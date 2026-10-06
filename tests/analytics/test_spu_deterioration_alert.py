@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -31,13 +32,19 @@ from tts_erp_v2.db.models import SpuDeteriorationAlert
 pytestmark = pytest.mark.layer_unit
 
 
-def metric(roi: str | None, profit: str | None, spend: str = "100") -> WindowMetric:
+def metric(
+    roi: str | None,
+    profit: str | None,
+    spend: str = "100",
+    order_count: int = 5,
+    ad_orders: int = 1,
+) -> WindowMetric:
     return WindowMetric(
         date(2026, 1, 1),
         date(2026, 1, 1),
         Decimal(spend),
-        5,
-        1,
+        order_count,
+        ad_orders,
         None if roi is None else Decimal(roi),
         None if profit is None else Decimal(profit),
     )
@@ -82,6 +89,31 @@ def test_missing_or_zero_spend_is_never_stable() -> None:
         layer.critical,
     )
     assert unavailable.sample_status is SampleStatus.SAMPLE_INSUFFICIENT
+
+
+def test_warning_gates_make_rows_insufficient_before_classification() -> None:
+    layer = SEED_FALLBACK_CONFIG.fast[1]
+    warning = replace(layer.warning, min_ad_orders=1)
+    cases = (
+        metric("0", "100", spend="99.99"),
+        metric("0", "100", order_count=2),
+        metric("0", "100", ad_orders=0),
+    )
+    for current in cases:
+        decision = evaluate(metric(".1", "100"), current, warning, layer.critical)
+        assert decision.sample_status is SampleStatus.SAMPLE_INSUFFICIENT
+        assert decision.state is AlertState.SAMPLE_INSUFFICIENT
+        assert decision.severity is AlertSeverity.NONE
+
+    boundary = evaluate(
+        metric(".1", "100"),
+        metric("0", "100", spend="100", order_count=3, ad_orders=1),
+        warning,
+        layer.critical,
+    )
+    assert boundary.sample_status is SampleStatus.SUFFICIENT
+    assert boundary.state is AlertState.PROFIT_TO_LOSS
+    assert boundary.severity is AlertSeverity.WARNING
 
 
 def test_transition_warning_uses_gates_without_net_profit_decline() -> None:
@@ -140,11 +172,10 @@ def test_window_items_batches_full_scope_in_stable_order(monkeypatch) -> None:
     calls: list[int] = []
 
     def fake_query(_session, **kwargs):
-        calls.append(kwargs["offset"])
-        start = kwargs["offset"]
+        selected = kwargs["selection"].spu_ids
+        calls.append(len(selected))
         rows = [
-            SimpleNamespace(spu_pk=spu_pk)
-            for spu_pk in range(start + 1, min(start + 501, 502))
+            SimpleNamespace(spu_pk=int(spu_id.split("_")[1])) for spu_id in selected
         ]
         return SimpleNamespace(items=rows)
 
@@ -155,13 +186,14 @@ def test_window_items_batches_full_scope_in_stable_order(monkeypatch) -> None:
     result = _window_items(
         cast(Session, object()),
         shop_pk=1,
+        selected_spu_ids=tuple(f"TEST_{index}" for index in range(501)),
         start=date(2026, 1, 1),
         end=date(2026, 1, 1),
         calculated_at=None,
     )
     assert len(result) == 501
-    assert list(result) == list(range(1, 502))
-    assert calls == [0, 500]
+    assert list(result) == list(range(501))
+    assert calls == [100, 100, 100, 100, 100, 1]
 
 
 def test_malformed_config_shapes_fail_closed_before_set_operations() -> None:
@@ -172,7 +204,7 @@ def test_malformed_config_shapes_fail_closed_before_set_operations() -> None:
         {**payload, "fast": {"1": []}},
         {**payload, "fast": {"1": {"warning": []}}},
     ):
-        with pytest.raises(ValueError):
+        with pytest.raises((TypeError, ValueError)):
             validate_alert_config(malformed)  # type: ignore[arg-type]
 
 

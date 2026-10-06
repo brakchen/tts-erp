@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
@@ -67,17 +67,17 @@ def _row(row: SpuDeteriorationAlert) -> dict[str, Any]:
 @router.get("/spu-profit-deterioration")
 def list_spu_profit_deterioration(
     request: Request,
-    shop_pk: int = Query(..., ge=1),
-    spu_ids: list[int] | None = Query(default=None, alias="spu_ids"),
-    window_days: list[int] | None = Query(default=None, alias="window_days"),
-    layer: str = Query(default="all"),
-    severity: str = Query(default="all"),
+    session: Annotated[Session, Depends(get_session)],
+    shop_pk: Annotated[int, Query(ge=1)],
+    spu_ids: Annotated[list[int] | None, Query(alias="spu_ids")] = None,
+    window_days: Annotated[list[int] | None, Query(alias="window_days")] = None,
+    layer: Annotated[str, Query()] = "all",
+    severity: Annotated[str, Query()] = "all",
     state: list[str] | None = None,
     sample: str = Query(default="all"),
     anchor_date: date | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    session: Session = Depends(get_session),
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
     require_role_at_least(request, "readonly")
     if window_days is not None and (
@@ -140,7 +140,7 @@ def list_spu_profit_deterioration(
         "insufficientSampleCount": sum(
             row.sample_status != "sufficient" for row in all_rows
         ),
-        "shopSpuCount": len(all_rows),
+        "shopSpuCount": len({row.spu_pk for row in all_rows}),
     }
     request_id = request.headers.get("x-request-id") or ""
     return {

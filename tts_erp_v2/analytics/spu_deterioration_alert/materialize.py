@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_deterioration_alert.config import AlertConfig
 from tts_erp_v2.analytics.spu_deterioration_alert.policy import AlertDecision
+from tts_erp_v2.api.deps import require_destructive_script_guard
 from tts_erp_v2.db.models import SpuDeteriorationAlert
 
 
@@ -31,6 +32,12 @@ def replace_anchor(
 ) -> int:
     """Atomically replace one anchor; callers commit or rollback as one unit."""
     materialized = list(rows)
+    require_destructive_script_guard(
+        script_name="spu_profit_deterioration_alert_replace",
+        confirmation=True,
+        dangerous=True,
+        allow_env="ALLOW_PROD_SPU_DETERIORATION_ALERT_REPLACE",
+    )
     session.execute(
         delete(SpuDeteriorationAlert).where(
             SpuDeteriorationAlert.anchor_date == anchor_date

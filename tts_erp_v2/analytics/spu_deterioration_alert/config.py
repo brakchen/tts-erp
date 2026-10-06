@@ -128,7 +128,7 @@ def validate_alert_config(
 ) -> AlertConfig:
     """Validate and normalize the sole global alert payload."""
     if not isinstance(payload, Mapping):
-        raise ValueError("alert payload must be an object")
+        raise TypeError("alert payload must be an object")
     if set(payload) != {"enabled", "maturityDays", "fast", "confirmation"}:
         raise ValueError(
             "alert payload must contain exactly enabled, maturityDays, fast, confirmation"
@@ -138,7 +138,11 @@ def validate_alert_config(
     layers: dict[str, dict[int, AlertLayerConfig]] = {}
     for layer_name in ("fast", "confirmation"):
         layer_payload = payload[layer_name]
-        if not isinstance(layer_payload, Mapping) or set(layer_payload) != {"1", "3", "7"}:
+        if not isinstance(layer_payload, Mapping) or set(layer_payload) != {
+            "1",
+            "3",
+            "7",
+        }:
             raise ValueError(f"{layer_name} must contain windows 1, 3 and 7")
         layers[layer_name] = {}
         for days in (1, 3, 7):

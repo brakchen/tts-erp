@@ -142,6 +142,12 @@ def evaluate(
         status = SampleStatus.SAMPLE_INSUFFICIENT
     else:
         status = SampleStatus.SUFFICIENT
+    if status is SampleStatus.SUFFICIENT and (
+        current.spend_cny < warning.min_spend_cny
+        or current.order_count < warning.min_orders
+        or current.ad_orders < warning.min_ad_orders
+    ):
+        status = SampleStatus.SAMPLE_INSUFFICIENT
     roi_decline = _decline(previous.roi_real, current.roi_real)
     net_profit_decline = _decline(previous.net_profit_cny, current.net_profit_cny)
     state = _state(previous, current)

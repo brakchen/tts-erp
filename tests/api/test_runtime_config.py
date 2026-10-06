@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
-from sqlalchemy import delete, text
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_deterioration_alert.config import (
@@ -15,6 +18,7 @@ from tts_erp_v2.analytics.spu_deterioration_alert.config import (
 )
 from tts_erp_v2.db.models.config import RuntimeConfigItem, RuntimeConfigRevision
 from tts_erp_v2.runtime_config.resolver import resolve_runtime_config
+from tts_erp_v2.runtime_config.validation import validate_rollout
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -77,6 +81,128 @@ def _clear_alert_runtime_config(db_engine) -> None:
             )
         )
         session.commit()
+
+
+def _load_alert_migration():
+    migration_path = (
+        Path(__file__).parents[2] / "alembic/versions/0053_spu_deterioration_alert.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "alert_migration_0053_runtime_config_test", migration_path
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
+def _ensure_alert_migration(db_engine):
+    migration = _load_alert_migration()
+    with db_engine.connect() as connection:
+        # pi-lens-ignore: python-sql-injection
+        database = connection.execute(text("SELECT current_database()")).scalar_one()
+        assert database.startswith("tts_erp_test_")
+        assert database != "tts_erp_test_template"
+        if inspect(connection).has_table(
+            "spu_deterioration_alerts", schema="analytics"
+        ):
+            return migration
+    with db_engine.begin() as connection:
+        # pi-lens-ignore: python-sql-injection
+        connection.execute(text("CREATE SCHEMA IF NOT EXISTS analytics"))
+        migration.__dict__["op"] = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+    return migration
+
+
+@pytest.fixture()
+def _alert_config_cleanup(db_engine):
+    yield
+    _clear_alert_runtime_config(db_engine)
+
+
+def test_alert_migration_seeds_strict_draft_idempotently_without_publication(
+    db_engine, _alert_config_cleanup
+) -> None:
+    migration = _ensure_alert_migration(db_engine)
+    _clear_alert_runtime_config(db_engine)
+    with db_engine.begin() as connection:
+        migration._seed_runtime_config(connection)
+    with Session(db_engine) as session:
+        item = session.get(RuntimeConfigItem, ALERT_CONFIG_KEY)
+        assert item is not None
+        assert item.published_version is None
+        assert item.draft_rollout == []
+        assert item.draft_payload == config_to_payload(SEED_FALLBACK_CONFIG)
+        assert item.draft_payload is not None
+        assert set(item.draft_payload) == {
+            "enabled",
+            "maturityDays",
+            "fast",
+            "confirmation",
+        }
+        assert item.json_schema["additionalProperties"] is False
+        assert "回测暂定" in item.json_schema["title"]
+        assert "回测暂定" in item.json_schema["description"]
+        assert set(item.json_schema["required"]) == {
+            "enabled",
+            "maturityDays",
+            "fast",
+            "confirmation",
+        }
+        for layer_name in ("fast", "confirmation"):
+            layer_schema = item.json_schema["properties"][layer_name]
+            assert set(layer_schema["properties"]) == {"1", "3", "7"}
+            assert layer_schema["additionalProperties"] is False
+            for window_schema in layer_schema["properties"].values():
+                assert set(window_schema["properties"]) == {"warning", "critical"}
+                assert window_schema["additionalProperties"] is False
+                for threshold_schema in window_schema["properties"].values():
+                    assert set(threshold_schema["properties"]) == {
+                        "roiAbsDelta",
+                        "roiRelativeDecline",
+                        "netProfitDecline",
+                        "minSpendCny",
+                        "minOrders",
+                        "minAdOrders",
+                    }
+                    assert threshold_schema["additionalProperties"] is False
+        assert not session.scalars(
+            select(RuntimeConfigRevision).where(
+                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY
+            )
+        ).all()
+        item.json_schema = {"sentinel": True}
+        item.draft_payload = {"sentinel": True}
+        item.draft_version = 99
+        session.add(
+            RuntimeConfigRevision(
+                config_key=ALERT_CONFIG_KEY,
+                version=9,
+                payload={"sentinel": True},
+                rollout=[],
+                created_by="TEST_existing_publication",
+            )
+        )
+        item.published_version = 9
+        session.commit()
+    with db_engine.begin() as connection:
+        migration._seed_runtime_config(connection)
+    with Session(db_engine) as session:
+        preserved = session.get(RuntimeConfigItem, ALERT_CONFIG_KEY)
+        assert preserved is not None
+        assert preserved.json_schema == {"sentinel": True}
+        assert preserved.draft_payload == {"sentinel": True}
+        assert preserved.draft_version == 99
+        assert preserved.published_version == 9
+        revision = session.scalar(
+            select(RuntimeConfigRevision).where(
+                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY,
+                RuntimeConfigRevision.version == 9,
+            )
+        )
+        assert revision is not None
+        assert revision.payload == {"sentinel": True}
 
 
 def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
@@ -291,7 +417,22 @@ def test_alert_runtime_config_lifecycle_and_rollout_rejection(
     _clear_alert_runtime_config(db_engine)
     schema = {"type": "object", "additionalProperties": True}
     headers = _headers(readwrite_key)
+    valid_rollout = [{"name": "canary", "basisPoints": 10000, "payload": payload}]
+    assert validate_rollout(valid_rollout, schema) == valid_rollout
     try:
+        rejected_create = api_client.post(
+            "/v2/config/runtime/items",
+            headers=headers,
+            json={
+                "configKey": ALERT_CONFIG_KEY,
+                "displayName": "TEST SPU alert",
+                "jsonSchema": schema,
+                "draftPayload": payload,
+                "draftRollout": valid_rollout,
+            },
+        )
+        assert rejected_create.status_code == 422, rejected_create.text
+        assert "global deterioration alert" in rejected_create.text
         created = api_client.post(
             "/v2/config/runtime/items",
             headers=headers,
@@ -318,7 +459,7 @@ def test_alert_runtime_config_lifecycle_and_rollout_rejection(
             json={
                 "expectedDraftVersion": saved.json()["draftVersion"],
                 "payload": payload,
-                "rollout": [{"basisPoints": 10000}],
+                "rollout": valid_rollout,
             },
         )
         assert rejected.status_code == 422, rejected.text
@@ -363,6 +504,34 @@ def test_alert_runtime_config_lifecycle_and_rollout_rejection(
         )
         assert rollback.status_code == 200, rollback.text
         assert rollback.json()["publishedVersion"] == 3
+        with Session(db_engine) as session:
+            item = session.get(RuntimeConfigItem, ALERT_CONFIG_KEY)
+            assert item is not None
+            session.add(
+                RuntimeConfigRevision(
+                    config_key=ALERT_CONFIG_KEY,
+                    version=4,
+                    payload=payload,
+                    rollout=valid_rollout,
+                    created_by="TEST_legacy_rollout",
+                )
+            )
+            item.published_version = 4
+            session.commit()
+        legacy_detail = api_client.get(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}", headers=headers
+        )
+        assert legacy_detail.status_code == 200, legacy_detail.text
+        legacy_rollback = api_client.post(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/rollback",
+            headers=headers,
+            json={
+                "expectedDraftVersion": legacy_detail.json()["draftVersion"],
+                "targetVersion": 4,
+            },
+        )
+        assert legacy_rollback.status_code == 422, legacy_rollback.text
+        assert "global deterioration alert" in legacy_rollback.text
     finally:
         _clear_alert_runtime_config(db_engine)
 

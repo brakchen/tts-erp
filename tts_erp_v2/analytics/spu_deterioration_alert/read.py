@@ -24,13 +24,19 @@ from tts_erp_v2.analytics.spu_deterioration_alert.policy import (
 )
 from tts_erp_v2.analytics.spu_profitability import _implementation
 from tts_erp_v2.analytics.spu_profitability._snapshot import consistent_read_snapshot
-from tts_erp_v2.analytics.spu_profitability._types import ActivitySelection, SortField
+from tts_erp_v2.analytics.spu_profitability._types import (
+    ExactIdsSelection,
+    SortField,
+)
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
     RuntimeConfigItem,
     RuntimeConfigRevision,
     SpuDeteriorationAlert,
+)
+from tts_erp_v2.runtime_config.validation import (
+    validate_spu_deterioration_alert_runtime_mutation,
 )
 
 
@@ -60,6 +66,13 @@ def effective_config_details(
         if revision is None:
             raise RuntimeError("published alert configuration is unavailable")
         try:
+            if not isinstance(revision.rollout, list):
+                raise TypeError("published alert rollout must be a list")
+            validate_spu_deterioration_alert_runtime_mutation(
+                ALERT_CONFIG_KEY,
+                payload=revision.payload,
+                rollout=revision.rollout,
+            )
             validate_alert_config(revision.payload)
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError("published alert configuration is invalid") from exc
@@ -82,45 +95,40 @@ def effective_config(session: Session) -> tuple[dict[str, Any], str, int | None,
     return effective_config_details(session)[:4]
 
 
-_FACT_BATCH_SIZE = 500
+_FACT_BATCH_SIZE = 100
 
 
 def _window_items(
     session: Session,
     *,
     shop_pk: int,
+    selected_spu_ids: tuple[str, ...],
     start: date,
     end: date,
     calculated_at: Any,
 ) -> dict[int, Any]:
     """Read one window in deterministic bounded batches."""
     items: dict[int, Any] = {}
-    offset = 0
-    while True:
+    for batch_start in range(0, len(selected_spu_ids), _FACT_BATCH_SIZE):
+        selected_batch = selected_spu_ids[batch_start : batch_start + _FACT_BATCH_SIZE]
         overview = _implementation._query_spu_roi(
             session,
             q=None,
             shop_pk=shop_pk,
-            selection=ActivitySelection(),
+            selection=ExactIdsSelection(selected_batch),
             active_only=True,
             include_without_activity=False,
             sort_field=SortField.ROI_REAL.value,
             ascending=True,
             limit=_FACT_BATCH_SIZE,
-            offset=offset,
+            offset=0,
             fee_rate=None,
             calculated_at=calculated_at,
             w_start=start,
             w_end=end,
         )
-        batch = sorted(overview.items, key=lambda item: item.spu_pk)
-        if not batch:
-            break
-        for item in batch:
+        for item in sorted(overview.items, key=lambda item: item.spu_pk):
             items[item.spu_pk] = item
-        offset += len(batch)
-        if len(batch) < _FACT_BATCH_SIZE:
-            break
     return items
 
 
@@ -170,23 +178,21 @@ def build_materialized_rows(
                 session, shop_pk=shop.id
             )
             anchor = calculated_at.astimezone(timezone).date() - timedelta(days=2)
-            products = (
-                session.execute(
-                    select(ChannelProduct.id)
-                    .where(
-                        ChannelProduct.shop_pk == shop.id,
-                        or_(
-                            ChannelProduct.status.is_(None),
-                            ChannelProduct.status.notin_(("deleted", "DELETED")),
-                        ),
-                    )
-                    .order_by(ChannelProduct.id)
+            product_rows = session.execute(
+                select(ChannelProduct.id, ChannelProduct.spu_id)
+                .where(
+                    ChannelProduct.shop_pk == shop.id,
+                    or_(
+                        ChannelProduct.status.is_(None),
+                        ChannelProduct.status.notin_(("deleted", "DELETED")),
+                    ),
                 )
-                .scalars()
-                .all()
-            )
-            if not products:
+                .order_by(ChannelProduct.id)
+            ).all()
+            if not product_rows:
                 continue
+            products = [row.id for row in product_rows]
+            product_spu_ids = tuple(row.spu_id for row in product_rows)
             cache: dict[tuple[date, date], dict[int, Any]] = {}
             for pair in compare_windows(anchor).values():
                 for start, end in (
@@ -197,6 +203,7 @@ def build_materialized_rows(
                         cache[(start, end)] = _window_items(
                             session,
                             shop_pk=shop.id,
+                            selected_spu_ids=product_spu_ids,
                             start=start,
                             end=end,
                             calculated_at=calculated_at,
@@ -210,6 +217,7 @@ def build_materialized_rows(
                         cache[(start, end)] = _window_items(
                             session,
                             shop_pk=shop.id,
+                            selected_spu_ids=product_spu_ids,
                             start=start,
                             end=end,
                             calculated_at=calculated_at,
