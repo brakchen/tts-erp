@@ -55,7 +55,9 @@ def _live_route_index() -> list[str]:
     status, body = _request_json("GET", "/endpoints", require_key=False, send_key=False)
     if status != 200 or not isinstance(body, (list, dict)):
         pytest.skip(_UNREACHABLE.format(reason=f"/endpoints 返回 {status}"))
-    return [entry["path"] for entry in body if isinstance(entry, dict) and "path" in entry]
+    # live 响应是 {"endpoints": [...], "count": N} 信封；兼容顶层数组。
+    entries = body.get("endpoints", body) if isinstance(body, dict) else body
+    return [entry["path"] for entry in entries if isinstance(entry, dict) and "path" in entry]
 
 
 def _skip_unless_deployed() -> None:
