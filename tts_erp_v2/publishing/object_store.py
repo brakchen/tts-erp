@@ -106,3 +106,15 @@ class MinioVideoStore:
             if not actual or actual != expected:
                 raise ObjectVersionMismatch("CLEANUP_OBJECT_VERSION_MISMATCH")
         self._client.remove(key)
+
+
+def video_store_from_env() -> MinioVideoStore:
+    """Construct the publishing store bound to the dedicated video bucket.
+
+    Endpoint/credentials come from the global ``MINIO_*`` configuration, while
+    the bucket is the publishing-dedicated ``TIKTOK_PUBLISH_MINIO_BUCKET``
+    (default ``tiktok-video``) so video objects never land in the SPU image
+    bucket and vice versa. Shared by the API presign path and the worker.
+    """
+    bucket = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
+    return MinioVideoStore(MinioClient.from_env().with_bucket(bucket))

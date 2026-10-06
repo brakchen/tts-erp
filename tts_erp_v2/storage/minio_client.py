@@ -21,7 +21,7 @@ import logging
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse, urlunparse
 
@@ -237,6 +237,19 @@ class MinioClient:
             region=cfg.region,
         )
         return cls(sdk, config=cfg)
+
+    def with_bucket(self, bucket: str) -> MinioClient:
+        """Bind the same endpoint/credentials to another bucket.
+
+        Video publishing needs its dedicated bucket (``TIKTOK_PUBLISH_MINIO_BUCKET``,
+        default ``tiktok-video``) while the global ``MINIO_BUCKET`` continues to
+        serve SPU images. Returns ``self`` when already bound to ``bucket``.
+        """
+        if not bucket:
+            raise ValueError("PUBLISH_BUCKET_MISMATCH")
+        if bucket == self._config.bucket:
+            return self
+        return MinioClient(self._sdk, config=replace(self._config, bucket=bucket))
 
     # -- accessors (for callers that need them) --------------------------
 

@@ -145,6 +145,12 @@
     }
     state.file = file;
     if (!state.resumeTask) state.clientRequestId = crypto.randomUUID();
+    if (!state.config) {
+      notice("配置尚未加载完成，请稍候重试", true);
+      state.file = null;
+      renderForm();
+      return;
+    }
     if (file.type !== "video/mp4" || !file.name.toLowerCase().endsWith(".mp4")) {
       notice("只接受 MP4 视频", true);
       state.file = null;
