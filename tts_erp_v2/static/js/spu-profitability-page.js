@@ -392,7 +392,9 @@
     freshnessTimer: null,
     selectionQueryable: true,
     meta: {}, // 后端拥有业务状态、阈值与公式说明；前端只渲染
-    priceCapability: false, // 仅由实际响应中的 nested priceStats 推导
+    // 三态：undefined = 未知(保持隐藏，不闪"加载中…")；true = 响应含 nested
+    // priceStats；false = 响应明确不带该能力。仅由实际响应推导，禁止预判。
+    priceCapability: undefined,
     enumMap: {}, // 枚举中文化映射,page load 时从 /v2/config/enum-map 获取
   };
   var lastTotal = 0;
@@ -1114,13 +1116,16 @@
       },
     });
     // 用 table.on 订阅（与 dataSorting 同一机制）；6.3 对 options 回调的订阅不可靠。
-    var lastDrillClick = { spuPk: null, at: 0 };
-    state.table.on("rowClick", (_e, row) => {
+    // 用原生事件身份去重，WeakSet 持有已处理事件；不依赖时钟分辨率，Firefox
+    // resistFingerprinting 粗化 timeStamp 也不会误吞用户连点。同一原生点击被 Tabulator
+    // 从 frozen/main 两侧 row 重复派发时只忽略一次；不认 "spu_pk + 时间窗口" 是因为
+    // 后者会把用户「点关闭 → 立刻点开同一行」的合法快速 toggle 一起吞掉。
+    var handledDrillEvents = new WeakSet();
+    state.table.on("rowClick", (e, row) => {
       var it = row.getData();
       if (!it || !it.spu_pk) return;
-      var now = Date.now();
-      if (lastDrillClick.spuPk === it.spu_pk && now - lastDrillClick.at < 300) return;
-      lastDrillClick = { spuPk: it.spu_pk, at: now };
+      if (e && handledDrillEvents.has(e)) return;
+      if (e) handledDrillEvents.add(e);
       openDrillPanel(row.getElement(), it);
     });
     // 表头点击只改状态并触发服务端重取（本地排序对同字段幂等）。
@@ -1232,9 +1237,15 @@
   function renderPriceLoading() {
     var box = document.getElementById("price-summary");
     if (!box) return;
+    var status = document.getElementById("price-summary-status");
+    if (state.priceCapability !== true) {
+      // 未知或已知不支持：不显示 box，也不写 "加载中…"，否则会先闪现再被
+      // renderPriceStats() 隐藏(2026-10-06 用户反馈"闪现一下就不见了")。
+      if (status) status.textContent = "";
+      return;
+    }
     box.hidden = false;
     box.setAttribute("aria-busy", "true");
-    var status = document.getElementById("price-summary-status");
     if (status) status.textContent = "加载中…";
     ["purchase", "originalSale", "paid"].forEach((metric) => {
       ["mean", "median"].forEach((kind) => {
@@ -1246,6 +1257,12 @@
   function renderPriceMessage(message) {
     var box = document.getElementById("price-summary");
     if (!box) return;
+    if (state.priceCapability === false) {
+      // 已知不支持：box 维持隐藏。否则一次加载失败会让 box 以"加载失败 · …"
+      // 冒出来，又被下一次成功响应的 renderPriceStats() 隐藏(同类 appear→disappear)。
+      box.hidden = true;
+      return;
+    }
     box.hidden = false;
     box.setAttribute("aria-busy", "false");
     var status = document.getElementById("price-summary-status");
