@@ -58,6 +58,7 @@ def start_sync_job(
     *,
     job_name: str,
     credential_id: int | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> SyncJob:
     """Insert a sync_jobs row with status='running' and return it.
 
@@ -65,11 +66,15 @@ def start_sync_job(
     model definition. Caller is expected to commit via
     :func:`run_with_sync_job` — this helper does NOT commit on its own
     so the lifecycle row + first business rows share one transaction.
+
+    ``extra`` is operator metadata (for example ``{"shop_id": ...}`` on
+    TikTok fan-out). It is not a cursor and is not read by the job itself.
     """
     row = SyncJob(
         job_name=job_name,
         credential_id=credential_id,
         status="running",
+        extra=extra,
     )
     session.add(row)
     session.flush()  # populate row.id for FK references / log clarity
@@ -100,6 +105,7 @@ def run_with_sync_job(
     *,
     job_name: str,
     credential_id: int | None = None,
+    extra: dict[str, Any] | None = None,
     inner: Callable[..., JobResult],
     inner_kwargs: dict[str, Any] | None = None,
 ) -> tuple[SyncJob, JobResult]:
@@ -111,7 +117,12 @@ def run_with_sync_job(
     sync_jobs row is durable (operators MUST see the run record even when
     the job crashed).
     """
-    sync_row = start_sync_job(session, job_name=job_name, credential_id=credential_id)
+    sync_row = start_sync_job(
+        session,
+        job_name=job_name,
+        credential_id=credential_id,
+        extra=extra,
+    )
     try:
         result = inner(session, **(inner_kwargs or {}))
     except Exception as exc:
@@ -149,6 +160,7 @@ def run_with_sync_job(
                         status="failed",
                         error_message=error_message,
                         finished_at=datetime.now(UTC),
+                        extra=extra,
                     )
                 )
                 session.commit()

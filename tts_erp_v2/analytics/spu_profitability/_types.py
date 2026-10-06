@@ -13,7 +13,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from tts_erp_v2.analytics.spu_profitability._price_stats import PriceStatsOverview
 
 
 class ProfitabilityError(RuntimeError):
@@ -22,6 +25,14 @@ class ProfitabilityError(RuntimeError):
 
 class FxRateUnavailable(ProfitabilityError):
     """Raised when the database has no complete USD/CNY/VND FX snapshot."""
+
+
+class PriceFxUnavailable(ProfitabilityError):
+    """Raised when an observed line price has no verifiable rate to CNY."""
+
+
+# The ROI cost resolver falls back to the K1 estimate with this source label.
+DEFAULT_COST_SOURCE = "DEFAULT_K1"
 
 
 class ReportingTimezoneUnavailable(ProfitabilityError):
@@ -59,6 +70,14 @@ class SortField(StrEnum):
     RETURN_LOSS = "return_loss"
     ROI_BREAKEVEN = "roi_breakeven"
     FULL_LOSS_RATE = "full_loss_rate"
+    # Quantity-weighted price columns; the identifiers are part of the wire
+    # contract (docs/design/spu-price-statistics.md §4.4).
+    PURCHASE_PRICE_MEAN = "purchasePriceMean"
+    PURCHASE_PRICE_MEDIAN = "purchasePriceMedian"
+    ORIGINAL_SALE_PRICE_MEAN = "originalSalePriceMean"
+    ORIGINAL_SALE_PRICE_MEDIAN = "originalSalePriceMedian"
+    PAID_PRICE_MEAN = "paidPriceMean"
+    PAID_PRICE_MEDIAN = "paidPriceMedian"
 
 
 class SortDirection(StrEnum):
@@ -249,6 +268,22 @@ class ShopFeeRateEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectionBasis:
+    status: ProjectionStatus
+    warnings: tuple[str, ...]
+    as_of: date
+    lookback_days: int
+    maturity_lag_days: int
+    sample_start: date
+    sample_end: date
+    basis_order_count: int
+    basis_full_loss_order_count: int
+    completed_full_loss_rate: Decimal | None
+    scope_description: str
+    calculated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ProfitabilityBasis:
     calculated_at: datetime
     fx: FxBasis
@@ -263,6 +298,7 @@ class ProfitabilityBasis:
     display_currency: str = "CNY"
     warnings: tuple[str, ...] = ()
     fee_per_shop: tuple[ShopFeeRateEntry, ...] = ()
+    projection: ProjectionBasis | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,7 +438,7 @@ class SpuProfitability:
 
     @property
     def uses_default_unit_cost(self) -> bool:
-        return self.cost_source == "DEFAULT_K1"
+        return self.cost_source == DEFAULT_COST_SOURCE
 
     @property
     def refund_rate_alert(self) -> bool:
@@ -511,6 +547,9 @@ class ProfitabilityOverview:
     total: int
     totals: ProfitabilityTotals
     basis: ProfitabilityBasis
+    # Quantity-weighted price statistics of the same read snapshot; ``None``
+    # when the read has no single shop to scope the line observations to.
+    price_stats: PriceStatsOverview | None = None
 
 
 EvidenceValue = object

@@ -1,0 +1,81 @@
+{
+  "protocolVersion": 1,
+  "requestId": "TEST_cross-statements-txn-request",
+  "scope": {
+    "sellerId": "TEST_cross-seller",
+    "shopId": "TEST_cross-seller"
+  },
+  "dump": {
+    "domain": "statements",
+    "endpoint": "https://seller.tiktokshopglobalselling.com/api/v1/pay/statement/transaction/detail",
+    "method": "GET",
+    "request": {
+      "params": null,
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "message": "success",
+        "data": {
+          "sku_record": {
+            "statement_sku_detail_id": "TEST_cross-sku-detail",
+            "statement_id": "TEST_cross-statement",
+            "statement_version": 0,
+            "trade_order_id": "TEST_cross-order",
+            "sku_id": "TEST_cross-sku",
+            "product_name": "TEST product",
+            "sku_name": "TEST variant",
+            "quantity": 2,
+            "settlement_status": 1,
+            "placed_time": "2026-09-01T08:00:00Z",
+            "settlement_amount": {
+              "amount": "100000",
+              "currency": "VND"
+            },
+            "earning_amount": {
+              "amount": "90000",
+              "currency": "VND"
+            },
+            "fees": {
+              "amount": "10000",
+              "currency": "VND"
+            },
+            "in_come": {
+              "amount": {
+                "amount": "100000",
+                "currency": "VND"
+              },
+              "fee_list": [
+                {
+                  "type": "GROSS_SALES",
+                  "amount": {
+                    "amount": "100000",
+                    "currency": "VND"
+                  }
+                }
+              ]
+            },
+            "out_come": {
+              "amount": {
+                "amount": "10000",
+                "currency": "VND"
+              },
+              "fee_list": [
+                {
+                  "type": "PLATFORM_COMMISSION",
+                  "amount": {
+                    "amount": "10000",
+                    "currency": "VND"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "createdAt": "2026-10-04T15:23:17.074Z"
+  }
+}

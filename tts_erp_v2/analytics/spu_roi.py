@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from typing import Any, Literal
@@ -25,13 +25,20 @@ from tts_erp_v2.analytics.spu_profitability import (
     EvidenceRequest,
     FocusedSelection,
     FxRateUnavailable,
+    PriceCoverage,
+    PriceFxUnavailable,
+    PriceMetric,
+    PriceStatsOverview,
     ProfitScope,
+    ProjectionPolicy,
     ReportingTimezoneUnavailable,
     RowView,
     SortDirection,
     SortField,
     SpuNotFound,
+    SpuPriceStats,
     explain_spu,
+    is_price_sort_field,
 )
 from tts_erp_v2.analytics.spu_profitability._compat import read_legacy_overview
 from tts_erp_v2.api.deps import get_session
@@ -152,7 +159,8 @@ _FEE_FALLBACK_MESSAGE = (
     "由后端按全局基线估算"
 )
 _PROJECTION_NOTE = (
-    "只预测同一订单时间窗口内尚未送达的未结算订单。已完结样本包括已结算、已送达"
+    "按店铺及已应用 SPU 范围，截至店铺本地 as-of 日期预测尚未送达的未结算订单；"
+    "预测样本窗口独立于报表日期范围。已完结样本包括已结算、已送达"
     "以及结果已确定的国内取消订单；全损分子包括终局物流全损，以及到达海外或送达后"
     "最终全额退款的订单。跨境业务没有海外仓，后者无法重新入库销售；国内取消进入"
     "分母但不进入全损分子。该已完结订单全损率同时用于预测风险订单数、件数和收入折损。"
@@ -232,6 +240,75 @@ def _totals_payload(totals) -> dict[str, Any]:
     return payload
 
 
+def _price_metric_payload(metric: PriceMetric) -> dict[str, Any]:
+    """一个价格的 wire 对象：CNY 四位小数字符串或 null + 独立字段覆盖计数。"""
+    return {
+        "mean": _fmt(metric.mean_cny, _MONEY_Q),
+        "median": _fmt(metric.median_cny, _MONEY_Q),
+        "eligibleQuantity": metric.eligible_quantity,
+        "observedQuantity": metric.observed_quantity,
+        "missingQuantity": metric.missing_quantity,
+        "invalidQuantity": metric.invalid_quantity,
+        "observedLineCount": metric.observed_line_count,
+        "missingLineCount": metric.missing_line_count,
+        "invalidLineCount": metric.invalid_line_count,
+        "coverageRatio": _fmt(metric.coverage_ratio, _MONEY_Q),
+        "status": metric.status.value,
+        "source": metric.source.value,
+        "estimated": metric.estimated,
+    }
+
+
+def _price_stats_payload(stats: SpuPriceStats) -> dict[str, Any]:
+    return {
+        "purchase": _price_metric_payload(stats.purchase),
+        "originalSale": _price_metric_payload(stats.original_sale),
+        "paid": _price_metric_payload(stats.paid),
+    }
+
+
+def _price_coverage_payload(coverage: PriceCoverage) -> dict[str, Any]:
+    """人口分类计数（互斥）；不算物理件数的不确定量只出行数。"""
+    return {
+        "eligibleLineCount": coverage.eligible_line_count,
+        "eligibleQuantity": coverage.eligible_quantity,
+        "excludedUnpaidQuantity": coverage.excluded_unpaid_quantity,
+        "excludedOnHoldQuantity": coverage.excluded_on_hold_quantity,
+        "excludedCancelledQuantity": coverage.excluded_cancelled_quantity,
+        "excludedGiftQuantity": coverage.excluded_gift_quantity,
+        "unknownGiftQuantity": coverage.unknown_gift_quantity,
+        "unknownStatusQuantity": coverage.unknown_status_quantity,
+        "invalidQuantityLineCount": coverage.invalid_quantity_line_count,
+        "excludedValidQuantity": coverage.excluded_valid_quantity,
+        "missingCurrencyQuantity": coverage.missing_currency_quantity,
+        "fxUnavailableQuantity": coverage.fx_unavailable_quantity,
+        "missingObservationLineCount": coverage.missing_observation_line_count,
+    }
+
+
+def _price_meta(
+    result, price_stats: PriceStatsOverview, price_sort: str | None
+) -> dict[str, Any]:
+    """价格模块的 meta 片段（与结果同一读快照的 calculatedAt/FX/成本基准）。"""
+    basis = result.basis
+    return {
+        "calculatedAt": _iso_utc(basis.calculated_at),
+        "priceCurrency": "CNY",
+        "priceFx": {
+            "snapshotId": basis.fx.snapshot_id,
+            "asOfAt": _iso_utc(basis.fx.as_of),
+            "conversionPolicy": "native_line_currency_to_cny_before_aggregation",
+        },
+        "priceCost": {
+            "basisFingerprint": price_stats.cost_basis_fingerprint,
+            "asOfAt": _iso_utc(basis.calculated_at),
+            "defaultK1Cny": _fmt(price_stats.default_k1_cny, _MONEY_Q),
+            "estimated": price_stats.cost_basis_estimated,
+        },
+        "priceSort": price_sort,
+    }
+
+
 def _estimate_payload(estimate) -> dict[str, Any] | None:
     """序列化一个店铺费率实测快照（无快照 → None）。"""
     if estimate is None:
@@ -247,6 +324,13 @@ def _estimate_payload(estimate) -> dict[str, Any] | None:
         "total_fee": str(estimate.total_fee),
         "currency": estimate.currency,
     }
+
+
+def _iso_utc(ts: datetime) -> str:
+    """Serialize a UTC-semantic timestamp with an offset so the page can format it."""
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC).isoformat()
 
 
 def _meta_payload(
@@ -271,6 +355,7 @@ def _meta_payload(
             "cny_vnd": format(basis.fx.usd_vnd / basis.fx.usd_cny, "f"),
             "vnd_cny": format(basis.fx.usd_cny / basis.fx.usd_vnd, "f"),
             "as_of": basis.fx.as_of.date().isoformat(),
+            "as_of_at": _iso_utc(basis.fx.as_of),
             "snapshot_id": basis.fx.snapshot_id,
             "source": "fx-cache",
         },
@@ -330,6 +415,67 @@ def _meta_payload(
             "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
         },
         "projection": {
+            "status": (
+                basis.projection.status.value
+                if basis.projection is not None
+                else None
+            ),
+            "warnings": (
+                list(basis.projection.warnings)
+                if basis.projection is not None
+                else []
+            ),
+            "as_of": (
+                basis.projection.as_of.isoformat()
+                if basis.projection is not None
+                else None
+            ),
+            "lookback_days": (
+                basis.projection.lookback_days
+                if basis.projection is not None
+                else 30
+            ),
+            "maturity_lag_days": (
+                basis.projection.maturity_lag_days
+                if basis.projection is not None
+                else 7
+            ),
+            "sample_start": (
+                basis.projection.sample_start.isoformat()
+                if basis.projection is not None
+                else None
+            ),
+            "sample_end": (
+                basis.projection.sample_end.isoformat()
+                if basis.projection is not None
+                else None
+            ),
+            "basis_order_count": (
+                basis.projection.basis_order_count
+                if basis.projection is not None
+                else 0
+            ),
+            "basis_full_loss_order_count": (
+                basis.projection.basis_full_loss_order_count
+                if basis.projection is not None
+                else 0
+            ),
+            "completed_full_loss_rate": (
+                _fmt_rate(basis.projection.completed_full_loss_rate)
+                if basis.projection is not None
+                and basis.projection.completed_full_loss_rate is not None
+                else None
+            ),
+            "scope": (
+                basis.projection.scope_description
+                if basis.projection is not None
+                else "shop_pk scope"
+            ),
+            "calculated_at": (
+                _iso_utc(basis.projection.calculated_at)
+                if basis.projection is not None
+                else _iso_utc(basis.calculated_at)
+            ),
             "note": _PROJECTION_NOTE,
             "date_attribution": "COALESCE(order_time, paid_at)",
             "refund_sample": (
@@ -343,11 +489,11 @@ def _meta_payload(
                 "兼容诊断字段：旧物流终态金额率，不参与当前预测"
             ),
             "full_loss_rate_source": "已完结全损订单数 ÷ 全部已完结订单数",
-            "target": "同一日期范围内尚未送达的未结算风险订单，已确认结果只扣一次",
+            "target": "店铺及已应用 SPU 范围内，截至本地 as-of 尚未送达的未结算风险订单，已确认结果只扣一次",
             "refund_target": "待完结风险订单费后收入 × 已完结订单全损率",
             "full_loss_target": (
                 "尚未送达的未结算订单；订单状态 DELIVERED/COMPLETED，或物流状态、"
-                "delivered_at、50101 事件任一确认已送达时排除"
+                "delivered_at、50101 事件任一确认已送达时排除；80101 退回卖家证据视为终局全损"
             ),
             "status_labels": {
                 "available": "可预测",
@@ -372,12 +518,30 @@ def _meta_payload(
     }
 
 
-def _overview_payload(result, scope: ProfitScope, fee_rate: Decimal | None) -> dict:
+def _overview_payload(
+    result, scope: ProfitScope, fee_rate: Decimal | None, price_sort: str | None = None
+) -> dict:
+    price_stats: PriceStatsOverview | None = result.price_stats
+    items: list[dict[str, Any]] = []
+    for row in result.items:
+        payload = _row_payload(row)
+        if price_stats is not None:
+            stats = price_stats.by_spu.get(row.spu_pk)
+            if stats is not None:
+                payload["priceStats"] = _price_stats_payload(stats)
+                payload["priceCoverage"] = _price_coverage_payload(stats.coverage)
+        items.append(payload)
+    totals = _totals_payload(result.totals)
+    meta = _meta_payload(result, scope, fee_rate)
+    if price_stats is not None:
+        totals["priceStats"] = _price_stats_payload(price_stats.totals)
+        totals["priceCoverage"] = _price_coverage_payload(price_stats.totals.coverage)
+        meta.update(_price_meta(result, price_stats, price_sort))
     return {
-        "items": [_row_payload(row) for row in result.items],
+        "items": items,
         "total": result.total,
-        "totals": _totals_payload(result.totals),
-        "meta": _meta_payload(result, scope, fee_rate),
+        "totals": totals,
+        "meta": meta,
     }
 
 
@@ -453,6 +617,7 @@ def list_spu_roi(
     fee_rate: str | None = Query(default=None, max_length=20),
     w_start: date | None = Query(default=None),  # noqa: B008
     w_end: date | None = Query(default=None),  # noqa: B008
+    projection_lookback_days: int = Query(default=30),
 ) -> Any:
     try:
         sort_field = SortField(sort)
@@ -461,6 +626,10 @@ def list_spu_roi(
             status_code=422,
             detail=f"sort must be one of {tuple(field.value for field in SortField)}",
         ) from exc
+    try:
+        ProjectionPolicy(lookback_days=projection_lookback_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     fee_value = _parse_fee_rate(fee_rate)
     try:
         parsed_spu_ids = parse_spu_ids(spu_ids)
@@ -498,12 +667,26 @@ def list_spu_roi(
             scope=profit_scope,
             view=view,
             fee_rate=fee_value,
+            projection_lookback_days=projection_lookback_days,
         )
     except FxRateUnavailable:
         return _fx_error(request)
+    except PriceFxUnavailable:
+        return error_response(
+            status=503,
+            code="PRICE_FX_UNAVAILABLE",
+            message="价格币种无法在本次读取快照内换算为 CNY",
+            request_id=request_id(request),
+            retryable=True,
+        )
     except ReportingTimezoneUnavailable as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _overview_payload(result, profit_scope, fee_value)
+    return _overview_payload(
+        result,
+        profit_scope,
+        fee_value,
+        sort_field.value if is_price_sort_field(sort_field.value) else None,
+    )
 
 
 drilldown_router = APIRouter(prefix="/v2/analytics/spu-roi", tags=["analytics"])

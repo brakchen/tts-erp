@@ -32,6 +32,7 @@ class FormulaInput:
     settled_net_vnd: Decimal
     settled_sales_vnd: Decimal
     unsettled_sales_vnd: Decimal
+    confirmed_unsettled_refund_vnd: Decimal
     refund_only_vnd: Decimal
     refund_return_vnd: Decimal
     refund_cancelled_vnd: Decimal
@@ -264,7 +265,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     )
     current_ad_max_spend = inputs.current_net_revenue_cny - inputs.cogs_total_cny
 
-    if inputs.unsettled_order_count <= 0:
+    if inputs.full_loss_exposure_unsettled_order_count <= 0:
         projected_roi_real = (
             current_nc_prime / inputs.spend_cny if inputs.spend_cny != 0 else None
         )
@@ -500,20 +501,10 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
         refund_order_count=inputs.refund_order_count,
     )
 
-    refund_rate_spu = Decimal(0)
-    if inputs.sales_vnd > 0:
-        refund_rate_spu = min(
-            Decimal(1),
-            max(
-                Decimal(0),
-                (inputs.refund_only_vnd + inputs.refund_return_vnd) / inputs.sales_vnd,
-            ),
-        )
-
     unsettled_net_cny = (
-        unsettled_sales_cny
+        (inputs.unsettled_sales_vnd - inputs.confirmed_unsettled_refund_vnd)
         * (Decimal(1) - inputs.unsettled_fee_rate)
-        * (Decimal(1) - refund_rate_spu)
+        / vnd_per_cny
     )
     net_revenue_cny = settled_net_cny + unsettled_net_cny
     cogs_sold_cny = Decimal(inputs.units_sold) * unit_cost_cny

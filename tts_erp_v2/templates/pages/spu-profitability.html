@@ -12,9 +12,18 @@
   <link rel="stylesheet" href="../../static/vendor/tabulator.min.css">
   <link rel="stylesheet" href="../../static/css/spu-roi.css?v={{ css_version('spu-roi.css') }}">
   {% if profile_id == "focused-spus" %}<link rel="stylesheet" href="../../static/css/focused-spus.css?v={{ css_version('focused-spus.css') }}">{% endif %}
-  <style data-page-profile="{{ profile_id }}">
-      {{ sidebar_css(current_page) }}
-  </style>
+  <script type="application/json" id="sidebar-css-payload">{{ sidebar_css(current_page) }}</script>
+  <script>
+    (() => {
+      const payload = document.getElementById("sidebar-css-payload");
+      if (!payload || !payload.textContent.trim()) return;
+      const style = document.createElement("style");
+      style.dataset.pageProfile = "{{ profile_id }}";
+      style.textContent = payload.textContent;
+      document.head.appendChild(style);
+      payload.remove();
+    })();
+  </script>
 </head>
 <body>
   {{ sidebar(current_page) }}
@@ -28,13 +37,23 @@
           <h1 class="op-title mb-0">{{ title }}</h1>
         </div>
         <div class="col-12 col-lg-auto">
-          <div class="op-header-meta d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center justify-content-sm-end gap-2 gap-sm-3">
-            <label class="op-shop mb-0" for="shop-switcher">
-              <span>店铺</span>
-              <select id="shop-switcher" name="shop_pk" class="form-select form-select-sm op-shop-select" aria-label="当前店铺"></select>
-            </label>
-            <span class="op-identity" id="ops-identity"></span>
-            <span class="op-scope-note" id="sum-stamp">ROI · 账页</span>
+          <div class="op-header-meta align-items-sm-end">
+            <div class="op-header-tools justify-content-sm-end">
+              <label class="op-shop mb-0" for="shop-switcher">
+                <span>店铺</span>
+                <select id="shop-switcher" name="shop_pk" class="form-select form-select-sm op-shop-select" aria-label="当前店铺"></select>
+              </label>
+              <span class="op-identity" id="ops-identity"></span>
+            </div>
+            <div class="op-freshness align-items-sm-end" id="data-freshness" aria-live="polite">
+              <ul class="op-freshness-times justify-content-sm-end" aria-label="数据同步时间">
+                <li data-source="ads" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">广告</span><time class="op-freshness-time">—</time></li>
+                <li data-source="orders" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">订单</span><time class="op-freshness-time">—</time></li>
+                <li data-source="logistics" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">物流</span><time class="op-freshness-time">—</time></li>
+                <li data-source="miaoshou" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">妙手</span><time class="op-freshness-time">—</time></li>
+                <li data-source="fx" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">汇率</span><time class="op-freshness-time">—</time></li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -42,17 +61,12 @@
   </header>
 
   <main class="container-fluid px-0 op-main" data-page-profile="{{ profile_id }}">
-    <!-- 店铺费率状态（feature/shop-fee-rate）：如实展示本次计算实际使用的 r̂ 口径
-         —— 来源（覆写/实测/基线）、实测样本量、覆盖率、快照日期与降级原因。
-         2026-10-02：置顶横幅；右侧 ✕ 可关闭（关闭后本次页面生命周期内不再自动弹出）。 -->
-    <section class="alert alert-light border mx-3 mx-lg-4 mt-3 mb-0 px-3 py-2 d-flex flex-wrap align-items-center gap-3 small" id="fee-card" hidden aria-live="polite">
-      <span class="badge text-bg-secondary" id="fee-card-source">—</span>
-      <span class="text-nowrap">
-        <span class="text-muted">平台佣金费率 r̂</span>
-        <strong class="ms-1" id="fee-card-rate">—</strong>
-      </span>
-      <span class="text-muted" id="fee-card-estimate"></span>
-      <span class="text-danger" id="fee-card-fallback" hidden></span>
+    <!-- 本次计算实际使用的佣金费率。正常是纸色事实条；回退基线才标红。右侧 ✕ 关闭后本次不再弹出。 -->
+    <section class="op-fee-bar mx-3 mx-lg-4 mt-3 mb-0" id="fee-card" hidden data-source="" aria-live="polite">
+      <span class="op-fee-source" id="fee-card-source">—</span>
+      <span class="op-fee-rate" id="fee-card-rate">—</span>
+      <span class="op-fee-meta" id="fee-card-estimate"></span>
+      <span class="op-fee-fallback" id="fee-card-fallback" hidden></span>
       <button type="button" class="btn-close ms-auto" id="fee-card-close" aria-label="关闭费率提示"></button>
     </section>
 
@@ -124,10 +138,10 @@
           </div>
         </div>
         <div class="col">
-          <div class="op-counter-group h-100">
-            <div class="op-counter-group-label">预测依据</div>
+          <div class="op-counter-group h-100" id="projection-basis-card">
+            <div class="op-counter-group-label">预测依据 · <span class="op-projection-window" aria-live="polite">预测样本窗口：<span id="projection-sample-window">—</span></span></div>
             <div class="row g-0 row-cols-2">
-              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测状态<span class="op-hint" data-tip="只预测所选日期范围内尚未送达的未结算风险订单；可预测、无未结算订单或样本不足由后端判定">?</span></span><span class="op-counter-num" id="sum-projection-status">—</span></span></div>
+              <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">预测状态<span class="op-hint" data-tip="按店铺、已应用 SPU 和所选经营窗口，预测截至本地 as-of 日期尚未送达的未结算风险订单；独立 30/90 天成熟样本只提供风险率">?</span></span><span class="op-counter-num" id="sum-projection-status">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结样本单<span class="op-hint" data-tip="已结算、已送达或结果已确定的国内取消订单；大盘按订单全局去重">?</span></span><span class="op-counter-num" id="sum-projection-completed-basis-orders">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结全损单<span class="op-hint" data-tip="终局物流全损，或商品已到达海外/已送达后最终全额退款；国内取消不计全损">?</span></span><span class="op-counter-num" id="sum-projection-completed-loss-orders">—</span></span></div>
               <div class="col"><span class="op-counter-item h-100 p-2 p-lg-3"><span class="op-counter-label">已完结订单全损率<span class="op-hint" data-tip="已完结全损单 ÷ 全部已完结样本单；用于预测待完结风险订单数、件数和收入折损">?</span></span><span class="op-counter-num" id="sum-projection-full-loss-rate">—</span></span></div>
@@ -158,58 +172,83 @@
             </div>
           </div>
         </div>
+        <div class="col" id="price-summary" hidden aria-live="polite" aria-busy="true">
+          <div class="op-counter-group h-100 op-price-summary">
+            <div class="op-counter-group-label op-price-summary-title">
+              价格
+              <button type="button" class="op-price-tip" data-price-tip="prices" data-tip="当前经营窗口、已付款、按件数加权；原价/实付来自 TikTok line item" aria-label="查看价格统计口径" aria-expanded="false">?</button>
+              <span class="op-price-summary-status" id="price-summary-status">加载中…</span>
+            </div>
+            <div class="row g-0 row-cols-2 op-price-summary-head" aria-hidden="true">
+              <div class="col"></div><div class="col">平均值</div><div class="col">中位数</div>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">采购价 <button type="button" class="op-price-tip" data-price-tip="purchase" data-tip="采购价统计口径" aria-label="查看采购价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-purchase"></span></span>
+              <span class="op-counter-num" id="price-purchase-mean" aria-label="采购价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-purchase-median" aria-label="采购价中位数 CNY">—</span>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">销售价 <button type="button" class="op-price-tip" data-price-tip="originalSale" data-tip="销售价统计口径" aria-label="查看销售价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-originalSale"></span></span>
+              <span class="op-counter-num" id="price-originalSale-mean" aria-label="销售价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-originalSale-median" aria-label="销售价中位数 CNY">—</span>
+            </div>
+            <div class="op-price-summary-row">
+              <span class="op-price-summary-label">实付价 <button type="button" class="op-price-tip" data-price-tip="paid" data-tip="实付价统计口径" aria-label="查看实付价统计口径" aria-expanded="false">?</button><span class="op-price-status" id="price-status-paid"></span></span>
+              <span class="op-counter-num" id="price-paid-mean" aria-label="实付价平均值 CNY">—</span>
+              <span class="op-counter-num" id="price-paid-median" aria-label="实付价中位数 CNY">—</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- 工具栏:原生 select multiple 由 Tom Select Bootstrap 5 主题增强；不自研多选组件。 -->
     <section class="op-toolbar px-3 px-lg-4 py-3" id="toolbar">
-      <div class="op-spu-filter border p-2 p-lg-3 mb-3" id="selection-slot">
-        <div class="op-spu-filter__header d-flex flex-wrap align-items-center justify-content-between gap-1 mb-2">
-          <label class="form-label op-fld-label mb-0" for="filter-spu-ids">SPU 筛选</label>
-          <span class="op-spu-selection-count" id="spu-selection-count">已选择 0 个</span>
+      <div class="op-tool-row op-spu-filter" id="selection-slot">
+        <div class="op-spu-filter__header">
+          <label class="op-tool-kicker mb-0" for="filter-spu-ids">SPU</label>
         </div>
-        <div class="row g-2 align-items-center">
-          <div class="col-12 col-xl">
-            <select id="filter-spu-ids" class="form-select" multiple aria-label="批量选择 SPU" disabled></select>
-          </div>
-          <div class="col-6 col-sm-auto d-grid">
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-spu-clear" disabled>清空</button>
-          </div>
-          <div class="col-6 col-sm-auto d-grid">
-            <button type="button" class="btn btn-sm btn-primary" id="btn-spu-apply" disabled>查询</button>
-          </div>
+        <div class="op-tool-spu">
+          <select id="filter-spu-ids" class="form-select" multiple aria-label="批量选择 SPU" title="支持搜索或批量粘贴中英文逗号分隔的 SPU；最多 100 个。" disabled></select>
         </div>
-        <div class="form-text op-spu-help mt-2">支持搜索或批量粘贴中英文逗号分隔的 SPU；最多 100 个。</div>
+        <span class="op-spu-selection-count" id="spu-selection-count">已选择 0 个</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-spu-clear" disabled>清空</button>
+        <button type="button" class="btn btn-sm btn-primary" id="btn-spu-apply" disabled>查询</button>
         <div class="invalid-feedback" id="spu-filter-feedback"></div>
       </div>
-      <div class="row g-2 g-lg-3 align-items-end">
-        <div class="col-6 col-md-3 col-xl-2" data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
-          <label class="form-label op-fld-label mb-1" for="filter-w-start">起始日</label>
+      <div class="op-tool-row op-tool-row--window">
+        <div data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
+          <label class="visually-hidden" for="filter-w-start">起始日</label>
           <input id="filter-w-start" type="date" class="form-control form-control-sm" aria-label="销售/退款起始日期（空 = 不限）">
         </div>
-        <div class="col-6 col-md-3 col-xl-2" data-tip="销售/退款日期范围（空 = 全历史；含当日）">
-          <label class="form-label op-fld-label mb-1" for="filter-w-end">截止日</label>
+        <div data-tip="销售/退款日期范围（空 = 全历史；含当日）">
+          <label class="visually-hidden" for="filter-w-end">截止日</label>
           <input id="filter-w-end" type="date" class="form-control form-control-sm" aria-label="销售/退款截止日期（空 = 不限）">
         </div>
-        <div class="col-6 col-md-3 col-xl-1" data-tip="平台佣金费率 r̂：默认用店铺实测（每24h按该店近180天已结算订单 Σ|FEE|/Σ行GMV 重算；行GMV=客户实付金额，非折扣前挂牌价。窗口内只要有一单已结算即产出），无可用实测的店铺回退基线 30.8%；在此填数可临时覆写（仅影响本页请求，不写回店铺）">
-          <label class="form-label op-fld-label mb-1" for="filter-fee">临时覆写费率 %</label>
-          <input id="filter-fee" type="text" class="form-control form-control-sm" placeholder="30.8" inputmode="decimal" autocomplete="off" aria-label="临时覆写平台佣金费率（留空则用店铺实测/全局基线）">
-        </div>
-        <div class="col-12 col-md-6 col-xl-auto">
-          <div class="form-check d-flex align-items-center gap-2 mb-0 py-2" data-tip="默认只列出当前窗口内有广告或销售/退款活动的 SPU；勾选后，处于 ACTIVE 状态但没有任意活动（无投放 / 未出单）的 SPU 也会一并列出——这类行的 ROI / 金额显示 — 或「无投放」">
-            <input id="filter-include-all" type="checkbox" class="form-check-input mt-0" aria-label="含无活动 SPU">
-            <label class="form-check-label op-fld-label mb-0" for="filter-include-all">含无活动</label>
-            <span class="op-hint" role="note" tabindex="0" aria-label="含无活动 SPU 的说明">?</span>
-          </div>
-        </div>
-        <div class="col-12 col-sm-auto d-grid">
-          <button type="button" class="btn btn-sm op-btn" id="btn-refresh">刷新</button>
-        </div>
-        <div class="col-12 col-xl text-xl-end ms-xl-auto">
-          <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
-        </div>
+        <label class="op-projection-control mb-0" for="filter-projection-lookback-days">
+          <span>预测样本</span>
+          <select id="filter-projection-lookback-days" class="form-select form-select-sm" aria-label="预测样本天数">
+            <option value="30" selected>30 天</option>
+            <option value="90">90 天</option>
+          </select>
+        </label>
+        <button type="button" class="op-more-toggle" id="btn-toolbar-more" aria-expanded="false" aria-controls="toolbar-more">更多</button>
+      </div>
+      <div class="op-more-panel" id="toolbar-more" hidden>
+        <label class="op-tool-kicker mb-0" for="filter-fee">费率覆写</label>
+        <input id="filter-fee" type="text" class="form-control form-control-sm op-fee-override" placeholder="留空=实测" inputmode="decimal" autocomplete="off" aria-label="临时覆写平台佣金费率（留空则用店铺实测/全局基线）">
+        <span class="op-hint" role="note" tabindex="0" data-tip="只影响本页本次计算，不写回店铺。留空则用上方费率条里的实测或基线。" aria-label="费率覆写说明">?</span>
+        <label class="op-more-check mb-0" for="filter-include-all">
+          <input id="filter-include-all" type="checkbox" class="form-check-input mt-0" aria-label="含无活动 SPU">
+          含无活动
+        </label>
+        <span class="op-hint" role="note" tabindex="0" data-tip="默认只列出当前窗口内有广告或销售/退款的 SPU。勾选后，没有投放也没出单的在售 SPU 也会列出。" aria-label="含无活动 SPU 的说明">?</span>
       </div>
     </section>
+
+    <div class="op-table-meta px-3 px-lg-4">
+      <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
+    </div>
 
     <!-- 主表 9 指标与大盘 v10 同口径：广告消耗 / 广告系统实际ROI / 广告系统保本ROI / 有效销售 / 总单量 / 有效单量 / 取消率 / 全损率 / 净利润 -->
     <div class="op-table-wrap px-3 px-lg-4" tabindex="0" aria-label="SPU ROI 明细，可横向滚动">

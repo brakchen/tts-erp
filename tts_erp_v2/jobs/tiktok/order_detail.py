@@ -35,7 +35,6 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models import (
     ChannelAccount,
-    SalesOrder,
     SalesOrderLine,
     SyncIssue,
 )
@@ -49,7 +48,10 @@ from tts_erp_v2.jobs.tiktok.orders import (
     _parse_order_payload,
     _safe_truncate,
     _store_raw,
+    _upsert_sales_order,
+    incoming_order_is_stale,
 )
+from tts_erp_v2.jobs.tiktok.order_prices import persist_price_observation
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 JOB_NAME = "tiktok.order_detail"
@@ -65,6 +67,10 @@ AUTO_ISSUE_TYPES: tuple[str, ...] = ("PARSE_ERROR", "UNKNOWN_ORDER", "UNKNOWN_LI
 #: single bad tick from hammering the upstream API if 1000s of issues
 #: accumulated while the job was broken.
 AUTO_BATCH_SIZE: int = 50
+
+
+def detail_response_matches_request(requested_order_id: str, response_order_id: str) -> bool:
+    return requested_order_id == response_order_id
 
 
 def _auto_collect_order_ids(
@@ -239,6 +245,19 @@ def run(
                 details={"error": str(e), "raw": _safe_truncate(raw)},
             )
             continue
+        if not detail_response_matches_request(order_id, fields["order_id"]):
+            rows_failed += 1
+            record_sync_issue(
+                session,
+                job_name=JOB_NAME,
+                issue_type="RESPONSE_ORDER_ID_MISMATCH",
+                external_id=order_id,
+                details={
+                    "requested_order_id": order_id,
+                    "response_order_id": fields["order_id"],
+                },
+            )
+            continue
 
         raw_row = _store_raw(
             session,
@@ -246,28 +265,23 @@ def run(
             external_id=order_id,
             payload=raw,
         )
-        insert_values = {
-            "shop_pk": account.id,
-            **fields,
-            "raw_record_id": raw_row.id,
-        }
-        update_cols = {k: insert_values[k] for k in fields}
-        update_cols["raw_record_id"] = raw_row.id
-        stmt = (
-            pg_insert(SalesOrder)
-            .values(**insert_values)
-            .on_conflict_do_update(
-                index_elements=["shop_pk", "order_id"],
-                set_=update_cols,
-            )
+        so_row = _upsert_sales_order(
+            session,
+            shop_pk=account.id,
+            fields=fields,
+            raw_record_id=raw_row.id,
         )
-        session.execute(stmt)
-        so_row = session.execute(
-            select(SalesOrder).where(
-                SalesOrder.shop_pk == account.id,
-                SalesOrder.order_id == order_id,
+        if incoming_order_is_stale(
+            fields.get("order_modify_time"), so_row.order_modify_time
+        ):
+            record_sync_issue(
+                session,
+                job_name=JOB_NAME,
+                issue_type="STALE_OBSERVATION_SKIPPED",
+                external_id=order_id,
+                details={"reason": "older_or_missing_source_version"},
             )
-        ).scalar_one()
+            continue
 
         for raw_line in raw.get("line_items") or []:
             try:
@@ -304,6 +318,19 @@ def run(
                     set_=li_update,
                 )
             )
+            persist_price_observation(
+                session,
+                raw_line=raw_line,
+                shop_pk=account.id,
+                order_pk=so_row.id,
+                raw_record_id=raw_row.id,
+                source_endpoint="ORDER_DETAIL",
+                source_captured_at=raw_row.captured_at,
+                source_order_version_at=fields.get("order_modify_time"),
+                parent_status=fields.get("status"),
+                parent_currency=fields.get("currency"),
+                spu_pk=line_fields.get("spu_pk"),
+            )
         # Success: resolve any open issues for this order so the next
         # tick doesn't re-fetch the same id.
         _resolve_matching_issues(session, order_id=order_id)
@@ -321,5 +348,6 @@ __all__ = [
     "AUTO_ISSUE_TYPES",
     "DETAIL_ENDPOINT",
     "JOB_NAME",
+    "detail_response_matches_request",
     "run",
 ]

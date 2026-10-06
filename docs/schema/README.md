@@ -79,7 +79,7 @@
 ### reporting —— 报表与派生快照（4 表）
 `shop_fee_rate_estimates`（店铺费率 `fee-v2` 日快照）、`product_cost_snapshots`（成本快照）、
 `focused_spus`（重点关注 SPU 集合）、`product_profit_daily`（**旧粗略毛利快照，禁止新增消费者**，
-退役约束见 [`docs/design/spu-profitability-module.md`](../design/spu-profitability-module.md) §5）。
+退役约束见 [`docs/design/spu-profitability-technical-design.md`](../design/spu-profitability-technical-design.md) §5）。
 
 ### fx —— 汇率（2 表）
 `exchange_rate_snapshots / exchange_rates`；盈利换算的唯一汇率来源（快照缺失 = 结果不可计算）。

@@ -48,7 +48,7 @@ credential kinds:
 | Latest cached FX rates | `GET /v2/fx/latest` | readonly |
 | Currency conversion (local, cached) | `GET /v2/fx/convert` | readonly |
 | Operator console (HTML) | `GET /v2/pages/manual-costs` | readonly (browser → 302 login) |
-| SPU 实际 ROI 看板主表 | `GET /v2/analytics/spu-roi` | readonly — 口径见 [`analytics/spu-real-roi-dashboard.md`](../archive/spu-real-roi-dashboard.md) |
+| SPU 盈利看板主表 | `GET /v2/analytics/spu-roi` | readonly — 实现/接口见 [`../design/spu-profitability-technical-design.md`](../design/spu-profitability-technical-design.md)；业务公式/日期口径见 [`../business/spu-profitability.md`](../business/spu-profitability.md) |
 | SPU 实际 ROI 页面 (HTML) | `GET /v2/pages/spu-roi` | readonly (browser → 302 login) |
 | 重点关注 SPU 页面 (HTML) | `GET /v2/pages/focused-spus` | readonly (browser → 302 login) |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
@@ -321,6 +321,7 @@ sync-worker 周期作业健康展示（dashboard「数据同步状态」卡片�
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/sync/status` | readonly | → `{server_time, jobs: [{job_name, interval_seconds, last_run_at, last_finished_at, last_status, last_error, next_expected_at, lag_seconds, cycles_late, severity}]}`。周期取自 `sync_worker.scheduler.JOBS` 注册表（单一真相源），运行记录取自 `integration.sync_jobs`（tiktok 作业按 shop 扇出多行，按 job_name 聚合取最新一行）。红灯规则：`now - last_run_at >= 2 × interval_seconds` → `severity="crit"`；≥1 周期 `"warn"`；周期内 `"ok"`；从未运行或注册表外 job `"unknown"`。只读、零上游外呼。 |
+| `GET /v2/sync/freshness?shop_pk=` | readonly | SPU ROI 页头四类同步时间。→ `{server_time, shop_pk, shop_id, sources: [{key, label, synced_at, scope, basis, job_name, last_status, severity, detail}]}`，`sources` 固定为 `ads` / `orders` / `logistics` / `miaoshou`。广告：`max(plugin.ad_daily.updated_at, plugin.ad_today.updated_at)`，`seller_id = shop_id`，判灯间隔 15 分钟（插件今日刷新是 30 秒，页头不按 30 秒报红）。订单 / 物流：该店 `integration.sync_jobs` 中 `extra.shop_id` 归因的最近成功 `finished_at`（`tiktok.orders` / `tiktok.logistics`，周期取自 `JOBS`）；尚无归因行时回退 `integration.sync_cursors.updated_at`（`scope=shop_id`）。妙手：注册表内 `miaoshou.*` 最近一次成功，按该作业自己的周期判灯，`scope="system"`。最近一次运行失败且新于上次成功时，`severity` 至少为 `warn`。未知 `shop_pk` 为 404。只读、零上游外呼。 |
 | `GET /v2/sync/jobs` | readwrite | 周期任务管理页的数据源：返回 `JOBS` 定义、`enabled` 启停状态、最近运行状态，以及可手动选择的 TikTok 店铺列表。启停状态持久化在 `integration.sync_cursors` 的保留命名空间 `scheduler.job_controls`。 |
 | `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理 HTML 页面（侧边栏入口）。页面可查看任务；readwrite 会话可立即执行任务；admin 会话还可切换周期启停。 |
 | `PATCH /v2/admin/sync-jobs/{job_name}/enabled` | admin | body `{"enabled": false}`：启用/停用周期 tick。只影响 APScheduler 自动触发；手动触发仍可执行。Cookie mutation 必须带 `X-Requested-With: tts-erp`。 |
@@ -472,242 +473,21 @@ The other 7 Partner API product-domain GETs in `tts-partner-api-docs/`
 Rules / Image Translation Tasks / Submission Records) are deferred to
 separate work items — same proxy + router pattern.
 
-### Analytics — SPU 实际 ROI (`/v2/analytics/spu-roi`)
+### Analytics — SPU 盈利导航 (`/v2/analytics/spu-roi*`)
 
-**Stability: stable · 只读(readonly)**。按 SPU 一行的「广告消耗 → 有效销售 → 退款 → 净收入 → 货本 → 净利润 → 实际 ROI/保本线」账页数据源；页面 `GET /v2/pages/spu-roi` 与 `GET /v2/pages/focused-spus` 共用该端点和预计终局字段。
+SPU 盈利主端点和四个懒加载钻取端点是稳定的 readonly API。完整的当前实现、目标契约、字段矩阵、示例、页面交互、快照、预测隔离和验收要求集中在 [`docs/design/spu-profitability-technical-design.md`](../design/spu-profitability-technical-design.md)；业务公式和日期口径唯一来源是 [`docs/business/spu-profitability.md`](../business/spu-profitability.md)。本节只保留全局导航，避免在 API 总览中维护第二套盈利契约。
 
-> **2026-09-29 明确兼容例外（operator-requested breaking currency migration）**：用户要求把现有盈利计算从 USD 全量切换为 CNY，因此本端点在 `/v2` 原字段名不变的前提下，将所有 money 字段的语义原地改为 CNY。部署方确认当前页面是主要消费者并接受该 breaking 变更；其他消费者必须读取 `meta.currency.display`，不能继续假定 USD。ROI/比率字段无量纲，语义不变。
-
-**口径唯一真相** = [`analytics/spu-real-roi-dashboard.md`](../archive/spu-real-roi-dashboard.md) §4/§5(公式 M1–M19) + [`docs/archive/spu-roi-full-loss-rubric.md`](../archive/spu-roi-full-loss-rubric.md)(**v9 当前**) + [`docs/business/spu-profitability.md`](../business/spu-profitability.md);本端点只读计算并序列化,不做任何写。
-
-Query parameters:
-
-| name | type | default | notes |
-| --- | --- | --- | --- |
-| `q` | string | — | 兼容的 `spu_id` 子串搜索；页面标准调用（带 `shop_pk`）中只改变 `items/total`、不改变大盘 `totals`；不能和 `spu_ids` 同传 |
-| `spu_ids` | comma-list | — | 当前店铺内按 `spu_id` 精确匹配的临时 scope，使用时 `shop_pk` 必填；同时约束 `items/total/totals`。支持 `,`/`，`、trim/去空/去重，最多 100 个且单项最多 128 字符；只有分隔符、缺 `shop_pk` 或与 `q` 同传 → 422 |
-| `scope` | enum | — | 目前仅 `focused`：从 `reporting.focused_spus` 解析该店完整 active 集合，不受 100-ID/URL 长度限制；`shop_pk` 必填且不能与 `spu_ids` 同传。空集合返回空 overview，绝不回退整店 |
-| `sort` | enum | `roi_real` | `roi_real` \| `spend` \| `refund_rate` \| `refund_rate_qty` \| `cancel_rate` \| `net_profit` \| `sales` \| `gmv_sales` \| `ad_count` \| `gmv_ad` \| `order_count` \| `cancelled_order_count` \| `units_sold` \| `refund_net_amount` \| `return_loss` \| `roi_breakeven` \| **`full_loss_rate`**(v8 新增);同值次级键 spend、最终 `spu_pk ASC` 保证分页稳定 |
-| `order` | enum | `asc` | `asc` \| `desc`;**默认 `sort="roi_real"` 升序保持不变**——避免改 API 契约;**页面 JS 显式传 `sort=net_profit&order=asc` 实现「最亏在前」视图** |
-| `limit` | int | 100 | 1..500(分页 v2 约定) |
-| `offset` | int | 0 | ≥ 0 |
-| `include_all` | bool | `false` | `false` 只含有广告∨有效销售∨退款的 SPU;`true` 拉全部 **ACTIVE**(status ILIKE 'activate')目录 SPU(DEACTIVATE/DELETED 等排除) |
-| `shop_pk` | int | — | 店铺过滤(内部主键) |
-| `fee_rate` | decimal-str | — | 临时页面覆写（仅本次请求，不持久化）；缺省按店铺取当前 `fee-v2` 实测快照，缺失/超过 7 天才回退基线 `0.308`。只作用于未结算订单 `r̂ × unsettled_sales`，已结算费用已含在 SETTLEMENT |
-| `w_start` | date | — | ISO `yyyy-mm-dd`;提供 `shop_pk` 时按该店 `commerce.shops.region` 对应的 IANA 报表时区解释本地日，销售与退款按关联订单 `COALESCE(order_time, paid_at)` 的本地日期裁剪；退款跟随原订单归属（含当日） |
-| `w_end` | date | — | ISO `yyyy-mm-dd`;与 `w_start` 配对使用并包含结束日；店铺地区缺失或不能唯一确定时区返回 422。未提供 `shop_pk` 的兼容性跨店查询继续按 UTC 解释日期；不提供窗口 = 销售/退款全历史累计。预计终局的已结算样本和未结算预测对象也使用同一订单时间窗口，因此时间选择会改变预测字段 |
-
-Response envelope:`{items: [...], total, totals, meta}`。店铺报表时区仅对单时区地区码映射：VN/TH/SG/MY/PH/CN/JP/KR/GB；时区边界使用 IANA `ZoneInfo` 规则转换为 UTC 半开区间，因此支持夏令时日的 23/25 小时长度。详情端点从 `spu_pk` 反查所属店铺并使用相同边界。`spu_ids` 属于盈利范围：金额从命中 SPU 行聚合，订单/取消/退款 totals 在命中 SPU 集合内跨 SPU 去重，且 totals 不受分页影响。页面使用 Bootstrap 5 + 自托管 Tom Select Bootstrap 5 主题的原生 `<select multiple>` 选择/搜索/粘贴 SPU，点击「查询」后才应用 scope；已应用的 scope 会同步到页面 URL，刷新或分享链接后恢复。批量粘贴校验期间可点「清空」取消，最多选择 100 个 SPU。
-
-`meta.fee` 契约：
-
-- `source`: `user_override | shop_estimate | baseline | mixed`，表示本次范围实际费率来源；
-- `mode`: **deprecated 兼容字段**，仅为旧客户端保留，值仍是 `override | baseline`；`shop_estimate`/`mixed` 映射为 `baseline`，新客户端必须读取 `source`；
-- `rate`: 本次范围展示费率（4 位小数字符串；多店不同费率时 `source=mixed`，逐店真实值见 `per_shop`）；
-- `override`: 页面覆写值，否则 `null`；
-- `degraded` / `fallback_message`: 是否有店铺回退基线，以及由后端给出的降级说明；
-- `per_shop[]`: `shop_pk/shop_name/rate/source/fallback_reason/estimate`；实测 `estimate` 包含 `calculated_on/calculated_at/lookback_days/kept_order_count/kept_line_gmv/window_line_gmv/kept_share/total_fee/currency`；
-- 解析优先级：页面覆写 > 7 天内 `fee-v2` 店铺实测 > `0.308` 基线。
-
-**当前行字段契约（页面主列仅渲染 6 列 + 商品维度，其余由下钻面板或外部分析消费）**：
-
-| 字段 | 类型 | 公式 / 含义 | 主列? |
-| --- | --- | --- | --- |
-| `spu_pk` | int | `commerce.products_spu.id` 内部主键 | — |
-| `spu_id` | str | 业务 SPU 编号（TikTok 端） | 商品列 |
-| `title` / `status` / `main_image_url` | str | 商品维度列 | 商品列 |
-| `shop_id` / `shop_name` | str/int | 店铺维度 | 商品列 |
-| `ad_count` | int | M2: 投放广告数 | — |
-| `ad_orders` | int | M2b: 平台出单量 | — |
-| `spend` | money-str (CNY) | M1: 广告消耗 = `Σ real_cost_total`（原生 USD，按 `meta.fx` 换算 CNY） | **主列** |
-| `gmv_ad` | money-str (CNY) | M3: 平台归因 GMV（原生 USD，按同一快照换算 CNY） | — |
-| `roi_l0` | ratio-str/null | M4: `gmv_ad / spend`；广告系统实际 ROI 的兼容别名 | — |
-| `ad_system_actual_roi` | ratio-str/null | 广告系统实际 ROI = 广告归因 GMV ÷ 广告实际消耗 | **主列** |
-| `ad_system_max_ad_spend` | money-str (CNY) | 最大可承受广告费 = 预计净结算收入 − 同范围采购成本 − 结算外必要成本 | — |
-| `ad_system_remaining_ad_spend_capacity` | money-str (CNY) | 最大可承受广告费 − 当前广告实际消耗；可为负 | — |
-| `ad_system_breakeven_roi` | ratio-str/null | 广告归因 GMV ÷ 最大可承受广告费；分母≤0或无归因 GMV 时为 null | **主列**（`estimated_known_costs` 时前端标 `≈`） |
-| `ad_system_breakeven_roi_status` | enum | 当前为 `estimated_known_costs`：结算外必要成本尚未结构化，不能解释为最终保本线 | — |
-| `ad_first_day` / `ad_last_day` | date/null | 广告观测窗口 | — |
-| `order_count` | int | M5b: 有效销售订单数（白名单状态，含 COD 在途） | **主列** |
-| `cancelled_order_count` | int | M5c: 取消订单数（**全部 CANCELLED，信息列口径不变**；取消率不再用它，见下两行拆分） | — |
-| **`domestic_cancelled_order_count`** | **int** | **v9 新增：国内取消单量 = CANCELLED ∧ 无 `tracking_events.action_code=38301`（物流未到海外）→ `cancel_rate` 分子** | — |
-| **`overseas_cancelled_order_count`** | **int** | **v9 新增：海外取消单量 = CANCELLED ∧ 38301 → 已入全损件数，不进取消率** | — |
-| `units_sold` | int | M5: 售出件数 | — |
-| `sales` | money-str (CNY) | M6: 有效销售金额 = `Σ quantity×unit_price`（原生 VND，按 `meta.fx` 换算 CNY） | **主列**(标记为"有效GMV") |
-| `gmv_sales` | money-str (CNY) | M6c: 全单 = sales + 取消原额 | — |
-| `cancel_rate` | ratio-str/null | M12b **v9**: 国内取消 ÷(有效+国内取消)；海外取消已入全损不重复计（与 `full_loss_rate` 互斥） | **主列** |
-| `refund_only_qty` / `refund_only_amount` | int/money | M7: 仅退款 | — |
-| `refund_return_qty` / `refund_return_amount` | int/money | M8: 退货退款 | — |
-| `refund_net_qty` / `refund_net_amount` | int/money | M10: M7+M8 | — |
-| `refund_rate` | ratio-str/null | M12: 净额 ÷ sales | — |
-| `refund_rate_qty` | ratio-str/null | M12c: 单量口径 | — |
-| `refund_cancelled_qty` / `refund_cancelled_amount` / `refund_cancelled_missing_lines` | int/money/int | M9: 已付被取消信息列 | — |
-| **`net_revenue`** | **money-str (CNY)** | **v8 新增：DUAL-LAYER = `Σ SETTLEMENT 分摊` + `Σ 未结 line_gmv × (1−r̂) × (1−refund_rate_spu)`；是 `net_profit` 的输入** | 下钻·结算 tab |
-| **`settled_sales`** | **money-str (CNY)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NOT NULL`** | 下钻·结算 tab |
-| **`unsettled_sales`** | **money-str (CNY)** | **v8 新增：`SUM line_gmv WHERE settlement_vnd IS NULL`** | 下钻·结算 tab |
-| **`settled_order_count`** | **int** | **v8 新增：已结算订单数** | 下钻·结算 tab |
-| **`full_loss_qty`** | **int** | **v9（2026-09-13 落地）：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流，限已付白名单订单) + 海外取消(CANCELLED∧38301) 件数** | 下钻·结算 tab |
-| **`full_loss_cancelled_qty`** | **int** | **v9：其中海外取消件数（COGS 补扣基数；退货件已含在 units_sold 里不重复补扣）** | 下钻·结算 tab |
-| **`full_loss_rate`** | **ratio-str/null** | **v9(D8 主列)：`full_loss_qty ÷ (units_sold + full_loss_cancelled_qty)`；分母 0 → null；不钳位（>100% 标识数据异常）** | **主列**(标记为"全损退款率%") |
-| `return_loss` | money-str (CNY) | **M13b v9** = `full_loss_qty × unit_cost_used` | — |
-| `unit_cost_used` | money-str (CNY) | 当前有效人工标注采购成本；未标注时使用 40 CNY/件。妙手/1688 同步货源价不参与计算 | — |
-| `cost_source` | enum | `MANUAL`(当前有效人工标注采购成交价) \| `DEFAULT_K1`(40 CNY/件) | — |
-| `net_profit` | money-str (CNY) | **M18 v8** = `net_revenue − (units_sold + full_loss_cancelled_qty) × unit_cost − spend`（**不**扣 platform_fee：已结费用含 SETTLEMENT，未结按 (1−r̂) 折算） | **主列** |
-| `platform_fee` | money-str (CNY) | **M19 v8** = `r̂ × unsettled_sales`（**信息列，不**进 M18） | — |
-| `fee_rate_used` | ratio-str | 本行实际使用的 r̂（4 位小数字符串） | — |
-| `fee_source` | enum | `user_override | shop_estimate | baseline`；逐行来源，不出现聚合层 `mixed` | — |
-| `profit_status` / `roi_status` | enum | 后端判定的盈利状态 `loss|profit|break_even` 与 ROI 状态 `negative|non_negative|unavailable`；前端不得从金额重新推导 | 标色 |
-| `has_unsettled_orders` | bool | `settled_order_count < order_count`；包括结算数为 0 的全估算场景 | 估算标记 |
-| `uses_default_unit_cost` / `refund_rate_alert` | bool | 后端判定的默认成本与高退款警戒状态；阈值见 `meta.presentation.refund_rate_alert_threshold` | 告警标记 |
-| `roi_real` | ratio-str/null | **M14 v8** = `(net_revenue − return_loss) / spend` | 下钻·利润构成 |
-| `roi_breakeven` | ratio-str/null | **M17 v8** = `NC′ ÷ (NC′ − COGS_kept)`（fee_est 项移除） | 下钻·利润构成 |
-| `cpa` | money-str/null | M15: `spend / ad_orders` | — |
-
-**预计终局增量字段**（不改变或覆盖上述当前字段）：
-
-| 字段 | 类型 | 公式 / 含义 |
+| Endpoint | Role | Purpose |
 | --- | --- | --- |
-| `projection_status` | enum | `available \| no_unsettled_orders \| insufficient_sample` |
-| `projection_basis_order_count` | int | 同一订单时间窗口内有 SETTLEMENT 实际到账的样本订单数；大盘全局去重 |
-| `projection_basis_qty` | int | 已结算样本商品件数 |
-| `projection_basis_sales` | money-str | 已结算样本商品行销售额 CNY |
-| `projection_basis_refund_amount` | money-str | 已结算样本已完结退款金额 CNY |
-| `projection_terminal_basis_order_count` | int | 物流终态样本订单数：成功送达 paid 订单 + `CANCELLED` 且有 80101 退回卖家事件的订单；大盘全局去重 |
-| `projection_terminal_basis_sales` | money-str | 物流终态样本商品行销售额 CNY |
-| `projection_terminal_full_loss_sales` | money-str | 80101 退回卖家全损终态订单商品行销售额 CNY |
-| `projection_terminal_full_loss_order_count` | int | 兼容诊断：80101 退回卖家全损订单数；大盘全局去重 |
-| `projection_terminal_full_loss_qty` | int | 兼容诊断：80101 退回卖家全损订单商品件数 |
-| `projection_completed_basis_order_count` | int | 权威预测分母：已结算、已送达或结果已确定的 `CANCELLED` 订单数；大盘全局去重 |
-| `projection_completed_full_loss_order_count` | int | 权威预测分子：终局物流全损，或到达海外/已送达后最终全额退款的订单数；国内取消不计全损；大盘全局去重 |
-| `projection_full_loss_basis_order_count` | int | 兼容字段：已送达 paid 样本订单数；保留原字段语义，不作为新预测输入 |
-| `projection_basis_full_loss_order_count` | int | 兼容字段：已送达样本中存在已完成退款/退货退款 case 的订单数 |
-| `projection_basis_full_loss_qty` | int | 兼容字段：已送达退款订单按 case 数量/金额折算的全损件数 |
-| `projection_refund_amount_rate` | rate-str/null | 兼容诊断：退回卖家全损销售额 ÷ 全部物流终态样本销售额；不再驱动预测 |
-| `pre_delivery_full_loss_rate` | rate-str/null | 兼容诊断：退回卖家全损订单数 ÷ 全部物流终态样本订单数；不再驱动预测 |
-| `completed_full_loss_rate` | rate-str/null | 权威预测比例：`projection_completed_full_loss_order_count ÷ projection_completed_basis_order_count`；同时用于风险订单数、件数和收入折损，4 位小数字符串 |
-| `delivered_full_loss_rate` | rate-str/null | 兼容字段：继续返回已送达退款订单数 ÷ 全部已送达 paid 样本订单数；不作为新预测输入 |
-| `settled_full_loss_rate` | rate-str/null | 兼容别名：继续与 `delivered_full_loss_rate` 相同 |
-| `projection_full_loss_qty_rate` | rate-str/null | 兼容别名：继续与 `delivered_full_loss_rate` 相同 |
-| `unsettled_order_count` | int | 当前范围内无 SETTLEMENT 实际到账的 paid 订单数；大盘全局去重 |
-| `delivered_unsettled_order_count` | int | 未结算但已送达的订单数；不进入未来全损风险池 |
-| `full_loss_exposure_unsettled_order_count` | int | 未结算且尚未送达的待完结风险订单数；大盘全局去重 |
-| `unresolved_unsettled_order_count` | int | 未结算且仍有未确认商品件的订单数；大盘全局去重 |
-| `unresolved_unsettled_qty` | int | 未结算件数减去已确认退款/退货/全损件数 |
-| `unresolved_unsettled_sales` | money-str | 待确认件数按订单行单价计算的销售额 CNY |
-| `full_loss_exposure_unsettled_sales` | money-str | 尚未送达未结算风险池的商品行销售额 CNY；`completed_full_loss_rate` 只作用于此范围 |
-| `confirmed_unsettled_refund_amount` | money-str | 未结算订单中已经确认的退款金额 CNY，只扣一次 |
-| `confirmed_full_loss_exposure_refund_amount` | money-str | 尚未送达风险池中已经确认的退款金额 CNY；从风险池预计额度中扣除 |
-| `confirmed_unsettled_full_loss_qty` | int | 未结算订单中按当前严格口径已经确认的全损件数；部分退款不计入 |
-| `projected_future_full_loss_order_count` | decimal-str/null | `待完结风险订单数 × completed_full_loss_rate − 已确认风险池全损订单数`，以未确认风险订单数封顶 |
-| `projected_future_full_loss_qty` | decimal-str/null | `待完结风险件数 × completed_full_loss_rate − 已确认风险池全损件数`，以未确认风险件数封顶，不为显示提前取整 |
-| `projected_terminal_full_loss_qty` | decimal-str/null | 当前已观察全损件数 + 预计未来新增全损件数 |
-| `projected_full_loss_cost` | money-str/null | 预计终局全损对应成本，用于预计 ROI/保本 ROI，不重复加入 COGS |
-| `projected_unsettled_net` | money-str/null | 未结算销售扣已知退款、预测退款和平台费后的预计净收入 |
-| `projected_net_revenue` | money-str/null | 已结算实际到账 + `projected_unsettled_net` |
-| `projected_net_profit` | money-str/null | `projected_net_revenue − 当前 cogs_total − spend`；预测全损不重复扣货本 |
-| `projected_nc_prime` | money-str/null | `projected_net_revenue − projected_full_loss_cost` |
-| `projected_cogs_kept` | money-str/null | 当前已确认保留货本减去预计新增全损对应货本 |
-| `projected_roi_real` | ratio-str/null | `projected_nc_prime ÷ spend`；广告消耗为 0 时 null |
-| `projected_roi_breakeven` | ratio-str/null | `projected_nc_prime ÷ (projected_nc_prime − projected_cogs_kept)`；分母≤0或样本不足时 null |
+| `GET /v2/analytics/spu-roi` | readonly | SPU 盈利主表、完整范围 `totals` 与 meta。带 `shop_pk` 时同一响应额外返回件数加权的 `items[].priceStats`/`priceCoverage` 与 `totals.priceStats`/`totals.priceCoverage`（采购/原价/实付 × 均值/中位数，CNY 四位小数或 `null`），并接受六个独立排序标识 `purchasePriceMean`、`purchasePriceMedian`、`originalSalePriceMean`、`originalSalePriceMedian`、`paidPriceMean`、`paidPriceMedian`；契约见 [`../design/spu-price-statistics.md`](../design/spu-price-statistics.md) |
+| `GET /v2/analytics/spu-roi/{spu_pk}/orders` | readonly | 订单与物流证据 |
+| `GET /v2/analytics/spu-roi/{spu_pk}/settlements` | readonly | 结算组件证据 |
+| `GET /v2/analytics/spu-roi/{spu_pk}/cases` | readonly | 售后证据 |
+| `GET /v2/analytics/spu-roi/{spu_pk}/ads` | readonly | 广告证据 |
+| `GET /v2/pages/spu-roi` | readonly HTML | 标准 SPU 盈利页面 |
+| `GET /v2/pages/focused-spus` | readonly HTML | 重点关注 SPU 页面 |
 
-`totals` 同样返回上述预计终局字段。金额/件数商品行事实按 scope 聚合；样本订单数、未结算订单数、待确认订单数独立按订单全局去重；比例和预计终局值按完整 scope 重新计算，不是行级比例平均值。单 SPU scope 下 `totals` 与该 SPU 的预测字段一致。
-
-`meta.projection` 返回预测说明、日期归属、已完结样本、`refund_amount_rate_source`、`full_loss_rate_source`、目标定义和状态中文标签；`meta.warnings` 在适用时增加 `projection_insufficient_sample` 和 `projection_uses_completed_order_full_loss_rate`。未结算中已经确认的退款金额只扣一次，对应确认件数先从待确认集合排除，已完结订单全损率只作用于待完结风险池。`meta.ad_system_roi` 给出实际 ROI、最大可承受广告费和保本 ROI 的公式与范围，并明确 `mixed_real_cost` 不混入广告赠金、赠金目前不可单独取得；`meta.presentation` 返回 `rubric_label`、退款警戒阈值/文案、估算/默认成本文案和 `pnl_hints`。前端只格式化和渲染这些状态/说明，不保存业务阈值、不重算分类。净结算已扣除的平台费用不得再次扣除；结算外成本补齐前，前端以 `≈` 展示该估算。
-
-> **2026-09-30 成本来源语义变化**：
->
-> - `unit_cost_used` 只读取当前有效的 `manual_product_costs.unit_cost`；未命中时直接使用 40 CNY/件
-> - 妙手/1688 同步的 `procurement_products.source_unit_cost` 不再参与 SPU ROI 计算
-> - `cost_source` 当前只会返回 `MANUAL` 或 `DEFAULT_K1`；该规则覆盖下方 v8 历史成本链说明
->
-> **v9 语义变化（2026-09-13，merge `3c8ea96`）**：
->
-> - `cancel_rate` 只计**国内取消**（CANCELLED ∧ 无 38301）；海外取消改由全损口径承载——修复 v8 及之前两率重叠（海外取消同单重复计入取消率与全损退款率）
-> - `full_loss_qty` 从「38301 ∧ (完结 case ∨ CANCELLED)」切到 v9 两桶：**完结退货不论物流**（限已付白名单订单，保住 rule 0 未归属不变量）+ 海外取消
-> - 新增 2 字段：`domestic_cancelled_order_count` / `overseas_cancelled_order_count`
-> - `meta.rubric_version` = `v9`；钻取 orders 的 `full_loss` 旗标同 v9（完结退货 ∨ 海外取消）
->
-> **v8 语义变化（breaking relative to v5 文本）**：
->
-> - `net_profit / roi_real / roi_breakeven / platform_fee` 公式重写（见 M18/M14/M17/M19）
-> - `return_loss` 口径从"完结退货件 × cost"切到"全损件数 × cost"（M13b v8）
-> - `cost_source` 从两值扩为四值
-> - `unit_cost_used` 来源从 manual+30 兜底切到 MANUAL→PURCHASE→SOURCE_PRICE→40 兜底链
-> - 新增 6 字段：`net_revenue / settled_sales / unsettled_sales / settled_order_count / full_loss_qty / full_loss_cancelled_qty / full_loss_rate`
-> - 主列（2026-09-29）为 8 个经营指标：商品 + `spend` + `ad_system_actual_roi` + `ad_system_breakeven_roi` + `effective_sales` + `effective_order_count` + `cancel_rate` + `full_loss_rate` + `net_profit`；其余字段继续在 JSON 返回，由下钻面板消费
-
-格式化约定(§5.1):**money = 4 位小数字符串（CNY）**、比率/ROI = 2 位小数字符串、件数/单量整数;`null` = 无解/除数为 0(页面显示 `—`);无投放 SPU `spend="0.0000"` + `ad_count=0`。广告原生 USD、销售/退款原生 VND 在公式入口按同一 fx 快照换算 CNY，采购成本保持 CNY；`meta.currency.display="CNY"`，`meta.fx` 同时标注 `usd_vnd/cny_usd/usd_cny/cny_vnd/vnd_cny`（键名均为 from→to；`cny_vnd` 是 1 CNY 对应 VND，`vnd_cny` 是 1 VND 对应 CNY）。`totals` = 跨分页、当前筛选的加总:`row_count`(SPU 数)、单量(`order_count` 有效单 / `cancelled_order_count` 取消单 / `total_orders` = 两者之和,跨可见 SPU 全局去重)、`gmv`(全部订单销售额 = 白名单有效 ∪ 取消订单的原始行金额;money-str)与 `spend, sales, refund_net_amount, return_loss, net_profit`(行级 CNY 服务端加总,4 位小数字符串)、`roi_real`(Σ(net_revenue−return_loss)/Σspend,Σspend=0 → null);`total` = 匹配行数。**口径注(2026-09-06 全链状态口径,COD 店)**:行级 `sales`/单量/`gmv` 全部按**订单状态**下单即算——白名单状态订单(含 COD 在途/待收款)计入 `sales` 与有效单量;取消订单只进 `gmv`/`cancelled_order_count`,不重复入 sales;净利润/退款率/ROI 等派生金额自动跟随状态口径 sales(回款前偏乐观)。窗口裁剪列 = `COALESCE(order_time, paid_at)`（优先按下单日；仅缺失 `order_time` 时回退收款日）。**主表行内列集(2026-09-29)**:**主列 = 商品 + 广告消耗CNY(`spend`) + 广告系统实际ROI(`ad_system_actual_roi`) + 广告系统保本ROI(`ad_system_breakeven_roi`) + 有效销售(`effective_sales`) + 有效单量(`effective_order_count`) + 取消率(`cancel_rate`) + 全损率(`full_loss_rate`) + 净利润**；其中广告系统保本 ROI 的 `estimated_known_costs` 状态在前端以 `≈` 明示。其余字段（通用 ROI/保本、平台佣金、全损货损金额、已结未结 GMV、退款拆分、广告归因明细、订单结构）由行内 accordion 钻取面板五 tab 顶部汇总区展示（详见下节）。`meta` 携带 fx/fee/cost_assumption/window/**`rubric_version`(v8 新增,当前值 v9)**:/"unattributed_refund_lines/computed_at/currency;`meta.window` 为 ad 视图观测窗口(供参考),销售/退款是否裁剪见 `note`。
-
-**v9 默认值总览**：
-
-- `sort="roi_real"`（API 契约不动；页面 JS 显式传 `sort=net_profit&order=asc`）
-- `fee_rate` 不传：逐店使用 7 天内 `fee-v2` 实测快照，无可用快照时回退 `0.308`；只作用于未结算订单
-- `include_all=false`、`limit=100`、`order="asc"`
-- `meta.rubric_version="v9"`（口径漂移一眼定位）
-
-Example:
-
-```bash
-curl -sS -H "X-API-Key: $KEY" \
-  'http://127.0.0.1:9877/v2/analytics/spu-roi?sort=net_profit&order=asc&limit=5'  # 页面视图
-curl -sS -H "X-API-Key: $KEY" \
-  'http://127.0.0.1:9877/v2/analytics/spu-roi?sort=roi_real&order=asc&limit=5'  # API 默认（外部分析兼容）
-```
-
-Auth 分类细节:`/v2/analytics/spu-roi` 命中 `_READONLY_EXACT`(readonly),与 `/v2/analytics/sync/*`(readwrite,Chrome 扩展 ingest)是两条不相干的路由。
-
-### Analytics — SPU 实际 ROI 钻取 (`/v2/analytics/spu-roi/{spu_pk}/...`)
-
-**Stability: stable · 只读(readonly)**。v8 D6 拍板的"每 tab 懒加载"端点集——行内 accordion 展开详情面板时，前端按 `(spu_pk, tab, 窗口)` 缓存，首次激活 tab 才请求。利润构成 tab **不发请求**（主表行字段直出）。4 个端点 + 共享约定如下。
-
-#### `GET /v2/analytics/spu-roi/{spu_pk}/orders`
-
-订单·物流 tab 数据源。
-
-| query | type | default | notes |
-| --- | --- | --- | --- |
-| `w_start` / `w_end` | date | — | 销售/退款裁剪窗口（同主表语义：均按关联订单 `COALESCE(order_time, paid_at)` 归属，含 `w_end` 当日；退款发生时间不改变所属窗口） |
-
-Response `{spu_pk, spu_id, window, orders[], meta}`。`orders[]` 字段：`order_id, status, qty, line_gmv(CNY), paid_at, is_settled(已结 ✓/未结), settled_net_share(SETTLEMENT × 分摊比例，CNY；未结 → null), arrived_overseas(38301 命中), full_loss(**v9：完结退货(RETURN_AND_REFUND/REFUND_ONLY，不论物流) ∨ 海外取消(CANCELLED∧38301)**), shipment{status, tracking_number}, tracking[]`（按事件时间排序的 `tracking_events` 子集：`action_code, desc, event_at`）。
-
-防呆：`orders` 上限 500 条；超限返回 `{meta.orders_truncated: true}`。404：spu_pk 不存在。金额与主表同序列化（money 4 位、CNY），`meta.currency.display="CNY"`。
-
-#### `GET /v2/analytics/spu-roi/{spu_pk}/settlements`
-
-结算 tab 数据源（已结订单组件拆分）。
-
-| query | type | default | notes |
-| --- | --- | --- | --- |
-| `w_start` / `w_end` | date | — | 同 orders |
-
-Response `{spu_pk, settlements[], meta}`。`settlements[]` 每条 = 一笔已结订单：`order_id, statement_time, share_ratio(该 SPU 行占整单 GMV 比例), components[]`。`components[]` = 完整 53 字段（v8 D2 零值落库后含 0 行），每条 `{code(如 SETTLEMENT/GROSS_SALES/PLATFORM_COMMISSION…), amount_vnd(VND 原值), amount(CNY 换算)}`。
-
-未结算订单 **不**进 `settlements[]`（tab 底部由行字段 `settled_order_count / unsettled_sales` 计算一行汇总："未结算 N 单，估算净收入 $X（基线 r̂ × (1−退款率)）"）。
-
-#### `GET /v2/analytics/spu-roi/{spu_pk}/cases`
-
-售后 tab 数据源。
-
-| query | type | default | notes |
-| --- | --- | --- | --- |
-| `w_start` / `w_end` | date | — | 同 orders |
-
-Response `{spu_pk, cases[], meta}`。`cases[]` 每条 = `case_id, order_id(可跳订单 tab 对号), type(REFUND_ONLY/RETURN_AND_REFUND/CANCELLATION), status(未完结标黄), refund_amount, reason(code+text), updated_at`。退款金额按 `case_lines.sales_order_line_id → sales_order_lines.spu_pk` 归集（同主表 M7/M8/M9）。
-
-#### `GET /v2/analytics/spu-roi/{spu_pk}/ads`
-
-广告 tab 数据源（**无窗口参数**——广告全窗口累计，与主表一致）。
-
-Response `{spu_pk, ads[], meta}`。`ads[]` 每条 = `campaign_id, spend(CNY；源数据 USD), orders, first_day, last_day`（`plugin.ad_daily` ∪ `plugin.ad_today` 聚合（`spu_roi.py::_SQL_ROI_AD` 直读））。**不含 `campaign_name`**——v8 拍板不追（同步数据无名称字段）。
-
-#### 4 端点共享约定
-
-- 鉴权：`_READONLY_EXACT`（readonly 角色矩阵沿用主表）
-- 404：`spu_pk` 不存在
-- 金额：money 4 位小数字符串（CNY，结算组件同时保留 `amount_vnd` 原值）；比率 2 位
-- 窗口：`w_start/w_end` 与主表同语义；`tracking / settlement / cases` 随订单走，不单独裁剪；`ads` 无窗口
-- 缓存：前端按 `(spu_pk, tab, 窗口)` 缓存；主表筛选变化 → 清缓存
-- 错误：参数非法 → 422；未授权 → 401/403（沿用 auth middleware 矩阵）
+鉴权沿用本文件前文的 readonly 角色矩阵、API key/session 方式、限流和标准错误；盈利 GET 不写入数据。`/v2/analytics/sync/*` 是 Chrome 扩展 ingest 的另一组 readwrite+scope API，不属于盈利查询契约。
 
 ### Analytics Sync (`/v2/analytics/sync/*`)
 
@@ -1194,9 +974,10 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `POST /v2/reporting/manual-costs` | readwrite | v2 |
 | `GET /v2/fx/latest`, `/v2/fx/convert` | readonly | v2 — cached (fx.sync ≈1 上游请求/天，API 路径零上游) |
 | `GET /v2/sync/status` | readonly | v2 — sync-worker 周期作业健康（红灯 = 落后 ≥2 周期） |
+| `GET /v2/sync/freshness` | readonly | v2 — 当前店铺广告/订单/物流与妙手最近同步时间 |
 | `GET /v2/pages/manual-costs` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/pages/spu-roi` | readonly | v2 (HTML — not a machine contract) |
-| `GET /v2/analytics/spu-roi` | readonly | stable 只读（口径见 `analytics/spu-real-roi-dashboard.md`） |
+| `GET /v2/analytics/spu-roi` | readonly | stable 只读；实现/接口见 [`../design/spu-profitability-technical-design.md`](../design/spu-profitability-technical-design.md)，业务公式/日期口径见 [`../business/spu-profitability.md`](../business/spu-profitability.md) |
 | `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
 | `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
 | `GET\|POST /v2/auth/*` | public / session user | v2 — 用户名+密码 + 会话 cookie `tts_erp_session`（浏览器 API key 登录已移除） |

@@ -58,9 +58,87 @@ a:hover {
  outline-offset: 1px;
 }
 
-/* ═══ header meta 区(shop-switcher + identity) ═══ */
+/* ═══ header meta 区(shop-switcher + identity + 同步时间) ═══ */
 .op-header-meta {
+ display: flex;
+ flex-direction: column;
+ align-items: flex-start;
+ gap: 8px;
  min-width: 0;
+ max-width: 100%;
+}
+.op-header-tools {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 8px 12px;
+ min-width: 0;
+ max-width: 100%;
+}
+.op-freshness {
+ display: flex;
+ flex-direction: column;
+ align-items: flex-start;
+ gap: 4px;
+ min-width: 0;
+ max-width: 100%;
+}
+.op-freshness-times {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 6px;
+ margin: 0;
+ padding: 0;
+ list-style: none;
+ max-width: 100%;
+}
+.op-freshness-times li {
+ display: inline-flex;
+ align-items: baseline;
+ gap: 5px;
+ margin: 0;
+ padding: 1px 7px;
+ border: 1px solid var(--rule-soft);
+ background: color-mix(in srgb, var(--paper) 72%, white);
+ color: var(--muted);
+ font-family: var(--sans);
+ font-size: 13px;
+ line-height: 1.45;
+ white-space: nowrap;
+}
+.op-freshness-dot {
+ width: 6px;
+ height: 6px;
+ border-radius: 50%;
+ background: var(--muted);
+ align-self: center;
+ flex: none;
+}
+.op-freshness-label {
+ font-family: var(--sans);
+ font-size: 13px;
+}
+.op-freshness-time {
+ font-family: var(--sans);
+ font-size: 13px;
+ font-variant-numeric: tabular-nums;
+ color: var(--ink);
+}
+.op-freshness-times li[data-severity="ok"] .op-freshness-dot {
+ background: var(--ok);
+}
+.op-freshness-times li[data-severity="warn"] .op-freshness-dot {
+ background: var(--warn);
+}
+.op-freshness-times li[data-severity="warn"] .op-freshness-time {
+ color: var(--warn);
+}
+.op-freshness-times li[data-severity="crit"] .op-freshness-dot {
+ background: var(--danger);
+}
+.op-freshness-times li[data-severity="crit"] .op-freshness-time {
+ color: var(--danger);
 }
 .op-shop {
  display: inline-flex;
@@ -142,10 +220,66 @@ a:hover {
  color: var(--ink);
 }
 .op-scope-note {
+ margin: 0;
  font-size: 12px;
  letter-spacing: 0.05em;
  color: var(--muted);
  user-select: none;
+}
+
+/* 佣金费率条：正常是纸色事实，不是告警。回退基线才用危险色。 */
+.op-fee-bar {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 6px 14px;
+ padding: 7px 12px;
+ border: 1px solid var(--rule-soft);
+ background: color-mix(in srgb, var(--paper) 78%, white);
+ color: var(--ink-soft);
+ font-family: var(--sans);
+ font-size: 13px;
+ line-height: 1.45;
+}
+.op-fee-bar[data-source="shop_estimate"] {
+ border-color: color-mix(in srgb, var(--ok) 32%, var(--rule));
+}
+.op-fee-bar[data-source="user_override"] {
+ border-color: color-mix(in srgb, var(--accent) 42%, var(--rule));
+}
+.op-fee-bar[data-source="baseline"],
+.op-fee-bar[data-source="mixed"] {
+ border-color: color-mix(in srgb, var(--danger) 46%, var(--rule));
+ background: color-mix(in srgb, var(--danger) 7%, var(--paper));
+}
+.op-fee-source {
+ font-family: var(--sans);
+ font-size: 13px;
+ font-weight: 400;
+ color: var(--ok);
+}
+.op-fee-bar[data-source="user_override"] .op-fee-source {
+ color: var(--accent);
+}
+.op-fee-bar[data-source="baseline"] .op-fee-source,
+.op-fee-bar[data-source="mixed"] .op-fee-source {
+ color: var(--danger);
+}
+.op-fee-rate {
+ font-family: var(--sans);
+ font-size: 13px;
+ font-variant-numeric: tabular-nums;
+ color: var(--ink);
+}
+.op-fee-meta {
+ font-family: var(--sans);
+ color: var(--muted);
+ font-size: 13px;
+}
+.op-fee-fallback {
+ font-family: var(--sans);
+ color: var(--danger);
+ font-size: 13px;
 }
 
 /* ═══ 结余带 ═══ */
@@ -179,6 +313,69 @@ a:hover {
 }
 .op-counter-group .col + .col .op-counter-item {
  border-left: 1px solid var(--rule-soft);
+}
+
+/* Price summary intentionally remains one group with three metric rows. */
+.op-price-summary-title {
+ display: flex;
+ align-items: center;
+ gap: 6px;
+}
+.op-price-tip {
+ border: 1px solid var(--rule);
+ border-radius: 50%;
+ background: transparent;
+ color: var(--muted);
+ font: inherit;
+ font-size: 12px;
+ line-height: 1.2;
+ width: 18px;
+ height: 18px;
+ padding: 0;
+ cursor: pointer;
+}
+.op-price-tip:hover,
+.op-price-tip[aria-expanded="true"] {
+ color: var(--accent);
+ border-color: var(--accent);
+}
+.op-price-summary-status {
+ margin-left: auto;
+ color: var(--muted);
+ font-size: 12px;
+ font-weight: 400;
+}
+.op-price-summary-head,
+.op-price-summary-row {
+ display: grid;
+ grid-template-columns: minmax(7rem, 1.2fr) repeat(2, minmax(5.5rem, 1fr));
+ align-items: center;
+}
+.op-price-summary-head {
+ padding: 4px 10px;
+ color: var(--muted);
+ font-size: 12px;
+ text-align: right;
+}
+.op-price-summary-row {
+ min-height: 34px;
+ padding: 4px 10px;
+ border-top: 1px solid var(--rule-soft);
+}
+.op-price-summary-row > span:not(.op-price-summary-label) {
+ text-align: right;
+ font-variant-numeric: tabular-nums;
+}
+.op-price-summary-label {
+ min-width: 0;
+ color: var(--ink-soft);
+ font-size: 13px;
+}
+.op-price-status {
+ display: block;
+ color: var(--muted);
+ font-size: 11px;
+ line-height: 1.25;
 }
 .op-counter-label {
  width: 100%;
@@ -263,13 +460,15 @@ a:hover {
 /* 日期范围沿用浏览器原生 date picker，并用 Bootstrap input-group / btn-group
    组成一个紧凑的账期控件；不引入第三方日期库。 */
 .op-date-range-col {
- flex: 1 1 34rem;
- max-width: 42rem;
- min-width: min(100%, 24rem);
+ min-width: 0;
+ flex: 1 1 auto;
 }
 .op-date-range {
- border: 1px solid var(--rule);
- background: rgba(255, 255, 255, 0.14);
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 8px 12px;
+ min-width: 0;
 }
 .op-date-range__heading {
  min-height: 31px;
@@ -301,11 +500,19 @@ a:hover {
  --bs-btn-hover-color: var(--ink);
  --bs-btn-hover-bg: var(--paper-deep);
  --bs-btn-hover-border-color: var(--accent);
- --bs-btn-active-color: var(--bs-white);
- --bs-btn-active-bg: var(--accent);
- --bs-btn-active-border-color: var(--accent);
+ --bs-btn-active-color: var(--ink);
+ --bs-btn-active-bg: transparent;
+ --bs-btn-active-border-color: var(--ink);
  border-radius: 0;
+ font-family: var(--sans);
+ font-size: 13px;
  white-space: nowrap;
+}
+.op-date-presets .btn.active {
+ color: var(--ink);
+ background: transparent;
+ border-color: var(--ink);
+ box-shadow: none;
 }
 .op-toolbar .form-check-input {
  border-color: var(--rule);
@@ -377,14 +584,78 @@ a:hover {
  text-overflow: ellipsis;
  white-space: nowrap;
 }
-/* SPU 筛选是一个完整的操作单元：标签、输入、动作与辅助文本共享边界，
-   不再把输入和按钮散落在同一工具栏行的不同列里。 */
+/* SPU、日期、更多各自成行，不再套第二层卡片。 */
+.op-tool-row {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 8px 12px;
+}
+.op-tool-row + .op-tool-row,
+.op-tool-row + .op-more-panel {
+ margin-top: 10px;
+}
+.op-tool-kicker {
+ color: var(--muted);
+ font-family: var(--sans);
+ font-size: 13px;
+ white-space: nowrap;
+}
+.op-tool-spu {
+ flex: 1 1 16rem;
+ min-width: min(100%, 16rem);
+}
 .op-spu-filter {
- border-color: var(--rule) !important;
- background: rgba(255, 255, 255, 0.12);
+ border: 0;
+ background: transparent;
 }
 .op-spu-filter__header {
- min-height: 18px;
+ min-height: 0;
+}
+.op-more-toggle {
+ border: 0;
+ background: transparent;
+ color: var(--muted);
+ font-family: var(--sans);
+ font-size: 13px;
+ padding: 0;
+}
+.op-more-toggle:hover,
+.op-more-toggle[aria-expanded="true"] {
+ color: var(--ink);
+}
+.op-more-panel {
+ display: flex;
+ flex-wrap: wrap;
+ align-items: center;
+ gap: 8px 12px;
+ margin-top: 10px;
+}
+.op-more-panel[hidden] {
+ display: none !important;
+}
+.op-fee-override {
+ width: 8.5rem;
+ font-family: var(--sans);
+ font-size: 13px;
+}
+.op-more-check {
+ display: inline-flex;
+ align-items: center;
+ gap: 6px;
+ color: var(--ink-soft);
+ font-family: var(--sans);
+ font-size: 13px;
+}
+.op-table-meta {
+ display: flex;
+ justify-content: flex-end;
+ padding-bottom: 6px;
+}
+.op-date-input-groups {
+ display: flex;
+ flex-wrap: wrap;
+ gap: 8px;
 }
 .op-spu-selection-count {
  color: var(--muted);
@@ -472,6 +743,7 @@ a:hover {
     面板/大盘卡片左右外凸 22.5px，看起来表格没对齐。 */
  background: var(--paper);
  border-bottom: 1px solid var(--rule);
+ overflow-x: auto;
 }
 .op-table-wrap:focus-visible {
  outline-offset: -2px;
@@ -479,8 +751,15 @@ a:hover {
 .op-tabulator {
  background: var(--paper);
  border: 0;
+ min-width: 980px;
  font-size: 14px;
  font-variant-numeric: tabular-nums;
+}
+.op-tabulator .tabulator-header .tabulator-col[tabulator-field^="priceStats."] {
+ min-width: 104px;
+}
+.op-tabulator .tabulator-header .tabulator-col.tabulator-col-group {
+ min-width: 208px;
 }
 .op-tabulator .tabulator-header {
  background: var(--paper);

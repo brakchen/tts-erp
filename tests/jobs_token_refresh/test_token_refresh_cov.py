@@ -38,6 +38,7 @@ from tts_erp_v2.jobs.token_refresh import (
     JOB_NAME,
     PROVIDERS_DEFAULT,
     REFRESH_WINDOW,
+    STALE_THRESHOLD,
     _default_registry,
     _instrument,
     _query_due_credentials,
@@ -183,6 +184,7 @@ def test_query_due_credentials_filters_by_window(db_session,
         db_session,
         providers=PROVIDERS_DEFAULT,
         window=REFRESH_WINDOW,
+        stale_threshold=STALE_THRESHOLD,
         now=now,
     )
     eids = {r.external_account_id for r in rows}
@@ -208,6 +210,7 @@ def test_query_due_credentials_window_smaller_excludes_near_row(
         db_session,
         providers=PROVIDERS_DEFAULT,
         window=timedelta(seconds=5),
+        stale_threshold=STALE_THRESHOLD,
         now=now,
     )
     eids = {r.external_account_id for r in rows}
@@ -250,32 +253,43 @@ def test_sync_token_refresh_skips_when_row_vanishes_between_select_and_refresh(
 # ───────────────────── info['called'] False branch (line 197-198) ─────────────────────
 
 
-def test_sync_token_refresh_skips_fresh_row_via_short_circuit(db_session) -> None:
-    """A row with ``expires_at`` far in the future is NOT in the due list
-    → the inner refresher is never wired → ``info['called'] is False``
-    branch is unreachable through the loop (line 197-198). But the
-    instrumentation of the inner refresher DOES happen for whatever rows
-    are in the due list — and if the refresher returns a non-empty
-    payload for a row that was still fresh at refresh time, the wrapped
-    counter classifies it as 'called'. To exercise the
-    ``info['called'] is False`` branch we need the ``_instrument``
-    helper to be invoked but NOT call the inner refresher. We achieve
-    this by passing a row whose ``expires_at`` is null → it's due, but
-    ``refresh_if_needed`` returns the existing view (row is null-expiry,
-    so it's "never expires" → refresh short-circuits)."""
+def test_sync_token_refresh_skips_fresh_row_via_short_circuit(
+    db_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``refresh_if_needed`` returns a non-None view WITHOUT invoking
+    the wrapped refresher (the legacy "row was fresh" path), the loop's
+    ``info['called'] is False`` branch fires: the row counts as
+    ``skipped``, the registry's refresher is never wired, and the SYNC
+    bookkeeping stays clean.
+
+    Pre-fix this branch was reachable through NULL-expires rows
+    (``is_expired(None)`` returned False even with skew=60s). Post-fix
+    NULL rows are force-refreshed with ``force=True`` (Fix #2), so
+    ``info['called'] is False`` now only fires when an unrelated
+    short-circuit path is exercised — we simulate that here by mocking
+    ``refresh_if_needed`` to return a non-None view without calling
+    ``wrapped``.
+    """
     eid = "TEST_tt_fresh_short_circuit"
-    # expires_at None → due (None considered due), refresh short-circuits.
     _make_credentials(
         db_session,
         external_account_id=eid,
-        expires_at=None,
-        access="seed_token_fresh",
+        expires_at=datetime.now(UTC) + timedelta(seconds=30),
     )
+
+    from tts_erp_v2.jobs import token_refresh as tr_mod
+
+    def fake_refresh_if_needed(*args, **kwargs):
+        # Return a non-None sentinel (the loop only checks ``view is None``).
+        return object()
+
+    monkeypatch.setattr(tr_mod, "refresh_if_needed", fake_refresh_if_needed)
+
     reg = _FakeRefresher()
     sync_token_refresh(db_session, registry=reg)
-    # Row counted as skipped (NOT refreshed) because refresh_if_needed
-    # short-circuited.
-    assert eid not in [call_eid for _p, call_eid in reg.calls]
+    # Row counted as skipped: refresh_if_needed short-circuited without
+    # calling the registry's wrapped refresher.
+    assert eid not in reg.calls
 
 
 # ───────────────────── info['got_token'] False branch (line 203-212) ─────────────────────

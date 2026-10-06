@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Literal
 
 import pytest
 from render_support import Renderer
@@ -41,7 +42,15 @@ _PLAIN = {
     "intercept-stats": "intercept-stats.html",
     "users": "users.html",
 }
-_SPU_PAGES = (
+_SPU_PAGES: tuple[
+    tuple[
+        Literal["spu-roi", "focused-spus"],
+        Literal["standard-roi", "focused-spus"],
+        Literal["spu-roi.js", "focused-spus.js"],
+        str,
+    ],
+    ...,
+] = (
     ("spu-roi", "standard-roi", "spu-roi.js", "SPU 实际 ROI"),
     ("focused-spus", "focused-spus", "focused-spus.js", "重点关注 SPU"),
 )
@@ -121,7 +130,7 @@ _SPU_ITEMS = [
 ]
 
 
-def _mock_payload(path: str) -> dict[str, Any] | list[Any]:
+def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     """/v2/** 的 canned 只读载荷；没列到的接口给空集合，页面照常渲染外壳。"""
     if path.endswith("/v2/auth/me"):
         return {"authenticated": True, "role": "admin"}
@@ -158,6 +167,7 @@ def _mock_payload(path: str) -> dict[str, Any] | list[Any]:
             "meta": {"currency": {"display": "CNY"}, "computed_at": _NOW,
                      "rubric_version": "v10", "reporting_timezone": "Asia/Ho_Chi_Minh",
                      "window": {"first_day": "2026-09-01", "last_day": "2026-09-30"},
+                     "fx": {"as_of": "2026-10-05", "as_of_at": _NOW},
                      "presentation": {"rubric_label": "盈利 v10"}},
         }
     if path.endswith("/v2/intercept/requests/stats"):
@@ -181,6 +191,26 @@ def _mock_payload(path: str) -> dict[str, Any] | list[Any]:
     if path.endswith("/v2/sync/status"):
         return {"server_time": _NOW, "jobs": [], "total_spus": 1234,
                 "missing_cost_spus": 89, "shop_count": 12, "auth_mode": "enforce"}
+    if path.endswith("/v2/sync/freshness"):
+        return {
+            "server_time": _NOW,
+            "shop_pk": 7,
+            "shop_id": "TEST_shop",
+            "sources": [
+                {"key": "ads", "label": "广告", "synced_at": _NOW,
+                 "scope": "shop", "basis": "rows", "severity": "ok",
+                 "detail": "该店广告事实最近写入"},
+                {"key": "orders", "label": "订单", "synced_at": _NOW,
+                 "scope": "shop", "basis": "job", "job_name": "tiktok.orders",
+                 "severity": "ok", "detail": "最近一次成功同步"},
+                {"key": "logistics", "label": "物流", "synced_at": "2026-09-01T00:00:00+00:00",
+                 "scope": "shop", "basis": "job", "job_name": "tiktok.logistics",
+                 "severity": "crit", "detail": "最近一次成功同步"},
+                {"key": "miaoshou", "label": "妙手", "synced_at": _NOW,
+                 "scope": "system", "basis": "job", "job_name": "miaoshou.packages",
+                 "severity": "warn", "detail": "最近成功：miaoshou.packages"},
+            ],
+        }
     if path.endswith("/v2/reporting/coverage"):
         return {"costed_spus": 1145, "linked_spus": 1200, "total_spus": 1234,
                 "coverage_rate": "0.928", "as_of": "2026-10-01"}
@@ -191,9 +221,9 @@ def _render_pages(out: Path) -> None:
     """用仓库自己的 Jinja 渲染全部页面（与线上同一套模板与资源版本戳）。"""
     from tts_erp_v2.api.v2.ad_daily import ad_daily_page
     from tts_erp_v2.api.v2.pages import (
-        _SpuProfitabilityPageConfig,
         _render_page,
         _render_spu_profitability_page,
+        _SpuProfitabilityPageConfig,
     )
 
     for slug, tpl in _PLAIN.items():
@@ -236,7 +266,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(target.read_bytes(),
                                   _MIME.get(target.suffix, "application/octet-stream"))
         if path.startswith("/v2/"):
-            body = json.dumps(_mock_payload(path)).encode("utf-8")
+            query = self.path.split("?", 1)[1] if "?" in self.path else ""
+            body = json.dumps(_mock_payload(path, query)).encode("utf-8")
             return self._send(body, _MIME[".json"])
         self.send_error(404)
 
@@ -247,7 +278,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *args: Any) -> None:  # 静默访问日志
+    def log_message(self, format: str, *args: Any) -> None:  # 静默访问日志
         return
 
 
@@ -279,6 +310,9 @@ def browser_renderer(site_url: str) -> Any:
     tests/browser 先于 tests/middleware 跑时必现。每条用例用完即关，退出测试
     进程前不留 Playwright 的循环。
     """
+    pw: Any = None
+    browser: Any = None
+    sync_playwright: Any = None
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:  # pragma: no cover - 环境相关
