@@ -32,7 +32,7 @@ from tts_erp_v2.db.models.publishing import (
 )
 from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_text
 from tts_erp_v2.publishing.domain import allowed_actions, cleanup_retryable_resources
-from tts_erp_v2.publishing.object_store import MinioVideoStore, VideoObjectStore
+from tts_erp_v2.publishing.object_store import VideoObjectStore, video_store_from_env
 from tts_erp_v2.publishing.repository import (
     _lock_publish_slot,
     request_verification,
@@ -51,7 +51,6 @@ from tts_erp_v2.publishing.submission import (
     replace_upload,
     retry_task,
 )
-from tts_erp_v2.storage.minio_client import MinioClient
 
 router = APIRouter(prefix="/v2/video-publish", tags=["video-publish"])
 _store: VideoObjectStore | None = None
@@ -60,7 +59,7 @@ _store: VideoObjectStore | None = None
 def get_store() -> VideoObjectStore:
     global _store
     if _store is None:
-        _store = MinioVideoStore(MinioClient.from_env())
+        _store = video_store_from_env()
     assert _store is not None
     return _store
 

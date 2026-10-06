@@ -21,9 +21,8 @@ from tts_erp_v2.publishing.dispatcher import (
     recover_active,
     run_background_cleanup_batch,
 )
-from tts_erp_v2.publishing.object_store import MinioVideoStore
+from tts_erp_v2.publishing.object_store import video_store_from_env
 from tts_erp_v2.publishing.repository import schedule_spool_reconciliation
-from tts_erp_v2.storage.minio_client import MinioClient
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ async def run() -> None:
     instance_id = str(uuid4())
     session_factory = get_session_factory()
     await asyncio.to_thread(_write_heartbeat, session_factory, instance_id, "starting")
-    store = MinioVideoStore(MinioClient.from_env())
+    store = video_store_from_env()
     deps = PublishDependencies(
         session_factory=session_factory,
         store=store,

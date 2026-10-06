@@ -20,7 +20,7 @@ from tts_erp_v2.publishing.dispatcher import (
     _query_after_submit_transport_error,
 )
 from tts_erp_v2.publishing.domain import classify_failure
-from tts_erp_v2.publishing.object_store import MinioVideoStore
+from tts_erp_v2.publishing.object_store import MinioVideoStore, video_store_from_env
 from tts_erp_v2.storage.minio_client import MinioClient
 
 ROOT = Path(__file__).parents[2]
@@ -96,6 +96,31 @@ def test_publish_store_rejects_non_dedicated_bucket(
     monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
     with pytest.raises(ValueError, match="PUBLISH_BUCKET_MISMATCH"):
         MinioVideoStore(cast(MinioClient, SimpleNamespace(bucket="general")))
+
+
+def test_video_store_from_env_binds_dedicated_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """工厂必须把全局 MINIO_BUCKET（SPU 图片桶）切到专用视频桶。
+
+    回归：生产集成时 worker/API 曾用全局 MINIO_BUCKET 构造 store，
+    触发 PUBLISH_BUCKET_MISMATCH 而无法启动。
+    """
+    monkeypatch.setenv("MINIO_ENDPOINT", "127.0.0.1:9000")
+    monkeypatch.setenv("MINIO_ACCESS_KEY", "minioadmin")
+    monkeypatch.setenv("MINIO_SECRET_KEY", "minioadmin")
+    monkeypatch.setenv("MINIO_BUCKET", "tts-erp-spu-images")
+    monkeypatch.setenv("MINIO_SECURE", "false")
+    monkeypatch.setenv("MINIO_REGION", "us-east-1")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+
+    store = video_store_from_env()
+
+    assert store.bucket == "tiktok-video"
+    # 预签名 URL 必须指向专用桶，而非 SPU 图片桶
+    url = store.presign_put("video-publish/x/y.mp4", "video/mp4")
+    assert "/tiktok-video/" in url
+    assert "/tts-erp-spu-images/" not in url
 
 
 def test_minio_download_streams_to_private_spool(tmp_path: Path) -> None:
