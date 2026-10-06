@@ -29,6 +29,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # Ensure .env is loaded before reading TTS_ERP_DB_URL.
 def _load_env() -> None:
+    if os.environ.get("TTS_ERP_TEST_NO_DOTENV") == "1":
+        return
     env_path = PROJECT_ROOT / ".env"
     if not env_path.exists():
         return
