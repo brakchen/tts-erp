@@ -589,5 +589,5 @@ def test_architecture_inventory_is_derived_from_live_schema(
         GROUP BY table_schema
         """)
     ).all()
-    assert len(rows) == 13
-    assert sum(int(row[1]) for row in rows) == 72
+    assert len(rows) == 14
+    assert sum(int(row[1]) for row in rows) == 73

@@ -32,7 +32,7 @@ tts_erp_v2/
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）；
 │                        #   operator controls use readwrite-gated /v2/pages/sync-jobs;
 │                        #   manual trigger is readwrite+, enable/disable is admin
-├── db/models/           # 13 schema SQLAlchemy 模型 — publishing.py 为视频发布任务/attempt/Worker 心跳；
+├── db/models/           # 14 schema SQLAlchemy 模型 — publishing.py 为视频发布任务/attempt/Worker 心跳；
 │                        #   miaoshou.py 为妙手 source-owned 包裹/采购价域 8 张表；
 │                        #   plugin.py 为插件 dump 的结构化表：订单/物流/结算 7 张
 │                        #   （orders/order_lines/shipments/tracking_events/settlements/
@@ -75,7 +75,7 @@ APScheduler 调度器，JOBS 注册表在文件顶部 `NOTE`，以它为准，�
 
 ### 3.3 db/models/
 
-13 schema SQLAlchemy 模型：
+14 schema SQLAlchemy 模型：
 
 - `publishing.py`：`publishing.video_publish_tasks / video_publish_attempts / worker_heartbeats`，分别保存任务与 publish/cleanup owner 状态（每轮 execution generation、下载前 generation-scoped `spool_path`、上传 generation/key/PUT expiry 独立）、含 profile/verification level 的完整不可变 attempt submission 身份和 Worker readiness；spool cleanup 精确处理退休 final/`.part`，对象 cleanup 固定退休 generation 并受 expiry+grace DB-time gate，设备 cleanup 只删除退休 generation 的精确 filesystem/MediaStore 路径；
 - `miaoshou.py`：妙手 source-owned 包裹/采购价域 8 张表（package raw/header/item/gift、purchase raw/candidate、cursor、issue）；
