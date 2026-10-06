@@ -154,7 +154,7 @@ def test_alert_schema_text_columns_match_migration() -> None:
     ):
         assert isinstance(columns[name].type, Text)
     migration = (
-        Path(__file__).parents[2] / "alembic/versions/0053_spu_deterioration_alert.py"
+        Path(__file__).parents[2] / "alembic/versions/0068_spu_deterioration_alert.py"
     )
     source = migration.read_text(encoding="utf-8")
     for field in (

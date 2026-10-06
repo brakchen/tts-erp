@@ -85,7 +85,7 @@ def _clear_alert_runtime_config(db_engine) -> None:
 
 def _load_alert_migration():
     migration_path = (
-        Path(__file__).parents[2] / "alembic/versions/0053_spu_deterioration_alert.py"
+        Path(__file__).parents[2] / "alembic/versions/0068_spu_deterioration_alert.py"
     )
     spec = importlib.util.spec_from_file_location(
         "alert_migration_0053_runtime_config_test", migration_path

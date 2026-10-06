@@ -75,7 +75,7 @@ def _ensure_alert_migration(db_engine) -> None:
         connection.execute(text("CREATE SCHEMA IF NOT EXISTS analytics"))
         migration_path = (
             Path(__file__).parents[2]
-            / "alembic/versions/0053_spu_deterioration_alert.py"
+            / "alembic/versions/0068_spu_deterioration_alert.py"
         )
         spec = importlib.util.spec_from_file_location(
             "alert_migration_0053_sync_test", migration_path

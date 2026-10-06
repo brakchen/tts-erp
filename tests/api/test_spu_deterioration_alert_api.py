@@ -32,7 +32,7 @@ pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 def _ensure_alert_migration(db_engine) -> None:
     migration_path = (
-        Path(__file__).parents[2] / "alembic/versions/0053_spu_deterioration_alert.py"
+        Path(__file__).parents[2] / "alembic/versions/0068_spu_deterioration_alert.py"
     )
     required = {
         "commerce.shops",

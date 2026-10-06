@@ -9,8 +9,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "0053_spu_deterioration_alert"
-down_revision: str | None = "0052_user_accounts"
+revision: str = "0068_spu_deterioration_alert"
+down_revision: str | None = "0067_merge_price_and_publish"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
