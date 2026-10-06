@@ -13,10 +13,18 @@
 
 运行方式（私有模板，避免共享模板被别的 lane stamp 成未合并的 revision）：
 
-    TTS_ERP_TEST_TEMPLATE_DB=tts_erp_test_template_price_e2e \\
+    TTS_ERP_TEST_NO_DOTENV=1 \\
+      TTS_ERP_TEST_TEMPLATE_DB=tts_erp_test_template_price_e2e \\
       bash scripts/test_isolated.sh \\
       --template-db tts_erp_test_template_price_e2e \\
       fast tests/browser/test_spu_price_stats_live.py
+
+本 module 同时带 `domain_e2e` 标记（design §9.1），所以 `test_isolated.sh e2e
+tests/browser/test_spu_price_stats_live.py` 也能选中它（对 `fast` 无影响）。
+
+鉴权跑两条 leg（design §8.1 gate 2）：真实 `POST /v2/auth/login` 的 TEST 用户
+cookie 会话，以及原有的 readonly API key 会话。浏览器、playwright 或 chromium
+不可用是**失败**（不是 skip）：这层证据不允许静默降级成「未运行」。
 
 期望值全部由 oracle 独立算出（件数加权、原生币种→CNY 换算），不读 API 响应，
 因此 API 与页面同时算错也会被抓到。
@@ -39,16 +47,24 @@ from support.spu_price_stats_live import (
     SPU_B1,
     SPU_B2,
     SPU_B3,
+    LiveApi,
     LiveBrowser,
     PriceScene,
     focused_spus_path,
     is_test_shaped,
     live_api_server,
+    log_tail,
     priced_test_database,
     spu_roi_path,
 )
 
-pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
+pytestmark = [
+    pytest.mark.domain_browser,
+    # `domain_e2e` 让 design §9.1 的 `e2e` 命令也能选中本 module（`fast` 用
+    # `-m "not slow and not requires_service"`，不受影响）。
+    pytest.mark.domain_e2e,
+    pytest.mark.requires_browser,
+]
 
 PRICE_GROUP_TITLES = ("采购价", "销售价", "实付价")
 
@@ -67,40 +83,73 @@ def price_scene(db_url: str) -> Iterator[PriceScene]:
 
 
 @pytest.fixture(scope="module")
-def live_api(price_scene: PriceScene, db_url: str) -> Iterator[str]:
+def live_api(price_scene: PriceScene, db_url: str) -> Iterator[LiveApi]:
     """冷启的临时 uvicorn（真实 FastAPI + 真实路由 + 真实库）。"""
-    with live_api_server(db_url) as base:
-        yield base
+    with live_api_server(db_url) as api:
+        yield api
+
+
+# 浏览器/playwright 不可用 = 本层证据缺失，必须失败（design §8.1 gate 5 第 4 条）。
+_BROWSER_UNAVAILABLE = (
+    "playwright/chromium 不可用：本层是真实浏览器全栈 E2E 证据，不允许跳过"
+)
 
 
 def _launch_chromium() -> tuple[Any, Any]:
-    """启动 headless chromium；playwright/chromium 不可用时 skip（环境能力）。"""
-    playwright_module = pytest.importorskip("playwright.sync_api")
-    playwright = playwright_module.sync_playwright().start()
-    browser: Any = None
+    """启动 headless chromium；playwright/chromium 不可用即硬失败（不是 skip）。"""
     try:
-        browser = playwright.chromium.launch(headless=True)
-    except Exception as exc:  # noqa: BLE001  # pragma: no cover - 环境相关
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:  # pragma: no cover - 环境相关
+        raise RuntimeError(f"{_BROWSER_UNAVAILABLE}（playwright 导入失败: {exc}）") from exc
+    playwright = sync_playwright().start()
+    try:
+        browser: Any = playwright.chromium.launch(headless=True)
+    except Exception as exc:  # pragma: no cover - 环境相关
         playwright.stop()
-        pytest.skip(f"chromium 启动失败: {exc}")
+        raise RuntimeError(f"{_BROWSER_UNAVAILABLE}（chromium 启动失败: {exc}）") from exc
     return playwright, browser
 
 
 @pytest.fixture()
-def live(live_api: str, price_scene: PriceScene) -> Iterator[LiveBrowser]:
+def live(
+    live_api: LiveApi, price_scene: PriceScene, request: pytest.FixtureRequest
+) -> Iterator[LiveBrowser]:
     """真实 Chromium 会话。
 
     作用域是 function（与 `tests/browser/conftest.py` 同因）：Playwright 存活
     期间会占着主线程事件循环，跨用例复用会污染后续 async 用例。
+
+    用例失败时把 uvicorn 日志尾巴 + 每个页面截图写进临时证据目录并打印路径。
     """
     playwright, browser = _launch_chromium()
-    session = LiveBrowser(browser, live_api, price_scene.api_key)
+    session = LiveBrowser(browser, live_api.base, price_scene)
     try:
         yield session
     finally:
+        if _call_failed(request):
+            _dump_failure_evidence(session, live_api)
         session.close()
         browser.close()
         playwright.stop()
+
+
+def _call_failed(request: pytest.FixtureRequest) -> bool:
+    """用例（call 阶段）是否失败；report 由 tests/browser/conftest.py 挂钩子记录。"""
+    report = getattr(request.node, "rep_call", None)
+    return bool(report is not None and report.failed)
+
+
+def _dump_failure_evidence(session: LiveBrowser, live_api: LiveApi) -> None:
+    """失败留证：uvicorn 日志尾巴 + 页面截图，落到临时目录并打印路径。"""
+    tail_path = live_api.evidence_dir / "uvicorn-tail.log"
+    tail_path.write_text(log_tail(live_api.log_path), encoding="utf-8")
+    shots = session.screenshot_all(live_api.evidence_dir)
+    print(
+        f"\n[live-e2e] 失败证据目录 {live_api.evidence_dir}\n"
+        f"[live-e2e]   uvicorn 日志: {tail_path}\n"
+        f"[live-e2e]   截图: {[str(path) for path in shots]}",
+        flush=True,
+    )
 
 
 # ─── 1. 两页六指标 + 价格分组列 ──────────────────────────────────────
@@ -109,7 +158,11 @@ def live(live_api: str, price_scene: PriceScene) -> Iterator[LiveBrowser]:
 def test_spu_roi_price_summary_and_columns_render_real_weighted_stats(
     live: LiveBrowser, price_scene: PriceScene
 ) -> None:
-    """spu-roi：六指标 + 分组列 + 行内价格 = 真实库里件数加权的价格统计。"""
+    """spu-roi：六指标 + 分组列 + 行内价格 = 真实库里件数加权的价格统计。
+
+    两条鉴权 leg（design §8.1 gate 2）：先真实 `POST /v2/auth/login` 的 TEST 用户
+    cookie 会话，再是原有的 readonly API key 会话；两条必须渲染同一组真实价格。
+    """
     shop = price_scene.shop_a
     expected = shop.stats((DAY_D1,))
     # oracle 自检：设计 §7.1 加权样例（行均值会得到 25.0000，非加权实现会被抓）
@@ -122,6 +175,24 @@ def test_spu_roi_price_summary_and_columns_render_real_weighted_stats(
         "paid.median": "45.0000",
     }
 
+    # ── leg 1：真实登录 cookie 会话（无 Authorization 头）──
+    session_page = live.open(spu_roi_path(shop.pk), auth="session")
+    session_page.set_window(DAY_D1, DAY_D1)
+    session_page.wait_price_state(expected.cells(), expected.summary_status())
+    login = live.last_login
+    assert login is not None, "浏览器未走真实 /v2/auth/login"
+    assert login["username"] == price_scene.login_username, login
+    assert login["role"] == "readonly", login  # viewer 角色
+    assert "page:spu-roi" in login["pages"], login
+    # 页面自己再问一次 /v2/auth/me：证明 DOM 下的会话真的凭 cookie 成立
+    assert session_page.auth_identity() == price_scene.login_username
+    assert session_page.summary_status() == expected.summary_status()
+    assert session_page.price_cells() == expected.cells()
+    assert session_page.row_cell(SPU_A1, "priceStats.purchase.mean") == "10.0000"
+    for field in PRICE_FIELDS:
+        assert session_page.price_field_count(field) == 1, field
+
+    # ── leg 2：原 readonly API key 会话（下面的断言保持原样）──
     page = live.open(spu_roi_path(shop.pk))
     page.set_window(DAY_D1, DAY_D1)
     page.wait_price_state(expected.cells(), expected.summary_status())
@@ -139,6 +210,9 @@ def test_spu_roi_price_summary_and_columns_render_real_weighted_stats(
     assert page.row_cell(SPU_A2, "priceStats.purchase.mean") == "≈40.0000"
     # 200000 VND 原生价 × (6.5/26000) = 50 CNY：价格确实走了同快照换算
     assert page.row_cell(SPU_A2, "priceStats.originalSale.mean") == "50.0000"
+
+    # 两条 leg 必须看到同一组真实价格（cookie 会话不降级、不旁路）
+    assert session_page.price_cells() == page.price_cells()
 
     urls = page.spu_roi_requests()
     assert urls, "页面没有真的请求过 /v2/analytics/spu-roi"
@@ -190,12 +264,22 @@ def test_focused_spus_profile_matches_spu_roi_price_totals(
 def test_price_header_sorts_on_server_and_reorders_rows(
     live: LiveBrowser, price_scene: PriceScene
 ) -> None:
-    """键盘点价格表头 → 服务端 sort=purchasePriceMean → 行序真的重排。"""
+    """键盘点价格表头 → 服务端 sort=purchasePriceMean → 行序真的重排。
+
+    默认序（roi_real 无效 → spu_pk 升序）是 [A2, A1]，与价格升序 [A1, A2]
+    相反：这样 asc/desc 两向都证明行序真的翻了，不会退化成默认行序。
+    """
     shop = price_scene.shop_a
     expected = shop.stats((DAY_D1,))
     page = live.open(spu_roi_path(shop.pk))
     page.set_window(DAY_D1, DAY_D1)
     page.wait_price_state(expected.cells(), expected.summary_status())
+
+    default_order = page.row_order((SPU_A1, SPU_A2))
+    assert default_order == [SPU_A2, SPU_A1], (
+        "默认行序必须与价格升序相反，否则下面的 asc 断言会被默认序满足",
+        default_order,
+    )
 
     header = page.price_header("priceStats.purchase.mean")
     header.focus()

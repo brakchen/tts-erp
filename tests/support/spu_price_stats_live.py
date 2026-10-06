@@ -14,10 +14,16 @@
   `TTS_ERP_DB_URL` 指向 `scripts/test_isolated.sh` 克隆出来的库；端口由内核分配，
   启动完成后 `/healthz` 探活。API 不可用即失败（不是 skip）。
 - **私有模板**：调用方必须用
+  `TTS_ERP_TEST_NO_DOTENV=1` +
   `TTS_ERP_TEST_TEMPLATE_DB=tts_erp_test_template_price_e2e` +
   `--template-db tts_erp_test_template_price_e2e`，因为共享模板会被其它 lane
   stamp 成本 worktree 尚未合并的 revision（克隆库 `alembic_version` 指向不存在的
   脚本时 alembic 报 `Can't locate ...`）。
+- **鉴权两条 leg**（§8.1 gate 2）：cookie leg 先 seed 一个 TEST 用户
+  （`test_price_e2e_login`，viewer 角色），浏览器在 context 里真实
+  `POST /v2/auth/login` 拿会话 cookie；api-key leg 仍用 readonly key。
+- **env allowlist**：子进程只拿本模块显式列出的测试键（`api_env`），不继承本机
+  `.env` 的生产凭据（TIKTOK_*、外部前缀等）。
 - **真实行为**：断言页面 DOM 上的价格文本、状态文案、行序；期望值由本模块用
   `Decimal` **独立算出**（件数加权均值/中位数、原生币种→CNY 换算），不读 API
   响应，所以 API 与页面同时算错也会被抓到。
@@ -32,6 +38,7 @@ import http.client
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -41,9 +48,9 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -59,6 +66,9 @@ from tts_erp_v2.db.models import (
     SalesOrderLine,
 )
 from tts_erp_v2.db.models.commerce import SalesOrderLinePriceObservation
+
+# 会话 cookie 名以 app 常量为唯一来源（生产与测试同为 tts_erp_session）。
+from tts_erp_v2.middleware.session_auth import SESSION_COOKIE_NAME
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -81,6 +91,16 @@ API_KEY_NAME = "TEST_PRICE_E2E_READONLY"
 
 # 造数前缀：所有 DELETE 都以它为准，绝不碰非本 lane 的行。
 PREFIX_TEST = "TEST_PRICE_E2E"
+
+# 登录 leg 的 TEST 用户：`USERNAME_RE` 只接受小写，所以库里存的是小写形态。
+LOGIN_USERNAME = f"{PREFIX_TEST}_LOGIN".lower()  # test_price_e2e_login
+LOGIN_CREDENTIAL = "Pricee2e1"  # 满足密码策略（≥6 位 + 大写 + 小写 + 数字）
+LOGIN_ROLE = "viewer"  # readonly tier + page:spu-roi / page:focused-spus 权限
+
+# 确定性测试 Fernet key（与 tests/conftest.py 的测试默认值同源，非生产凭据）。
+TEST_FERNET_KEY = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+
+AuthMode = Literal["api_key", "session"]
 
 DAY_D1 = "2026-09-01"
 DAY_D2 = "2026-09-10"
@@ -184,15 +204,21 @@ def _price_at_rank(buckets: dict[Decimal, int], rank: int) -> Decimal:
 
 
 def _mean_and_median(buckets: dict[Decimal, int]) -> tuple[str | None, str | None]:
-    """件数加权均值/中位数（与 `_price_math.summarize_weighted_prices` 同定义）。"""
+    """件数加权均值/中位数（与 `_price_math.summarize_weighted_prices` 同定义）。
+
+    `localcontext(prec=80)` 与 `_price_math` 对齐：长小数价（原生币种换算）在
+    默认 28 位精度下会先被截断再取整，oracle 会与 API 分歧。
+    """
     total = sum(buckets.values())
     if total <= 0:
         return None, None
-    weighted = sum((price * qty for price, qty in buckets.items()), Decimal(0))
-    median = _price_at_rank(buckets, total // 2 + 1)
-    if total % 2 == 0:
-        median = (_price_at_rank(buckets, total // 2) + median) / 2
-    return q4(weighted / Decimal(total)), q4(median)
+    with localcontext() as context:
+        context.prec = 80
+        weighted = sum((price * qty for price, qty in buckets.items()), Decimal(0))
+        median = _price_at_rank(buckets, total // 2 + 1)
+        if total % 2 == 0:
+            median = (_price_at_rank(buckets, total // 2) + median) / 2
+        return q4(weighted / Decimal(total)), q4(median)
 
 
 # ─── 造数规格 ───────────────────────────────────────────────────────
@@ -229,9 +255,11 @@ SHOP_A = SeedShop(
     region="VN",
     # 设计文档 §7.1 加权 oracle：10×1 + 40×9 → 大盘均值 37、中位数 40（行均值=25）。
     # A2 用 VND 原生价 → 证明价格确实经 FX 快照换算（200000 VND × 0.00025 = 50 CNY）。
+    # A2 的行排在前：两行 spend 均为 0 → roi_real 无效 → 服务端默认序按 spu_pk 升序
+    # [A2, A1]，与价格升序 [A1, A2]（10 < K1 40）相反，asc 断言才证明行序真的反了。
     lines=(
-        SeedLine(SPU_A1, DAY_D1, 1, "CNY", Decimal(10), Decimal(20), Decimal(18)),
         SeedLine(SPU_A2, DAY_D1, 9, "VND", None, Decimal(200000), Decimal(180000)),
+        SeedLine(SPU_A1, DAY_D1, 1, "CNY", Decimal(10), Decimal(20), Decimal(18)),
         SeedLine(SPU_A1, DAY_D2, 1, "CNY", Decimal(10), Decimal(880), Decimal(800)),
     ),
     focused=True,
@@ -319,6 +347,8 @@ class PriceScene:
     shop_b: SeededShop
     fx_snapshot_id: int
     api_key: str
+    login_username: str
+    login_credential: str
 
     def shop(self, name: str) -> SeededShop:
         return {"A": self.shop_a, "B": self.shop_b}[name]
@@ -363,6 +393,8 @@ _WIPE_STATEMENTS = (
         "AND upstream_last_update = :ts"
     ),
     "DELETE FROM security.api_keys WHERE name = :name",
+    # 登录用户：子表 user_sessions / user_roles 在库里是 ON DELETE CASCADE。
+    "DELETE FROM security.users WHERE username LIKE 'test_price_e2e_%'",
 )
 
 
@@ -415,6 +447,24 @@ def _seed_api_key(sess: Session) -> str:
         },
     )
     return API_KEY_PLAINTEXT
+
+
+def _seed_login_user(sess: Session) -> None:
+    """真实 `security.users` TEST 用户（viewer 角色，可登录 spu-roi 页）。
+
+    用 app 自己的 `accounts.service.create_user`（同一套 argon2 哈希与密码策略），
+    浏览器再走真实 `POST /v2/auth/login` 拿 cookie；不硬编码生产口令、不绕过登录。
+    """
+    from tts_erp_v2.accounts import service  # 局部导入：仅供本 leg 使用
+
+    service.create_user(
+        sess,
+        username=LOGIN_USERNAME,
+        display_name=f"{PREFIX_TEST} 登录用户",
+        password=LOGIN_CREDENTIAL,
+        roles=[LOGIN_ROLE],
+        actor="spu-price-e2e",
+    )
 
 
 def _day_timestamps(day: str) -> tuple[datetime, datetime]:
@@ -543,6 +593,7 @@ def priced_test_database(db_url: str) -> Iterator[PriceScene]:
         with Session(engine) as sess:
             snapshot_id = _seed_fx(sess)
             api_key = _seed_api_key(sess)
+            _seed_login_user(sess)
             shop_a = _seed_shop(sess, SHOP_A)
             shop_b = _seed_shop(sess, SHOP_B)
             sess.commit()
@@ -551,6 +602,8 @@ def priced_test_database(db_url: str) -> Iterator[PriceScene]:
             shop_b=shop_b,
             fx_snapshot_id=snapshot_id,
             api_key=api_key,
+            login_username=LOGIN_USERNAME,
+            login_credential=LOGIN_CREDENTIAL,
         )
     finally:
         _wipe(engine)
@@ -566,13 +619,22 @@ def is_test_shaped(db_url: str) -> bool:
 # ─── 冷启临时 API（uvicorn 子进程）────────────────────────────────────
 
 
-def api_env(db_url: str) -> dict[str, str]:
-    """临时 API 的环境：只读测试库 + enforce 鉴权 + 关访问日志。
+# 子进程只拿这份 allowlist 里的进程级变量；其余键一个都不继承。
+_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL", "TZ")
 
-    `TTS_ERP_RATE_LIMIT_PER_MIN` 抬高：一个 module 内要驱动十几次真实页面请求，
-    默认 100/min 会把 E2E 变成限流测试（限流本身另有单测）。
+
+def api_env(db_url: str) -> dict[str, str]:
+    """临时 API 的环境：**显式 allowlist** + 只读测试库 + enforce 鉴权。
+
+    `dict(os.environ)` 会把本机 `.env` 的生产凭据（TIKTOK_*、外部前缀…）带进
+    子进程（design §8.1 gate 5 第 1 条），所以这里只放必需键：
+
+    - `TTS_ERP_DB_URL` / `TTS_ERP_DB_URL_TEST` 都指向同一个克隆测试库；
+    - `TTS_ERP_AUTH_MODE=enforce` + 确定性测试 Fernet key：与生产同形、无真凭据；
+    - `TTS_ERP_RATE_LIMIT_PER_MIN` 抬高：一个 module 内要驱动十几次真实页面请求，
+      默认 100/min 会把 E2E 变成限流测试（限流本身另有单测）。
     """
-    env = dict(os.environ)
+    env = {key: os.environ[key] for key in _ENV_ALLOWLIST if key in os.environ}
     env.update(
         {
             "TTS_ERP_DB_URL": db_url,
@@ -581,11 +643,11 @@ def api_env(db_url: str) -> dict[str, str]:
             "TTS_ERP_ACCESS_LOG": "0",
             "TTS_ERP_RATE_LIMIT_PER_MIN": "100000",
             "TTS_ERP_SESSION_SECURE": "0",
+            "TTS_ERP_FERNET_KEY": TEST_FERNET_KEY,
+            "TTS_ERP_TEST_NO_DOTENV": "1",
             "PYTHONUNBUFFERED": "1",
         }
     )
-    for key in ("TTS_ERP_EXTERNAL_PREFIX", "TTS_ERP_DOCS_USER", "TTS_ERP_DOCS_PASSWORD"):
-        env.pop(key, None)
     return env
 
 
@@ -595,7 +657,8 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _log_tail(path: Path, lines: int = 40) -> str:
+def log_tail(path: Path, lines: int = 40) -> str:
+    """冷启 API 日志的最后 `lines` 行（失败留证/探活报错共用）。"""
     if not path.exists():
         return "<no log>"
     return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
@@ -607,7 +670,7 @@ def _wait_healthy(port: int, proc: subprocess.Popen[bytes], log_path: Path) -> N
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             raise AssertionError(
-                f"临时 API 提前退出 rc={proc.returncode}\n{_log_tail(log_path)}"
+                f"临时 API 提前退出 rc={proc.returncode}\n{log_tail(log_path)}"
             )
         with suppress(OSError):
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
@@ -619,16 +682,42 @@ def _wait_healthy(port: int, proc: subprocess.Popen[bytes], log_path: Path) -> N
                 conn.close()
         # 启动轮询间隔（不是用例同步 sleep）
         time.sleep(0.2)
-    raise AssertionError(f"临时 API 60s 内未就绪\n{_log_tail(log_path)}")
+    raise AssertionError(f"临时 API 60s 内未就绪\n{log_tail(log_path)}")
+
+
+@dataclass(frozen=True)
+class LiveApi:
+    """冷启的临时 API：基址 + 日志/证据目录（失败时往这里写留证）。"""
+
+    base: str
+    log_path: Path
+    evidence_dir: Path
+
+
+def _stop_process_group(proc: subprocess.Popen[bytes]) -> None:
+    """terminate → kill 升级，收掉整个进程组。
+
+    `start_new_session=True` 使 pgid == pid，子进程再 fork 的成员也一并收掉；
+    只调 `proc.terminate()` 会漏掉它们。
+    """
+    if proc.poll() is None:
+        with suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:  # pragma: no cover - 收尾尽力而为
+        with suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=10)
 
 
 @contextmanager
-def live_api_server(db_url: str) -> Iterator[str]:
-    """冷启真实 FastAPI（uvicorn 子进程）并返回基址；退出时收掉进程。"""
+def live_api_server(db_url: str) -> Iterator[LiveApi]:
+    """冷启真实 FastAPI（uvicorn 子进程）并返回基址；退出时收掉整个进程组。"""
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
-    log_dir = Path(tempfile.mkdtemp(prefix="tts-erp-price-e2e-"))
-    log_path = log_dir / "uvicorn.log"
+    evidence_dir = Path(tempfile.mkdtemp(prefix="tts-erp-price-e2e-"))
+    log_path = evidence_dir / "uvicorn.log"
     command = [
         sys.executable,
         "-m",
@@ -649,17 +738,13 @@ def live_api_server(db_url: str) -> Iterator[str]:
             env=api_env(db_url),
             stdout=log,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         try:
             _wait_healthy(port, proc, log_path)
-            yield base
+            yield LiveApi(base=base, log_path=log_path, evidence_dir=evidence_dir)
         finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:  # pragma: no cover - 收尾尽力而为
-                proc.kill()
-                proc.wait(timeout=10)
+            _stop_process_group(proc)
 
 
 # ─── 真实浏览器 ──────────────────────────────────────────────────────
@@ -844,6 +929,14 @@ class LivePage:
     def summary_status(self) -> str:
         return self.page.locator("#price-summary-status").inner_text()
 
+    def auth_identity(self) -> str | None:
+        """页面自己的 `GET /v2/auth/me`：已登录返回用户名，否则 None。
+
+        用于区分「cookie 会话真的成立了」与「页面照了某个 key 的便车」。
+        """
+        payload = self.page.evaluate("() => fetch('/v2/auth/me').then((r) => r.json())")
+        return payload.get("username") if payload.get("authenticated") else None
+
     def row_order(self, expected: Sequence[str]) -> list[str | None]:
         """DOM 行序（按期望 id 归一；未命中的行返回 None）。"""
         return self.page.evaluate(_ROW_MATCH_JS, list(expected))
@@ -913,25 +1006,75 @@ class LivePage:
 
 
 class LiveBrowser:
-    """真实 Chromium 会话；每个页面一个 context（视口独立、带 Bearer 凭据）。"""
+    """真实 Chromium 会话；每个页面一个 context（视口独立，鉴权两选一）。
 
-    def __init__(self, browser: Any, base: str, key: str) -> None:
+    - `auth="api_key"`：context 带 readonly key 的 Bearer 头（原 leg）；
+    - `auth="session"`：先在 context 里真实 `POST /v2/auth/login`（design §8.1
+      gate 2）拿会话 cookie，**不**发 Authorization 头。
+    """
+
+    def __init__(self, browser: Any, base: str, scene: PriceScene) -> None:
         self._browser = browser
         self._base = base.rstrip("/")
-        self._key = key
+        self._scene = scene
         self._pages: list[LivePage] = []
+        # 最近一次真实登录响应体（用户名/角色/页面权限）；断言用它证明登录真发生了。
+        self.last_login: dict[str, Any] | None = None
 
-    def new_page(self, *, width: int = 1440, height: int = 1200) -> LivePage:
+    def _login(self, context: Any) -> None:
+        """在 context 上真实 POST /v2/auth/login；断言 200 + 会话 cookie 进了 context。"""
+        response = context.request.post(
+            f"{self._base}/v2/auth/login",
+            data={
+                "username": self._scene.login_username,
+                "password": self._scene.login_credential,
+            },
+        )
+        assert response.status == 200, (
+            f"真实登录失败：HTTP {response.status} {response.text()}"
+        )
+        cookie_names = {cookie["name"] for cookie in context.cookies(self._base)}
+        assert SESSION_COOKIE_NAME in cookie_names, (
+            f"登录未下发会话 cookie：{sorted(cookie_names)}"
+        )
+        self.last_login = response.json()
+
+    def new_page(
+        self, *, auth: AuthMode = "api_key", width: int = 1440, height: int = 1200
+    ) -> LivePage:
         context = self._browser.new_context(
             viewport={"width": width, "height": height}
         )
-        context.set_extra_http_headers({"Authorization": f"Bearer {self._key}"})
+        if auth == "api_key":
+            context.set_extra_http_headers(
+                {"Authorization": f"Bearer {self._scene.api_key}"}
+            )
+        else:
+            self._login(context)
         live_page = LivePage(context.new_page(), self._base, context)
         self._pages.append(live_page)
         return live_page
 
-    def open(self, path: str, *, width: int = 1440, height: int = 1200) -> LivePage:
-        return self.new_page(width=width, height=height).goto(path)
+    def open(
+        self,
+        path: str,
+        *,
+        auth: AuthMode = "api_key",
+        width: int = 1440,
+        height: int = 1200,
+    ) -> LivePage:
+        return self.new_page(auth=auth, width=width, height=height).goto(path)
+
+    def screenshot_all(self, directory: Path) -> list[Path]:
+        """把已打开页面逐个截图写入 `directory`（失败留证，尽力而为）。"""
+        shots: list[Path] = []
+        for index, live_page in enumerate(self._pages, start=1):
+            target = directory / f"failure-page-{index}.png"
+            with suppress(Exception):
+                live_page.page.screenshot(path=str(target), full_page=True)
+            if target.exists():
+                shots.append(target)
+        return shots
 
     def close(self) -> None:
         for live_page in self._pages:

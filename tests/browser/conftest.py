@@ -29,6 +29,19 @@ from render_support import Renderer
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _STATIC_ROOT = REPO_ROOT / "tts_erp_v2" / "static"
 
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item: Any, call: Any) -> Any:
+    """把每个阶段的结果挂到 item 上（`item.rep_call` 等）。
+
+    供 fixture teardown 判断用例是否失败后留证（当前只有真实全栈 E2E 用它，
+    见 `test_spu_price_stats_live.py::live`）。断言在 call 阶段失败时，fixture
+    finalizer 拿不到异常，只能靠这份 report 判定。
+    """
+    outcome = yield
+    report = outcome.get_result()
+    setattr(item, f"rep_{report.when}", report)
+
 # 与 scripts/probe_ui_layout_pages.py 同口径：普通页 + SPU 数据页 + 内联页
 _PLAIN = {
     "dashboard": "dashboard.html",
