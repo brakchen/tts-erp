@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 from anyio.to_thread import run_sync
@@ -16,6 +17,9 @@ from tts_erp_v2.access._types import (
     AuthMode,
     Credential,
     UserCredential,
+)
+from tts_erp_v2.access._types import (
+    Role as AccessRole,
 )
 from tts_erp_v2.accounts.pages import required_page_permission
 from tts_erp_v2.accounts.service import authenticate_session_cookie
@@ -95,6 +99,12 @@ async def evaluate_access(
         elif auth_state == "none":
             auth_state = "invalid"
 
+    if (
+        isinstance(credential, Credential)
+        and request.route_path.startswith("/v2/video-publish")
+        and os.environ.get("TTS_ERP_VIDEO_PUBLISH_ALLOW_READWRITE_API_KEYS") != "1"
+    ):
+        needed = AccessRole.ADMIN
     grant = _grant(
         mode,
         credential,
@@ -113,7 +123,8 @@ async def evaluate_access(
         denied_status = 403
         detail = f"requires {needed.value}"
     else:
-        # 页面级权限（设计 §7.1）：仅会话用户受约束；API key 走角色矩阵不变。
+        # 页面权限只约束 session user。API key 不持有 page permission；
+        # video-publish 的 admin-first API-key gate 已在上方单独收紧。
         needed_page = required_page_permission(request.route_path)
         if (
             needed_page is not None

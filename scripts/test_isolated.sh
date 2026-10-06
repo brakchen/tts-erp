@@ -386,14 +386,14 @@ refresh_template() {
       TTS_ERP_DB_URL="$TEMPLATE_URL" "$alembic" stamp "$revision"
       echo "[isolated-test] upgrading template to worktree head"
       TTS_ERP_DB_URL="$TEMPLATE_URL" "$alembic" upgrade head
-      # 迁移 0052 的 roles/permissions INSERT 被 stamp 跳过；用同源 python 幂等
-      # seed 内置角色/权限（不 seed 用户，由部署者用 CLI 创建）。
-      python_bin="${TTS_ERP_TEST_PYTHON_BIN:-.venv/bin/python}"
-      if [[ ! -x "$python_bin" ]]; then
-        python_bin="/home/schan/tts-erp/.venv/bin/python"
+
+      local python_bin="${alembic%/alembic}/python"
+      if [[ -x "$python_bin" ]]; then
+        echo "[isolated-test] seeding built-in test roles and permissions"
+        TTS_ERP_DB_URL="$TEMPLATE_URL" \
+          "$python_bin" -m tts_erp_v2.accounts.cli sync-permissions
       fi
-      echo "[isolated-test] seeding built-in roles/permissions against $TEMPLATE_URL"
-      TTS_ERP_DB_URL="$TEMPLATE_URL" "$python_bin" -m tts_erp_v2.accounts.cli sync-permissions
+
     else
       echo "[isolated-test] WARNING: prod alembic revision $revision is not present in this worktree;" >&2
       echo "                 leaving template at imported schema without alembic upgrade" >&2

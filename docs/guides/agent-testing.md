@@ -7,10 +7,10 @@ This document defines the only supported test workflow for coding agents in `tts
 - Default agent test entry point: `scripts/test_isolated.sh`. **It is the only supported entry point.**
 - Template database: `tts_erp_test_template` (schema-only, maintained by `scripts/test_isolated.sh --refresh-template`).
 - Per-run database: an ephemeral `tts_erp_test_*` clone created from the template and dropped after the command.
-- Deprecated: shared fallback database `tts_erp_v3_test`, reached by calling `scripts/test.sh` directly. See §4.
+- The long-lived shared database is not an agent fallback; repair isolated-runner prerequisites instead.
 - Production database: `tts_erp` or another production-shaped name recognized by `tts_erp_v2.api.deps.is_prod_shaped_db()`.
 - `.env.test` supplies the base `TTS_ERP_DB_URL_TEST`; `scripts/test_isolated.sh` rewrites only the database name for template/ephemeral clones.
-- `scripts/test.sh` still loads `.env.test` before invoking pytest, and `tests/conftest.py` still prefers `TTS_ERP_DB_URL_TEST`.
+- The isolated wrapper loads `.env.test` and rewrites `TTS_ERP_DB_URL_TEST` to the ephemeral clone.
 - `tests/conftest.py` hard-exits with status 2 if a direct pytest invocation would target a production-shaped database.
 - Agents must never set `TTS_ERP_TEST_OFF=1`.
 
@@ -34,16 +34,7 @@ installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` firs
 
 Domain names may be passed with or without the `domain_` prefix.
 
-Do not run:
-
-```bash
-.venv/bin/pytest ...
-/home/schan/tts-erp/.venv/bin/pytest ...
-bash scripts/test.sh all
-bash scripts/test.sh coverage
-```
-
-`all` and `coverage` deliberately include `domain_migration`, which contains production-touching historical behavior. They are human-only commands.
+Agents must not invoke the underlying test framework or low-level wrapper directly, and must not select `all`, `coverage`, or archived migration domains. Those paths can include production-touching historical behavior.
 
 ## 3. Worktree prerequisites
 
@@ -68,11 +59,11 @@ Rules:
 - Recreate the private copy instead of changing the main repository's `.env` for debugging.
 - Temporary overrides belong in the process environment or a gitignored worktree-local file, and must be removed after use.
 
-`scripts/test.sh` falls back to `/home/schan/tts-erp/.venv/bin/pytest` if the worktree virtual-environment link is missing, but creating the link is still required for pi-lens and other tooling discovery.
+Creating the worktree `.venv` link is required for the isolated runner, pi-lens, and other tooling discovery.
 
 ## 4. Template and shared database usage
 
-`bash scripts/test_isolated.sh ...` is parallel-safe for ordinary agent work: it serializes template refresh/clone through `/tmp/tts-erp-test-template.lock`, clones `tts_erp_test_template` to a unique `tts_erp_test_*` database, runs `scripts/test.sh` with `TTS_ERP_DB_URL_TEST` pointing at that clone, and drops the clone on exit. Concurrent isolated runs do not delete each other's `TEST_` rows.
+`bash scripts/test_isolated.sh ...` is parallel-safe for ordinary agent work: it serializes template refresh/clone through `/tmp/tts-erp-test-template.lock`, clones `tts_erp_test_template` to a unique `tts_erp_test_*` database, points the test process at that clone, and drops the clone on exit. Concurrent isolated runs do not delete each other's `TEST_` rows.
 
 Refresh the template when schema/migration state changes or if a run reports missing tables:
 
@@ -82,25 +73,9 @@ bash scripts/test_isolated.sh --refresh-template fast
 
 The refresh path rebuilds only the test-shaped template DB. It imports production schema read-only through `scripts/import_prod_to_test.sh --schema-only`, stamps the production alembic revision, then upgrades the template to the current worktree's alembic head. If the production alembic revision is not present in the worktree, the script leaves the imported schema in place and prints a warning instead of guessing. It must not be pointed at a production-shaped target DB.
 
-### Deprecated: direct `scripts/test.sh` (shared-DB fallback)
+### No shared-database fallback
 
-Calling `scripts/test.sh` directly is **deprecated**. It bypasses the ephemeral
-clone and reuses the long-lived shared `tts_erp_v3_test`, so concurrent suites
-delete each other's `TEST_` rows and produce false 401 / missing-row failures.
-`scripts/test.sh` is retained only as the low-level pytest wrapper that
-`scripts/test_isolated.sh` delegates to.
-
-Reach for it only when `test_isolated.sh` genuinely cannot run (for example
-`createdb`/`dropdb` are unavailable and cannot be installed). In that case you
-must serialize the run **and** record why:
-
-```bash
-flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
-```
-
-If the lock is already held, do not run a competing shared-DB suite. Install the
-PostgreSQL client tools with `sudo bash scripts/envsetup/install-test-deps.sh` and use
-`scripts/test_isolated.sh` instead.
+If template cloning or PostgreSQL client tooling is unavailable, stop and repair prerequisites with `bash scripts/envsetup/install-test-deps.sh --check` followed by the documented installer. Agents must not substitute a shared database, a direct framework invocation, or an archived migration selection.
 
 ## 5. Selecting validation scope
 

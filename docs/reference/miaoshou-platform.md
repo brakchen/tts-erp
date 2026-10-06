@@ -122,8 +122,8 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_pric
 ## 8. 测试
 
 ```bash
-# 妙手 jobs（测试包装器会强制使用 tts_erp_v3_test）
-bash scripts/test.sh miaoshou
+# 妙手 jobs（每次使用独立 ephemeral test clone）
+bash scripts/test_isolated.sh miaoshou
 ```
 
 ## 9. 注意事项

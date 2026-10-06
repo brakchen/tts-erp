@@ -37,6 +37,7 @@ PAGES: tuple[PageDef, ...] = (
     PageDef("intercept-configs", "配", "拦截配置", "数据工具"),
     PageDef("intercept-requests", "录", "拦截记录", "数据工具"),
     PageDef("intercept-stats", "计", "拦截统计", "数据工具"),
+    PageDef("video-publish", "发", "视频发布", "数据工具"),
 )
 
 PAGE_BY_ID: dict[str, PageDef] = {p.page_id: p for p in PAGES}
@@ -47,16 +48,16 @@ ALL_PERMISSION_CODES: tuple[str, ...] = tuple(p.permission_code for p in PAGES)
 def permission_catalog() -> list[dict]:
     """全部页面权限点目录（角色编辑表单的勾选清单，同源于侧边栏注册表）."""
     return [
-        {"code": p.permission_code, "label": p.label, "group": p.group}
-        for p in PAGES
+        {"code": p.permission_code, "label": p.label, "group": p.group} for p in PAGES
     ]
+
 
 # 预置角色（§2.1）：code → (api_tier, 页面 id 集合)。`users` 页面仅 admin。
 BUILTIN_ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
     "admin": ("admin", tuple(p.page_id for p in PAGES)),
     "operator": (
         "readwrite",
-        tuple(p.page_id for p in PAGES if p.page_id != "users"),
+        tuple(p.page_id for p in PAGES if p.page_id not in {"users", "video-publish"}),
     ),
     "viewer": (
         "readonly",
@@ -80,6 +81,7 @@ PAGE_MIN_WRITE_TIER: dict[str, str] = {
     "users": "admin",
     "intercept-configs": "readwrite",
     "intercept-requests": "readwrite",
+    "video-publish": "readwrite",
 }
 
 
@@ -88,8 +90,8 @@ def required_page_permission(route_path: str) -> str | None:
 
     - ``/v2/pages/<id>``   → ``page:<id>``
     - ``/v2/users*`` ``/v2/roles*`` → ``page:users``（用户管理页的配套 API）
-    - 其余（数据 API）→ None：页面内全部操作不设权限点（设计 §7.1），
-      由会话的 api_tier 走既有路由角色矩阵兜底。
+    - ``/v2/video-publish*`` → ``page:video-publish``（会话用户的发布 API）
+    - 其余数据 API → None：由会话的 api_tier 走既有路由角色矩阵兜底。
     """
     path = route_path.split("?", 1)[0]
     if path.startswith("/v2/pages/"):
@@ -99,4 +101,6 @@ def required_page_permission(route_path: str) -> str | None:
         return f"page:{page_id}"
     if path.startswith(("/v2/users", "/v2/roles")):
         return "page:users"
+    if path.startswith("/v2/video-publish"):
+        return "page:video-publish"
     return None

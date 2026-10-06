@@ -30,6 +30,7 @@ _READONLY_PREFIXES = (
     "/v2/tiktok-shop/",
     "/v2/intercept/configs",
     "/v2/intercept/requests",
+    "/v2/video-publish/",
 )
 
 _READWRITE_EXACT = {
@@ -80,6 +81,10 @@ def required_role(method: str, route_path: str) -> Role | None:
         return Role.READWRITE
     if path.startswith("/miaoshou/callback"):
         return None
+    if normalized_method == "POST" and path.startswith("/v2/video-publish/tasks"):
+        return Role.READWRITE
+    if path == "/v2/video-publish/config" or path.startswith("/v2/video-publish/tasks"):
+        return Role.READONLY
     if normalized_method == "POST" and path in _READWRITE_EXACT:
         return Role.READWRITE
     if path.startswith(_READWRITE_PREFIXES):

@@ -654,16 +654,15 @@ X-Requested-With: tts-erp
 
 ### 9.5 验证命令
 
-实现阶段只在 `tts_erp_v3_test` 验证迁移。测试按仓库规定执行：
+实现阶段只使用 isolated runner 的 ephemeral test clone 验证：
 
 ```bash
-flock -n /tmp/tts-erp-test.lock \
-  bash scripts/test.sh fast \
+bash scripts/test_isolated.sh fast \
   tests/reporting/test_focused_spus.py \
   tests/api/test_focused_spus.py \
   tests/api/test_spu_roi_api.py
 
-flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
+bash scripts/test_isolated.sh fast
 ```
 
 禁止在生产库运行迁移或测试；生产 migration 与服务重启由人工执行。

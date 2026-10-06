@@ -9,7 +9,7 @@
 # 日常全量测试（默认入口；每个 session 克隆独立临时测试库，避免并发互删 TEST_ 行）
 bash scripts/test_isolated.sh fast
 
-# 单域/单文件/单测试仍走 isolated wrapper，参数透传给 scripts/test.sh
+# 单域/单文件/单测试都走 isolated wrapper
 bash scripts/test_isolated.sh api tests/api/test_auth_login.py::test_login_sets_cookie
 
 # schema/migration 改动后刷新模板库，再跑验证
@@ -20,18 +20,7 @@ bash scripts/envsetup/install-test-deps.sh --check
 sudo bash scripts/envsetup/install-test-deps.sh
 ```
 
-> `scripts/test_isolated.sh` 是**唯一标准测试入口**。
->
-> 直接调 `scripts/test.sh` 的 shared-DB 回退路径**已弃用**：它不克隆临时库、
-> 直接写常驻 `tts_erp_v3_test`，并发时互删 `TEST_` 行。`scripts/test.sh` 仅保留为
-> `test_isolated.sh` 内部委托的 pytest 包装层。
-> 确实无法走 isolated（例如 `createdb` 装不上）时才允许兜底，必须串行并记录原因：
->
-> ```bash
-> flock -n /tmp/tts-erp-test.lock bash scripts/test.sh fast
-> ```
->
-> 跳过 `.env.test` source（`TTS_ERP_TEST_OFF=1`）仅限人工迁移/手动调试，agent 禁用。
+> `scripts/test_isolated.sh` 是 agent 的**唯一测试入口**。如果 isolated 前置依赖不可用，先运行依赖检查/安装；不得降级到共享数据库或绕过 wrapper。`TTS_ERP_TEST_OFF=1` 对 agent 永久禁用。
 
 ## 2. 数据导入
 
@@ -60,12 +49,12 @@ systemctl --user restart tts-erp-sync.service
 
 ```bash
 # 浏览器渲染回归（无需服务；fast 默认就跑，单独跑用这条）
-#  = pytest -m "domain_browser and not slow" tests/
+# isolated wrapper 内部选择 domain_browser and not slow
 #  断言：13 页 @1440 横向溢出、ad-daily 多视口、computed 字体栈 ⊆ tokens 三套栈
 bash scripts/test_isolated.sh browser
 
 # live 端到端冒烟（需 :9877 在跑；用例在 tests/e2e/，默认被 fast 排除）
-bash scripts/test_isolated.sh e2e        # = pytest -m "domain_e2e and not slow" tests/
+bash scripts/test_isolated.sh e2e
 # 只读：/healthz、/endpoints、/v2/fx/latest、/v2/reporting/*；
 # 基址/密钥可用 TTS_ERP_E2E_BASE、TTS_ERP_SERVICE_KEY 覆盖
 
@@ -131,9 +120,9 @@ MIAOSHOU_DEBUG_SIGN=1
 - **测试环境隔离（2026-09-30）**：agent 默认跑 `bash scripts/test_isolated.sh ...`
   - 模板库：`tts_erp_test_template`；临时库：每次克隆一个 `tts_erp_test_*`，命令结束自动 drop
   - `bash scripts/test_isolated.sh --refresh-template fast` 会重建模板：prod schema 只读导入 → stamp prod alembic revision → upgrade 到当前 worktree head；如果 prod revision 不在当前 worktree，会警告并保留导入 schema
-  - `bash scripts/test_isolated.sh` 是唯一标准入口；直接调 `scripts/test.sh` 的 shared-DB 回退路径已弃用（不克隆临时库、直写常驻 `tts_erp_v3_test`，并发互删 `TEST_` 行），确实需要时必须 `flock -n /tmp/tts-erp-test.lock ...` 并记录原因
+  - `bash scripts/test_isolated.sh` 是唯一标准入口；依赖缺失时先用 `install-test-deps.sh --check`/安装修复，不允许退回共享库
   - prod API service / `uvicorn` 本地启动仍读 `.env` 连 prod `tts_erp`，**零变更**
   - 安全护栏：tests/conftest.py 检测到 pytest 将指向 prod-shape dbname（`tts_erp` / `tts_erp_prod`）会 hard exit
-  - scripts/test.sh 会在 .env.test 缺失时直接退出；`.env.test` 由 `bash scripts/envsetup/install-test-deps.sh` 生成
+  - `.env.test` 由 `bash scripts/envsetup/install-test-deps.sh` 生成；isolated wrapper 会验证其存在
   - 需要 prod-shaped 数据时只导入到测试库：`bash scripts/import_prod_to_test.sh --yes`
 - **收尾标准**：跑不过 0 fail 不收尾

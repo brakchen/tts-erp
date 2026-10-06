@@ -126,6 +126,7 @@ dst_plain="${DST_URL/postgresql+psycopg:\/\//postgresql://}"
 # ``rm`` can never reach it (it leaked ~15G of plain-text dumps that way).
 # Therefore dumps stream through stdout into the host file and restores
 # are fed over stdin (``docker exec -i`` keeps stdin attached).
+
 #
 # Keep this selection contract aligned with scripts/test_isolated.sh:
 # PG_DOCKER unset means the postgres container; an explicitly empty value
@@ -151,6 +152,7 @@ else
   }
   pg_dump() { command pg_dump "$@"; }
   psql()   { command psql "$@"; }
+
 fi
 
 # ── Safety: target must look like a test DB ──────────────────
