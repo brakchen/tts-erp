@@ -1116,13 +1116,22 @@
       },
     });
     // 用 table.on 订阅（与 dataSorting 同一机制）；6.3 对 options 回调的订阅不可靠。
-    var lastDrillClick = { spuPk: null, at: 0 };
-    state.table.on("rowClick", (_e, row) => {
+    // 去重只认原生事件身份（timeStamp），不认 "spu_pk + 时间窗口"：后者会把用户
+    // 「点关闭 → 立刻点开同一行」的合法快速 toggle 一起吞掉。50ms 是给 Tabulator
+    // 把同一原生点击从 frozen/main 两侧 row 重复派发留的同帧兜底窗口。
+    var lastDrillEvent = { timeStamp: null, at: 0 };
+    state.table.on("rowClick", (e, row) => {
       var it = row.getData();
       if (!it || !it.spu_pk) return;
       var now = Date.now();
-      if (lastDrillClick.spuPk === it.spu_pk && now - lastDrillClick.at < 300) return;
-      lastDrillClick = { spuPk: it.spu_pk, at: now };
+      var stamp = e && typeof e.timeStamp === "number" ? e.timeStamp : null;
+      if (
+        stamp !== null &&
+        stamp === lastDrillEvent.timeStamp &&
+        now - lastDrillEvent.at < 50
+      )
+        return;
+      lastDrillEvent = { timeStamp: stamp, at: now };
       openDrillPanel(row.getElement(), it);
     });
     // 表头点击只改状态并触发服务端重取（本地排序对同字段幂等）。
