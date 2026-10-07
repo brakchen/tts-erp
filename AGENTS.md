@@ -70,6 +70,21 @@ cred = load_credentials(session, provider="tiktok", external_account_id=shop_id)
 - Store timestamps as aware UTC using `datetime.now(UTC)`, never `datetime.utcnow()`.
 - Reporting dates are grouped by the shop's local timezone, not the UTC calendar day. Bridge nook currently uses Vietnam time (UTC+7).
 
+### Frontend calculation boundary — IMPORTANT
+
+Frontend code may perform **presentation-only simple calculations** from values already returned for display, including:
+
+- choosing an up/down/flat arrow;
+- calculating a displayed absolute difference;
+- calculating a displayed percentage difference with explicit null/zero/negative-denominator handling;
+- formatting, rounding, grouping, and other view-only transformations.
+
+These results are non-authoritative display values. Name or document them as `display*` / “展示值” when they could be confused with a server decision field. They must not determine eligibility, severity, state, threshold matches, sample gates, persisted values, audit facts, business totals, or server query scope.
+
+Complex or business-significant calculations belong on the backend, including ROI, net profit, currency or financial formulas, cross-row aggregation and deduplication, threshold evaluation, alert classification, and any percentage used for a business decision. Prefer Python `Decimal` / database `numeric` so precision and rounding policy have one owner. JavaScript `Number` uses binary floating-point; reproducing exact financial precision in every browser consumer adds cost and creates competing calculation paths.
+
+The purpose of this boundary is not “the frontend may never calculate”. It is to keep one authoritative backend calculation exit while allowing inexpensive UI derivations. If a calculation affects a business result, is reused by multiple consumers, requires exact precision, or is hard to classify, implement and test it on the backend and let the frontend render the result.
+
 ## 5. Canonical commands
 
 | Task | Command |
@@ -223,6 +238,7 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/gui
 | Dumps endpoints and HTTP envelopes | `docs/api/dumps-data-contract.md` |
 | TikTok signing | `docs/reference/tiktok-hmac-signing.md` |
 | External endpoints, roles, pagination, schemas | `docs/api/external-api.md` |
+| SPU profit-deterioration product, design, implementation, or tests | `docs/spu-profit-deterioration/01-product-proposal.md`, then the matching numbered document in that directory |
 | Process/service architecture | `docs/architecture/process-architecture.md` |
 | Miaoshou integration | `docs/reference/miaoshou-platform.md` |
 | Known recurring failures | `docs/guides/common-bugs.md` |
