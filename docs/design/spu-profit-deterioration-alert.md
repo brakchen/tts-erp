@@ -23,7 +23,7 @@
 | --- | --- |
 | 单位 | shop × SPU；同一 SPU 的多个 campaign 在窗口内先聚合 |
 | 事实 | 复用现有 `analytics.spu_profitability` 的 canonical `roi_real`：`(current_net_revenue - observed_full_loss_cost) / ad_spend` |
-| 窗口 | 等长、非重叠；批次到 T-1，观察锚点 A=T-2；快窗口与确认窗口均按需求定义 |
+| 窗口 | 等长、非重叠；批次到 T-1，观察锚点 A=T-1；快窗口与确认窗口均按需求定义 |
 | 判断 | ROI 劣化为触发主因，净利润劣化为业务影响，广告消耗/订单数为可靠性门槛 |
 | 非法百分比 | previous ROI ≤ 0 时绝不计算百分比；使用 `profit_to_loss`、`loss_expanding`、`loss_to_profit` 等状态 |
 | 配置 | `config.runtime_config_items` 的已发布版本是运行时唯一权威；seed/backtest 只作没有发布版本时的可见 fallback |
@@ -103,13 +103,18 @@ probe 行为：
 
 | fast | current | previous |
 | --- | --- | --- |
-| 1d | T-2 | T-3 |
-| 3d | T-4..T-2 | T-7..T-5 |
-| 7d | T-8..T-2 | T-15..T-9 |
+| 1d | T-1 | T-2 |
+| 3d | T-3..T-1 | T-6..T-4 |
+| 7d | T-7..T-1 | T-14..T-8 |
 
-确认窗口整体向前平移 7 天：1d 为 T-9 vs T-10，3d 为 T-11..T-9 vs T-14..T-12，7d 为 T-15..T-9 vs T-22..T-16。窗口不重叠。
+确认窗口整体向前平移 7 天：1d 为 T-8 vs T-9，3d 为 T-10..T-8 vs T-13..T-11，7d 为 T-14..T-8 vs T-21..T-15。窗口不重叠。
 
-状态枚举：`profit_to_loss`、`loss_expanding`、`loss_to_profit`、`roi_deterioration`、`net_profit_deterioration`、`roi_recovery`、`recovery`、`stable`、`sample_insufficient`、`unavailable`。`profit_to_loss` 和 `loss_expanding` 不依赖非法百分比。
+> **锚点变更（2026-10-07，owner 决策）**：观察锚点由 T-2 改为 **T-1**。理由：结算数据每日结算，
+> 未结算订单由 canonical 公式按「未结算」处理（主查询对结算表是 LEFT JOIN），因此不需要额外退后一天。
+> 注意本文件 §2.1 描述的 probe 行为与 §2.4 引用的回测数字（含 digest `sha256:396511d0…`）
+> 是当时以 **T-2 + UTC 日** 跑出的历史证据，未重算，仍按原值保留。
+
+状态枚举：`profit_to_loss`、`loss_expanding`、`loss_to_profit`、`roi_deterioration`、`net_profit_deterioration`、`stable`、`sample_insufficient`、`unavailable`。`profit_to_loss` 和 `loss_expanding` 不依赖非法百分比。扭亏为盈只有 `loss_to_profit` 一个状态：ROI 与净利润的转正判定在 `net_profit_deterioration` 之前先行 return，独立的 “ROI 回升 / 净利润恢复” 状态从未可达，故不在枚举内。
 
 ### 2.3 指标定义与证据可用性
 
@@ -120,7 +125,7 @@ probe 行为：
 | candidate matrix | 每个 windowDays × ROI abs/relative × net-profit decline × gates 的 comparison、sufficient、alert count/rate、state counts | 已执行 648 候选并输出汇总 |
 | per-anchor alert volume | 每个 anchor、windowDays、config 下 warning/critical 的 shop×SPU 数量；输出 `per_anchor`，不把跨 anchor 总数命名为 daily | 已执行；summary 另给 median/mean/max/anchor_count/anchor_total，并在 30 anchors 给 `30_anchor_total` |
 | persistence | fast 告警在对应 shifted confirmation comparison 仍告警的比例 | 已执行；以同一 `(anchor, shop×SPU)` key 的 fast alert 与 confirmation alert 交集 / fast alert key 计算 |
-| reversal/recovery | 对每个 fast alert 的同一 `(anchor, shop×SPU)` 配对 confirmation decision，无论 confirmation 是否 alert；state 为 `loss_to_profit`/`recovery`/`roi_recovery` 即 numerator，fast alert 数为 denominator | denominator=0 返回 null；不能把 confirmation 未 alert 的配对丢出分母；当前 evidence 为真实 0 或比例，missing/unavailable 只按此配对口径解释 |
+| reversal/recovery | 对每个 fast alert 的同一 `(anchor, shop×SPU)` 配对 confirmation decision，无论 confirmation 是否 alert；state 为 `loss_to_profit` 即 numerator（生产 `paired_recovery` 口径），fast alert 数为 denominator | denominator=0 返回 null；不能把 confirmation 未 alert 的配对丢出分母；当前 evidence 为真实 0 或比例，missing/unavailable 只按此配对口径解释。**注意口径差异**：本行与 §2.4 的 `recovery` 数字（`6/51`、`16/71`、`0/13`）均来自 probe，probe 的 `roi_recovery`/`recovery` 指「指标上升但未变号」，与生产枚举无关，故仍按 3 状态计（见 `scripts/probe_spu_profit_deterioration_thresholds.py`）；生产枚举只有 8 个状态，不含这两个值 |
 | data limitations | ad_daily 缺失、FX/cost/rate current valuation、时区 | 明确记录，不把缺失当作正常值 |
 
 > 当前 probe 输出是阈值选择证据，不是最终生产物化逻辑。probe 已输出各窗口 current/previous 的 ROI、net-profit、ad-spend、order-count count/min/p25/median/p75/max、sample_status/state counts、per-anchor warning/critical volumes 与 recovery numerator/denominator/rate；`self_check_sql_scope()` 验证 bounded scoped CTE 仍包住 refund/full-loss facts，`self_check_formula_input_contract()` 验证当前 master 所需 confirmed-unsettled-refund consumer path；bounded query 为可重复性使用 UTC 日，生产实现必须使用每店 IANA timezone。
@@ -173,9 +178,9 @@ config.runtime published payload --------------------------┘
 
 采用每日物化，而不是每次页面请求做全表历史扫描：
 
-1. sync worker 在订单/物流/售后/广告任务之后运行 `analytics.spu_deterioration_alert`，建议 anchor T-2 的店铺当地日完成后执行；
+1. sync worker 在订单/物流/售后/广告任务之后运行 `analytics.spu_deterioration_alert`，建议 anchor T-1 的店铺当地日完成后执行；
 2. 任务在一个只读 `REPEATABLE READ` 快照中读取 facts/config，写入专用 alert snapshot（写入只发生在受控 job，不能由 HTTP 写）；
-3. 页面读取最新 snapshot，支持按 shop、windowDays、severity、state、sample status 过滤，并钻取至 canonical SPU profit detail；
+3. 页面读取最新 snapshot，支持按 shop、windowDays、severity、state、sample status 过滤，并钻取至 canonical SPU profit detail；页面默认再叠加 SPU 级展示过滤 `activity=recent`（仅保留近 14 天出单大于 3 单的 SPU——fast 7d 行 previous+current 订单数 >3 正好覆盖最近 14 天，保留该 SPU 的全部窗口行；显式 `spu_ids` 精确调查时不生效，快照本身仍全量物化；owner 2026-10-07 拍板，由 ≥1 收紧为 >3）；
 4. job 使用现有 `JobSpec` 的 `max_instances=1`、coalesce、catch-up；失败记录 SyncJob/error counter，旧 snapshot 保留但页面显示 stale。
 
 projection-window 已合并到 master（merge commit `75e2370`），其 lane 已由 master commit `6c29f46` 清理，不再拥有或阻塞 scheduler、profitability、SPU 页面/API、测试和本设计路径。实现前，现有 alert lane 必须先合并当前 `origin/master`（确认包含 projection），在 coordination lock 下更新 `docs/handoff/ACTIVE.md` ownership，并重新检查任何较新的 active lane owner；若 `current-net-refund-fix`、`price-statistics` 或其他新 owner 与目标路径重叠，先完成协调再编辑。不得仅因 projection 曾经活跃而创建重复 successor branch。
@@ -380,11 +385,15 @@ runtime-config sidecar 的 `rollout`/`draftRollout` 只存在 mutation/history w
 2. **配置发布**：key `analytics.spu_profit_deterioration_alert.v1` 的首次发布必须由**人**在运行配置页面/端点执行。
    在发布之前，API 与页面一直显示 `source=seed_fallback` 和字面量“回测暂定”。agent 不执行生产 publish。
 3. **重启 sync worker（必需）**：告警快照由 sync worker 的 `analytics.spu_deterioration_alert` job 写入，
-   任何 `tts_erp_v2/jobs/` 或 `tts_erp_v2/sync_worker/` 的变更后必须
+   任何 `tts_erp_v2/jobs/`、`tts_erp_v2/sync_worker/` 或 `tts_erp_v2/analytics/` 的变更后必须
+   （job 模块在加载时 import 其 analytics 依赖并被 `sys.modules` 缓存，不重启则进程里仍是旧代码）
    `systemctl --user restart tts-erp-sync.service`；不重启就没有新的 anchor，页面只能看到旧快照，
    且 `read_alerts()` 会以 stale `503` 拒绝，而不是返回伪装成空结果的 `200`。API/静态资源变更后另行重启 API（`bash restart.sh`）。
-4. **破坏性重算开关**：`ALLOW_PROD_SPU_DETERIORATION_ALERT_REPLACE` 是人工设置的生产环境变量，
-   用于显式批准生产形态库上的替换写。它只能由运维在明确批准后设置；页面、API、job 与 agent 都不得自行设置或绕过。
+4. **无需人工放行的写路径**：`analytics.spu_deterioration_alerts` 是本 job 独占写入的**派生快照**，
+   `replace_anchor()` 只按单个 `anchor_date` 删除并重算插回，源事实（订单/结算/退款/广告）不被破坏，
+   下个调度会从源数据重新算出同样的行。因此该写路径**不接入** `tts_erp_v2.api.deps` 的破坏性守卫，
+   也**不需要**任何生产环境变量放行（曾挂在该写路径上的生产放行开关已删除）。
+   真正破坏原始事实的路径（结算/订单 oneoff 重置脚本、alembic 等）仍必须走共享守卫。
 5. **验收顺序**：`/endpoints` 出现新路由 → 页面 `200` + 侧边栏“利润劣化告警”入口（经营分析组）→
    权限点行为（无权限会话 `403`、readonly 抽屉全 disabled）→ `meta.effectiveConfig` 的版本/审计/`payloadHash` →
    sync job 最近成功时间与 anchor freshness。

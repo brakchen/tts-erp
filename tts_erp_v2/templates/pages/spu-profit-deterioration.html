@@ -95,6 +95,11 @@
           <span class="op-fld-label">Anchor 日期</span>
           <input id="filter-anchor-date" type="date" class="form-control form-control-sm" aria-label="Anchor 日期（空 = 最新物化 anchor）">
         </label>
+        <label class="op-filter op-filter--check" for="filter-activity">
+          <input id="filter-activity" type="checkbox" class="form-check-input" checked
+            aria-label="仅看近 14 天出单大于 3 单的 SPU（取消勾选 = 查看全部 SPU）">
+          <span class="op-fld-label">仅看近 14 天出单大于 3 单</span>
+        </label>
         <button type="button" class="btn-secondary" id="btn-refresh">刷新</button>
       </div>
       <p class="op-scope-note op-spu-feedback mt-2 mb-0" id="filter-spu-feedback"
@@ -211,11 +216,6 @@
           <button type="button" class="btn-secondary" id="btn-load-backtest">载入回测暂定</button>
           <span class="op-scope-note" id="drawer-action-note"></span>
         </div>
-        <p class="op-scope-note mb-2">
-          单位：<code>roiAbsDelta</code> 为 ROI 绝对差，<code>roiRelativeDecline</code>/<code>netProfitDecline</code>
-          为 0..1 比例，<code>minSpendCny</code> 为 CNY，<code>minOrders</code>/<code>minAdOrders</code> 为整数。
-          保存草稿与发布都由现有运行配置端点校验；本页不复制阈值公式。
-        </p>
         <div id="drawer-thresholds"></div>
       </section>
 

@@ -980,3 +980,55 @@ a:hover {
     width: 100vw;
   }
 }
+
+/* 差异对比表（明细面板 + 卡片）：指标 | 上期 | 本期 | 变化 */
+.alert-compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  margin: 0.5rem 0;
+}
+.alert-compare th,
+.alert-compare td {
+  padding: 0.3rem 0.5rem;
+  text-align: right;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.alert-compare th:first-child,
+.alert-compare td:first-child {
+  text-align: left;
+}
+.alert-compare thead th {
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--rule);
+}
+.delta--up { color: var(--ok); font-weight: 600; }
+.delta--down { color: var(--danger); font-weight: 600; }
+.delta--flat { color: var(--muted); }
+
+/* 阈值抽屉改版（2026-10-07）：字段单位标注 + 同步操作条 + 窗口默认收起 */
+.op-threshold-unit {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+.op-threshold-group__sync {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.4rem 0 0.2rem;
+}
+.op-threshold-sync-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+details.op-threshold-window > summary {
+  cursor: pointer;
+  user-select: none;
+}

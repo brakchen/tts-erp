@@ -6,7 +6,7 @@ import json
 from datetime import date, timedelta
 from decimal import Decimal
 from hashlib import sha256
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -177,7 +177,9 @@ def build_materialized_rows(
             timezone = _implementation._shop_reporting_timezone(
                 session, shop_pk=shop.id
             )
-            anchor = calculated_at.astimezone(timezone).date() - timedelta(days=2)
+            # 观察锚点 = 店铺本地日的 T-1（owner 2026-10-07 决策：结算数据每日结算，
+            # 未结算订单由 canonical 公式按“未结算”处理，不需要额外退后一天）。
+            anchor = calculated_at.astimezone(timezone).date() - timedelta(days=1)
             product_rows = session.execute(
                 select(ChannelProduct.id, ChannelProduct.spu_id)
                 .where(
@@ -286,6 +288,23 @@ def _item_metric(item: Any, start: date, end: date):
     )
 
 
+class AlertReadResult(NamedTuple):
+    """Materialized alert read result with both scope-wide and filtered counts.
+
+    ``items`` is the current page (filtered then paged). ``filtered_total`` is
+    the number of rows matching the active presentation filters — the correct
+    denominator for pagination. ``scope_rows`` is the complete unfiltered anchor
+    scope; ``scope_total`` is its row count, used for the scope-wide totals
+    footer and freshness metadata.
+    """
+
+    items: list[SpuDeteriorationAlert]
+    filtered_total: int
+    scope_total: int
+    scope_rows: list[SpuDeteriorationAlert]
+    config: tuple[dict[str, Any], str, int | None, str, Any | None, str | None]
+
+
 def read_alerts(
     session: Session,
     *,
@@ -296,20 +315,16 @@ def read_alerts(
     severity: str | None = None,
     states: list[str] | None = None,
     sample: str = "all",
+    activity: str = "all",
     anchor_date: date | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> tuple[
-    list[SpuDeteriorationAlert],
-    int,
-    list[SpuDeteriorationAlert],
-    tuple[dict[str, Any], str, int | None, str, Any | None, str | None],
-]:
+) -> AlertReadResult:
     """Validate the complete requested snapshot before presentation filters."""
     config = effective_config_details(session)
     payload = config[0]
     if payload["enabled"] is False:
-        return [], 0, [], config
+        return AlertReadResult([], 0, 0, [], config)
     if shop_pk is None:
         raise RuntimeError("shop_pk is required for alert snapshots")
 
@@ -366,6 +381,21 @@ def read_alerts(
         statement = statement.where(SpuDeteriorationAlert.state.in_(states))
     if sample != "all":
         statement = statement.where(SpuDeteriorationAlert.sample_status == sample)
+    if activity == "recent" and not spu_pks:
+        # SPU 级展示过滤“近 14 天出单大于 3 单”（owner 2026-10-07 拍板，由 >=1
+        # 收紧为 >3）：fast 7d 行的 previous+current 正好覆盖最近 14 天（fast
+        # previous=anchor-13..anchor-7、current=anchor-6..anchor；确认层 current 与
+        # fast previous 同区间），所以能触发告警的品必然满足本条件——此过滤不会
+        # 藏掉任何告警。scope-wide totals 走 basis_rows，不受影响。显式 spu_pks
+        # 调查单个品时跳过本过滤。
+        active_spu_pks = {
+            row.spu_pk
+            for row in basis_rows
+            if row.window_days == 7
+            and row.layer == "fast"
+            and (row.previous_order_count or 0) + (row.current_order_count or 0) > 3
+        }
+        statement = statement.where(SpuDeteriorationAlert.spu_pk.in_(active_spu_pks))
     filtered_rows = (
         session.execute(
             statement.order_by(
@@ -377,8 +407,9 @@ def read_alerts(
         .scalars()
         .all()
     )
-    return (
+    return AlertReadResult(
         list(filtered_rows[offset : offset + limit]),
+        len(filtered_rows),
         len(basis_rows),
         list(basis_rows),
         config,

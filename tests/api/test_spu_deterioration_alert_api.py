@@ -19,6 +19,7 @@ from tts_erp_v2.analytics.spu_deterioration_alert.config import (
     SEED_FALLBACK_CONFIG,
     config_to_payload,
 )
+from tts_erp_v2.analytics.spu_deterioration_alert.policy import AlertState
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -87,7 +88,7 @@ def materialized_alert_scope(db_engine) -> Iterator[tuple[int, int]]:
         ).encode()
     ).hexdigest()
     calculated_at = datetime.now(UTC)
-    anchor_date = calculated_at.date() - timedelta(days=2)
+    anchor_date = calculated_at.date() - timedelta(days=1)
     with Session(db_engine) as session:
         # The 0053 migration seeds a strict draft; this fixture intentionally
         # replaces it with the published fixture required by API-contract tests.
@@ -274,12 +275,19 @@ def test_authenticated_get_requires_shop_and_returns_complete_scope(
     assert body["total"] == 2
     assert len(body["items"]) == 1
     assert body["items"][0]["spuPk"] == spu_pk
+    # SPU 列展示业务 spu_id（owner 2026-10-07）：API 必须带出 products_spu.spu_id。
+    assert body["items"][0]["spuId"] == "TEST_alert_spu"
     assert body["items"][0]["configSource"] == "runtime_config"
     assert body["items"][0]["configVersion"] == 3
     assert body["totals"]["shopSpuCount"] == 1
     item = body["items"][0]
     assert isinstance(item["previousRoi"], str)
     assert item["drilldown"]["profitabilityUrl"].startswith("/v2/analytics/spu-roi?")
+    # B-03：目标端点 /v2/analytics/spu-roi 只收 spu_ids（逗号串），不接受 spu_pk。
+    # 参数名写错会被静默忽略，CTA 就落到全量列表而不是该 SPU。
+    _drill_url = item["drilldown"]["profitabilityUrl"]
+    assert "spu_ids=" in _drill_url, _drill_url
+    assert "spu_pk=" not in _drill_url, _drill_url
     assert body["meta"]["requestId"] == "TEST_REQ_ALERT"
     assert "rollout" not in body["meta"]["effectiveConfig"]
     assert "draftPayload" not in body["meta"]["effectiveConfig"]
@@ -345,6 +353,7 @@ def test_totals_count_distinct_shop_spu_across_windows_filters_and_pages(
         )
         assert all_rows.status_code == 200, all_rows.text
         assert all_rows.json()["total"] == 12
+        assert all_rows.json()["totals"]["scopeTotal"] == 12
         assert all_rows.json()["totals"]["shopSpuCount"] == 2
         filtered = api_client.get(
             f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}"
@@ -352,7 +361,10 @@ def test_totals_count_distinct_shop_spu_across_windows_filters_and_pages(
             headers=headers,
         )
         assert filtered.status_code == 200, filtered.text
-        assert filtered.json()["total"] == 12
+        # B-02：带筛选时 total 是匹配筛选的行数（2 SPU × 1 窗口 × fast 层 = 2），
+        # 不是未过滤全量 12。scope-wide 的 12 改由 totals.scopeTotal 承载。
+        assert filtered.json()["total"] == 2
+        assert filtered.json()["totals"]["scopeTotal"] == 12
         assert filtered.json()["totals"]["shopSpuCount"] == 2
         scoped = api_client.get(
             f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}"
@@ -360,7 +372,9 @@ def test_totals_count_distinct_shop_spu_across_windows_filters_and_pages(
             headers=headers,
         )
         assert scoped.status_code == 200, scoped.text
-        assert scoped.json()["total"] == 12
+        # 1 SPU × 3 窗口 × 2 层 = 6 行；total 反映 spu_ids 筛选，scopeTotal 仍是 12。
+        assert scoped.json()["total"] == 6
+        assert scoped.json()["totals"]["scopeTotal"] == 12
         assert scoped.json()["totals"]["shopSpuCount"] == 2
     finally:
         with Session(db_engine) as session:
@@ -378,6 +392,37 @@ def test_totals_count_distinct_shop_spu_across_windows_filters_and_pages(
             session.commit()
 
 
+def test_filtered_total_is_matching_rows_and_not_unfiltered_scope(
+    api_client, readonly_key, materialized_alert_scope
+) -> None:
+    """B-02：带筛选请求时 total == 匹配筛选的行数，且 ≠ 未筛选全量。
+
+    修复前 read.py 把 total 接成 `len(basis_rows)`（未过滤全量），前端
+    renderPager 拿它算页数 → 销灵分页 + 假空态。此断言锁死新语义：
+    ``total`` 反映 presentation filters，scope-wide 数字走 ``totals.scopeTotal``。
+    """
+    shop_pk, _ = materialized_alert_scope
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    unfiltered = api_client.get(
+        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}", headers=headers
+    )
+    assert unfiltered.status_code == 200, unfiltered.text
+    assert unfiltered.json()["total"] == 2
+    assert unfiltered.json()["totals"]["scopeTotal"] == 2
+
+    filtered = api_client.get(
+        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}"
+        "&state=roi_deterioration",
+        headers=headers,
+    )
+    assert filtered.status_code == 200, filtered.text
+    body = filtered.json()
+    assert len(body["items"]) == 1
+    assert body["total"] == 1
+    assert body["total"] != body["totals"]["scopeTotal"]
+    assert body["totals"]["scopeTotal"] == 2
+
+
 def test_repeatable_filters_bounds_and_explicit_latest_anchor(
     api_client, readonly_key, materialized_alert_scope
 ) -> None:
@@ -391,12 +436,15 @@ def test_repeatable_filters_bounds_and_explicit_latest_anchor(
             ("window_days", 1),
             ("state", "unavailable"),
             ("sample", "unavailable"),
-            ("anchor_date", (datetime.now(UTC).date() - timedelta(days=2)).isoformat()),
+            ("anchor_date", (datetime.now(UTC).date() - timedelta(days=1)).isoformat()),
         ],
         headers=headers,
     )
     assert filtered.status_code == 200, filtered.text
-    assert filtered.json()["total"] == 2
+    # 带筛选时 total 是匹配筛选的行数（仅 3d/confirmation/unavailable 一行），
+    # scope-wide 仍是 2。
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["totals"]["scopeTotal"] == 2
     assert all(
         item["sampleStatus"] == "unavailable" for item in filtered.json()["items"]
     )
@@ -522,7 +570,44 @@ def test_page_wired_filters_reject_invalid_enums_and_over_cap_spu_ids(
         f"{base}?shop_pk={shop_pk}&{at_cap}&state=roi_deterioration", headers=headers
     )
     assert accepted.status_code == 200, accepted.text
-    assert accepted.json()["total"] == 2
+    # B-02：100×spu_ids=spu_pk 与 state=roi_deterioration 都匹配时只剩 1 行
+    # （fixture 的 confirmation/unavailable 行 state 不是 roi_deterioration）。
+    # total 反映筛选，scope-wide 的 2 由 totals.scopeTotal 承载。
+    assert accepted.json()["total"] == 1
+    assert accepted.json()["totals"]["scopeTotal"] == 2
+
+
+def test_dead_recovery_states_are_rejected_with_422_not_empty_results(
+    api_client, readonly_key, materialized_alert_scope
+) -> None:
+    """B-04：``roi_recovery`` / ``recovery`` 在 _state() 中永不可达，查询必须 422。
+
+    修复前这两个值在 allow-list 里：请求返回 200 + 空列表，运维按页面/文档给出的
+    值筛选会得到一个静默的 “没有数据” 而无法区分 “真的没有” 与 “状态不存在”。
+    删除枚举后，页面下拉与服务端 allow-list 一致，非法值走和其它枚举外值同一条
+    422 分支。
+    """
+    shop_pk, _ = materialized_alert_scope
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    base = "/v2/analytics/spu-profit-deterioration"
+
+    for dead in ("roi_recovery", "recovery"):
+        response = api_client.get(
+            base, params=[("shop_pk", shop_pk), ("state", dead)], headers=headers
+        )
+        assert response.status_code == 422, (dead, response.status_code, response.text)
+        assert response.json()["detail"] == "invalid state", dead
+
+    # 对照组：仍然存活的 8 个业务状态必须全部被接受（200），否则 422 就成了
+    # “把所有 state 都拒了” 的假绿。
+    for alive in (state.value for state in AlertState):
+        response = api_client.get(
+            base, params=[("shop_pk", shop_pk), ("state", alive)], headers=headers
+        )
+        assert response.status_code == 200, (alive, response.status_code, response.text)
+
+    assert "roi_recovery" not in {state.value for state in AlertState}
+    assert "recovery" not in {state.value for state in AlertState}
 
 
 def test_state_filter_is_repeatable_and_narrows_items(
@@ -673,9 +758,15 @@ def test_stale_snapshot_fails_closed(
     assert response.status_code == 503
 
 
-def test_valid_empty_filter_preserves_snapshot_totals(
+def test_valid_empty_filter_zeroes_total_but_keeps_scope_totals(
     api_client, readonly_key, materialized_alert_scope
 ) -> None:
+    """B-02：severity=none 命中 0 行 → total=0（分页用），scope-wide 的
+    scopeTotal / totals.* 仍按完整 scope 保留（有意行为，不能一并清零）。
+
+    旧名 ``..._preserves_snapshot_totals`` 把 “total＝全量” 写进了名字，
+    会把 total 的新语义误导回去。
+    """
     shop_pk, _ = materialized_alert_scope
     response = api_client.get(
         f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&severity=none",
@@ -683,5 +774,21 @@ def test_valid_empty_filter_preserves_snapshot_totals(
     )
     assert response.status_code == 200
     assert response.json()["items"] == []
-    assert response.json()["total"] == 2
+    assert response.json()["total"] == 0
+    assert response.json()["totals"]["scopeTotal"] == 2
     assert response.json()["totals"]["shopSpuCount"] == 1
+
+
+def test_decimal_wire_serializes_zero_without_scientific_notation() -> None:
+    """高精度零（如 Decimal("0E-12")）wire 上必须是 "0"，不能是科学计数法。
+
+    页面曾显示「上期 ROI 0E-12」：公式保留 12 位精度痕迹的零被 str() 直接
+    转成科学计数法。非零值（含负值）保持原样。
+    """
+    from tts_erp_v2.api.v2.spu_deterioration_alert import _decimal
+
+    assert _decimal(None) is None
+    assert _decimal(Decimal("0E-12")) == "0"
+    assert _decimal(Decimal("0")) == "0"
+    assert _decimal(Decimal("210.803081902496")) == "210.803081902496"
+    assert _decimal(Decimal("-1.409499")) == "-1.409499"

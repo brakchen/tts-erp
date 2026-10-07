@@ -39,12 +39,12 @@
   /* 字段顺序 + 客户端只做「类型/范围」校验（范围＝服务端 schema 的上下界，
      不是告警阈值；真正的阈值比较与状态判定全部在服务端）。 */
   const THRESHOLD_FIELDS = [
-    { key: 'roiAbsDelta', label: 'ROI 绝对差', kind: 'decimal', max: '10' },
-    { key: 'roiRelativeDecline', label: 'ROI 相对降幅', kind: 'ratio', max: '1' },
-    { key: 'netProfitDecline', label: '净利润降幅', kind: 'ratio', max: '1' },
-    { key: 'minSpendCny', label: '最小消耗 CNY', kind: 'decimal', max: '10000000' },
-    { key: 'minOrders', label: '最小订单数', kind: 'int', max: '100000' },
-    { key: 'minAdOrders', label: '最小广告订单数', kind: 'int', max: '100000' },
+    { key: 'roiAbsDelta', label: 'ROI 绝对差', kind: 'decimal', max: '10', unit: '单位：ROI 点（数值差，如 0.5）' },
+    { key: 'roiRelativeDecline', label: 'ROI 相对降幅', kind: 'ratio', max: '1', unit: '单位：比例 0–1（0.3 = 降 30%）' },
+    { key: 'netProfitDecline', label: '净利润降幅', kind: 'ratio', max: '1', unit: '单位：比例 0–1（0.25 = 降 25%）' },
+    { key: 'minSpendCny', label: '最小消耗 CNY', kind: 'decimal', max: '10000000', unit: '单位：元（CNY）' },
+    { key: 'minOrders', label: '最小订单数', kind: 'int', max: '100000', unit: '单位：单（整数）' },
+    { key: 'minAdOrders', label: '最小广告订单数', kind: 'int', max: '100000', unit: '单位：单（整数）' },
   ];
 
   /* 非颜色信号：每类状态都有文案 + 图标 + 行处理。 */
@@ -95,6 +95,7 @@
     canEdit: false,
     selectedKey: null,
     lastSnapshot: null,
+    loadSeq: 0,
   };
 
   const els = {};
@@ -124,15 +125,20 @@
     }
     if (!res.ok) {
       let detail = `${res.status} ${res.statusText}`;
+      let code = '';
+      let requestId = res.headers.get('x-request-id') || '';
       try {
         const body = await res.json();
-        detail = body.detail || detail;
+        detail = body.detail || body.message || detail;
+        code = body.code || '';
+        requestId = requestId || body.requestId || '';
       } catch {
         /* 非 JSON 错误体：保留状态行。 */
       }
       const wrapped = new Error(Array.isArray(detail) ? JSON.stringify(detail) : String(detail));
       wrapped.status = res.status;
-      wrapped.requestId = res.headers.get('x-request-id') || '';
+      wrapped.code = code;
+      wrapped.requestId = requestId;
       throw wrapped;
     }
     return res.json();
@@ -213,7 +219,7 @@
     const raw = dd.profitabilityUrl ? `${rootPrefix}${dd.profitabilityUrl}` : '';
     const detailPage = dd.pageUrl
       ? `${rootPrefix}${dd.pageUrl}?shop_pk=${encodeURIComponent(item.shopPk)}` +
-        `&spu_pk=${encodeURIComponent(item.spuPk)}`
+        `&spu_ids=${encodeURIComponent(item.spuPk)}`
       : '';
     if (detailPage) {
       const rawLink = raw
@@ -234,21 +240,50 @@
     return [item.shopPk, item.spuPk, item.windowDays, item.layer].join(':');
   }
 
-  function summaryPairs(item) {
-    return [
-      ['上期 ROI', cell(item.previousRoi)],
-      ['本期 ROI', cell(item.currentRoi)],
-      ['ROI 降幅', cell(item.roiDecline)],
-      ['上期净利润(CNY)', cell(item.previousNetProfitCny)],
-      ['本期净利润(CNY)', cell(item.currentNetProfitCny)],
-      ['净利润降幅', cell(item.netProfitDecline)],
-      ['上期消耗(CNY)', cell(item.previousSpendCny)],
-      ['本期消耗(CNY)', cell(item.currentSpendCny)],
-      ['上期订单数', intCell(item.previousOrderCount)],
-      ['本期订单数', intCell(item.currentOrderCount)],
-      ['上期广告订单数', intCell(item.previousAdOrderCount)],
-      ['本期广告订单数', intCell(item.currentAdOrderCount)],
+  /* 差异对比表（指标 | 上期 | 本期 | 变化）。
+     上期/本期两列照抄服务端 wire 值；「变化」列只是对两个已下发展示值做两位
+     小数加减与百分比格式化——不重算 ROI/降幅口径，百分比沿用告警策略的守卫
+     （上期 >0 才显示），非正基数只给绝对差。
+     ROI/净利润：升=改善绿、降=恶化红；消耗/订单无好坏语义，中性展示。 */
+  function deltaCell(prevRaw, curRaw, colored, isInt) {
+    if (prevRaw === null || prevRaw === undefined || curRaw === null || curRaw === undefined) {
+      return '<span class="is-null" data-null="1" title="服务端返回 null（数学无解或样本不足），不显示为 0">—</span>';
+    }
+    const prev = Number(prevRaw);
+    const cur = Number(curRaw);
+    const diff = cur - prev;
+    const arrow = diff > 0 ? '↑' : diff < 0 ? '↓' : '＝';
+    const cls = colored
+      ? diff > 0 ? 'delta--up' : diff < 0 ? 'delta--down' : 'delta--flat'
+      : 'delta--flat';
+    const sign = diff > 0 ? '+' : '';
+    const absText = isInt ? `${sign}${diff}` : `${sign}${diff.toFixed(2)}`;
+    let text = `${arrow} ${absText}`;
+    if (!isInt && prev > 0 && diff !== 0) {
+      text += `（${sign}${((diff / prev) * 100).toFixed(1)}%）`;
+    }
+    return `<span class="delta ${cls}">${esc(text)}</span>`;
+  }
+
+  function compareTableHtml(item) {
+    const rows = [
+      ['ROI', item.previousRoi, item.currentRoi, true, false],
+      ['净利润 (CNY)', item.previousNetProfitCny, item.currentNetProfitCny, true, false],
+      ['消耗 (CNY)', item.previousSpendCny, item.currentSpendCny, false, false],
+      ['订单数', item.previousOrderCount, item.currentOrderCount, false, true],
+      ['广告订单数', item.previousAdOrderCount, item.currentAdOrderCount, false, true],
     ];
+    const body = rows
+      .map(([label, prev, cur, colored, isInt]) => {
+        const prevCell = isInt ? intCell(prev) : cell(prev);
+        const curCell = isInt ? intCell(cur) : cell(cur);
+        return `<tr><th scope="row">${esc(label)}</th><td>${prevCell}</td>` +
+          `<td>${curCell}</td><td>${deltaCell(prev, cur, colored, isInt)}</td></tr>`;
+      })
+      .join('');
+    return '<table class="alert-compare"><thead><tr><th scope="col">指标</th>' +
+      '<th scope="col">上期</th><th scope="col">本期</th><th scope="col">变化</th></tr></thead>' +
+      `<tbody>${body}</tbody></table>`;
   }
 
   function metricPairs(item) {
@@ -284,10 +319,10 @@
         aria-expanded="${expanded ? 'true' : 'false'}"
         title="${esc(meta.note)}">
       <td>${badge(item)}</td>
-      <td><span class="mono">#${esc(item.spuPk)}</span>
+      <td><span class="mono">${esc(item.spuId ?? item.spuPk)}</span>
         <button type="button" class="alert-row__toggle" data-role="row-summary"
           aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="alert-summary"
-          aria-label="展开 SPU #${esc(item.spuPk)} 明细">明细</button>
+          aria-label="展开 SPU ${esc(item.spuId ?? item.spuPk)} 明细">明细</button>
         <div class="visually-hidden">shop_pk=${esc(item.shopPk)}</div></td>
       <td><span class="mono">${esc(item.windowDays)} 天</span></td>
       <td>${sampleCell(item)}
@@ -314,25 +349,22 @@
     const kind = itemKind(item);
     const meta = KINDS[kind];
     const expanded = state.selectedKey === itemKey(item);
-    const grid = metricPairs(item)
-      .map((pair) => `<dt>${esc(pair[0])}</dt><dd>${pair[1]}</dd>`)
-      .join('');
     return `<article class="alert-card alert-card--${kind} mb-3" data-kind="${kind}"
         data-severity="${esc(item.severity)}" data-sample="${esc(item.sampleStatus)}"
         data-item-key="${esc(itemKey(item))}" data-shop-pk="${esc(item.shopPk)}" data-spu-pk="${esc(item.spuPk)}"
         aria-expanded="${expanded ? 'true' : 'false'}">
       <header class="alert-card__head">
         ${badge(item)}
-        <span class="alert-card__spu mono">SPU #${esc(item.spuPk)}</span>
+        <span class="alert-card__spu mono">SPU ${esc(item.spuId ?? item.spuPk)}</span>
         <span class="alert-card__window mono">${esc(item.windowDays)} 天</span>
         <button type="button" class="alert-row__toggle" data-role="row-summary"
           aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="alert-summary"
-          aria-label="展开 SPU #${esc(item.spuPk)} 明细">明细</button>
+          aria-label="展开 SPU ${esc(item.spuId ?? item.spuPk)} 明细">明细</button>
       </header>
       <p class="alert-card__text">${esc(item.warningText || meta.note)}</p>
       <p class="alert-card__meta mono">状态 ${esc(stateLabel(item))} · 样本 ${esc(item.sampleStatus)} ·
         anchor ${esc(item.anchorDate)} · 配置 ${esc(item.configSource)}${item.configVersion ? ` v${esc(item.configVersion)}` : ''}</p>
-      <dl class="alert-card__grid">${grid}</dl>
+      ${compareTableHtml(item)}
       <footer class="alert-card__foot">${drillLinks(item)}</footer>
     </article>`;
   }
@@ -383,6 +415,27 @@
     if (eff.source) parts.push(`配置 ${eff.source}${eff.version ? ` v${eff.version}` : ''}`);
     if (requestId) parts.push(`requestId ${requestId}`);
     return parts.join(' · ');
+  }
+
+  /* scope-wide 计数：完整 anchor scope 的行数，来自服务端 totals.scopeTotal。
+     与分页用的 payload.total（匹配当前筛选）是两个概念，不混用。 */
+  function scopeWideTotal(payload) {
+    const totals = (payload && payload.totals) || {};
+    return totals.scopeTotal === undefined || totals.scopeTotal === null ? null : totals.scopeTotal;
+  }
+
+  /* 是否有 presentation filter 改变 URL：只读 state 里真实的筛选值，不硬编码。 */
+  function hasActiveFilters() {
+    return (
+      state.spuIds.length > 0 ||
+      state.windowDays !== '' ||
+      state.layer !== 'all' ||
+      state.severity !== 'all' ||
+      state.alertState !== 'all' ||
+      state.sample !== 'all' ||
+      state.activity !== 'recent' ||
+      state.anchorDate !== ''
+    );
   }
 
   function renderTotals(payload) {
@@ -451,11 +504,31 @@
       return;
     }
     if (!items.length) {
-      renderEmpty(
-        payload,
-        'ok',
-        `当前 scope 没有达到阈值的告警（已检查 anchor ${meta.anchorDate || '—'} 的 ${payload.total} 行）。`,
-      );
+      /* 幽灵页：匹配行存在（filtered > 0）但本页 offset 越界。不得冒充「没有达到阈值」。
+         回到第一页重新取；offset 已是 0 却无行时如实说明，不把服务端不一致说成无告警。 */
+      if (payload.total > 0) {
+        if (state.offset > 0) {
+          state.offset = 0;
+          syncUrl();
+          load();
+          return;
+        }
+        renderEmpty(payload, 'ok', `本页没有行（匹配当前筛选 ${payload.total} 行）；请刷新重试。`);
+        return;
+      }
+      /* 空态文案分三种，不把「筛选命中 0」说成「没有达到阈值的告警」。
+         触发用过滤后的 payload.total === 0；显示用 scope-wide 的 scopeTotal。 */
+      const scopeTotal = scopeWideTotal(payload);
+      const scopeShown = scopeTotal === null ? '—' : scopeTotal;
+      let text;
+      if (scopeTotal === 0) {
+        text = `该 anchor 没有数据（anchor ${meta.anchorDate || '—'}）：物化快照为空，暂无可检查的告警行。`;
+      } else if (hasActiveFilters()) {
+        text = `当前筛选条件下没有匹配的行（本 scope 共 ${scopeShown} 行）；请放宽筛选条件后重试。`;
+      } else {
+        text = `当前 scope 没有达到阈值的告警（已检查 ${scopeShown} 行）。`;
+      }
+      renderEmpty(payload, 'ok', text);
       return;
     }
 
@@ -463,7 +536,8 @@
     const allSample = kinds.every((kind) => kind === 'sample' || kind === 'unavailable');
     let bannerKind = 'ok';
     let bannerText = '当前 scope 没有达到阈值的告警';
-    let statusText = `已加载 ${items.length} 行（共 ${payload.total} 行）；样本不足 / 不可用 ${totals.insufficientSampleCount} 条。`;
+    const scopeTotalForStatus = scopeWideTotal(payload);
+    let statusText = `已加载 ${items.length} 行（本 scope 共 ${scopeTotalForStatus === null ? '—' : scopeTotalForStatus} 行）；样本不足 / 不可用 ${totals.insufficientSampleCount} 条。`;
     if (allSample) {
       const onlySample = kinds.includes('sample');
       bannerKind = onlySample ? 'sample' : 'unavailable';
@@ -538,8 +612,9 @@
     setExpandedMarkers(null);
   }
 
-  /* 只照抄服务端字段：上期/本期 ROI、净利润、消耗、订单/广告订单、降幅、
-     状态、样本、anchor/basis 时间与配置来源。浏览器不重算任何百分比。 */
+  /* 只照抄服务端字段：状态、样本、anchor/basis 时间与配置来源；
+     指标区用差异对比表展示（变化列只是已下发展示值的格式化差值，
+     浏览器不重算 ROI/降幅口径）。 */
   function showSummary(item, trigger) {
     const kind = itemKind(item);
     const meta = KINDS[kind];
@@ -551,7 +626,7 @@
     els.summary.dataset.shopPk = item.shopPk;
     // pi-lens-ignore: no-inner-html-js
     els.summaryMeta.innerHTML =
-      `${badge(item)} <span class="mono">shop_pk #${esc(item.shopPk)} · SPU #${esc(item.spuPk)} · ` +
+      `${badge(item)} <span class="mono">shop_pk #${esc(item.shopPk)} · SPU ${esc(item.spuId ?? item.spuPk)} · ` +
       `${esc(item.windowDays)} 天</span>` +
       `<div class="alert-summary__line">状态 <span class="mono">${esc(stateLabel(item))}</span> · ` +
       `severity <span class="mono">${esc(item.severity || '—')}</span> · ` +
@@ -563,9 +638,7 @@
       `<div class="alert-summary__line">warningCode <span class="mono">${esc(item.warningCode || '—')}</span> · ` +
       `${esc(item.warningText || meta.note)}</div>`;
     // pi-lens-ignore: no-inner-html-js
-    els.summaryGrid.innerHTML = summaryPairs(item)
-      .map((pair) => `<dt>${esc(pair[0])}</dt><dd>${pair[1]}</dd>`)
-      .join('');
+    els.summaryGrid.innerHTML = compareTableHtml(item);
     // pi-lens-ignore: no-inner-html-js
     els.summaryFoot.innerHTML = drillLinks(item);
     setExpandedMarkers(key);
@@ -636,6 +709,7 @@
     if (state.alertState !== 'all') params.append('state', state.alertState);
     params.set('severity', state.severity);
     params.set('sample', state.sample);
+    params.set('activity', state.activity);
     if (state.anchorDate) params.set('anchor_date', state.anchorDate);
     params.set('limit', String(state.limit));
     params.set('offset', String(state.offset));
@@ -651,6 +725,8 @@
     if (state.alertState !== 'all') params.set('state', state.alertState);
     params.set('severity', state.severity);
     params.set('sample', state.sample);
+    /* activity 默认 recent（仅看近 14 天出单大于 3 单），只在被关掉时才写进 URL。 */
+    if (state.activity !== 'recent') params.set('activity', state.activity);
     if (state.anchorDate) params.set('anchor_date', state.anchorDate);
     return params.toString();
   }
@@ -777,8 +853,12 @@
       return;
     }
     renderLoading();
+    const seq = ++state.loadSeq;
     try {
       const payload = await api(`${DATA_PATH}?${queryString()}`);
+      /* latest-wins：只有最后一次请求的结果被渲染。快速连续切筛选时，
+         慢的旧响应不得覆盖新结果（不用延时/重试掩盖，从机制上保证）。 */
+      if (seq !== state.loadSeq) return;
       if (!payload || !Array.isArray(payload.items)) {
         throw new Error('响应缺少 items 数组（契约错误）');
       }
@@ -786,6 +866,7 @@
       renderPayload(payload);
       loadConfigProjection(payload);
     } catch (err) {
+      if (seq !== state.loadSeq) return;
       renderError(err);
     }
   }
@@ -847,6 +928,33 @@
       aria-label="${esc(path)}">`;
   }
 
+  /* 一键同步：把某组 6 个阈值复制到其他环比窗口的同级别卡片；
+     勾选「含确认层」（默认）时连另一层的全部窗口一起覆盖。
+     只改表单值，不自动保存——保存草稿/发布仍走原有按钮与校验。 */
+  function syncGroupValues(sourceLayer, sourceDays, severity, includeOtherLayer) {
+    const targets = [];
+    for (const days of WINDOW_DAYS) {
+      if (days !== sourceDays) targets.push([sourceLayer, days]);
+    }
+    if (includeOtherLayer) {
+      const other = sourceLayer === 'fast' ? 'confirmation' : 'fast';
+      for (const days of WINDOW_DAYS) targets.push([other, days]);
+    }
+    let copied = 0;
+    for (const [layer, days] of targets) {
+      for (const field of THRESHOLD_FIELDS) {
+        const source = document.querySelector(
+          `[data-path="${sourceLayer}.${sourceDays}.${severity}.${field.key}"]`);
+        const target = document.querySelector(`[data-path="${layer}.${days}.${severity}.${field.key}"]`);
+        if (source && target && !target.disabled) {
+          target.value = source.value;
+          copied += 1;
+        }
+      }
+    }
+    return { windows: targets.length, copied };
+  }
+
   /* 接收整个 effectiveConfig 投影：enabled / maturityDays 读顶层的显式字段，
      层/窗口/严重度表格读 eff.thresholds（= 完整 published payload）。 */
   function renderThresholdTables(eff, disabled) {
@@ -869,7 +977,8 @@
           const rows = THRESHOLD_FIELDS.map((field) => {
             const path = `${layer}.${days}.${severity}.${field.key}`;
             return `<tr>
-              <th scope="row" class="op-th">${esc(field.label)}</th>
+              <th scope="row" class="op-th">${esc(field.label)}
+                <span class="op-threshold-unit">${esc(field.unit)}</span></th>
               <td>${thresholdInput(path, values[field.key] === undefined ? '' : values[field.key], disabled)}
                 <span class="field-error" id="${fieldId(path)}"></span></td>
             </tr>`;
@@ -882,13 +991,23 @@
               <span class="mono">${esc(layer)}.${esc(days)}.${esc(severity)}</span>
             </h5>
             <table class="op-table op-threshold-table"><tbody>${rows}</tbody></table>
+            ${disabled ? '' : `<div class="op-threshold-group__sync">
+              <button type="button" class="btn-secondary btn-sm" data-role="sync-group"
+                data-layer="${esc(layer)}" data-days="${esc(days)}" data-severity="${esc(severity)}"
+                title="把本组 6 个阈值复制到其他环比窗口的同级别卡片；只改表单，需再点保存草稿">同步到其他环比窗口</button>
+              <label class="op-threshold-sync-scope">
+                <input type="checkbox" class="form-check-input" data-role="sync-scope" checked>
+                <span>含确认层</span>
+              </label>
+            </div>`}
             <span class="field-error" id="err-${groupId}"></span>
           </div>`;
         }).join('');
-        return `<section class="op-threshold-window">
-          <h4 class="op-threshold-window__title">窗口 ${esc(days)} 天</h4>
+        /* 1 天窗口默认展开，3/7 天默认收起、点击才展示（owner 2026-10-07）。 */
+        return `<details class="op-threshold-window"${days === '1' ? ' open' : ''}>
+          <summary class="op-threshold-window__title">窗口 ${esc(days)} 天</summary>
           ${groups}
-        </section>`;
+        </details>`;
       }).join('');
       return `<details class="op-threshold-layer" open>
         <summary>${esc(LAYER_LABELS[layer])}</summary>
@@ -906,8 +1025,7 @@
             ${eff.enabled ? 'checked' : ''}${disabled ? ' disabled aria-disabled="true"' : ''}>
           <span>enabled（关闭后不再生成新告警，旧快照只读）</span>
         </label>
-        <span class="op-scope-note">maturityDays 固定为服务端值
-          <strong class="mono">${esc(eff.maturityDays)}</strong>（v1 不可改，避免破坏业务窗口）；rollout 对本 key 不生效。</span>
+        <span class="op-scope-note">maturityDays 固定为服务端值 <strong class="mono">${esc(eff.maturityDays)}</strong>，v1 不可改。</span>
       </div>
       ${blocks}`;
     setFormStatus('', '');
@@ -1123,11 +1241,19 @@
     if (d.drawer.dataset.rendered !== '1' && eff.thresholds) {
       renderThresholdTables(eff, !state.canEdit);
     }
-    d.readonlyNote.hidden = state.canEdit;
+    const hasProjection = Boolean(
+      state.payload && state.payload.meta && state.payload.meta.effectiveConfig,
+    );
+    d.readonlyNote.hidden = state.canEdit || !hasProjection;
     d.actions.hidden = !state.canEdit;
     syncDrawerButtons();
     if (state.canEdit) loadConfigDetail();
-    else {
+    else if (!hasProjection) {
+      /* 无有效载荷（如 503）时不声称会话档位：元数据全为 —、输入 0 个，
+         如实说明没有可用配置信息。 */
+      setFormStatus('当前没有可用配置信息：主响应尚未取得有效配置投影，抽屉只显示占位状态。', 'error');
+      els.drawerClose.focus();
+    } else {
       setFormStatus('只读会话：抽屉只显示已发布的有效投影；如需改动请联系运维在运行配置页发布。', 'info');
       els.drawerClose.focus();
     }
@@ -1221,6 +1347,15 @@
     els.settings.addEventListener('click', openDrawer);
     $('drawer-close').addEventListener('click', closeDrawer);
     $('btn-drawer-cancel').addEventListener('click', closeDrawer);
+    $('drawer-thresholds').addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-role="sync-group"]');
+      if (!btn) return;
+      const scope = btn.parentElement ? btn.parentElement.querySelector('[data-role="sync-scope"]') : null;
+      const result = syncGroupValues(
+        btn.dataset.layer, btn.dataset.days, btn.dataset.severity, !!(scope && scope.checked));
+      setFormStatus(
+        `已把 ${btn.dataset.layer}.${btn.dataset.days}.${btn.dataset.severity} 同步到 ${result.windows} 个窗口（${result.copied} 个字段）；改动尚未保存，确认后点「保存草稿」。`, '');
+    });
     els.drawer.addEventListener('close', () => els.settings.setAttribute('aria-expanded', 'false'));
     els.drawer.addEventListener('cancel', (event) => {
       event.preventDefault();

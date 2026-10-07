@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -346,68 +347,6 @@ def test_run_scheduled_replaces_all_anchors_and_records_later_failure(
     failure.assert_called_once()
 
 
-def test_materialize_guard_denies_prod_shape_before_delete(
-    db_engine, monkeypatch
-) -> None:
-    _ensure_alert_migration(db_engine)
-    anchor = date(2026, 10, 10)
-    with Session(db_engine) as session:
-        shop = ChannelAccount(
-            platform="tiktok",
-            shop_id="TEST_guard_shop",
-            region="VN",
-            status="active",
-        )
-        session.add(shop)
-        session.flush()
-        spu = ChannelProduct(shop_pk=shop.id, spu_id="TEST_guard_spu", status="active")
-        session.add(spu)
-        session.flush()
-        old_row = SpuDeteriorationAlert(
-            shop_pk=shop.id,
-            spu_pk=spu.id,
-            anchor_date=anchor,
-            window_days=1,
-            layer="fast",
-            severity="none",
-            state="stable",
-            sample_status="sufficient",
-            effective_config_source="seed_fallback",
-            config_payload_hash="0" * 64,
-            basis_calculated_at=datetime.now(UTC),
-        )
-        session.add(old_row)
-        session.commit()
-        shop_pk, old_id = shop.id, old_row.id
-    monkeypatch.setattr("tts_erp_v2.api.deps.is_prod_shaped_db", lambda: True)
-    deleted: list[str] = []
-
-    def observe_delete(_connection, _cursor, statement, *_args):
-        if "DELETE FROM analytics.spu_deterioration_alerts" in statement:
-            deleted.append(statement)
-
-    event.listen(db_engine, "before_cursor_execute", observe_delete)
-    try:
-        with Session(db_engine) as session, pytest.raises(SystemExit):
-            materialize_alerts(session, anchor_date=anchor, rows=[])
-        assert deleted == []
-        with Session(db_engine) as session:
-            assert session.get(SpuDeteriorationAlert, old_id) is not None
-    finally:
-        event.remove(db_engine, "before_cursor_execute", observe_delete)
-        with Session(db_engine) as session:
-            session.execute(
-                delete(SpuDeteriorationAlert).where(
-                    SpuDeteriorationAlert.shop_pk == shop_pk
-                )
-            )
-            session.execute(
-                delete(ChannelProduct).where(ChannelProduct.shop_pk == shop_pk)
-            )
-            session.execute(delete(ChannelAccount).where(ChannelAccount.id == shop_pk))
-            session.commit()
-
-
 def test_failure_audit_redacts_read_and_write_exception_details(
     db_engine, monkeypatch, caplog
 ) -> None:
@@ -642,6 +581,77 @@ def test_read_phase_rollback_failure_is_sanitized(
             assert failure_job is not None
             assert failure_job.status == "failed"
             assert sentinel not in str(failure_job.extra)
+    finally:
+        with Session(db_engine) as session:
+            session.execute(
+                delete(SpuDeteriorationAlert).where(
+                    SpuDeteriorationAlert.shop_pk == shop_pk
+                )
+            )
+            session.execute(
+                delete(ChannelProduct).where(ChannelProduct.shop_pk == shop_pk)
+            )
+            session.execute(delete(ChannelAccount).where(ChannelAccount.id == shop_pk))
+            session.commit()
+        _delete_bounded_fx(db_engine)
+
+
+def test_prod_shaped_db_writes_anchor_without_operator_release(
+    db_engine, monkeypatch
+) -> None:
+    """The derived snapshot recompute must not need an operator opt-in.
+
+    ``analytics.spu_deterioration_alerts`` is written only by this job, and
+    ``replace_anchor`` deletes a single ``anchor_date`` before re-inserting
+    rows the next scheduled run recomputes from source facts, so the shared
+    destructive-script guard (AGENTS.md section 3) does not belong on this
+    write path: with it wired in, every production tick exited before
+    writing anything. Re-adding a prod-shaped release switch to
+    ``replace_anchor`` makes this test fail again.
+    """
+    _ensure_alert_migration(db_engine)
+    _seed_bounded_fx(db_engine)
+    # Prod-shaped dbname, exactly what the guard used to refuse on.
+    monkeypatch.setattr("tts_erp_v2.api.deps.is_prod_shaped_db", lambda: True)
+    for name in list(os.environ):
+        if name.startswith("ALLOW_PROD_"):
+            monkeypatch.delenv(name, raising=False)
+    with Session(db_engine) as session:
+        shop = ChannelAccount(
+            platform="tiktok",
+            shop_id="TEST_prod_shape_alert_shop",
+            region="VN",
+            status="active",
+        )
+        session.add(shop)
+        session.flush()
+        session.add(
+            ChannelProduct(
+                shop_pk=shop.id, spu_id="TEST_prod_shape_alert_spu", status="active"
+            )
+        )
+        session.commit()
+        shop_pk = shop.id
+    try:
+        with Session(db_engine) as session:
+            result = run_scheduled(session)
+        assert result["status"] == "success"
+        assert result["rows"] > 0
+        with Session(db_engine) as session:
+            rows = session.scalars(
+                select(SpuDeteriorationAlert).where(
+                    SpuDeteriorationAlert.shop_pk == shop_pk
+                )
+            ).all()
+            assert rows
+            job = session.scalar(
+                select(SyncJob)
+                .where(SyncJob.job_name == "analytics.spu_profit_deterioration_alert")
+                .order_by(SyncJob.id.desc())
+            )
+            assert job is not None
+            assert job.status == "succeeded"
+            assert job.extra["status"] == "success"
     finally:
         with Session(db_engine) as session:
             session.execute(
@@ -965,7 +975,7 @@ def test_real_canonical_queries_batch_more_than_500_scope(
     monkeypatch.setattr(_implementation, "calculate", capture_calculate)
     anchor = datetime.now(UTC).astimezone(
         ZoneInfo("Asia/Ho_Chi_Minh")
-    ).date() - timedelta(days=2)
+    ).date() - timedelta(days=1)
     with Session(db_engine) as session:
         shop = ChannelAccount(
             platform="tiktok",

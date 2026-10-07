@@ -25,8 +25,6 @@ class AlertState(StrEnum):
     LOSS_TO_PROFIT = "loss_to_profit"
     ROI_DETERIORATION = "roi_deterioration"
     NET_PROFIT_DETERIORATION = "net_profit_deterioration"
-    ROI_RECOVERY = "roi_recovery"
-    RECOVERY = "recovery"
     STABLE = "stable"
     SAMPLE_INSUFFICIENT = "sample_insufficient"
     UNAVAILABLE = "unavailable"
@@ -56,7 +54,7 @@ def _pair(anchor: date, days: int, shift: int = 0) -> WindowPair:
 
 
 def fast_windows(anchor: date) -> dict[int, WindowPair]:
-    """Return exact non-overlapping fast comparisons ending at T-2."""
+    """Return exact non-overlapping fast comparisons ending at the anchor date."""
     return {days: _pair(anchor, days) for days in (1, 3, 7)}
 
 
@@ -107,19 +105,26 @@ def _state(previous: WindowMetric, current: WindowMetric) -> AlertState:
         return AlertState.ROI_DETERIORATION
     if profit_decline is not None and profit_decline > 0:
         return AlertState.NET_PROFIT_DETERIORATION
-    if (
-        previous.roi_real is not None
-        and current.roi_real is not None
-        and previous.roi_real <= 0 < current.roi_real
-    ):
-        return AlertState.ROI_RECOVERY
-    if (
-        previous.net_profit_cny is not None
-        and current.net_profit_cny is not None
-        and previous.net_profit_cny <= 0 < current.net_profit_cny
-    ):
-        return AlertState.RECOVERY
     return AlertState.STABLE
+
+
+def _gates_met(
+    previous: WindowMetric, current: WindowMetric, thresholds: AlertThresholds
+) -> bool:
+    """Return whether a comparison is credible: both windows must clear the gates.
+
+    The gates answer "can these two windows be compared", so they bind the
+    weaker of the pair. The design doc
+    (``docs/design/spu-profit-deterioration-alert.md`` §2.2 evaluability) and
+    ``scripts/probe_spu_profit_deterioration_thresholds.py`` both gate on
+    ``min(previous, current)``; ``evaluate()`` shares this one helper so the
+    sample_status gates and the severity gates cannot drift apart again.
+    """
+    return (
+        min(previous.spend_cny, current.spend_cny) >= thresholds.min_spend_cny
+        and min(previous.order_count, current.order_count) >= thresholds.min_orders
+        and min(previous.ad_orders, current.ad_orders) >= thresholds.min_ad_orders
+    )
 
 
 def evaluate(
@@ -142,10 +147,8 @@ def evaluate(
         status = SampleStatus.SAMPLE_INSUFFICIENT
     else:
         status = SampleStatus.SUFFICIENT
-    if status is SampleStatus.SUFFICIENT and (
-        current.spend_cny < warning.min_spend_cny
-        or current.order_count < warning.min_orders
-        or current.ad_orders < warning.min_ad_orders
+    if status is SampleStatus.SUFFICIENT and not _gates_met(
+        previous, current, warning
     ):
         status = SampleStatus.SAMPLE_INSUFFICIENT
     roi_decline = _decline(previous.roi_real, current.roi_real)
@@ -179,11 +182,7 @@ def evaluate(
             net_profit_decline is not None
             and net_profit_decline >= t.net_profit_decline
         )
-        gates = (
-            current.spend_cny >= t.min_spend_cny
-            and current.order_count >= t.min_orders
-            and current.ad_orders >= t.min_ad_orders
-        )
+        gates = _gates_met(previous, current, t)
         transition = allow_transition and state in {
             AlertState.PROFIT_TO_LOSS,
             AlertState.LOSS_EXPANDING,
@@ -198,12 +197,6 @@ def evaluate(
         severity = AlertSeverity.WARNING
         if qualifies(critical, allow_transition=False):
             severity = AlertSeverity.CRITICAL
-    if severity is AlertSeverity.NONE and state in {
-        AlertState.LOSS_TO_PROFIT,
-        AlertState.ROI_RECOVERY,
-        AlertState.RECOVERY,
-    }:
-        state = AlertState.ROI_RECOVERY if state is AlertState.ROI_RECOVERY else state
     return AlertDecision(
         state, severity, status, roi_decline, net_profit_decline, current, previous
     )
@@ -217,11 +210,7 @@ def paired_recovery(
     denominator = len(fast_alerts)
     if denominator == 0:
         return {"numerator": 0, "denominator": 0, "rate": None}
-    recovered_states = {
-        AlertState.LOSS_TO_PROFIT,
-        AlertState.ROI_RECOVERY,
-        AlertState.RECOVERY,
-    }
+    recovered_states = {AlertState.LOSS_TO_PROFIT}
     numerator = sum(
         1
         for key, _ in fast_alerts
