@@ -689,15 +689,25 @@
     syncFilterControls();
   }
 
-  /* state 下拉的合法值直接读 DOM option，枚举只维护一处（模板）。 */
+  /* 状态表头筛选的合法值直接读表头按钮的 data-state-values，枚举只维护一处（模板）。 */
   function alertStateValues() {
     if (!els.alertState) return ['all'];
-    const values = ['all'];
-    els.alertState.querySelectorAll('option').forEach((option) => {
-      const value = option.value;
-      if (value && value !== 'all') values.push(value);
-    });
-    return values;
+    const raw = els.alertState.dataset.stateValues || '';
+    return ['all', ...raw.split(',').map((value) => value.trim()).filter(Boolean)];
+  }
+
+  function alertStateLabel(value) {
+    return value === 'all' ? '全部' : value;
+  }
+
+  function syncAlertStateButton() {
+    if (!els.alertState) return;
+    const active = state.alertState !== 'all';
+    els.alertState.textContent = active ? `状态：${alertStateLabel(state.alertState)}` : '状态';
+    els.alertState.setAttribute('aria-pressed', active ? 'true' : 'false');
+    els.alertState.title = active
+      ? `状态筛选：${alertStateLabel(state.alertState)}（点击切换到下一状态）`
+      : '状态筛选：点击循环切换';
   }
 
   function syncFilterControls() {
@@ -707,7 +717,7 @@
       tab.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
     if (els.spuIds) els.spuIds.value = state.spuIds.join(',');
-    if (els.alertState) els.alertState.value = state.alertState;
+    syncAlertStateButton();
     if (els.severity) els.severity.value = state.severity;
     if (els.anchorDate) els.anchorDate.value = state.anchorDate;
     if (els.limit) els.limit.value = String(state.limit);
@@ -1146,9 +1156,12 @@
         applySpuScope();
       }
     });
-    els.alertState.addEventListener('change', () => {
-      state.alertState = els.alertState.value;
+    els.alertState.addEventListener('click', () => {
+      const values = alertStateValues();
+      const index = values.indexOf(state.alertState);
+      state.alertState = values[(index + 1) % values.length];
       state.offset = 0;
+      syncAlertStateButton();
       syncUrl();
       load();
     });

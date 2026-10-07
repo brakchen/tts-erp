@@ -448,6 +448,33 @@ a:hover {
   background: var(--paper-deep);
 }
 
+/* 状态列表头筛选：看起来像普通表头文字，点击循环切换 state。 */
+.op-th-filter {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  /* th 的 text-transform: uppercase 不应作用于枚举码（大小写即语义）。 */
+  text-transform: none;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.op-th-filter:hover,
+.op-th-filter:focus-visible {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.op-th-filter[aria-pressed="true"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .alert-row td {
   vertical-align: top;
 }

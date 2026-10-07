@@ -88,8 +88,8 @@ def test_alert_page_route_and_sidebar_entry() -> None:
     assert 'id="settings-drawer"' in body
     assert 'aria-live="polite"' in body
     assert "/static/js/spu-profit-deterioration.js" in body
-    # design §6.1/§6.2 的筛选与交互外壳：SPU scope、state 下拉、summary 容器、
-    # 新鲜度提示都必须随 HTML 下发（不依赖 JS 注入）。
+    # design §6.1/§6.2 的筛选与交互外壳：SPU scope、状态表头筛选（filter-state
+    # 已迁至表头按钮）、summary 容器、新鲜度提示都必须随 HTML 下发（不依赖 JS 注入）。
     for marker in (
         'id="filter-spu-ids"',
         'id="filter-state"',

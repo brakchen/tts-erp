@@ -82,22 +82,6 @@
             <button type="button" class="op-window-tab" data-window-days="7" aria-pressed="false">7 天</button>
           </div>
         </div>
-        <label class="op-filter" for="filter-state">
-          <span class="op-fld-label">状态 state</span>
-          <select id="filter-state" class="form-select form-select-sm" aria-label="告警状态 state">
-            <option value="all" selected>全部</option>
-            <option value="profit_to_loss">profit_to_loss（盈利转亏损）</option>
-            <option value="loss_expanding">loss_expanding（亏损扩大）</option>
-            <option value="loss_to_profit">loss_to_profit（亏损转盈利）</option>
-            <option value="roi_deterioration">roi_deterioration（ROI 劣化）</option>
-            <option value="net_profit_deterioration">net_profit_deterioration（净利润劣化）</option>
-            <option value="roi_recovery">roi_recovery（ROI 回升）</option>
-            <option value="recovery">recovery（恢复）</option>
-            <option value="stable">stable（稳定）</option>
-            <option value="sample_insufficient">sample_insufficient（样本不足）</option>
-            <option value="unavailable">unavailable（数据不可用）</option>
-          </select>
-        </label>
         <label class="op-filter" for="filter-severity">
           <span class="op-fld-label">严重度</span>
           <select id="filter-severity" class="form-select form-select-sm" aria-label="严重度">
@@ -149,7 +133,12 @@
       <table class="op-table alert-table" id="alert-table" aria-label="SPU 利润劣化告警明细">
         <thead>
           <tr>
-            <th class="op-th" scope="col">状态</th>
+            <th class="op-th" scope="col">
+              <!-- 状态枚举唯一来源：data-state-values（JS 从这里读合法值，不硬编码第二份）。点击循环 all → 各 state → all。 -->
+              <button type="button" id="filter-state" class="op-th-filter"
+                data-state-values="profit_to_loss,loss_expanding,loss_to_profit,roi_deterioration,net_profit_deterioration,stable,sample_insufficient,unavailable"
+                aria-label="状态筛选：点击循环切换" aria-pressed="false">状态</button>
+            </th>
             <th class="op-th" scope="col">SPU</th>
             <th class="op-th" scope="col">窗口</th>
             <th class="op-th" scope="col">样本</th>

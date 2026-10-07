@@ -651,13 +651,15 @@ def test_spu_scope_filter_sends_ids_round_trips_and_never_widens_silently(
     assert page.locator("#filter-spu-ids").input_value() == "1001,1002"
 
 
-def test_state_dropdown_covers_documented_enum_and_is_sent_as_state_param(
+def test_state_header_filter_covers_documented_enum_and_is_sent_as_state_param(
     browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """状态下拉已移除；点击「状态」列表头循环筛选，合法值只读 data-state-values。"""
     page = _open(browser_renderer, _Mock(), monkeypatch)
-    options = page.eval_on_selector_all(
-        "#filter-state option", "els => els.map(el => el.value)"
-    )
+    button = page.locator("#filter-state")
+    values = button.get_attribute("data-state-values")
+    assert values is not None
+    options = ["all"] + [v.strip() for v in values.split(",") if v.strip()]
     assert options == [
         "all",
         "profit_to_loss",
@@ -665,22 +667,38 @@ def test_state_dropdown_covers_documented_enum_and_is_sent_as_state_param(
         "loss_to_profit",
         "roi_deterioration",
         "net_profit_deterioration",
-        "roi_recovery",
-        "recovery",
         "stable",
         "sample_insufficient",
         "unavailable",
     ]
+    # B-04：两个死状态已被删除。JS 的合法值只从 data-state-values 读
+    # （alertStateValues()），所以模板是唯一来源；这里点名断言防止死状态被塞回。
+    assert "roi_recovery" not in options
+    assert "recovery" not in options
+    assert len(options) == 9, options
 
+    # 点击循环：all → profit_to_loss → loss_expanding（第 2 次点击）。
     requests: list[str] = []
     page.on("request", lambda request: requests.append(request.url))
-    page.locator("#filter-state").select_option("loss_expanding")
+    button.click()
+    button.click()
     page.wait_for_timeout(200)
 
     last = [url for url in requests if ALERT_API in url][-1]
     assert "state=loss_expanding" in last, last
     assert "state=loss_expanding" in page.url, page.url
-    assert page.locator("#filter-state").input_value() == "loss_expanding"
+    assert button.inner_text() == "状态：loss_expanding"
+    assert button.get_attribute("aria-pressed") == "true"
+
+    # 再点 7 次回到 all，state 参数消失。
+    for _ in range(7):
+        button.click()
+    page.wait_for_timeout(200)
+    last = [url for url in requests if ALERT_API in url][-1]
+    assert "state=" not in last, last
+    assert "state=" not in page.url, page.url
+    assert button.inner_text() == "状态"
+    assert button.get_attribute("aria-pressed") == "false"
 
 
 def test_row_click_opens_summary_card_with_server_supplied_values(

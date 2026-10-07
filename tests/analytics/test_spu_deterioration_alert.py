@@ -233,9 +233,13 @@ _ALLOWED_STATES = ["all", *(state.value for state in AlertState)]
 
 
 def _template_state_options() -> list[str]:
+    """表头按钮的 data-state-values（不含 all；all 是 JS 侧循环起点，补上保持旧契约）。"""
     body = _TEMPLATE.read_text(encoding="utf-8")
-    block = body[body.index('id="filter-state"'): body.index('id="filter-severity"')]
-    return re.findall(r'<option value="([a-z_]+)"', block)
+    match = re.search(
+        r'<button[^>]*id="filter-state"[^>]*data-state-values="([^"]+)"', body
+    )
+    assert match, "filter-state 表头按钮必须带 data-state-values"
+    return ["all", *(v.strip() for v in match.group(1).split(",") if v.strip())]
 
 
 def _doc_bullet(prefix: str, doc: Path = _EXTERNAL_API_DOC) -> str:

@@ -332,7 +332,7 @@ runtime-config sidecar 的 `rollout`/`draftRollout` 只存在 mutation/history w
   §5 的 `spu_ids` wire 契约一致，不接受上游 `spu_id`），上限 100 与服务端一致。非法或超限输入**不静默放宽**为全 SPU：
   保持原 scope、把原因写进 `#filter-spu-feedback`、且不发请求。URL 回写用逗号串（与盈利页同一习惯），发 API 时展开为
   重复参数 `spu_ids=`。服务端 `totals` 仍按完整 scope 计算，因此 SPU scope 只收窄 `items`。
-- **state 下拉**：枚举只维护一处（模板 `<option>`），JS 从 DOM 读合法值，不在 JS 硬编码第二份清单。页面一次只发一个
+- **state 表头筛选**：状态下拉已移除（业务用户理解不了枚举码）；点击「状态」列表头在 `all → 各 state → all` 间循环。枚举只维护一处（模板 th 按钮的 `data-state-values`），JS 从 DOM 读合法值，不在 JS 硬编码第二份清单。页面一次只发一个
   `state=`；端点参数本身可重复（多值 OR），由 API 层测试固定。
 - **row click summary card**：点整行或行内「明细」按钮展开 `#alert-summary`，列出上期/本期 ROI、净利润、消耗、
   订单数、广告订单数、降幅、`state`、`sampleStatus`、`anchorDate`、`basisCalculatedAt`、`configSource`/`configVersion`

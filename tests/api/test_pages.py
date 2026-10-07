@@ -371,29 +371,35 @@ def test_spu_profit_deterioration_page_permission_gate(
     assert readonly_publish.status_code == 401, readonly_publish.text
 
 
-def test_spu_profit_deterioration_page_state_dropdown_matches_documented_enum(api_client, readonly_key):
-    """state 下拉的每个 option 都必须是被服务端接受的枚举值（design §6.1）。"""
+def test_spu_profit_deterioration_page_state_header_filter_matches_documented_enum(api_client, readonly_key):
+    """状态表头筛选的 data-state-values 必须与被服务端接受的枚举一致（design §6.1）。"""
     body = api_client.get(
         "/v2/pages/spu-profit-deterioration",
         headers={"Authorization": f"Bearer {readonly_key}"},
     ).text
-    options = re.findall(r'<option value="([a-z_]+)"', body)
     documented = [
-        "all",
         "profit_to_loss",
         "loss_expanding",
         "loss_to_profit",
         "roi_deterioration",
         "net_profit_deterioration",
-        "roi_recovery",
-        "recovery",
         "stable",
         "sample_insufficient",
         "unavailable",
     ]
-    state_block = body[body.index('id="filter-state"'): body.index('id="filter-severity"')]
-    assert re.findall(r'<option value="([a-z_]+)"', state_block) == documented
-    assert set(documented) <= set(options)
+    # 状态下拉已从工具条移除（owner 2026-10-08：业务用户理解不了枚举码）；
+    # 筛选入口是「状态」列表头按钮，枚举唯一来源是其 data-state-values。
+    assert '<select id="filter-state"' not in body
+    match = re.search(
+        r'<button[^>]*id="filter-state"[^>]*data-state-values="([^"]+)"', body
+    )
+    assert match, body[body.index('id="filter-state"') - 200: body.index('id="filter-state"') + 400]
+    state_values = [value.strip() for value in match.group(1).split(",") if value.strip()]
+    assert state_values == documented
+    # B-04：roi_recovery / recovery 在 _state() 中永不可达，枚举里没有它们。
+    # 点名断言（而不是靠上面的等值比较隐含），任何人把死状态加回模板都会在这里失败。
+    assert len(state_values) == 8, state_values
+    assert not {"roi_recovery", "recovery"} & set(state_values), state_values
 
 
 def test_spu_profit_deterioration_page_requires_some_auth(api_client):
