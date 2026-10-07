@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from fastapi import Request
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -16,6 +17,8 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishAttempt,
     VideoPublishTask,
 )
+
+pytestmark = [pytest.mark.domain_publishing]
 
 ROOT = Path(__file__).parents[2]
 

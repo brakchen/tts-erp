@@ -12,6 +12,8 @@ from tts_erp_v2.publishing.artemis_client import (
 )
 from tts_erp_v2.publishing.prompt import build_verify_prompt
 
+pytestmark = [pytest.mark.domain_publishing]
+
 
 @pytest.mark.asyncio
 async def test_adb_adapter_rejects_unmanaged_delete_path() -> None:

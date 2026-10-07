@@ -25,6 +25,7 @@ from tts_erp_v2.publishing.domain import (
     apply_cleanup_result,
     classify_failure,
     cleanup_retryable_resources,
+    replacement_cleanup_pending,
     set_task_stage,
 )
 from tts_erp_v2.publishing.observability import emit_publish_event
@@ -1646,9 +1647,26 @@ def schedule_retention_cleanup(
 def queue_task(
     session: Session, task: VideoPublishTask, *, delay_seconds: int = 0
 ) -> None:
+    # Read the cleanup state BEFORE mutating anything. Reading an expired
+    # attribute would emit a refresh SELECT whose autoflush persists the
+    # half-built row (status='pending' while stage is still 'done'), violating
+    # video_publish_task_status_stage_check. Hoisting the read keeps every
+    # autoflush on a still-valid row.
+    pending_cleanup = replacement_cleanup_pending(task)
     now = _db_now(session)
     task.status = TaskStatus.PENDING.value
-    task.cleanup_intent = CleanupIntent.NONE.value
+    # Keep an unresolved device/spool cleanup visible to the readiness gate.
+    # Writing 'none' here would erase this task's own cleanup marker, so
+    # has_pending_device_cleanup() and claim_one() would no longer see it and a
+    # second video could be staged onto a device that still holds the previous
+    # one. When nothing is outstanding the intent stays 'none' so the worker can
+    # lease the task immediately: a 'requeue_publish' row is only released back
+    # to 'none' by the cleanup worker, which never claims a clean row.
+    task.cleanup_intent = (
+        CleanupIntent.REQUEUE_PUBLISH.value
+        if pending_cleanup
+        else CleanupIntent.NONE.value
+    )
     task.cleanup_lease_owner = None
     task.cleanup_lease_expires_at = None
     task.cleanup_heartbeat_at = None

@@ -419,6 +419,9 @@ def retry_task(
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
     if object_cleanup_blocks_input(task):
         raise ValueError("OBJECT_CLEANUP_IN_PROGRESS")
+    # Device/spool cleanup does NOT block retry (design §10.7: failed（可重试）→
+    # 重试原任务). queue_task keeps the cleanup-gated marker so the readiness
+    # gate still holds the task until the cleanup drains.
     attempts = task.attempts or []
     latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
     if latest is None or latest.kind != "publish" or latest.retry_safe is not True:

@@ -66,6 +66,7 @@ markers = [
     "domain_sdk: SDK 自身测试 (miaoshou/endpoints/test_tools.py)",
     "domain_e2e: 需要 live :9877 服务的端到端 smoke",
     "domain_browser: 浏览器渲染回归（多视口溢出 / 字体栈），本分支渲染 + 本地静态服务，不需要 :9877，随 fast 跑",
+    "domain_publishing: 视频发布流水线 (publishing domain / repository / API 契约 / 前端脚本回归)",
     # Layer markers — orthogonal to domain.
     "layer_unit: pure helpers, no DB / no fixtures",
     "layer_integration: uses DB / fixtures / TestClient (default)",

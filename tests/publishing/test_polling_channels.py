@@ -3,6 +3,10 @@ from __future__ import annotations
 import subprocess
 import textwrap
 
+import pytest
+
+pytestmark = [pytest.mark.domain_publishing]
+
 
 def test_frontend_polling_channels_keep_independent_abort_state() -> None:
     script = (
@@ -173,7 +177,10 @@ def test_frontend_polling_channels_keep_independent_abort_state() -> None:
         await view.onclick();
         if (!created.some((node) => node.textContent === "full-artemis-session-id")) throw new Error("detail hid the full Artemis session ID");
         if (!created.some((node) => node.textContent.includes("正式发布"))) throw new Error("detail omitted localized attempt kind");
-        if (!created.some((node) => node.textContent.includes("清理：设备 succeeded"))) throw new Error("detail omitted cleanup sections");
+        // P2-15: the cleanup line must carry the localized status label, not the
+        // raw backend token ("succeeded"), which is the defect P2-15 reports.
+        if (!created.some((node) => node.textContent.includes("清理：设备 已清理"))) throw new Error("detail omitted cleanup sections or leaked a raw cleanup status token");
+        if (created.some((node) => /清理：设备 (succeeded|failed|pending|not_started)/.test(node.textContent))) throw new Error("detail leaked a raw cleanup status token to the operator");
         if (!created.some((node) => node.tagName === "SUMMARY" && node.textContent === "管理员诊断")) throw new Error("admin diagnostics were not folded");
         if (!created.some((node) => node.tagName === "PRE" && node.textContent.includes("SECRET_PROMPT"))) throw new Error("admin diagnostics were not rendered as text");
         const latestList = requests.filter((request) => request.method === "GET" && request.url.includes("/tasks") && !request.url.includes("/tasks/current") && !request.url.includes("/tasks/task-1")).at(-1);

@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.publishing.repository import request_verification
 
+pytestmark = [pytest.mark.domain_publishing]
+
 MIGRATION = (
     Path(__file__).parents[2] / "alembic/versions/0058_video_publish_cleanup_owner.py"
 )

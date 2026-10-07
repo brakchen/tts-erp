@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
@@ -16,7 +17,10 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishTask,
 )
 from tts_erp_v2.publishing.artemis_client import ArtemisClient, ArtemisTransportError
+from tts_erp_v2.publishing.domain import allowed_actions
 from tts_erp_v2.publishing.safe_values import mask_device_serial
+
+pytestmark = [pytest.mark.domain_publishing]
 
 
 class _UploadStore:
@@ -471,3 +475,191 @@ def test_devices_endpoint_proxies_artemis_and_fails_closed(
         assert unconfigured.json()["detail"]["code"] == "ARTEMIS_UNREACHABLE"
 
     app.dependency_overrides.clear()
+
+
+class _RetryStore:
+    """Object store where the uploaded object is still present."""
+
+    bucket = "tiktok-video"
+
+    def stat(self, key: str) -> dict:
+        return {"key": key, "size": 4}
+
+
+def _retry_client(db_session: Session) -> TestClient:
+    """Cookie-authed readwrite client whose user owns the created tasks.
+
+    ``raise_server_exceptions=False`` so an unhandled server-side exception
+    surfaces as a real HTTP 5xx instead of propagating out of the test.
+    """
+    app = FastAPI()
+    app.include_router(video_publish.router)
+
+    @app.middleware("http")
+    async def test_auth(request: Request, call_next):
+        request.scope["auth_method"] = "cookie"
+        request.scope["api_key_role"] = "readwrite"
+        request.scope["user_id"] = 1
+        return await call_next(request)
+
+    app.dependency_overrides[deps.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_store] = lambda: _RetryStore()
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _retryable_failed_task(*, device_cleanup_status: str) -> VideoPublishTask:
+    task = VideoPublishTask(
+        public_id=uuid4(),
+        client_request_id=uuid4(),
+        created_by_user_id=1,
+        caption="TEST_retry_caption",
+        original_filename="TEST_retry.mp4",
+        object_filename="TEST_retry.mp4",
+        content_type="video/mp4",
+        size_bytes=4,
+        object_bucket="tiktok-video",
+        object_key=f"TEST/http/{uuid4()}/video.mp4",
+        object_etag="TEST-retry-etag",
+        object_uploaded_at=datetime.now(UTC),
+        status="failed",
+        stage="done",
+        stage_started_at=datetime.now(UTC),
+        attempt_count=1,
+        publish_budget_used=1,
+        cleanup_intent="preserve_state",
+        target_device_serial="TEST_device",
+        target_app_package="com.test.http",
+        device_cleanup_status=device_cleanup_status,
+    )
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            artemis_session_id=uuid4(),
+            status="failed",
+            prompt_version="TEST_retry",
+            prompt_snapshot="TEST_retry prompt",
+            device_serial="TEST_device",
+            target_app_package="com.test.http",
+            artemis_profile="TEST_retry_non_default_profile",
+            artemis_verification_level="TEST_retry_non_default_verification",
+            retry_safe=True,
+        )
+    )
+    return task
+
+
+def test_retry_http_contract_requeues_when_device_cleanup_is_unfinished(
+    db_session: Session,
+) -> None:
+    """Batch 3A: ``POST /tasks/{id}/retry`` re-queues even while the device/spool
+    cleanup is still pending or failed.
+
+    Historically this write raised IntegrityError on
+    ``video_publish_task_cleanup_owner_check`` because the re-queue set
+    ``cleanup_intent='none'`` while the device row was still
+    pending/failed (that was the bare 500). ``queue_task`` now keeps the
+    cleanup-gated marker instead, so the row is valid *and* the readiness gate
+    can still see the task.
+    """
+    for cleanup_status in ("pending", "failed"):
+        task = _retryable_failed_task(device_cleanup_status=cleanup_status)
+        db_session.add(task)
+        db_session.commit()
+        task_id = task.public_id
+
+        with _retry_client(db_session) as client:
+            response = client.post(
+                f"/v2/video-publish/tasks/{task_id}/retry",
+                json={"rowVersion": task.row_version},
+                headers={"X-Requested-With": "tts-erp"},
+            )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "pending"
+        assert body["stage"] == "queued"
+
+        db_session.expire_all()
+        requeued = db_session.scalar(
+            select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
+        )
+        assert requeued.status == "pending"
+        assert requeued.stage == "queued"
+        # The gate must remain able to see this task...
+        assert requeued.cleanup_intent == "requeue_publish"
+        # ...and retry must not fake a clean device.
+        assert requeued.device_cleanup_status == cleanup_status
+        assert len(requeued.attempts) == 1
+        # The operator keeps a way to clear the cleanup itself.
+        assert ("retry_cleanup" in body["allowedActions"]) is (
+            cleanup_status == "failed"
+        )
+
+
+def test_retry_cleanup_http_contract_unblocks_after_device_cleanup_failure(
+    db_session: Session,
+) -> None:
+    """Positive control for the test above: with the same unfinished device
+    cleanup, ``cleanup/retry`` must still be offered and must still work, so the
+    publish retry is not a redirect through a dead end.
+    """
+    task = _retryable_failed_task(device_cleanup_status="failed")
+    db_session.add(task)
+    db_session.commit()
+    task_id = task.public_id
+
+    headers = {"X-Requested-With": "tts-erp"}
+    with _retry_client(db_session) as client:
+        requeued = client.post(
+            f"/v2/video-publish/tasks/{task_id}/retry",
+            json={"rowVersion": task.row_version},
+            headers=headers,
+        )
+        assert requeued.status_code == 200, requeued.text
+        body = requeued.json()
+        assert "retry_cleanup" in body["allowedActions"]
+
+        retried = client.post(
+            f"/v2/video-publish/tasks/{task_id}/cleanup/retry",
+            json={"resources": ["device"], "rowVersion": body["rowVersion"]},
+            headers=headers,
+        )
+        assert retried.status_code == 200, retried.text
+
+    db_session.expire_all()
+    reloaded = db_session.scalar(
+        select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
+    )
+    # cleanup/retry re-arms the failed cleanup as in-flight.
+    assert reloaded.device_cleanup_status == "pending"
+
+
+def test_retry_http_contract_requeues_when_no_cleanup_is_outstanding(
+    db_session: Session,
+) -> None:
+    """The healthy path is unchanged: a cleanly failed task still re-queues."""
+    task = _retryable_failed_task(device_cleanup_status="not_started")
+    task.cleanup_intent = "none"
+    db_session.add(task)
+    db_session.commit()
+    task_id = task.public_id
+
+    with _retry_client(db_session) as client:
+        response = client.post(
+            f"/v2/video-publish/tasks/{task_id}/retry",
+            json={"rowVersion": task.row_version},
+            headers={"X-Requested-With": "tts-erp"},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["stage"] == "queued"
+    db_session.expire_all()
+    requeued = db_session.scalar(
+        select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
+    )
+    assert requeued.status == "pending"
+    assert requeued.cleanup_intent == "none"

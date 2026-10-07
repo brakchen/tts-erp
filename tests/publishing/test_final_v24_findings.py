@@ -43,6 +43,8 @@ from tts_erp_v2.publishing.submission import (
 )
 from tts_erp_v2.storage.minio_client import ObjectNotFound
 
+pytestmark = [pytest.mark.domain_publishing]
+
 
 def _task(*, status: str = "running", stage: str = "downloading") -> VideoPublishTask:
     return VideoPublishTask(

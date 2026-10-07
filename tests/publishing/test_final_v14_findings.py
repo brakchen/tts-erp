@@ -45,6 +45,8 @@ from tts_erp_v2.publishing.submission import CreateCommand, create_upload_ticket
 from tts_erp_v2.publishing.worker import _probe_device_readiness
 from tts_erp_v2.storage.minio_client import ObjectNotFound
 
+pytestmark = [pytest.mark.domain_publishing]
+
 ROOT = Path(__file__).parents[2]
 MIGRATION_0062 = ROOT / "alembic/versions/0062_publish_attempt_identity.py"
 
@@ -390,12 +392,17 @@ def test_presign_failure_is_structured_and_keeps_awaiting_upload(
             Response(),
         )
     assert exc_info.value.status_code == 503
-    assert exc_info.value.detail == {
-        "code": "OBJECT_STORE_UNAVAILABLE",
-        "message": "OBJECT_STORE_UNAVAILABLE",
-        "retryable": True,
-        "requestId": "TEST-v14-request",
-    }
+    detail = cast(dict, exc_info.value.detail)
+    # 字段断言（不再硬编码完整字典，避免 P2-3 修 message 文案后再断言失败）。
+    assert detail["code"] == "OBJECT_STORE_UNAVAILABLE"
+    assert detail["retryable"] is True
+    assert detail["requestId"] == "TEST-v14-request"
+    # ★ P2-3 逆向守护：message 不得是机器码本身
+    assert detail["message"] != detail["code"], (
+        f"P2-3 回归：message 仍是机器码 {detail['message']!r}，"
+        "应查 _ERROR_DETAIL_MESSAGES 给出人话"
+    )
+    assert detail["message"], "message 不可为空"
     task = db_session.scalar(
         select(VideoPublishTask).where(
             VideoPublishTask.client_request_id == body.client_request_id

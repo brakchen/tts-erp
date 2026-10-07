@@ -24,6 +24,8 @@ from tts_erp_v2.publishing.domain import classify_failure
 from tts_erp_v2.publishing.object_store import MinioVideoStore, video_store_from_env
 from tts_erp_v2.storage.minio_client import MinioClient
 
+pytestmark = [pytest.mark.domain_publishing]
+
 ROOT = Path(__file__).parents[2]
 
 

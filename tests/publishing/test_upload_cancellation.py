@@ -3,6 +3,10 @@ from __future__ import annotations
 import subprocess
 import textwrap
 
+import pytest
+
+pytestmark = [pytest.mark.domain_publishing]
+
 
 def test_upload_cancellation_aborts_xhr_and_handles_terminal_and_failed_cancel() -> (
     None
