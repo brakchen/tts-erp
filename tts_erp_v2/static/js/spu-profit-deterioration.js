@@ -389,8 +389,10 @@
     els.totalRows.textContent = payload.total === null || payload.total === undefined ? '—' : String(payload.total);
     els.totalWarning.textContent = totals.warningCount === undefined ? '—' : String(totals.warningCount);
     els.totalCritical.textContent = totals.criticalCount === undefined ? '—' : String(totals.criticalCount);
-    els.totalInsufficient.textContent =
-      totals.insufficientSampleCount === undefined ? '—' : String(totals.insufficientSampleCount);
+    if (els.totalInsufficient) {
+      els.totalInsufficient.textContent =
+        totals.insufficientSampleCount === undefined ? '—' : String(totals.insufficientSampleCount);
+    }
     els.totalSpus.textContent = totals.shopSpuCount === undefined ? '—' : String(totals.shopSpuCount);
         // pi-lens-ignore: no-inner-html-js
     els.tfoot.innerHTML = `<tr class="alert-total-row">
