@@ -238,7 +238,7 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/gui
 | Dumps endpoints and HTTP envelopes | `docs/api/dumps-data-contract.md` |
 | TikTok signing | `docs/reference/tiktok-hmac-signing.md` |
 | External endpoints, roles, pagination, schemas | `docs/api/external-api.md` |
-| SPU profit-deterioration product, design, implementation, or tests | `spu-profit-deterioration/01-product-proposal.md`, then the matching numbered document in that directory |
+| SPU profit-deterioration product, design, implementation, or tests | `docs/spu-profit-deterioration/01-product-proposal.md`, then the matching numbered document in that directory |
 | Process/service architecture | `docs/architecture/process-architecture.md` |
 | Miaoshou integration | `docs/reference/miaoshou-platform.md` |
 | Known recurring failures | `docs/guides/common-bugs.md` |
