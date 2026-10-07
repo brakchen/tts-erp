@@ -449,9 +449,10 @@ def test_spu_profit_deterioration_page_assets_cover_all_documented_states():
     # 硬规则：浏览器不算业务公式、不硬编码 effective 阈值。
     for forbidden in ("roiReal", "net_profit =", "calculateRoi", "0.20", "0.40"):
         assert forbidden not in js, forbidden
-    # 非颜色告警信号：图标 + 徽章 + 行处理（斜纹背景、边框样式）。
+    # 非颜色告警信号：图标 + 徽章 + 行处理（纯色浅底、边框样式；不用斜纹）。
     assert "alert-icon" in js and "alert-badge" in js
-    assert "repeating-linear-gradient" in css
+    assert "--paper-warn-soft" in css and "--paper-danger-soft" in css
+    assert "repeating-linear-gradient" not in css
     assert ".alert-row--sample" in css and ".alert-card--sample" in css
     assert ".alert-row--unavailable" in css and ".alert-card--unavailable" in css
     assert "dashed var(--muted)" in css
