@@ -57,6 +57,8 @@ from tts_erp_v2.publishing.submission import confirm_upload, retry_task
 from tts_erp_v2.publishing.worker import _probe_device_readiness
 from tts_erp_v2.storage.minio_client import ObjectNotFound
 
+pytestmark = [pytest.mark.domain_publishing]
+
 
 def _factory(db_session: Session):
     def factory():
@@ -476,14 +478,19 @@ def test_stateful_error_envelope_has_request_and_retry_contract(
         )
     assert exc_info.value.status_code == 409
     detail = cast(dict, exc_info.value.detail)
-    assert detail == {
-        "code": "TASK_ACTION_NOT_ALLOWED",
-        "message": "TASK_ACTION_NOT_ALLOWED",
-        "retryable": False,
-        "requestId": "TEST-request-id",
-        "rowVersion": task.row_version,
-        "allowedActions": ["view", "cancel"],
-    }
+    # 字段断言（不再硬编码完整字典，避免 P2-3 修 message 文案后再断言失败）。
+    # 必填字段
+    assert detail["code"] == "TASK_ACTION_NOT_ALLOWED"
+    assert detail["retryable"] is False
+    assert detail["requestId"] == "TEST-request-id"
+    assert detail["rowVersion"] == task.row_version
+    assert detail["allowedActions"] == ["view", "cancel"]
+    # ★ P2-3 逆向守护：message 不得是机器码本身（之前透出 "TASK_ACTION_NOT_ALLOWED" 是 bug）
+    assert detail["message"] != detail["code"], (
+        f"P2-3 回归：message 仍是机器码 {detail['message']!r}，"
+        "应查 _ERROR_DETAIL_MESSAGES 给出人话"
+    )
+    assert detail["message"], "message 不可为空"
 
 
 def test_user_verification_is_immediately_claimable(db_session: Session) -> None:

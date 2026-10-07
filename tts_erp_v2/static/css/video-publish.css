@@ -2,3 +2,45 @@
 @media(min-width:721px) and (max-width:900px){.publish-main{padding:20px}.publish-workbench{grid-template-columns:minmax(0,3fr) minmax(260px,2fr);gap:18px}.publish-rail-section,.publish-workbench,.publish-history{padding:18px}#publish-task-drawer{width:min(560px,72vw)}}
 @media(max-width:390px){.publish-main{padding:12px}.publish-rail-section,.publish-workbench,.publish-history{padding:12px}.history-toolbar>div{align-items:stretch}.history-toolbar select,.history-toolbar button{width:100%}#publish-task-drawer{padding:18px;width:100vw}.filter-tabs button{flex:1 1 42%}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+#publish-device-select{width:100%;max-width:28rem;margin-top:6px;border:1px solid var(--rule);border-radius:var(--radius);background:var(--paper);color:var(--ink);padding:9px;font-family:var(--sans)}
+/* 确认类 dialog（提交确认 / 任务操作确认）的内部排版。
+   表面、遮罩、标题层级已由 common.css 的 .op-dialog 统一提供（两个 dialog 都带
+   class="op-dialog"）；原生 <dialog> 的 UA 默认样式不消费本站令牌，所以本页只补
+   自己特有的部分：长文案可滚、两列动作行、文件/文案/设备网格。 */
+#publish-confirm-dialog,#publish-action-dialog{max-height:calc(100vh - 48px);overflow:auto}
+#publish-confirm-dialog>form,#publish-action-dialog>form{display:grid;grid-template-columns:1fr auto;column-gap:10px;margin:0}
+#publish-confirm-dialog h2,#publish-action-dialog h2{grid-column:1/-1;line-height:1.35}
+#publish-confirm-preview{grid-column:1/-1;max-width:100%;max-height:220px;margin:12px 0 0;background:var(--ink)}
+.publish-confirm-warning{grid-column:1/-1;margin:12px 0 0;color:var(--muted);font-size:13px;line-height:1.6}
+#publish-confirm-dialog dl{grid-column:1/-1;display:grid;grid-template-columns:80px 1fr;gap:6px 10px;margin:14px 0 0;font-size:14px}
+#publish-confirm-dialog dt{color:var(--muted);font-family:var(--mono);font-size:12px}
+#publish-confirm-dialog dd{margin:0;overflow-wrap:anywhere}
+#publish-confirm-dialog button:first-of-type,#publish-action-dialog button:first-of-type{grid-column:1;justify-self:start;margin-top:20px}
+#publish-confirm-dialog button:last-of-type,#publish-action-dialog button:last-of-type{grid-column:2;justify-self:end;margin-top:20px}
+@media(max-width:720px){#publish-confirm-dialog,#publish-action-dialog{padding:18px 16px}#publish-confirm-dialog button:first-of-type,#publish-action-dialog button:first-of-type,#publish-confirm-dialog button:last-of-type,#publish-action-dialog button:last-of-type{min-height:44px}}
+/* ── Wave 2 Batch 2D ──────────────────────────────────────────────────────
+   只改本页样式：common.css / shops.html 是共享组件，本轮不动。 */
+/* P2-4 长文案/长文件名撑爆布局：.artemis-cell 与 .publish-summary dd 早已声明
+   overflow-wrap:anywhere，唯独表格 td 漏了；桌面端再给文案列封顶。 */
+.op-table td{overflow-wrap:anywhere}
+@media(min-width:721px){.op-table td:nth-child(3){max-width:22rem}}
+/* P2-5 移动端卡片态的 :before 标签是 72px 定宽块；属性缺失时用 :not() 兜底隐藏。 */
+.op-table td:not([data-label]):before{display:none}
+/* P2-6 目标设备：给 select 预留高度，/devices 返回时不再产生 63px 位移。 */
+#publish-device-select{min-height:38px}
+/* P2-7 四个状态文本此前没有任何页面级规则，吃 16px 正文黑；对齐本页既有的
+   mono/12px/muted 家族。write-status 是唯一的阻塞说明，单独用 danger 并预留
+   一行高度，出没不再推动下方按钮。 */
+#publish-write-status,#publish-rail-meta,#publish-last-refreshed,#publish-refresh-status{font-family:var(--mono);font-size:12px;color:var(--muted)}
+#publish-write-status{min-height:18px;color:var(--danger)}
+/* P2-9 UA 的 dialog{max-width:calc(100% - 6px - 2em)} 让抽屉右侧恒漏 38px；
+   本页已重置 max-height，这里补上宽度方向。 */
+#publish-task-drawer{max-width:100vw}
+/* P2-17 drawer 不是 .op-dialog，h2/dl 吃 UA 默认（32px 纯黑 sans、dl 退化为
+   block），这里补与 .publish-summary 一致的排版令牌。 */
+#publish-drawer-content h2{font-family:var(--serif);font-size:20px;color:var(--ink);margin:0 0 16px}
+#publish-drawer-content dl{display:grid;grid-template-columns:80px 1fr;gap:6px 10px;margin:16px 0 0;font-size:14px}
+#publish-drawer-content dt{color:var(--muted);font-family:var(--mono);font-size:12px}
+#publish-drawer-content dd{margin:0;overflow-wrap:anywhere}
+/* P2-18 Artemis ID 单元格里的 <code> 命中 Bootstrap 默认 10.5px 粉红。 */
+.artemis-cell code{font:inherit;color:inherit}

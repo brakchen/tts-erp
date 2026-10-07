@@ -82,30 +82,6 @@
             <button type="button" class="op-window-tab" data-window-days="7" aria-pressed="false">7 天</button>
           </div>
         </div>
-        <label class="op-filter" for="filter-layer">
-          <span class="op-fld-label">层级</span>
-          <select id="filter-layer" class="form-select form-select-sm" aria-label="计算层级">
-            <option value="all" selected>全部</option>
-            <option value="fast">快层 fast</option>
-            <option value="confirmation">确认层 confirmation</option>
-          </select>
-        </label>
-        <label class="op-filter" for="filter-state">
-          <span class="op-fld-label">状态 state</span>
-          <select id="filter-state" class="form-select form-select-sm" aria-label="告警状态 state">
-            <option value="all" selected>全部</option>
-            <option value="profit_to_loss">profit_to_loss（盈利转亏损）</option>
-            <option value="loss_expanding">loss_expanding（亏损扩大）</option>
-            <option value="loss_to_profit">loss_to_profit（亏损转盈利）</option>
-            <option value="roi_deterioration">roi_deterioration（ROI 劣化）</option>
-            <option value="net_profit_deterioration">net_profit_deterioration（净利润劣化）</option>
-            <option value="roi_recovery">roi_recovery（ROI 回升）</option>
-            <option value="recovery">recovery（恢复）</option>
-            <option value="stable">stable（稳定）</option>
-            <option value="sample_insufficient">sample_insufficient（样本不足）</option>
-            <option value="unavailable">unavailable（数据不可用）</option>
-          </select>
-        </label>
         <label class="op-filter" for="filter-severity">
           <span class="op-fld-label">严重度</span>
           <select id="filter-severity" class="form-select form-select-sm" aria-label="严重度">
@@ -115,18 +91,14 @@
             <option value="critical">critical（严重告警）</option>
           </select>
         </label>
-        <label class="op-filter" for="filter-sample">
-          <span class="op-fld-label">样本</span>
-          <select id="filter-sample" class="form-select form-select-sm" aria-label="样本状态">
-            <option value="all" selected>全部</option>
-            <option value="sufficient">sufficient（样本充足）</option>
-            <option value="sample_insufficient">sample_insufficient（样本不足）</option>
-            <option value="unavailable">unavailable（数据不可用）</option>
-          </select>
-        </label>
         <label class="op-filter" for="filter-anchor-date">
           <span class="op-fld-label">Anchor 日期</span>
           <input id="filter-anchor-date" type="date" class="form-control form-control-sm" aria-label="Anchor 日期（空 = 最新物化 anchor）">
+        </label>
+        <label class="op-filter op-filter--check" for="filter-activity">
+          <input id="filter-activity" type="checkbox" class="form-check-input" checked
+            aria-label="仅看近 14 天出单大于 3 单的 SPU（取消勾选 = 查看全部 SPU）">
+          <span class="op-fld-label">仅看近 14 天出单大于 3 单</span>
         </label>
         <button type="button" class="btn-secondary" id="btn-refresh">刷新</button>
       </div>
@@ -139,11 +111,10 @@
 
     <!-- 全量 totals（服务端按完整 scope 计算）。 -->
     <section class="alert-totals" id="alert-totals" aria-label="全量统计">
-      <span class="alert-totals__item">全部行 <strong class="mono" id="total-rows">—</strong></span>
-      <span class="alert-totals__item" data-kind="warning">告警 <strong class="mono" id="total-warning">—</strong></span>
-      <span class="alert-totals__item" data-kind="critical">严重告警 <strong class="mono" id="total-critical">—</strong></span>
-      <span class="alert-totals__item" data-kind="sample">样本不足 / 不可用 <strong class="mono" id="total-insufficient">—</strong></span>
-      <span class="alert-totals__item">涉及 SPU <strong class="mono" id="total-spus">—</strong></span>
+      <span class="alert-totals__item">全部订单 <strong class="mono" id="total-rows">—</strong></span>
+      <span class="alert-totals__item" data-kind="warning">告警SPU <strong class="mono" id="total-warning">—</strong></span>
+      <span class="alert-totals__item" data-kind="critical">严重告警SPU <strong class="mono" id="total-critical">—</strong></span>
+      <span class="alert-totals__item">SPU <strong class="mono" id="total-spus">—</strong></span>
     </section>
 
     <!-- 结果状态面板：loading / empty / sample / unavailable / stale / disabled / error -->
@@ -167,10 +138,14 @@
       <table class="op-table alert-table" id="alert-table" aria-label="SPU 利润劣化告警明细">
         <thead>
           <tr>
-            <th class="op-th" scope="col">状态</th>
+            <th class="op-th" scope="col">
+              <!-- 状态枚举唯一来源：data-state-values（JS 从这里读合法值，不硬编码第二份）。点击循环 all → 各 state → all。 -->
+              <button type="button" id="filter-state" class="op-th-filter"
+                data-state-values="profit_to_loss,loss_expanding,loss_to_profit,roi_deterioration,net_profit_deterioration,stable,sample_insufficient,unavailable"
+                aria-label="状态筛选：点击循环切换" aria-pressed="false">状态</button>
+            </th>
             <th class="op-th" scope="col">SPU</th>
             <th class="op-th" scope="col">窗口</th>
-            <th class="op-th" scope="col">层级</th>
             <th class="op-th" scope="col">样本</th>
             <th class="op-th" scope="col">上期 ROI</th>
             <th class="op-th" scope="col">本期 ROI</th>
@@ -241,11 +216,6 @@
           <button type="button" class="btn-secondary" id="btn-load-backtest">载入回测暂定</button>
           <span class="op-scope-note" id="drawer-action-note"></span>
         </div>
-        <p class="op-scope-note mb-2">
-          单位：<code>roiAbsDelta</code> 为 ROI 绝对差，<code>roiRelativeDecline</code>/<code>netProfitDecline</code>
-          为 0..1 比例，<code>minSpendCny</code> 为 CNY，<code>minOrders</code>/<code>minAdOrders</code> 为整数。
-          保存草稿与发布都由现有运行配置端点校验；本页不复制阈值公式。
-        </p>
         <div id="drawer-thresholds"></div>
       </section>
 

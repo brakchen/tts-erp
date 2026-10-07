@@ -40,6 +40,8 @@ from tts_erp_v2.publishing.submission import (
     replace_upload,
 )
 
+pytestmark = [pytest.mark.domain_publishing]
+
 ROOT = Path(__file__).parents[2]
 
 

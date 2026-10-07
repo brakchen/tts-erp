@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from tts_erp_v2.publishing.domain import (
     TaskStage,
     TaskStatus,
@@ -9,6 +11,8 @@ from tts_erp_v2.publishing.domain import (
     classify_failure,
 )
 from tts_erp_v2.publishing.prompt import build_publish_prompt, build_verify_prompt
+
+pytestmark = [pytest.mark.domain_publishing]
 
 
 def test_ambiguous_publish_requires_verification() -> None:

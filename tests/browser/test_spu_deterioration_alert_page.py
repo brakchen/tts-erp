@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import re
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -78,6 +80,7 @@ def _item(**overrides: Any) -> dict[str, Any]:
     item: dict[str, Any] = {
         "shopPk": 7,
         "spuPk": 1001,
+        "spuId": "TEST-BIZ-SPU-1001",
         "windowDays": 3,
         "layer": "fast",
         "severity": "warning",
@@ -103,7 +106,7 @@ def _item(**overrides: Any) -> dict[str, Any]:
         "warningCode": "ROI_AND_NET_PROFIT_DETERIORATED",
         "warningText": "实际 ROI 与净利润比较恶化；请查看利润构成与订单/售后证据。",
         "drilldown": {
-            "profitabilityUrl": "/v2/analytics/spu-roi?shop_pk=7&spu_pk=1001",
+            "profitabilityUrl": "/v2/analytics/spu-roi?shop_pk=7&spu_ids=1001",
             "pageUrl": "/v2/pages/spu-roi",
         },
     }
@@ -111,7 +114,13 @@ def _item(**overrides: Any) -> dict[str, Any]:
     return item
 
 
-def _payload(items: list[dict[str, Any]], **overrides: Any) -> dict[str, Any]:
+def _payload(
+    items: list[dict[str, Any]],
+    *,
+    total: int | None = None,
+    scope_total: int | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
     meta: dict[str, Any] = {
         "requestId": "TEST-request-id",
         "enabled": True,
@@ -155,10 +164,12 @@ def _payload(items: list[dict[str, Any]], **overrides: Any) -> dict[str, Any]:
         "criticalCount": sum(item["severity"] == "critical" for item in items),
         "insufficientSampleCount": sum(item["sampleStatus"] != "sufficient" for item in items),
         "shopSpuCount": len({item["spuPk"] for item in items}),
+        # scope-wide 行数（完整 scope，不是过滤后命中数）；与分页用的 total 分开。
+        "scopeTotal": len(items) if scope_total is None else scope_total,
     }
     return {
         "items": items,
-        "total": len(items),
+        "total": len(items) if total is None else total,
         "totals": severity_counts,
         "meta": meta,
     }
@@ -187,11 +198,28 @@ class _Mock:
         self.malformed = False
         self.first_load_gate: threading.Event | None = None
         self.alert_calls = 0
+        # 可选：把 filtered total 与 scope-wide scopeTotal 分离（B-02 回归用）。
+        self.total: int | None = None
+        self.scope_total: int | None = None
+        # 可选：让载荷的 windowDays 随请求的 window_days 改变（B-10 乱序响应用）。
+        self.tag_window = False
 
     def payload(self, query: str) -> dict[str, Any]:
         if self.malformed:
             return {"detail": "materialized alert snapshot is unavailable"}
-        return copy.deepcopy(_payload(self.items, **self.meta_overrides))
+        items = self.items
+        if self.tag_window:
+            match = re.search(r"window_days=(\d+)", query or "")
+            if match:
+                items = [dict(item, windowDays=int(match.group(1))) for item in self.items]
+        return copy.deepcopy(
+            _payload(
+                items,
+                total=self.total,
+                scope_total=self.scope_total,
+                **self.meta_overrides,
+            )
+        )
 
 
 def _patch_mock(monkeypatch: pytest.MonkeyPatch, mock: _Mock) -> None:
@@ -355,14 +383,17 @@ def test_warning_rows_cards_and_banner_use_text_icon_and_treatment(
         assert icon.get_attribute("role") == "img"
         assert icon.get_attribute("aria-label") == label
         assert icon.inner_text().strip() != ""
-        # 行处理：彩色只是辅助，非颜色信号是左边框样式 + 背景纹理。
+        # 行处理：彩色只是辅助，非颜色信号是左边框样式 + 纯色浅底
+        # （斜纹已移除——密集行噪点太重，见 e85d616 与 css 头注）。
         treatment = row.evaluate(
             "el => { const cs = getComputedStyle(el.firstElementChild);"
+            " const bg = getComputedStyle(el);"
             " return {width: cs.borderLeftWidth, style: cs.borderLeftStyle,"
-            " image: getComputedStyle(el).backgroundImage}; }"
+            " color: bg.backgroundColor, image: bg.backgroundImage}; }"
         )
         assert treatment["width"] != "0px"
-        assert treatment["image"] != "none"
+        assert treatment["image"] == "none"
+        assert treatment["color"] not in ("rgba(0, 0, 0, 0)", "transparent")
         assert label in row.inner_text()
 
     assert critical.locator(".alert-badge").first.inner_text().startswith("严重告警")
@@ -377,8 +408,8 @@ def test_warning_rows_cards_and_banner_use_text_icon_and_treatment(
     # 样本不足 / 不可用绝不能与健康稳定行同形。
     assert sample.get_attribute("data-sample") == "sample_insufficient"
     assert stable.locator(".alert-badge").first.inner_text().startswith("无告警")
-    sample_treatment = sample.evaluate("el => getComputedStyle(el).backgroundImage")
-    stable_treatment = stable.evaluate("el => getComputedStyle(el).backgroundImage")
+    sample_treatment = sample.evaluate("el => getComputedStyle(el).backgroundColor")
+    stable_treatment = stable.evaluate("el => getComputedStyle(el).backgroundColor")
     assert sample_treatment != stable_treatment
 
     # 空值必须显示为「—」，不能变成 0。
@@ -413,11 +444,7 @@ def test_filters_are_sent_to_the_api_and_round_trip_through_the_url(
 
     page.locator("#filter-window-days button[data-window-days='7']").click()
     page.wait_for_timeout(150)
-    page.locator("#filter-layer").select_option("fast")
-    page.wait_for_timeout(150)
     page.locator("#filter-severity").select_option("warning")
-    page.wait_for_timeout(150)
-    page.locator("#filter-sample").select_option("unavailable")
     page.wait_for_timeout(150)
     page.locator("#filter-anchor-date").fill(_ANCHOR)
     page.wait_for_timeout(400)
@@ -428,19 +455,62 @@ def test_filters_are_sent_to_the_api_and_round_trip_through_the_url(
     for expected in (
         "shop_pk=7",
         "window_days=7",
-        "layer=fast",
+        "layer=confirmation",
         "severity=warning",
-        "sample=unavailable",
+        "sample=sufficient",
         f"anchor_date={_ANCHOR}",
     ):
         assert expected in last, (expected, last)
 
     # 同一份筛选写回 URL，并在页面上可见（刷新后仍可复现）。
     assert "window_days=7" in page.url
-    assert "sample=unavailable" in page.url
+    assert "sample=sufficient" in page.url
     assert page.locator("#filter-echo").inner_text().count("window_days=7") == 1
     assert page.locator("#filter-window-days button[aria-pressed='true']").inner_text().strip() == "7 天"
-    assert page.locator("#filter-sample").input_value() == "unavailable"
+    # owner 2026-10-07：样本下拉框已移除（业务用户理解不了样本概念），
+    # 页面默认只查 sufficient（可判定行）；URL ?sample= 保留为排查入口，见下方专项测试。
+    assert page.locator("#filter-sample").count() == 0
+    # owner 2026-10-07：层级下拉框已移除（业务理解不了 fast/confirmation），
+    # 页面默认只查 confirmation（确认层）；快层走 ?layer=fast 排查，见下方专项测试。
+    assert page.locator("#filter-layer").count() == 0
+
+
+def test_layer_filter_is_still_reachable_via_url(
+    browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """URL ?layer= 保留为排查入口：显式给 fast 时必须透传到 API 并写回 URL。"""
+    _patch_mock(monkeypatch, _Mock())
+    page = browser_renderer.open(f"{ALERT_PAGE}?layer=fast")
+    page.wait_for_selector("#alert-rows tr[data-kind]", timeout=10_000)
+    requests: list[str] = []
+    page.on("request", lambda request: requests.append(request.url))
+
+    page.locator("#btn-refresh").click()
+    page.wait_for_timeout(400)
+
+    alert_requests = [url for url in requests if ALERT_API in url]
+    assert alert_requests
+    assert "layer=fast" in alert_requests[-1], alert_requests[-1]
+    assert "layer=fast" in page.url
+
+
+def test_sample_filter_is_still_reachable_via_url(
+    browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """URL ?sample= 保留为排查入口：显式给 unavailable 时必须透传到 API 并写回 URL。"""
+    _patch_mock(monkeypatch, _Mock())
+    page = browser_renderer.open(f"{ALERT_PAGE}?sample=unavailable")
+    page.wait_for_selector("#alert-rows tr[data-kind]", timeout=10_000)
+    requests: list[str] = []
+    page.on("request", lambda request: requests.append(request.url))
+
+    page.locator("#btn-refresh").click()
+    page.wait_for_timeout(400)
+
+    alert_requests = [url for url in requests if ALERT_API in url]
+    assert alert_requests
+    assert "sample=unavailable" in alert_requests[-1], alert_requests[-1]
+    assert "sample=unavailable" in page.url
 
 
 def test_loading_state_is_announced_while_refetching(
@@ -467,13 +537,16 @@ def test_loading_state_is_announced_while_refetching(
 def test_empty_sample_unavailable_stale_and_disabled_states_are_readable(
     browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # B-02 case (a)：scope-wide === 0 → 该 anchor 没有数据（不是「没有达到阈值」）。
     empty = _Mock()
     empty.items = []
+    empty.scope_total = 0
     page = _open(browser_renderer, empty, monkeypatch, expect_rows=False)
     assert page.locator("#alert-rows tr[data-kind]").count() == 0
-    assert "没有达到阈值的告警" in page.locator("#alert-status").inner_text()
+    assert "该 anchor 没有数据" in page.locator("#alert-status").inner_text()
     assert page.locator("#alert-status").get_attribute("data-kind") == "ok"
-    assert "已检查" in page.locator("#alert-banner").inner_text()
+    # 「已检查 N 行」是 scope-wide 计数（这里 0）。
+    assert "已检查 0 行" in page.locator("#alert-banner").inner_text()
 
     sample_only = _Mock()
     sample_only.items = [
@@ -548,10 +621,16 @@ def test_drilldown_links_use_server_supplied_urls(
     drill = page.locator("#alert-rows a[data-role='drilldown']").first
     assert drill.is_visible()
     assert "查看利润详情" in drill.inner_text()
-    assert drill.get_attribute("href") == "/v2/pages/spu-roi?shop_pk=7&spu_pk=1001"
+    # B-03：目标页 /v2/analytics/spu-roi 只认 spu_ids（逗号串），不认 spu_pk。
+    # 写成 spu_pk 会被静默忽略，CTA 就落到全量列表而不是该 SPU。
+    drill_href = drill.get_attribute("href") or ""
+    assert drill_href == "/v2/pages/spu-roi?shop_pk=7&spu_ids=1001"
+    assert "spu_pk=" not in drill_href, drill_href
     raw = page.locator("#alert-rows a[data-role='drilldown-json']").first
     assert raw.is_visible()
-    assert raw.get_attribute("href") == "/v2/analytics/spu-roi?shop_pk=7&spu_pk=1001"
+    raw_href = raw.get_attribute("href") or ""
+    assert raw_href == "/v2/analytics/spu-roi?shop_pk=7&spu_ids=1001"
+    assert "spu_pk=" not in raw_href, raw_href
     assert "alert-drill--secondary" in (raw.get_attribute("class") or "")
 
 
@@ -560,11 +639,11 @@ def test_drilldown_falls_back_to_json_when_server_omits_page_url(
 ) -> None:
     """服务端不下发 pageUrl 时主 CTA 退回 JSON 端点，而不是给一个死链。"""
     mock = _Mock()
-    mock.items = [_item(drilldown={"profitabilityUrl": "/v2/analytics/spu-roi?shop_pk=7&spu_pk=1001"})]
+    mock.items = [_item(drilldown={"profitabilityUrl": "/v2/analytics/spu-roi?shop_pk=7&spu_ids=1001"})]
     page = _open(browser_renderer, mock, monkeypatch)
 
     drill = page.locator("#alert-rows a[data-role='drilldown']").first
-    assert drill.get_attribute("href") == "/v2/analytics/spu-roi?shop_pk=7&spu_pk=1001"
+    assert drill.get_attribute("href") == "/v2/analytics/spu-roi?shop_pk=7&spu_ids=1001"
     assert drill.get_attribute("data-role-target") == "json"
     assert page.locator("#alert-rows a[data-role='drilldown-json']").count() == 0
 
@@ -610,13 +689,15 @@ def test_spu_scope_filter_sends_ids_round_trips_and_never_widens_silently(
     assert page.locator("#filter-spu-ids").input_value() == "1001,1002"
 
 
-def test_state_dropdown_covers_documented_enum_and_is_sent_as_state_param(
+def test_state_header_filter_covers_documented_enum_and_is_sent_as_state_param(
     browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """状态下拉已移除；点击「状态」列表头循环筛选，合法值只读 data-state-values。"""
     page = _open(browser_renderer, _Mock(), monkeypatch)
-    options = page.eval_on_selector_all(
-        "#filter-state option", "els => els.map(el => el.value)"
-    )
+    button = page.locator("#filter-state")
+    values = button.get_attribute("data-state-values")
+    assert values is not None
+    options = ["all"] + [v.strip() for v in values.split(",") if v.strip()]
     assert options == [
         "all",
         "profit_to_loss",
@@ -624,22 +705,38 @@ def test_state_dropdown_covers_documented_enum_and_is_sent_as_state_param(
         "loss_to_profit",
         "roi_deterioration",
         "net_profit_deterioration",
-        "roi_recovery",
-        "recovery",
         "stable",
         "sample_insufficient",
         "unavailable",
     ]
+    # B-04：两个死状态已被删除。JS 的合法值只从 data-state-values 读
+    # （alertStateValues()），所以模板是唯一来源；这里点名断言防止死状态被塞回。
+    assert "roi_recovery" not in options
+    assert "recovery" not in options
+    assert len(options) == 9, options
 
+    # 点击循环：all → profit_to_loss → loss_expanding（第 2 次点击）。
     requests: list[str] = []
     page.on("request", lambda request: requests.append(request.url))
-    page.locator("#filter-state").select_option("loss_expanding")
+    button.click()
+    button.click()
     page.wait_for_timeout(200)
 
     last = [url for url in requests if ALERT_API in url][-1]
     assert "state=loss_expanding" in last, last
     assert "state=loss_expanding" in page.url, page.url
-    assert page.locator("#filter-state").input_value() == "loss_expanding"
+    assert button.inner_text() == "状态：loss_expanding"
+    assert button.get_attribute("aria-pressed") == "true"
+
+    # 再点 7 次回到 all，state 参数消失。
+    for _ in range(7):
+        button.click()
+    page.wait_for_timeout(200)
+    last = [url for url in requests if ALERT_API in url][-1]
+    assert "state=" not in last, last
+    assert "state=" not in page.url, page.url
+    assert button.inner_text() == "状态"
+    assert button.get_attribute("aria-pressed") == "false"
 
 
 def test_row_click_opens_summary_card_with_server_supplied_values(
@@ -655,9 +752,8 @@ def test_row_click_opens_summary_card_with_server_supplied_values(
     text = summary.inner_text()
     for expected in (
         "shop_pk #7",
-        "SPU #1001",
+        "SPU TEST-BIZ-SPU-1001",
         "3 天",
-        "fast",
         "roi_deterioration",
         "warning",
         "sufficient",
@@ -667,24 +763,26 @@ def test_row_click_opens_summary_card_with_server_supplied_values(
         "ROI_AND_NET_PROFIT_DETERIORATED",
     ):
         assert expected in text, (expected, text)
+    # 差异对比表：指标 | 上期 | 本期 | 变化（owner 2026-10-07 重排）。
     for label in (
-        "上期 ROI",
-        "本期 ROI",
-        "ROI 降幅",
-        "上期净利润(CNY)",
-        "本期净利润(CNY)",
-        "净利润降幅",
-        "上期消耗(CNY)",
-        "本期消耗(CNY)",
-        "上期订单数",
-        "本期订单数",
-        "上期广告订单数",
-        "本期广告订单数",
+        "指标",
+        "上期",
+        "本期",
+        "变化",
+        "ROI",
+        "净利润 (CNY)",
+        "消耗 (CNY)",
+        "订单数",
+        "广告订单数",
     ):
         assert label in text, label
-    assert summary.locator("dd").count() == 12
-    # 值是照抄服务端的 Decimal wire string，浏览器不重算。
-    assert "1.1200" in text and "0.8400" in text and "0.2500" in text
+    assert summary.locator(".alert-compare tbody tr").count() == 5
+    # 上期/本期照抄服务端的 Decimal wire string，浏览器不重算。
+    assert "1.1200" in text and "0.8400" in text
+    # 变化列：绝对差 + 百分比，降 = 恶化（红）。
+    assert "↓ -0.28（-25.0%）" in text
+    assert "↓ -130.00（-31.0%）" in text
+    assert summary.locator(".alert-compare .delta--down").count() >= 2
     assert summary.get_attribute("data-spu-pk") == "1001"
     assert summary.get_attribute("data-shop-pk") == "7"
     assert (
@@ -702,7 +800,7 @@ def test_row_click_opens_summary_card_with_server_supplied_values(
     # 键盘用户可用行内按钮展开（表格语义不靠 role=button 破坏）。
     page.locator("#alert-rows [data-role='row-summary']").first.click()
     page.wait_for_selector("#alert-summary:not([hidden])", timeout=5_000)
-    assert "SPU #1001" in page.locator("#alert-summary").inner_text()
+    assert "SPU TEST-BIZ-SPU-1001" in page.locator("#alert-summary").inner_text()
 
 
 def test_freshness_prompt_reports_snapshot_time_and_announced_update(
@@ -788,6 +886,75 @@ def test_readonly_session_sees_disabled_inputs_and_runtime_link(
     # readonly 不调用 readwrite-only 的运行配置端点。
     assert not [url for url in requests if "/v2/config/runtime/items" in url]
     assert "只读会话" in page.locator("#drawer-form-status").inner_text()
+
+
+def test_threshold_drawer_units_collapse_and_sync(
+    browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """owner 2026-10-07 阈值抽屉改版：字段标单位、删顶部废话、3/7 天默认收起、一键同步。"""
+    mock = _Mock()
+    _patch_mock(monkeypatch, mock)
+    page = browser_renderer.open(ALERT_PAGE)
+    page.wait_for_selector("#alert-rows tr[data-kind]", timeout=10_000)
+
+    page.locator("#btn-settings").click()
+    page.wait_for_selector("#settings-drawer[open]", timeout=5_000)
+    page.wait_for_selector("#drawer-thresholds .op-threshold-input", timeout=10_000)
+    drawer = page.locator("#settings-drawer")
+    text = drawer.inner_text()
+
+    # 1) 每个字段直接标单位；顶部“单位：roiAbsDelta 为 …”说明段已删除。
+    assert "比例 0–1" in text
+    assert "元（CNY）" in text
+    assert "单（整数）" in text
+    assert "roiAbsDelta 为 ROI 绝对差" not in text
+
+    # 2) 窗口默认只展开 1 天；3/7 天收起、点击才展示。
+    assert drawer.locator("details.op-threshold-window").count() == 6  # 2 层 × 3 窗口
+    opened_titles = drawer.locator(
+        "details.op-threshold-window[open] summary"
+    ).all_inner_texts()
+    assert opened_titles == ["窗口 1 天", "窗口 1 天"]
+    win3_summary = drawer.locator(
+        "summary.op-threshold-window__title", has_text="窗口 3 天"
+    ).first
+    assert win3_summary.locator("xpath=..").get_attribute("open") is None
+    win3_summary.click()
+    assert win3_summary.locator("xpath=..").get_attribute("open") is not None
+
+    # 3) 一键同步：默认勾选「含确认层」，点击后同级别其他窗口全部同值。
+    src = '[data-path="fast.1.warning.roiAbsDelta"]'
+    drawer.locator(src).fill("0.55")
+    sync_btn = drawer.locator(
+        '[data-role="sync-group"][data-layer="fast"][data-days="1"][data-severity="warning"]'
+    )
+    scope = sync_btn.locator("xpath=..").locator('[data-role="sync-scope"]')
+    assert scope.is_checked()  # 默认勾选
+    sync_btn.click()
+    for path in (
+        "fast.3.warning.roiAbsDelta",
+        "fast.7.warning.roiAbsDelta",
+        "confirmation.1.warning.roiAbsDelta",
+        "confirmation.3.warning.roiAbsDelta",
+        "confirmation.7.warning.roiAbsDelta",
+    ):
+        assert drawer.locator(f'[data-path="{path}"]').input_value() == "0.55", path
+    # 不同 severity 不被波及。
+    assert (
+        drawer.locator('[data-path="fast.3.critical.roiAbsDelta"]').input_value() != "0.55"
+    )
+    assert "尚未保存" in page.locator("#drawer-form-status").inner_text()
+
+    # 4) 取消勾选「含确认层」后只同步本层其他窗口。
+    drawer.locator(src).fill("0.66")
+    scope.uncheck()
+    sync_btn.click()
+    assert drawer.locator('[data-path="fast.3.warning.roiAbsDelta"]').input_value() == "0.66"
+    assert drawer.locator('[data-path="fast.7.warning.roiAbsDelta"]').input_value() == "0.66"
+    assert (
+        drawer.locator('[data-path="confirmation.1.warning.roiAbsDelta"]').input_value()
+        == "0.55"
+    )
 
 
 def test_drawer_projects_effective_config_and_seed_fallback_label(

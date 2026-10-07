@@ -514,6 +514,7 @@ Query 参数（全部 camelCase → 本文件用 snake_case wire 名）：
 | `severity` | 否 | `all`（默认）/`none`/`warning`/`critical` |
 | `state` | 否 | 可重复；见下方状态枚举（页面一次只发一个值；端点参数本身可重复，多值为 OR 语义） |
 | `sample` | 否 | `all`（默认）/`sufficient`/`sample_insufficient`/`unavailable`，逐项匹配 item 的 `sampleStatus` |
+| `activity` | 否 | `all`（默认）/`recent`，其它值 422。`recent` = SPU 级展示过滤：仅保留近 14 天出单大于 3 单的 SPU（其 fast 7d 行 previous+current 订单数 >3，正好覆盖最近 14 天），保留 SPU 的全部窗口行；页面默认开启并提供开关。显式 `spu_ids` 精确调查时不生效 |
 | `anchor_date` | 否 | 当地日期；默认最新已物化 anchor |
 | `limit`/`offset` | 否 | `limit` 1..500（默认 100），`offset` ≥0；只影响 `items`，不影响 `totals` |
 
@@ -523,8 +524,8 @@ Query 参数（全部 camelCase → 本文件用 snake_case wire 名）：
 `previousSpendCny`/`currentSpendCny`、`previousOrderCount`/`currentOrderCount`、
 `previousAdOrderCount`/`currentAdOrderCount`、`anchorDate`、`basisCalculatedAt`、`configSource`、
 `configVersion`、`provisionalLabel`、`warningCode`、`warningText`、`drilldown{profitabilityUrl,pageUrl}`。
-ROI / 净利润 / 消耗是 Decimal wire string，`null` 表示数学无解或样本不足（客户端不得显示为 0）；订单数为 int。
-`totals` = `{warningCount, criticalCount, insufficientSampleCount, shopSpuCount}`，按完整 scope 计算，不是当前页可见行。
+ROI / 净利润 / 消耗是 Decimal wire string，统一两位小数（ROUND_HALF_UP，零值输出 `0`）；`null` 表示数学无解或样本不足（客户端不得显示为 0）；订单数为 int。
+`totals` = `{scopeTotal, warningCount, criticalCount, insufficientSampleCount, shopSpuCount}`，按完整 scope 计算，不是当前页可见行；`scopeTotal` 是全量行数，与分页分母 `total`（匹配当前筛选含 activity）分开。
 
 `meta` 关键字段：`requestId`、`enabled`、`anchorDate`、`batchThrough`、`maturityDays`、`calculatedAt`、`stale`、
 `coverage{materialized,stale,missingWindowCount}`、`config{key,source,version,updatedAt,updatedBy,validation}`，
@@ -550,7 +551,7 @@ readonly 会话不访问 `/v2/config/runtime/items` 或 `/v2/config/runtime/snap
 - `sampleStatus`（wire）：`sufficient`/`sample_insufficient`/`unavailable`，与 `sample` 过滤一一对应；
   缺 facts / ROI 无解 / 门槛不满足的 item 绝不显示为 `stable`。
 - `state`：`profit_to_loss`、`loss_expanding`、`loss_to_profit`、`roi_deterioration`、`net_profit_deterioration`、
-  `roi_recovery`、`recovery`、`stable`、`sample_insufficient`、`unavailable`；未知值原样显示不静默留空。
+  `stable`、`sample_insufficient`、`unavailable`；未知值原样显示不静默留空。
 - `warningCode`：`ROI_AND_NET_PROFIT_DETERIORATED`、`PROFIT_TO_LOSS`、`LOSS_EXPANDING`、`SAMPLE_INSUFFICIENT`、
   `DATA_STALE`。以上五个即全部可达值（由 `state` 经固定映射得出），没有其它值；
   客户端不得对未列出的 `warningCode` 做分支。

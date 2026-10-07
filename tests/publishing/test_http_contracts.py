@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
@@ -15,6 +16,11 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishAttempt,
     VideoPublishTask,
 )
+from tts_erp_v2.publishing.artemis_client import ArtemisClient, ArtemisTransportError
+from tts_erp_v2.publishing.domain import allowed_actions
+from tts_erp_v2.publishing.safe_values import mask_device_serial
+
+pytestmark = [pytest.mark.domain_publishing]
 
 
 class _UploadStore:
@@ -301,3 +307,359 @@ def test_verify_http_contract_blocks_on_global_cleanup_and_running_task(
         delete(VideoPublishTask).where(VideoPublishTask.id == cleanup_pk)
     )
     db_session.commit()
+
+
+def test_create_task_device_serial_override_default_and_invalid(
+    db_session: Session, monkeypatch
+) -> None:
+    """POST /tasks honours optional deviceSerial (design §21.3): an explicit
+    serial is snapshotted onto the task, omission falls back to
+    ARTEMIS_DEVICE_SERIAL, and malformed or explicitly-empty serials fail with
+    422 DEVICE_SERIAL_INVALID. Replaying the idempotency key without
+    deviceSerial keeps the original task and its device snapshot."""
+    monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
+    monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
+    monkeypatch.setenv("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "120")
+    app = FastAPI()
+    app.include_router(video_publish.router)
+
+    @app.middleware("http")
+    async def test_auth(request: Request, call_next):
+        request.scope["auth_method"] = "bearer"
+        request.scope["api_key_role"] = "readwrite"
+        request.scope["api_key_hash"] = "key-a"
+        return await call_next(request)
+
+    db_session.add(
+        PublishWorkerHeartbeat(
+            instance_id="TEST-device-worker",
+            hostname="TEST-host",
+            pid=2425,
+            status="ready",
+            device_status="ready",
+            started_at=datetime.now(UTC),
+            heartbeat_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+    store = _UploadStore(db_session)
+    app.dependency_overrides[deps.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_store] = lambda: store
+
+    def payload(request_id: str, **extra) -> dict:
+        return {
+            "clientRequestId": request_id,
+            "filename": "TEST_device.mp4",
+            "contentType": "video/mp4",
+            "sizeBytes": 4,
+            "caption": "TEST_device_caption",
+            **extra,
+        }
+
+    def task_for(request_id: str) -> VideoPublishTask:
+        return db_session.scalar(
+            select(VideoPublishTask).where(
+                VideoPublishTask.client_request_id == UUID(request_id)
+            )
+        )
+
+    with TestClient(app) as client:
+        override_id = "00000000-0000-0000-0000-000000000d01"
+        override = client.post(
+            "/v2/video-publish/tasks",
+            json=payload(override_id, deviceSerial="TEST_other_device"),
+        )
+        assert override.status_code == 201
+        assert task_for(override_id).target_device_serial == "TEST_other_device"
+
+        default_id = "00000000-0000-0000-0000-000000000d02"
+        default = client.post("/v2/video-publish/tasks", json=payload(default_id))
+        assert default.status_code == 201
+        assert task_for(default_id).target_device_serial == "TEST_device"
+
+        invalid_id = "00000000-0000-0000-0000-000000000d03"
+        invalid = client.post(
+            "/v2/video-publish/tasks",
+            json=payload(invalid_id, deviceSerial="bad serial!"),
+        )
+        assert invalid.status_code == 422
+        assert invalid.json()["detail"]["code"] == "DEVICE_SERIAL_INVALID"
+        assert invalid.json()["detail"]["retryable"] is False
+
+        empty_id = "00000000-0000-0000-0000-000000000d04"
+        empty = client.post(
+            "/v2/video-publish/tasks",
+            json=payload(empty_id, deviceSerial=""),
+        )
+        assert empty.status_code == 422
+        assert empty.json()["detail"]["code"] == "DEVICE_SERIAL_INVALID"
+
+        replay = client.post("/v2/video-publish/tasks", json=payload(override_id))
+        assert replay.status_code == 200
+        assert replay.json()["idempotentReplay"] is True
+        assert task_for(override_id).target_device_serial == "TEST_other_device"
+
+    app.dependency_overrides.clear()
+
+
+def test_devices_endpoint_proxies_artemis_and_fails_closed(
+    db_session: Session, monkeypatch
+) -> None:
+    """GET /devices (design §21.15) proxies Artemis GET /api/devices with the
+    exact serial plus its masked twin, never forwards task/session text, and
+    maps an unreachable or unconfigured Artemis to 503 ARTEMIS_UNREACHABLE."""
+    monkeypatch.setenv("ARTEMIS_BASE_URL", "http://artemis.test:8001")
+    app = FastAPI()
+    app.include_router(video_publish.router)
+
+    @app.middleware("http")
+    async def test_auth(request: Request, call_next):
+        request.scope["auth_method"] = "bearer"
+        request.scope["api_key_role"] = "readwrite"
+        request.scope["api_key_hash"] = "key-a"
+        return await call_next(request)
+
+    app.dependency_overrides[deps.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_session] = lambda: db_session
+
+    async def fake_request(self, method, path, **kwargs):
+        assert (method, path) == ("GET", "/api/devices")
+        return {
+            "devices": [
+                {
+                    "serial": "TEST_device_A",
+                    "state": "device",
+                    "model": "NX712J",
+                    "product": "CN_TEST",
+                    "is_emulator": False,
+                    "is_busy": True,
+                    "active_pid": 42,
+                    "active_task_desc": "TEST prompt secret",
+                    "active_session_id": "TEST-session",
+                    "acquired_at": None,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(ArtemisClient, "_request", fake_request)
+    with TestClient(app) as client:
+        ok = client.get("/v2/video-publish/devices")
+        assert ok.status_code == 200
+        devices = ok.json()["devices"]
+        assert len(devices) == 1
+        device = devices[0]
+        assert device["serial"] == "TEST_device_A"
+        assert device["serialMasked"] == mask_device_serial("TEST_device_A")
+        assert device["model"] == "NX712J"
+        assert device["product"] == "CN_TEST"
+        assert device["state"] == "device"
+        assert device["isBusy"] is True
+        assert device["isEmulator"] is False
+        assert "activeTaskDesc" not in device
+        assert "activeSessionId" not in device
+
+        async def fail_request(self, method, path, **kwargs):
+            raise ArtemisTransportError("ARTEMIS_TRANSPORT_ERROR")
+
+        monkeypatch.setattr(ArtemisClient, "_request", fail_request)
+        down = client.get("/v2/video-publish/devices")
+        assert down.status_code == 503
+        detail = down.json()["detail"]
+        assert detail["code"] == "ARTEMIS_UNREACHABLE"
+        assert detail["retryable"] is True
+
+        monkeypatch.delenv("ARTEMIS_BASE_URL")
+        unconfigured = client.get("/v2/video-publish/devices")
+        assert unconfigured.status_code == 503
+        assert unconfigured.json()["detail"]["code"] == "ARTEMIS_UNREACHABLE"
+
+    app.dependency_overrides.clear()
+
+
+class _RetryStore:
+    """Object store where the uploaded object is still present."""
+
+    bucket = "tiktok-video"
+
+    def stat(self, key: str) -> dict:
+        return {"key": key, "size": 4}
+
+
+def _retry_client(db_session: Session) -> TestClient:
+    """Cookie-authed readwrite client whose user owns the created tasks.
+
+    ``raise_server_exceptions=False`` so an unhandled server-side exception
+    surfaces as a real HTTP 5xx instead of propagating out of the test.
+    """
+    app = FastAPI()
+    app.include_router(video_publish.router)
+
+    @app.middleware("http")
+    async def test_auth(request: Request, call_next):
+        request.scope["auth_method"] = "cookie"
+        request.scope["api_key_role"] = "readwrite"
+        request.scope["user_id"] = 1
+        return await call_next(request)
+
+    app.dependency_overrides[deps.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_session] = lambda: db_session
+    app.dependency_overrides[video_publish.get_store] = lambda: _RetryStore()
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _retryable_failed_task(*, device_cleanup_status: str) -> VideoPublishTask:
+    task = VideoPublishTask(
+        public_id=uuid4(),
+        client_request_id=uuid4(),
+        created_by_user_id=1,
+        caption="TEST_retry_caption",
+        original_filename="TEST_retry.mp4",
+        object_filename="TEST_retry.mp4",
+        content_type="video/mp4",
+        size_bytes=4,
+        object_bucket="tiktok-video",
+        object_key=f"TEST/http/{uuid4()}/video.mp4",
+        object_etag="TEST-retry-etag",
+        object_uploaded_at=datetime.now(UTC),
+        status="failed",
+        stage="done",
+        stage_started_at=datetime.now(UTC),
+        attempt_count=1,
+        publish_budget_used=1,
+        cleanup_intent="preserve_state",
+        target_device_serial="TEST_device",
+        target_app_package="com.test.http",
+        device_cleanup_status=device_cleanup_status,
+    )
+    task.attempts.append(
+        VideoPublishAttempt(
+            sequence_no=1,
+            kind="publish",
+            artemis_session_id=uuid4(),
+            status="failed",
+            prompt_version="TEST_retry",
+            prompt_snapshot="TEST_retry prompt",
+            device_serial="TEST_device",
+            target_app_package="com.test.http",
+            artemis_profile="TEST_retry_non_default_profile",
+            artemis_verification_level="TEST_retry_non_default_verification",
+            retry_safe=True,
+        )
+    )
+    return task
+
+
+def test_retry_http_contract_requeues_when_device_cleanup_is_unfinished(
+    db_session: Session,
+) -> None:
+    """Batch 3A: ``POST /tasks/{id}/retry`` re-queues even while the device/spool
+    cleanup is still pending or failed.
+
+    Historically this write raised IntegrityError on
+    ``video_publish_task_cleanup_owner_check`` because the re-queue set
+    ``cleanup_intent='none'`` while the device row was still
+    pending/failed (that was the bare 500). ``queue_task`` now keeps the
+    cleanup-gated marker instead, so the row is valid *and* the readiness gate
+    can still see the task.
+    """
+    for cleanup_status in ("pending", "failed"):
+        task = _retryable_failed_task(device_cleanup_status=cleanup_status)
+        db_session.add(task)
+        db_session.commit()
+        task_id = task.public_id
+
+        with _retry_client(db_session) as client:
+            response = client.post(
+                f"/v2/video-publish/tasks/{task_id}/retry",
+                json={"rowVersion": task.row_version},
+                headers={"X-Requested-With": "tts-erp"},
+            )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "pending"
+        assert body["stage"] == "queued"
+
+        db_session.expire_all()
+        requeued = db_session.scalar(
+            select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
+        )
+        assert requeued.status == "pending"
+        assert requeued.stage == "queued"
+        # The gate must remain able to see this task...
+        assert requeued.cleanup_intent == "requeue_publish"
+        # ...and retry must not fake a clean device.
+        assert requeued.device_cleanup_status == cleanup_status
+        assert len(requeued.attempts) == 1
+        # The operator keeps a way to clear the cleanup itself.
+        assert ("retry_cleanup" in body["allowedActions"]) is (
+            cleanup_status == "failed"
+        )
+
+
+def test_retry_cleanup_http_contract_unblocks_after_device_cleanup_failure(
+    db_session: Session,
+) -> None:
+    """Positive control for the test above: with the same unfinished device
+    cleanup, ``cleanup/retry`` must still be offered and must still work, so the
+    publish retry is not a redirect through a dead end.
+    """
+    task = _retryable_failed_task(device_cleanup_status="failed")
+    db_session.add(task)
+    db_session.commit()
+    task_id = task.public_id
+
+    headers = {"X-Requested-With": "tts-erp"}
+    with _retry_client(db_session) as client:
+        requeued = client.post(
+            f"/v2/video-publish/tasks/{task_id}/retry",
+            json={"rowVersion": task.row_version},
+            headers=headers,
+        )
+        assert requeued.status_code == 200, requeued.text
+        body = requeued.json()
+        assert "retry_cleanup" in body["allowedActions"]
+
+        retried = client.post(
+            f"/v2/video-publish/tasks/{task_id}/cleanup/retry",
+            json={"resources": ["device"], "rowVersion": body["rowVersion"]},
+            headers=headers,
+        )
+        assert retried.status_code == 200, retried.text
+
+    db_session.expire_all()
+    reloaded = db_session.scalar(
+        select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
+    )
+    # cleanup/retry re-arms the failed cleanup as in-flight.
+    assert reloaded.device_cleanup_status == "pending"
+
+
+def test_retry_http_contract_requeues_when_no_cleanup_is_outstanding(
+    db_session: Session,
+) -> None:
+    """The healthy path is unchanged: a cleanly failed task still re-queues."""
+    task = _retryable_failed_task(device_cleanup_status="not_started")
+    task.cleanup_intent = "none"
+    db_session.add(task)
+    db_session.commit()
+    task_id = task.public_id
+
+    with _retry_client(db_session) as client:
+        response = client.post(
+            f"/v2/video-publish/tasks/{task_id}/retry",
+            json={"rowVersion": task.row_version},
+            headers={"X-Requested-With": "tts-erp"},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["stage"] == "queued"
+    db_session.expire_all()
+    requeued = db_session.scalar(
+        select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
+    )
+    assert requeued.status == "pending"
+    assert requeued.cleanup_intent == "none"

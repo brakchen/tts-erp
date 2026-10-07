@@ -13,7 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, false, func, or_, select, text
+from sqlalchemy import and_, case, false, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, selectinload
 
@@ -30,6 +30,7 @@ from tts_erp_v2.db.models.publishing import (
     VideoPublishAttempt,
     VideoPublishTask,
 )
+from tts_erp_v2.publishing.artemis_client import ArtemisClient, ArtemisTransportError
 from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_text
 from tts_erp_v2.publishing.domain import allowed_actions, cleanup_retryable_resources
 from tts_erp_v2.publishing.object_store import VideoObjectStore, video_store_from_env
@@ -86,6 +87,7 @@ class CreateIn(BaseModel):
     content_type: str = Field(alias="contentType")
     size_bytes: int = Field(alias="sizeBytes", gt=0)
     caption: str
+    device_serial: str | None = Field(default=None, alias="deviceSerial")
 
     model_config = {"populate_by_name": True}
 
@@ -192,12 +194,20 @@ def _snapshot(
         "queuePosition": queue_position,
         "operationalStage": operational_stage,
         "stageStartedAt": task.stage_started_at,
+        # When did the *current* operational phase begin. This must never be a
+        # future timestamp: during cleanup backoff ``device_cleanup_next_attempt_at``
+        # is the next retry time, not a stage start, and reporting it here pinned
+        # the rail's 已耗时 to 0 for the whole backoff window (P2-21).
         "operationalStageStartedAt": (
             task.cleanup_heartbeat_at
-            or task.device_cleanup_next_attempt_at
             or task.updated_at
             if operational_stage == "cleaning"
             else task.stage_started_at
+        ),
+        # Backoff target for the current cleanup phase, reported separately so it
+        # can be shown as 下次重试 instead of being folded into the elapsed time.
+        "cleanupNextAttemptAt": (
+            task.device_cleanup_next_attempt_at if operational_stage == "cleaning" else None
         ),
         "latestArtemisSessionId": str(latest.artemis_session_id) if latest else None,
         "attemptCount": task.attempt_count,
@@ -349,7 +359,7 @@ def _error_detail(
 ) -> dict:
     detail = {
         "code": code,
-        "message": sanitize_text(message),
+        "message": sanitize_text(_ERROR_DETAIL_MESSAGES.get(code, message)),
         "retryable": retryable,
         "requestId": request_id(request),
     }
@@ -359,6 +369,47 @@ def _error_detail(
             allowedActions=[a.value for a in allowed_actions(task)],
         )
     return detail
+
+
+# Machine-code → human-readable copy for the operator.  When callers pass the
+# code itself as the message (the historical convention), the API instead emits
+# the copy below.  This satisfies docs/design §10.12 ("errors must state
+# where they happened and what to do next") without requiring every existing
+# call site to be edited.  The code field stays as the machine identifier;
+# only message changes.  Codes absent here fall back to the raw code, which
+# surfaces an obvious "unknown error" signal to triage.
+_ERROR_DETAIL_MESSAGES: dict[str, str] = {
+    # 4xx — caller/owner input problems
+    "TASK_NOT_FOUND": "任务不存在或你无权访问。",
+    "TASK_ACTION_NOT_ALLOWED": "当前任务状态不允许此操作。",
+    "TASK_VERSION_CONFLICT": "任务状态已变化，请刷新后重试。",
+    "OBJECT_CLEANUP_IN_PROGRESS": "对象清理尚未完成，任务当前不能重试。",
+    "CLEANUP_REQUIRED": "设备或本地暂存清理失败，请先「重试清理」成功后再重试发布。",
+    "TASK_RETRY_NOT_SAFE": "上一次执行结果不确定，自动重试不安全；请先运行自动核验。",
+    "UPLOAD_REPLACEMENT_REQUIRED": "原视频对象已不可用，请使用「重新上传」而不是重试。",
+    "RETRY_BUDGET_EXHAUSTED": "发布预算已用尽，请查看执行历史，不再自动重试。",
+    "IDEMPOTENCY_PAYLOAD_MISMATCH": "幂等键对应任务的参数与本次不同。",
+    "INVALID_CURSOR": "分页游标无效，请刷新后再翻页。",
+    "CSRF_HEADER_REQUIRED": "cookie 认证需在请求头加 X-Requested-With: tts-erp。",
+    "CAPTION_REQUIRED": "文案不能为空。",
+    "CAPTION_TOO_LONG": "文案超过长度上限。",
+    "VIDEO_TOO_LARGE": "视频文件超过服务端大小上限。",
+    "INVALID_VIDEO_TYPE": "文件类型必须是 video/mp4 且扩展名为 .mp4。",
+    "DEVICE_SERIAL_INVALID": "设备序列号格式无效。",
+    "DEVICE_NOT_CONFIGURED": "服务端未配置设备序列号。",
+    "DEVICE_OFFLINE": "设备离线或 ADB 探测失败。",
+    "DEVICE_LOCKED": "设备在线但仍处于锁屏状态。",
+    "APP_NOT_INSTALLED": "TikTok 未安装在目标设备上。",
+    "MEDIA_SCAN_FAILED": "设备扫描上传的视频失败。",
+    "VERIFY_ALREADY_RUNNING": "已经有一次自动核验在跑，请等其结束。",
+    "VERIFY_INCONCLUSIVE": "自动核验结果不确定，请查看执行历史。",
+    # 503 — infrastructure / external dependency unavailable
+    "PUBLISH_WORKER_UNAVAILABLE": "发布 Worker 不可用，请稍后重试。",
+    "OBJECT_STORE_UNAVAILABLE": "对象存储暂不可用，请稍后重试。",
+    "ARTEMIS_UNREACHABLE": "Artemis 不可达，请稍后在同 session 重提。",
+    "ARTEMIS_REJECTED": "Artemis 拒绝了该任务，请查看拒绝原因。",
+    "ARTEMIS_UNKNOWN_OUTCOME": "Artemis 返回了未知结果，请查看执行历史。",
+}
 
 
 def _action_conflict(
@@ -620,6 +671,45 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
     }
 
 
+@router.get("/devices")
+async def devices(request: Request) -> dict:
+    """Live Artemis device list for the page picker (design §21.15)."""
+    base_url = os.environ.get("ARTEMIS_BASE_URL", "").strip()
+    if not base_url:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            _error_detail(
+                request, "ARTEMIS_UNREACHABLE", "ARTEMIS_UNREACHABLE", retryable=True
+            ),
+        )
+    client = ArtemisClient(base_url, token=os.environ.get("ARTEMIS_TOKEN") or None)
+    try:
+        raw = await client.list_devices()
+    except ArtemisTransportError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            _error_detail(
+                request, "ARTEMIS_UNREACHABLE", "ARTEMIS_UNREACHABLE", retryable=True
+            ),
+        ) from exc
+    # Only whitelisted fields: never forward active_task_desc / session ids.
+    return {
+        "devices": [
+            {
+                "serial": item["serial"][:64],
+                "serialMasked": mask_device_serial(item["serial"]),
+                "model": sanitize_text(str(item.get("model") or ""))[:64],
+                "product": sanitize_text(str(item.get("product") or ""))[:64],
+                "state": str(item.get("state") or "unknown")[:32],
+                "isBusy": bool(item.get("is_busy")),
+                "isEmulator": bool(item.get("is_emulator")),
+            }
+            for item in raw
+            if isinstance(item.get("serial"), str) and item["serial"]
+        ]
+    }
+
+
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
 def create_task(
     body: CreateIn,
@@ -639,6 +729,7 @@ def create_task(
                 content_type=body.content_type,
                 size_bytes=body.size_bytes,
                 caption=body.caption,
+                device_serial=body.device_serial,
                 actor_user_id=request.scope.get("user_id"),
                 actor_key_hash=caller_key_hash(request),
             ),
@@ -903,7 +994,14 @@ def current(
                 & VideoPublishTask.device_cleanup_status.in_(["pending", "failed"])
             )
         )
-        .order_by(VideoPublishTask.id)
+        # §10.5: the rail shows the single current *device* task, so a running
+        # task must win over an older task that is only still cleaning up.
+        # Ordering by id alone returned whichever row was created first, which
+        # put a cleaning task on screen while another task was really running.
+        .order_by(
+            case((VideoPublishTask.status == "running", 0), else_=1),
+            VideoPublishTask.id,
+        )
         .limit(1)
     )
     owner_clause = _owner_clause(request)
@@ -1180,6 +1278,22 @@ def cancel(
         ) from exc
 
 
+# Human-readable copy for the codes ``retry_task`` can raise. ``code`` stays the
+# machine identifier; ``message`` is what the console shows. Before this, the
+# retry endpoint passed the code as both, so the operator saw a raw
+# "CLEANUP_REQUIRED" string. See docs/design §10.12 (errors must state where
+# they happened and what to do next).
+_RETRY_ACTION_MESSAGES = {
+    "TASK_ACTION_NOT_ALLOWED": "当前状态不允许重试该任务。",
+    "OBJECT_CLEANUP_IN_PROGRESS": "对象清理尚未完成，任务当前不能重试。",
+    "CLEANUP_REQUIRED": "设备或本地暂存清理失败，请先「重试清理」成功后再重试发布。",
+    "TASK_RETRY_NOT_SAFE": "上一次执行结果不确定，自动重试不安全；请先运行自动核验。",
+    "UPLOAD_REPLACEMENT_REQUIRED": "原视频对象已不可用，请使用「重新上传」而不是重试。",
+    "RETRY_BUDGET_EXHAUSTED": "发布预算已用尽，请查看执行历史，不再自动重试。",
+    "OBJECT_STORE_UNAVAILABLE": "对象存储暂不可用，请稍后重试。",
+}
+
+
 @router.post("/tasks/{task_id}/retry")
 def retry(
     task_id: UUID,
@@ -1214,8 +1328,29 @@ def retry(
                 request,
                 task_snapshot,
                 code,
-                code,
+                _RETRY_ACTION_MESSAGES.get(code, code),
                 retryable=code == "OBJECT_STORE_UNAVAILABLE",
+            ),
+        ) from exc
+    except IntegrityError as exc:
+        # Defence in depth: the retry path gates cleanup ownership before it
+        # writes, so this should be unreachable. Never let a constraint failure
+        # escape as a bare 500 -- the console only redraws buttons on 409.
+        # The code must NOT blame cleanup: any future constraint conflict would
+        # be misreported as a cleanup problem and send triage the wrong way.
+        # TASK_VERSION_CONFLICT is reused because its documented client action
+        # ("re-GET, then let the user confirm again") is the correct response to
+        # an unexpected server-side state change. See docs/design §28: every 409
+        # carries code/message/retryable/requestId/rowVersion/allowedActions.
+        session.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            _action_conflict(
+                request,
+                task_snapshot,
+                "TASK_VERSION_CONFLICT",
+                "任务状态已变化，请刷新后重试。",
+                retryable=False,
             ),
         ) from exc
 

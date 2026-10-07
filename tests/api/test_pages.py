@@ -320,7 +320,9 @@ def test_spu_profit_deterioration_page_shell_and_sidebar(api_client, readonly_ke
     assert 'id="alert-banner"' in body
     assert 'id="alert-status" role="status" aria-live="polite"' in body
     assert 'id="filter-window-days"' in body
-    assert 'id="filter-sample"' in body
+    # owner 2026-10-07：样本筛选下拉框已从页面移除（业务用户无法理解该概念），
+    # 默认只展示可判定行（sufficient）；URL ?sample= 保留为排查入口。
+    assert 'id="filter-sample"' not in body
     assert 'id="alert-rows"' in body
     assert 'id="alert-cards"' in body
     # design §6.1/§6.2 的新接线也必须随 HTML 下发（不靠 JS 注入）。
@@ -369,29 +371,35 @@ def test_spu_profit_deterioration_page_permission_gate(
     assert readonly_publish.status_code == 401, readonly_publish.text
 
 
-def test_spu_profit_deterioration_page_state_dropdown_matches_documented_enum(api_client, readonly_key):
-    """state 下拉的每个 option 都必须是被服务端接受的枚举值（design §6.1）。"""
+def test_spu_profit_deterioration_page_state_header_filter_matches_documented_enum(api_client, readonly_key):
+    """状态表头筛选的 data-state-values 必须与被服务端接受的枚举一致（design §6.1）。"""
     body = api_client.get(
         "/v2/pages/spu-profit-deterioration",
         headers={"Authorization": f"Bearer {readonly_key}"},
     ).text
-    options = re.findall(r'<option value="([a-z_]+)"', body)
     documented = [
-        "all",
         "profit_to_loss",
         "loss_expanding",
         "loss_to_profit",
         "roi_deterioration",
         "net_profit_deterioration",
-        "roi_recovery",
-        "recovery",
         "stable",
         "sample_insufficient",
         "unavailable",
     ]
-    state_block = body[body.index('id="filter-state"'): body.index('id="filter-severity"')]
-    assert re.findall(r'<option value="([a-z_]+)"', state_block) == documented
-    assert set(documented) <= set(options)
+    # 状态下拉已从工具条移除（owner 2026-10-08：业务用户理解不了枚举码）；
+    # 筛选入口是「状态」列表头按钮，枚举唯一来源是其 data-state-values。
+    assert '<select id="filter-state"' not in body
+    match = re.search(
+        r'<button[^>]*id="filter-state"[^>]*data-state-values="([^"]+)"', body
+    )
+    assert match, body[body.index('id="filter-state"') - 200: body.index('id="filter-state"') + 400]
+    state_values = [value.strip() for value in match.group(1).split(",") if value.strip()]
+    assert state_values == documented
+    # B-04：roi_recovery / recovery 在 _state() 中永不可达，枚举里没有它们。
+    # 点名断言（而不是靠上面的等值比较隐含），任何人把死状态加回模板都会在这里失败。
+    assert len(state_values) == 8, state_values
+    assert not {"roi_recovery", "recovery"} & set(state_values), state_values
 
 
 def test_spu_profit_deterioration_page_requires_some_auth(api_client):
@@ -449,9 +457,10 @@ def test_spu_profit_deterioration_page_assets_cover_all_documented_states():
     # 硬规则：浏览器不算业务公式、不硬编码 effective 阈值。
     for forbidden in ("roiReal", "net_profit =", "calculateRoi", "0.20", "0.40"):
         assert forbidden not in js, forbidden
-    # 非颜色告警信号：图标 + 徽章 + 行处理（斜纹背景、边框样式）。
+    # 非颜色告警信号：图标 + 徽章 + 行处理（纯色浅底、边框样式；不用斜纹）。
     assert "alert-icon" in js and "alert-badge" in js
-    assert "repeating-linear-gradient" in css
+    assert "--paper-warn-soft" in css and "--paper-danger-soft" in css
+    assert "repeating-linear-gradient" not in css
     assert ".alert-row--sample" in css and ".alert-card--sample" in css
     assert ".alert-row--unavailable" in css and ".alert-card--unavailable" in css
     assert "dashed var(--muted)" in css

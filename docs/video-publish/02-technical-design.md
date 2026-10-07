@@ -1,69 +1,20 @@
-# TikTok 视频发布工作流技术方案
+# TikTok 视频发布：技术设计
 
-> 状态：Implemented（真实设备与响应式视觉检查仍是发布前人工门禁）
->
-> 日期：2026-10-04
->
-> 目标系统：ttsERP → MinIO → Android/ADB → Artemis → TikTok
->
-> UI 规范：[`ui-style-system.md`](./ui-style-system.md)
+> **文档导航**：[产品方案](01-product-proposal.md) · [技术设计](02-technical-design.md) · [实施计划](03-implementation-plan.md) · [测试计划和结果](04-test-plan-and-results.md)
 
-## 1. 背景与目标
+> 来源基线：`docs/video-publish-design@b88b26c` 中的 `docs/design/tiktok-video-publish.md`。
+> 本目录按职责拆分原 2781 行单体文档；四个文件共同构成当前项目文档集。
 
-运营人员需要在 ttsERP 中创建一个发布任务，上传一个视频并填写文案。ttsERP 负责保存业务任务、把视频托管到 MinIO、全局串行调度 Android 设备、调用 Artemis 完成 TikTok UI 操作、持续查询执行状态，并在确认发布成功后清理视频。
+## 文档职责
 
-本方案的核心边界是：
+本文是架构与契约的单一真相源，覆盖领域模型、状态机、对象生命周期、Worker、API、前端状态、可观测性与安全边界。产品目标冲突时先修订《产品方案》；实现偏离本文时必须在《实施计划》中记录迁移，而不是在调用方继续增加兼容分支。
 
-- **ttsERP 是业务任务与状态真相源**：管理上传、队列、重试、核验、审计和清理；
-- **Artemis 是手机操作执行器**：接收固定 Prompt，在明确指定的 Android 设备和 App 内执行一次自动化；
-- **MinIO 是临时媒资存储**：数据库保存 bucket/object key/ETag，不保存会过期的预签名 URL；
-- **浏览器只调用 ttsERP**：不得直接调用 Artemis 或 ADB，也不自行推断发布结果。
+## 当前需要先决策的契约
 
-### 1.1 已确认需求
-
-1. 用户在 ttsERP 页面创建任务，选择一个视频并填写文案。
-2. 视频上传到 MinIO；数据库保存文案与 MinIO 对象引用。
-3. 后台通过 ADB 把视频放入手机专用相册，再调用 Artemis。
-4. 全系统同一时间只执行一个视频发布任务。
-5. Artemis 使用固定、版本化 Prompt，明确 App、视频来源、文案和成功/失败条件。
-6. Artemis 支持按 `session_id` 查询状态，并支持通过 `device_serial` 指定设备。
-7. Artemis 明确失败后可在同一个原任务下重试，所有执行历史必须保留。
-8. 尽量自动完成状态确认；只有自动核验仍无法判定时才进入人工处理。
-9. 前端任务状态必须定时刷新，并允许用户选择智能、固定间隔或关闭自动刷新。
-10. 前端必须展示每次执行对应的完整 Artemis session ID，并提供一键复制，方便进入 Artemis 排障。
-11. 发布成功后由后台清理手机、本地临时文件和 MinIO 视频。
-
-### 1.2 非目标
-
-- v1 不支持一个任务发布多个视频；
-- v1 不支持同时向多台手机并行发布；
-- v1 不让普通运营人员编辑 Artemis Prompt、App package 或设备序列号；
-- v1 不实现 TikTok Shop Open API 发帖；发布仍通过手机 UI；
-- v1 不把任意 ADB shell 命令暴露给 API 或前端；
-- v1 不把 MinIO 预签名 URL 当作永久业务字段；
-- v1 不保证在 TikTok 或设备完全不可用时零人工介入，但应把人工介入降到自动核验也无法收敛的最后一步。
-
-## 2. 领域术语与不变量
-
-| 术语 | 含义 |
-| --- | --- |
-| 发布任务（publish task） | 用户的一次业务意图：把一个视频和一份文案发布到 TikTok。重试不创建新的发布任务。 |
-| 执行记录（attempt） | 一次 Artemis session。可用于正式发布或只读核验。一个发布任务可拥有多条执行记录。 |
-| 正式发布执行（publish attempt） | 允许进入上传页面并最多点击一次最终发布按钮的 Artemis session。 |
-| 核验执行（verify attempt） | 只检查作品页/草稿箱，不允许进入上传页面或点击发布的 Artemis session。 |
-| 设备暂存文件 | ttsERP 通过 ADB 放入 `/sdcard/Movies/TTSERP/` 的任务专属文件。 |
-| 业务成功 | Artemis 返回成功，或后续核验明确确认目标视频已经发布。 |
-| 结果不确定 | Artemis 中断或失败时，无法证明最终发布动作未发生。 |
-
-必须始终成立：
-
-1. 一个发布任务恰好引用一个 MinIO 视频对象和一份文案。
-2. 一个 Artemis `session_id` 只属于一条执行记录，并在网络重试时复用。
-3. 同一个发布任务不能同时存在两条运行中的执行记录。
-4. 全系统不能同时存在两个占用发布设备的任务。
-5. 正式发布执行最多点击一次最终发布按钮。
-6. `failed` 不等于“可以无条件重试”；结果不确定时必须先自动核验。
-7. 发布成功与资源清理是两个维度；清理失败不能把已发布成功改成业务失败。
+1. **设备/本地清理失败时是否允许重新排队**：必须在“API 直接 409”与“允许排队但由领取门禁阻塞”之间选定一个模型，并统一 `allowed_actions`、写路径、数据库约束与测试。
+2. **运营指标作用域**：`pollState` 是 owner-scoped 还是全局指标，必须明确。
+3. **队列位置定义**：必须与 Worker 的真实可领取条件一致。
+4. **条件请求缓存**：ETag 与对应 payload 必须由同一缓存条目持有；没有 payload 时不得接受 304 作为可渲染结果。
 
 ## 3. 总体架构
 
@@ -112,7 +63,6 @@ python -m tts_erp_v2.publishing.worker
 ```
 
 Worker 每次只领取一个任务，使用短事务更新状态；等待 Artemis 时不得持有数据库事务或行锁。
-
 ## 4. 数据模型
 
 新增 `publishing` schema。
@@ -314,7 +264,6 @@ CREATE TABLE publishing.worker_heartbeats (
 ```
 
 Worker 每 5 秒 upsert 自己的行；API 以 `heartbeat_at >= now() - interval '15 seconds'` 判定进程可用。`device_status/device_message` 是 Worker 对配置 serial、ADB 在线/解锁、TikTok package、Artemis、MinIO 及设备清理占用的有界综合探测；设备 offline/locked/busy 不阻止有权限用户创建排队任务，Worker 不可用或必需配置缺失才写阻断原因。超过 5 分钟的终止实例可由 Worker 自身或运维清理。
-
 ## 5. 上传与对象生命周期
 
 ### 5.1 上传模式
@@ -356,7 +305,6 @@ v1 仅接受 MP4。具体大小上限由服务端配置并通过配置接口下�
 | 清理失败 | 后台重试 | 后台重试 | 后台重试 |
 
 确认发布后先尝试清理设备文件，再释放设备执行槽。设备清理必须只针对服务端生成的精确 `device_path`：删除文件、删除/重扫该 MediaStore entry，并以同一路径轮询查询直至目录项与 MediaStore 行都不存在；确认前失败保持 `device_cleanup_status=failed`。设备预检同时检查文件系统与 MediaStore 中的受管视频残留；任一处未清除时，下一任务停在 `waiting_device`，不能在同一相册继续 staging。一个登记的 spool resource 同时包含精确 `video.mp4` 与其精确 sibling `video.mp4.part`；selector-owned cleanup 必须逐个删除并验证两者，不得使用 wildcard。spool 与 MinIO 清理可在业务成功后后台重试。任一清理失败不能覆盖 `status=succeeded`。
-
 ## 6. 调度、设备与 Artemis 契约
 
 ### 6.1 任务领取
@@ -449,7 +397,6 @@ completed | success | failed | cancelled | canceled | rejected
 ```
 
 等待超时不是业务失败。Worker 只结束本轮等待，保留同一 attempt 为 `running`，下一轮继续查询同一 session。
-
 ## 7. 重试与自动核验
 
 ### 7.1 两类重试
@@ -507,7 +454,6 @@ completed | success | failed | cancelled | canceled | rejected
 ```
 
 人工只处理 `needs_review`，不参与普通失败与超时。
-
 ## 8. 固定 Prompt 契约
 
 Prompt 在 `tts_erp_v2/publishing/prompt.py` 中版本化；用户不能编辑原始 Prompt。
@@ -531,7 +477,6 @@ VERIFY_PROMPT_VERSION = "tiktok-video-verify-v2"
 - 不修改账号设置、不离开锁定 App。
 
 核验 Prompt 必须明确禁止任何发布动作，并包含 caption、原始 basename、已确认 ETag/SHA 身份、相关 publish attempt 的预期最新发布时间窗，以及比较最新作品发布时间和缩略图的指令；任一识别证据不足时必须返回 `inconclusive`。
-
 ## 9. HTTP API
 
 所有浏览器写请求继续发送：
@@ -678,329 +623,6 @@ POST /v2/video-publish/tasks/{task_id}/cleanup/retry
   }
 }
 ```
-
-## 10. 前端 UI 与交互设计
-
-### 10.1 页面定位
-
-- 页面：`GET /v2/pages/video-publish`
-- 侧边栏：数据工具 → `视频发布`
-- 页面权限：`page:video-publish`
-- 主要用户：负责 TikTok 内容投放的运营人员
-- 页面唯一工作：**安全地投递一个视频，并看清它是否真正完成发布。**
-
-视觉继续使用全站“暖纸编辑体”，不新建颜色或字体体系：
-
-```text
-tokens.css → common.css → video-publish.css
-```
-
-页面的标志性元素是 **“单线发布轨道”**：它不是装饰，而是把“全局一次只执行一个任务”变成持续可见的信息结构。
-
-```text
-MINIO ●━━━━ 手机相册 ●━━━━ Artemis ◉━━━━ TikTok ○━━━━ 清理 ○
-                              当前：执行中
-```
-
-周围界面保持克制：直角、纸面底色、墨色正文、陶土橙仅用于主操作和当前轨道节点；成功、警告、失败使用既有 `--ok/--warn/--danger`。
-
-### 10.2 桌面信息架构
-
-```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│ VIDEO DISPATCH · 视频发布                 设备 D123…00AC · 在线 · 空闲   │
-│ 上传一个视频，系统将按队列串行发布到 TikTok                              │
-├──────────────────────────────────────────────────────────────────────────┤
-│ 当前发布轨道                                                             │
-│ [MINIO]━━[手机相册]━━[Artemis]━━[TikTok]━━[清理]                         │
-│ 当前无运行任务 / #1004 正在等待 Artemis                                  │
-├──────────────────────────────────┬───────────────────────────────────────┤
-│ 新建发布任务                     │ 本次投递                              │
-│                                  │ App       TikTok                      │
-│ [拖入 MP4 或选择文件]            │ 设备      D123…00AC                   │
-│ video.mp4 · 14.7 MB              │ 相册      TTSERP                      │
-│                                  │ 队列      前面 2 个任务               │
-│ 文案                             │ 视频      video.mp4                   │
-│ ┌──────────────────────────────┐ │ 文案      227 字                      │
-│ │ ...                          │ │                                       │
-│ └──────────────────────────────┘ │ [上传并加入发布队列]                  │
-│ 227 / 4000                       │                                       │
-├──────────────────────────────────┴───────────────────────────────────────┤
-│ 任务记录 [全部][排队][执行中][失败][需核验][成功]                       │
-│ 自动刷新 [智能 ▼] · 上次 10:42:15                         [立即刷新]    │
-│ #1006 queued  video-a.mp4  Artemis 尚未创建             10:42 [查看]    │
-│ #1005 failed  video-b.mp4  c8af5a6c…391d2 [复制]        10:31 [重试]    │
-│ #1004 running video-c.mp4  41d9d326…8a104 [复制]        10:20 [查看]    │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-任务详情使用右侧 drawer；移动端改为全屏 dialog。主表不直接展开完整 Prompt、错误 trace 或执行步骤，避免队列扫描被长文本打断。
-
-### 10.3 移动端布局
-
-小于 720px 时：
-
-1. 设备状态和轨道置顶；轨道允许横向滚动但节点文字不可缩成图标；
-2. 新建任务改为单列：文件 → 文案 → 投递摘要 → 主按钮；
-3. 任务表改为纵向任务条，每条显示状态、文件、创建时间和一个主操作；
-4. 详情 drawer 改为全屏 dialog，返回后保留筛选与滚动位置；
-5. 不使用 hover 才能发现的信息。
-
-### 10.4 创建任务交互
-
-初始状态：
-
-- 文件选择区显示允许格式与服务端下发的大小上限；
-- 文案为空，显示字符计数；
-- “上传并加入发布队列”禁用；
-- 右侧投递摘要始终展示固定 App、设备和相册，避免用户误以为可自由选择目标。
-
-选择文件后：
-
-1. 立即在浏览器校验扩展名、MIME 和大小；
-2. 展示文件名、格式化大小以及“重新选择”；
-3. 使用本地 object URL 显示静音视频预览、时长和分辨率，让运营在入队前确认没有选错视频；重新选择或离开页面时必须 `URL.revokeObjectURL()`；
-4. 浏览器校验只用于快速反馈，不能代替服务端校验；
-5. 不在选择文件后自动上传，避免用户尚未确认文案时产生废弃对象。
-
-输入文案时：
-
-- 保留换行、emoji 和 `#` 标签；
-- 显示 `当前字符数 / 服务端上限`；
-- 超限时计数变为危险色，主按钮禁用；
-- 不自动清洗、翻译或重写；如需要运营备注，必须使用独立字段，不能混入文案后再猜测删除。
-
-点击“上传并加入发布队列”：
-
-1. 前端执行最终本地校验；
-2. 打开确认 dialog，原样展示文件、完整文案、TikTok、目标设备和提示“设备空闲时可能立即开始”；
-3. 用户点击“确认加入队列”后生成一次 `clientRequestId`；
-4. POST 创建任务；
-5. 使用 `XMLHttpRequest` PUT 到 MinIO，以获得真实上传进度；
-6. PUT 完成后调用 `confirm-upload`；
-7. confirm 成功后清空表单，把新任务插入队列顶部，并聚焦成功提示。
-
-上传过程中：
-
-- 文件与文案锁定，防止上传对象与数据库元数据不一致；
-- 主按钮替换为进度，例如 `上传中 42%`；
-- 提供“取消上传”，终止 XHR 后调用任务 cancel；
-- 页面离开时，如果存在上传中的 XHR，使用原生 beforeunload 提示；普通排队/运行任务不阻止离开页面。
-
-上传失败：
-
-- 保留本地文件引用和文案；
-- 显示具体错误：网络中断、URL 过期、对象校验失败或服务端拒绝；
-- 提供“重试上传”，对同一 task 请求新 upload URL；
-- 重试上传不创建新的业务任务。
-
-浏览器刷新后无法恢复 `File` 对象。未完成任务显示在列表中，操作为“重新选择文件继续”或“取消任务”；重新选择时前端检查文件名和大小，后端仍以对象校验为准。
-
-### 10.5 当前发布轨道
-
-轨道只显示全局唯一的当前设备任务：
-
-| stage | 当前节点 | 页面文案 |
-| --- | --- | --- |
-| downloading | MinIO | 正在下载并校验视频 |
-| staging_device | 手机相册 | 正在写入 TTSERP 相册 |
-| dispatching_artemis | Artemis | 正在创建手机自动化任务 |
-| waiting_artemis | Artemis/TikTok | Artemis 正在操作 TikTok |
-| verifying | TikTok | 正在核验是否已经发布 |
-| `operationalStage=cleaning` | 清理 | 业务状态已终态；API 根据正交 cleanup 状态计算的展示阶段，不是持久化 task stage。 |
-| done | 全部完成 | 轨道收起，任务进入历史记录 |
-
-节点状态必须同时使用图形、文字和 `aria-current="step"`，不能只靠颜色。阶段切换采用一次 150–200ms 的轨道填充过渡；`prefers-reduced-motion` 下关闭动画。
-
-轨道旁显示：
-
-- 任务编号与视频文件名；
-- 当前 attempt 类型及次数；
-- 当前 Artemis session ID；桌面端显示完整 UUID，窄屏可视觉省略中段，但 `title`、无障碍名称和“复制”操作必须保留完整值；
-- 当前阶段开始时间与已耗时；
-- “查看详情”，不提供运行中普通重试。
-
-### 10.6 队列与任务列表
-
-筛选项：
-
-```text
-全部 | 排队 | 执行中 | 失败 | 需核验 | 成功 | 已取消
-```
-
-列表字段：
-
-- 任务编号；
-- 视频文件名和大小；
-- 文案首行摘要；
-- 业务状态与当前 stage；
-- 发布/核验执行次数；
-- 当前或最近一次 Artemis session ID，使用等宽字体并提供一键复制；尚未创建 attempt 时明确显示“尚未创建”；
-- 创建人和创建时间；
-- 服务端返回的主要动作。
-
-前端不得根据状态自行拼出允许动作。列表/详情响应提供：
-
-```json
-{
-  "allowedActions": ["view", "retry", "verify", "cancel", "retry_cleanup"]
-}
-```
-
-页面只渲染服务端允许的动作，服务端仍须在写端点再次校验状态。
-
-### 10.7 状态与操作矩阵
-
-| task 状态/阶段 | 主操作 | 次操作 | 禁止 |
-| --- | --- | --- | --- |
-| awaiting_upload | 重新选择文件继续 | 取消任务 | 发布重试 |
-| queued | 查看队列位置 | 取消任务 | 修改视频/文案 |
-| waiting_device | 查看设备原因 | 取消任务 | 绕过指定设备 |
-| running/* | 查看详情 | 无 | 重试、再次提交、普通取消 |
-| failed（可重试） | 重试原任务 | 查看执行历史 | 新建重复任务 |
-| needs_review | 自动核验 | 查看失败步骤 | 直接重试发布 |
-| succeeded | 查看详情 | 清理失败时重试清理 | 再次发布 |
-| cancelled | 查看详情 | 无 | 恢复原 attempt |
-
-`needs_review` 不显示普通“重试”按钮。若以后提供管理员强制重试，必须是单独的 admin 权限和二次确认，并明确提示可能重复发布；不纳入 v1。
-
-### 10.8 任务详情 drawer
-
-详情分四个固定区域：
-
-1. **发布内容**：视频元数据、完整文案、MinIO 对象状态；
-2. **目标与进度**：App、设备、相册、当前 stage、队列/耗时；
-3. **执行历史**：按 sequence 倒序展示 publish/verify attempt；
-4. **资源清理**：手机、本地 spool、MinIO 的独立清理结果。
-
-attempt 行展示：
-
-```text
-第 3 次执行 · 正式发布
-success · Artemis ID c8af5a6c-4158-49c3-9141-13bc69b391d2 · D123…00AC
-开始 10:42:12 · 完成 10:46:31 · 4m19s
-[查看错误/输出] [复制 Artemis ID]
-```
-
-Artemis ID 不是敏感凭据，应在详情中完整展示，复制内容不得带前后缀或省略号，方便直接粘贴到 Artemis 查询。一个原任务存在多次 publish/verify attempt 时，每一条都展示自己的 ID，不能只保留最后一个。
-
-Prompt 快照和 Artemis 原始 output 默认折叠，仅 admin 或诊断权限可查看；文案与错误文本按纯文本渲染，禁止 `innerHTML` 注入。
-
-### 10.9 重试交互
-
-`failed` 且服务端返回 `retry` 时：
-
-1. 用户点击“重试原任务”；
-2. dialog 显示上一条 attempt 的失败阶段、错误、`retryBudgetUsed/maxAttempts` 发布预算；追加式 `attemptCount` 只作审计，不得冒充已消耗预算；
-3. 明确说明“将使用原视频和原文案创建新的 Artemis 执行记录”；
-4. 用户确认后 POST `/retry`；
-5. 服务端原子检查状态并排队；
-6. UI 更新为 queued，不复制一条新的业务任务行。
-
-若 MinIO 对象已经丢失或清理，服务端不返回 `retry`，而返回 `replace_upload`；UI 要求重新上传，不得生成必然失败的 attempt。
-
-### 10.10 自动核验交互
-
-通常 Worker 自动进入 verifying，用户只看到轨道节点变化。若自动策略停在 `needs_review`：
-
-- 主按钮为“再次自动核验”，不是“人工检查”或“重新发布”；
-- 点击后显示只读说明：“核验只查看作品页和草稿箱，不会发布内容”；
-- verify attempt 运行时任务回到 `running/verifying`；
-- 已发布 → 成功；明确未发布（单次 `not_published`）→ 回到 `needs_review/done`，不得自动 publish/queued；仍无法判断 → 回到 `needs_review/done` 并展示原因。
-
-### 10.11 定时刷新、轮询与竞态
-
-页面只轮询 ttsERP，不直接查询 Artemis。`video-publish.js` 与现有页面一致，从 `location.pathname` 推导 `/tts` 等部署前缀；API 和静态资产不得使用破坏子路径部署的绝对根路径。
-
-任务工具栏提供可见的定时刷新控制：
-
-```text
-自动刷新 [智能 | 2 秒 | 5 秒 | 10 秒 | 30 秒 | 关闭]
-上次刷新 10:42:15 · 下次约 2 秒后              [立即刷新]
-```
-
-默认选择“智能”，规则为：
-
-- 存在运行中的 publish/verify attempt：`/current` 每 2 秒；当前列表每 5 秒；
-- 无运行任务但存在排队任务：当前任务/列表每 8 秒；
-- 只有终态历史任务：列表每 30 秒；
-- 页面隐藏：暂停高频轮询，最多每 30 秒一次；恢复可见时立即刷新；
-- 用户选择固定间隔后，当前任务、当前列表页和已打开详情都使用该间隔；
-- 用户选择“关闭”后只保留“立即刷新”，运行中轨道显示“自动刷新已暂停”，避免用户误以为状态仍实时；
-- 用户选择保存在 `localStorage`，只保存刷新偏好，不保存任务、文案或凭据。
-
-轮询实现约束：
-
-1. 定时器必须在上一次请求结束后再安排下一次，禁止 `setInterval` 造成慢请求重叠；
-2. 使用 `AbortController` 与单调 generation，旧响应不得覆盖新筛选、新详情或更新后的 attempt；
-3. 使用 `If-None-Match`，304 时只更新时间提示，不重建 DOM；
-4. 打开任务详情时同步刷新该任务详情，保证新增 attempt 和 Artemis ID 在页面出现；
-5. 每次任务状态、stage、current attempt 或 Artemis ID 变化时，更新轨道、列表行和 drawer，但不得抢走当前键盘焦点；
-6. 连续刷新失败时采用 5/10/30/60 秒退避，顶部显示“状态刷新失败，正在重试”，手动刷新成功后恢复用户选择的频率；
-7. 页面销毁时取消 timer 和所有未完成请求；
-8. 后续可升级 SSE，但 v1 不为单页状态建立新的实时基础设施。
-
-列表顶部始终显示上次成功刷新时间。前端可以对“已提交/已取消”做临时 busy 状态，但任务业务状态和 Artemis ID 始终以服务端响应为准。
-
-### 10.12 空状态、错误和文案
-
-空状态应给下一步动作：
-
-- 无任务：`还没有发布任务。选择一个 MP4 并填写文案开始。`
-- 队列为空：`当前没有等待中的视频。`
-- 设备不可用：`发布设备离线。任务会保留在队列中，设备恢复后继续。`
-- needs_review：`系统无法确认这次操作是否已经发布。先运行自动核验，避免重复发布。`
-
-错误必须说明发生位置和可执行动作：
-
-- `视频上传中断。文件和文案已保留，可以重试上传。`
-- `MinIO 对象校验失败：实际大小与所选文件不一致，请重新上传。`
-- `目标设备已锁屏。任务仍在队列中，解锁后会自动继续。`
-- `Artemis 在点击发布后失去连接，系统正在检查作品页。`
-
-禁止只显示 `操作失败`、`未知错误` 或原始 Python/HTTP 堆栈。
-
-### 10.13 可访问性与安全
-
-- 文件区同时保留原生 `<input type="file">`，拖放不是唯一入口；
-- dialog 使用原生 `<dialog>` 或完整 focus trap，并在关闭后恢复触发按钮焦点；
-- 状态提示使用有界 `aria-live="polite"`，上传失败使用 `role="alert"`；
-- 进度条使用 `role="progressbar"` 和数值属性；
-- 所有状态文字都能在不识别颜色的情况下理解；
-- 视频文件名、文案、错误和 Artemis output 一律 textContent/HTML escape；
-- 浏览器不获取 MinIO access key、Artemis token 或完整设备控制能力；
-- 页面不暴露任意 Prompt 编辑器或任意 ADB 命令输入框。
-
-### 10.14 前端状态机
-
-```text
-FORM_EMPTY
-  └─ file/caption valid → FORM_READY
-       └─ click submit → CONFIRMING
-            └─ confirm → CREATING_TASK
-                 └─ ticket → UPLOADING
-                      ├─ progress → UPLOADING
-                      ├─ cancel → CANCELLING → FORM_READY
-                      ├─ upload error → UPLOAD_FAILED → retry → UPLOADING
-                      └─ PUT complete → CONFIRMING_OBJECT
-                           ├─ confirm error → UPLOAD_FAILED
-                           └─ success → QUEUED → FORM_EMPTY
-```
-
-任务列表与创建表单是两个独立状态域。列表刷新失败不能清空正在编辑的文件和文案；上传失败也不能停止当前运行轨道的轮询。
-
-## 11. 权限
-
-| 操作 | 最低角色 |
-| --- | --- |
-| 打开页面、查看任务/attempt | readonly + `page:video-publish` |
-| 创建、上传确认、取消排队任务 | readwrite + `page:video-publish` |
-| 重试、自动核验、重试清理 | readwrite + `page:video-publish` |
-| 查看完整 Prompt/原始 Artemis output | admin |
-| 强制跳过核验直接重试 | v1 不提供 |
-
-`accounts/pages.py` 新增 `video-publish`，migration 与权限同步只自动授权 `admin`；`operator` 必须在全部发布门禁通过后由 admin 手工授权，`viewer` 默认不授权。访问策略对 GET 与写方法分别分类，不能把整个 prefix 粗暴设为 readwrite。
-
 ## 12. 模块与文件布局
 
 ```text
@@ -1047,7 +669,6 @@ recover_active(...)
 ```
 
 FastAPI handler 只负责 wire 校验、鉴权和 outcome → HTTP 映射；不得自行拼 Prompt、运行 ADB 或决定状态转换。
-
 ## 13. 配置
 
 ```env
@@ -1064,7 +685,6 @@ TIKTOK_PUBLISH_MAX_ATTEMPTS=3
 ```
 
 凭据、Artemis token 和 MinIO secret 只来自环境或既有 secret 管理；不得写入代码、Prompt、浏览器响应或日志。
-
 ## 14. 故障恢复
 
 Worker 启动时执行 `recover_active()`：
@@ -1079,90 +699,6 @@ Worker 启动时执行 `recover_active()`：
 8. spool 与 MinIO 清理独立重试，不阻塞新的发布任务；设备清理失败则在下一次 staging 前形成 readiness gate，清除残留后才能继续。
 
 进程被终止、HTTP 超时或数据库短暂不可用，都不能通过“新建另一个业务任务”恢复。
-
-## 15. 测试策略
-
-测试只能通过：
-
-```bash
-bash scripts/test_isolated.sh ...
-```
-
-### 15.1 Domain 与数据库
-
-- 合法/非法状态转换；
-- 原任务多 attempt；
-- 相同 session ID 幂等；
-- 同任务活跃 attempt 唯一；
-- 全局 running task 唯一；
-- `FOR UPDATE SKIP LOCKED` 并发领取；
-- publish/cleanup 状态正交；
-- retry/verify 的服务端 allowedActions。
-
-### 15.2 Adapter
-
-- MinIO ticket、HEAD、下载校验和删除失败；
-- ADB 设备离线、锁屏、push、size 和 MediaStore；
-- Artemis 指定 `device_serial`、相同 session 重提、状态轮询、404→全局状态 fallback；
-- completed/success/failed/rejected/timeout 映射；
-- steps=0 安全失败与最终点击后的不确定失败分类。
-
-### 15.3 API
-
-- create 的 `clientRequestId` 幂等；
-- confirm 前后状态；
-- readonly/readwrite/admin 权限；
-- 非法状态返回 409 + allowedActions；
-- cancel/retry/verify/cleanup retry；
-- 列表不泄露 Prompt、token、完整设备 serial 或大段 output。
-
-### 15.4 前端
-
-- 文件格式/大小、文案计数和按钮可用性；
-- XHR 进度、取消、URL 过期后重试；
-- 创建双击只生成一个任务；
-- 状态轨道节点与服务端 stage 映射；
-- needs_review 不显示直接重试；
-- drawer 执行历史、每条 attempt 的完整 Artemis ID 和清理状态；
-- Artemis ID 一键复制，复制值为完整 UUID，排队未建 attempt 时显示“尚未创建”；
-- 智能/固定/关闭三类定时刷新、手动刷新、页面可见恢复、失败退避和 stale response 防护；
-- 401 登录跳转、403 只读模式；
-- 键盘、dialog 焦点、aria-live、reduced motion；
-- 390px、768px、1440px 三档视觉冒烟。
-
-禁止在测试中向真实 TikTok 发布。端到端测试默认使用假 Artemis/ADB adapter；真实设备验证必须先 dry-run，并由用户显式确认。
-
-## 16. 实施阶段
-
-### Phase 1：持久化与上传
-
-- migration、models、MinIO video bucket；
-- create/upload-url/confirm/list/detail/cancel；
-- 页面创建表单、上传进度和队列列表。
-
-### Phase 2：单任务执行
-
-- 独立 publish worker；
-- ADB staging 与 MediaStore 校验；
-- Artemis SDK adapter、指定设备、状态轮询；
-- 当前发布轨道和 attempt 详情。
-
-### Phase 3：自动恢复与核验
-
-- restart recovery；
-- safe retry classifier；
-- verify attempt 与固定核验 Prompt；
-- needs_review 最后兜底；
-- 清理重试。
-
-### Phase 4：真机受控验证
-
-1. 使用模拟器验证上传、队列、ADB staging 和失败恢复；
-2. 真机只执行 staging + MediaStore dry-run；
-3. 用户确认后创建一条真实发布任务；
-4. 验证发布、状态闭环和三处清理；
-5. 再开放普通运营角色。
-
 ## 17. 核心决策汇总
 
 1. ttsERP 管理业务任务；Artemis 只执行手机操作。
@@ -1177,7 +713,6 @@ bash scripts/test_isolated.sh ...
 10. 前端的“单线发布轨道”直接表达全局串行约束；状态与允许操作全部由服务端真相驱动。
 11. 页面提供智能或固定间隔定时刷新，任务、attempt 和 Artemis ID 的变化无需手工刷新即可出现。
 12. 每条 Artemis attempt 的完整 session ID 都在详情中保留并可复制；列表展示当前或最近一次 ID。
-
 ## 18. 实现级数据字典
 
 本节是开发时的字段真相源。数据库使用 `snake_case`；HTTP JSON 使用 `camelCase`。时间统一为 PostgreSQL `timestamptz`，API 输出 UTC ISO-8601，例如 `2026-10-04T10:42:15Z`。客户端不得提交服务端状态、计数、设备路径或 Artemis ID。
@@ -1358,7 +893,6 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 | `verify` | 再次自动核验 | needs_review。 |
 | `retry_cleanup` | 重试清理 | 任一 cleanup status=failed。 |
 | `copy_artemis_id` | 复制 Artemis ID | 至少存在一个 attempt。 |
-
 ## 19. 合法状态转换
 
 所有状态修改必须通过 domain transition 函数，禁止 handler/adapter 直接赋字符串。
@@ -1392,7 +926,6 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 - `status=succeeded` 后禁止创建新的 publish attempt；
 - `row_version` 不匹配时返回并发冲突，调用方重新读取，不覆盖较新的状态；
 - 状态转换、attempt insert、计数和审计字段在同一 DB 事务中提交。
-
 ## 20. 后端核心逻辑
 
 ### 20.1 实际 service / handler owner
@@ -1656,7 +1189,6 @@ async def cleanup_task(work):
 - 列表查询使用 lateral/subquery 取最新 attempt，避免 N+1；
 - caption、Prompt、output 不进入普通应用日志；
 - attempt/history 永不物理覆盖；只追加新执行记录并更新当前状态字段。
-
 ## 21. 完整 HTTP 契约示例
 
 ### 21.1 通用响应和错误
@@ -2047,7 +1579,6 @@ GET /v2/video-publish/devices
 - 选择面返回精确 `serial`：创建请求必须回传它（§21.3），且该端点与 `/config` 同属 `page:video-publish` 已授权面；任务列表/详情/指标继续只返回掩码。不透传 `active_task_desc`、`active_session_id` 等可能含文案或会话信息的字段。
 - Artemis 不可达或未配置 `ARTEMIS_BASE_URL` 时返回 503 `ARTEMIS_UNREACHABLE`（可重试）；前端此时隐藏选择器并回退配置设备。
 - 设备 offline/locked/busy 不阻止展示与创建排队任务。
-
 ## 22. 前端实现规格
 
 ### 22.1 页面组件树
@@ -2337,236 +1868,6 @@ copyArtemisId
 - 时长：`4m 19s` 或中文 `4分19秒`，全页统一；
 - ttsERP task ID 与 Artemis ID 标签必须明确，不能都写“任务 ID”；
 - UUID copy 使用完整原始值；视觉缩写固定为前 8、后 5：`c8af5a6c…391d2`。
-
-## 23. 基本部署方案
-
-### 23.1 拓扑
-
-```text
-Browser
-  ├─ HTTPS /tts/* ─────────────→ NGINX → tts-erp API :9877
-  └─ HTTPS /minio/* signed PUT → MinIO :9000
-
-tts-erp API / publish worker
-  ├─ PostgreSQL
-  ├─ MinIO internal endpoint
-  ├─ Artemis http://127.0.0.1:8001
-  └─ adb server → D123084100AC
-```
-
-Artemis 和 ADB 不直接暴露给浏览器或公网。若 Artemis 不在同机，使用受限内网、token 和防火墙 allowlist。
-
-### 23.2 PostgreSQL migration
-
-migration 必须：
-
-1. `CREATE SCHEMA IF NOT EXISTS publishing`；
-2. 创建三张表和所有 CHECK/FK/unique/index；
-3. 安装 `updated_at` trigger，复用项目现有 trigger helper；
-4. 创建部分唯一索引；
-5. 不读取或修改生产业务数据；
-6. downgrade 只允许在确认没有任务数据时执行，否则拒绝或由运维先导出。
-
-关键索引：
-
-```sql
-CREATE INDEX ix_video_publish_queue
-ON publishing.video_publish_tasks (next_attempt_at, queued_at, id)
-WHERE status = 'pending' AND stage IN ('queued', 'waiting_device');
-
-CREATE INDEX ix_video_publish_history
-ON publishing.video_publish_tasks (created_at DESC, id DESC);
-
-CREATE INDEX ix_video_publish_attempt_task_seq
-ON publishing.video_publish_attempts (task_id, sequence_no DESC);
-
-CREATE INDEX ix_video_publish_attempt_status
-ON publishing.video_publish_attempts (status, updated_at)
-WHERE status IN ('created', 'submitting', 'queued', 'running', 'unknown');
-```
-
-### 23.3 MinIO bucket
-
-创建私有 bucket `tiktok-video`。禁止 anonymous read/write。服务端账号至少需要：
-
-```text
-s3:GetObject
-s3:PutObject
-s3:DeleteObject
-s3:HeadObject
-```
-
-限制到 bucket/prefix `video-publish/*`。浏览器通过预签名 URL 上传，不获得 access key。
-
-CORS 示例（origin 按实际域名替换）：
-
-```xml
-<CORSConfiguration>
-  <CORSRule>
-    <AllowedOrigin>https://erp.example.com</AllowedOrigin>
-    <AllowedMethod>PUT</AllowedMethod>
-    <AllowedMethod>HEAD</AllowedMethod>
-    <AllowedHeader>content-type</AllowedHeader>
-    <AllowedHeader>content-length</AllowedHeader>
-    <ExposeHeader>etag</ExposeHeader>
-    <MaxAgeSeconds>3600</MaxAgeSeconds>
-  </CORSRule>
-</CORSConfiguration>
-```
-
-生产不要设置 bucket lifecycle 自动删除成功前对象；清理由业务 Worker 控制。可以另外设置临时 multipart 残片清理策略。
-
-### 23.4 本地 spool
-
-默认：
-
-```text
-~/.local/share/tts-erp/video-publish/
-```
-
-要求：
-
-- 目录 owner 为 publish service 用户，权限 `0700`；
-- 文件 `0600`；
-- 每次 execution 的目录 `<task_public_id>/<execution_generation>/video.mp4.part|video.mp4`，设备文件同样使用唯一 `tts_erp_<execution_generation>.mp4`；
-- 先写 `.part`，fsync 后原子 rename；登记的 `spool_path` 同时拥有该精确 final 与精确 sibling `.part`，process kill 后 selector 必须幂等删除并验证两者；
-- spool 所在磁盘预留至少 `2 × maxVideoBytes + safety margin`；
-- 日志不打印完整本地路径中的原始用户文件名。
-
-启动时扫描 orphan spool：只对 DB 中证明已终态且超过保留窗的任务原子调度/重开 spool cleanup；扫描器不删除目录，实际删除仍由 cleanup selector 独占。未知或活跃目录保留，禁止 `rm -rf` 整个根目录。
-
-### 23.5 ADB 与手机
-
-- systemd 用户必须能调用固定 `adb` binary；
-- 设备通过 USB debugging 或受控 ADB TCP 接入；
-- 明确配置 `ARTEMIS_DEVICE_SERIAL`，禁止依赖“第一台设备”；
-- 手机保持解锁、TikTok 已登录、系统相册权限已授权；
-- `/sdcard/Movies/TTSERP/` 只放系统管理的 `tts_erp_<uuid>.mp4`；
-- 不授予 Worker 任意删除其他相册目录的能力；
-- udev/USB 权限由运维配置，不以 root 运行整个 ttsERP。
-
-### 23.6 Artemis
-
-发布 Worker 使用仓库内 `tts_erp_v2/publishing/artemis_client.py` 的 `httpx` adapter；不要求另装或固定不存在的外部 `artemis-client` 包。配置：
-
-```env
-ARTEMIS_BASE_URL=http://127.0.0.1:8001
-ARTEMIS_TOKEN=<secret-if-enabled>
-ARTEMIS_DEVICE_SERIAL=D123084100AC
-ARTEMIS_APP_PACKAGE=com.zhiliaoapp.musically
-ARTEMIS_PROFILE=pro
-ARTEMIS_VERIFICATION_LEVEL=strict
-```
-
-部署前 smoke check：
-
-```text
-GET /healthz 或 SDK health()
-GET /api/devices 包含精确 serial
-GET /api/system/readiness 无 fatal
-```
-
-不得用真实发布 Prompt 做健康检查。
-
-### 23.7 systemd unit
-
-检查并安装仓库中的 `scripts/systemd/tts-erp-publish.service` user unit；其内容与实际部署路径一致：
-
-```ini
-[Unit]
-Description=ttsERP TikTok publish worker
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=%h/tts-erp
-EnvironmentFile=%h/tts-erp/.env
-ExecStart=%h/tts-erp/.venv/bin/python -m tts_erp_v2.publishing.worker
-Restart=always
-RestartSec=5
-TimeoutStopSec=30
-KillSignal=SIGTERM
-NoNewPrivileges=true
-PrivateTmp=true
-UMask=0077
-
-[Install]
-WantedBy=default.target
-```
-
-该 unit 以当前用户运行，以便继承其 USB/ADB 权限；确保 `PrivateDevices` 等 hardening 不阻断 USB/ADB。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 可启动但设备 readiness 为 `unknown`，API 创建任务会失败关闭；缺少 `ARTEMIS_BASE_URL` 或 `TTS_ERP_PUBLISH_SPOOL_DIR` 时 Worker 启动失败。先在 staging 主机验证再收紧 sandbox。
-
-常用命令：
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now tts-erp-publish.service
-systemctl --user status tts-erp-publish.service
-journalctl --user -u tts-erp-publish.service -f
-```
-
-### 23.8 NGINX 与路径前缀
-
-新 API 和页面随既有 `/tts/` 反代，无需暴露 Worker 端口。必须验证：
-
-- `/tts/v2/pages/video-publish` 可打开；
-- 相对静态资源 `/tts/static/...` 正常；
-- JS 从 pathname 推导 `/tts/v2`；
-- MinIO signed URL 使用浏览器可达的 `MINIO_PUBLIC_HOST`；
-- NGINX/API 不代理大视频 body，因为浏览器直传 MinIO。
-
-### 23.9 环境变量字典
-
-| 变量 | 必填 | 默认 | 含义 |
-| --- | --- | --- | --- |
-| `TIKTOK_PUBLISH_MINIO_BUCKET` | 是 | 无 | 私有视频 bucket。 |
-| `TIKTOK_PUBLISH_MAX_VIDEO_BYTES` | 否 | 524288000 | 视频上限。 |
-| `TIKTOK_PUBLISH_MAX_CAPTION_CHARS` | 否 | 4000 | 文案字符上限。 |
-| `TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS` | 否 | 900 | 预签名 PUT 有效期。 |
-| `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` | 否 | 30 | 失败媒资保留期。 |
-| `TIKTOK_PUBLISH_MAX_ATTEMPTS` | 否 | 3 | 正式发布 attempt 上限。 |
-| `TIKTOK_PUBLISH_ALBUM` | 否 | TTSERP | 设备相册/目录名。 |
-| `TTS_ERP_PUBLISH_SPOOL_DIR` | 是 | 无 | 本地 spool 根目录。 |
-| `ARTEMIS_BASE_URL` | 是 | 无 | Artemis daemon URL。 |
-| `ARTEMIS_TOKEN` | 视部署 | 无 | Artemis 鉴权 token。 |
-| `ARTEMIS_DEVICE_SERIAL` | API 创建任务必需 | 无 | 唯一目标设备；缺失时 Worker 仍启动但 readiness=`unknown`，API 创建失败关闭。 |
-| `ARTEMIS_APP_PACKAGE` | 否 | com.zhiliaoapp.musically | TikTok package。 |
-| `ARTEMIS_PROFILE` | 否 | pro | 执行 profile。 |
-| `ARTEMIS_VERIFICATION_LEVEL` | 否 | strict | Pro checker 强度。 |
-| `PUBLISH_POLL_INTERVAL_SECONDS` | 否 | 2 | 后端查 Artemis 间隔。 |
-| `PUBLISH_TASK_LEASE_SECONDS` | 否 | 30 | DB task lease。 |
-| `PUBLISH_WORKER_HEARTBEAT_SECONDS` | 否 | 5 | Worker 心跳周期。 |
-
-Worker 启动直接要求 `ARTEMIS_BASE_URL` 与 `TTS_ERP_PUBLISH_SPOOL_DIR`，缺少任一项即失败；bucket 有受校验的 `tiktok-video` 默认值。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍可启动，设备 readiness=`unknown`，API 创建任务失败关闭；不得静默选择“第一台设备”。
-
-### 23.10 部署顺序
-
-1. 发布代码但不启用页面权限和 Worker；
-2. 执行 migration；
-3. 创建 MinIO bucket/policy/CORS；
-4. 创建 spool 并校验权限/磁盘；
-5. 安装/验证 Artemis client 和 ADB；
-6. 启动 publish worker，确认 heartbeat ready；
-7. API smoke：config/create/cancel，使用小型测试 MP4，不调用真实发布；
-8. 模拟器 dry-run；
-9. 真机 staging-only；
-10. 用户显式确认后真实发布一条；
-11. 授权 `page:video-publish` 给 operator。
-
-### 23.11 回滚
-
-应用回滚优先级：
-
-1. 从角色移除页面权限或 feature flag，阻止新任务；
-2. 停止 Worker 领取新任务；
-3. 对 running Artemis session 继续只读查询并保存结果，不盲目 stop；
-4. 保留数据库表、MinIO 对象和 attempt 历史；
-5. 回滚 API/页面代码；
-6. 数据 migration 只有在表为空并经人工确认时 downgrade。
-
-不得以“回滚”为理由删除 needs_review 或 running 任务的媒资。
-
 ## 24. 日志、监控与运维
 
 ### 24.1 结构化日志
@@ -2650,7 +1951,6 @@ worker_recovered_task
 ```
 
 普通用户看到业务友好状态；admin 可看实例/hostname/PID，但仍不暴露 token。
-
 ## 25. 安全与数据保留
 
 - 上传接口必须校验登录、page permission、readwrite role 和 CSRF-style `X-Requested-With`；
@@ -2664,95 +1964,6 @@ worker_recovered_task
 - 数据库任务/attempt 审计默认保留 180 天；真实保留期需与合规策略确认；
 - succeeded/cancelled 对象立即删除；failed/needs_review 对象按保留策略；
 - 删除 API v1 不提供，避免误删审计历史。
-
-## 26. Definition of Done
-
-### 26.1 后端
-
-- [ ] migration 在隔离测试库 upgrade/downgrade（空表）通过；
-- [ ] create 幂等键在并发双请求下只生成一行；
-- [ ] confirm 对不存在、大小错、状态冲突有稳定错误；
-- [ ] 两个 Worker 并发领取时全局最多一个 running；
-- [ ] attempt 在调用 Artemis 前已持久化 session ID；
-- [ ] 相同 session ID 的 transport retry 不重复执行；
-- [ ] Worker 重启后继续查询原 session；
-- [ ] 安全失败自动重试，模糊失败自动 verify；
-- [ ] success 与 cleanup failure 独立；
-- [ ] API 列表/详情返回完整 Artemis ID 和 allowedActions；
-- [ ] 日志不泄露 caption/Prompt/secret/signed URL。
-
-### 26.2 前端
-
-- [ ] 文件选择、预览、清除和 object URL 回收正确；
-- [ ] 文案原样保留并准确计数；
-- [ ] 上传进度、取消、失败重试与 confirm 闭环；
-- [ ] 双击提交只创建一个任务；
-- [ ] 轨道阶段、状态 badge、队列位置与服务端一致；
-- [ ] 智能/固定/关闭刷新模式和 localStorage 偏好正确；
-- [ ] 轮询不重叠、隐藏降频、失败退避、旧响应不覆盖；
-- [ ] 列表和 drawer 展示/复制完整 Artemis ID；
-- [ ] 每条 attempt 都保留自己的 ID；
-- [ ] needs_review 不显示直接重试；
-- [ ] 390/768/1440px 可用；
-- [ ] 键盘、焦点、aria-live、reduced-motion 通过。
-
-### 26.3 部署
-
-- [ ] bucket 私有且 CORS 仅允许生产 origin；
-- [ ] spool 权限、磁盘和 orphan 清理验证；
-- [ ] systemd 重启和 SIGTERM recovery 验证；
-- [ ] API/Worker/Artemis/ADB readiness 可诊断；
-- [ ] 模拟器完成全流程但不真实发布；
-- [ ] 真机 staging-only 通过；
-- [ ] 用户显式确认的一条真实任务成功且三处清理完成。
-
-## 27. GPT Luna 开发交接清单
-
-Luna 开始开发前必须按顺序阅读：
-
-1. 根目录 `AGENTS.md`；
-2. `docs/guides/agent-safety.md`；
-3. `docs/architecture/architecture-overview.md`；
-4. `docs/architecture/process-architecture.md`；
-5. `docs/design/ui-style-system.md`；
-6. 本方案全文；
-7. 现有 `tts_erp_v2/storage/minio_client.py` 与 `api/v2/spu_images.py`；
-8. Artemis client 的 `submit/get_task/wait_for_task` 契约。
-
-开发约束：
-
-- 在独立 lane/worktree 开发并登记所有 owned files；
-- 测试只用 `bash scripts/test_isolated.sh ...`；
-- 先测试后实现，每个 Phase 可独立验收；
-- 不把之前外部 PoC 的自定义 SigV4 客户端搬入 ttsERP；
-- 不在 FastAPI handler 内执行 ADB、下载大文件或长轮询；
-- 不在浏览器直接访问 Artemis；
-- 不跳过 DB 状态机直接更新字段；
-- 不运行真实发布，除非当前用户再次明确授权；
-- 不擅自改变本方案枚举/错误码/按钮语义；如实现发现冲突，先更新方案并说明迁移影响。
-
-建议提交拆分：
-
-```text
-1. feat(publishing): add schema and domain state machine
-2. feat(publishing): add upload and task APIs
-3. feat(publishing): add object, adb, and Artemis adapters
-4. feat(publishing): add resilient publish worker
-5. feat(ui): add video publish console
-6. test(publishing): cover retries, recovery, and UI contracts
-7. docs: add deployment and operator runbook
-```
-
-Luna 每个 Phase 的输出必须包含：
-
-- 改动文件；
-- 新增/修改的 public interface；
-- migration head；
-- 执行过的隔离测试及结果；
-- 未验证的真实设备风险；
-- 是否改变本方案中的 API、字段或枚举；
-- 当前分支/commit，且未经 review 不合并 master。
-
 ## 28. 已实现的最终安全边界
 
 当前 migration head 为 `0066_publish_execution_fences`（parent `0065_publish_generation_identity`）。实现还明确保证：

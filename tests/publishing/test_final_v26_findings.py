@@ -26,6 +26,8 @@ from tts_erp_v2.publishing.repository import (
     request_verification,
 )
 
+pytestmark = [pytest.mark.domain_publishing]
+
 ROOT = Path(__file__).parents[2]
 ACTIVE_ATTEMPT_STATUSES = ("created", "submitting", "queued", "running", "unknown")
 

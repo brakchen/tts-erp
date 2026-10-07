@@ -38,6 +38,8 @@ from tts_erp_v2.publishing.repository import (
 )
 from tts_erp_v2.storage.minio_client import ObjectNotFound
 
+pytestmark = [pytest.mark.domain_publishing]
+
 ROOT = Path(__file__).parents[2]
 
 

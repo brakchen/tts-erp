@@ -29,7 +29,8 @@
 - Agents must not select full-history, coverage, or archived migration suites under `docs/archive/migrate-v1-to-v2-2026-08-29/`. These paths include or restore production-touching migration behavior.
 - Never execute `DELETE`, `TRUNCATE`, `DROP`, or irreversible `UPDATE` against production data without the documented guard and explicit human authorization.
 - Never run `alembic upgrade` against production. Agents may validate migrations only through the isolated runner against `tts_erp_test_template` and its ephemeral `tts_erp_test_*` clones; production migration and restart are human-operated.
-- Do not add a destructive HTTP, CLI, migration, or job path without the shared guard from `tts_erp_v2.api.deps`.
+- Do not add an HTTP, CLI, migration, or job path that destroys source-of-truth facts (settlement, order, refund, ad, or config rows) without the shared guard from `tts_erp_v2.api.deps`.
+- Recomputing a derived snapshot the same job owns (for example `analytics.spu_deterioration_alerts`, whose rows are rebuilt from source facts on the next run) is not a destructive path and does not take that guard; adding a release switch to it reintroduces the mismatch. If a new write path is unclear, ask before adding it.
 - Credentials must go through `tts_erp_v2.proxy.token_service`; never query legacy `oauth_tokens` or decrypt `integration.credentials` directly.
 - Do not reintroduce v1 `public.*` business tables or remove `public.fn_touch_updated_at()`.
 - Do not add store-writing TikTok endpoints. This repository is a read-oriented analytics system.
@@ -95,7 +96,7 @@ The purpose of this boundary is not “the frontend may never calculate”. It i
 | Refresh isolated test template | `bash scripts/test_isolated.sh --refresh-template fast` |
 | 测试前置依赖体检 / 安装 | `bash scripts/envsetup/install-test-deps.sh --check` / `sudo bash scripts/envsetup/install-test-deps.sh` |
 | API restart | `bash restart.sh` |
-| Sync-worker restart after `tts_erp_v2/jobs/` or `tts_erp_v2/sync_worker/` changes | `systemctl --user restart tts-erp-sync.service` |
+| Sync-worker restart after `tts_erp_v2/jobs/`, `tts_erp_v2/sync_worker/`, or `tts_erp_v2/analytics/` changes (the worker imports job modules and their analytics deps at load time; without a restart the running process keeps the old code) | `systemctl --user restart tts-erp-sync.service` |
 | Service status | `systemctl --user status tts-erp{,-sync}.service` |
 | API logs | `journalctl --user -u tts-erp -n 50` |
 

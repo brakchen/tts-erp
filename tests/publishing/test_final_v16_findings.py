@@ -33,6 +33,8 @@ from tts_erp_v2.publishing.submission import (
 )
 from tts_erp_v2.publishing.worker import _probe_device_readiness
 
+pytestmark = [pytest.mark.domain_publishing]
+
 
 def _request(*, role: Role = Role.READWRITE) -> Request:
     return Request(

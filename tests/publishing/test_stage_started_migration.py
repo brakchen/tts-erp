@@ -10,6 +10,8 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import text
 
+pytestmark = [pytest.mark.domain_publishing]
+
 MIGRATION = (
     Path(__file__).parents[2] / "alembic/versions/0059_publish_stage_started_at.py"
 )

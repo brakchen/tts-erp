@@ -3,25 +3,32 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_deterioration_alert.config import ALERT_CONFIG_KEY
 from tts_erp_v2.analytics.spu_deterioration_alert.read import read_alerts
 from tts_erp_v2.api.deps import get_session, require_role_at_least
-from tts_erp_v2.db.models import SpuDeteriorationAlert
+from tts_erp_v2.db.models import ChannelProduct, SpuDeteriorationAlert
 
 router = APIRouter(prefix="/v2/analytics", tags=["analytics"])
 
 
 def _decimal(value: Decimal | None) -> str | None:
-    return None if value is None else str(value)
+    if value is None:
+        return None
+    # 页面只展示两位小数（owner 2026-10-07）：wire 统一 ROUND_HALF_UP 到 2dp。
+    # 公式产出的高精度零（如 Decimal("0E-12")）归零为 "0"，避免科学计数法。
+    if value == 0:
+        return "0"
+    return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def _row(row: SpuDeteriorationAlert) -> dict[str, Any]:
+def _row(row: SpuDeteriorationAlert, spu_id: str | None = None) -> dict[str, Any]:
     warning_code = {
         "profit_to_loss": "PROFIT_TO_LOSS",
         "loss_expanding": "LOSS_EXPANDING",
@@ -31,6 +38,8 @@ def _row(row: SpuDeteriorationAlert) -> dict[str, Any]:
     return {
         "shopPk": row.shop_pk,
         "spuPk": row.spu_pk,
+        # 页面 SPU 列展示业务 spu_id（owner 2026-10-07）；spuPk 仍是跳转/过滤的内部主键。
+        "spuId": spu_id,
         "windowDays": row.window_days,
         "layer": row.layer,
         "severity": row.severity,
@@ -58,7 +67,7 @@ def _row(row: SpuDeteriorationAlert) -> dict[str, Any]:
         "warningCode": warning_code,
         "warningText": "实际 ROI 与净利润比较恶化" if row.severity != "none" else None,
         "drilldown": {
-            "profitabilityUrl": f"/v2/analytics/spu-roi?shop_pk={row.shop_pk}&spu_pk={row.spu_pk}",
+            "profitabilityUrl": f"/v2/analytics/spu-roi?shop_pk={row.shop_pk}&spu_ids={row.spu_pk}",
             "pageUrl": "/v2/pages/spu-roi",
         },
     }
@@ -75,10 +84,11 @@ def list_spu_profit_deterioration(
     severity: Annotated[str, Query()] = "all",
     state: Annotated[list[str] | None, Query(alias="state")] = None,
     sample: str = Query(default="all"),
+    activity: Annotated[str, Query()] = "all",
     anchor_date: date | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> dict[str, Any]:
+) -> Any:
     require_role_at_least(request, "readonly")
     if window_days is not None and (
         not window_days or any(value not in (1, 3, 7) for value in window_days)
@@ -100,8 +110,6 @@ def list_spu_profit_deterioration(
             "loss_to_profit",
             "roi_deterioration",
             "net_profit_deterioration",
-            "roi_recovery",
-            "recovery",
             "stable",
             "sample_insufficient",
             "unavailable",
@@ -111,6 +119,8 @@ def list_spu_profit_deterioration(
         raise HTTPException(status_code=422, detail="invalid state")
     if sample not in ("all", "sufficient", "sample_insufficient", "unavailable"):
         raise HTTPException(status_code=422, detail="invalid sample")
+    if activity not in ("all", "recent"):
+        raise HTTPException(status_code=422, detail="activity must be all or recent")
     parsed_spu_ids = spu_ids or []
     if len(parsed_spu_ids) > 100 or any(value < 1 for value in parsed_spu_ids):
         raise HTTPException(
@@ -126,6 +136,7 @@ def list_spu_profit_deterioration(
             severity=None if severity == "all" else severity,
             states=state,
             sample=sample,
+            activity=activity,
             anchor_date=anchor_date,
             limit=limit,
             offset=offset,
@@ -143,8 +154,19 @@ def list_spu_profit_deterioration(
         "shopSpuCount": len({row.spu_pk for row in all_rows}),
     }
     request_id = request.headers.get("x-request-id") or ""
+    # SPU 列展示业务 spu_id：按本页 spu_pk 批量回查 commerce.products_spu。
+    spu_id_by_pk: dict[int, str] = {}
+    page_spu_pks = {row.spu_pk for row in rows}
+    if page_spu_pks:
+        spu_id_by_pk = dict(
+            session.execute(
+                select(ChannelProduct.id, ChannelProduct.spu_id).where(
+                    ChannelProduct.id.in_(page_spu_pks)
+                )
+            ).all()
+        )
     return {
-        "items": [_row(row) for row in rows],
+        "items": [_row(row, spu_id_by_pk.get(row.spu_pk)) for row in rows],
         "total": total,
         "totals": totals,
         "meta": {

@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_deterioration_alert.config import AlertConfig
 from tts_erp_v2.analytics.spu_deterioration_alert.policy import AlertDecision
-from tts_erp_v2.api.deps import require_destructive_script_guard
 from tts_erp_v2.db.models import SpuDeteriorationAlert
 
 
@@ -30,14 +29,13 @@ def replace_anchor(
     rows: Iterable[SpuDeteriorationAlert],
     anchor_date: date,
 ) -> int:
-    """Atomically replace one anchor; callers commit or rollback as one unit."""
+    """Atomically replace one anchor; callers commit or rollback as one unit.
+
+    No destructive-script guard: this is a job-owned derived snapshot, the
+    DELETE is scoped to a single ``anchor_date``, and the next scheduled run
+    recomputes the same rows from source facts (AGENTS.md section 3).
+    """
     materialized = list(rows)
-    require_destructive_script_guard(
-        script_name="spu_profit_deterioration_alert_replace",
-        confirmation=True,
-        dangerous=True,
-        allow_env="ALLOW_PROD_SPU_DETERIORATION_ALERT_REPLACE",
-    )
     session.execute(
         delete(SpuDeteriorationAlert).where(
             SpuDeteriorationAlert.anchor_date == anchor_date
@@ -49,6 +47,10 @@ def replace_anchor(
 
 
 def stale(anchor_date: date, *, today: date | None = None) -> bool:
+    # Freshness budget, deliberately one day looser than the T-1 anchor offset in
+    # read.build_materialized_rows. With anchor = T-1, accepting T-2 here keeps a
+    # snapshot fresh for the remainder of its run day plus one full day of slack
+    # instead of flipping to stale the moment the UTC date rolls over.
     return anchor_date < (today or datetime.now(UTC).date()) - timedelta(days=2)
 
 

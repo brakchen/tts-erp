@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -22,6 +23,8 @@ from tts_erp_v2.publishing.dispatcher import (
 from tts_erp_v2.publishing.domain import classify_failure
 from tts_erp_v2.publishing.object_store import MinioVideoStore, video_store_from_env
 from tts_erp_v2.storage.minio_client import MinioClient
+
+pytestmark = [pytest.mark.domain_publishing]
 
 ROOT = Path(__file__).parents[2]
 
@@ -316,3 +319,79 @@ def test_publish_responsive_accessibility_contract_uses_existing_css() -> None:
     assert 'class="btn-icon drawer-close"' in template
     assert 'id="publish-preview-metadata"' in template
     assert 'maxlength="4000"' not in template
+
+
+def _css_rules(css: str) -> dict[str, str]:
+    """Flatten minified CSS into ``selector -> declaration block``.
+
+    ``@media`` wrappers are ignored (their inner rules are kept), so an
+    assertion cannot be satisfied or broken merely by where a rule sits.
+    """
+    rules: dict[str, str] = {}
+    without_comments = re.sub(r"/\*.*?\*/", " ", css, flags=re.DOTALL)
+    for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", without_comments):
+        for selector in match.group(1).split(","):
+            key = " ".join(selector.split())
+            rules.setdefault(key, match.group(2).strip())
+    return rules
+
+
+def test_modal_dialogs_use_the_shared_op_dialog_component() -> None:
+    """模态弹窗的外观只有一个 owner：common.css 的 ``.op-dialog``。
+
+    原生 ``<dialog>`` 的 UA 默认样式不消费本站令牌：白底黑框、16px padding、
+    ``h2`` 落到 32px、``::backdrop`` 只有 10% 黑。页面内联一份 ``.op-dialog`` 就等于
+    制造第二个 owner（曾经就发生过：shops.html 内联一份，video-publish 一份都没有）。
+    """
+    common = (ROOT / "tts_erp_v2/static/css/common.css").read_text()
+    rules = _css_rules(common)
+    surface = rules.get(".op-dialog", "")
+    assert surface, "common.css 缺少 .op-dialog 共享组件"
+    assert "var(--paper)" in surface and "var(--ink)" in surface
+    assert "var(--rule)" in surface and "var(--radius)" in surface
+    assert re.search(r"padding:\s*[^;}]+", surface)
+    assert rules.get(".op-dialog::backdrop"), ".op-dialog 缺少遮罩样式"
+    assert "var(--serif)" in rules.get(".op-dialog h2", "")
+
+    for name in ("video-publish.html", "shops.html"):
+        template = (ROOT / f"tts_erp_v2/templates/pages/{name}").read_text()
+        assert 'class="op-dialog"' in template, f"{name} 的弹窗未接入共享组件"
+        assert "common.css" in template
+
+    # 页面模板不得再内联表面/遮罩/标题（common.css 头部约定）。
+    shops = (ROOT / "tts_erp_v2/templates/pages/shops.html").read_text()
+    assert ".op-dialog {" not in shops
+    assert "::backdrop" not in shops
+    assert ".op-dialog .form-field" in shops, "页面特有的表单字段排版应留在页面里"
+
+
+def test_publish_confirm_dialog_layout_and_copy_match_design_spec() -> None:
+    """确认框的内部排版归页面 CSS，文案归设计文档 §22.8。"""
+    css = (ROOT / "tts_erp_v2/static/css/video-publish.css").read_text()
+    rules = _css_rules(css)
+    template = (ROOT / "tts_erp_v2/templates/pages/video-publish.html").read_text()
+
+    # 表面已上移到 common.css，页面只补长文案滚动 + 两列动作行 + 元数据网格。
+    # （_css_rules 按逗号拆开分组选择器，所以成对出现的选择器要合并后再断言。）
+    def merged(*selectors: str) -> str:
+        return ";".join(rules.get(selector, "") for selector in selectors)
+
+    assert "max-height:calc(100vh - 48px)" in merged(
+        "#publish-confirm-dialog", "#publish-action-dialog"
+    )
+    assert "display:grid" in merged(
+        "#publish-confirm-dialog>form", "#publish-action-dialog>form"
+    )
+    assert "grid-column:1/-1" in rules.get("#publish-confirm-dialog h2", "")
+    assert "grid-column:1/-1" in rules.get("#publish-action-dialog h2", "")
+    assert "grid-column:1/-1" in rules.get("#publish-confirm-preview", "")
+    assert "grid-column:1/-1" in rules.get(".publish-confirm-warning", "")
+    assert "display:grid" in rules.get("#publish-confirm-dialog dl", "")
+    assert "#publish-confirm-dialog button:first-of-type" in css
+    assert "min-height:44px" in css
+
+    # 设计文档 22.8「提交确认」逐项文案。
+    assert "<h2>确认加入发布队列</h2>" in template
+    assert "设备空闲时任务可能立即开始，入队后不能修改视频和文案。" in template
+    assert 'class="btn-secondary">返回修改</button>' in template
+    assert 'class="btn-primary">确认并上传</button>' in template

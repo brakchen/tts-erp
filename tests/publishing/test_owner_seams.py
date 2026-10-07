@@ -21,6 +21,8 @@ from tts_erp_v2.publishing.repository import (
     finish_cleanup_work,
 )
 
+pytestmark = [pytest.mark.domain_publishing]
+
 
 def _task(*, stage: str = "waiting_artemis") -> VideoPublishTask:
     task_id = uuid4()
