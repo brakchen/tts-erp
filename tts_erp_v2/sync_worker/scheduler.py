@@ -619,7 +619,7 @@ def _overdue_first_runs(
     now: datetime,
     jitter_seconds: int,
 ) -> dict[str, datetime]:
-    """First-fire overrides for jobs overdue since their last success.
+    """First-fire overrides for jobs that owe a run.
 
     ``IntervalTrigger``'s first fire is ``start + interval`` — every
     worker restart resets that timer. A 24 h job under a worker that
@@ -627,14 +627,25 @@ def _overdue_first_runs(
     starving 2026-10-03) therefore never fires: the watchdog flags it
     stale while the trigger keeps re-arming 24 h into a future that
     never arrives. Anchoring the first fire to ``sync_jobs`` success
-    history fixes the whole class: overdue jobs fire within
+    history fixes that class: overdue jobs fire within
     ``min(interval, _MAX_CATCHUP_SPREAD)`` seconds of startup instead of
     a full interval later, while jobs that are still within cadence keep
     the default ``start + interval`` behaviour.
 
+    A job with no ``succeeded`` row at all owes a run just as much as one
+    whose last success has aged past its interval — it has produced
+    nothing yet. Anchoring only to the history rows left those jobs on
+    ``start + interval``, so a newly registered 24 h job stayed silent for
+    a full day after every deploy: observed 2026-10-06 with
+    ``analytics.spu_profit_deterioration_alert``, whose first fire was
+    deferred to 2026-10-07 21:17 and left its snapshot table empty (the
+    read API answers 503 "materialized alert snapshot is unavailable").
+    Never-run jobs therefore get the same catch-up first fire.
+
     Returns an empty mapping when history is unavailable (``list``
     mode's raising factory, test doubles, DB errors) — callers then fall
-    back to plain interval scheduling.
+    back to plain interval scheduling. That fallback is deliberate: an
+    unreadable history cannot distinguish "never ran" from "ran recently".
     """
     try:
         session = session_factory()
@@ -657,16 +668,18 @@ def _overdue_first_runs(
             session.close()
 
     overdue: dict[str, datetime] = {}
-    for name, last in rows:
-        spec = JOBS.get(name)
-        if spec is None or last is None:
-            continue
-        if last.tzinfo is None:
-            last = last.replace(tzinfo=UTC)
-        due = last + timedelta(seconds=spec.interval_seconds)
-        if due <= now:
-            spread = min(spec.interval_seconds, _MAX_CATCHUP_SPREAD)
-            overdue[name] = now + timedelta(seconds=random.uniform(0, spread))
+    history = dict(rows)
+    for name, spec in JOBS.items():
+        last = history.get(name)
+        if last is not None:
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=UTC)
+            if last + timedelta(seconds=spec.interval_seconds) > now:
+                continue  # still within cadence — keep start + interval
+        # Either past due, or never succeeded: both owe a run. Spread the
+        # catch-up fires so a restart doesn't launch everything at t=0.
+        spread = min(spec.interval_seconds, _MAX_CATCHUP_SPREAD)
+        overdue[name] = now + timedelta(seconds=random.uniform(0, spread))
     return overdue
 
 
