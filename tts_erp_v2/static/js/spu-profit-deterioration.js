@@ -80,7 +80,9 @@
     shopPk: null,
     spuIds: [],
     windowDays: '',
-    layer: 'all',
+    /* 层级筛选已从 UI 移除（业务理解不了 fast/confirmation）：固定只看确认层；
+       快层数据仍可用 ?layer=fast 或 ?layer=all 排查。 */
+    layer: 'confirmation',
     severity: 'all',
     alertState: 'all',
     sample: 'sufficient',
@@ -288,7 +290,6 @@
           aria-label="展开 SPU #${esc(item.spuPk)} 明细">明细</button>
         <div class="visually-hidden">shop_pk=${esc(item.shopPk)}</div></td>
       <td><span class="mono">${esc(item.windowDays)} 天</span></td>
-      <td><span class="mono">${esc(item.layer)}</span></td>
       <td>${sampleCell(item)}
         <div class="alert-row__state mono">${esc(stateLabel(item))} · ${severityCell(item)}</div></td>
       <td>${byLabel('上期 ROI')}</td>
@@ -323,7 +324,7 @@
       <header class="alert-card__head">
         ${badge(item)}
         <span class="alert-card__spu mono">SPU #${esc(item.spuPk)}</span>
-        <span class="alert-card__window mono">${esc(item.windowDays)} 天 · ${esc(item.layer)}</span>
+        <span class="alert-card__window mono">${esc(item.windowDays)} 天</span>
         <button type="button" class="alert-row__toggle" data-role="row-summary"
           aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="alert-summary"
           aria-label="展开 SPU #${esc(item.spuPk)} 明细">明细</button>
@@ -396,7 +397,7 @@
     els.totalSpus.textContent = totals.shopSpuCount === undefined ? '—' : String(totals.shopSpuCount);
         // pi-lens-ignore: no-inner-html-js
     els.tfoot.innerHTML = `<tr class="alert-total-row">
-      <td colspan="18">服务端 totals（完整 scope，不是当前页可见行）：全部 ${esc(payload.total)} 行 ·
+      <td colspan="17">服务端 totals（完整 scope，不是当前页可见行）：全部 ${esc(payload.total)} 行 ·
         告警 ${esc(totals.warningCount)} · 严重告警 ${esc(totals.criticalCount)} ·
         样本不足 / 不可用 ${esc(totals.insufficientSampleCount)} · 涉及 SPU ${esc(totals.shopSpuCount)}</td>
     </tr>`;
@@ -416,7 +417,7 @@
   function renderEmpty(payload, kind, text) {
     hideSummary();
     // pi-lens-ignore: no-inner-html-js
-    els.rows.innerHTML = `<tr><td colspan="18" class="op-empty">${esc(text)}</td></tr>`;
+    els.rows.innerHTML = `<tr><td colspan="17" class="op-empty">${esc(text)}</td></tr>`;
     // pi-lens-ignore: no-inner-html-js
     els.cards.innerHTML = `<p class="op-empty alert-card alert-card--${kind}">${esc(text)}</p>`;
     setStatus(kind, text);
@@ -493,7 +494,7 @@
     setBanner('loading', '正在加载告警…', '');
     setStatus('loading', '正在加载告警…');
     // pi-lens-ignore: no-inner-html-js
-    els.rows.innerHTML = `<tr class="alert-row alert-row--loading"><td colspan="18" class="op-loading">正在加载告警…</td></tr>`;
+    els.rows.innerHTML = `<tr class="alert-row alert-row--loading"><td colspan="17" class="op-loading">正在加载告警…</td></tr>`;
     // pi-lens-ignore: no-inner-html-js
     els.cards.innerHTML = '<p class="op-loading alert-card">正在加载告警…</p>';
     els.bannerProvisional.hidden = true;
@@ -514,7 +515,7 @@
     else text = `加载失败（HTTP ${err.status}）：${err.message}${rid}`;
     setBanner('error', '加载失败', rid.replace(/^ · /, ''));
     // pi-lens-ignore: no-inner-html-js
-    els.rows.innerHTML = `<tr><td colspan="18" class="op-error">${esc(text)}</td></tr>`;
+    els.rows.innerHTML = `<tr><td colspan="17" class="op-error">${esc(text)}</td></tr>`;
     // pi-lens-ignore: no-inner-html-js
     els.cards.innerHTML = `<p class="op-error alert-card alert-card--error">${esc(text)}</p>`;
     setStatus('error', `${text} 可点击「刷新」重试。`);
@@ -551,7 +552,7 @@
     // pi-lens-ignore: no-inner-html-js
     els.summaryMeta.innerHTML =
       `${badge(item)} <span class="mono">shop_pk #${esc(item.shopPk)} · SPU #${esc(item.spuPk)} · ` +
-      `${esc(item.windowDays)} 天 · ${esc(item.layer)}</span>` +
+      `${esc(item.windowDays)} 天</span>` +
       `<div class="alert-summary__line">状态 <span class="mono">${esc(stateLabel(item))}</span> · ` +
       `severity <span class="mono">${esc(item.severity || '—')}</span> · ` +
       `样本 <span class="mono">${esc(item.sampleStatus || '—')}</span></div>` +
@@ -672,8 +673,8 @@
     setSpuFeedback(scope.error);
     const windowDays = params.get('window_days') || '';
     state.windowDays = WINDOW_DAYS.includes(windowDays) ? windowDays : '';
-    const layer = params.get('layer') || 'all';
-    state.layer = ['all', 'fast', 'confirmation'].includes(layer) ? layer : 'all';
+    const layer = params.get('layer') || 'confirmation';
+    state.layer = ['all', 'fast', 'confirmation'].includes(layer) ? layer : 'confirmation';
     const alertState = params.get('state') || 'all';
     state.alertState = alertStateValues().includes(alertState) ? alertState : 'all';
     const severity = params.get('severity') || 'all';
@@ -706,7 +707,6 @@
       tab.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
     if (els.spuIds) els.spuIds.value = state.spuIds.join(',');
-    if (els.layer) els.layer.value = state.layer;
     if (els.alertState) els.alertState.value = state.alertState;
     if (els.severity) els.severity.value = state.severity;
     if (els.anchorDate) els.anchorDate.value = state.anchorDate;
@@ -1161,12 +1161,6 @@
       syncUrl();
       load();
     });
-    els.layer.addEventListener('change', () => {
-      state.layer = els.layer.value;
-      state.offset = 0;
-      syncUrl();
-      load();
-    });
     els.severity.addEventListener('change', () => {
       state.severity = els.severity.value;
       state.offset = 0;
@@ -1260,7 +1254,6 @@
     els.spuIds = $('filter-spu-ids');
     els.spuFeedback = $('filter-spu-feedback');
     els.windowTabs = $('filter-window-days');
-    els.layer = $('filter-layer');
     els.alertState = $('filter-state');
     els.severity = $('filter-severity');
     els.anchorDate = $('filter-anchor-date');

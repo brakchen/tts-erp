@@ -355,14 +355,17 @@ def test_warning_rows_cards_and_banner_use_text_icon_and_treatment(
         assert icon.get_attribute("role") == "img"
         assert icon.get_attribute("aria-label") == label
         assert icon.inner_text().strip() != ""
-        # 行处理：彩色只是辅助，非颜色信号是左边框样式 + 背景纹理。
+        # 行处理：彩色只是辅助，非颜色信号是左边框样式 + 纯色浅底
+        # （斜纹已移除——密集行噪点太重，见 e85d616 与 css 头注）。
         treatment = row.evaluate(
             "el => { const cs = getComputedStyle(el.firstElementChild);"
+            " const bg = getComputedStyle(el);"
             " return {width: cs.borderLeftWidth, style: cs.borderLeftStyle,"
-            " image: getComputedStyle(el).backgroundImage}; }"
+            " color: bg.backgroundColor, image: bg.backgroundImage}; }"
         )
         assert treatment["width"] != "0px"
-        assert treatment["image"] != "none"
+        assert treatment["image"] == "none"
+        assert treatment["color"] not in ("rgba(0, 0, 0, 0)", "transparent")
         assert label in row.inner_text()
 
     assert critical.locator(".alert-badge").first.inner_text().startswith("严重告警")
@@ -377,8 +380,8 @@ def test_warning_rows_cards_and_banner_use_text_icon_and_treatment(
     # 样本不足 / 不可用绝不能与健康稳定行同形。
     assert sample.get_attribute("data-sample") == "sample_insufficient"
     assert stable.locator(".alert-badge").first.inner_text().startswith("无告警")
-    sample_treatment = sample.evaluate("el => getComputedStyle(el).backgroundImage")
-    stable_treatment = stable.evaluate("el => getComputedStyle(el).backgroundImage")
+    sample_treatment = sample.evaluate("el => getComputedStyle(el).backgroundColor")
+    stable_treatment = stable.evaluate("el => getComputedStyle(el).backgroundColor")
     assert sample_treatment != stable_treatment
 
     # 空值必须显示为「—」，不能变成 0。
@@ -413,8 +416,6 @@ def test_filters_are_sent_to_the_api_and_round_trip_through_the_url(
 
     page.locator("#filter-window-days button[data-window-days='7']").click()
     page.wait_for_timeout(150)
-    page.locator("#filter-layer").select_option("fast")
-    page.wait_for_timeout(150)
     page.locator("#filter-severity").select_option("warning")
     page.wait_for_timeout(150)
     page.locator("#filter-anchor-date").fill(_ANCHOR)
@@ -426,7 +427,7 @@ def test_filters_are_sent_to_the_api_and_round_trip_through_the_url(
     for expected in (
         "shop_pk=7",
         "window_days=7",
-        "layer=fast",
+        "layer=confirmation",
         "severity=warning",
         "sample=sufficient",
         f"anchor_date={_ANCHOR}",
@@ -440,6 +441,28 @@ def test_filters_are_sent_to_the_api_and_round_trip_through_the_url(
     assert page.locator("#filter-window-days button[aria-pressed='true']").inner_text().strip() == "7 天"
     # owner 2026-10-07：样本下拉框已移除，页面默认只查 sufficient（可判定行）。
     assert page.locator("#filter-sample").count() == 0
+    # owner 2026-10-07：层级下拉框已移除（业务理解不了 fast/confirmation），
+    # 页面默认只查 confirmation（确认层）；快层走 ?layer=fast 排查，见下方专项测试。
+    assert page.locator("#filter-layer").count() == 0
+
+
+def test_layer_filter_is_still_reachable_via_url(
+    browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """URL ?layer= 保留为排查入口：显式给 fast 时必须透传到 API 并写回 URL。"""
+    _patch_mock(monkeypatch, _Mock())
+    page = browser_renderer.open(f"{ALERT_PAGE}?layer=fast")
+    page.wait_for_selector("#alert-rows tr[data-kind]", timeout=10_000)
+    requests: list[str] = []
+    page.on("request", lambda request: requests.append(request.url))
+
+    page.locator("#btn-refresh").click()
+    page.wait_for_timeout(400)
+
+    alert_requests = [url for url in requests if ALERT_API in url]
+    assert alert_requests
+    assert "layer=fast" in alert_requests[-1], alert_requests[-1]
+    assert "layer=fast" in page.url
 
 
 def test_sample_filter_is_still_reachable_via_url(
@@ -675,7 +698,6 @@ def test_row_click_opens_summary_card_with_server_supplied_values(
         "shop_pk #7",
         "SPU #1001",
         "3 天",
-        "fast",
         "roi_deterioration",
         "warning",
         "sufficient",
