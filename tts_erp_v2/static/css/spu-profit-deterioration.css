@@ -6,8 +6,9 @@
  *
  * 强警告要求（docs/design/spu-profit-deterioration-alert.md §6.3）：
  * 每个告警行/卡片/横幅同时给出「文本徽章 + 非颜色图标 + 行处理」，
- * 颜色只作辅助。所以这里用左边框宽度、斜纹背景与文字标签区分状态，
- * 不依赖红/绿；高对比模式下图标、文案、边框依旧可辨。
+ * 颜色只作辅助。所以这里用左边框宽度/线型、纯色浅底与文字标签区分状态，
+ * 不依赖红/绿，也不用斜纹（斜纹在密集行上噪点太重）；高对比模式下图标、
+ * 文案、边框依旧可辨。
  */
 
 :root {
@@ -15,6 +16,9 @@
   --paper-soft: color-mix(in srgb, var(--paper) 55%, var(--paper-deep));
   --paper-warn: color-mix(in srgb, var(--paper) 72%, var(--warn));
   --paper-danger: color-mix(in srgb, var(--paper) 70%, var(--danger));
+  /* 行/卡片用的更浅底纹：纯色、无斜纹，保证密集表格可读。 */
+  --paper-warn-soft: color-mix(in srgb, var(--paper) 90%, var(--warn));
+  --paper-danger-soft: color-mix(in srgb, var(--paper) 90%, var(--danger));
   /* Bootstrap 变量桥接到暖纸令牌。 */
   --bs-body-bg: var(--paper);
   --bs-body-color: var(--ink);
@@ -184,23 +188,15 @@ a:hover {
   word-break: break-all;
 }
 
-/* 状态 = 左框宽度 + 斜纹 + 文案；颜色只是辅助信号。 */
+/* 状态 = 左框宽度/线型 + 纯色浅底 + 文案；颜色只是辅助信号。 */
 .alert-banner[data-kind="critical"] {
   border-left-color: var(--danger);
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 7px,
-    color-mix(in srgb, var(--danger) 12%, transparent) 7px 14px
-  );
+  background: var(--paper-danger);
 }
 
 .alert-banner[data-kind="warning"] {
   border-left-color: var(--warn);
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 9px,
-    color-mix(in srgb, var(--warn) 12%, transparent) 9px 18px
-  );
+  background: var(--paper-warn);
 }
 
 .alert-banner[data-kind="sample"],
@@ -473,30 +469,17 @@ a:hover {
 }
 
 .alert-row--critical {
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 8px,
-    color-mix(in srgb, var(--danger) 8%, transparent) 8px 16px
-  );
+  background-color: var(--paper-danger-soft);
 }
 
 .alert-row--warning {
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 10px,
-    color-mix(in srgb, var(--warn) 9%, transparent) 10px 20px
-  );
+  background-color: var(--paper-warn-soft);
 }
 
-/* 样本不足 / 数据不可用必须与「健康稳定行」明显不同：去饱和 + 虚线框 + 斜纹。 */
+/* 样本不足 / 数据不可用必须与「健康稳定行」明显不同：去饱和 + 虚线/点线左边框 + 纯色浅底。 */
 .alert-row--sample,
 .alert-row--unavailable {
   background-color: var(--paper-deep);
-  background-image: repeating-linear-gradient(
-    90deg,
-    transparent 0 6px,
-    color-mix(in srgb, var(--muted) 10%, transparent) 6px 12px
-  );
 }
 
 .alert-row--sample .mono,
@@ -568,20 +551,12 @@ a:hover {
 
 .alert-summary[data-kind="critical"] {
   border-left-color: var(--danger);
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 8px,
-    color-mix(in srgb, var(--danger) 8%, transparent) 8px 16px
-  );
+  background: var(--paper-danger-soft);
 }
 
 .alert-summary[data-kind="warning"] {
   border-left-color: var(--warn);
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 10px,
-    color-mix(in srgb, var(--warn) 9%, transparent) 10px 20px
-  );
+  background: var(--paper-warn-soft);
 }
 
 .alert-summary[data-kind="sample"] {
@@ -696,20 +671,12 @@ a:hover {
 
 .alert-card--critical {
   border-left-color: var(--danger);
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 8px,
-    color-mix(in srgb, var(--danger) 8%, transparent) 8px 16px
-  );
+  background: var(--paper-danger-soft);
 }
 
 .alert-card--warning {
   border-left-color: var(--warn);
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 10px,
-    color-mix(in srgb, var(--warn) 9%, transparent) 10px 20px
-  );
+  background: var(--paper-warn-soft);
 }
 
 .alert-card--sample {
