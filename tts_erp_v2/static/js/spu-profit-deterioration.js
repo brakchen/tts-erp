@@ -83,7 +83,7 @@
     layer: 'all',
     severity: 'all',
     alertState: 'all',
-    sample: 'all',
+    sample: 'sufficient',
     anchorDate: '',
     limit: 100,
     offset: 0,
@@ -678,8 +678,10 @@
     state.alertState = alertStateValues().includes(alertState) ? alertState : 'all';
     const severity = params.get('severity') || 'all';
     state.severity = ['all', 'none', 'warning', 'critical'].includes(severity) ? severity : 'all';
-    const sample = params.get('sample') || 'all';
-    state.sample = ['all', 'sufficient', 'sample_insufficient', 'unavailable'].includes(sample) ? sample : 'all';
+    /* 样本筛选默认 sufficient（页面不再提供该下拉框，owner 2026-10-07）；
+       URL ?sample= 仍接受 all/sample_insufficient/unavailable 作为排查入口。 */
+    const sample = params.get('sample') || 'sufficient';
+    state.sample = ['all', 'sufficient', 'sample_insufficient', 'unavailable'].includes(sample) ? sample : 'sufficient';
     state.anchorDate = params.get('anchor_date') || '';
     const limit = Number(params.get('limit'));
     state.limit = [50, 100, 200].includes(limit) ? limit : 100;
@@ -707,7 +709,6 @@
     if (els.layer) els.layer.value = state.layer;
     if (els.alertState) els.alertState.value = state.alertState;
     if (els.severity) els.severity.value = state.severity;
-    if (els.sample) els.sample.value = state.sample;
     if (els.anchorDate) els.anchorDate.value = state.anchorDate;
     if (els.limit) els.limit.value = String(state.limit);
   }
@@ -1172,12 +1173,6 @@
       syncUrl();
       load();
     });
-    els.sample.addEventListener('change', () => {
-      state.sample = els.sample.value;
-      state.offset = 0;
-      syncUrl();
-      load();
-    });
     els.anchorDate.addEventListener('change', () => {
       state.anchorDate = els.anchorDate.value;
       state.offset = 0;
@@ -1268,7 +1263,6 @@
     els.layer = $('filter-layer');
     els.alertState = $('filter-state');
     els.severity = $('filter-severity');
-    els.sample = $('filter-sample');
     els.anchorDate = $('filter-anchor-date');
     els.limit = $('filter-limit');
     els.filterEcho = $('filter-echo');

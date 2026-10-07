@@ -312,7 +312,7 @@ runtime-config sidecar 的 `rollout`/`draftRollout` 只存在 mutation/history w
 - route：`GET /v2/pages/spu-profit-deterioration`，权限点 `page:spu-profit-deterioration`，最低 readonly。
 - sidebar：Analytics 分组中“利润劣化告警”，紧邻“SPU 实际 ROI”；active 状态沿用共享 sidebar。
 - 页面头：左为标题/anchor freshness；右为“阈值设置”按钮（见 §4.2）。
-- filters：店铺 select（左上）、SPU scope（其右，精确 scope）、窗口 tabs `1d/3d/7d`、层级 `fast/确认`、severity/state/sample dropdown、anchor date、刷新按钮。sample dropdown 的选项固定为 `sufficient`、`sample_insufficient`、`unavailable`、`all`，与 API validation 和 `sampleStatus` 完全一致。筛选改变 URL/query，不能改变 server totals 语义。
+- filters：店铺 select（左上）、SPU scope（其右，精确 scope）、窗口 tabs `1d/3d/7d`、层级 `fast/确认`、severity/state dropdown、anchor date、刷新按钮。筛选改变 URL/query，不能改变 server totals 语义。~~sample dropdown~~（owner 2026-10-07 拍板移除：业务用户无法理解样本概念）；页面默认以 `sample=sufficient` 查询（只展示可判定行），URL `?sample=all|sample_insufficient|unavailable` 保留为排查入口，取值仍与 API validation 和 `sampleStatus` 完全一致。
 
 ### 6.2 States/interactions
 
@@ -320,7 +320,7 @@ runtime-config sidecar 的 `rollout`/`draftRollout` 只存在 mutation/history w
 - empty：明确“当前 scope 没有达到阈值的告警”，同时显示 `checkedCount`、anchor、config source；不是白屏。
 - sample-insufficient：单独灰黄状态“样本不足，未触发告警”，显示缺少 spend/orders/ad-orders 哪一项；不显示红告警。
 - error：可读错误、request id、重试；403 显示权限；503 显示 stale/快照时间。
-- row click：展开 summary card，显示两个窗口原值、阈值、状态转移、effective config source/version；点击“查看利润详情”进入现有 ROI drilldown。不得在 JS 重新计算百分比。API/browser named tests 必须覆盖 sample filter 的 `unavailable` 选项、URL/query round-trip、匹配 `sampleStatus` 的结果以及 sample-insufficient/unavailable 空态；不得把 unavailable 静默归入 all 之外的其他状态。
+- row click：展开 summary card，显示两个窗口原值、阈值、状态转移、effective config source/version；点击“查看利润详情”进入现有 ROI drilldown。不得在 JS 重新计算百分比。API/browser named tests 必须覆盖 URL `?sample=unavailable` 入口的 API 透传与 round-trip、页面默认 `sample=sufficient`、sample-insufficient/unavailable 空态；不得把 unavailable 静默归入 all 之外的其他状态。
 - refresh：保留 filters，重新获取同一 endpoint；当新 snapshot 到达时提示“已更新”。
 - settings save/reset：遵循 runtime optimistic lock；保存草稿后显示 draft version；发布后刷新 effective values 和 audit metadata。
 

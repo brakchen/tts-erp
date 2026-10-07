@@ -417,8 +417,6 @@ def test_filters_are_sent_to_the_api_and_round_trip_through_the_url(
     page.wait_for_timeout(150)
     page.locator("#filter-severity").select_option("warning")
     page.wait_for_timeout(150)
-    page.locator("#filter-sample").select_option("unavailable")
-    page.wait_for_timeout(150)
     page.locator("#filter-anchor-date").fill(_ANCHOR)
     page.wait_for_timeout(400)
 
@@ -430,17 +428,37 @@ def test_filters_are_sent_to_the_api_and_round_trip_through_the_url(
         "window_days=7",
         "layer=fast",
         "severity=warning",
-        "sample=unavailable",
+        "sample=sufficient",
         f"anchor_date={_ANCHOR}",
     ):
         assert expected in last, (expected, last)
 
     # 同一份筛选写回 URL，并在页面上可见（刷新后仍可复现）。
     assert "window_days=7" in page.url
-    assert "sample=unavailable" in page.url
+    assert "sample=sufficient" in page.url
     assert page.locator("#filter-echo").inner_text().count("window_days=7") == 1
     assert page.locator("#filter-window-days button[aria-pressed='true']").inner_text().strip() == "7 天"
-    assert page.locator("#filter-sample").input_value() == "unavailable"
+    # owner 2026-10-07：样本下拉框已移除，页面默认只查 sufficient（可判定行）。
+    assert page.locator("#filter-sample").count() == 0
+
+
+def test_sample_filter_is_still_reachable_via_url(
+    browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """URL ?sample= 保留为排查入口：显式给 unavailable 时必须透传到 API 并写回 URL。"""
+    _patch_mock(monkeypatch, _Mock())
+    page = browser_renderer.open(f"{ALERT_PAGE}?sample=unavailable")
+    page.wait_for_selector("#alert-rows tr[data-kind]", timeout=10_000)
+    requests: list[str] = []
+    page.on("request", lambda request: requests.append(request.url))
+
+    page.locator("#btn-refresh").click()
+    page.wait_for_timeout(400)
+
+    alert_requests = [url for url in requests if ALERT_API in url]
+    assert alert_requests
+    assert "sample=unavailable" in alert_requests[-1], alert_requests[-1]
+    assert "sample=unavailable" in page.url
 
 
 def test_loading_state_is_announced_while_refetching(

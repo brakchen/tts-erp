@@ -320,7 +320,9 @@ def test_spu_profit_deterioration_page_shell_and_sidebar(api_client, readonly_ke
     assert 'id="alert-banner"' in body
     assert 'id="alert-status" role="status" aria-live="polite"' in body
     assert 'id="filter-window-days"' in body
-    assert 'id="filter-sample"' in body
+    # owner 2026-10-07：样本筛选下拉框已从页面移除（业务用户无法理解该概念），
+    # 默认只展示可判定行（sufficient）；URL ?sample= 保留为排查入口。
+    assert 'id="filter-sample"' not in body
     assert 'id="alert-rows"' in body
     assert 'id="alert-cards"' in body
     # design §6.1/§6.2 的新接线也必须随 HTML 下发（不靠 JS 注入）。
