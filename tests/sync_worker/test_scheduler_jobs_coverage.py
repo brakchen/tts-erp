@@ -191,7 +191,49 @@ def test_overdue_first_runs_skips_jobs_still_within_cadence() -> None:
 
     overdue = _overdue_first_runs(factory, now=now, jitter_seconds=30)
 
-    assert overdue == {}
+    assert "tiktok.orders" not in overdue
+
+
+def test_overdue_first_runs_fires_job_that_never_succeeded() -> None:
+    """A registered job with NO success history is overdue by definition.
+
+    Catch-up only sees jobs that already have a ``succeeded`` row, so a
+    newly registered 24 h job got no ``next_run_time`` override and its
+    first fire was ``worker start + 24 h``. Observed 2026-10-06:
+    ``analytics.spu_profit_deterioration_alert`` was registered and
+    deployed, the worker started 21:17, and the job did not fire until
+    2026-10-07 21:17 — so ``analytics.spu_deterioration_alerts`` stayed
+    empty and the read API 503'd with
+    "materialized alert snapshot is unavailable".
+    """
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    factory = _make_history_factory([])  # no succeeded rows at all
+
+    overdue = _overdue_first_runs(factory, now=now, jitter_seconds=30)
+
+    assert "analytics.spu_profit_deterioration_alert" in overdue
+    first_fire = overdue["analytics.spu_profit_deterioration_alert"]
+    assert now <= first_fire <= now + timedelta(seconds=300)
+
+
+def test_overdue_first_runs_never_run_job_respects_short_interval_spread() -> None:
+    """The stagger spread is ``min(interval, _MAX_CATCHUP_SPREAD)`` — a
+    never-run 30 min job must not be scheduled further out than its own
+    interval."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    factory = _make_history_factory([])
+
+    overdue = _overdue_first_runs(factory, now=now, jitter_seconds=30)
+
+    for name, spec in JOBS.items():
+        if name not in overdue:
+            continue
+        spread = min(spec.interval_seconds, 300)
+        assert now <= overdue[name] <= now + timedelta(seconds=spread), name
 
 
 def test_overdue_first_runs_tolerates_unavailable_history() -> None:
@@ -218,7 +260,10 @@ def test_build_scheduler_passes_catchup_next_run_time(monkeypatch) -> None:
 
     now = datetime.now(UTC)
     stale = now - timedelta(days=4)
-    factory = _make_history_factory([("analytics.shop_fee_rate", stale)])
+    fresh = now - timedelta(seconds=30)  # tiktok.orders interval 600s
+    factory = _make_history_factory(
+        [("analytics.shop_fee_rate", stale), ("tiktok.orders", fresh)]
+    )
     sched = build_scheduler(session_factory=factory, jitter_seconds=30)
 
     by_id = {job.id: job for job in sched.get_jobs()}
@@ -226,7 +271,7 @@ def test_build_scheduler_passes_catchup_next_run_time(monkeypatch) -> None:
     nft = getattr(fee_rate, "next_run_time", None)
     assert nft is not None
     assert now <= nft <= now + timedelta(seconds=300)
-    # Non-overdue jobs keep the default (no explicit next_run_time).
+    # Jobs still within cadence keep the default (no explicit next_run_time).
     orders = by_id["tiktok.orders"]
     assert getattr(orders, "next_run_time", None) is None
 
