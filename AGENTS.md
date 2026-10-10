@@ -37,13 +37,21 @@
 - Do not change middleware registration order in `tts_erp_v2/app.py`.
 - Never use repository-wide destructive Git commands such as `git reset --hard`, `git checkout -- .`, or `git clean -f`.
 
-### `plugins/` boundary (chrome-plugins submodule)
+### `plugins/` boundary (external data-collector submodules)
 
-- `plugins/chrome-plugins` is a **git submodule** pointing at `git@github.com:brakchen/chrome-plugins.git`. It holds the external Chrome-extension data collectors (ads-data-sync, order-data-sync, miaoshou-order-capture, monitor, tts-request-intercept) that feed this service's plugin intake endpoints.
+- `plugins/` holds the **external Chrome-extension data collectors** that feed this service's plugin intake endpoints. Each is its own **git submodule** with an independent remote, history, and release cadence:
+  | path | remote |
+  | --- | --- |
+  | `plugins/ads-data-sync` | `git@github.com:brakchen/ads-data-sync.git` |
+  | `plugins/order-data-sync` | `git@github.com:brakchen/order-data-sync.git` |
+  | `plugins/miaoshou-order-capture` | `git@github.com:brakchen/miaoshou-order-capture.git` |
+  | `plugins/monitor` | `git@github.com:brakchen/ads-monitor.git` |
+
+  They are submodules of this repo directly — not of a `chrome-plugins` superproject.
 - **The §3 production-safety rules do not apply inside `plugins/`.** Those extensions run in the user's browser, hold shop sessions, and have no database session. Do not run migrations, `alembic upgrade`, the isolated test runner, or any destructive SQL against that subtree.
 - `plugins/` has its own TypeScript/WXT toolchain (`vitest`, `wxt`) and its own `.gitignore`. Run `bash scripts/test_isolated.sh ...` only from the repository root, against `tests/`.
 - Python tooling is explicitly scoped away from it: `pyproject.toml` `[tool.ruff] exclude`, `pyrightconfig.json` `exclude`. pytest's `testpaths` and setuptools' package `include` are already explicit lists, so they never collect it. If you add a tool that scans the whole tree, exclude `plugins/` too.
-- Each plugin is itself a repository with its own history and release cadence. **Never `git add` inside `plugins/`** — changes there belong to the plugin repositories, not to this lane. Commit a submodule pointer change only when a plugin's pinned commit is intentionally advanced.
+- **Never `git add` inside `plugins/`** — changes there belong to the plugin repositories, not to this lane. Commit a submodule pointer change only when a plugin's pinned commit is intentionally advanced.
 
 Read `docs/guides/agent-safety.md` before any database, credential, migration, destructive, authentication, or production-adjacent change.
 

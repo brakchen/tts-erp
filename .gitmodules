@@ -1,3 +1,12 @@
-[submodule "plugins/chrome-plugins"]
-	path = plugins/chrome-plugins
-	url = git@github.com:brakchen/chrome-plugins.git
+[submodule "plugins/ads-data-sync"]
+	path = plugins/ads-data-sync
+	url = git@github.com:brakchen/ads-data-sync.git
+[submodule "plugins/order-data-sync"]
+	path = plugins/order-data-sync
+	url = git@github.com:brakchen/order-data-sync.git
+[submodule "plugins/miaoshou-order-capture"]
+	path = plugins/miaoshou-order-capture
+	url = git@github.com:brakchen/miaoshou-order-capture.git
+[submodule "plugins/monitor"]
+	path = plugins/monitor
+	url = git@github.com:brakchen/ads-monitor.git
