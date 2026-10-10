@@ -46,8 +46,10 @@
   | `plugins/order-data-sync` | `git@github.com:brakchen/order-data-sync.git` |
   | `plugins/miaoshou-order-capture` | `git@github.com:brakchen/miaoshou-order-capture.git` |
   | `plugins/monitor` | `git@github.com:brakchen/ads-monitor.git` |
+  | `plugins/tts-request-intercept` | `git@github.com:brakchen/tts-request-intercept.git` |
 
   They are submodules of this repo directly — not of a `chrome-plugins` superproject.
+- `tts-request-intercept` was extracted from `chrome-plugins` (2026-10-10) with `git subtree split`, so its 13 prior commits are preserved as real history rather than one squashed initial commit. It is the only plugin that talks to `/api/v2/intercept`.
 - **The §3 production-safety rules do not apply inside `plugins/`.** Those extensions run in the user's browser, hold shop sessions, and have no database session. Do not run migrations, `alembic upgrade`, the isolated test runner, or any destructive SQL against that subtree.
 - `plugins/` has its own TypeScript/WXT toolchain (`vitest`, `wxt`) and its own `.gitignore`. Run `bash scripts/test_isolated.sh ...` only from the repository root, against `tests/`.
 - Python tooling is explicitly scoped away from it: `pyproject.toml` `[tool.ruff] exclude`, `pyrightconfig.json` `exclude`. pytest's `testpaths` and setuptools' package `include` are already explicit lists, so they never collect it. If you add a tool that scans the whole tree, exclude `plugins/` too.

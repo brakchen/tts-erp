@@ -10,3 +10,6 @@
 [submodule "plugins/monitor"]
 	path = plugins/monitor
 	url = git@github.com:brakchen/ads-monitor.git
+[submodule "plugins/tts-request-intercept"]
+	path = plugins/tts-request-intercept
+	url = git@github.com:brakchen/tts-request-intercept.git
