@@ -67,3 +67,7 @@ tts-partner-api-docs/
 
 # 插件诊断导出（一次性排查产物，不入库）
 tiktok-data-sync-runtime-*.json
+
+# plugins/ 是 git submodule（chrome-plugins）；其内容由各插件仓自己的
+# .gitignore 管理。下列规则只针对 superproject 层可能出现的本地产物。
+plugins/*/node_modules/

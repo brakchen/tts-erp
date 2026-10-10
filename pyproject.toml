@@ -78,6 +78,14 @@ markers = [
     "slow: takes >1s per test — skipped by `-m 'not slow'`",
 ]
 
+[tool.ruff]
+# plugins/ 是 git submodule（chrome-plugins），内含独立 TypeScript/WXT 插件仓。
+# 它们有自己的 lint/test 工具链，不属于本仓 Python 工具链的检查范围。
+# 缺少该exclude 时，ruff 默认全树扫描会引入 plugins/ 内的历史 lint 债，
+# 造成与本仓无关的失败（2026-10-10 实测多出 1 个 I001，来自
+# plugins/chrome-plugins/monitor/docs/demos/feishu-card-webhook-demo.py）。
+exclude = ["plugins"]
+
 [tool.ruff.lint.per-file-ignores]
 # tts_erp.py is the LEGACY stdlib service (not the running prod service —
 # FastAPI in tdd/ is). It is scheduled for full retirement in Wave 4 of

@@ -1,0 +1,3 @@
+[submodule "plugins/chrome-plugins"]
+	path = plugins/chrome-plugins
+	url = git@github.com:brakchen/chrome-plugins.git
