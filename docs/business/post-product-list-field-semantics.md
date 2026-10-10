@@ -134,7 +134,7 @@ campaign 总 GMV  = SUM(table[*].onsite_roi2_shopping_value)
 
 - **修复后 schema 验证**: ad_raw id=2657 (2026-09-04 09:43:54 CST)
 - **修复前 schema 残留**: ad_raw id=52-1835 (~2026-08-26 - 2026-09-03)
-- **Chrome 扩展源码**: `/home/schan/chrome-plugins/ads-data-sync/entrypoints/background.ts:518`
+- **Chrome 扩展采集机制**（源码仓见 `plugins/ads-data-sync`）:
   - `executeTikTokRequestInBoundPage` 在 Seller Center tab MAIN world 调 fetch
   - `createCollectionRequestBody` 构造 body
 - **tts-erp server schema**:
