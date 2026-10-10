@@ -1,7 +1,7 @@
 # 广告计划状态同步技术方案
 
-> 状态：评审稿，尚未实施。2026-10-09。
-> 契约所有者：TTS-ERP；消费者：`chrome-plugins/ads-data-sync`。
+> 状态：评审稿，尚未实施。2026-10-09；2026-10-10 按用户指示更新插件位置与源码基线。
+> 契约所有者：TTS-ERP；消费者：本仓库独立子模块 `plugins/ads-data-sync`。
 > 本方案依据本轮用户已确认要求：插件与 ERP 同时修改；每页只上传 Seller／Advertiser 与整页响应；不增加客户端采集时间、批次或页码；不额外归档原始响应；仅新增接口的 request body 原样写本机日志、不脱敏、保留两天；不捕获认证请求头。
 
 ## 1. 目标与非目标
@@ -20,9 +20,9 @@
 ### 2.1 源码基线
 
 - ERP：`ff5122872567aa2b456434b9607dc49f1e2104a1`；建立方案工作树前仅增加 lane 登记提交 `13488726f31b03a0c72f746f8183f5ee439179ab`。
-- 插件父仓库：`cf2b793c47c5e43ac629b389978fabea23b0088d`；子模块检出 `76b05815d50d4abaabe04ccb068aa9b143b0ff66`（0.1.232）。子模块 `origin/master` 为 `58a8c7c`（0.1.233）；本方案核验的六个关键采集、日志、上传文件在两提交间一致。实现分支从实施时最新 `origin/master` 创建，不能直接修改父仓库固定的子模块检出。
+- 当前插件位置：`/home/schan/tts-erp/plugins/ads-data-sync`，直接属于 TTS-ERP 的独立 Git 子模块，remote 为 `git@github.com:brakchen/ads-data-sync.git`；本次路径复核 HEAD 为 `5fa6e7add30a4307890abd61750dea6784f9f23f`（0.1.244）。不再从旧 `chrome-plugins` 父仓库或旧目录取源码。初次调查的 0.1.232／0.1.233 仅为历史证据；新位置的 background 和计划发现模块已变化，实施前以当前子模块及届时最新 remote master 重读。实现使用插件独立任务工作树，不直接改 ERP 固定的子模块检出，也不把插件文件作为 ERP 提交内容。
 - `src/core/all-campaign-discovery.ts::discoverAllCampaigns` 已顺序遍历全部查询分页；`CampaignDiscoveryExchangeObserver` 已拿到每页完整响应。
-- `entrypoints/background.ts::discoverBoundCampaignsOnce` 将发现结果投影为计划 ID 与创建日；查询结束日为店铺当地昨天，范围受现有历史同步设置限制。
+- `plugins/ads-data-sync/entrypoints/background.ts::discoverBoundCampaignsOnce` 仍将发现结果投影为计划 ID 与创建日；查询结束日为店铺当地昨天，范围受现有历史同步设置限制。新基线增加非 heartbeat 发现前的 coverage 预检及绑定／范围变化后的有界重试；状态接线必须保留这些行为，不能套用旧 background 覆盖新逻辑。
 - `src/core/daily-progress.ts::dailyEndpoints` 只选择商品分析和操作日志，不包含计划列表。
 - `src/core/runtime-observability.ts::runtimeLogContext` 会压缩诊断响应。新状态上传必须使用直接取得的响应，不能从 runtime 日志、下载诊断或完成检查点恢复正文。插件 README 的“完整正文”描述与该实现不一致，不把描述当成传输保证，也不顺带改变全局 runtime 日志策略。
 - `tts_erp_v2/api/v2/analytics.py` 已有 `ScopeIn`、scope 授权、2 MiB 原始请求尺寸闸及同步数据库 handler 模式；`access/_policy.py` 将 `/v2/analytics/sync*` 归为 readwrite。
@@ -142,7 +142,7 @@
 
 ### 7.2 插件
 
-预计修改 `entrypoints/background.ts`、`src/core/all-campaign-discovery.ts`；新增上传模块及测试，补充分页 observer／冻结作用域接线测试；按发布规范更新 `package.json`、`package-lock.json`、`wxt.config.ts`、README、CHANGELOG。直接修改 ads-data-sync 独立仓库的任务分支，不未经授权改父仓库其他子模块。父仓库 pin 更新／Chrome 安装与发布单独交接。
+插件源码所有者为 `plugins/ads-data-sync` 独立仓库，以下路径均相对此子模块根目录：预计修改 `entrypoints/background.ts`、`src/core/all-campaign-discovery.ts`；新增上传模块及测试，补充分页 observer／冻结作用域接线测试；按发布规范更新 `package.json`、`package-lock.json`、`wxt.config.ts`、README、CHANGELOG。插件在自己的任务分支／工作树提交，ERP lane 不在 `plugins/` 中执行暂存、不纳入插件源码或其他子模块。只有有意推进已验证插件提交时才单独处理 ERP 的子模块 pin；Chrome 安装与发布另行交接。
 
 ### 7.3 验收与测试
 
