@@ -783,12 +783,12 @@ def test_decimal_wire_serializes_zero_without_scientific_notation() -> None:
     """高精度零（如 Decimal("0E-12")）wire 上必须是 "0"，不能是科学计数法。
 
     页面曾显示「上期 ROI 0E-12」：公式保留 12 位精度痕迹的零被 str() 直接
-    转成科学计数法。非零值（含负值）保持原样。
+    转成科学计数法。非零值（含负值）依 wire 契约舍入到两位小数。
     """
     from tts_erp_v2.api.v2.spu_deterioration_alert import _decimal
 
     assert _decimal(None) is None
     assert _decimal(Decimal("0E-12")) == "0"
     assert _decimal(Decimal("0")) == "0"
-    assert _decimal(Decimal("210.803081902496")) == "210.803081902496"
-    assert _decimal(Decimal("-1.409499")) == "-1.409499"
+    assert _decimal(Decimal("210.803081902496")) == "210.80"
+    assert _decimal(Decimal("-1.409499")) == "-1.41"
