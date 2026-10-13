@@ -277,6 +277,40 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 Focused membership 按 `(shop_pk, spu_id)` 隔离；每店 active 关注总数没有业务上限。新增 ID 必须属于路径店铺；add/remove trim/去空/去重后重叠返回 422。详见 [`analytics/focused-spus.md`](../design/focused-spus.md)。
 
+### Monitor remote configuration (`/v2/monitor/config`)
+
+Plugin-side read of one shop's frozen monitor configuration. Contract, threat
+model and rollout are in
+[`docs/monitor-config-sync.md`](../monitor-config-sync.md) (§4.2 token boundary,
+§6.1 wire shape, §6.2 conditional semantics); this is the endpoint inventory.
+
+| Endpoint | Role | Purpose |
+| --- | --- | --- |
+| `GET /v2/monitor/config?sellerId=…` | `readonly` **and** a shop-bound `monitor_config` key | Returns the shop's frozen delivery snapshot `{schemaVersion, sellerId, shopPk, current:{version, sourceVersions, contentHash, payload}, force}` |
+
+This path is deliberately narrower than its nominal `readonly` role:
+
+- The credential must be an API key with `purpose='monitor_config'` bound to
+  exactly one `security.api_keys.shop_pk`. A general `readonly`/`admin` key and
+  a browser session are **not** delivery authorization, and `auth=off`/`shadow`
+  does not bypass it. The handler re-verifies the key **uncached**, so disabling
+  or rotating it takes effect on the next request.
+- `sellerId` is the only identity parameter and must resolve to a registered
+  `(platform='tiktok', shop_id=sellerId)` shop whose `id` equals the token's
+  `shop_pk`; otherwise 403. An unknown or unregistered seller is 404 — never a
+  global fallback.
+- Authorization, shop matching and existence checks all run **before**
+  `If-None-Match`, so a correct ETag cannot turn a 401/403/404 into a 304.
+- 200 and 304 both return `ETag` (weak, `W/"…"`), `Cache-Control: private, no-cache`
+  and `Vary: Authorization`. `If-None-Match` follows RFC 9110 §8.8.3, including
+  `*`, comma-separated lists, and weak comparison (§8.8.2).
+- No credential, cookie, Fernet key, or ciphertext is returned in the body, the
+  headers, or logs.
+
+Status: Phase B read path only. Publish/admin endpoints (§6.3) are not yet
+exposed. CORS for the monitor extension origin is **not** configured yet, so a
+browser extension cannot currently call this route cross-origin.
+
 ### Intercept statistics (`/v2/intercept/requests/stats`)
 
 `GET /v2/intercept/requests/stats` 返回 `total_requests`、白名单/今日/错误计数，以及 `by_host`、`by_method`、`by_status`、`daily`。每个分布项由后端返回 `{label, count, percentage, host|method|status}`；`percentage` 是一位小数字符串，分母始终为完整时间范围内的 `total_requests`，即使 `by_host`/`by_status` 仅返回 Top 10 也不能改用可见 bucket 之和。

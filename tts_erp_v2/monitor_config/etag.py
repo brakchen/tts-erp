@@ -42,6 +42,58 @@ def _opaque_tag(tag: str) -> str:
     return candidate
 
 
+def parse_entity_tag_list(header: str) -> list[str]:
+    """Split an ``If-None-Match`` field value into its entity-tags.
+
+    A naive ``split(",")`` is wrong: RFC 9110's ``etagc`` is
+    ``%x21 / %x23-7E / obs-text`` and ``%x2C`` (comma) sits inside
+    ``%x23-7E``, so ``W/"a,b"`` is one tag, not two. This walks the field
+    value and only treats a comma outside a quoted string as a separator,
+    also honouring ``\\`` escapes inside the quoted string.
+
+    Unparsable members are skipped rather than raising: a malformed header must
+    degrade to "no match" (a 200 with the full body), never to a 304 or a 500.
+    """
+
+    tags: list[str] = []
+    index = 0
+    length = len(header)
+    while index < length:
+        start = index
+        while index < length and header[index] in " \t":
+            index += 1
+        if index < length and header[index : index + 2].upper() == WEAK_PREFIX:
+            index += 2
+            while index < length and header[index] in " \t":
+                index += 1
+        if index >= length or header[index] != '"':
+            # Not an entity-tag; skip to the next separator.
+            index = start
+            while index < length and header[index] != ",":
+                index += 1
+            index += 1
+            continue
+        index += 1  # opening quote
+        while index < length:
+            char = header[index]
+            if char == "\\" and index + 1 < length:
+                index += 2
+                continue
+            if char == '"':
+                index += 1
+                break
+            index += 1
+        else:
+            # Unterminated quoted string: nothing more to consume.
+            break
+        tags.append(header[start:index].strip())
+        while index < length and header[index] in " \t":
+            index += 1
+        if index < length and header[index] == ",":
+            index += 1
+    return tags
+
+
 def is_not_modified(if_none_match: str | None, current: str) -> bool:
     """Return True when ``If-None-Match`` selects the current representation.
 
@@ -58,7 +110,10 @@ def is_not_modified(if_none_match: str | None, current: str) -> bool:
         return True
     current_opaque = _opaque_tag(current)
     # A list member matches on weak comparison, so `W/"x"` matches `"x"`.
-    return any(_opaque_tag(member) == current_opaque for member in header.split(","))
+    return any(
+        _opaque_tag(member) == current_opaque
+        for member in parse_entity_tag_list(header)
+    )
 
 
 def weak_etag(material: Mapping[str, Any]) -> str:

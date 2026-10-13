@@ -10,11 +10,12 @@ import importlib.util
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import inspect, select, text
+from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
@@ -545,6 +546,34 @@ def test_0070_downgrade_refuses_each_populated_data_guard(db_engine) -> None:
 
 # ─── Phase B：发布编排指针与 force 幂等 ─────────────────────────
 
+def _complete_payload(**overrides: Any) -> dict[str, Any]:
+    """Syntactically valid complete-settings payload (synthetic values)."""
+
+    payload: dict[str, Any] = {
+        "globalThreshold": "10.0",
+        "autoCloseSkuOrderLimit": 0,
+        "autoCloseMaxSkuOrders": 5,
+        "autoCloseSingleConversionCostThreshold": "2.5",
+        "autoCloseCampaignWhitelist": ["abc"],
+        "closeQueryRecentDays": 7,
+        "reportQueryRecentDays": 30,
+        "scanIntervalMinSeconds": 30,
+        "scanIntervalMaxSeconds": 60,
+        "notificationIntervalMinSeconds": 900,
+        "notificationIntervalMaxSeconds": 1080,
+        "notifyAutoCloseSuccessEnabled": True,
+        "notifyAutoCloseFailureRepeatEnabled": True,
+        "feishuWebhookUrl": "https://open.feishu.cn/hook/TEST_HOOK",
+        "feishuSigningSecret": "TEST_SIGNING",
+        "feishuAppId": "TEST_APP_ID",
+        "feishuAppSecret": "TEST_APP_SECRET",
+        "feishuRecipientIdentifiers": ["ou_test_recipient_1"],
+        "autoCloseEnabled": True,
+        "campaignThresholds": {},
+    }
+    payload.update(overrides)
+    return payload
+
 
 def test_publish_advances_state_pointers_transactionally(
     db_session: Session, monitor_shop: int
@@ -554,7 +583,7 @@ def test_publish_advances_state_pointers_transactionally(
     first = publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "10.0"},
+        payload=_complete_payload(),
         source_global_version=4,
         source_shop_version=None,
         created_by="TEST_monitor_publish",
@@ -569,7 +598,7 @@ def test_publish_advances_state_pointers_transactionally(
     second = publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "11.0"},
+        payload=_complete_payload(globalThreshold="11.0"),
         source_global_version=5,
         source_shop_version=2,
         created_by="TEST_monitor_publish",
@@ -586,7 +615,7 @@ def test_force_publish_advances_both_pointers(db_session: Session, monitor_shop:
     publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "10.0"},
+        payload=_complete_payload(),
         source_global_version=4,
         source_shop_version=None,
         created_by="TEST_monitor_publish",
@@ -594,11 +623,13 @@ def test_force_publish_advances_both_pointers(db_session: Session, monitor_shop:
     forced = publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "10.0"},
+        payload=_complete_payload(),
         source_global_version=4,
         source_shop_version=None,
         created_by="TEST_monitor_publish",
         is_force=True,
+        request_id=uuid.uuid4(),
+        request_digest="sha256:force",
     )
     db_session.flush()
     state = db_session.get(MonitorShopState, monitor_shop)
@@ -610,7 +641,7 @@ def test_force_publish_advances_both_pointers(db_session: Session, monitor_shop:
     after = publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "12.0"},
+        payload=_complete_payload(globalThreshold="12.0"),
         source_global_version=6,
         source_shop_version=None,
         created_by="TEST_monitor_publish",
@@ -629,7 +660,7 @@ def test_same_request_id_replays_the_same_delivery(
     first = publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "10.0"},
+        payload=_complete_payload(),
         source_global_version=4,
         source_shop_version=None,
         created_by="TEST_monitor_publish",
@@ -640,7 +671,7 @@ def test_same_request_id_replays_the_same_delivery(
     replay = publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "10.0"},
+        payload=_complete_payload(),
         source_global_version=4,
         source_shop_version=None,
         created_by="TEST_monitor_publish",
@@ -666,7 +697,7 @@ def test_same_request_id_with_different_metadata_conflicts(
     publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "10.0"},
+        payload=_complete_payload(),
         source_global_version=4,
         source_shop_version=None,
         created_by="TEST_monitor_publish",
@@ -678,7 +709,7 @@ def test_same_request_id_with_different_metadata_conflicts(
         publish_delivery(
             db_session,
             shop_pk=monitor_shop,
-            payload={"globalThreshold": "10.0"},
+            payload=_complete_payload(),
             source_global_version=4,
             source_shop_version=None,
             created_by="TEST_monitor_publish",
@@ -696,7 +727,7 @@ def test_delivery_payload_is_encrypted_at_rest(db_session: Session, monitor_shop
     publish_delivery(
         db_session,
         shop_pk=monitor_shop,
-        payload={"globalThreshold": "10.0"},
+        payload=_complete_payload(),
         source_global_version=4,
         source_shop_version=None,
         created_by="TEST_monitor_publish",
@@ -708,3 +739,289 @@ def test_delivery_payload_is_encrypted_at_rest(db_session: Session, monitor_shop
         )
     ).scalar_one()
     assert b"globalThreshold" not in row.encrypted_payload
+
+
+# ─── Phase B Terra 修复：发布前的校验与 force 前置条件 ───────────
+
+
+
+
+def test_incomplete_payload_creates_no_row_and_no_state(
+    db_session: Session, monitor_shop: int
+) -> None:
+    """校验必须早于加密与指针推进，非法载荷不得留下任何痕迹。"""
+
+    from tts_erp_v2.monitor_config import contracts
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    with pytest.raises(contracts.ConfigContractError):
+        publish_delivery(
+            db_session,
+            shop_pk=monitor_shop,
+            # 只给一个字段：不足以构成完整业务配置。
+            payload={"globalThreshold": "10.0"},
+            source_global_version=4,
+            source_shop_version=None,
+            created_by="TEST_monitor_publish",
+        )
+    db_session.rollback()
+    assert db_session.execute(
+        select(MonitorConfigDelivery).where(
+            MonitorConfigDelivery.shop_pk == monitor_shop
+        )
+    ).scalars().all() == []
+    assert db_session.get(MonitorShopState, monitor_shop) is None
+
+
+def test_forbidden_wire_field_is_rejected_before_any_write(
+    db_session: Session, monitor_shop: int
+) -> None:
+    """运行时字段绝不能被冻结进下发配置。"""
+
+    from tts_erp_v2.monitor_config import contracts
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    for forbidden in ("monitorEnabled", "cookie", "lastError"):
+        with pytest.raises(contracts.ConfigContractError):
+            publish_delivery(
+                db_session,
+                shop_pk=monitor_shop,
+                payload=_complete_payload(**{forbidden: "leak"}),
+                source_global_version=4,
+                source_shop_version=None,
+                created_by="TEST_monitor_publish",
+            )
+        db_session.rollback()
+    assert db_session.execute(
+        select(MonitorConfigDelivery).where(
+            MonitorConfigDelivery.shop_pk == monitor_shop
+        )
+    ).scalars().all() == []
+    assert db_session.get(MonitorShopState, monitor_shop) is None
+
+
+def test_out_of_range_threshold_is_rejected_before_any_write(
+    db_session: Session, monitor_shop: int
+) -> None:
+    from tts_erp_v2.monitor_config import contracts
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    with pytest.raises(contracts.ConfigContractError):
+        publish_delivery(
+            db_session,
+            shop_pk=monitor_shop,
+            payload=_complete_payload(scanIntervalMinSeconds=5),
+            source_global_version=4,
+            source_shop_version=None,
+            created_by="TEST_monitor_publish",
+        )
+    db_session.rollback()
+    assert db_session.get(MonitorShopState, monitor_shop) is None
+
+
+def test_payload_is_normalized_before_encryption(
+    db_session: Session, monitor_shop: int
+) -> None:
+    """冻结的是规范化结果，不是调用方传入的原始形状。"""
+
+    import json
+
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+    from tts_erp_v2.proxy import token_service
+
+    publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload=_complete_payload(
+            autoCloseCampaignWhitelist=["abc", "def"],
+            scanIntervalMinSeconds=30,
+        ),
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+    )
+    db_session.flush()
+    row = db_session.execute(
+        select(MonitorConfigDelivery).where(
+            MonitorConfigDelivery.shop_pk == monitor_shop
+        )
+    ).scalar_one()
+    stored = json.loads(token_service.decrypt(row.encrypted_payload))
+    # Tuples normalize to JSON lists; Decimal thresholds serialize as strings.
+    assert stored["autoCloseCampaignWhitelist"] == ["abc", "def"]
+    assert stored["globalThreshold"] == "10.0"
+    assert "sellerId" not in stored
+
+
+def test_force_requires_an_existing_published_delivery(
+    db_session: Session, monitor_shop: int
+) -> None:
+    """未发布草稿不得被强制覆盖隐式发布（§5.4）。"""
+
+    from tts_erp_v2.monitor_config.delivery import (
+        ForceRequiresPublishedDelivery,
+        publish_delivery,
+    )
+
+    with pytest.raises(ForceRequiresPublishedDelivery):
+        publish_delivery(
+            db_session,
+            shop_pk=monitor_shop,
+            payload=_complete_payload(),
+            source_global_version=4,
+            source_shop_version=None,
+            created_by="TEST_monitor_publish",
+            is_force=True,
+            request_id=uuid.uuid4(),
+            request_digest="sha256:force",
+        )
+    db_session.rollback()
+    assert db_session.get(MonitorShopState, monitor_shop) is None
+
+
+def test_force_requires_a_request_id_and_digest(
+    db_session: Session, monitor_shop: int
+) -> None:
+    """force 必须带幂等键，否则双击/重试无法安全重放（§5.4）。"""
+
+    from tts_erp_v2.monitor_config.delivery import (
+        ForceRequiresRequestId,
+        publish_delivery,
+    )
+
+    _publish_one(db_session, monitor_shop)
+    db_session.commit()
+
+    with pytest.raises(ForceRequiresRequestId):
+        publish_delivery(
+            db_session,
+            shop_pk=monitor_shop,
+            payload=_complete_payload(),
+            source_global_version=4,
+            source_shop_version=None,
+            created_by="TEST_monitor_publish",
+            is_force=True,
+            request_id=None,
+            request_digest="sha256:force",
+        )
+    db_session.rollback()
+
+    with pytest.raises(ForceRequiresRequestId):
+        publish_delivery(
+            db_session,
+            shop_pk=monitor_shop,
+            payload=_complete_payload(),
+            source_global_version=4,
+            source_shop_version=None,
+            created_by="TEST_monitor_publish",
+            is_force=True,
+            request_id=uuid.uuid4(),
+            request_digest=None,
+        )
+    db_session.rollback()
+
+    state = db_session.get(MonitorShopState, monitor_shop)
+    assert state is not None
+    assert state.last_force_version is None
+
+
+def _publish_one(session: Session, shop_pk: int, *, is_force: bool = False,
+                 request_id: Any = None, request_digest: str | None = None) -> int:
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    return publish_delivery(
+        session,
+        shop_pk=shop_pk,
+        payload=_complete_payload(),
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+        is_force=is_force,
+        request_id=request_id,
+        request_digest=request_digest,
+    )
+
+
+def test_concurrent_retries_of_one_request_id_replay_a_single_delivery(
+    db_engine,
+) -> None:
+    """同一 request_id 的并发重试必须只落一行并返回同一 version。
+
+    重放复查在按店铺行锁之后进行，第二个事务因此看不到未提交的行，
+    但会在拿到锁后读到已提交的那一行并直接重放。
+    """
+
+    import threading
+
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    with Session(db_engine) as setup:
+        shop = ChannelAccount(
+            platform="tiktok",
+            shop_id=f"TEST_monitor_concurrent_{uuid.uuid4().hex[:8]}",
+            account_name="TEST_monitor_concurrent",
+        )
+        setup.add(shop)
+        setup.commit()
+        shop_pk = shop.id
+
+    request_id = uuid.uuid4()
+    barrier = threading.Barrier(2)
+    results: list[Any] = []
+    errors: list[BaseException] = []
+
+    def _attempt() -> None:
+        try:
+            with Session(db_engine) as session:
+                barrier.wait(timeout=10)
+                results.append(
+                    publish_delivery(
+                        session,
+                        shop_pk=shop_pk,
+                        payload=_complete_payload(),
+                        source_global_version=4,
+                        source_shop_version=None,
+                        created_by="TEST_monitor_concurrent",
+                        request_id=request_id,
+                        request_digest="sha256:concurrent",
+                    )
+                )
+                session.commit()
+        except BaseException as exc:  # noqa: BLE001 - reported to the main thread
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_attempt) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    try:
+        assert not errors, f"concurrent publish raised: {errors!r}"
+        assert len(results) == 2, results
+        # 两次重试得到同一个 version，即只有一次真实写入。
+        assert results[0] == results[1], results
+        with Session(db_engine) as verify:
+            rows = verify.execute(
+                select(MonitorConfigDelivery).where(
+                    MonitorConfigDelivery.shop_pk == shop_pk
+                )
+            ).scalars().all()
+            assert len(rows) == 1
+            state = verify.get(MonitorShopState, shop_pk)
+            assert state is not None
+            assert state.current_delivery_version == rows[0].version
+    finally:
+        with Session(db_engine) as cleanup:
+            cleanup.execute(
+                delete(MonitorConfigDelivery).where(
+                    MonitorConfigDelivery.shop_pk == shop_pk
+                )
+            )
+            cleanup.execute(
+                delete(MonitorShopState).where(MonitorShopState.shop_pk == shop_pk)
+            )
+            cleanup.execute(
+                delete(ChannelAccount).where(ChannelAccount.id == shop_pk)
+            )
+            cleanup.commit()

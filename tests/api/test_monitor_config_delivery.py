@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -88,6 +89,9 @@ def _publish(session: Session, shop_pk: int, *, is_force: bool = False,
         source_shop_version=None,
         is_force=is_force,
         created_by="TEST_monitor_delivery_actor",
+        # force 必须带完整幂等键（§5.4）
+        request_id=uuid.uuid4() if is_force else None,
+        request_digest=f"sha256:force:{uuid.uuid4().hex[:8]}" if is_force else None,
     )
     session.commit()
     return version

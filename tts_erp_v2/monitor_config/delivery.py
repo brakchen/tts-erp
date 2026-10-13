@@ -43,6 +43,21 @@ class ShopUnconfigured(RuntimeError):
     """The shop is onboarded but has no published delivery yet."""
 
 
+class ForceRequiresPublishedDelivery(RuntimeError):
+    """Force was requested for a shop with nothing published yet (§5.4).
+
+    An unpublished draft must never be implicitly published by a force click.
+    """
+
+
+class ForceRequiresRequestId(RuntimeError):
+    """Force was requested without a full idempotency key (§5.4).
+
+    Without both ``request_id`` and ``request_digest`` a double-click or a
+    retried request could not be replayed safely.
+    """
+
+
 def resolve_shop(session: Session, seller_id: str) -> ChannelAccount | None:
     """Resolve the single identity field ``sellerId`` to a registered shop.
 
@@ -56,6 +71,18 @@ def resolve_shop(session: Session, seller_id: str) -> ChannelAccount | None:
             ChannelAccount.shop_id == seller_id,
         )
     ).scalar_one_or_none()
+
+
+def _frozen_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate then normalize one composed business payload.
+
+    Raises :class:`~tts_erp_v2.monitor_config.contracts.ConfigContractError`
+    for an incomplete, unknown, or forbidden field, before the caller encrypts
+    anything or touches a pointer.
+    """
+
+    settings = contracts.validate_complete_business_settings(payload)
+    return contracts.config_to_payload(settings)
 
 
 def content_hash_of(payload: Mapping[str, Any]) -> str:
@@ -93,10 +120,37 @@ def publish_delivery(
     """Freeze one composed payload as a new immutable delivery.
 
     Returns the new delivery version, which doubles as the delivery identifier.
-    Idempotency is checked before any version conflict so a client that lost a
-    response can safely retry the same ``request_id`` (§5.4).
+
+    Ordering is deliberate, and every step precedes any write:
+
+    1. Validate and normalize the payload through the contract layer, so an
+       incomplete or forbidden payload never reaches encryption, the delivery
+       table, or the state pointers.
+    2. Enforce the force preconditions (an already published delivery plus a
+       full idempotency key) against a read-only peek, before creating state.
+    3. Take the per-shop row lock **before** rechecking for a replay. Checking
+       first would let two concurrent retries of the same ``request_id`` both
+       miss and both write; under the lock the second one sees the committed
+       row and replays that version instead.
     """
 
+    frozen = _frozen_payload(payload)
+
+    if is_force:
+        if request_id is None or request_digest is None:
+            raise ForceRequiresRequestId(
+                "force publish requires both request_id and request_digest"
+            )
+        peek = session.get(MonitorShopState, shop_pk)
+        if peek is None or peek.current_delivery_version is None:
+            raise ForceRequiresPublishedDelivery(
+                "force publish requires an already published delivery"
+            )
+
+    state = _lock_state(session, shop_pk)
+
+    # Idempotency is checked before any version conflict so a client that lost a
+    # response can safely retry the same request_id (§5.4).
     if request_id is not None:
         existing = session.execute(
             select(MonitorConfigDelivery).where(
@@ -105,15 +159,13 @@ def publish_delivery(
             )
         ).scalar_one_or_none()
         if existing is not None:
-            if request_digest is not None and existing.request_digest != request_digest:
+            if existing.request_digest != request_digest:
                 raise PublishConflict(
                     "request_id replayed with different request metadata"
                 )
             return existing.version
 
-    state = _lock_state(session, shop_pk)
     version = (state.current_delivery_version or 0) + 1
-    frozen = dict(payload)
     session.add(
         MonitorConfigDelivery(
             shop_pk=shop_pk,
