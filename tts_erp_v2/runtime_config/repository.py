@@ -53,46 +53,53 @@ def publish(
     *,
     item: RuntimeConfigItem,
     payload: dict[str, Any],
-    rollout: list[dict[str, Any]],
     comment: str | None,
     actor: str,
 ) -> RuntimeConfigRevision:
     """Publish while the caller holds ``locked_item``'s row lock."""
-    validate_spu_deterioration_alert_runtime_mutation(
-        item.config_key, payload=payload, rollout=rollout
-    )
+    validate_spu_deterioration_alert_runtime_mutation(item.config_key, payload=payload)
     ensure_secret_references_exist(session, payload)
-    for rule in rollout:
-        ensure_secret_references_exist(session, rule["payload"])
     next_version = (item.published_version or 0) + 1
     revision = RuntimeConfigRevision(
         config_key=item.config_key,
         version=next_version,
         payload=payload,
-        rollout=rollout,
         comment=comment,
         created_by=actor,
     )
     session.add(revision)
     item.published_version = next_version
     item.draft_payload = None
-    item.draft_rollout = []
     item.draft_version += 1
     session.flush()
     return revision
 
 
-def ensure_secret_references_exist(session: Session, value: Any) -> None:
+def lock_referenced_secrets(session: Session, value: Any) -> set[str]:
+    """Lock every active secret ``value`` references; return the unusable names.
+
+    Taking the row lock is what serializes this check against
+    ``retire_runtime_config_secret``, which locks the same row before scanning
+    active configs. Without it an interleaving could publish a revision that
+    points at a secret retired a moment later.
+    """
     names = set(iter_secret_references(value))
     if not names:
-        return
+        return set()
     rows = session.execute(
-        select(RuntimeConfigSecret.name).where(
+        select(RuntimeConfigSecret.name)
+        .where(
             RuntimeConfigSecret.name.in_(names),
             RuntimeConfigSecret.retired_at.is_(None),
         )
+        .order_by(RuntimeConfigSecret.name)
+        .with_for_update()
     ).scalars()
-    missing = names - set(rows)
+    return names - set(rows)
+
+
+def ensure_secret_references_exist(session: Session, value: Any) -> None:
+    missing = lock_referenced_secrets(session, value)
     if missing:
         raise KeyError(
             f"referenced active secrets do not exist: {', '.join(sorted(missing))}"
@@ -109,8 +116,6 @@ def secret_is_referenced_by_active_config(session: Session, name: str) -> bool:
         revision = published_revision(session, item)
         if revision is not None:
             values.append(revision.payload)
-            values.extend(rule["payload"] for rule in revision.rollout)
-        values.extend(rule["payload"] for rule in item.draft_rollout)
         for value in values:
             if value is None:
                 continue

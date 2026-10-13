@@ -174,7 +174,7 @@ def test_dashboard_links_to_runtime_config_console():
     body = bytes(dashboard_page().body).decode()
 
     assert 'href="../../v2/pages/runtime-configs"' in body
-    assert "配置下发、灰度控制与凭证管理" in body
+    assert "版本化默认配置下发与凭证管理（通用灰度已退役）" in body
     assert "即将上线" not in body
 
 
