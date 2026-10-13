@@ -541,3 +541,170 @@ def test_0070_downgrade_refuses_each_populated_data_guard(db_engine) -> None:
             assert not {"purpose", "shop_pk"} & _api_key_columns(conn)
         finally:
             transaction.rollback()
+
+
+# ─── Phase B：发布编排指针与 force 幂等 ─────────────────────────
+
+
+def test_publish_advances_state_pointers_transactionally(
+    db_session: Session, monitor_shop: int
+) -> None:
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    first = publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "10.0"},
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+    )
+    db_session.flush()
+    state = db_session.get(MonitorShopState, monitor_shop)
+    assert state is not None
+    assert state.current_delivery_version == first
+    # 普通发布不得推进 force 指针（§5.3）。
+    assert state.last_force_version is None
+
+    second = publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "11.0"},
+        source_global_version=5,
+        source_shop_version=2,
+        created_by="TEST_monitor_publish",
+    )
+    db_session.flush()
+    assert second == first + 1
+    assert state.current_delivery_version == second
+    assert state.last_force_version is None
+
+
+def test_force_publish_advances_both_pointers(db_session: Session, monitor_shop: int) -> None:
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "10.0"},
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+    )
+    forced = publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "10.0"},
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+        is_force=True,
+    )
+    db_session.flush()
+    state = db_session.get(MonitorShopState, monitor_shop)
+    assert state is not None
+    assert state.current_delivery_version == forced
+    assert state.last_force_version == forced
+
+    # 后续普通发布不得撤回强制指令（§5.4）。
+    after = publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "12.0"},
+        source_global_version=6,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+    )
+    db_session.flush()
+    assert state.current_delivery_version == after
+    assert state.last_force_version == forced
+
+
+def test_same_request_id_replays_the_same_delivery(
+    db_session: Session, monitor_shop: int
+) -> None:
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    request_id = uuid.uuid4()
+    first = publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "10.0"},
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+        request_id=request_id,
+        request_digest="sha256:idem",
+    )
+    db_session.flush()
+    replay = publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "10.0"},
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+        request_id=request_id,
+        request_digest="sha256:idem",
+    )
+    db_session.flush()
+    assert replay == first
+    rows = db_session.execute(
+        select(MonitorConfigDelivery).where(
+            MonitorConfigDelivery.shop_pk == monitor_shop
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+
+
+def test_same_request_id_with_different_metadata_conflicts(
+    db_session: Session, monitor_shop: int
+) -> None:
+    from tts_erp_v2.monitor_config.delivery import PublishConflict, publish_delivery
+
+    request_id = uuid.uuid4()
+    publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "10.0"},
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+        request_id=request_id,
+        request_digest="sha256:first",
+    )
+    db_session.flush()
+    with pytest.raises(PublishConflict):
+        publish_delivery(
+            db_session,
+            shop_pk=monitor_shop,
+            payload={"globalThreshold": "10.0"},
+            source_global_version=4,
+            source_shop_version=None,
+            created_by="TEST_monitor_publish",
+            request_id=request_id,
+            request_digest="sha256:second",
+        )
+    db_session.rollback()
+
+
+def test_delivery_payload_is_encrypted_at_rest(db_session: Session, monitor_shop: int) -> None:
+    """明文只经 token_service 进出，库里不得留明文。"""
+
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    publish_delivery(
+        db_session,
+        shop_pk=monitor_shop,
+        payload={"globalThreshold": "10.0"},
+        source_global_version=4,
+        source_shop_version=None,
+        created_by="TEST_monitor_publish",
+    )
+    db_session.flush()
+    row = db_session.execute(
+        select(MonitorConfigDelivery).where(
+            MonitorConfigDelivery.shop_pk == monitor_shop
+        )
+    ).scalar_one()
+    assert b"globalThreshold" not in row.encrypted_payload

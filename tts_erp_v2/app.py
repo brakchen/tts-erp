@@ -53,6 +53,7 @@ from tts_erp_v2.api.v2 import (
     fx,
     intercept,
     llm_context,
+    monitor_config,
     oauth,
     order_sync,
     pages,
@@ -139,6 +140,10 @@ def _build_routes(app: FastAPI) -> None:
     # sync-worker 周期作业同步状态（GET /v2/sync/status, readonly）——
     # dashboard「数据同步状态」卡片数据源，只读 integration.sync_jobs。
     app.include_router(sync_status.router)
+    # monitor 插件按店铺读取冻结配置（GET /v2/monitor/config）。该路径只接受
+    # 绑定到单个 shop_pk 的 monitor_config 专用 key，由 access 层强制；
+    # 仅注册 router，不改动中间件顺序。docs/monitor-config-sync.md §6.1。
+    app.include_router(monitor_config.router)
 
     # Operator-console static assets (vendor/bootstrap.min.css / js/console.js)
     # are public. Business data remains protected at API endpoints; public assets
