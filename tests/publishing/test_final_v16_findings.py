@@ -138,7 +138,6 @@ def test_underscore_credentials_are_redacted_at_persistence_and_response(
         OperationalFailure(
             action="failed",
             code="TEST_FAILURE",
-            max_attempts=3,
             message="\n".join(
                 f"{identifier}={value}"
                 for identifier, value in zip(

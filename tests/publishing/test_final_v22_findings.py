@@ -148,6 +148,7 @@ async def test_process_kill_part_residue_is_removed_by_selector_cleanup(
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-v22-cleaner",
+            device_serial="TESTV22SERIAL",
             lease_seconds=30,
             spool_dir=tmp_path,
             store=SimpleNamespace(remove=lambda *_args, **_kwargs: None),
@@ -208,9 +209,10 @@ def test_upload_replacement_allocates_a_new_generation_and_key(
     assert replaced.object_upload_expires_at is None
 
 
-def test_cancel_defers_object_cleanup_until_persisted_put_expiry(
+def test_cancel_never_schedules_object_cleanup(
     db_session: Session,
 ) -> None:
+    """02 §5.3: cancelling keeps the MinIO source video; no deletion is queued."""
     task = _task(status="pending", stage="awaiting_upload")
     task.object_upload_expires_at = datetime.now(UTC) + timedelta(minutes=10)
     db_session.add(task)
@@ -220,43 +222,35 @@ def test_cancel_defers_object_cleanup_until_persisted_put_expiry(
         db_session, task.public_id, cast(VideoObjectStore, SimpleNamespace())
     )
 
-    assert (
-        cancelled.object_cleanup_next_attempt_at == cancelled.object_upload_expires_at
-    )
+    assert cancelled.status == "cancelled"
+    assert cancelled.stage == "done"
+    assert cancelled.object_cleanup_status == "not_started"
+    assert cancelled.object_cleanup_next_attempt_at is None
 
     def factory() -> Session:
         return Session(
             bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
         )
 
-    assert (
-        claim_cleanup_work(
-            factory,
-            CleanupClaimRequest(
-                owner="TEST-too-early", lease_seconds=30, scope="background"
-            ),
-        )
-        is None
-    )
-
+    # Even after the persisted PUT ticket expires, nothing may delete it.
     db_session.execute(
         text(
             "UPDATE publishing.video_publish_tasks "
-            "SET object_upload_expires_at = clock_timestamp() - interval '16 minutes', "
-            "object_cleanup_next_attempt_at = clock_timestamp() - interval '16 minutes' "
+            "SET object_upload_expires_at = clock_timestamp() - interval '16 minutes' "
             "WHERE id = :task_id"
         ),
         {"task_id": task.id},
     )
     db_session.commit()
-    due = claim_cleanup_work(
-        factory,
-        CleanupClaimRequest(
-            owner="TEST-after-expiry", lease_seconds=30, scope="background"
-        ),
+    assert (
+        claim_cleanup_work(
+            factory,
+            CleanupClaimRequest(
+                owner="TEST-after-expiry", lease_seconds=30, scope="background"
+            ),
+        )
+        is None
     )
-    assert due is not None
-    assert due.object_key == task.object_key
 
 
 def test_cleanup_work_keeps_retired_generation_identity(
@@ -333,6 +327,7 @@ async def test_stale_cleaner_can_only_delete_its_retired_generation(
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-stale",
+            device_serial="TESTV22SERIAL",
             lease_seconds=1,
             spool_dir=tmp_path,
             store=Store(),
@@ -364,6 +359,7 @@ async def test_stale_cleaner_can_only_delete_its_retired_generation(
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-takeover",
+            device_serial="TESTV22SERIAL",
             lease_seconds=30,
             spool_dir=tmp_path,
             store=stale_deps.store,
@@ -425,6 +421,7 @@ async def test_dispatch_uses_immutable_attempt_package_snapshot(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v22-worker",
+            device_serial="TESTV22SERIAL",
             lease_seconds=30,
             max_attempts=3,
             poll_seconds=0,
@@ -478,6 +475,7 @@ async def test_unexpected_post_creation_exception_preserves_same_session_recover
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v22-crashing-worker",
+            device_serial="TESTV22SERIAL",
             lease_seconds=30,
             max_attempts=3,
             poll_seconds=0,

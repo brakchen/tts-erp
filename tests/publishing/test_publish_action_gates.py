@@ -90,7 +90,9 @@ def _heartbeat(db_session: Session) -> None:
 @pytest.fixture()
 def client(db_session: Session):
     _heartbeat(db_session)
-    with TestClient(_app(db_session, _PresentStore()), raise_server_exceptions=False) as c:
+    with TestClient(
+        _app(db_session, _PresentStore()), raise_server_exceptions=False
+    ) as c:
         yield c
 
 
@@ -98,7 +100,9 @@ def client(db_session: Session):
 def strict_client(db_session: Session):
     """Client that re-raises server-side exceptions (to name the exception type)."""
     _heartbeat(db_session)
-    with TestClient(_app(db_session, _PresentStore()), raise_server_exceptions=True) as c:
+    with TestClient(
+        _app(db_session, _PresentStore()), raise_server_exceptions=True
+    ) as c:
         yield c
 
 
@@ -209,6 +213,7 @@ def _row_state(db_session: Session, task_id) -> str:
     fresh = db_session.scalar(
         select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
     )
+    assert fresh is not None
     if fresh is None:
         return "row missing"
     return (
@@ -226,6 +231,7 @@ def _row_snapshot(db_session: Session, task_id) -> dict:
     fresh = db_session.scalar(
         select(VideoPublishTask).where(VideoPublishTask.public_id == task_id)
     )
+    assert fresh is not None
     if fresh is None:
         return {"__missing__": True}
     return {
@@ -272,11 +278,15 @@ def _p1_1_task(db_session: Session) -> VideoPublishTask:
 def test_p1_1_repro_pre_fix_retry_500(client, db_session: Session) -> None:
     task = _p1_1_task(db_session)
     response = _post(client, task, row_version=task.row_version)
-    print(f"\n[probe:P1-1-repro] status={response.status_code} body={response.text[:200]}")
+    print(
+        f"\n[probe:P1-1-repro] status={response.status_code} body={response.text[:200]}"
+    )
     assert response.status_code == 500, _explain("P1-1-repro", response)
 
 
-def test_p1_1_repro_pre_fix_unhandled_exception(strict_client, db_session: Session) -> None:
+def test_p1_1_repro_pre_fix_unhandled_exception(
+    strict_client, db_session: Session
+) -> None:
     """Names the exception that escaped the retry handler pre-fix.
 
     Post-fix nothing escapes, so this asserts the *absence* of an unhandled
@@ -314,7 +324,9 @@ def test_p1_1_retry_contract_requeues_when_device_cleanup_unresolved(
     assert not before.get("__missing__")
 
     response = _post(client, task, row_version=before["row_version"])
-    print(f"\n[probe:3A-retry] status={response.status_code} body={response.text[:300]}")
+    print(
+        f"\n[probe:3A-retry] status={response.status_code} body={response.text[:300]}"
+    )
 
     assert response.status_code == 200, _explain("3A-retry", response)
     body = response.json()
@@ -334,7 +346,9 @@ def test_p1_1_retry_contract_requeues_when_device_cleanup_unresolved(
     )
 
 
-def test_p1_1_retry_cleanup_still_available_same_state(client, db_session: Session) -> None:
+def test_p1_1_retry_cleanup_still_available_same_state(
+    client, db_session: Session
+) -> None:
     """Control: the operator keeps BOTH exits while cleanup is failing.
 
     Under 3A the publish task is allowed to be re-queued *and* the cleanup
@@ -365,7 +379,9 @@ def test_p1_1_retry_cleanup_still_available_same_state(client, db_session: Sessi
 
 
 # ── Regression net: retry success path ──────────────────────────────────────
-def test_retry_success_path_requeues_clean_failed_task(client, db_session: Session) -> None:
+def test_retry_success_path_requeues_clean_failed_task(
+    client, db_session: Session
+) -> None:
     task = _seed(db_session, status="failed", stage="done", cleanup_intent="none")
     response = _post(client, task, row_version=task.row_version)
     assert response.status_code == 200, _explain("R-retry-success", response)
@@ -387,7 +403,9 @@ def test_retry_blocked_by_object_cleanup(
         object_cleanup_status=cleanup_status,
     )
     response = _post(client, task, row_version=task.row_version)
-    assert response.status_code == 409, _explain(f"R-cleanup-{cleanup_status}", response)
+    assert response.status_code == 409, _explain(
+        f"R-cleanup-{cleanup_status}", response
+    )
     assert response.json()["detail"]["code"] == "OBJECT_CLEANUP_IN_PROGRESS", _explain(
         f"R-cleanup-{cleanup_status}", response
     )
@@ -407,16 +425,17 @@ def test_retry_blocked_by_live_cleanup_lease(client, db_session: Session) -> Non
     }, _explain("R-lease", response)
 
 
-def test_retry_blocked_when_budget_exhausted(client, db_session: Session) -> None:
+def test_retry_is_allowed_after_many_attempts(client, db_session: Session) -> None:
+    """02 §14.1: publish_budget_used is retired and no longer gates a retry."""
     task = _seed(db_session, cleanup_intent="none", publish_budget_used=3)
     response = _post(client, task, row_version=task.row_version)
-    assert response.status_code == 409, _explain("R-budget", response)
-    assert response.json()["detail"]["code"] == "RETRY_BUDGET_EXHAUSTED", _explain(
-        "R-budget", response
-    )
+    assert response.status_code == 200, _explain("R-budget", response)
+    assert response.json()["status"] == "pending", _explain("R-budget", response)
 
 
-def test_retry_requires_replacement_when_object_deleted(client, db_session: Session) -> None:
+def test_retry_requires_replacement_when_object_deleted(
+    client, db_session: Session
+) -> None:
     task = _seed(db_session, cleanup_intent="none", object_deleted=True)
     response = _post(client, task, row_version=task.row_version)
     assert response.status_code == 409, _explain("R-deleted", response)
@@ -425,13 +444,12 @@ def test_retry_requires_replacement_when_object_deleted(client, db_session: Sess
     )
 
 
-def test_retry_rejects_unsafe_latest_attempt(client, db_session: Session) -> None:
+def test_retry_ignores_legacy_retry_safe_flag(client, db_session: Session) -> None:
+    """02 §14.4: retry_safe is diagnostic only and no longer blocks a retry."""
     task = _seed(db_session, cleanup_intent="none", retry_safe=False)
     response = _post(client, task, row_version=task.row_version)
-    assert response.status_code == 409, _explain("R-unsafe", response)
-    assert response.json()["detail"]["code"] == "TASK_RETRY_NOT_SAFE", _explain(
-        "R-unsafe", response
-    )
+    assert response.status_code == 200, _explain("R-unsafe", response)
+    assert response.json()["status"] == "pending", _explain("R-unsafe", response)
 
 
 def test_retry_rejects_non_failed_status(client, db_session: Session) -> None:
@@ -444,7 +462,9 @@ def test_retry_rejects_non_failed_status(client, db_session: Session) -> None:
 
 
 # ── Regression net: transport / auth guards ────────────────────────────────
-def test_retry_requires_csrf_header_for_cookie_auth(client, db_session: Session) -> None:
+def test_retry_requires_csrf_header_for_cookie_auth(
+    client, db_session: Session
+) -> None:
     task = _seed(db_session, cleanup_intent="none")
     response = client.post(
         f"/v2/video-publish/tasks/{task.public_id}/retry",
@@ -461,7 +481,9 @@ def test_retry_hides_foreign_task(client, db_session: Session) -> None:
     task = _seed(db_session, cleanup_intent="none", owner_key=OWNER_KEY)
     response = _post(client, task, row_version=task.row_version, key=FOREIGN_KEY)
     assert response.status_code == 404, _explain("R-foreign", response)
-    assert response.json()["detail"]["code"] == "TASK_NOT_FOUND", _explain("R-foreign", response)
+    assert response.json()["detail"]["code"] == "TASK_NOT_FOUND", _explain(
+        "R-foreign", response
+    )
 
 
 def test_retry_rejects_stale_row_version(client, db_session: Session) -> None:
@@ -490,12 +512,12 @@ def test_allowed_actions_matrix(client, db_session: Session) -> None:
         (
             "failed",
             {"status": "failed", "stage": "done", "cleanup_intent": "none"},
-            {"view", "retry", "copy_artemis_id"},
+            {"view", "retry", "confirm_published", "copy_artemis_id"},
         ),
         (
             "needs_review",
             {"status": "needs_review", "stage": "done", "cleanup_intent": "none"},
-            {"view", "verify", "copy_artemis_id"},
+            {"view", "verify", "confirm_published", "copy_artemis_id"},
         ),
         (
             "succeeded",
@@ -518,7 +540,9 @@ def test_allowed_actions_matrix(client, db_session: Session) -> None:
         task = _seed(db_session, **kwargs)
         response = client.get(f"/v2/video-publish/tasks/{task.public_id}")
         if response.status_code != 200:
-            failures.append(f"{label}: HTTP {response.status_code} {response.text[:200]}")
+            failures.append(
+                f"{label}: HTTP {response.status_code} {response.text[:200]}"
+            )
             continue
         actual = set(response.json()["allowedActions"])
         if actual != expected:
@@ -568,7 +592,9 @@ def test_integrity_error_fallback_uses_a_dedicated_code(
     task = _seed(db_session, cleanup_intent="none")
 
     def boom(*_a, **_k):
-        raise IntegrityError("UPDATE publishing.video_publish_tasks", {}, Exception("probe"))
+        raise IntegrityError(
+            "UPDATE publishing.video_publish_tasks", {}, Exception("probe")
+        )
 
     monkeypatch.setattr(submission_module, "queue_task", boom)
     response = _post(client, task, row_version=task.row_version)
@@ -590,7 +616,9 @@ def test_integrity_error_fallback_uses_a_dedicated_code(
 
 def _seed_running(db_session: Session, **kw) -> VideoPublishTask:
     """A task the worker holds: status=running, stage deep in the pipeline."""
-    return _seed(db_session, status="running", stage="verifying", cleanup_intent="none", **kw)
+    return _seed(
+        db_session, status="running", stage="verifying", cleanup_intent="none", **kw
+    )
 
 
 def test_p1_5_current_prefers_running_over_older_cleaning_task(
@@ -631,7 +659,9 @@ def test_p1_5_current_prefers_running_over_older_cleaning_task(
         "task existed; the rail would show the wrong task "
         f"(expected {running.public_id}, got {returned['taskId']})"
     )
-    assert returned["taskId"] == str(running.public_id), _explain("P1-5-current", response)
+    assert returned["taskId"] == str(running.public_id), _explain(
+        "P1-5-current", response
+    )
 
 
 def test_p1_5_current_returns_cleaning_when_nothing_runs(
@@ -652,7 +682,9 @@ def test_p1_5_current_returns_cleaning_when_nothing_runs(
     assert response.status_code == 200, _explain("P1-5-cleaning-only", response)
     task = response.json()["task"]
     assert task is not None, "a lone cleaning task must still be reported"
-    assert task["taskId"] == str(cleaning.public_id), _explain("P1-5-cleaning-only", response)
+    assert task["taskId"] == str(cleaning.public_id), _explain(
+        "P1-5-cleaning-only", response
+    )
 
 
 def test_p2_21_operational_stage_started_at_is_never_in_the_future(
@@ -737,6 +769,7 @@ def test_retry_then_gate_still_blocks_publishing(db_session: Session) -> None:
     requeued = db_session.scalar(
         select(VideoPublishTask).where(VideoPublishTask.public_id == task.public_id)
     )
+    assert requeued is not None
     print(
         f"\n[probe:3A-gate] status={requeued.status} stage={requeued.stage} "
         f"cleanup_intent={requeued.cleanup_intent} "
@@ -752,13 +785,13 @@ def test_retry_then_gate_still_blocks_publishing(db_session: Session) -> None:
 
     # 2) the global pre-claim probe still sees it
     db_session.rollback()
-    assert has_pending_device_cleanup(db_session) is True, (
+    assert has_pending_device_cleanup(db_session, "TEST_device") is True, (
         "has_pending_device_cleanup went blind to a task whose device cleanup is "
         "still failed"
     )
 
     # 3) and the worker refuses to lease anything at all
-    claimed = claim_one(db_session, "TEST-a3-gate-worker")
+    claimed = claim_one(db_session, "TEST-a3-gate-worker", "TEST_device")
     print(f"[probe:3A-gate] claim_one -> {claimed!r}")
     assert claimed is None, (
         "claim_one leased a task while its device cleanup is unresolved; the "
@@ -793,6 +826,7 @@ def test_retry_healthy_path_is_claimable(db_session: Session) -> None:
     requeued = db_session.scalar(
         select(VideoPublishTask).where(VideoPublishTask.public_id == task.public_id)
     )
+    assert requeued is not None
     print(
         f"\n[probe:3A-clean] cleanup_intent={requeued.cleanup_intent} "
         f"device_cleanup_status={requeued.device_cleanup_status}"
@@ -802,8 +836,8 @@ def test_retry_healthy_path_is_claimable(db_session: Session) -> None:
         "'requeue_publish' would deadlock it in the queue forever"
     )
     db_session.rollback()
-    assert has_pending_device_cleanup(db_session) is False
-    claimed = claim_one(db_session, "TEST-a3-clean-worker")
+    assert has_pending_device_cleanup(db_session, "TEST_device") is False
+    claimed = claim_one(db_session, "TEST-a3-clean-worker", "TEST_device")
     print(f"[probe:3A-clean] claim_one -> {getattr(claimed, 'public_id', None)!r}")
     assert claimed is not None, "clean re-queued task must be claimable"
     assert claimed.public_id == task.public_id
@@ -843,6 +877,7 @@ def test_requeue_publish_satisfies_db_check_constraint(db_session: Session) -> N
     requeued = db_session.scalar(
         select(VideoPublishTask).where(VideoPublishTask.public_id == task.public_id)
     )
+    assert requeued is not None
     print(
         f"\n[probe:3A-check] committed status={requeued.status} stage={requeued.stage} "
         f"cleanup_intent={requeued.cleanup_intent} "
@@ -871,7 +906,9 @@ def test_retry_rejected_when_object_cleanup_pending_still_holds(
             object_cleanup_status=cleanup_status,
         )
         response = _post(client, task, row_version=task.row_version)
-        assert response.status_code == 409, _explain(f"3A-obj-{cleanup_status}", response)
+        assert response.status_code == 409, _explain(
+            f"3A-obj-{cleanup_status}", response
+        )
         assert response.json()["detail"]["code"] == "OBJECT_CLEANUP_IN_PROGRESS", (
             _explain(f"3A-obj-{cleanup_status}", response)
         )

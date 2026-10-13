@@ -139,6 +139,7 @@ async def test_spool_is_owned_before_download_rename_and_object_loss_recovery(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v20-worker",
+            device_serial="T20SERIAL",
             lease_seconds=30,
             max_attempts=3,
             store=Store(),
@@ -333,7 +334,7 @@ def test_attempt_events_only_report_real_insert_and_status_change(
             attempt_id=attempt_id,
             expected_attempt_status="running",
         ),
-        PrepareAttempt(attempt_id=attempt_id, lease_seconds=30, max_attempts=3),
+        PrepareAttempt(attempt_id=attempt_id, lease_seconds=30),
     )
     assert prepared.retained_token is not None
     commit_publish_transition(
@@ -341,7 +342,6 @@ def test_attempt_events_only_report_real_insert_and_status_change(
         prepared.retained_token,
         ObserveAttempt(
             observation=AttemptObservation(status="running", terminal=False),
-            max_attempts=3,
             lease_seconds=30,
         ),
     )
@@ -382,7 +382,7 @@ def test_attempt_events_report_actual_insert_and_status_change(
             lease_owner="TEST-v20-new-attempt-owner",
             row_version=task.row_version,
         ),
-        PrepareAttempt(lease_seconds=30, max_attempts=3),
+        PrepareAttempt(lease_seconds=30),
     )
     assert prepared.retained_token is not None
     commit_publish_transition(
@@ -390,7 +390,6 @@ def test_attempt_events_report_actual_insert_and_status_change(
         prepared.retained_token,
         ObserveAttempt(
             observation=AttemptObservation(status="running", terminal=False),
-            max_attempts=3,
             lease_seconds=30,
         ),
     )
@@ -429,6 +428,7 @@ async def test_recover_active_logs_only_after_leasing_existing_running_task(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v20-recovery-worker",
+            device_serial="T20SERIAL",
             lease_seconds=30,
             spool_dir=tmp_path,
         ),

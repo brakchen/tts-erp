@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import os
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from time import monotonic
@@ -47,6 +48,7 @@ from tts_erp_v2.publishing.repository import (
     PublishTransitionCommand,
     PublishTransitionOutcome,
     RecoverPersistedAttempt,
+    StopForCancellation,
     _lease_task,
     claim_cleanup_work,
     claim_one,
@@ -67,6 +69,13 @@ class PublishDependencies:
     artemis: ArtemisClient
     spool_dir: Path
     instance_id: str
+    # This worker claims tasks for one device only; another device runs its
+    # own worker instance (02 §16.1).
+    device_serial: str = field(
+        default_factory=lambda: os.environ.get("ARTEMIS_DEVICE_SERIAL", "")
+    )
+    # Kept for the worker entry point; the publish budget is retired and no
+    # decision reads this value any more (02 §14.1).
     max_attempts: int = 3
     lease_seconds: int = 30
     poll_seconds: float = 2.0
@@ -113,8 +122,8 @@ async def dispatch_one(deps: PublishDependencies) -> str:
         task = claim_one(
             session,
             deps.instance_id,
+            deps.device_serial,
             lease_seconds=deps.lease_seconds,
-            max_attempts=deps.max_attempts,
         )
         if task is not None:
             task_id = task.public_id
@@ -289,16 +298,10 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             outcome = _apply_publish_command(
                 deps,
                 task_id,
-                RecoverPersistedAttempt(
-                    max_attempts=deps.max_attempts,
-                    lease_seconds=deps.lease_seconds,
-                ),
+                RecoverPersistedAttempt(lease_seconds=deps.lease_seconds),
                 attempt_id=recovery_id,
             )
-            if outcome.follow_up == "run_verify":
-                assert outcome.verify_attempt_id is not None
-                await _run_attempt(task_id, outcome.verify_attempt_id, deps)
-            elif outcome.follow_up == "claim_device_cleanup":
+            if outcome.follow_up == "claim_device_cleanup":
                 await _cleanup_success(task_id, deps)
             return
         if active_id is not None:
@@ -306,18 +309,9 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             await _run_attempt(task_id, active_id, deps)
             return
         with deps.session_factory() as session:
-            blocked = has_pending_device_cleanup(session)
+            blocked = has_pending_device_cleanup(session, device_serial)
         if blocked:
-            _apply_publish_command(
-                deps,
-                task_id,
-                OperationalFailure(
-                    action="safe_retry",
-                    code="DEVICE_CLEANUP_BLOCKED",
-                    max_attempts=deps.max_attempts,
-                    retry_stage=TaskStage.WAITING_DEVICE.value,
-                ),
-            )
+            await _mark_failed(task_id, "DEVICE_CLEANUP_BLOCKED", deps)
             return
 
         execution_generation = persisted_execution_generation or uuid4()
@@ -400,12 +394,14 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             device_serial=device_serial,
         )
         await _run_external(task_id, deps, stage_device)
+        if _cancel_requested(task_id, deps):
+            await _stop_for_cancel(task_id, deps)
+            return
         outcome = _apply_publish_command(
             deps,
             task_id,
             PrepareAttempt(
                 lease_seconds=deps.lease_seconds,
-                max_attempts=deps.max_attempts,
                 artemis_profile=getattr(deps, "artemis_profile", "pro"),
                 artemis_verification_level=getattr(
                     deps, "artemis_verification_level", "strict"
@@ -432,20 +428,18 @@ async def _execute(task_id: UUID, deps: PublishDependencies) -> None:
             deps, task_id, InvalidateConfirmedObject(reason="missing")
         )
     except DeviceUnavailable as exc:
-        await _safe_retry(
+        await _mark_failed(
             task_id,
             "DEVICE_UNAVAILABLE",
             deps,
-            stage=TaskStage.WAITING_DEVICE.value,
             message=str(exc),
         )
     except Exception as exc:  # noqa: BLE001 - persist sanitized worker failures
         if pre_artemis:
-            await _safe_retry(
+            await _mark_failed(
                 task_id,
                 "WORKER_OPERATION_FAILED",
                 deps,
-                stage=TaskStage.QUEUED.value,
                 message=str(exc),
             )
         else:
@@ -463,7 +457,6 @@ async def _handle_admission_rejection(
         task_id,
         AdmissionRejected(
             code=sanitize_text(code),
-            max_attempts=deps.max_attempts,
             lease_seconds=deps.lease_seconds,
         ),
         attempt_id=attempt_id,
@@ -498,7 +491,6 @@ async def _run_attempt(
             PrepareAttempt(
                 attempt_id=attempt_id,
                 lease_seconds=deps.lease_seconds,
-                max_attempts=deps.max_attempts,
             ),
             attempt_id=attempt_id,
         )
@@ -631,15 +623,11 @@ async def _run_attempt(
         task_id,
         ObserveAttempt(
             observation=observation,
-            max_attempts=deps.max_attempts,
             lease_seconds=deps.lease_seconds,
         ),
         attempt_id=attempt_id,
     )
-    if outcome.follow_up == "run_verify":
-        assert outcome.verify_attempt_id is not None
-        await _run_attempt(task_id, outcome.verify_attempt_id, deps)
-    elif outcome.follow_up == "claim_device_cleanup":
+    if outcome.follow_up == "claim_device_cleanup":
         await _cleanup_success(task_id, deps)
 
 
@@ -745,31 +733,14 @@ async def _lease_heartbeat(
         lost.set()
 
 
-async def _safe_retry(
+async def _mark_failed(
     task_id: UUID,
     code: str,
     deps: PublishDependencies,
     *,
-    stage: str = TaskStage.QUEUED.value,
     message: str | None = None,
 ) -> None:
-    try:
-        _apply_publish_command(
-            deps,
-            task_id,
-            OperationalFailure(
-                action="safe_retry",
-                code=code,
-                max_attempts=deps.max_attempts,
-                retry_stage=stage,
-                message=sanitize_text(message) if message else None,
-            ),
-        )
-    except LeaseLost:
-        return
-
-
-async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> None:
+    """Persist a round failure. 02 §7.1: no automatic re-queue, ever."""
     try:
         _apply_publish_command(
             deps,
@@ -777,12 +748,37 @@ async def _mark_failed(task_id: UUID, code: str, deps: PublishDependencies) -> N
             OperationalFailure(
                 action="failed",
                 code=code,
-                max_attempts=deps.max_attempts,
-                message=code,
+                message=sanitize_text(message) if message else code,
             ),
         )
     except LeaseLost:
         return
+
+
+def _cancel_requested(task_id: UUID, deps: PublishDependencies) -> bool:
+    """Read the pre-admission cancel flag at a stage boundary (02 §6.5)."""
+    with deps.session_factory() as session:
+        return bool(
+            session.scalar(
+                select(VideoPublishTask.cancel_requested).where(
+                    VideoPublishTask.public_id == task_id
+                )
+            )
+        )
+
+
+async def _stop_for_cancel(task_id: UUID, deps: PublishDependencies) -> None:
+    """Close a cancelled round without ever submitting to Artemis."""
+    try:
+        outcome = _apply_publish_command(
+            deps,
+            task_id,
+            StopForCancellation(lease_seconds=deps.lease_seconds),
+        )
+    except LeaseLost:
+        return
+    if outcome.follow_up == "claim_device_cleanup":
+        await _cleanup_success(task_id, deps)
 
 
 async def _mark_unexpected(
@@ -820,7 +816,6 @@ async def _mark_unexpected(
             OperationalFailure(
                 action="unexpected",
                 code="UNEXPECTED_WORKER_FAILURE",
-                max_attempts=deps.max_attempts,
                 message=sanitize_text(error),
             ),
             attempt_id=attempt_id,

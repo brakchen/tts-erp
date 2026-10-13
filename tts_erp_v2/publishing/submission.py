@@ -17,11 +17,11 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.domain import (
+    CANCELLABLE_RUNNING_STAGES,
     CleanupIntent,
     TaskStage,
     TaskStatus,
     object_cleanup_blocks_input,
-    plan_cleanup,
     replace_upload_allowed,
     replacement_cleanup_pending,
     set_task_stage,
@@ -29,6 +29,7 @@ from tts_erp_v2.publishing.domain import (
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.observability import emit_publish_event
 from tts_erp_v2.publishing.repository import (
+    active_attempt_exists,
     database_now,
     get_task,
     queue_task,
@@ -386,46 +387,64 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
 def cancel_task(
     session: Session, task_id: UUID, store: VideoObjectStore
 ) -> VideoPublishTask:
+    """Cancel an unpublished task (02 §6.5). Never deletes the source video."""
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
-    if task.stage not in {
+    if task.params_locked_at is not None:
+        # Artemis already accepted the publish: the phone owns the outcome.
+        raise ValueError("TASK_ALREADY_SUBMITTED")
+    now = database_now(session)
+    if task.status == TaskStatus.PENDING.value and task.stage in {
         TaskStage.AWAITING_UPLOAD.value,
         TaskStage.QUEUED.value,
         TaskStage.WAITING_DEVICE.value,
     }:
-        raise ValueError("TASK_ACTION_NOT_ALLOWED")
-    now = database_now(session)
-    task.status = TaskStatus.CANCELLED.value
-    set_task_stage(task, TaskStage.DONE, now=now)
-    plan_cleanup(task, CleanupIntent.PRESERVE_STATE, object=True)
-    task.completed_at = now
-    task.row_version += 1
-    release_lease(task)
-    task.object_cleanup_next_attempt_at = max(
-        filter(None, (now, task.object_upload_expires_at))
-    )
-    session.commit()
-    return task
+        task.status = TaskStatus.CANCELLED.value
+        set_task_stage(task, TaskStage.DONE, now=now)
+        task.completed_at = now
+        task.row_version += 1
+        release_lease(task)
+        session.commit()
+        return task
+    if task.status == TaskStatus.RUNNING.value and (
+        task.stage == TaskStage.DISPATCHING_ARTEMIS.value
+    ):
+        # The admission request is already in flight; the caller must retry
+        # once the real outcome is visible instead of trusting a cancel flag
+        # the worker would never read (02 §6.5).
+        raise ValueError("TASK_SUBMITTING")
+    if task.status == TaskStatus.RUNNING.value and (
+        task.stage in CANCELLABLE_RUNNING_STAGES
+    ):
+        # The worker stops at the next stage boundary and never submits.
+        task.cancel_requested = True
+        task.row_version += 1
+        session.commit()
+        return task
+    raise ValueError("TASK_ACTION_NOT_ALLOWED")
 
 
 def retry_task(
     session: Session, task_id: UUID, store: VideoObjectStore | None = None
 ) -> VideoPublishTask:
+    """Re-queue a failed task for another human-triggered round (02 §7.1).
+
+    There is no attempt counter and no budget: a failed task may be retried as
+    often as the operator needs, and the attempt history stays for display.
+    """
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
-    if task.status != TaskStatus.FAILED.value:
+    if task.status != TaskStatus.FAILED.value or task.stage != TaskStage.DONE.value:
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
     if object_cleanup_blocks_input(task):
         raise ValueError("OBJECT_CLEANUP_IN_PROGRESS")
     # Device/spool cleanup does NOT block retry (design §10.7: failed（可重试）→
     # 重试原任务). queue_task keeps the cleanup-gated marker so the readiness
     # gate still holds the task until the cleanup drains.
-    attempts = task.attempts or []
-    latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
-    if latest is None or latest.kind != "publish" or latest.retry_safe is not True:
-        raise ValueError("TASK_RETRY_NOT_SAFE")
+    if active_attempt_exists(session, task.id):
+        raise ValueError("TASK_ACTION_NOT_ALLOWED")
     if task.object_uploaded_at is None or task.object_deleted_at is not None:
         raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
     if store is not None:
@@ -447,10 +466,6 @@ def retry_task(
             raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc
         except Exception as exc:
             raise ValueError("OBJECT_STORE_UNAVAILABLE") from exc
-    if task.publish_budget_used >= int(
-        os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")
-    ):
-        raise ValueError("RETRY_BUDGET_EXHAUSTED")
     queue_task(session, task)
     task.row_version += 1
     session.commit()

@@ -31,15 +31,17 @@ ROOT = Path(__file__).parents[2]
 
 def test_failed_artemis_result_requires_read_only_verification() -> None:
     result = classify_failure(artemis_status="failed", steps_count=4)
-    assert result.requires_verification is True
-    assert result.retry_safe is None
+    # 02 §7.3: an uncertain result waits for a human and never auto-verifies.
+    assert result.code == "ambiguous_artemis_failure"
+    assert result.ambiguous is True
 
 
 def test_missing_artemis_session_is_terminal_for_classification() -> None:
     result = ArtemisResult(session_id=uuid4(), status="missing")
     assert result.terminal is True
     classification = classify_failure(artemis_status="missing")
-    assert classification.requires_verification is True
+    assert classification.code == "session_missing"
+    assert classification.ambiguous is True
 
 
 def test_detail_api_returns_304_for_matching_etag(

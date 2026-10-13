@@ -41,8 +41,8 @@ def _queue_and_probe(db_session: Session, label: str, **seed_kw) -> dict:
         "intent": task.cleanup_intent,
         "device_cleanup_status": task.device_cleanup_status,
         "spool_cleanup_status": task.spool_cleanup_status,
-        "gate_says_dirty": has_pending_device_cleanup(db_session),
-        "claimed": claim_one(db_session, "probe-worker", lease_seconds=30, max_attempts=3)
+        "gate_says_dirty": has_pending_device_cleanup(db_session, "TEST_device"),
+        "claimed": claim_one(db_session, "probe-worker", "TEST_device", lease_seconds=30)
         is not None,
     }
     print(

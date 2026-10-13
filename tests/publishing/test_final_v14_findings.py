@@ -321,7 +321,6 @@ def test_plain_text_credentials_are_redacted_at_persistence_and_response(
         OperationalFailure(
             action="failed",
             code="TEST_FAILURE",
-            max_attempts=3,
             message=f"password={sensitive_value}" + "x" * 5000,
         ),
     )
@@ -572,6 +571,7 @@ async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
                 join_transaction_mode="create_savepoint",
             ),
             instance_id="TEST-v14-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
             max_attempts=3,
             store=Store(),
@@ -630,6 +630,7 @@ async def test_download_size_mismatch_keeps_tracked_spool_cleanup(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v18-size-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
             max_attempts=3,
             store=Store(),
@@ -639,10 +640,12 @@ async def test_download_size_mismatch_keeps_tracked_spool_cleanup(
     )
     assert await dispatch_one(deps) == "processed"
     db_session.expire_all()
-    assert (task.status, task.stage) == ("pending", "queued")
+    # 02 §7.1: a pre-Artemis worker failure stops at failed/done and waits for
+    # a human retry instead of re-queueing itself.
+    assert (task.status, task.stage) == ("failed", "done")
     assert task.last_error_code == "WORKER_OPERATION_FAILED"
     assert task.spool_cleanup_status == "pending"
-    assert task.cleanup_intent == "requeue_publish"
+    assert task.cleanup_intent == "preserve_state"
 
 
 @pytest.mark.asyncio
@@ -686,6 +689,7 @@ async def test_album_residue_stops_workflow_before_artemis_attempt(
                 join_transaction_mode="create_savepoint",
             ),
             instance_id="TEST-v14-album-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
             max_attempts=3,
             store=Store(),
@@ -696,14 +700,15 @@ async def test_album_residue_stops_workflow_before_artemis_attempt(
     )
     assert await dispatch_one(deps) == "processed"
     db_session.expire_all()
-    assert (task.status, task.stage) == ("pending", "waiting_device"), (
+    # 02 §7.1: an ADB album-residue failure stops at failed/done.
+    assert (task.status, task.stage) == ("failed", "done"), (
         task.last_error_code,
         task.last_error_message,
         task.spool_cleanup_status,
         task.cleanup_intent,
     )
     assert task.spool_cleanup_status == "pending"
-    assert task.cleanup_intent == "requeue_publish"
+    assert task.cleanup_intent == "preserve_state"
     assert task.attempt_count == 0
     assert (
         db_session.scalar(

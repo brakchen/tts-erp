@@ -114,6 +114,7 @@ async def test_execution_generation_is_persisted_before_download_side_effect(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v24-worker",
+            device_serial="TESTV24SERIAL",
             lease_seconds=30,
             max_attempts=3,
             poll_seconds=0,
@@ -192,6 +193,7 @@ async def test_stale_spool_cleaner_cannot_address_new_execution_generation(
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-stale-spool",
+            device_serial="TESTV24SERIAL",
             lease_seconds=1,
             spool_dir=tmp_path,
             store=SimpleNamespace(remove=lambda *_args: None),
@@ -285,6 +287,7 @@ async def test_stale_device_cleaner_cannot_address_new_execution_generation(
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-stale-device",
+            device_serial="TESTV24SERIAL",
             lease_seconds=1,
             spool_dir=tmp_path,
             store=SimpleNamespace(remove=lambda *_args: None),
@@ -382,10 +385,9 @@ def test_existing_ticket_issuance_serializes_with_cancellation(
     assert replay is True
     assert url
     assert cancelled.object_upload_expires_at is not None
-    assert cancelled.object_cleanup_next_attempt_at is not None
-    assert (
-        cancelled.object_cleanup_next_attempt_at >= cancelled.object_upload_expires_at
-    )
+    # Cancelling never queues a MinIO deletion (02 §5.3).
+    assert cancelled.object_cleanup_next_attempt_at is None
+    assert cancelled.object_cleanup_status == "not_started"
     _delete_task(factory, task.public_id)
 
 
@@ -423,6 +425,7 @@ async def test_attempt_profile_and_verification_level_are_immutable_submit_snaps
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v24-worker",
+            device_serial="TESTV24SERIAL",
             lease_seconds=30,
             max_attempts=3,
             poll_seconds=0,
@@ -513,6 +516,7 @@ async def test_background_cleanup_progresses_while_publish_queue_remains_sustain
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-v24-background",
+            device_serial="TESTV24SERIAL",
             lease_seconds=30,
             spool_dir=tmp_path,
             store=SimpleNamespace(remove=lambda *_args: None),
@@ -819,6 +823,7 @@ async def test_missing_retry_object_stays_selector_owned_until_expiry_grace(
             SimpleNamespace(
                 session_factory=factory,
                 instance_id="TEST-missing-object-cleaner",
+                device_serial="TESTV24SERIAL",
                 lease_seconds=30,
                 spool_dir=tmp_path,
                 store=cleanup_store,

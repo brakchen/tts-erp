@@ -67,8 +67,8 @@ def test_readiness_gate_full_loop_releases_after_cleanup(db_session: Session) ->
 
     # ---- 1) 刹车应踩住 ----
     assert task.cleanup_intent == "requeue_publish", task.cleanup_intent
-    assert has_pending_device_cleanup(db_session) is True, "闸门必须认定设备脏"
-    blocked = claim_one(db_session, "w1", lease_seconds=30, max_attempts=3)
+    assert has_pending_device_cleanup(db_session, "TEST_device") is True, "闸门必须认定设备脏"
+    blocked = claim_one(db_session, "w1", "TEST_device", lease_seconds=30)
     print(f"[gate:2-blocked] claim_one -> {blocked!r}")
     assert blocked is None, "设备清理未完成时不得领取（安全底线）"
 
@@ -109,8 +109,8 @@ def test_readiness_gate_full_loop_releases_after_cleanup(db_session: Session) ->
     )
 
     # ---- 4) 刹车松开，活应能被领走 ----
-    assert has_pending_device_cleanup(db_session) is False, "闸门应已松开"
-    released = claim_one(db_session, "w3", lease_seconds=30, max_attempts=3)
+    assert has_pending_device_cleanup(db_session, "TEST_device") is False, "闸门应已松开"
+    released = claim_one(db_session, "w3", "TEST_device", lease_seconds=30)
     # 每个字段独立成行、带字段名：避免 `bool and (uuid, stage)` 挤在一行导致
     # 打印串里 ID 与阶段粘连（截图/OCR 时会被读成一个不存在的编号）。
     print("[gate:5-released] claim_one 结果：")
@@ -157,10 +157,10 @@ def test_readiness_gate_failure_path_backs_off_instead_of_spinning(
           f"next_in={after.device_cleanup_next_attempt_at is not None}")
 
     # (a) 闸门必须继续踩住：清理还没成功，不得放行新任务
-    assert has_pending_device_cleanup(db_session) is True, (
+    assert has_pending_device_cleanup(db_session, "TEST_device") is True, (
         "清理失败后闸门必须继续踩住，否则会往脏设备发新视频"
     )
-    blocked = claim_one(db_session, "w2", lease_seconds=30, max_attempts=3)
+    blocked = claim_one(db_session, "w2", "TEST_device", lease_seconds=30)
     print(f"[gate:F2-blocked] claim_one -> {blocked!r}")
     assert blocked is None, "清理失败期间不得放行"
 

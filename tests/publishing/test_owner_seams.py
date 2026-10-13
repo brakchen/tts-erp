@@ -140,7 +140,7 @@ def test_stale_publish_token_cannot_commit_any_observation(
             commit_publish_transition(
                 factory,
                 token,
-                ObserveAttempt(observation=observation, max_attempts=3),
+                ObserveAttempt(observation=observation),
             )
         with factory() as session:
             persisted = session.get(VideoPublishAttempt, attempt_id)
@@ -190,7 +190,7 @@ def test_attempt_failure_rolls_back_task_transition_atomically(
     )
     monkeypatch.setattr(
         repository,
-        "_new_verify_attempt",
+        "_terminal_cleanup_values",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("TEST_INSERT")),
     )
     try:
@@ -202,7 +202,6 @@ def test_attempt_failure_rolls_back_task_transition_atomically(
                     observation=AttemptObservation(
                         status="failed", terminal=True, steps_count=2
                     ),
-                    max_attempts=3,
                 ),
             )
         with factory() as session:
