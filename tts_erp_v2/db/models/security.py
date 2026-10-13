@@ -35,11 +35,12 @@ class ApiKey(Base):
         Index("ix_api_keys_key_hash", "key_hash", unique=True),
         Index("ix_api_keys_role", "role"),
         Index("ix_api_keys_shop_pk", "shop_pk"),
-        # A monitor key is only meaningful when it names a shop, and a general
-        # key must not carry a binding (it would imply shop scoping it lacks).
+        # purpose 只有两个取值，且取值决定 shop_pk 是否必须存在：monitor 必须
+        # 绑定店铺，general 必须不带绑定（绑定会暗示一个它不具备的店铺作用域）。
         CheckConstraint(
+            "purpose IN ('general', 'monitor_config') AND ("
             "(purpose = 'monitor_config' AND shop_pk IS NOT NULL) OR "
-            "(purpose <> 'monitor_config' AND shop_pk IS NULL)",
+            "(purpose = 'general' AND shop_pk IS NULL))",
             name="ck_api_keys_purpose_shop_binding",
         ),
         {"schema": "security"},

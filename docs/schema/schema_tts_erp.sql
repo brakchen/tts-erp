@@ -2027,7 +2027,7 @@ CREATE TABLE IF NOT EXISTS security.api_keys (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     purpose text DEFAULT 'general'::text NOT NULL,
     shop_pk bigint,
-    CONSTRAINT ck_api_keys_purpose_shop_binding CHECK ((((purpose = 'monitor_config'::text) AND (shop_pk IS NOT NULL)) OR ((purpose <> 'monitor_config'::text) AND (shop_pk IS NULL))))
+    CONSTRAINT ck_api_keys_purpose_shop_binding CHECK (((purpose = ANY (ARRAY['general'::text, 'monitor_config'::text])) AND (((purpose = 'monitor_config'::text) AND (shop_pk IS NOT NULL)) OR ((purpose = 'general'::text) AND (shop_pk IS NULL)))))
 );
 
 
@@ -3563,6 +3563,11 @@ CREATE OR REPLACE TRIGGER trg_commerce_sales_order_lines_touch BEFORE UPDATE ON 
 -- Name: sales_orders trg_commerce_sales_orders_touch; Type: TRIGGER; Schema: commerce; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_commerce_sales_orders_touch BEFORE UPDATE ON commerce.sales_orders FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: monitor_shop_state trg_config_monitor_shop_state_touch; Type: TRIGGER; Schema: config; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_config_monitor_shop_state_touch BEFORE UPDATE ON config.monitor_shop_state FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: enum_map trg_enum_map_updated_at; Type: TRIGGER; Schema: config; Owner: -

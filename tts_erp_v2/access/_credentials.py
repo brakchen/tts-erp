@@ -41,7 +41,7 @@ def _purpose_of(purpose: str | None, shop_pk: int | None) -> ApiKeyPurpose | Non
     return parsed
 
 
-def _db_lookup(key_hash: str) -> Credential | None:
+def _db_lookup(key_hash: str, *, require_current: bool = False) -> Credential | None:
     from sqlalchemy import select
 
     from tts_erp_v2.db.base import get_session_factory
@@ -55,6 +55,9 @@ def _db_lookup(key_hash: str) -> Credential | None:
         if row is None or not hmac.compare_digest(row.key_hash, key_hash):
             return None
         if row.status != "active":
+            return None
+        if require_current and row.rotated_to_key_hash is not None:
+            # 已被轮换取代的旧 key 不再是有效凭证，即使 status 尚未翻转。
             return None
         if row.last_used_at is not None and (
             row.last_used_at < datetime(1970, 1, 1, tzinfo=UTC)
@@ -95,3 +98,39 @@ def authenticate_key(plaintext: str) -> Credential | None:
     """Return a current credential for a plaintext API key."""
 
     return authenticate_hash(hash_key(plaintext))
+
+
+def authenticate_hash_uncached(key_hash: str) -> Credential | None:
+    """Re-read a credential straight from the store, ignoring the TTL cache.
+
+    ``authenticate_hash`` memoises a success for up to ``CACHE_TTL`` seconds, so
+    it cannot answer "is this key still good right now?". A boundary that must
+    react to revocation uses this instead, and a rejection evicts the stale
+    positive entry so it does not keep living for another TTL.
+    """
+
+    result = _db_lookup(key_hash, require_current=True)
+    if result is None:
+        _cache.pop(key_hash, None)
+    return result
+
+
+def authenticate_monitor_delivery_key(plaintext: str) -> Credential | None:
+    """Return the credential allowed to read one shop's monitor delivery.
+
+    This is the authoritative check for the delivery boundary
+    (docs/monitor-config-sync.md §4.2 约束 4/5). Unlike the middleware, which
+    gates on a possibly cached credential, it re-reads the key so that disabling
+    or rotating it takes effect on the very next request, and it refuses
+    anything that is not an active, un-rotated, shop-bound ``monitor_config``
+    key — a general key or a browser session is not delivery authorization.
+    """
+
+    credential = authenticate_hash_uncached(hash_key(plaintext))
+    if credential is None:
+        return None
+    if credential.purpose is not ApiKeyPurpose.MONITOR_CONFIG:
+        return None
+    if credential.shop_pk is None:
+        return None
+    return credential

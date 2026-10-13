@@ -2,7 +2,13 @@
 
 from tts_erp_v2.access._access import evaluate_access as evaluate_access
 from tts_erp_v2.access._credentials import authenticate_hash as authenticate_hash
+from tts_erp_v2.access._credentials import (
+    authenticate_hash_uncached as authenticate_hash_uncached,
+)
 from tts_erp_v2.access._credentials import authenticate_key as authenticate_key
+from tts_erp_v2.access._credentials import (
+    authenticate_monitor_delivery_key as authenticate_monitor_delivery_key,
+)
 from tts_erp_v2.access._credentials import (
     clear_credential_cache as clear_credential_cache,
 )
@@ -43,7 +49,9 @@ __all__ = [
     "Role",
     "UserCredential",
     "authenticate_hash",
+    "authenticate_hash_uncached",
     "authenticate_key",
+    "authenticate_monitor_delivery_key",
     "canonicalize_path",
     "clear_credential_cache",
     "evaluate_access",

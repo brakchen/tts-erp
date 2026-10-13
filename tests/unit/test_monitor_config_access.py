@@ -12,7 +12,7 @@ import hashlib
 from collections.abc import Iterator
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.access import (
@@ -22,11 +22,13 @@ from tts_erp_v2.access import (
     AuthMode,
     Role,
     authenticate_key,
+    authenticate_monitor_delivery_key,
     clear_credential_cache,
     evaluate_access,
     is_monitor_config_delivery_route,
     required_role,
 )
+from tts_erp_v2.db.base import get_session_factory
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.security import ApiKey
 from tts_erp_v2.middleware.rate_limit import reset_shared
@@ -100,6 +102,30 @@ def general_key(db_engine) -> Iterator[str]:
     clear_credential_cache()
     yield plaintext
     clear_credential_cache()
+
+
+def _set_key_state(
+    plaintext: str,
+    *,
+    status: str | None = None,
+    rotated_to: str | None = None,
+) -> None:
+    """Mutate one issued key behind the process-local credential cache.
+
+    Uses its own committed session so the change is visible to the cache-free
+    delivery lookup without disturbing the test's own transaction.
+    """
+
+    key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        row = session.execute(
+            select(ApiKey).where(ApiKey.key_hash == key_hash)
+        ).scalar_one()
+        if status is not None:
+            row.status = status
+        row.rotated_to_key_hash = rotated_to
+        session.commit()
 
 
 def _request(
@@ -285,3 +311,72 @@ def test_general_key_keeps_ordinary_readonly_access(general_key: str) -> None:
     assert decision.effect is AccessEffect.ALLOW
     assert decision.grant.purpose is ApiKeyPurpose.GENERAL
     assert decision.grant.shop_pk is None
+
+
+# ─── 下发边界的实时失效（§4.2 约束 5）──────────────────────────
+# 认证中间件走 <=60s 正缓存；专用下发边界必须在缓存成功后仍然核对当前
+# 状态，否则被禁用/轮换的 token 还能存活一个 TTL。
+
+
+def test_cache_would_hide_a_disabled_key(monitor_key: str) -> None:
+    """前提：该 gap 真实存在——缓存仍返回旧的认证成功。"""
+
+    assert authenticate_key(monitor_key) is not None
+    _set_key_state(monitor_key, status="disabled")
+
+    # 通用路径仍被正缓存蒙住（这正是下发边界必须自己核对的原因）。
+    assert authenticate_key(monitor_key) is not None
+
+    # 下发边界不受缓存影响，立即拒绝。
+    assert authenticate_monitor_delivery_key(monitor_key) is None
+
+
+def test_disabled_monitor_key_is_rejected_immediately(monitor_key: str) -> None:
+    assert authenticate_monitor_delivery_key(monitor_key) is not None
+    _set_key_state(monitor_key, status="disabled")
+    assert authenticate_monitor_delivery_key(monitor_key) is None
+
+
+def test_rotated_monitor_key_is_rejected_immediately(monitor_key: str) -> None:
+    """轮换后的旧 key 立即失效，不再靠 status 变化。"""
+
+    assert authenticate_monitor_delivery_key(monitor_key) is not None
+    _set_key_state(monitor_key, rotated_to="0" * 64)
+    assert authenticate_monitor_delivery_key(monitor_key) is None
+
+
+def test_cache_would_hide_a_rotated_key(monitor_key: str) -> None:
+    assert authenticate_key(monitor_key) is not None
+    _set_key_state(monitor_key, rotated_to="0" * 64)
+    assert authenticate_key(monitor_key) is not None
+    assert authenticate_monitor_delivery_key(monitor_key) is None
+
+
+def test_monitor_delivery_primitive_refuses_general_keys(general_key: str) -> None:
+    """专用边界不得成为通用 key 的旁路。"""
+
+    assert authenticate_key(general_key) is not None
+    assert authenticate_monitor_delivery_key(general_key) is None
+
+
+def test_monitor_delivery_primitive_returns_the_shop_binding(
+    monitor_key: str, monitor_shop: int
+) -> None:
+    credential = authenticate_monitor_delivery_key(monitor_key)
+    assert credential is not None
+    assert credential.purpose is ApiKeyPurpose.MONITOR_CONFIG
+    assert credential.shop_pk == monitor_shop
+
+
+def test_monitor_delivery_primitive_rejects_unknown_keys() -> None:
+    assert authenticate_monitor_delivery_key("TEST_monitor_config_never_issued") is None
+
+
+def test_delivery_primitive_evicts_a_stale_positive_entry(monitor_key: str) -> None:
+    assert authenticate_key(monitor_key) is not None
+    _set_key_state(monitor_key, status="disabled")
+
+    assert authenticate_monitor_delivery_key(monitor_key) is None
+    # 陈旧正缓存不得继续存活：通用路径随后也必须重新核对。
+    clear_credential_cache()
+    assert authenticate_key(monitor_key) is None

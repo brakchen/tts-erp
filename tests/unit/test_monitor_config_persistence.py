@@ -274,3 +274,107 @@ def test_live_head_is_0070(db_session: Session) -> None:
         db_session.scalar(text("SELECT version_num FROM alembic_version"))
         == "0070_monitor_config_delivery"
     )
+
+
+# ─── f-7691881f-7d1：标准 trigger 与 purpose 取值域 ─────────────
+
+
+def test_shop_state_has_the_standard_updated_at_trigger(
+    db_session: Session,
+) -> None:
+    triggers = db_session.execute(
+        text(
+            "SELECT trigger_name, action_timing, event_manipulation "
+            "FROM information_schema.triggers "
+            "WHERE event_object_schema='config' "
+            "AND event_object_table='monitor_shop_state'"
+        )
+    ).all()
+    assert triggers, "monitor_shop_state must carry the standard touch trigger"
+    name, timing, event = triggers[0]
+    assert timing == "BEFORE"
+    assert event == "UPDATE"
+    assert name.startswith("trg_config_monitor_shop_state")
+    definition = db_session.scalar(
+        text("SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgname = :n"),
+        {"n": name},
+    )
+    # pg_get_triggerdef 渲染时不带 schema 前缀，只断言函数名。
+    assert "fn_touch_updated_at()" in definition
+
+
+def test_shop_state_updated_at_advances_on_update(
+    db_session: Session, monitor_shop: int
+) -> None:
+    """trigger 必须真正刷新 updated_at，而不是只靠 ORM 的 onupdate。"""
+
+    state = MonitorShopState(shop_pk=monitor_shop)
+    db_session.add(state)
+    db_session.commit()
+    stored = db_session.get(MonitorShopState, monitor_shop)
+    assert stored is not None
+    before = stored.updated_at
+
+    db_session.execute(
+        text(
+            "UPDATE config.monitor_shop_state "
+            "SET current_delivery_version = 3 WHERE shop_pk = :pk"
+        ),
+        {"pk": monitor_shop},
+    )
+    db_session.commit()
+    db_session.expire_all()
+
+    refreshed = db_session.get(MonitorShopState, monitor_shop)
+    assert refreshed is not None
+    after = refreshed.updated_at
+    assert after > before
+
+
+def test_api_keys_reject_purpose_outside_the_allowed_domain(
+    db_session: Session,
+) -> None:
+    """purpose 只允许 general|monitor_config（0070 CHECK）。"""
+
+    with pytest.raises(IntegrityError):
+        db_session.add(
+            ApiKey(
+                key_hash=uuid.uuid4().hex + "3" * 32,
+                key_prefix="TEST_monitor_bogus",
+                name="TEST_monitor_bogus_purpose",
+                role="readonly",
+                purpose="not_a_real_purpose",
+            )
+        )
+        db_session.commit()
+        pytest.fail("unknown purpose must be rejected by the database")
+    db_session.rollback()
+
+
+def test_api_keys_accept_both_allowed_purposes(
+    db_session: Session, monitor_shop: int
+) -> None:
+    general = ApiKey(
+        key_hash=uuid.uuid4().hex + "4" * 32,
+        key_prefix="TEST_monitor_ok_general",
+        name="TEST_monitor_ok_general",
+        role="readonly",
+        purpose="general",
+    )
+    monitor = ApiKey(
+        key_hash=uuid.uuid4().hex + "5" * 32,
+        key_prefix="TEST_monitor_ok_bound",
+        name="TEST_monitor_ok_monitor",
+        role="readonly",
+        purpose="monitor_config",
+        shop_pk=monitor_shop,
+    )
+    db_session.add_all([general, monitor])
+    db_session.commit()
+    assert general.purpose == "general"
+    assert monitor.shop_pk == monitor_shop
+
+
+def test_migration_source_pins_the_purpose_domain() -> None:
+    source = MIGRATION.read_text()
+    assert "purpose IN ('general', 'monitor_config')" in source

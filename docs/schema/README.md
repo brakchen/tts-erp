@@ -101,9 +101,10 @@
 （见 [`docs/design/user-account-authz-design.md`](../design/user-account-authz-design.md)、
 [`docs/design/api-key-auth-design.md`](../design/api-key-auth-design.md)）。
 
-### publishing —— TikTok 视频发布（3 表）
+### publishing —— TikTok 视频发布（4 表）
 `video_publish_tasks` 保存 upload generation/key/PUT-ticket expiry、每轮 execution generation、任务状态、publish/cleanup 双 owner lease、下载副作用前登记的 generation-scoped `spool_path` 与三类资源清理状态；
 `video_publish_attempts` 是 append-only Artemis publish/verify 审计记录，关系/session、Prompt、设备路径/序列号、app package、profile 与 verification level 构成不可变 submission identity；
+`video_publish_confirmations` 是人工「已发布」确认的审计记录（0069），action/to_status 组合唯一，记录操作人（user_id / key_hash）与幂等 request_id；
 `worker_heartbeats` 保存发布 Worker 的受控 readiness 与设备探测状态。契约见
 [`docs/design/tiktok-video-publish.md`](../design/tiktok-video-publish.md)。
 

@@ -54,13 +54,14 @@ def upgrade() -> None:
         ondelete="RESTRICT",
     )
     op.create_index("ix_api_keys_shop_pk", "api_keys", ["shop_pk"], schema="security")
-    # monitor 用途必须绑定店铺；general 用途不得携带绑定，否则会暗示一个它
-    # 并不具备的店铺作用域。
+    # purpose 只允许两个取值，且取值决定 shop_pk 是否必须存在：
+    # monitor 必须绑定店铺，general 必须不带绑定。
     op.create_check_constraint(
         "ck_api_keys_purpose_shop_binding",
         "api_keys",
+        "purpose IN ('general', 'monitor_config') AND ("
         "(purpose = 'monitor_config' AND shop_pk IS NOT NULL) OR "
-        "(purpose <> 'monitor_config' AND shop_pk IS NULL)",
+        "(purpose = 'general' AND shop_pk IS NULL))",
         schema="security",
     )
 
@@ -90,6 +91,13 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("shop_pk"),
         schema="config",
+    )
+    # 版本指针会被每次发布反复推进，updated_at 必须由触发器维护（ADR-0001），
+    # 命名沿用既有 trg_<schema>_<table>_touch 约定。
+    op.execute(
+        "CREATE OR REPLACE TRIGGER trg_config_monitor_shop_state_touch "
+        "BEFORE UPDATE ON config.monitor_shop_state FOR EACH ROW "
+        "EXECUTE FUNCTION public.fn_touch_updated_at()"
     )
 
     # ── config.monitor_config_deliveries：不可变的完整店铺配置快照 ──
@@ -179,6 +187,13 @@ def downgrade() -> None:
         schema="config",
     )
     op.drop_table("monitor_config_deliveries", schema="config")
+    # pi-lens-ignore: python-sql-injection
+    op.execute(
+        text(
+            "DROP TRIGGER IF EXISTS trg_config_monitor_shop_state_touch "
+            "ON config.monitor_shop_state"
+        )
+    )
     op.drop_table("monitor_shop_state", schema="config")
     op.drop_constraint(
         "ck_api_keys_purpose_shop_binding", "api_keys", schema="security"
