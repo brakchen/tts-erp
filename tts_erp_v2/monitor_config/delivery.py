@@ -21,6 +21,7 @@ from dataclasses import replace
 from typing import Any, NamedTuple
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.commerce import ChannelAccount
@@ -91,18 +92,29 @@ def content_hash_of(payload: Mapping[str, Any]) -> str:
 
 
 def _lock_state(session: Session, shop_pk: int) -> MonitorShopState:
-    """Row-lock the per-shop state, creating it on first onboarding (§5.2)."""
+    """Row-lock the per-shop state, creating it atomically on first onboarding (§5.2).
 
-    state = session.execute(
+    ``SELECT ... FOR UPDATE`` cannot lock a row that does not exist yet, so a
+    plain select-then-insert lets two concurrent first publishes both miss and
+    both insert, and one dies on ``monitor_shop_state_pkey``. Inserting with
+    ``ON CONFLICT DO NOTHING`` makes the create itself atomic: the loser of the
+    race waits on the winner's uncommitted row and then proceeds as a no-op.
+    Only after that does the ``FOR UPDATE`` take the per-shop publishing lock,
+    so a concurrent retry cannot slip its idempotency recheck past a live
+    publish.
+    """
+
+    session.execute(
+        pg_insert(MonitorShopState)
+        .values(shop_pk=shop_pk)
+        .on_conflict_do_nothing(index_elements=["shop_pk"])
+    )
+    session.flush()
+    return session.execute(
         select(MonitorShopState)
         .where(MonitorShopState.shop_pk == shop_pk)
         .with_for_update()
-    ).scalar_one_or_none()
-    if state is None:
-        state = MonitorShopState(shop_pk=shop_pk)
-        session.add(state)
-        session.flush()
-    return state
+    ).scalar_one()
 
 
 def publish_delivery(

@@ -1025,3 +1025,105 @@ def test_concurrent_retries_of_one_request_id_replay_a_single_delivery(
                 delete(ChannelAccount).where(ChannelAccount.id == shop_pk)
             )
             cleanup.commit()
+
+
+def test_first_publish_race_is_resolved_without_a_primary_key_collision(
+    db_engine,
+) -> None:
+    """首次纳管的并发发布必须原子化创建 state 行。
+
+    ``SELECT ... FOR UPDATE`` 对**尚不存在**的行不加锁，所以两个并发首次
+    发布会同时未命中并同时 INSERT，其中一个撞 ``monitor_shop_state_pkey``。
+    这里用显式交错（A 先插入不提交，B 在线程里跟进）让这个竞态确定性地
+    复现，而不是依赖线程调度运气。
+    """
+
+    import threading
+
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    with Session(db_engine) as setup:
+        shop = ChannelAccount(
+            platform="tiktok",
+            shop_id=f"TEST_monitor_firstrace_{uuid.uuid4().hex[:8]}",
+            account_name="TEST_monitor_firstrace",
+        )
+        setup.add(shop)
+        setup.commit()
+        shop_pk = shop.id
+
+    request_id = uuid.uuid4()
+    outcome: dict[str, Any] = {}
+
+    # A：抢先插入 state 行并发布，但**不提交**。
+    session_a = Session(db_engine)
+    try:
+        first_version = publish_delivery(
+            session_a,
+            shop_pk=shop_pk,
+            payload=_complete_payload(),
+            source_global_version=4,
+            source_shop_version=None,
+            created_by="TEST_monitor_firstrace",
+            request_id=request_id,
+            request_digest="sha256:firstrace",
+        )
+
+        def _follower() -> None:
+            try:
+                with Session(db_engine) as session_b:
+                    outcome["version"] = publish_delivery(
+                        session_b,
+                        shop_pk=shop_pk,
+                        payload=_complete_payload(),
+                        source_global_version=4,
+                        source_shop_version=None,
+                        created_by="TEST_monitor_firstrace",
+                        request_id=request_id,
+                        request_digest="sha256:firstrace",
+                    )
+                    session_b.commit()
+            except BaseException as exc:  # noqa: BLE001 - reported below
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=_follower)
+        thread.start()
+
+        # A 提交前，B 必须还在等待（A 的未提交 state 行对 B 不可见）。
+        thread.join(timeout=1.0)
+        assert thread.is_alive(), "follower must wait for the in-flight first publish"
+
+        session_a.commit()
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "follower must finish once A commits"
+
+        assert "error" not in outcome, f"follower raised: {outcome.get('error')!r}"
+        assert outcome["version"] == first_version
+    finally:
+        session_a.close()
+
+    try:
+        with Session(db_engine) as verify:
+            rows = verify.execute(
+                select(MonitorConfigDelivery).where(
+                    MonitorConfigDelivery.shop_pk == shop_pk
+                )
+            ).scalars().all()
+            assert len(rows) == 1
+            state_rows = verify.execute(
+                select(MonitorShopState).where(MonitorShopState.shop_pk == shop_pk)
+            ).scalars().all()
+            assert len(state_rows) == 1
+            assert state_rows[0].current_delivery_version == rows[0].version
+    finally:
+        with Session(db_engine) as cleanup:
+            cleanup.execute(
+                delete(MonitorConfigDelivery).where(
+                    MonitorConfigDelivery.shop_pk == shop_pk
+                )
+            )
+            cleanup.execute(
+                delete(MonitorShopState).where(MonitorShopState.shop_pk == shop_pk)
+            )
+            cleanup.execute(delete(ChannelAccount).where(ChannelAccount.id == shop_pk))
+            cleanup.commit()
