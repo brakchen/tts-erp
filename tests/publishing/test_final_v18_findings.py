@@ -242,5 +242,9 @@ def test_pg18_tooling_and_deployment_docs_are_self_contained() -> None:
     assert "User=" not in design
     assert "WantedBy=default.target" in design
     assert "systemctl --user enable --now tts-erp-publish.service" in design
+    # A missing serial no longer means "the worker may idle as if healthy":
+    # one process serves one device, so the documented outcome is an error log
+    # and an idle loop. Pin the exact wording instead of the bare prefix.
     assert "缺少 `ARTEMIS_DEVICE_SERIAL`" in design
+    assert "只记录一条错误日志并空转" in design
     assert "只自动授权 `admin`" in design

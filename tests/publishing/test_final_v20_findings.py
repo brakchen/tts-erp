@@ -551,7 +551,13 @@ def test_implemented_layout_and_deployment_docs_match_checked_in_files() -> None
     assert "tests/api/test_video_publish.py" not in design
     assert "tests/browser/test_video_publish_page.py" not in design
     assert unit in design
-    assert "缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 可启动" in design
+    # VP-D made a worker process serve exactly one device, so a missing serial
+    # no longer means "starts and creates are refused": the process still starts
+    # but logs an error and idles (no claim, cleanup selector refuses).
+    assert (
+        "缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍会启动，但只记录一条错误日志并空转"
+        in design
+    )
     assert (
         "缺少 `ARTEMIS_BASE_URL` 或 `TTS_ERP_PUBLISH_SPOOL_DIR` 时 Worker 启动失败"
         in design

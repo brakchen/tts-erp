@@ -24,8 +24,12 @@ from tts_erp_v2.db.models.publishing import (
 )
 from tts_erp_v2.publishing.domain import AttemptStatus, TaskStage, TaskStatus
 from tts_erp_v2.publishing.repository import (
+    AttemptObservation,
     ConfirmationActor,
+    ObserveAttempt,
+    PublishLeaseToken,
     claim_one,
+    commit_publish_transition,
     confirm_published,
     database_now,
     release_lease,
@@ -458,3 +462,100 @@ def test_cancel_closes_a_queued_task_and_keeps_the_object(
     assert task.completed_at is not None
     assert task.object_cleanup_status == "succeeded"
     release_lease(task)
+
+
+def _leased_waiting_task(
+    db_session: Session, task: VideoPublishTask
+) -> VideoPublishAttempt:
+    """A task parked in `running/waiting_artemis` with one active attempt."""
+    task.status = TaskStatus.RUNNING.value
+    task.stage = TaskStage.WAITING_ARTEMIS.value
+    task.queued_at = None
+    task.completed_at = None
+    task.last_error_code = None
+    task.last_error_message = None
+    task.params_locked_at = datetime.now(UTC)
+    task.lease_owner = "worker-a"
+    task.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    db_session.add(task)
+    attempt = VideoPublishAttempt(
+        sequence_no=1,
+        kind="publish",
+        status=AttemptStatus.RUNNING.value,
+        artemis_session_id=uuid4(),
+        prompt_version="TEST",
+        prompt_snapshot="TEST",
+        device_serial=task.target_device_serial,
+        artemis_profile="TEST_pro",
+        artemis_verification_level="TEST_strict",
+    )
+    task.attempts.append(attempt)
+    db_session.flush()
+    return attempt
+
+
+@pytest.mark.parametrize(
+    ("artemis_status", "steps_count", "expected_classification", "ambiguous"),
+    [
+        # The planner never opened the publish UI, so nothing was published:
+        # a definite failure that waits for a human retry (02 §7.1).
+        ("failed", 0, "planner_zero_steps", False),
+        # A reported failure with steps does not prove the publish action was
+        # not observed, so it is an uncertainty, not a failure verdict.
+        ("failed", 4, "ambiguous_artemis_failure", True),
+        ("rejected", 3, "ambiguous_terminal_execution", True),
+        ("missing", None, "session_missing", True),
+    ],
+)
+def test_waiting_artemis_observation_only_ever_reaches_a_human_decision(
+    db_session: Session,
+    artemis_status: str,
+    steps_count: int | None,
+    expected_classification: str,
+    ambiguous: bool,
+) -> None:
+    """02 §15: only a definite failure becomes failed/done; the rest wait.
+
+    Either arm stops the round without re-queuing and without starting a
+    verification on its own, so the next move is always a person's (retry, or
+    confirm-published).
+    """
+    task = _task(object_uploaded=True)
+    attempt = _leased_waiting_task(db_session, task)
+    token = PublishLeaseToken(
+        task_id=task.public_id,
+        lease_owner="worker-a",
+        row_version=task.row_version,
+        attempt_id=attempt.id,
+        expected_attempt_status=AttemptStatus.RUNNING.value,
+    )
+
+    commit_publish_transition(
+        _factory(db_session),
+        token,
+        ObserveAttempt(
+            observation=AttemptObservation(
+                status=artemis_status,
+                terminal=True,
+                steps_count=steps_count,
+                final_publish_observed=False,
+            )
+        ),
+    )
+
+    db_session.expire_all()
+    assert task.stage == TaskStage.DONE.value
+    assert task.last_error_code == expected_classification
+    if ambiguous:
+        assert task.status == TaskStatus.NEEDS_REVIEW.value
+    else:
+        assert task.status == TaskStatus.FAILED.value
+    # No automatic re-queue, no backoff, no verification attempt.
+    assert task.queued_at is None
+    assert task.next_attempt_at is None
+    assert task.lease_owner is None
+    assert task.lease_expires_at is None
+    assert [a.kind for a in task.attempts] == ["publish"]
+    assert task.attempts[0].status != AttemptStatus.RUNNING.value
+    # The MinIO object is retained in both arms (02 §5.3).
+    assert task.object_cleanup_status == "succeeded"

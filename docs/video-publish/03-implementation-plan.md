@@ -9,6 +9,74 @@
 
 本文只管理实施顺序、任务边界、交付物、依赖、部署与回滚。不得用“顺手修”扩大批次；每个批次都必须对应一个 canonical owner 和独立验收证据。
 
+## 当前实施状态（as-built）
+
+本节记录已合入本 lane 的实际交付。下方“修复实施顺序”与 §16/§23/§27 是原 2781 行单体文档继承下来的计划与部署章节，仍按原编号保留；**与实现不符的描述已按 as-built 修正并在文中就地标注**。
+
+### 切片与 commit
+
+| 切片 | commit | 交付范围 |
+| --- | --- | --- |
+| VP-A 数据层 | `73b5a62` | `0069` 迁移：人工确认审计表、任务新列、按设备 running 互斥；模型同步。 |
+| VP-B 领域层 | `abf914c` | 人工确认成为唯一成功路径、无限手动重试、失败不自排、按设备领取、取消三态。 |
+| VP-C API 层 | `6f5d240` | `confirm-published` 与 `settings` 端点、页面级统一授权、诊断门移除。 |
+| VP-D Worker | `29bfdbe` | 一进程一设备、object 清理端到端退役、按设备隔离的 cleanup selector。 |
+| VP-E 前端 | `f48b9a8` | 按设备多轨道、详情内「确认已发布」单按钮、固定 5 秒刷新开关。 |
+| VP-F 文档与测试收尾 | 本切片 | 本文件、[测试计划与结果](04-test-plan-and-results.md) 与设计/运维/API 文档同步（不改生产代码）。 |
+
+### VP-A：0069 迁移与确认审计表（`73b5a62`）
+
+- 新建 `publishing.video_publish_confirmations`：`task_id`（FK `RESTRICT`）、`action`、`from_status`、`to_status`、`operator_user_id` / `operator_key_hash`、`request_id`（唯一）、`created_at`（`now()` server default）。
+- 部分唯一索引 `uq_video_publish_confirm_once ON (task_id) WHERE action='confirm_published' AND to_status='succeeded'`：第一笔确认不可被覆盖。
+- `video_publish_tasks` 新增 `prompt_override`、`params_locked_at`、`confirmed_at`、`confirmed_by_user_id`、`confirmed_by_key_hash`、`last_verify_verdict`、`cancel_requested`。
+- 互斥索引由全局 `uq_video_publish_one_running` 改为 `uq_video_publish_one_running_per_device ON (target_device_serial) WHERE status='running'`。
+- downgrade 在存在任何确认审计行、或同时存在多个 running 任务时直接报错拒绝。
+- 测试：`tests/publishing/test_confirmation_migration.py`。
+
+### VP-B：领域转换与 `confirm_published`（`abf914c`）
+
+- `commit_publish_transition()`：Artemis 报告 success、verify `published` 一律落 `needs_review/done`，不再直接置 `succeeded`。
+- 唯一成功路径：`confirm_published()` 在一个事务内 `FOR UPDATE` 锁任务、校验 `status IN (needs_review,failed) && stage='done'` 且无活跃 attempt、插入审计行、`row_version+1`；重放/并发冲突时返回既有确认事实。
+- 失败不再自动重排、不再有预算门槛：`retry_task()` 只要求 `failed/done`、无活跃 attempt、对象可用，次数不限。
+- `claim_one()` 按 `target_device_serial` 领取，一台设备一个 running，跨设备并行。
+- 取消三态（设计 02 §6.5）：未锁定 pending 直接 `cancelled/done`；未 admission 的 running 置 `cancel_requested`；admission 在途返回 `TASK_SUBMITTING`；已 admission（`params_locked_at` 非空）一律 `TASK_ALREADY_SUBMITTED`。
+- 测试：`tests/publishing/test_manual_confirmation.py`（并改造 `test_domain.py`、`test_db_workflow.py`、`test_publish_action_gates.py` 等）。
+
+### VP-C：API 端点与页面级授权（`6f5d240`）
+
+- 新增 `POST /v2/video-publish/tasks/{id}/confirm-published`（操作人=认证主体、时间=数据库 `now()`，重复点击/并发返回相同事实）与 `PATCH /v2/video-publish/tasks/{id}/settings`（仅未锁定且 pending；锁定拒绝优先于其他检查，不做部分写）。
+- 授权统一为页面级：`_task_or_404()` 不再按创建人过滤，`created_by_*` 仅保留审计；`GET /tasks/{id}?includeDiagnostics=true` 移除 admin 角色门，任意 `page:video-publish` 持有者可读；`GET /metrics` 改为页面级全局口径。
+- 幂等重放仍绑定创建者：他人重放同一 `clientRequestId` 返回 `404 TASK_NOT_FOUND`。
+- 测试：`tests/publishing/test_http_contracts.py`（本切片大幅扩充），并改造 `test_probe_p2_3_error_messages.py` 等。
+
+### VP-D：Worker 按设备隔离与 object 清理退役（`29bfdbe`）
+
+- `worker.py` 启动时读一次 `ARTEMIS_DEVICE_SERIAL`，`PublishDependencies.device_serial` 贯穿领取、清理、心跳；缺 serial 只记一条错误日志并空转，cleanup selector 直接以 `CLEANUP_DEVICE_SERIAL_REQUIRED` 拒绝。
+- `claim_cleanup_work()` 只领取 `device` 与 `spool` 两个资源且必须按本设备限定；`cleanup_retryable_resources()` 不再返回 `object`。
+- MinIO 对象端到端退役：没有任何执行方再删除对象。
+- 测试：`tests/publishing/test_device_scoped_cleanup.py`（并大幅收窄 `test_final_v22/v24/v26_findings.py` 等历史用例）。
+
+### VP-E：前端按设备轨道与确认按钮（`f48b9a8`）
+
+- `/tasks/current` 返回 `tasks[]`；页面按设备渲染多条轨道（`#publish-rail-tracks`，空态 `#publish-rail-empty`），不再有单一全局轨道。
+- 详情内新增唯一成功按钮「确认已发布」（`#publish-confirm-published`），成功后原地展示操作人与点击时间；旧自动成功任务如实标为无确认人，不伪造。
+- pending 且未锁定时可在详情内编辑 Prompt/App/设备（`#publish-settings-*`）；锁定后只读并展示锁定时间。
+- 刷新固定 5 秒（上一响应结束后计时），开关只有 on/off 加「立即刷新」；旧版本遗留的 `smart`/数字偏好被忽略并回落 5 秒。
+- 测试：`tests/publishing/test_video_publish_frontend.py`。
+
+### 遗留现状（如实记录）
+
+以下不是待办，而是本切片确认下来的**事实状态**，处理它们需要另开迁移或产品决策：
+
+1. **`replace_upload` 事实休眠。** 「MinIO 对象永不删除」落地后，没有任何 Worker 阶段再写 `object_deleted_at`，而 `replace_upload_allowed()` / `replace_upload()` 的准入条件是 `object_deleted_at` 非空，因此该端点准入不可达。对象在外部失效时，操作员新建一条发布任务即可。
+2. **历史 `object_cleanup_status='pending'/'failed'` 永久持有 `preserve_state`。** `0058` 的 `video_publish_task_cleanup_owner_check` 只允许在对象状态不是 pending/failed 时写 `cleanup_intent='none'`，而这些遗留行没有任何执行方会再改写该列，所以它们会一直持有 `cleanup_intent=preserve_state`，并因此持续对 `retry` / `replace_upload` 形成输入门（返回干净 409 而非 500）。释放它们需要后续迁移，不在本 lane。
+3. **`schedule_retention_cleanup()` 与 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` 仍在运行但已无执行方。** 它仍会把超时 `awaiting_upload` 自动转为 `cancelled/done`，并给超期 `failed` 行写 `object_cleanup_status='pending'`；该标记不再对应任何删除行为。
+4. **`publish_budget_used` 列保留但不再写入/读取**；`TIKTOK_PUBLISH_MAX_ATTEMPTS` 已无任何读取方（发布预算取消）。
+
+### 与《技术设计》§21 差距清单的关系
+
+《技术设计》§21 列的 7 条“与当前实现的差距”在本 lane 结束时已全部关闭（人工确认、对象不删、按设备互斥、无预算/无自动重排、取消扩展到未提交 running、页面级口径、可编辑 Prompt）。本切片不修改 `02-technical-design.md`（设计定稿），因此该清单的**表述**已经过时；实际差异以本节与《测试计划和结果》为准。
+
 ## 当前修复实施顺序
 
 ### Phase 0：恢复可控基线
@@ -22,7 +90,7 @@
 
 - 决定 retry 与 device/spool cleanup 的状态语义。
 - 让领域层统一拥有 allowed actions 与写路径资格判定。
-- 收口 current 优先级、owner-scoped poll state、queue eligibility 和统一错误信封。
+- 收口 current 优先级（按设备多轨）、页面级 poll state、queue eligibility 和统一错误信封。
 - API 层只做认证、协议转换与领域错误映射，不承担第二套业务状态机。
 
 ### Phase 2：前端状态与缓存
@@ -75,10 +143,10 @@
 ### Phase 3：自动恢复与核验
 
 - restart recovery；
-- safe retry classifier；
+- 失败分类器（仅诊断展示，不再驱动自动重排或自动核验）；
 - verify attempt 与固定核验 Prompt；
-- needs_review 最后兜底；
-- 清理重试。
+- needs_review 最后兜底，等待人工确认；
+- 清理重试（仅 device/spool）。
 
 ### Phase 4：真机受控验证
 
@@ -110,7 +178,7 @@ Artemis 和 ADB 不直接暴露给浏览器或公网。若 Artemis 不在同机�
 migration 必须：
 
 1. `CREATE SCHEMA IF NOT EXISTS publishing`；
-2. 创建三张表和所有 CHECK/FK/unique/index；
+2. 创建表和所有 CHECK/FK/unique/index（当前为 `video_publish_tasks`、`video_publish_attempts`、`video_publish_confirmations`、`worker_heartbeats`）；
 3. 安装 `updated_at` trigger，复用项目现有 trigger helper；
 4. 创建部分唯一索引；
 5. 不读取或修改生产业务数据；
@@ -163,7 +231,7 @@ CORS 示例（origin 按实际域名替换）：
 </CORSConfiguration>
 ```
 
-生产不要设置 bucket lifecycle 自动删除成功前对象；清理由业务 Worker 控制。可以另外设置临时 multipart 残片清理策略。
+生产不要设置 bucket lifecycle 自动删除对象：MinIO 原视频任何状态都不删除（服务端已退役对象清理路径），设置 lifecycle 会与“已保留（不删除）”的页面承诺相矛盾。可以另外设置临时 multipart 残片清理策略（仅未完成的分片，不是已确认对象）。
 
 ### 23.4 本地 spool
 
@@ -188,7 +256,7 @@ CORS 示例（origin 按实际域名替换）：
 
 - systemd 用户必须能调用固定 `adb` binary；
 - 设备通过 USB debugging 或受控 ADB TCP 接入；
-- 明确配置 `ARTEMIS_DEVICE_SERIAL`，禁止依赖“第一台设备”；
+- 明确配置 `ARTEMIS_DEVICE_SERIAL`，禁止依赖“第一台设备”；一个进程只服务一台设备，多设备并行靠多开 Worker 进程；
 - 手机保持解锁、TikTok 已登录、系统相册权限已授权；
 - `/sdcard/Movies/TTSERP/` 只放系统管理的 `tts_erp_<uuid>.mp4`；
 - 不授予 Worker 任意删除其他相册目录的能力；
@@ -244,7 +312,7 @@ UMask=0077
 WantedBy=default.target
 ```
 
-该 unit 以当前用户运行，以便继承其 USB/ADB 权限；确保 `PrivateDevices` 等 hardening 不阻断 USB/ADB。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 可启动但设备 readiness 为 `unknown`，API 创建任务会失败关闭；缺少 `ARTEMIS_BASE_URL` 或 `TTS_ERP_PUBLISH_SPOOL_DIR` 时 Worker 启动失败。先在 staging 主机验证再收紧 sandbox。
+该 unit 以当前用户运行，以便继承其 USB/ADB 权限；确保 `PrivateDevices` 等 hardening 不阻断 USB/ADB。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍会启动，但只记录一条错误日志并空转（不领取任何任务，cleanup selector 直接拒绝），设备 readiness 报 `unknown`；缺少 `ARTEMIS_BASE_URL` 或 `TTS_ERP_PUBLISH_SPOOL_DIR` 时 Worker 启动失败。先在 staging 主机验证再收紧 sandbox。多设备部署时每个设备一个 unit 实例（各自的 `EnvironmentFile` 指定不同 serial）。
 
 常用命令：
 
@@ -272,14 +340,15 @@ journalctl --user -u tts-erp-publish.service -f
 | `TIKTOK_PUBLISH_MINIO_BUCKET` | 是 | 无 | 私有视频 bucket。 |
 | `TIKTOK_PUBLISH_MAX_VIDEO_BYTES` | 否 | 524288000 | 视频上限。 |
 | `TIKTOK_PUBLISH_MAX_CAPTION_CHARS` | 否 | 4000 | 文案字符上限。 |
+| `TIKTOK_PUBLISH_MAX_PROMPT_CHARS` | 否 | 4000 | 提交前可编辑的 Prompt 正文（`prompt_override`）长度上限；服务端强制安全段不计入。 |
 | `TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS` | 否 | 900 | 预签名 PUT 有效期。 |
-| `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` | 否 | 30 | 失败媒资保留期。 |
-| `TIKTOK_PUBLISH_MAX_ATTEMPTS` | 否 | 3 | 正式发布 attempt 上限。 |
+| `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` | 否 | 30 | **遗留项**：只参与 `schedule_retention_cleanup()` 算 `failed` 行到期时间并写 `object_cleanup_status`。对象已永不删除、cleanup selector 只处理 `device`/`spool`，该值不影响任何实际删除。 |
+| `TIKTOK_PUBLISH_MAX_ATTEMPTS` | — | — | **已退役**：发布预算取消后不再有任何读取方；保留此行只为说明其消失。 |
 | `TIKTOK_PUBLISH_ALBUM` | 否 | TTSERP | 设备相册/目录名。 |
 | `TTS_ERP_PUBLISH_SPOOL_DIR` | 是 | 无 | 本地 spool 根目录。 |
 | `ARTEMIS_BASE_URL` | 是 | 无 | Artemis daemon URL。 |
 | `ARTEMIS_TOKEN` | 视部署 | 无 | Artemis 鉴权 token。 |
-| `ARTEMIS_DEVICE_SERIAL` | API 创建任务必需 | 无 | 唯一目标设备；缺失时 Worker 仍启动但 readiness=`unknown`，API 创建失败关闭。 |
+| `ARTEMIS_DEVICE_SERIAL` | 是（一进程一设备） | 无 | 该 Worker 进程唯一负责的设备。缺失时进程仍启动，但只记一条错误日志并空转：不领取任务，cleanup selector 直接拒绝，`/config` 的 `canWrite=false`。 |
 | `ARTEMIS_APP_PACKAGE` | 否 | com.zhiliaoapp.musically | TikTok package。 |
 | `ARTEMIS_PROFILE` | 否 | pro | 执行 profile。 |
 | `ARTEMIS_VERIFICATION_LEVEL` | 否 | strict | Pro checker 强度。 |
@@ -287,7 +356,7 @@ journalctl --user -u tts-erp-publish.service -f
 | `PUBLISH_TASK_LEASE_SECONDS` | 否 | 30 | DB task lease。 |
 | `PUBLISH_WORKER_HEARTBEAT_SECONDS` | 否 | 5 | Worker 心跳周期。 |
 
-Worker 启动直接要求 `ARTEMIS_BASE_URL` 与 `TTS_ERP_PUBLISH_SPOOL_DIR`，缺少任一项即失败；bucket 有受校验的 `tiktok-video` 默认值。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍可启动，设备 readiness=`unknown`，API 创建任务失败关闭；不得静默选择“第一台设备”。
+Worker 启动直接要求 `ARTEMIS_BASE_URL` 与 `TTS_ERP_PUBLISH_SPOOL_DIR`，缺少任一项即失败；bucket 有受校验的 `tiktok-video` 默认值。**一个进程只服务一台设备**：`ARTEMIS_DEVICE_SERIAL` 读一次，领取、清理、心跳全部按该 serial 限定，多设备并行靠多开 Worker 进程。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍可启动，但只记录一条错误日志并空转（不领取任何任务，设备 readiness 报 `unknown`）；不得静默选择“第一台设备”。
 
 ### 23.10 部署顺序
 

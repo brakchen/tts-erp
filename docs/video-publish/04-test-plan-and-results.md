@@ -11,11 +11,72 @@
 
 ## 当前结论
 
-- **状态：未达到发布完成门槛。**
-- 2026-10-06 审计使用真实模板与静态资源，但 API、MinIO、Artemis、ADB 均存在 mock/stub 边界。
-- 当时 `tests/publishing` 的替代命令跑过 19 个文件、290 个用例；文档中的 canonical `publishing` 命令当时收集 0 个用例。
-- 现有 Wave 2 仍有 10 条缺少 PASS/FAIL 证据。
-- Firefox/Safari、真实鉴权 HTTP、真实 MinIO/Artemis/ADB、多 Worker 并发压测和真机发布仍未覆盖。
+- **状态：特性实现完成并回归通过；仍不到真实发布完成门槛。**
+- 本 lane（VP-A…VP-F，commit `73b5a62`/`abf914c`/`6f5d240`/`29bfdbe`/`f48b9a8` + 文档收尾）已经把《产品方案》与《技术设计》的规则落到代码：`bash scripts/test_isolated.sh publishing` 全绿（401 passed + 1 xfailed，2026-10-12）。
+- `bash scripts/test_isolated.sh fast` 的 22 条失败全部落在本 lane 未触碰的文件（SPU 劣化告警 / SPU ROI API / 浏览器渲染烟测），属既有稳定基线，与视频发布无关（见《本次结果记录》）。
+- **仍未覆盖、不得按通过统计的边界**：真实 MinIO / Artemis / ADB / 真机发布、Firefox/Safari 差异、多 Worker 跨设备并发压测、未登录态真实 HTTP 往返、人工 390/768/1440px 视觉检查。这些仍是发布前人工门禁。
+
+## 本次结果记录（2026-10-12，as-built）
+
+基线：分支 `video-publish-impl`，HEAD 含 `73b5a62`、`abf914c`、`6f5d240`、`29bfdbe`、`f48b9a8` 与本收尾切片。所有测试均通过 `scripts/test_isolated.sh`（每轮克隆 `tts_erp_test_template` → 临时库 → drop），未接触生产库。
+
+| 命令 | 结果 | 证据 |
+| --- | --- | --- |
+| `bash scripts/test_isolated.sh publishing` | **PASS** | 402 collected；401 passed，1 xfailed，0 failed（`EXIT=0`）。 |
+| `bash scripts/test_isolated.sh fast` | **PASS（本特性零新增失败）** | 1 xfailed（见下），14 skipped（`tests/miaoshou/test_sync_routes.py` 7 + `tests/miaoshou/test_sync_shops.py` 7，已标注的 v1 退役），**22 failed**，全部为既有基线。 |
+
+### XFAIL（唯一一条）
+
+| 用例 | 含义 |
+| --- | --- |
+| `tests/publishing/test_publish_action_gates.py::test_p1_1_repro_pre_fix_retry_500` | 保留 2026-10-06 回测 P1-1 的**修复前**复现用例。修复前该状态（设备清理 `failed` + `publish_budget_used < max`）点「重试」必然 500；修复后应为 409。标成 `xfail`（非 strict）意味着：当前实现返回 409，**XPASS**——即原缺陷已不存在，XFAIL 只是留作回归证据，不是已知缺口。 |
+
+### fast 的 22 条失败（逐文件，均与本特性无关）
+
+| 文件 | 失败数 |
+| --- | --- |
+| `tests/api/test_spu_deterioration_alert_api.py` | 14 |
+| `tests/api/test_spu_roi_api.py` | 7 |
+| `tests/browser/test_render_smoke.py::test_spu_deterioration_alert_has_no_horizontal_overflow_at_any_viewport[390]` | 1 |
+
+判定依据：`git diff --name-only 60ee95f..HEAD` 显示本 lane 的 36 个改动文件全部属于 `publishing` / `video-publish` / `alembic 0069` 范围，**未修改任何 SPU、analytics 或浏览器测试/模板**；因此这 22 条是既有基线，本切片引入零新增失败。
+
+## 测试清单（as-built）
+
+### 新增文件
+
+| 文件 | 切片 | 覆盖点 |
+| --- | --- | --- |
+| `tests/publishing/test_confirmation_migration.py` | VP-A | `0069` 链与模型元数据一致；upgrade 建审计表 + 任务新列 + 按设备唯一索引；downgrade 在有审计行 / 多 running 时拒绝并可逆。 |
+| `tests/publishing/test_manual_confirmation.py` | VP-B | `confirm_published` 写审计/幂等/并发首笔保留/版本冲突/非法状态；failed 可无限重试；活跃 attempt 阻断；按设备领取与互斥；设备清理门只挡本设备；§6.5 取消三态（已提交拒绝、`TASK_SUBMITTING`、置 `cancel_requested`、pending 直接关闭且保留对象）；**本切片新增** `waiting_artemis` 观测落 `failed/done` 或 `needs_review/done` 且不自排、不自启核验。 |
+| `tests/publishing/test_device_scoped_cleanup.py` | VP-D | 清理领取忽略他设备 running、本设备 running 时阻断、不跨设备选行、缺 serial 直接拒绝；遗留 pending object 行永不可领取；object 保留但 spool 仍能排空；object 不是可重试清理资源。 |
+| `tests/publishing/test_video_publish_frontend.py` | VP-E | 每台设备一条轨道与空态；刷新开关只有 on/off；`confirm_published` 只发一次并展示审计；旧自动成功不伪造操作人；设置编辑带 `rowVersion` 且锁定后只读、无取消入口；清理区只列 device/spool；退役字段从页面消失。 |
+
+### 改造的既有文件
+
+`test_db_workflow.py`、`test_domain.py`、`test_http_contracts.py`、`test_publish_action_gates.py`、`test_contracts.py`、`test_a3w3_verify.py`、`test_owner_seams.py`、`test_polling_channels.py`、`test_probe_main_agent_3a_safety.py`、`test_probe_p2_3_error_messages.py`、`test_probe_readiness_gate_loop.py`、`test_final_v12/v14/v16/v18/v20/v22/v24/v26_findings.py`，以及 `tests/e2e/test_video_publish_smoke.py`。改造原因统一为：删掉发布预算/自动重排/对象清理/owner 作用域/单一全局轨道/智能刷新的旧断言，换成确认审计、无限重试、页面级授权、按设备语义与固定 5 秒刷新的新断言。
+
+### 设计覆盖自检（02 §15 转换表与 §6.5 取消三态）
+
+| 02 §15 行 | 覆盖用例 |
+| --- | --- |
+| `pending/awaiting_upload` + `UPLOAD_CONFIRMED` → `pending/queued` | `test_db_workflow.py::test_confirm_head_then_cas_detects_concurrent_task_update` |
+| 未锁定 pending `USER_CANCEL` → `cancelled/done` | `test_manual_confirmation.py::test_cancel_closes_a_queued_task_and_keeps_the_object` |
+| 未锁定 running `USER_CANCEL` → `cancel_requested` | `test_manual_confirmation.py::test_cancel_of_a_running_round_sets_the_stop_flag` |
+| `pending/queued` + `CLAIM(device)` → `running/downloading` | `test_manual_confirmation.py::test_claim_is_per_device_and_lets_other_devices_proceed`、`test_db_workflow.py::test_per_device_claim_and_expired_lease_takeover` |
+| `DEVICE_NOT_READY` → `pending/waiting_device` | `test_a3w3_verify.py::test_a3w3_deadlock_cleanup_failure_requeues_to_waiting_device` |
+| `ARTEMIS_ADMITTED` → `running/waiting_artemis`（写 `params_locked_at`） | `test_db_workflow.py` 的全流程 dispatch 用例（断言 `params_locked_at is not None`） |
+| `ARTEMIS_SUCCESS` → `needs_review/done` | 同上全流程 dispatch 用例 |
+| `ARTEMIS_FAILURE` / `AMBIGUOUS_FAILURE` → `failed/done` / `needs_review/done` | **本切片新增** `test_manual_confirmation.py::test_waiting_artemis_observation_only_ever_reaches_a_human_decision`（4 组参数） |
+| `needs_review` + `USER_VERIFY` → `running/verifying` → `needs_review/done` | `test_final_v12_findings.py`（断言 `stage == verifying`）、`test_db_workflow.py` 的 verify 结束用例 |
+| `needs_review`/`failed` + `HUMAN_CONFIRM` → `succeeded/done` | `test_manual_confirmation.py::test_confirm_published_writes_the_audit_row_and_succeeds` |
+| `failed` + `USER_RETRY` → `pending/queued` | `test_manual_confirmation.py::test_failed_task_can_be_retried_without_any_attempt_limit` |
+
+§6.5 取消三态同样齐备：已 admission 拒绝（`test_cancel_is_refused_once_artemis_admitted_the_publish`）、admission 在途返回 `TASK_SUBMITTING`（`test_cancel_during_admission_returns_task_submitting`）、未 admission 置停止标志（`test_cancel_of_a_running_round_sets_the_stop_flag`）。本切片只补了上表标注为新增的那一条，其余已覆盖的用例不重复添加。
+
+### 与设计的一处实现差异（只记录，不改代码）
+
+02 §15 把“含 TikTok 未登录”的 Artemis 失败写成 `ARTEMIS_FAILURE → failed/done`。当前 `classify_failure()`（`tts_erp_v2/publishing/domain.py`）只在 `steps_count == 0`（`planner_zero_steps`）时给出确定失败；有步骤的 `failed`、`rejected/cancelled`、`missing` 一律归为不确定并落 `needs_review/done`。两者都是终态、都等待人工判定（重试或确认），用户可见行为一致，只是落地桶不同。代码属已合入切片，本切片只报告，不改。
 
 ## 结果记录规则
 
