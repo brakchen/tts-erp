@@ -1,4 +1,4 @@
-"""Pure contract layer for the monitor remote-configuration wire schema.
+r"""Pure contract layer for the monitor remote-configuration wire schema.
 
 This module is intentionally:
 
@@ -19,16 +19,21 @@ Invariants inherited from the maintained plugin side
 - ``MIN_QUERY_RECENT_DAYS = 1``
 - Spend and conversion-cost thresholds must be finite positive numbers
 - ``skuOrderLimit`` is a non-negative integer
+- ``shopPk`` and every delivery / force ``version`` are canonical
+  decimal identifier strings (see :func:`_decimal_identifier`), matching
+  the plugin's ``DECIMAL_IDENTIFIER = /^\d+$/`` in
+  ``plugins/monitor/src/core/remote-config.ts``
 
 The wire schema is the strict subset of the local plugin settings
-defined in ``design.md`` §3.1. Runtime state (``monitorEnabled``,
-``status``, ``nextScanAt``, ...), browser cookies, ERP tokens,
-service URLs, and the deprecated ``queryRecentDays`` field are
-explicitly forbidden — see :data:`FORBIDDEN_WIRE_FIELDS`.
+defined in ``docs/monitor-config-sync.md`` §3.1. Runtime state
+(``monitorEnabled``, ``status``, ``nextScanAt``, ...), browser cookies,
+ERP tokens, service URLs, and the deprecated ``queryRecentDays`` field
+are explicitly forbidden — see :data:`FORBIDDEN_WIRE_FIELDS`.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
 from decimal import Decimal, InvalidOperation
@@ -205,6 +210,49 @@ def _delay_seconds(value: Any, *, path: str) -> int:
     if value < MIN_CHROME_ALARM_DELAY_SECONDS:
         raise ConfigContractError(
             f"{path} must be >= {MIN_CHROME_ALARM_DELAY_SECONDS}"
+        )
+    return value
+
+
+#: Canonical decimal wire identifiers (docs/monitor-config-sync.md §5.2 /
+#: §6.1). Mirrors the plugin's
+#: ``DECIMAL_IDENTIFIER = /^\d+$/`` (``remote-config.ts``). Written as an
+#: explicit ASCII character class rather than ``\d`` because Python's
+#: ``\d`` also matches non-ASCII digits (fullwidth ``１８``, Arabic-Indic
+#: ``١٨``) which the plugin's ASCII-only regex rejects.
+_DECIMAL_IDENTIFIER = re.compile(r"[0-9]+")
+
+
+def _decimal_identifier(value: Any, *, path: str) -> str:
+    r"""Validate a canonical decimal wire identifier.
+
+    These fields (``shopPk``, delivery ``version``, ``force.version``,
+    ``force.target.version``) cross the plugin contract as strings so the
+    plugin can order them with ``BigInt`` without JS ``Number`` precision
+    loss. The plugin therefore requires ``/^\d+$/`` and this side must not
+    be laxer — a value this layer accepts but the plugin rejects is a
+    silently broken delivery.
+
+    Accepted: a non-empty run of ASCII digits (``"0"``, ``"18"``,
+    ``"9007199254740993"``). Rejected: empty strings, surrounding or
+    embedded whitespace, ``+``/``-`` signs, decimal points, exponents,
+    digit separators, ``0x``/``0b`` prefixes, and non-ASCII digits.
+
+    Leading zeros are accepted (``"007"``) to stay exactly at parity with
+    the plugin's ``/^\d+$/`` and with ``BigInt("007") === 7n``: the
+    version ordering contract is numeric, so ``"007"`` and ``"7"`` are
+    the same version on both sides. ``"0"`` is likewise accepted because
+    the plugin accepts it and it is the documented "no shop assigned yet"
+    sentinel (:func:`parse_envelope`'s ``shop_pk`` default).
+
+    ``bool`` and ``int`` are rejected: Python's ``bool`` is an ``int``
+    subclass, and coercing either to ``str`` would let ``True`` become
+    ``"1"`` — a value the plugin never sees from a server.
+    """
+    if not isinstance(value, str) or _DECIMAL_IDENTIFIER.fullmatch(value) is None:
+        raise ConfigContractError(
+            f"{path} must be a canonical decimal identifier string "
+            "(one or more ASCII digits, no sign/whitespace/separator)"
         )
     return value
 
@@ -767,14 +815,21 @@ class Current:
 
     ``payload`` is a fully-typed :class:`MonitorBusinessSettings`. The
     wire-shape ``{"sellerId","schemaVersion","settings",...}`` is produced
-    by :attr:`DeliveryEnvelope.payload`, not stored on this object, so
-    the contract layer keeps one canonical typed source.
+    by :attr:`DeliveryEnvelope.payload`, not stored on this object, so the
+    contract layer keeps one canonical typed source.
+
+    ``version`` is validated at construction time so a typed instance
+    cannot carry a version the wire-shape path would have rejected —
+    typed and mapping construction stay at parity.
     """
 
     version: str
     source_versions: Mapping[str, Optional[str]]
     content_hash: str
     payload: MonitorBusinessSettings
+
+    def __post_init__(self) -> None:
+        _decimal_identifier(self.version, path="current.version")
 
 
 # Allowed keys for a complete delivery block (used by both ``current``
@@ -842,6 +897,15 @@ class DeliveryEnvelope:
         target: Current
 
         def __post_init__(self) -> None:
+            # Both sides of the equality must be canonical decimal
+            # identifiers: the force block and its target are two separate
+            # wire fields the plugin validates independently, so a
+            # non-decimal value cannot be excused by the other one being
+            # equal to it.
+            _decimal_identifier(self.version, path="force.version")
+            _decimal_identifier(
+                self.target.version, path="force.target.version"
+            )
             # Defensive check; the surrounding constructor already
             # enforces this, but the dataclass contract should stand
             # on its own so callers cannot construct an inconsistent
@@ -873,8 +937,7 @@ class DeliveryEnvelope:
             )
         if not isinstance(sellerId, str) or sellerId == "":
             raise ConfigContractError("sellerId must be a non-empty string")
-        if not isinstance(shopPk, str) or shopPk == "":
-            raise ConfigContractError("shopPk must be a non-empty string")
+        _decimal_identifier(shopPk, path="shopPk")
         normalized_current = _coerce_current_block(current)
         typed_force = _coerce_force(force, default_seller_id=sellerId)
         # Cross-shop snapshot guard. The wire payload may carry a
@@ -979,8 +1042,7 @@ def _validate_delivery_block(block: Mapping[str, Any], *, shape: str) -> None:
         if key not in block:
             raise ConfigContractError(f"{shape} missing field: {key}")
     version = block["version"]
-    if not isinstance(version, str) or version == "":
-        raise ConfigContractError(f"{shape}.version must be a non-empty string")
+    _decimal_identifier(version, path=f"{shape}.version")
     source_versions = block["sourceVersions"]
     if not isinstance(source_versions, Mapping):
         raise ConfigContractError(
@@ -1034,12 +1096,11 @@ def _validate_force_block(force_block: Mapping[str, Any]) -> tuple[str, Mapping[
     if "target" not in force_block:
         raise ConfigContractError("force missing field: target")
     version = force_block["version"]
-    if not isinstance(version, str) or version == "":
-        raise ConfigContractError("force.version must be a non-empty string")
+    version = _decimal_identifier(version, path="force.version")
     target = force_block["target"]
     if not isinstance(target, Mapping):
         raise ConfigContractError("force.target must be an object")
-    return str(version), cast(Mapping[str, Any], target)
+    return version, cast(Mapping[str, Any], target)
 
 
 def _coerce_current_block(value: Any) -> Current:
@@ -1051,9 +1112,9 @@ def _coerce_current_block(value: Any) -> Current:
     _validate_delivery_block(value, shape="current")
     typed_settings = _extract_typed_settings(value["payload"])
     return Current(
-        version=str(value["version"]),
+        version=value["version"],
         source_versions=dict(value["sourceVersions"]),
-        content_hash=str(value["contentHash"]),
+        content_hash=value["contentHash"],
         payload=typed_settings,
     )
 
@@ -1086,8 +1147,7 @@ def parse_envelope(
     wire-shape ``Mapping`` (``{"version": "...", "target": {...}}``)
     which will be validated and coerced.
     """
-    if not isinstance(current_version, str) or current_version == "":
-        raise ConfigContractError("currentVersion must be a non-empty string")
+    current_version = _decimal_identifier(current_version, path="currentVersion")
     if not isinstance(source_versions, Mapping):
         raise ConfigContractError("sourceVersions must be an object")
     if not isinstance(content_hash, str) or content_hash == "":
@@ -1163,7 +1223,13 @@ def _coerce_force(
     version_str, target_mapping = _validate_force_block(value)
     target_settings = _extract_typed_settings(target_mapping["payload"])
     target = Current(
-        version=str(target_mapping["version"]),
+        # ``force.target`` is a delivery block the plugin validates
+        # independently (``validateDeliveryBlock(raw.target,
+        # "force.target")``), so its version needs the same canonical
+        # decimal check — not just the outer ``force.version``.
+        version=_decimal_identifier(
+            target_mapping["version"], path="force.target.version"
+        ),
         source_versions=dict(target_mapping["sourceVersions"]),
         content_hash=str(target_mapping["contentHash"]),
         payload=target_settings,

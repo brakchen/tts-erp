@@ -10,10 +10,17 @@ Acceptance cases derive from docs/monitor-config-sync.md §3 and
 side (``MIN_CHROME_ALARM_DELAY_SECONDS=30``,
 ``MIN_QUERY_RECENT_DAYS=1``, finite/positive spend and conversion
 thresholds, non-negative integer ``skuOrderLimit``).
+
+``shopPk`` and every delivery/force ``version`` are canonical decimal
+identifier strings (docs/monitor-config-sync.md §5.2 / §6.1) so the
+plugin can order them with ``BigInt`` without JS ``Number`` precision
+loss. The accepted/rejected table below is the shared parity fixture
+for all three paths.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
@@ -1330,6 +1337,332 @@ def test_build_envelope_accepts_typed_current_with_none_seller_id() -> None:
     )
     assert env.seller_id == TEST_SELLER_ID
     assert env.current.payload.seller_id is None
+
+
+# ---------------------------------------------------------------------------
+# Canonical decimal wire identifiers (shopPk / delivery / force version)
+# ---------------------------------------------------------------------------
+
+#: Accepted canonical decimal identifiers. ``0`` stays valid because the
+#: plugin's ``/^\d+$/`` accepts it and it is the documented "not yet
+#: assigned" sentinel for ``shopPk``. ``9007199254740993`` is 2^53+1 —
+#: exactly the value that loses precision as a JS ``Number``, and the
+#: reason these fields are strings at all.
+CANONICAL_DECIMAL_IDENTIFIERS = [
+    "0",
+    "1",
+    "7",
+    "18",
+    "101",
+    "9007199254740993",
+]
+
+#: Rejected values: empty, whitespace, signs, decimal points, exponents,
+#: non-ASCII digits (fullwidth ``１８`` and Arabic-Indic ``١٨`` both
+#: match Python's ``\d`` but not the plugin's ASCII-only ``\d``), and
+#: anything else that is not a bare digit run.
+NON_CANONICAL_DECIMAL_IDENTIFIERS = [
+    "",
+    " 18",
+    "18 ",
+    "18\n",
+    "+18",
+    "-18",
+    "18.0",
+    "1.8e1",
+    "v18",
+    "0x12",
+    "18_000",
+    "1,018",
+    "１８",
+    "١八",
+    "⑱",
+]
+
+#: Parity fixture: the plugin gate is the JavaScript literal
+#: ``const DECIMAL_IDENTIFIER = /^\d+$/;`` in
+#: ``plugins/monitor/src/core/remote-config.ts``, applied by
+#: ``requireDecimalIdentifier``. Re-evaluated here in Python so a future
+#: change to this table is checked against the same rule the plugin uses,
+#: without importing or executing the TypeScript module. Verified
+#: value-by-value against ``node`` running the literal regex.
+_PLUGIN_DECIMAL_IDENTIFIER = re.compile(r"[0-9]+")
+
+
+def _plugin_accepts(value: str) -> bool:
+    r"""Evaluate the plugin's ``/^\d+$/`` rule for one wire value."""
+    return _PLUGIN_DECIMAL_IDENTIFIER.fullmatch(value) is not None
+
+
+@pytest.mark.parametrize("identifier", CANONICAL_DECIMAL_IDENTIFIERS)
+def test_canonical_table_matches_plugin_regex(identifier: str) -> None:
+    assert _plugin_accepts(identifier) is True
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_non_canonical_table_matches_plugin_regex(identifier: str) -> None:
+    assert _plugin_accepts(identifier) is False
+
+
+def _wire_current_block(version: Any) -> dict[str, Any]:
+    return {
+        "version": version,
+        "sourceVersions": {"global": "4", "shop": None},
+        "contentHash": "sha256:abc",
+        "payload": {
+            "sellerId": TEST_SELLER_ID,
+            "schemaVersion": 1,
+            "settings": _complete_settings(),
+        },
+    }
+
+
+def _wire_force_block(version: Any, target_version: Any) -> dict[str, Any]:
+    return {"version": version, "target": _wire_current_block(target_version)}
+
+
+@pytest.mark.parametrize("identifier", CANONICAL_DECIMAL_IDENTIFIERS)
+def test_shop_pk_accepts_canonical_decimal_identifier(identifier: str) -> None:
+    env = DeliveryEnvelope(
+        schemaVersion=1,
+        sellerId=TEST_SELLER_ID,
+        shopPk=identifier,
+        current=_wire_current_block("18"),
+        force=None,
+    )
+    assert env.shop_pk == identifier
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_shop_pk_rejects_non_canonical_decimal_identifier(identifier: str) -> None:
+    with pytest.raises(ConfigContractError, match="shopPk"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk=identifier,
+            current=_wire_current_block("18"),
+            force=None,
+        )
+
+
+@pytest.mark.parametrize("bad_shop_pk", [101, 18.0, None, True])
+def test_shop_pk_rejects_non_string_value(bad_shop_pk: Any) -> None:
+    """``bool`` is an ``int`` subclass in Python; it must not become ``"1"``."""
+    with pytest.raises(ConfigContractError, match="shopPk"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk=bad_shop_pk,  # type: ignore[arg-type]
+            current=_wire_current_block("18"),
+            force=None,
+        )
+
+
+@pytest.mark.parametrize("identifier", CANONICAL_DECIMAL_IDENTIFIERS)
+def test_current_version_accepts_canonical_decimal_identifier(identifier: str) -> None:
+    env = DeliveryEnvelope(
+        schemaVersion=1,
+        sellerId=TEST_SELLER_ID,
+        shopPk="101",
+        current=_wire_current_block(identifier),
+        force=None,
+    )
+    assert env.current_version == identifier
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_current_version_rejects_non_canonical_decimal_identifier(
+    identifier: str,
+) -> None:
+    with pytest.raises(ConfigContractError, match="current.version"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block(identifier),
+            force=None,
+        )
+
+
+@pytest.mark.parametrize("bad_version", [18, 18.0, None, True])
+def test_current_version_rejects_non_string_value(bad_version: Any) -> None:
+    """An ``int`` version must not be silently coerced to ``"18"``: the
+    plugin rejects a non-string version outright.
+    """
+    with pytest.raises(ConfigContractError, match="current.version"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block(bad_version),
+            force=None,
+        )
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_force_version_rejects_non_canonical_decimal_identifier(
+    identifier: str,
+) -> None:
+    with pytest.raises(ConfigContractError, match="force.version"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_wire_force_block(identifier, "18"),
+        )
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_force_target_version_rejects_non_canonical_decimal_identifier(
+    identifier: str,
+) -> None:
+    with pytest.raises(ConfigContractError, match="force.target.version"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_wire_force_block("18", identifier),
+        )
+
+
+@pytest.mark.parametrize("identifier", CANONICAL_DECIMAL_IDENTIFIERS)
+def test_force_version_and_target_accept_canonical_decimal_identifier(
+    identifier: str,
+) -> None:
+    env = DeliveryEnvelope(
+        schemaVersion=1,
+        sellerId=TEST_SELLER_ID,
+        shopPk="101",
+        current=_wire_current_block("18"),
+        force=_wire_force_block(identifier, identifier),
+    )
+    assert env.force is not None
+    assert env.force.version == identifier
+    assert env.force.target.version == identifier
+
+
+@pytest.mark.parametrize("bad_version", [18, 18.0, None])
+def test_force_version_rejects_non_string_value(bad_version: Any) -> None:
+    with pytest.raises(ConfigContractError, match="force.version"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_wire_force_block(bad_version, "18"),
+        )
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_typed_current_rejects_non_canonical_version(identifier: str) -> None:
+    """Typed/mapping coercion parity: a typed :class:`Current` must not
+    smuggle a non-decimal version past the wire-shape guard.
+    """
+    with pytest.raises(ConfigContractError, match="version"):
+        Current(
+            version=identifier,
+            source_versions={"global": "4", "shop": None},
+            content_hash="sha256:abc",
+            payload=_envelope_settings(),
+        )
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_typed_force_rejects_non_canonical_version(identifier: str) -> None:
+    target = Current(
+        version="17",
+        source_versions={"global": "4", "shop": None},
+        content_hash="sha256:abc",
+        payload=_envelope_settings(),
+    )
+    with pytest.raises(ConfigContractError, match="force.version"):
+        DeliveryEnvelope.Force(version=identifier, target=target)
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_parse_envelope_rejects_non_canonical_current_version(
+    identifier: str,
+) -> None:
+    with pytest.raises(ConfigContractError, match="currentVersion"):
+        parse_envelope(
+            _envelope_settings(),
+            current_version=identifier,
+            source_versions={"global": "4", "shop": None},
+            content_hash="sha256:abc",
+        )
+
+
+@pytest.mark.parametrize("identifier", NON_CANONICAL_DECIMAL_IDENTIFIERS)
+def test_parse_envelope_rejects_non_canonical_shop_pk(identifier: str) -> None:
+    with pytest.raises(ConfigContractError, match="shopPk"):
+        parse_envelope(
+            _envelope_settings(),
+            current_version="18",
+            source_versions={"global": "4", "shop": None},
+            content_hash="sha256:abc",
+            shop_pk=identifier,
+        )
+
+
+def test_parse_envelope_default_shop_pk_is_canonical() -> None:
+    """The documented ``shop_pk="0"`` default must stay a valid
+    canonical decimal identifier.
+    """
+    envelope = parse_envelope(
+        _envelope_settings(),
+        current_version="18",
+        source_versions={"global": "4", "shop": None},
+        content_hash="sha256:abc",
+    )
+    assert envelope.shop_pk == "0"
+
+
+def test_source_versions_stay_plain_non_empty_strings() -> None:
+    """Parity guard against over-tightening: the plugin validates
+    ``sourceVersions`` entries with ``requireNonEmptyString``, NOT with
+    the decimal-identifier rule, so non-decimal source revisions stay
+    legal here too.
+    """
+    env = DeliveryEnvelope(
+        schemaVersion=1,
+        sellerId=TEST_SELLER_ID,
+        shopPk="101",
+        current={
+            "version": "18",
+            "sourceVersions": {"global": "global-rev-a", "shop": None},
+            "contentHash": "sha256:abc",
+            "payload": {
+                "sellerId": TEST_SELLER_ID,
+                "schemaVersion": 1,
+                "settings": _complete_settings(),
+            },
+        },
+        force=None,
+    )
+    assert env.source_versions == {"global": "global-rev-a", "shop": None}
+
+
+def test_content_hash_stays_plain_non_empty_string() -> None:
+    """``contentHash`` is not a decimal identifier on either side."""
+    env = DeliveryEnvelope(
+        schemaVersion=1,
+        sellerId=TEST_SELLER_ID,
+        shopPk="101",
+        current={
+            "version": "18",
+            "sourceVersions": {"global": "4", "shop": None},
+            "contentHash": "sha256:abcdef",
+            "payload": {
+                "sellerId": TEST_SELLER_ID,
+                "schemaVersion": 1,
+                "settings": _complete_settings(),
+            },
+        },
+        force=None,
+    )
+    assert env.content_hash == "sha256:abcdef"
 
 
 # ---------------------------------------------------------------------------
