@@ -178,12 +178,14 @@ def test_browser_handles_settled_replay_and_non_admin_polling_once() -> None:
     assert "clearForm()" in replay_block
     assert "state.clientRequestId = crypto.randomUUID()" in replay_block
     assert "await refresh()" in replay_block
-    assert "state.config?.canViewDiagnostics === true" in source
+    # 02 §9/§20: the diagnostics dump is part of the business record, so the
+    # frontend asks for it unconditionally instead of behind a role flag.
+    assert "canViewDiagnostics" not in source
     assert "?includeDiagnostics=true" in source
     assert "error.status !== 403" not in source
     assert "attempt?.kindLabel || attempt?.kind" in source
     assert "attempt.kindLabel || attempt.kind" in source
-    assert "copyText(id, event.currentTarget)" in source
+    assert "copyText(id, copy)" in source
 
 
 def test_observability_inventory_is_wired_at_commit_boundaries() -> None:

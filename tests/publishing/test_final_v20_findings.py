@@ -516,15 +516,22 @@ def test_transition_event_reports_the_completed_stage_duration(
     assert transitions[0]["duration_ms"] >= 3000
 
 
-def test_retry_dialog_uses_consumed_publish_budget_not_audit_attempt_count() -> None:
+def test_retry_dialog_states_the_manual_verify_hint_and_no_budget() -> None:
+    """02 §18/§14.1: the retry dialog no longer shows counts or a ceiling.
+
+    The publish budget is retired, so a remaining/limit readout would be a lie;
+    the dialog instead tells the operator the AI verdict can be wrong.
+    """
     source = (ROOT / "tts_erp_v2/static/js/video-publish.js").read_text()
     dialog = source[
         source.index("function confirmationMessage") : source.index(
             "function confirmTaskAction"
         )
     ]
-    assert "task.retryBudgetUsed" in dialog
+    assert "AI 报告失败可能有误，请先自行核验作品页再决定是否重试" in dialog
+    assert "task.retryBudgetUsed" not in dialog
     assert "task.attemptCount" not in dialog
+    assert "maxPublishAttempts" not in dialog
 
 
 def test_test_dependency_help_uses_real_path_and_accurate_pg_client_contract() -> None:

@@ -274,18 +274,21 @@ def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
     assert 'headers["If-None-Match"]' in source
     assert "new AbortController()" in source
     assert "document.hidden" in source
-    assert "state.currentChannel.failures" in source
-    assert "state.listChannel.failures" in source
-    assert "state.detailChannel.failures" in source
-    assert "scheduleCurrent(mode)" in source
-    assert "scheduleList(mode)" in source
-    assert "scheduleDetail(mode)" in source
-    assert "shared.queued ? 8" in source
-    assert "function sharedPollState()" in source
+    # 02 §18: fixed 5s cadence — the failure backoff table, the per-channel
+    # counters and the smart/interval picker are all retired.
+    assert "const REFRESH_SECONDS = 5;" in source
+    assert "scheduleCurrent()" in source
+    assert "scheduleList()" in source
+    assert "scheduleDetail()" in source
+    assert "backoffSeconds" not in source
+    assert "sharedPollState" not in source
+    assert "[5, 10, 30, 60]" not in source
+    assert "currentChannel.failures" not in source
+    assert "listChannel.failures" not in source
+    assert "detailChannel.failures" not in source
     assert "localStorage.setItem(REFRESH_KEY, mode)" in source
     assert "Array.from(value).length" in source
     assert ".maxLength =" not in source
-    assert "[5, 10, 30, 60]" in source
     assert 'window.addEventListener("pagehide", destroy)' in source
     assert "operationalStageStartedAt" in source
     assert "publish-preview-metadata" in source

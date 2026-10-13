@@ -44,3 +44,20 @@
 #publish-drawer-content dd{margin:0;overflow-wrap:anywhere}
 /* P2-18 Artemis ID 单元格里的 <code> 命中 Bootstrap 默认 10.5px 粉红。 */
 .artemis-cell code{font:inherit;color:inherit}
+
+/* ── VP-E 多设备轨道与提交前参数区（02 §17.2/§18） ────────────────────────
+   轨道从「一条全局 rail」改成「每台设备一条」，所以新增 .device-track 容器；
+   抽屉新增「发布设置 / 确认」两区，排版令牌沿用本页既有的 mono+muted 家族。 */
+.device-track{border:1px solid var(--rule-soft);padding:14px 16px;margin:12px 0}
+.device-track+.device-track{margin-top:16px}
+.device-track-name{font-family:var(--mono);font-size:13px;margin:0 0 10px;color:var(--ink);overflow-wrap:anywhere}
+.device-track-summary{font-size:14px;margin-top:10px;overflow-wrap:anywhere}
+.device-track-meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:6px;overflow-wrap:anywhere}
+.device-track-detail{margin-top:10px}
+.rail-empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:12px 0}
+.publish-rail[aria-label^="设备 "]{margin:0}
+#publish-drawer-content h3{font-family:var(--mono);font-size:13px;margin:18px 0 0;color:var(--muted)}
+.drawer-note,.drawer-confirmation p{font-size:13px;line-height:1.6;color:var(--muted);margin:8px 0 0;overflow-wrap:anywhere}
+.drawer-settings input,.drawer-settings textarea{display:block;width:100%;border:1px solid var(--rule);border-radius:var(--radius);background:transparent;color:var(--ink);padding:8px;font-family:var(--sans);resize:vertical}
+.drawer-settings .drawer-action{margin-top:14px}
+.drawer-settings dd{margin:6px 0 10px}

@@ -443,9 +443,10 @@ def test_attempt_submission_snapshot_fields_are_immutable_in_postgresql(
         db_session.rollback()
 
 
-def test_metrics_include_all_owner_scoped_pending_cleanup_gauges(
+def test_metrics_expose_page_scoped_cleanup_gauges_without_object(
     db_session: Session,
 ) -> None:
+    """02 §14.1/§19: device/spool gauges only — objects are never deleted."""
     task = _task(status="cancelled", stage="done")
     task.cleanup_intent = "preserve_state"
     task.spool_cleanup_status = "pending"
@@ -456,7 +457,8 @@ def test_metrics_include_all_owner_scoped_pending_cleanup_gauges(
     payload = api.metrics(_request(), db_session)
 
     assert payload["cleanup"]["spoolPending"] == 1
-    assert payload["cleanup"]["objectPending"] == 1
+    assert "objectPending" not in payload["cleanup"]
+    assert "objectFailed" not in payload["cleanup"]
 
 
 def test_v22_docs_and_layout_match_shipped_contracts() -> None:

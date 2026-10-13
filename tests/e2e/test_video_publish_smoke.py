@@ -12,7 +12,8 @@
 - ``GET /tasks`` 的 items/cursor/pollState 契约，以及 **ETag/304** 语义
   （``If-None-Match`` 命中时必须 304，这是页面轮询的基础，也是历史缺陷
   "切筛选命中 304 后表格显示上一个筛选数据" 所在的契约面）；
-- ``GET /tasks/current`` 的 task/pollState/suggestedPollSeconds 契约。
+- ``GET /tasks/current`` 的 tasks/pollState/serverTime 契约（多设备轨道数组；
+  ``suggestedPollSeconds`` 仍会返回，但页面按固定 5 秒刷新，不再采用它）。
 
 鉴权说明：``access/_access.py`` 对 ``/v2/video-publish*`` 的 API key 默认
 强制 ADMIN（``TTS_ERP_VIDEO_PUBLISH_ALLOW_READWRITE_API_KEYS`` 未开时）。
@@ -57,7 +58,8 @@ def test_config_shape_and_readiness_contract() -> None:
         isinstance(body.get("maxCaptionCharacters"), int)
         and body["maxCaptionCharacters"] > 0
     ), body
-    assert isinstance(body.get("maxPublishAttempts"), int), body
+    # 发布预算已退役：config 不再暴露 maxPublishAttempts（02 §14.1）
+    assert "maxPublishAttempts" not in body, body
 
     # 可写判定与阻塞原因：提交按钮的 icon 态
     assert isinstance(body.get("canWrite"), bool), body
@@ -157,7 +159,9 @@ def test_current_task_shape_contract() -> None:
     assert status == 200, body
     assert isinstance(body.get("tasks"), list), body
     assert isinstance(body.get("pollState"), dict), body
+    # 仍会返回，但前端只按固定 5 秒刷新，不采用该建议值。
     assert isinstance(body.get("suggestedPollSeconds"), int), body
+    assert body.get("serverTime"), body
 
     for entry in body["tasks"]:
         assert {

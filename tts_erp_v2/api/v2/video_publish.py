@@ -320,8 +320,9 @@ def _snapshot(
             else None
         ),
         "latestArtemisSessionId": str(latest.artemis_session_id) if latest else None,
+        # attempt_count is an append-only audit counter; the publish budget is
+        # retired, so no retryBudgetUsed field is emitted (02 §14.1).
         "attemptCount": task.attempt_count,
-        "retryBudgetUsed": task.publish_budget_used,
         "publishAttemptCount": (
             publish_attempt_count
             if publish_attempt_count is not None
@@ -399,12 +400,8 @@ def _snapshot(
                         if task.spool_cleanup_error
                         else None,
                     },
-                    "object": {
-                        "status": task.object_cleanup_status,
-                        "error": sanitize_text(task.object_cleanup_error)
-                        if task.object_cleanup_error
-                        else None,
-                    },
+                    # 02 §14.1: object cleanup is retired. MinIO objects are kept
+                    # forever, so there is no object resource to report or retry.
                 },
             }
         )
@@ -724,7 +721,7 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
         "acceptedExtensions": [".mp4"],
         "maxVideoBytes": max_video_bytes(),
         "maxCaptionCharacters": max_caption_chars(),
-        "maxPublishAttempts": int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")),
+        # No maxPublishAttempts: there is no publish budget any more (02 §14.1).
         "uploadUrlTtlSeconds": int(
             os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900")
         ),
@@ -1226,12 +1223,7 @@ def metrics(
         func.count()
         .filter(VideoPublishTask.spool_cleanup_status == "failed")
         .label("spool_failed"),
-        func.count()
-        .filter(VideoPublishTask.object_cleanup_status == "pending")
-        .label("object_pending"),
-        func.count()
-        .filter(VideoPublishTask.object_cleanup_status == "failed")
-        .label("object_failed"),
+        # 02 §14.1/§19: no object gauge exists any more; objects are never deleted.
     ).select_from(VideoPublishTask)
     row = session.execute(query).one()
 
@@ -1299,8 +1291,6 @@ def metrics(
             "deviceFailed": int(row.device_failed),
             "spoolPending": int(row.spool_pending),
             "spoolFailed": int(row.spool_failed),
-            "objectPending": int(row.object_pending),
-            "objectFailed": int(row.object_failed),
         },
         "serverTime": datetime.now(UTC),
     }

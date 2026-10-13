@@ -498,7 +498,9 @@ def test_cleanup_retry_resources_resets_only_requested_failed_rows(
         db_session,
     )
     assert result["cleanup"]["device"]["status"] == "pending"
-    assert result["cleanup"]["object"]["status"] == "failed"
+    # 02 §14.1: object cleanup is retired, so the detail snapshot no longer
+    # exposes an object resource at all, failed or otherwise.
+    assert "object" not in result["cleanup"]
     # 02 §14.1: object is retired, so a failed object status is not retryable.
     assert result["cleanupRetryableResources"] == []
     with pytest.raises(HTTPException) as exc_info:

@@ -15,15 +15,15 @@
     currentTimer: null,
     listTimer: null,
     detailTimer: null,
-    currentChannel: { controller: null, generation: 0, failures: 0 },
+    currentChannel: { controller: null, generation: 0 },
     // renderedPath: which /tasks path produced the rows currently on screen. A 304
     // only proves *that* path's payload is unchanged, so it may not stand in for
     // "the screen is current" when it differs. See refreshList.
     // pageSize: how many of those rows came from page 1; rows beyond that were
     // appended by 加载更多 and must survive a timed refresh. See renderTasks.
-    listChannel: { controller: null, generation: 0, failures: 0, items: [], nextCursor: null, renderedPath: null, pageSize: 0 },
+    listChannel: { controller: null, generation: 0, items: [], nextCursor: null, renderedPath: null, pageSize: 0 },
     pollState: { running: false, cleaning: false, queued: false },
-    detailChannel: { controller: null, generation: 0, failures: 0 },
+    detailChannel: { controller: null, generation: 0 },
     // Detail bodies we actually received, keyed by taskId. A 304 carries no body,
     // so this is what lets an explicit reopen render the right task (P1-3/D1).
     detailCache: new Map(),
@@ -36,7 +36,13 @@
     detailTaskId: null,
     detailOpener: null,
     etags: new Map(),
-    currentTask: null,
+    // 02 §17.2: /current answers {"tasks": [...]} — one entry per device track.
+    currentTasks: [],
+    serverTime: null,
+    // 02 §9.5: params_locked_at is a permanent boundary. Once the server reports
+    // it (or refuses an edit with TASK_ALREADY_SUBMITTED) this page stops offering
+    // the settings editor and the cancel entry for the rest of the session.
+    settingsLocked: new Set(),
     mutationBusy: new Set(),
     destroyed: false,
   };
@@ -313,9 +319,10 @@
       $("publish-target-album").textContent = state.config.target.album || "未配置";
       $("publish-device-status").textContent = `设备 ${state.config.target.deviceSerialMasked || "—"} · ${state.config.device.message}`;
       const saved = localStorage.getItem(REFRESH_KEY);
-      if (saved && ["off", "smart", "2", "5", "10", "30"].includes(saved)) {
-        $("publish-refresh-mode").value = saved;
-      }
+      // 02 §18: the switch is on/off only. Any interval or "smart" value left
+      // behind by an older build is dropped, so the page falls back to the
+      // default 5-second cadence instead of honouring a retired mode.
+      if (saved === "off") $("publish-refresh-mode").value = "off";
       await loadDevices();
       renderForm();
       await refresh();
@@ -563,70 +570,132 @@
   const statusLabel = (value, provided) => provided || STATUS_LABELS[value] || value || "—";
   const stageLabel = (value, provided) => provided || STAGE_LABELS[value] || value || "—";
 
-  function renderRail(task) {
-    const rail = $("publish-rail");
-    const currentStage = task ? (task.operationalStage || task.stage) : null;
-    rail.querySelectorAll("[data-stage]").forEach((node) => {
-      const current = Boolean(task && node.dataset.stage === currentStage);
-      node.classList.toggle("is-current", current);
-      if (current) node.setAttribute("aria-current", "step");
-      else node.removeAttribute("aria-current");
+  // One track per device (02 §17.2/§18). The chips are built in JS because the
+  // number of tracks is data-driven: the page no longer has a single global rail.
+  const RAIL_STAGES = [
+    ["downloading", "MINIO"],
+    ["staging_device", "手机相册"],
+    ["dispatching_artemis", "提交 Artemis"],
+    ["waiting_artemis", "Artemis"],
+    ["verifying", "核验"],
+    ["cleaning", "清理"],
+  ];
+
+  function railTaskMeta(task) {
+    const currentStage = task.operationalStage || task.stage;
+    const attempt = task.currentAttempt;
+    const startedAt = task.operationalStageStartedAt || task.stageStartedAt || attempt?.startedAt || task.startedAt;
+    const attemptCount = attempt?.kind === "verify" ? task.verifyAttemptCount : task.publishAttemptCount;
+    const elapsed = startedAt ? `${Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000))} 秒` : "—";
+    // 清理退避期的“下次重试”与“阶段开始时间”是两个字段，分开展示，
+    // 否则把未来时间当成开始时间会让已耗时恒为 0 秒（P2-21）。
+    const retryAt = task.cleanupNextAttemptAt ? ` · 下次重试 ${new Date(task.cleanupNextAttemptAt).toLocaleString()}` : "";
+    const queued = task.queuePosition ? ` · 队列第 ${task.queuePosition} 位` : "";
+    return `任务 ${task.taskId} · ${stageLabel(currentStage)} · ${attempt?.kindLabel || attempt?.kind} #${attemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}${queued}${retryAt}`;
+  }
+
+  function buildDeviceTrack(task) {
+    const currentStage = task.operationalStage || task.stage;
+    const deviceLabel = task.deviceSerialMasked || "未配置设备";
+    const track = document.createElement("article");
+    track.className = "device-track";
+    const heading = document.createElement("h3");
+    heading.className = "device-track-name";
+    heading.textContent = deviceLabel;
+    track.append(heading);
+    const rail = document.createElement("div");
+    rail.className = "publish-rail";
+    rail.setAttribute("aria-label", `设备 ${deviceLabel} 发布阶段`);
+    RAIL_STAGES.forEach(([stage, label], index) => {
+      if (index) {
+        const arrow = document.createElement("i");
+        arrow.textContent = "━━";
+        rail.append(arrow);
+      }
+      const chip = document.createElement("span");
+      chip.dataset.stage = stage;
+      chip.textContent = label;
+      if (stage === currentStage) {
+        chip.classList.add("is-current");
+        chip.setAttribute("aria-current", "step");
+      }
+      rail.append(chip);
     });
-    $("publish-rail-summary").textContent = task
-      ? `${task.filename || ""} · ${stageLabel(currentStage)}`
-      : "当前无运行任务";
-    const meta = $("publish-rail-meta");
-    const detailButton = $("publish-rail-detail");
-    if (task) {
-      const attempt = task.currentAttempt;
-      const startedAt = task.operationalStageStartedAt || task.stageStartedAt || attempt?.startedAt || task.startedAt;
-      const attemptCount = attempt?.kind === "verify" ? task.verifyAttemptCount : task.publishAttemptCount;
-      const elapsed = startedAt ? `${Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000))} 秒` : "—";
-      // 清理退避期的“下次重试”与“阶段开始时间是两个字段”，分开展示，
-      // 否则把未来时间当成开始时间会让已耗时恒为 0 秒（P2-21）。
-      const retryAt = task.cleanupNextAttemptAt ? ` · 下次重试 ${new Date(task.cleanupNextAttemptAt).toLocaleString()}` : "";
-      meta.textContent = `任务 ${task.taskId} · ${stageLabel(currentStage)} · ${attempt?.kindLabel || attempt?.kind} #${attemptCount || 0} · 开始 ${startedAt || "—"} · 已耗时 ${elapsed}${retryAt}`;
-      detailButton.hidden = false;
-      detailButton.onclick = () => {
-        state.detailOpener = detailButton;
-        return openDetail(task.taskId);
-      };
-    } else {
-      meta.textContent = "";
-      detailButton.hidden = true;
-    }
-    const id = task?.currentAttempt?.artemisSessionId || task?.latestArtemisSessionId || "";
-    $("active-artemis-id").textContent = id || "尚未创建";
-    $("active-artemis-id").title = id;
-    const button = document.querySelector("[data-copy-artemis-id]");
-    button.dataset.copyArtemisId = id;
-    button.disabled = !id;
+    track.append(rail);
+    const summary = document.createElement("div");
+    summary.className = "device-track-summary";
+    summary.textContent = `${task.filename || ""} · ${stageLabel(currentStage)}`;
+    track.append(summary);
+    const meta = document.createElement("div");
+    meta.className = "device-track-meta";
+    meta.setAttribute("role", "status");
+    meta.textContent = railTaskMeta(task);
+    track.append(meta);
+    const detailButton = document.createElement("button");
+    detailButton.type = "button";
+    detailButton.className = "btn-secondary device-track-detail";
+    detailButton.textContent = "查看运行详情";
+    detailButton.onclick = () => {
+      state.detailOpener = detailButton;
+      return openDetail(task.taskId);
+    };
+    track.append(detailButton);
+    const id = task.currentAttempt?.artemisSessionId || task.latestArtemisSessionId || "";
+    const idRow = document.createElement("div");
+    idRow.className = "rail-id";
+    const idText = document.createElement("span");
+    idText.textContent = id || "尚未创建";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "btn-secondary";
+    copy.textContent = "复制";
+    copy.disabled = !id;
+    if (id) copy.onclick = () => copyText(id, copy);
+    idRow.append(idText, copy);
+    track.append(idRow);
+    return track;
+  }
+
+  function renderRail(tasks) {
+    const host = $("publish-rail-tracks");
+    host.replaceChildren();
+    tasks.forEach((task) => host.append(buildDeviceTrack(task)));
+    const empty = $("publish-rail-empty");
+    empty.hidden = tasks.length > 0;
+    empty.textContent = state.serverTime
+      ? `当前没有运行中的发布任务 · 服务端时间 ${new Date(state.serverTime).toLocaleString()}`
+      : "当前没有运行中的发布任务。";
   }
 
   const ACTION_LABELS = {
     view: "查看",
     continue_upload: "继续上传",
+    edit_settings: "修改发布设置",
     cancel: "取消",
     retry: "重试",
     verify: "再次自动核验",
+    confirm_published: "确认已发布",
     retry_cleanup: "重试清理",
     replace_upload: "重新上传",
     copy_artemis_id: "复制 Artemis ID",
   };
+  // 02 §18: 确认已发布 是唯一按钮且幂等，点击即提交，不再套一层确认弹窗。
   const CONFIRM_ACTIONS = new Set(["cancel", "retry", "verify", "retry_cleanup", "replace_upload"]);
+  // 02 §14.1: only device/spool cleanup is retryable; objects are never deleted.
+  const CLEANUP_RESOURCES = ["device", "spool"];
+  const paramsLocked = (task) => Boolean(task?.paramsLockedAt) || state.settingsLocked.has(task?.taskId);
 
   function confirmationMessage(task, actionName) {
     const attempt = task.currentAttempt || {};
     const attemptId = attempt.artemisSessionId || task.latestArtemisSessionId || "尚未创建";
     const relatedPublishId = task.relatedPublishAttempt?.artemisSessionId || attemptId;
     const failure = `${task.lastErrorCode || "无错误码"} / ${task.lastErrorMessage || "无错误详情"}`;
-    const budget = `${task.retryBudgetUsed ?? 0}/${state.config?.maxPublishAttempts || 3}`;
     return {
-      cancel: `取消任务 ${task.taskId}（阶段 ${stageLabel(task.stage, task.stageLabel)}）会保留审计记录，并清理已生成的对象；确认取消？`,
-      retry: `重试任务 ${task.taskId}\n前次 Artemis ID：${attemptId}\n失败阶段：${stageLabel(task.stage, task.stageLabel)}\n错误：${failure}\n发布预算：${budget}\n重试会复用已上传对象，且不会自动确认模糊结果。确认重试？`,
+      cancel: `取消任务 ${task.taskId}（阶段 ${stageLabel(task.stage, task.stageLabel)}）会保留审计记录和已上传的原视频（对象不删除）；确认取消？`,
+      retry: `重试任务 ${task.taskId}\n前次 Artemis ID：${attemptId}\n失败阶段：${stageLabel(task.stage, task.stageLabel)}\n错误：${failure}\nAI 报告失败可能有误，请先自行核验作品页再决定是否重试。确认重试？`,
       verify: `只读核验任务 ${task.taskId} 的发布 attempt ${relatedPublishId}；只查看作品页和草稿箱，不会进入上传页，不会再次点击发布。确认开始核验？`,
       retry_cleanup: `仅重试任务 ${task.taskId} 的失败资源：${(task.cleanupRetryableResources || []).join("、") || "无"}；不会改变业务发布结果。确认重试清理？`,
-      replace_upload: `任务 ${task.taskId} 的原对象已删除；当前阶段 ${stageLabel(task.stage, task.stageLabel)}，错误 ${failure}，预算 ${budget}。重新上传会创建新的发布输入。确认重新上传？`,
+      replace_upload: `任务 ${task.taskId} 的原对象已删除；当前阶段 ${stageLabel(task.stage, task.stageLabel)}，错误 ${failure}。重新上传会创建新的发布输入。确认重新上传？`,
     }[actionName] || `确认${ACTION_LABELS[actionName] || actionName}？`;
   }
 
@@ -664,7 +733,7 @@
     $("publish-video-file").click();
   }
 
-  const NON_MUTATING_ACTIONS = new Set(["view", "copy_artemis_id", "continue_upload"]);
+  const NON_MUTATING_ACTIONS = new Set(["view", "copy_artemis_id", "continue_upload", "edit_settings"]);
 
   function setTaskMutationBusy(taskId, actionName, busy) {
     const key = `${taskId}:${actionName}`;
@@ -677,6 +746,12 @@
   }
 
   async function runTaskAction(task, actionName, trigger = null) {
+    // 02 §6.5/§18: once Artemis admitted the publish there is no cancel/stop
+    // entry left, even if a stale payload still advertised one.
+    if (actionName === "cancel" && paramsLocked(task)) {
+      notice("任务已提交给发布端，无法取消。", true);
+      return;
+    }
     const mutation = !NON_MUTATING_ACTIONS.has(actionName);
     const key = `${task.taskId}:${actionName}`;
     if (mutation && state.mutationBusy.has(key)) return;
@@ -698,6 +773,8 @@
       }
       applyBusy();
       if (actionName === "view") return openDetail(task.taskId);
+      // 参数编辑在详情抽屉里完成：列表行只负责把人带到编辑区。
+      if (actionName === "edit_settings") return openDetail(task.taskId);
       if (actionName === "copy_artemis_id") {
         const id = task.latestArtemisSessionId;
         if (id) await copyText(id, trigger);
@@ -718,9 +795,16 @@
       }
       const body = { rowVersion: task.rowVersion };
       if (actionName === "retry_cleanup") {
-        body.resources = task.cleanupRetryableResources || Object.entries(task.cleanup || {})
-          .filter(([, resource]) => resource.status === "failed")
-          .map(([name]) => name);
+        const offered = Array.isArray(task.cleanupRetryableResources)
+          ? task.cleanupRetryableResources
+          : Object.entries(task.cleanup || {})
+            .filter(([, resource]) => resource.status === "failed")
+            .map(([name]) => name);
+        body.resources = CLEANUP_RESOURCES.filter((name) => offered.includes(name));
+        if (!body.resources.length) {
+          notice("没有可重试的清理资源（仅设备与本地暂存）", true);
+          return;
+        }
       }
       await request(endpoint, {
         method: "POST",
@@ -872,17 +956,20 @@
     try {
       const current = await request("/tasks/current", { signal: channel.controller.signal });
       if (generation !== channel.generation) return;
-      channel.failures = 0;
       if (!current.notModified) {
-        state.currentTask = current.task;
-        state.pollState = current.pollState || { running: Boolean(current.task), cleaning: false, queued: false };
-        renderRail(current.task);
+        // 02 §17.2: /current answers {"tasks": [...]} — one entry per device
+        // track. The single "task" object it replaced no longer exists.
+        state.currentTasks = Array.isArray(current.tasks) ? current.tasks : [];
+        if (current.serverTime) state.serverTime = current.serverTime;
+        state.pollState = current.pollState || {
+          running: state.currentTasks.length > 0, cleaning: false, queued: false,
+        };
+        renderRail(state.currentTasks);
       }
       $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       if (error.name === "AbortError" || generation !== channel.generation) return;
-      channel.failures += 1;
-      notice("当前任务刷新失败，正在退避重试", true);
+      notice(`当前任务刷新失败，${REFRESH_SECONDS} 秒后自动重试`, true);
     }
   }
 
@@ -907,7 +994,6 @@
         reuseEtag: !append && channel.renderedPath === path,
       });
       if (generation !== channel.generation) return;
-      channel.failures = 0;
       if (!list.notModified) {
         state.pollState = list.pollState || { running: false, cleaning: false, queued: false };
         renderTasks(list, { append, path });
@@ -915,11 +1001,10 @@
       $("publish-last-refreshed").textContent = `上次刷新 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       if (error.name === "AbortError" || generation !== channel.generation) return;
-      channel.failures += 1;
       // A failed request must not leave a cached validator behind, otherwise the
       // retry could be answered 304 and the error row would never clear (P1-6).
       if (path) state.etags.delete(path);
-      notice("任务列表刷新失败，正在退避重试", true);
+      notice(`任务列表刷新失败，${REFRESH_SECONDS} 秒后自动重试`, true);
       renderTasks(null, { error: error.message || "请稍后重试" });
     } finally {
       if (append) $("publish-load-more").disabled = false;
@@ -934,14 +1019,12 @@
     if (channel.controller) channel.controller.abort();
     channel.controller = new AbortController();
     try {
-      const diagnostics = state.config?.canViewDiagnostics === true
-        ? "?includeDiagnostics=true"
-        : "";
-      const detail = await request(`/tasks/${taskId}${diagnostics}`, {
+      // 02 §9/§20: page:video-publish is the only human gate, so the diagnostics
+      // dump is part of the business record every page holder may read.
+      const detail = await request(`/tasks/${taskId}?includeDiagnostics=true`, {
         signal: channel.controller.signal,
       });
       if (generation !== channel.generation || taskId !== state.detailTaskId) return null;
-      channel.failures = 0;
       // A 304 carries no body; the payload we already hold for *this* task is by
       // definition the current one, so refresh the drawer from that snapshot.
       const body = detail.notModified ? state.detailCache.get(taskId) : detail;
@@ -952,8 +1035,7 @@
       return body;
     } catch (error) {
       if (error.name === "AbortError" || generation !== channel.generation) return null;
-      channel.failures += 1;
-      notice("任务详情刷新失败，正在退避重试", true);
+      notice(`任务详情刷新失败，${REFRESH_SECONDS} 秒后自动重试`, true);
       return null;
     }
   }
@@ -966,16 +1048,15 @@
     await Promise.all(jobs);
   }
 
-  function backoffSeconds(seconds, failures) {
-    if (failures > 0) seconds = [5, 10, 30, 60][Math.min(failures - 1, 3)];
-    if (document.hidden) seconds = Math.max(30, seconds);
-    return seconds;
-  }
+  // 02 §18: fixed cadence. The server may still return suggestedPollSeconds and
+  // the poll state is still tracked, but this page never turns either into a
+  // refresh interval — every channel waits one full response plus 5 seconds.
+  const REFRESH_SECONDS = 5;
 
   function renderRefreshState(mode) {
     const indicator = $("publish-refresh-status");
     const paused = mode === "off";
-    indicator.textContent = paused ? "自动刷新已暂停" : "自动刷新已启用";
+    indicator.textContent = paused ? "自动刷新已暂停" : "自动刷新已启用（每 5 秒）";
     indicator.hidden = !paused;
   }
 
@@ -986,48 +1067,166 @@
     const mode = $("publish-refresh-mode").value;
     localStorage.setItem(REFRESH_KEY, mode);
     renderRefreshState(mode);
-    if (mode === "off" || state.destroyed) return;
-    scheduleCurrent(mode);
-    scheduleList(mode);
-    scheduleDetail(mode);
+    // A hidden page does not poll; becoming visible refreshes immediately.
+    if (mode === "off" || state.destroyed || document.hidden) return;
+    scheduleCurrent();
+    scheduleList();
+    scheduleDetail();
   }
 
-  function sharedPollState() {
-    return state.pollState;
-  }
-
-  function scheduleCurrent(mode) {
-    const shared = sharedPollState();
-    const base = mode === "smart"
-      ? shared.running || shared.cleaning ? 2 : shared.queued ? 8 : 30
-      : Number(mode);
-    const seconds = backoffSeconds(base, state.currentChannel.failures);
+  function scheduleCurrent() {
     state.currentTimer = setTimeout(async () => {
       await refreshCurrent();
-      scheduleCurrent(mode);
-    }, seconds * 1000);
+      scheduleCurrent();
+    }, REFRESH_SECONDS * 1000);
   }
 
-  function scheduleList(mode) {
-    const shared = sharedPollState();
-    const base = mode === "smart"
-      ? shared.running || shared.cleaning ? 5 : shared.queued ? 8 : 30
-      : Number(mode);
-    const seconds = backoffSeconds(base, state.listChannel.failures);
+  function scheduleList() {
     state.listTimer = setTimeout(async () => {
       await refreshList();
-      scheduleList(mode);
-    }, seconds * 1000);
+      scheduleList();
+    }, REFRESH_SECONDS * 1000);
   }
 
-  function scheduleDetail(mode) {
+  function scheduleDetail() {
     if (!state.detailTaskId) return;
-    const base = mode === "smart" ? (state.currentTask ? 5 : 30) : Number(mode);
-    const seconds = backoffSeconds(base, state.detailChannel.failures);
     state.detailTimer = setTimeout(async () => {
       await refreshDetail();
-      scheduleDetail(mode);
-    }, seconds * 1000);
+      scheduleDetail();
+    }, REFRESH_SECONDS * 1000);
+  }
+
+  function renderConfirmationSection(detail) {
+    const confirmation = detail.confirmation || null;
+    if (!confirmation && detail.status !== "succeeded") return null;
+    const section = document.createElement("section");
+    section.className = "drawer-confirmation";
+    const heading = document.createElement("h3");
+    heading.textContent = "确认";
+    const audit = document.createElement("p");
+    if (confirmation) {
+      const from = confirmation.fromStatus ? ` · 来源状态 ${statusLabel(confirmation.fromStatus)}` : "";
+      audit.textContent = `已确认发布：${confirmation.confirmedBy || "—"} · ${confirmation.confirmedAt ? new Date(confirmation.confirmedAt).toLocaleString() : "—"}${from}`;
+    } else {
+      // 02 §9.6: legacy auto-success rows carry no audit row. Say so instead of
+      // inventing an operator and a timestamp.
+      audit.textContent = "历史自动成功：该任务由系统自动判定成功，没有人工确认记录。";
+    }
+    section.append(heading, audit);
+    return section;
+  }
+
+  function renderReadonlySettings(detail) {
+    const fields = document.createElement("dl");
+    [
+      ["App 包名", detail.target?.appPackage || "—"],
+      ["设备", detail.target?.deviceSerialMasked || "—"],
+      ["正文", detail.caption || detail.captionPreview || "—"],
+    ].forEach(([label, value]) => {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const description = document.createElement("dd");
+      description.textContent = value;
+      fields.append(term, description);
+    });
+    return fields;
+  }
+
+  function renderSettingsSection(detail) {
+    const locked = paramsLocked(detail);
+    const section = document.createElement("section");
+    section.className = "drawer-settings";
+    const heading = document.createElement("h3");
+    heading.textContent = "发布设置";
+    section.append(heading);
+    if (locked) {
+      const note = document.createElement("p");
+      note.className = "drawer-note";
+      note.textContent = detail.paramsLockedAt
+        ? `参数已于 ${new Date(detail.paramsLockedAt).toLocaleString()} 提交给发布端，不可再修改。`
+        : "参数已提交给发布端，不可再修改。";
+      section.append(note, renderReadonlySettings(detail));
+      return section;
+    }
+    if (!(detail.allowedActions || []).includes("edit_settings")) {
+      section.append(renderReadonlySettings(detail));
+      return section;
+    }
+    // 02 §9.5: every field is optional in PATCH, so an untouched field is simply
+    // not sent. The detail snapshot masks the device serial and does not carry
+    // the stored prompt override, so the editor never pre-fills either one.
+    const prompt = document.createElement("textarea");
+    prompt.id = "publish-settings-prompt";
+    prompt.rows = "4";
+    prompt.placeholder = "留空表示不修改正文；当前正文以下方文案为准";
+    const device = document.createElement("input");
+    device.id = "publish-settings-device";
+    device.type = "text";
+    device.placeholder = `留空表示保持当前设备（${detail.target?.deviceSerialMasked || "未配置"}）`;
+    const appPackage = document.createElement("input");
+    appPackage.id = "publish-settings-app-package";
+    appPackage.type = "text";
+    appPackage.placeholder = "App 包名";
+    appPackage.value = detail.target?.appPackage || "";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn-primary drawer-action";
+    save.id = "publish-settings-save";
+    save.textContent = "保存发布设置";
+    save.onclick = () => saveSettings(detail, save);
+    [
+      ["正文 Prompt", prompt],
+      ["设备序列号", device],
+      ["App 包名", appPackage],
+    ].forEach(([label, input]) => {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const cell = document.createElement("dd");
+      cell.append(input);
+      section.append(term, cell);
+    });
+    section.append(save);
+    return section;
+  }
+
+  // PATCH /tasks/{id}/settings: only changed fields are sent, always with the
+  // rowVersion the drawer rendered. TASK_ALREADY_SUBMITTED is permanent, so the
+  // editor is retired for this task for the rest of the page session.
+  async function saveSettings(detail, trigger) {
+    const prompt = $("publish-settings-prompt").value;
+    const deviceSerial = $("publish-settings-device").value.trim();
+    const appPackage = $("publish-settings-app-package").value.trim();
+    const body = { rowVersion: detail.rowVersion };
+    if (prompt.trim()) body.prompt = prompt;
+    if (deviceSerial) body.deviceSerial = deviceSerial;
+    if (appPackage) body.appPackage = appPackage;
+    if (body.prompt === undefined && body.deviceSerial === undefined && body.appPackage === undefined) {
+      notice("没有需要保存的修改。");
+      return;
+    }
+    trigger.disabled = true;
+    try {
+      await request(`/tasks/${detail.taskId}/settings`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      notice("发布设置已保存");
+      await refresh();
+    } catch (error) {
+      if (error.code === "TASK_ALREADY_SUBMITTED") state.settingsLocked.add(detail.taskId);
+      if (Array.isArray(error.allowedActions)) {
+        detail.allowedActions = error.allowedActions;
+        if (Number.isInteger(error.rowVersion)) detail.rowVersion = error.rowVersion;
+      }
+      if (error.status === 409) {
+        notice(error.message || "任务状态已更新，已按服务端允许动作刷新", true);
+        await refresh();
+      } else {
+        notice(error.message, true);
+      }
+    } finally {
+      trigger.disabled = false;
+    }
   }
 
   function renderDetail(detail) {
@@ -1051,13 +1250,16 @@
       metadata.append(term, description);
     });
     drawer.append(metadata);
+    drawer.append(renderSettingsSection(detail));
+    const confirmationSection = renderConfirmationSection(detail);
+    if (confirmationSection) drawer.append(confirmationSection);
     (detail.attempts || []).forEach((attempt) => {
       const section = document.createElement("section");
       section.className = "drawer-attempt";
       const summary = document.createElement("div");
       summary.textContent = `第 ${attempt.sequenceNo} 次 ${attempt.kindLabel || attempt.kind} · ${statusLabel(attempt.status)} · ${attempt.startedAt || "—"} → ${attempt.finishedAt || "—"}`;
       const diagnostic = document.createElement("p");
-      diagnostic.textContent = `错误：${attempt.error || "—"} · 重试分类：${attempt.retryClassification || "—"} · 可重试：${attempt.retrySafe == null ? "—" : attempt.retrySafe ? "是" : "否"}`;
+      diagnostic.textContent = `错误：${attempt.error || "—"} · 失败分类：${attempt.retryClassification || "—"}`;
       const id = document.createElement("code");
       id.textContent = attempt.artemisSessionId;
       const copy = document.createElement("button");
@@ -1080,15 +1282,22 @@
       const cleanup = document.createElement("section");
       cleanup.className = "drawer-cleanup";
       const cleanupBlock = detail.cleanup;
-      cleanup.textContent = `清理：设备 ${cleanupStatusLabel(cleanupBlock.device.status)}（${cleanupBlock.device.error || "—"}） · spool ${cleanupStatusLabel(cleanupBlock.spool.status)}（${cleanupBlock.spool.error || "—"}） · 对象 ${cleanupStatusLabel(cleanupBlock.object.status)}（${cleanupBlock.object.error || "—"}）`;
+      // 02 §14.1: object cleanup is retired, so only device/spool are reported
+      // and the retained object is stated as a fixed fact instead of a status.
+      cleanup.textContent = `清理：设备 ${cleanupStatusLabel(cleanupBlock.device.status)}（${cleanupBlock.device.error || "—"}） · spool ${cleanupStatusLabel(cleanupBlock.spool.status)}（${cleanupBlock.spool.error || "—"}） · 原视频 已保留（不删除）`;
       drawer.append(cleanup);
     }
     const actions = $("publish-drawer-actions");
     actions.replaceChildren();
-    (detail.allowedActions || []).filter((action) => action !== "view" && action !== "copy_artemis_id").forEach((action) => {
+    (detail.allowedActions || []).filter((action) => (
+      action !== "view" && action !== "copy_artemis_id" && action !== "edit_settings" &&
+      !(action === "cancel" && paramsLocked(detail))
+    )).forEach((action) => {
       const button = document.createElement("button");
       button.className = "btn-secondary drawer-action";
       button.textContent = ACTION_LABELS[action] || action;
+      // 02 §18: 唯一成功路径的按钮有稳定 id，审计回执就在它旁边的「确认」区。
+      if (action === "confirm_published") button.id = "publish-confirm-published";
       button.dataset.taskMutation = "true";
       button.dataset.taskId = detail.taskId;
       button.disabled = Array.from(state.mutationBusy).some((key) => key.startsWith(`${detail.taskId}:`));
@@ -1179,10 +1388,6 @@
     return copied;
   }
 
-  document.querySelector("[data-copy-artemis-id]").addEventListener("click", (event) => {
-    const id = event.currentTarget.dataset.copyArtemisId;
-    if (id) copyText(id, event.currentTarget);
-  });
   $("publish-video-drop").addEventListener("dragover", (event) => { event.preventDefault(); $("publish-video-drop").classList.add("is-dragging"); });
   $("publish-video-drop").addEventListener("dragleave", () => $("publish-video-drop").classList.remove("is-dragging"));
   $("publish-video-drop").addEventListener("drop", (event) => { event.preventDefault(); pick(event.dataTransfer.files[0]); $("publish-video-drop").classList.remove("is-dragging"); });
