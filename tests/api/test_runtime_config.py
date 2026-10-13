@@ -9,6 +9,7 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import delete, inspect, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_deterioration_alert.config import (
@@ -16,9 +17,12 @@ from tts_erp_v2.analytics.spu_deterioration_alert.config import (
     SEED_FALLBACK_CONFIG,
     config_to_payload,
 )
-from tts_erp_v2.db.models.config import RuntimeConfigItem, RuntimeConfigRevision
-from tts_erp_v2.runtime_config.resolver import resolve_runtime_config
-from tts_erp_v2.runtime_config.validation import validate_rollout
+from tts_erp_v2.db.models.config import (
+    RuntimeConfigItem,
+    RuntimeConfigRevision,
+    RuntimeConfigSecret,
+)
+from tts_erp_v2.runtime_config.repository import lock_referenced_secrets
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -244,16 +248,6 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
                     "endpoint": "https://published.example",
                     "token": "secret://test_runtime_token",
                 },
-                "rollout": [
-                    {
-                        "name": "canary",
-                        "basisPoints": 10000,
-                        "payload": {
-                            "endpoint": "https://canary.example",
-                            "token": "secret://test_runtime_token",
-                        },
-                    }
-                ],
             },
         )
         assert save.status_code == 200, save.text
@@ -276,7 +270,7 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
         )
         assert (
             api_client.get(
-                "/v2/config/runtime/snapshot?subject=TEST_subject",
+                "/v2/config/runtime/snapshot",
                 headers=_headers(readonly_key),
             ).status_code
             == 403
@@ -290,30 +284,37 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
         assert "draftPayload" not in listed.text
 
         snapshot = api_client.get(
-            "/v2/config/runtime/snapshot?subject=TEST_subject",
+            "/v2/config/runtime/snapshot",
             headers=_headers(readwrite_key),
         )
         assert snapshot.status_code == 200, snapshot.text
-        assert snapshot.json()["items"]["test_runtime.api"]["payload"] == {
-            "endpoint": "https://canary.example",
+        body = snapshot.json()
+        # Generic rollout is retired: the envelope carries no subject and each
+        # entry is exactly the active published payload/version.
+        assert "subject" not in body
+        assert set(body["items"]["test_runtime.api"]) == {"version", "payload"}
+        assert body["items"]["test_runtime.api"]["payload"] == {
+            "endpoint": "https://published.example",
             "token": "secret://test_runtime_token",
         }
+        assert "rolloutRuleIndex" not in snapshot.text
         assert "TEST_plaintext_token" not in snapshot.text
         etag = snapshot.headers["etag"]
         assert (
             api_client.get(
-                "/v2/config/runtime/snapshot?subject=TEST_subject",
+                "/v2/config/runtime/snapshot",
                 headers={**_headers(readwrite_key), "If-None-Match": etag},
             ).status_code
             == 304
         )
-        assert (
-            api_client.get(
-                "/v2/config/runtime/snapshot?subject=TEST_other_subject",
-                headers={**_headers(readwrite_key), "If-None-Match": etag},
-            ).status_code
-            == 200
+        # A leftover subject query parameter no longer selects anything.
+        other_subject = api_client.get(
+            "/v2/config/runtime/snapshot?subject=TEST_other_subject",
+            headers=_headers(readwrite_key),
         )
+        assert other_subject.status_code == 200, other_subject.text
+        assert other_subject.headers["etag"] == etag
+        assert other_subject.json() == body
 
         blocked_secret_retire = api_client.post(
             "/v2/config/runtime/secrets/test_runtime_token/retire",
@@ -321,14 +322,22 @@ def test_runtime_config_draft_publish_snapshot_and_secret_redaction(
         )
         assert blocked_secret_retire.status_code == 409, blocked_secret_retire.text
 
-        with Session(db_engine) as sess:
-            resolved = resolve_runtime_config(
-                sess,
-                config_key="test_runtime.api",
-                rollout_salt="TEST_salt",
-                subject="TEST_subject",
-            )
-        assert resolved["payload"]["token"] == "TEST_" + "plaintext_token"
+        revisions = api_client.get(
+            "/v2/config/runtime/items/test_runtime.api/revisions",
+            headers=_headers(readwrite_key),
+        )
+        assert revisions.status_code == 200, revisions.text
+        assert revisions.json()["items"][0] == {
+            "version": 1,
+            "payload": {
+                "endpoint": "https://published.example",
+                "token": "secret://test_runtime_token",
+            },
+            "comment": "TEST publish",
+            "createdBy": revisions.json()["items"][0]["createdBy"],
+            "createdAt": revisions.json()["items"][0]["createdAt"],
+        }
+        assert "rollout" not in revisions.text
     finally:
         _clear_runtime_config(db_engine)
 
@@ -409,30 +418,17 @@ def test_runtime_config_optimistic_lock_and_rollback(
         _clear_runtime_config(db_engine)
 
 
-def test_alert_runtime_config_lifecycle_and_rollout_rejection(
+def test_alert_runtime_config_lifecycle_and_legacy_rollout_rejection(
     api_client, db_engine, readwrite_key
 ):
+    """The alert key keeps normal publish/rollback and never accepts rollout input."""
     payload = config_to_payload(SEED_FALLBACK_CONFIG)
     _clear_runtime_config(db_engine)
     _clear_alert_runtime_config(db_engine)
     schema = {"type": "object", "additionalProperties": True}
     headers = _headers(readwrite_key)
-    valid_rollout = [{"name": "canary", "basisPoints": 10000, "payload": payload}]
-    assert validate_rollout(valid_rollout, schema) == valid_rollout
+    legacy_rollout = [{"name": "canary", "basisPoints": 10000, "payload": payload}]
     try:
-        rejected_create = api_client.post(
-            "/v2/config/runtime/items",
-            headers=headers,
-            json={
-                "configKey": ALERT_CONFIG_KEY,
-                "displayName": "TEST SPU alert",
-                "jsonSchema": schema,
-                "draftPayload": payload,
-                "draftRollout": valid_rollout,
-            },
-        )
-        assert rejected_create.status_code == 422, rejected_create.text
-        assert "global deterioration alert" in rejected_create.text
         created = api_client.post(
             "/v2/config/runtime/items",
             headers=headers,
@@ -444,6 +440,32 @@ def test_alert_runtime_config_lifecycle_and_rollout_rejection(
             },
         )
         assert created.status_code == 201, created.text
+        assert "draftRollout" not in created.json()
+        # A retired rollout field is an explicit client error, not a silent drop.
+        create_with_draft_rollout = api_client.post(
+            "/v2/config/runtime/items",
+            headers=headers,
+            json={
+                "configKey": ALERT_CONFIG_KEY,
+                "displayName": "TEST SPU alert",
+                "jsonSchema": schema,
+                "draftPayload": payload,
+                "draftRollout": legacy_rollout,
+            },
+        )
+        assert create_with_draft_rollout.status_code == 422, (
+            create_with_draft_rollout.text
+        )
+        rejected_rollout_save = api_client.put(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/draft",
+            headers=headers,
+            json={
+                "expectedDraftVersion": created.json()["draftVersion"],
+                "payload": payload,
+                "rollout": legacy_rollout,
+            },
+        )
+        assert rejected_rollout_save.status_code == 422, rejected_rollout_save.text
         saved = api_client.put(
             f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/draft",
             headers=headers,
@@ -453,22 +475,24 @@ def test_alert_runtime_config_lifecycle_and_rollout_rejection(
             },
         )
         assert saved.status_code == 200, saved.text
-        rejected = api_client.put(
-            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/draft",
-            headers=headers,
-            json={
-                "expectedDraftVersion": saved.json()["draftVersion"],
-                "payload": payload,
-                "rollout": valid_rollout,
-            },
-        )
-        assert rejected.status_code == 422, rejected.text
+        assert "rollout" not in saved.json()
         published = api_client.post(
             f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/publish",
             headers=headers,
             json={"expectedDraftVersion": saved.json()["draftVersion"]},
         )
         assert published.status_code == 200, published.text
+        with Session(db_engine) as session:
+            revision = session.scalar(
+                select(RuntimeConfigRevision).where(
+                    RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY,
+                    RuntimeConfigRevision.version == 1,
+                )
+            )
+            assert revision is not None
+            # New code never writes rollout behavior; the legacy NOT NULL column
+            # keeps its empty default.
+            assert revision.rollout == []
         updated = dict(payload)
         updated["enabled"] = False
         published_detail = api_client.get(
@@ -512,7 +536,7 @@ def test_alert_runtime_config_lifecycle_and_rollout_rejection(
                     config_key=ALERT_CONFIG_KEY,
                     version=4,
                     payload=payload,
-                    rollout=valid_rollout,
+                    rollout=legacy_rollout,
                     created_by="TEST_legacy_rollout",
                 )
             )
@@ -823,3 +847,274 @@ def test_runtime_config_retirement_lifecycle(api_client, db_engine, readwrite_ke
         )
     finally:
         _clear_runtime_config(db_engine)
+
+
+def test_runtime_config_restore_rejects_a_retired_secret_reference(
+    api_client, db_engine, readwrite_key
+):
+    """Archiving a config frees its secret; restoring must not revive a broken reference."""
+    _clear_runtime_config(db_engine)
+    headers = _headers(readwrite_key)
+    try:
+        created = api_client.post(
+            "/v2/config/runtime/items",
+            headers=headers,
+            json={
+                "configKey": "test_runtime.restore_secret",
+                "displayName": "TEST restore secret",
+                "jsonSchema": _schema(secret_reference=True),
+                "draftPayload": {
+                    "endpoint": "https://v1.example",
+                    "token": "secret://test_runtime_restore_token",
+                },
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert (
+            api_client.put(
+                "/v2/config/runtime/secrets/test_runtime_restore_token",
+                headers=headers,
+                json={"value": "TEST_restore_plaintext"},
+            ).status_code
+            == 200
+        )
+        published = api_client.post(
+            "/v2/config/runtime/items/test_runtime.restore_secret/publish",
+            headers=headers,
+            json={"expectedDraftVersion": created.json()["draftVersion"]},
+        )
+        assert published.status_code == 200, published.text
+
+        # While the key is archived its published reference no longer blocks retirement.
+        assert (
+            api_client.post(
+                "/v2/config/runtime/items/test_runtime.restore_secret/retire",
+                headers=headers,
+            ).json()["status"]
+            == "retired"
+        )
+        assert (
+            api_client.post(
+                "/v2/config/runtime/secrets/test_runtime_restore_token/retire",
+                headers=headers,
+            ).status_code
+            == 200
+        )
+
+        blocked = api_client.post(
+            "/v2/config/runtime/items/test_runtime.restore_secret/restore",
+            headers=headers,
+        )
+        assert blocked.status_code == 409, blocked.text
+        assert "test_runtime_restore_token" in blocked.text
+        assert "retired or missing" in blocked.text
+        assert (
+            api_client.get(
+                "/v2/config/runtime/items?includeRetired=true", headers=headers
+            ).json()["items"][0]["retiredAt"]
+            is not None
+        )
+
+        # Restoring the secret first makes the key restorable again.
+        assert (
+            api_client.post(
+                "/v2/config/runtime/secrets/test_runtime_restore_token/restore",
+                headers=headers,
+            ).json()["status"]
+            == "active"
+        )
+        assert (
+            api_client.post(
+                "/v2/config/runtime/items/test_runtime.restore_secret/restore",
+                headers=headers,
+            ).json()["status"]
+            == "active"
+        )
+    finally:
+        _clear_runtime_config(db_engine)
+
+
+def test_runtime_config_write_models_reject_retired_rollout_fields(
+    api_client, db_engine, readwrite_key
+):
+    """Retired rollout inputs fail loudly on the two payload-bearing write models.
+
+    ``extra="forbid"`` is deliberately scoped to create and draft update: a
+    leftover ``draftRollout``/``rollout`` must surface as 422 instead of being
+    silently dropped, while the remaining runtime request models stay lenient.
+    """
+    _clear_runtime_config(db_engine)
+    headers = _headers(readwrite_key)
+    config_key = "test_runtime.strict_extra"
+    try:
+        rejected_create = api_client.post(
+            "/v2/config/runtime/items",
+            headers=headers,
+            json={
+                "configKey": config_key,
+                "displayName": "TEST strict extra",
+                "jsonSchema": _schema(),
+                "draftRollout": [{"name": "TEST_canary", "basisPoints": 10000}],
+            },
+        )
+        assert rejected_create.status_code == 422, rejected_create.text
+        assert "draftRollout" in rejected_create.text
+
+        # The rejected create must not have persisted a row.
+        assert (
+            api_client.get("/v2/config/runtime/items", headers=headers).status_code
+            == 200
+        )
+
+        created = api_client.post(
+            "/v2/config/runtime/items",
+            headers=headers,
+            json={
+                "configKey": config_key,
+                "displayName": "TEST strict extra",
+                "jsonSchema": _schema(),
+                "draftPayload": {"endpoint": "https://v1.example", "value": "TEST_v"},
+            },
+        )
+        assert created.status_code == 201, created.text
+        draft_version = created.json()["draftVersion"]
+
+        rejected_draft = api_client.put(
+            f"/v2/config/runtime/items/{config_key}/draft",
+            headers=headers,
+            json={
+                "expectedDraftVersion": draft_version,
+                "payload": {"endpoint": "https://v1.example", "value": "TEST_v"},
+                "rollout": [{"name": "TEST_canary", "basisPoints": 10000}],
+            },
+        )
+        assert rejected_draft.status_code == 422, rejected_draft.text
+        assert "rollout" in rejected_draft.text
+
+        # The rejected draft left the optimistic version untouched.
+        accepted_draft = api_client.put(
+            f"/v2/config/runtime/items/{config_key}/draft",
+            headers=headers,
+            json={
+                "expectedDraftVersion": draft_version,
+                "payload": {"endpoint": "https://v2.example", "value": "TEST_v2"},
+            },
+        )
+        assert accepted_draft.status_code == 200, accepted_draft.text
+
+        # Other runtime request models are intentionally not strict.
+        published = api_client.post(
+            f"/v2/config/runtime/items/{config_key}/publish",
+            headers=headers,
+            json={
+                "expectedDraftVersion": accepted_draft.json()["draftVersion"],
+                "comment": "TEST strict extra",
+                "rollout": [{"name": "TEST_canary", "basisPoints": 10000}],
+            },
+        )
+        assert published.status_code == 200, published.text
+
+        # The snapshot's leftover ``subject`` query stays non-selecting.
+        base_snapshot = api_client.get("/v2/config/runtime/snapshot", headers=headers)
+        assert base_snapshot.status_code == 200, base_snapshot.text
+        subject_snapshot = api_client.get(
+            "/v2/config/runtime/snapshot?subject=TEST_other_subject", headers=headers
+        )
+        assert subject_snapshot.status_code == 200, subject_snapshot.text
+        assert subject_snapshot.json() == base_snapshot.json()
+        assert subject_snapshot.headers["etag"] == base_snapshot.headers["etag"]
+    finally:
+        _clear_runtime_config(db_engine)
+
+
+def test_lock_referenced_secrets_serializes_with_secret_retirement(db_engine) -> None:
+    """The publish-side and retire-side locks must genuinely contend.
+
+    ``lock_referenced_secrets`` and ``retire_runtime_config_secret`` each take a
+    ``SELECT ... FOR UPDATE`` row lock on the same ``config.runtime_config_secrets``
+    row. That pairing is what stops a publish from referencing a secret retired a
+    moment later, so this guards BOTH directions rather than re-acquiring one
+    lock the same holder already owns.
+
+    Deterministic by construction: the blocked waiter arms a transaction-local
+    ``lock_timeout`` instead of sleeping, and each phase uses its own sessions so
+    no waiter is ever reused after a rollback (which would silently drop the
+    armed ``SET LOCAL``).
+    """
+    secret_name = "test_runtime_concurrency_token"
+    payload = {
+        "endpoint": "https://concurrency.example",
+        "token": f"secret://{secret_name}",
+    }
+    # Postgres SQLSTATE for "could not obtain lock on row in relation".
+    lock_not_available = "55P03"
+
+    # Commit the secret first: an uncommitted INSERT would itself block the
+    # contenders and the phases would prove nothing.
+    with Session(db_engine) as seed_session:
+        seed_session.add(
+            RuntimeConfigSecret(
+                name=secret_name,
+                encrypted_value=b"TEST_concurrency_ciphertext",
+                fingerprint="TEST_concurrency_fp",
+            )
+        )
+        seed_session.commit()
+
+    # ── Phase 1: reference lock held, a second reference lock must block ──
+    reference_holder = Session(db_engine)
+    try:
+        # Uncontended: the secret exists and is active, so nothing is missing.
+        assert lock_referenced_secrets(reference_holder, payload) == set()
+
+        reference_waiter = Session(db_engine)
+        try:
+            # pi-lens-ignore: python-sql-injection
+            reference_waiter.execute(text("SET LOCAL lock_timeout = '250ms'"))
+            with pytest.raises(OperationalError) as blocked:
+                lock_referenced_secrets(reference_waiter, payload)
+            assert getattr(blocked.value.orig, "sqlstate", None) == lock_not_available
+        finally:
+            reference_waiter.rollback()
+            reference_waiter.close()
+    finally:
+        reference_holder.rollback()
+        reference_holder.close()
+
+    # ── Phase 2: retire-side row lock held, the reference lock must block ──
+    retire_holder = Session(db_engine)
+    try:
+        # Exactly the lock retire_runtime_config_secret takes, and nothing else.
+        retire_holder.execute(
+            select(RuntimeConfigSecret)
+            .where(RuntimeConfigSecret.name == secret_name)
+            .with_for_update()
+        ).scalar_one()
+
+        publish_waiter = Session(db_engine)
+        try:
+            # pi-lens-ignore: python-sql-injection
+            publish_waiter.execute(text("SET LOCAL lock_timeout = '250ms'"))
+            with pytest.raises(OperationalError) as blocked:
+                lock_referenced_secrets(publish_waiter, payload)
+            assert getattr(blocked.value.orig, "sqlstate", None) == lock_not_available
+        finally:
+            publish_waiter.rollback()
+            publish_waiter.close()
+    finally:
+        retire_holder.rollback()
+        retire_holder.close()
+
+    # ── Both locks released: a fresh uncontended session succeeds ──
+    fresh_session = Session(db_engine)
+    try:
+        assert lock_referenced_secrets(fresh_session, payload) == set()
+    finally:
+        fresh_session.rollback()
+        fresh_session.close()
+
+    with Session(db_engine) as cleanup:
+        cleanup.execute(
+            delete(RuntimeConfigSecret).where(RuntimeConfigSecret.name == secret_name)
+        )
+        cleanup.commit()

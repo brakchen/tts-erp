@@ -1,7 +1,3 @@
-"""Versioned runtime configuration with secret-reference resolution."""
+"""Versioned runtime configuration payloads, schemas and secret references."""
 
 from __future__ import annotations
-
-from tts_erp_v2.runtime_config.resolver import resolve_runtime_config, select_payload
-
-__all__ = ["resolve_runtime_config", "select_payload"]
