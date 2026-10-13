@@ -294,6 +294,7 @@ a:hover {
 .op-toolbar {
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
+  overflow-x: clip;
 }
 
 .op-filter {
