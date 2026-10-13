@@ -1759,6 +1759,27 @@ ALTER TABLE publishing.video_publish_attempts ALTER COLUMN id ADD GENERATED ALWA
 );
 
 
+-- Name: video_publish_confirmations; Type: TABLE; Schema: publishing; Owner: -
+
+CREATE TABLE IF NOT EXISTS publishing.video_publish_confirmations (
+    id bigint NOT NULL,
+    task_id bigint NOT NULL,
+    action text NOT NULL,
+    from_status text NOT NULL,
+    to_status text NOT NULL,
+    operator_user_id bigint,
+    operator_key_hash text,
+    request_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE publishing.video_publish_confirmations ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME publishing.video_publish_confirmations_id_seq
+);
+
+
 -- Name: video_publish_tasks; Type: TABLE; Schema: publishing; Owner: -
 
 CREATE TABLE IF NOT EXISTS publishing.video_publish_tasks (
@@ -1818,6 +1839,13 @@ CREATE TABLE IF NOT EXISTS publishing.video_publish_tasks (
     object_generation uuid DEFAULT gen_random_uuid() NOT NULL,
     object_upload_expires_at timestamp with time zone,
     execution_generation uuid,
+    prompt_override text,
+    params_locked_at timestamp with time zone,
+    confirmed_at timestamp with time zone,
+    confirmed_by_user_id bigint,
+    confirmed_by_key_hash text,
+    last_verify_verdict text,
+    cancel_requested boolean DEFAULT false NOT NULL,
     CONSTRAINT video_publish_task_budget_check CHECK (((attempt_count >= 0) AND (publish_budget_used >= 0) AND (publish_budget_used <= attempt_count))),
     CONSTRAINT video_publish_task_cleanup_intent_check CHECK ((cleanup_intent = ANY (ARRAY['none'::text, 'finalize_success'::text, 'requeue_publish'::text, 'preserve_state'::text]))),
     CONSTRAINT video_publish_task_cleanup_owner_check CHECK ((((cleanup_intent = 'none'::text) AND (cleanup_lease_owner IS NULL) AND (cleanup_lease_expires_at IS NULL) AND (((status = 'running'::text) AND (lease_owner IS NOT NULL) AND (stage = ANY (ARRAY['downloading'::text, 'staging_device'::text, 'dispatching_artemis'::text, 'waiting_artemis'::text, 'verifying'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))) OR ((device_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text])) AND (spool_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))))) OR ((cleanup_intent = 'finalize_success'::text) AND (status = 'succeeded'::text) AND (stage = 'done'::text)) OR ((cleanup_intent = 'requeue_publish'::text) AND (status = 'pending'::text) AND (stage = ANY (ARRAY['queued'::text, 'waiting_device'::text])) AND (object_cleanup_status <> ALL (ARRAY['pending'::text, 'failed'::text]))) OR ((cleanup_intent = 'preserve_state'::text) AND (status = ANY (ARRAY['succeeded'::text, 'failed'::text, 'needs_review'::text, 'cancelled'::text])) AND (stage = 'done'::text)))),
@@ -2716,6 +2744,12 @@ ALTER TABLE ONLY publishing.video_publish_attempts
     ADD CONSTRAINT uq_video_publish_attempt_task_seq UNIQUE (task_id, sequence_no);
 
 
+-- Name: video_publish_confirmations uq_video_publish_confirmation_request_id; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_confirmations
+    ADD CONSTRAINT uq_video_publish_confirmation_request_id UNIQUE (request_id);
+
+
 -- Name: video_publish_tasks uq_video_publish_execution_generation; Type: CONSTRAINT; Schema: publishing; Owner: -
 
 ALTER TABLE ONLY publishing.video_publish_tasks
@@ -2738,6 +2772,12 @@ ALTER TABLE ONLY publishing.video_publish_attempts
 
 ALTER TABLE ONLY publishing.video_publish_attempts
     ADD CONSTRAINT video_publish_attempts_pkey PRIMARY KEY (id);
+
+
+-- Name: video_publish_confirmations video_publish_confirmations_pkey; Type: CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_confirmations
+    ADD CONSTRAINT video_publish_confirmations_pkey PRIMARY KEY (id);
 
 
 -- Name: video_publish_tasks video_publish_tasks_client_request_id_key; Type: CONSTRAINT; Schema: publishing; Owner: -
@@ -3352,9 +3392,14 @@ CREATE INDEX IF NOT EXISTS ix_video_publish_history ON publishing.video_publish_
 CREATE INDEX IF NOT EXISTS ix_video_publish_queue ON publishing.video_publish_tasks USING btree (next_attempt_at, queued_at, id) WHERE ((status = 'pending'::text) AND (stage = ANY (ARRAY['queued'::text, 'waiting_device'::text])));
 
 
--- Name: uq_video_publish_one_running; Type: INDEX; Schema: publishing; Owner: -
+-- Name: uq_video_publish_confirm_once; Type: INDEX; Schema: publishing; Owner: -
 
-CREATE UNIQUE INDEX uq_video_publish_one_running ON publishing.video_publish_tasks USING btree ((1)) WHERE (status = 'running'::text);
+CREATE UNIQUE INDEX uq_video_publish_confirm_once ON publishing.video_publish_confirmations USING btree (task_id) WHERE ((action = 'confirm_published'::text) AND (to_status = 'succeeded'::text));
+
+
+-- Name: uq_video_publish_one_running_per_device; Type: INDEX; Schema: publishing; Owner: -
+
+CREATE UNIQUE INDEX uq_video_publish_one_running_per_device ON publishing.video_publish_tasks USING btree (target_device_serial) WHERE (status = 'running'::text);
 
 
 -- Name: uq_video_publish_task_active_attempt; Type: INDEX; Schema: publishing; Owner: -
@@ -4031,6 +4076,12 @@ ALTER TABLE ONLY procurement.spu_images
 
 ALTER TABLE ONLY procurement.spu_images
     ADD CONSTRAINT spu_images_uploaded_by_key_id_fkey FOREIGN KEY (uploaded_by_key_id) REFERENCES security.api_keys(id) ON DELETE SET NULL;
+
+
+-- Name: video_publish_confirmations fk_video_publish_confirmation_task_id; Type: FK CONSTRAINT; Schema: publishing; Owner: -
+
+ALTER TABLE ONLY publishing.video_publish_confirmations
+    ADD CONSTRAINT fk_video_publish_confirmation_task_id FOREIGN KEY (task_id) REFERENCES publishing.video_publish_tasks(id) ON DELETE RESTRICT;
 
 
 -- Name: video_publish_attempts video_publish_attempts_related_attempt_id_fkey; Type: FK CONSTRAINT; Schema: publishing; Owner: -
