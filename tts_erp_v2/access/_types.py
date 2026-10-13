@@ -40,6 +40,18 @@ class Role(StrEnum):
         }[self]
 
 
+class ApiKeyPurpose(StrEnum):
+    """Restricted use of ``security.api_keys`` (docs/monitor-config-sync.md §4.2).
+
+    ``GENERAL`` is the default for every pre-existing key and keeps whatever
+    access its ``role`` already grants. ``MONITOR_CONFIG`` is shop-bound: it may
+    only read that shop's monitor delivery, never the rest of the ERP.
+    """
+
+    GENERAL = "general"
+    MONITOR_CONFIG = "monitor_config"
+
+
 class AuthMode(StrEnum):
     OFF = "off"
     SHADOW = "shadow"
@@ -71,6 +83,8 @@ class Credential:
     key_hash: str
     role: Role
     scopes: tuple[str, ...] = ()
+    purpose: ApiKeyPurpose = ApiKeyPurpose.GENERAL
+    shop_pk: int | None = None  # only meaningful for MONITOR_CONFIG
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,9 +110,17 @@ class AccessGrant:
     role: Role | None = None
     key_hash: str | None = None
     scopes: tuple[str, ...] = ()
+    purpose: ApiKeyPurpose = ApiKeyPurpose.GENERAL
+    shop_pk: int | None = None  # shop binding for a MONITOR_CONFIG key
     auth_method: Literal["cookie", "bearer"] | None = None
     bypass: bool = False
     user: UserCredential | None = None  # 会话用户凭证（cookie 登录）；API key 为 None
+
+    @property
+    def is_shop_bound_monitor_key(self) -> bool:
+        """True for a credential that may only read one shop's monitor delivery."""
+
+        return self.purpose is ApiKeyPurpose.MONITOR_CONFIG and self.shop_pk is not None
 
     def allows(self, required: Role) -> bool:
         if self.bypass:

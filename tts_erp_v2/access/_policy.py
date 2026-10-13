@@ -57,6 +57,23 @@ _READONLY_EXACT = {
     "/v2/auth/change-password",
 }
 
+#: 插件读取店铺 monitor 配置的唯一路径（docs/monitor-config-sync.md §6.1）。
+#: 该路由的最低角色是 readonly，但真正的准入条件是 access 层要求的
+#: “绑定到单个 shop_pk 的 monitor_config 专用 key”，而非角色。
+MONITOR_CONFIG_DELIVERY_PATH = "/v2/monitor/config"
+
+
+def is_monitor_config_delivery_route(method: str, route_path: str) -> bool:
+    """True only for the shop-scoped monitor config read.
+
+    Phase A owns the classification only; the route handler arrives in Phase B.
+    """
+
+    return (
+        method.upper() == "GET"
+        and route_path.split("?", 1)[0] == MONITOR_CONFIG_DELIVERY_PATH
+    )
+
 
 def required_role(method: str, route_path: str) -> Role | None:
     """Return the minimum role for a route-relative path."""
@@ -89,6 +106,9 @@ def required_role(method: str, route_path: str) -> Role | None:
         return Role.READONLY
     if normalized_method == "POST" and path in _READWRITE_EXACT:
         return Role.READWRITE
+    if path == MONITOR_CONFIG_DELIVERY_PATH and normalized_method == "GET":
+        # 角色只是下限；用途/店铺绑定在 ``_access`` 层单独收紧。
+        return Role.READONLY
     if path.startswith(_READWRITE_PREFIXES):
         return Role.READWRITE
     if normalized_method == "POST" and path == "/v2/spu-images/upload-url":

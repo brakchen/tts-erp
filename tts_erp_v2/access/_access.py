@@ -8,12 +8,17 @@ from typing import Literal
 from anyio.to_thread import run_sync
 
 from tts_erp_v2.access._credentials import authenticate_key, hash_key
-from tts_erp_v2.access._policy import required_role
+from tts_erp_v2.access._policy import (
+    MONITOR_CONFIG_DELIVERY_PATH,
+    is_monitor_config_delivery_route,
+    required_role,
+)
 from tts_erp_v2.access._types import (
     AccessDecision,
     AccessEffect,
     AccessGrant,
     AccessRequest,
+    ApiKeyPurpose,
     AuthMode,
     Credential,
     UserCredential,
@@ -29,6 +34,10 @@ _MISSING_CREDENTIAL = (
 )
 _INVALID_CREDENTIAL = "invalid, disabled or expired api key"
 _STORE_UNAVAILABLE = "auth store unavailable"
+_MONITOR_KEY_REQUIRED = "requires a shop-bound monitor_config api key"
+_MONITOR_KEY_ROUTE_RESTRICTED = (
+    "monitor_config api key is limited to " + MONITOR_CONFIG_DELIVERY_PATH
+)
 
 
 def _grant(
@@ -39,15 +48,45 @@ def _grant(
     bypass: bool = False,
 ) -> AccessGrant:
     user = credential if isinstance(credential, UserCredential) else None
+    api_key = credential if isinstance(credential, Credential) else None
     return AccessGrant(
         mode=mode,
         role=credential.role if credential else None,
         key_hash=credential.key_hash if credential else None,
         scopes=credential.scopes if isinstance(credential, Credential) else (),
+        purpose=api_key.purpose if api_key else ApiKeyPurpose.GENERAL,
+        shop_pk=api_key.shop_pk if api_key else None,
         auth_method=auth_method,
         bypass=bypass,
         user=user,
     )
+
+
+def _purpose_denied(
+    request: AccessRequest,
+    credential: Credential | UserCredential | None,
+) -> str | None:
+    """Cross-route rejection for restricted api keys (docs §4.2 约束 2/4).
+
+    ``None`` means the credential is usable on this route.
+    """
+
+    api_key = credential if isinstance(credential, Credential) else None
+    is_monitor_key = (
+        api_key is not None and api_key.purpose is ApiKeyPurpose.MONITOR_CONFIG
+    )
+    if is_monitor_config_delivery_route(request.method, request.route_path):
+        # 只有绑定到单个 shop_pk 的 monitor key 才是下发授权；普通 key 与
+        # 浏览器登录 cookie 都不是（管理能力走独立管理接口）。
+        if api_key is not None and api_key.purpose is ApiKeyPurpose.MONITOR_CONFIG:
+            if api_key.shop_pk is None:
+                return _MONITOR_KEY_REQUIRED
+            return None
+        return _MONITOR_KEY_REQUIRED
+    if is_monitor_key:
+        # role=readonly 不得让 monitor key 读到 ERP 其他只读数据或管理接口。
+        return _MONITOR_KEY_ROUTE_RESTRICTED
+    return None
 
 
 async def evaluate_access(
@@ -58,7 +97,19 @@ async def evaluate_access(
     """Evaluate one canonical request and return a rendering-neutral decision."""
 
     needed = required_role(request.method, request.route_path)
+    monitor_delivery = is_monitor_config_delivery_route(
+        request.method, request.route_path
+    )
     if mode is AuthMode.OFF:
+        if monitor_delivery:
+            # 匿名放行不得成为释放店铺配置的通道（docs §4.2 约束 4）。
+            return AccessDecision(
+                effect=AccessEffect.DENY,
+                grant=_grant(mode, bypass=True),
+                required_role=needed,
+                status=403,
+                detail=_MONITOR_KEY_REQUIRED,
+            )
         return AccessDecision(
             effect=AccessEffect.ALLOW,
             grant=_grant(mode, bypass=True),
@@ -134,11 +185,26 @@ async def evaluate_access(
             denied_status = 403
             detail = f"requires {needed_page}"
 
+    purpose_detail = _purpose_denied(request, credential)
+    if denied_status is None and purpose_detail is not None:
+        denied_status = 403
+        detail = purpose_detail
+
     if denied_status is None:
         return AccessDecision(
             effect=AccessEffect.ALLOW,
             grant=grant,
             required_role=needed,
+        )
+    if purpose_detail is not None and mode is not AuthMode.ENFORCE:
+        # 受限下发边界不放宽：shadow 模式不得把拒绝降级为放行
+        # （docs/monitor-config-sync.md §4.2 约束 4）。
+        return AccessDecision(
+            effect=AccessEffect.DENY,
+            grant=grant,
+            required_role=needed,
+            status=403,
+            detail=purpose_detail,
         )
     if mode is AuthMode.SHADOW:
         return AccessDecision(

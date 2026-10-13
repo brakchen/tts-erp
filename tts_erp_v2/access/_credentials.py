@@ -7,7 +7,7 @@ import hmac
 import time
 from datetime import UTC, datetime
 
-from tts_erp_v2.access._types import Credential, Role
+from tts_erp_v2.access._types import ApiKeyPurpose, Credential, Role
 
 CACHE_TTL = 60.0
 NEG_CACHE_TTL = 20.0
@@ -21,6 +21,24 @@ def clear_credential_cache() -> None:
 
 def hash_key(plaintext: str) -> str:
     return hashlib.sha256(plaintext.encode()).hexdigest()
+
+
+def _purpose_of(purpose: str | None, shop_pk: int | None) -> ApiKeyPurpose | None:
+    """Return the key's restricted purpose, or None when it is not usable.
+
+    A ``monitor_config`` key without a shop binding could serve any shop, so it
+    is treated as no credential at all rather than degrading to a general key.
+    The 0070 CHECK constraint makes this unreachable in the database; this is
+    the second line of defence so the access owner never relies on it.
+    """
+
+    try:
+        parsed = ApiKeyPurpose(purpose or ApiKeyPurpose.GENERAL)
+    except ValueError:
+        return None
+    if parsed is ApiKeyPurpose.MONITOR_CONFIG and shop_pk is None:
+        return None
+    return parsed
 
 
 def _db_lookup(key_hash: str) -> Credential | None:
@@ -46,12 +64,17 @@ def _db_lookup(key_hash: str) -> Credential | None:
             role = Role(row.role)
         except ValueError:
             return None
+        purpose = _purpose_of(row.purpose, row.shop_pk)
+        if purpose is None:
+            return None
         try:
             row.last_used_at = datetime.now(UTC)
             session.commit()
         except Exception:  # noqa: BLE001 — last-used update is best-effort
             session.rollback()
-        return Credential(key_hash=key_hash, role=role)
+        return Credential(
+            key_hash=key_hash, role=role, purpose=purpose, shop_pk=row.shop_pk
+        )
 
 
 def authenticate_hash(key_hash: str) -> Credential | None:

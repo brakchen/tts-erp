@@ -478,6 +478,42 @@ CREATE TABLE IF NOT EXISTS config.enum_map (
 
 
 
+-- Name: monitor_config_deliveries; Type: TABLE; Schema: config; Owner: -
+
+CREATE TABLE IF NOT EXISTS config.monitor_config_deliveries (
+    id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
+    version bigint NOT NULL,
+    source_global_version bigint,
+    source_shop_version bigint,
+    schema_version integer NOT NULL,
+    content_hash text NOT NULL,
+    encrypted_payload bytea NOT NULL,
+    is_force boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by text NOT NULL,
+    request_id uuid,
+    request_digest text
+);
+
+
+
+ALTER TABLE config.monitor_config_deliveries ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME config.monitor_config_deliveries_id_seq
+);
+
+
+-- Name: monitor_shop_state; Type: TABLE; Schema: config; Owner: -
+
+CREATE TABLE IF NOT EXISTS config.monitor_shop_state (
+    shop_pk bigint NOT NULL,
+    current_delivery_version bigint,
+    last_force_version bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: runtime_config_items; Type: TABLE; Schema: config; Owner: -
 
 CREATE TABLE IF NOT EXISTS config.runtime_config_items (
@@ -1988,7 +2024,10 @@ CREATE TABLE IF NOT EXISTS security.api_keys (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_used_at timestamp with time zone,
     rotated_to_key_hash text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    purpose text DEFAULT 'general'::text NOT NULL,
+    shop_pk bigint,
+    CONSTRAINT ck_api_keys_purpose_shop_binding CHECK ((((purpose = 'monitor_config'::text) AND (shop_pk IS NOT NULL)) OR ((purpose <> 'monitor_config'::text) AND (shop_pk IS NULL))))
 );
 
 
@@ -2210,6 +2249,18 @@ ALTER TABLE ONLY config.enum_map
     ADD CONSTRAINT enum_map_pkey PRIMARY KEY (id);
 
 
+-- Name: monitor_config_deliveries monitor_config_deliveries_pkey; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_config_deliveries
+    ADD CONSTRAINT monitor_config_deliveries_pkey PRIMARY KEY (id);
+
+
+-- Name: monitor_shop_state monitor_shop_state_pkey; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_shop_state
+    ADD CONSTRAINT monitor_shop_state_pkey PRIMARY KEY (shop_pk);
+
+
 -- Name: runtime_config_items runtime_config_items_pkey; Type: CONSTRAINT; Schema: config; Owner: -
 
 ALTER TABLE ONLY config.runtime_config_items
@@ -2232,6 +2283,18 @@ ALTER TABLE ONLY config.runtime_config_secrets
 
 ALTER TABLE ONLY config.enum_map
     ADD CONSTRAINT uq_enum_map_type_value UNIQUE (enum_type, enum_value);
+
+
+-- Name: monitor_config_deliveries uq_monitor_config_deliveries_shop_request_id; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_config_deliveries
+    ADD CONSTRAINT uq_monitor_config_deliveries_shop_request_id UNIQUE (shop_pk, request_id);
+
+
+-- Name: monitor_config_deliveries uq_monitor_config_deliveries_shop_version; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_config_deliveries
+    ADD CONSTRAINT uq_monitor_config_deliveries_shop_version UNIQUE (shop_pk, version);
 
 
 -- Name: runtime_config_revisions uq_runtime_config_revision; Type: CONSTRAINT; Schema: config; Owner: -
@@ -2997,6 +3060,11 @@ CREATE INDEX IF NOT EXISTS ix_solpo_spu_capture ON commerce.sales_order_line_pri
 CREATE INDEX IF NOT EXISTS ix_enum_map_type ON config.enum_map USING btree (enum_type);
 
 
+-- Name: ix_monitor_config_deliveries_shop_force; Type: INDEX; Schema: config; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_monitor_config_deliveries_shop_force ON config.monitor_config_deliveries USING btree (shop_pk, is_force);
+
+
 -- Name: ix_runtime_config_items_active; Type: INDEX; Schema: config; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_runtime_config_items_active ON config.runtime_config_items USING btree (config_key) WHERE (retired_at IS NULL);
@@ -3437,6 +3505,11 @@ CREATE INDEX IF NOT EXISTS ix_shop_fee_rate_est_shop_calc_at ON reporting.shop_f
 CREATE INDEX IF NOT EXISTS ix_api_keys_role ON security.api_keys USING btree (role);
 
 
+-- Name: ix_api_keys_shop_pk; Type: INDEX; Schema: security; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_api_keys_shop_pk ON security.api_keys USING btree (shop_pk);
+
+
 -- Name: ix_user_sessions_active; Type: INDEX; Schema: security; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_user_sessions_active ON security.user_sessions USING btree (user_id, expires_at);
@@ -3874,6 +3947,18 @@ ALTER TABLE ONLY commerce.sales_orders
     ADD CONSTRAINT sales_orders_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
+-- Name: monitor_config_deliveries fk_monitor_config_deliveries_shop_pk; Type: FK CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_config_deliveries
+    ADD CONSTRAINT fk_monitor_config_deliveries_shop_pk FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
+-- Name: monitor_shop_state fk_monitor_shop_state_shop_pk; Type: FK CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_shop_state
+    ADD CONSTRAINT fk_monitor_shop_state_shop_pk FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
 -- Name: runtime_config_revisions runtime_config_revisions_config_key_fkey; Type: FK CONSTRAINT; Schema: config; Owner: -
 
 ALTER TABLE ONLY config.runtime_config_revisions
@@ -4124,6 +4209,12 @@ ALTER TABLE ONLY reporting.product_profit_daily
 
 ALTER TABLE ONLY reporting.shop_fee_rate_estimates
     ADD CONSTRAINT shop_fee_rate_estimates_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE CASCADE;
+
+
+-- Name: api_keys fk_api_keys_shop_pk; Type: FK CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.api_keys
+    ADD CONSTRAINT fk_api_keys_shop_pk FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
 
 
 -- Name: role_permissions role_permissions_permission_code_fkey; Type: FK CONSTRAINT; Schema: security; Owner: -

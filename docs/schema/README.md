@@ -7,7 +7,7 @@
 
 | 文件 | 是什么 |
 | --- | --- |
-| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：14 个业务 schema、74 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
+| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：14 个业务 schema、76 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
 | [`schema_storage.sql`](schema_storage.sql) | `procurement.spu_images`（SPU 图片元数据）的补丁式幂等 DDL，不走 ORM；测试在 `tests/api/conftest.py` 会用到它描述的表 |
 
 ## 2. 维护规则（怎么保持"是现在的数据结构"）
@@ -19,7 +19,7 @@
    ```
    `scripts/regen_schema.py` 只读不写库；它剥掉序列/`\restrict` 等噪音、给
    `CREATE TABLE`/`CREATE FUNCTION` 加 `IF NOT EXISTS`，使快照可重复执行。
-2. **生成源必须在当前 alembic head**（当前 head：`0069_video_publish_confirmation`）：
+2. **生成源必须在当前 alembic head**（当前 head：`0070_monitor_config_delivery`）：
    ```bash
    docker exec postgres psql -U postgres -tAc "SELECT version_num FROM alembic_version" -d tts_erp_test_template
    ```
@@ -30,7 +30,7 @@
 4. 历史漂移教训（2026-08-25）：手维护的 schema.sql 曾漏 7 张表、列名写错，
    healthz/sync/db 三处互相矛盾——**只有"生成 + 同步"这条路是可靠的**。
 
-## 3. 数据结构索引（截至 migration 0069）
+## 3. 数据结构索引（截至 migration 0070）
 
 领域模型与表间关系见 [`docs/architecture/data-model-target-v3.md`](../architecture/data-model-target-v3.md)；
 「业务概念 ↔ 物理表字段」映射见 [`docs/business/spu-profitability.md`](../business/spu-profitability.md) 附录 A；
@@ -89,9 +89,12 @@
 `credentials / tiktok_app_credentials / oauth_states`（凭证，只经 `tts_erp_v2.proxy.token_service`）、
 `sync_jobs / sync_cursors / sync_issues`（同步任务/游标/异常）、`raw_records`（原始报文留证）。
 
-### config —— 运行配置（4 表）
+### config —— 运行配置（6 表）
 `enum_map`（枚举翻译）、`runtime_config_items / runtime_config_revisions / runtime_config_secrets`
 （运行配置下发，见 [`docs/ops/runtime-config-management.md`](../ops/runtime-config-management.md)）。
+`monitor_shop_state`（每店交付版本指针与发布行锁锚点）、`monitor_config_deliveries`
+（发布时冻结的不可变店铺配置快照，`(shop_pk, version)` 唯一；明文只经
+`token_service` 加解密）——见 [`docs/monitor-config-sync.md`](../monitor-config-sync.md) §5.2。
 
 ### security —— 访问控制（7 表）
 `api_keys`、`users / roles / permissions / role_permissions / user_roles / user_sessions`
