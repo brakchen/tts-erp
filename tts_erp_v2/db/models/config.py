@@ -47,7 +47,14 @@ class EnumMap(Base):
 
 
 class RuntimeConfigItem(Base):
-    """One versioned runtime configuration key and its mutable draft."""
+    """One versioned runtime configuration key and its mutable draft.
+
+    ``draft_rollout`` is a retired column kept only to hold historical data.
+    Generic rollout is no longer a capability: no application code reads or
+    writes rollout rules, and the column exists solely because the legacy
+    ``NOT NULL DEFAULT '[]'`` definition is still in the database and is left
+    untouched pending an explicit production audit.
+    """
 
     __tablename__ = "runtime_config_items"
     __table_args__ = ({"schema": "config"},)
@@ -70,7 +77,12 @@ class RuntimeConfigItem(Base):
 
 
 class RuntimeConfigRevision(Base):
-    """Immutable published payload for a runtime configuration key."""
+    """Immutable published payload for a runtime configuration key.
+
+    ``rollout`` is retained for the same data-retention reason as
+    ``RuntimeConfigItem.draft_rollout``: published rules stay readable as
+    history but are never evaluated, and new revisions always store ``[]``.
+    """
 
     __tablename__ = "runtime_config_revisions"
     __table_args__ = (

@@ -337,20 +337,23 @@ curl -sS -H "X-API-Key: $TTS_ERP_RO_KEY" \
 ### Runtime configuration (`/v2/config/runtime/*`)
 
 Versioned JSON configuration with draft/publish/rollback and encrypted
-`secret://` references. Full lifecycle and resolver contract:
+`secret://` references. Full lifecycle contract:
 [`runtime-config-management.md`](../ops/runtime-config-management.md).
+Generic rollout is retired: no rollout/subject inputs or outputs, and the
+snapshot returns each active published default payload/version. Retained
+rollout columns keep their historical data and are not migrated or dropped.
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/config/runtime/items` | readwrite | Active published-state list only; never returns drafts or secret values. `?includeRetired=true` includes archived metadata. |
 | `POST /v2/config/runtime/items` | readwrite | Creates a key, immutable JSON Schema and optional initial draft. |
 | `GET /v2/config/runtime/items/{config_key}` | readwrite | Editor detail including draft and published reference payloads. |
-| `PUT /v2/config/runtime/items/{config_key}/draft` | readwrite | Optimistic draft save; body contains `expectedDraftVersion`, `payload`, `rollout`. |
-| `POST /v2/config/runtime/items/{config_key}/publish` | readwrite | Publishes the current draft as a higher immutable version. |
+| `PUT /v2/config/runtime/items/{config_key}/draft` | readwrite | Optimistic draft save; body contains `expectedDraftVersion` and `payload`. |
+| `POST /v2/config/runtime/items/{config_key}/publish` | readwrite | Publishes the current draft as a higher immutable version. Reference validation locks the referenced secrets so it serializes with secret retirement. |
 | `GET /v2/config/runtime/items/{config_key}/revisions` | readwrite | Revision history. |
 | `POST /v2/config/runtime/items/{config_key}/rollback` | readwrite | Republishes a historical revision as a higher version. |
-| `POST /v2/config/runtime/items/{config_key}/{retire,restore}` | readwrite | Soft-retire or restore a key. Retired keys are absent from snapshots and cannot be edited/published. |
-| `GET /v2/config/runtime/snapshot` | readwrite | Published, rollout-selected values with ETag; secret references stay redacted. |
+| `POST /v2/config/runtime/items/{config_key}/{retire,restore}` | readwrite | Soft-retire or restore a key. Retired keys are absent from snapshots and cannot be edited/published. Restore is refused with `409` while the published payload references a secret that is retired or missing. |
+| `GET /v2/config/runtime/snapshot` | readwrite | Each active published default payload/version with ETag; no `subject` or `rolloutRuleIndex`, and secret references stay redacted. |
 | `GET /v2/config/runtime/secrets`, `PUT /v2/config/runtime/secrets/{name}` | readwrite | Fingerprint/reference metadata and encrypted write only; no secret plaintext read endpoint. `?includeRetired=true` includes archived metadata. |
 | `POST /v2/config/runtime/secrets/{name}/{retire,restore}` | readwrite | Soft-retire or restore a secret. Retirement is refused while an active config or draft references it. |
 
@@ -364,7 +367,7 @@ Versioned JSON configuration with draft/publish/rollback and encrypted
 | `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。使用相同盈利汇总、表格、分页和钻取；`/static/js/focused-spus.js` 提供持久 selection adapter 与编辑器。 |
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
 | `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理页。读取 `/v2/sync/jobs`；readwrite 会话可调用 `/v2/admin/sync-jobs/{job_name}/trigger` 立即提交后台执行；admin 会话还可调用 `/v2/admin/sync-jobs/{job_name}/enabled` 启停周期 tick。 |
-| `GET /v2/pages/runtime-configs` | readwrite | 运行配置台：创建草稿、发布/恢复版本、管理灰度规则及加密 secret 引用。 |
+| `GET /v2/pages/runtime-configs` | readwrite | 运行配置台：创建草稿、发布/恢复版本及加密 secret 引用。 |
 | `GET /v2/pages/users` | admin + `page:users` | 用户管理页（用户 / 角色权限两页签），仅 `page:users` 权限点持有者可见可用；侧边栏入口同样按权限过滤。无权限 → 403 页面。 |
 
 ### User & role management (`/v2/users/*`, `/v2/roles/*`)
@@ -541,7 +544,7 @@ ROI / 净利润 / 消耗是 Decimal wire string，统一两位小数（ROUND_HAL
 **消费方约定**：页面与任何客户端读 `enabled` / `maturityDays` 时一律用 `effectiveConfig` 的顶层字段，
 不要从 `thresholds` 里取（`thresholds.enabled` / `thresholds.maturityDays` 只是同一份 payload 的重复投影，
 不作为契约保证）。
-它只由 published revision 生成，**绝不包含** draft payload、rollout sidecar、secret reference 或明文 secret；
+它只由 published revision 生成，**绝不包含** draft payload、secret reference 或明文 secret；
 `meta.config` 仅为 key/source/version/audit/validation 的 summary metadata，不是抽屉数据源。
 readonly 会话不访问 `/v2/config/runtime/items` 或 `/v2/config/runtime/snapshot`（那些是 readwrite 档）。
 
@@ -562,8 +565,9 @@ Seed fallback 与全局 key 规则：
   唯一权威；没有已发布版本时 resolver 回退到代码内 seed，API 返回 `source=seed_fallback` 且
   `provisionalLabel` 为字面量 `回测暂定`，页面横幅、每行/卡片与抽屉都显示该标签。旧 published revision 读取失败时
   fail closed（503），不静默切 seed。
-- 该 global key 不支持 rollout：payload 内出现 `rollout`/`draftRollout`、或非空的 sidecar `rollout`/`draftRollout`
-  都会被拒绝（`validate_spu_deterioration_alert_runtime_mutation`）；其它 runtime key 的 generic rollout 行为不变。
+- 该 global key 一直不支持 rollout：payload 内出现 `rollout`/`draftRollout` 会被拒绝。通用 rollout 能力现已整体退役，
+  `PUT .../draft` 请求里的 `rollout` 字段不再被接受或求值；保留的历史 revision 若带非空 rollout sidecar，
+  仍会被 `validate_spu_deterioration_alert_runtime_mutation` 拒绝（fail closed），不会被当成生效行为。
 - 抽屉的草稿/发布仍走本文《Runtime configuration》的 `PUT .../draft`、`POST .../publish`：`409` 表示草稿版本冲突
   （重新加载后再保存/发布），`422` 返回字段级校验错误（页面在对应字段旁显示，不只 toast）。
 

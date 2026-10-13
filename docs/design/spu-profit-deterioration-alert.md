@@ -36,7 +36,7 @@
 
 - 领域公式：`tts_erp_v2/analytics/spu_profitability/_formula_v10.py` 的纯 `calculate()` 和类型结构；不重新实现盈利公式。
 - 查询/快照：`analytics/spu_profitability/_implementation.py` 和 `_snapshot.py`；告警实现应从此 seam 获取事实，不能直接从 HTTP adapter 拼 SQL。
-- 配置：`db/models/config.py`、`runtime_config/resolver.py`、`runtime_config/validation.py`、`runtime_config/repository.py`、`api/v2/config.py` 及 `runtime-configs.html/js`；不新增配置库或依赖。告警 key 使用唯一 per-key seam `validate_spu_deterioration_alert_runtime_mutation(...)`，generic rollout 行为保持不变。
+- 配置：`db/models/config.py`、`runtime_config/`、`api/v2/config.py` 及 `runtime-configs.html/js`；不新增配置库或依赖。告警 key 使用唯一 per-key seam `validate_spu_deterioration_alert_runtime_mutation(...)`。通用灰度（generic rollout）已整体退役：`runtime_config/resolver.py` 的 `resolve_runtime_config()`/`select_payload()` 与灰度输入输出均已删除，配置中心只下发版本化的已发布默认 payload；历史 `draft_rollout`/`rollout` 列保留但不迁移、不求值。
 - 调度：`sync_worker/scheduler.py` 的 `JobSpec`、系统 job 和 catch-up 语义；告警 job 复用此平台。projection-window 已合并到 master（merge commit `75e2370`），其 lane 已由 master commit `6c29f46` 清理，不再是 active/blocking dependency；实现前按 §3.2 重新同步 master 并检查当前 active owner。
 - 页面/API 测试：`tests/api/test_spu_roi_api.py`、`tests/api/test_runtime_config.py`、`tests/sync_worker/test_scheduler_jobs_coverage.py`、现有 browser/E2E smoke 模式。
 - 外部生态：没有需要引入的阈值/统计依赖；Decimal、标准库 dataclass 和已有 SQLAlchemy/pytest 足够。新增依赖没有收益，故不加。
@@ -224,7 +224,7 @@ projection-window 已合并到 master（merge commit `75e2370`），其 lane 已
 
 - `enabled`：是否生成/展示告警；false 时 API 返回 disabled meta，旧 snapshot 只读。seed fallback 的整个 payload 和设置 drawer 均显示 literal `回测暂定`。
 - `maturityDays`：确认层平移天数，初始固定 7；v1 只允许 7，不能让用户破坏业务窗口。
-- rollout 是 runtime-config sidecar，不是 alert payload 字段；此 global key 的 per-key seam `validate_spu_deterioration_alert_runtime_mutation(...)` 必须拒绝 payload 内的 `rollout`/`draftRollout`，以及非空 sidecar `rollout`/`draftRollout`。generic rollout 仍对其他 runtime keys 可用；本 key 不支持 shop、SPU 或 cohort 定向生效。materialization 与 readonly API 都解析同一份 global published payload/revision，不得创建第二个 owner。
+- rollout 是 runtime-config sidecar，不是 alert payload 字段；此 global key 的 per-key seam `validate_spu_deterioration_alert_runtime_mutation(...)` 必须拒绝 payload 内的 `rollout`/`draftRollout`，以及非空 sidecar `rollout`/`draftRollout`（保留的历史 revision 走该读取侧 fail closed 护栏）。通用灰度已整体退役：没有任何 runtime key 提供 `subject` 分桶生效，配置中心只分发版本化的已发布默认 payload；本 key 同样不支持 shop、SPU 或 cohort 定向生效。materialization 与 readonly API 都解析同一份 global published payload/revision，不得创建第二个 owner。
 - `fast`/`confirmation`：两个计算层；键 `1|3|7` 是 windowDays。
 - `warning`/`critical`：独立严重级别门槛；`roiAbsDelta` 是 ROI 绝对差，`roiRelativeDecline` 与 `netProfitDecline` 为 0..1 比例；`minSpendCny` 非负金额；`minOrders`/`minAdOrders` 非负整数。critical 不从 warning 推导：必须同时满足 critical gates、critical ROI threshold 和 critical business-impact threshold；state transition 先产生 warning，只有数值 critical 条件也成立才升级 critical。
 - `source` 不写入 payload，由 resolver/物化结果提供 `runtime_config|seed_fallback`；`version` 是 published revision；`updatedAt/updatedBy` 来自 revision audit。
@@ -233,7 +233,7 @@ Validation ranges：`maturityDays=7`；rollout sidecar 对本 key 必须为空�
 
 ### 4.2 Existing platform behavior
 
-使用现有 `/v2/config/runtime/items` 的 create、draft optimistic lock、publish、revisions、rollback、runtime snapshot；不加第二套保存 API。对 key `analytics.spu_profit_deterioration_alert.v1`，create、`PUT .../draft`、`POST .../publish`、`POST .../rollback`/history republish 全部在 generic schema validation 后调用同一个 `validate_spu_deterioration_alert_runtime_mutation(...)`；该 seam 只拒绝本 key 的非空 sidecar rollout/draftRollout 或 payload rollout 字段，不改变其他 key 的 generic rollout 支持。初次 seed 由受控 migration/seed 创建 draft 并由运维发布；生产 migration 不由 agent 执行。该 global key 的 published payload 是 materialization 和 readonly API 的唯一 authority；两者必须使用相同 revision/payload hash，禁止 per-shop rollout 或第二 owner。
+使用现有 `/v2/config/runtime/items` 的 create、draft optimistic lock、publish、revisions、rollback、runtime snapshot；不加第二套保存 API。对 key `analytics.spu_profit_deterioration_alert.v1`，create、`PUT .../draft`、`POST .../publish`、`POST .../rollback`/history republish 全部在 generic schema validation 后调用同一个 `validate_spu_deterioration_alert_runtime_mutation(...)`；该 seam 只拒绝本 key 的非空 sidecar rollout/draftRollout 或 payload rollout 字段；create/draft 请求体已不接受 `rollout` 字段（残留输入返回 `422`），通用灰度能力整体退役，本仓库不为此新增迁移或删除历史列。初次 seed 由受控 migration/seed 创建 draft 并由运维发布；生产 migration 不由 agent 执行。该 global key 的 published payload 是 materialization 和 readonly API 的唯一 authority；两者必须使用相同 revision/payload hash，禁止 per-shop rollout 或第二 owner。
 
 页面右上角标题栏“阈值设置”按钮打开 drawer：
 
@@ -304,7 +304,7 @@ Field/enum semantics：
 
 ### 5.2 Settings/effective endpoint
 
-runtime-config sidecar 的 `rollout`/`draftRollout` 只存在 mutation/history wire contract，不进入 alert payload 或 readonly `effectiveConfig`。readonly 不能读取 `/v2/config/runtime/items` 或 `/v2/config/runtime/snapshot`；告警主响应中的 `meta.effectiveConfig` 是专门的 readonly-safe effective projection，也是 drawer 的数据源。它不暴露 draft、rollout payload、secret reference 或明文 secret。readwrite/admin 的保存仍走现有 runtime config draft/publish endpoints。
+runtime-config sidecar 的 `rollout`/`draftRollout` 只作为历史留存数据存在：mutation wire contract 已不再接受这些字段，它们不进入 alert payload 或 readonly `effectiveConfig`。readonly 不能读取 `/v2/config/runtime/items` 或 `/v2/config/runtime/snapshot`；告警主响应中的 `meta.effectiveConfig` 是专门的 readonly-safe effective projection，也是 drawer 的数据源。它不暴露 draft、rollout payload、secret reference 或明文 secret。readwrite/admin 的保存仍走现有 runtime config draft/publish endpoints。
 
 页面不要求 readonly 用户访问现有 readwrite-only runtime item endpoints。主 endpoint 的 `meta.effectiveConfig` 是 drawer 唯一数据源，也是唯一 readonly-safe complete projection：它提供 `source`、`version`、`updatedAt`、`updatedBy`、`validation`、完整 effective threshold payload、`provisionalLabel` 和仅包含可展示字段的 `drawer`；只从 published revision 生成，绝不包含 draft、rollout sidecar、secret reference 或解密 secret。`meta.config` 若保留，仅是 key/source/version/audit/validation summary metadata，绝不作为 drawer payload。readwrite/admin 仍可从 drawer 链接至运行配置页面进行 draft/publish；readonly drawer 全部 disabled。
 

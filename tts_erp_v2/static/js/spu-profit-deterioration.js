@@ -1178,7 +1178,7 @@
     try {
       const detail = await api(DRAFT_PATH, {
         method: 'PUT',
-        body: JSON.stringify({ expectedDraftVersion: state.draftVersion, payload, rollout: [] }),
+        body: JSON.stringify({ expectedDraftVersion: state.draftVersion, payload }),
       });
       applyConfigDetail(detail);
       setFormStatus(`已保存草稿（draftVersion=${state.draftVersion}）；发布后才会成为运行时权威。`, 'ok');

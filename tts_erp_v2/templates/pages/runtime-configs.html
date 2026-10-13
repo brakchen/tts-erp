@@ -20,7 +20,7 @@
       <div>
         <div class="rc-eyebrow">CONTROL PLANE / VERSIONED JSON</div>
         <h1>运行配置</h1>
-        <p>先保存草稿，再发布不可变版本；灰度规则按稳定桶位生效。凭证只以 <code>secret://</code> 引用出现。</p>
+        <p>先保存草稿，再发布不可变版本。凭证只以 <code>secret://</code> 引用出现。</p>
       </div>
       <span class="rc-status" id="rc-version">选择一项配置</span>
     </header>
@@ -38,7 +38,6 @@
             <div class="rc-field"><label for="rc-name">名称</label><input id="rc-name"></div>
             <div class="rc-field wide"><label for="rc-schema">Schema（发布后不可修改）</label><textarea id="rc-schema"></textarea></div>
             <div class="rc-field wide"><label for="rc-payload">草稿配置</label><textarea id="rc-payload"></textarea></div>
-            <div class="rc-field wide"><label for="rc-rollout">灰度规则</label><textarea id="rc-rollout">[]</textarea><p class="rc-help">规则按顺序命中：<code>{"basisPoints": 500, "payload": {...}}</code> 表示稳定桶位前 5%。</p></div>
             <div class="rc-field wide"><label for="rc-comment">发布说明</label><input id="rc-comment" maxlength="2000"></div>
           </div>
           <div class="rc-actions"><button class="rc-button secondary" type="button" id="rc-save">保存草稿</button><button class="rc-button" type="button" id="rc-publish">发布新版本</button></div>
