@@ -101,7 +101,7 @@
 
   async function installJsonEditors() {
     const JSONEditor = await loadJsonEditor();
-    const editors = ["rc-schema", "rc-payload", "rc-rollout", "rc-new-schema", "rc-new-payload"];
+    const editors = ["rc-schema", "rc-payload", "rc-new-schema", "rc-new-payload"];
     for (const id of editors) {
       const textarea = document.getElementById(id);
       if (!textarea || state.jsonEditors.has(id)) continue;
@@ -184,10 +184,9 @@
       $("#rc-name").value = item.displayName;
       setJsonEditorText("rc-schema", "只读会话不显示 Schema");
       setJsonEditorText("rc-payload", pretty(published.payload));
-      setJsonEditorText("rc-rollout", "只读会话不显示灰度规则");
       $("#rc-version").textContent = `已发布 v${published.version}`;
       ["#rc-key", "#rc-name"].forEach((selector) => { $(selector).readOnly = true; });
-      ["rc-schema", "rc-payload", "rc-rollout"].forEach((id) => setJsonEditorReadOnly(id, true));
+      ["rc-schema", "rc-payload"].forEach((id) => setJsonEditorReadOnly(id, true));
       [...document.querySelectorAll("#rc-editor button")].forEach((button) => { button.disabled = true; });
       document.querySelectorAll(".rc-item").forEach((button) => {
         button.classList.toggle("active", button.textContent.includes(item.configKey));
@@ -208,13 +207,11 @@
       $("#rc-name").value = item.displayName;
       setJsonEditorText("rc-schema", pretty(item.jsonSchema));
       setJsonEditorText("rc-payload", pretty(item.draftPayload ?? item.publishedPayload ?? {}));
-      setJsonEditorText("rc-rollout", pretty(item.draftPayload ? item.draftRollout : item.publishedRollout));
       $("#rc-version").textContent = item.publishedVersion ? `已发布 v${item.publishedVersion}` : "尚未发布";
       $("#rc-key").readOnly = true;
       $("#rc-name").readOnly = true;
       setJsonEditorReadOnly("rc-schema", true);
       setJsonEditorReadOnly("rc-payload", false);
-      setJsonEditorReadOnly("rc-rollout", false);
       [...document.querySelectorAll("#rc-editor button")].forEach((button) => { button.disabled = !state.writable; });
       await loadHistory();
       document.querySelectorAll(".rc-item").forEach((button) => {
@@ -244,10 +241,9 @@
     if (!state.item) return;
     try {
       const payload = parseJson("#rc-payload", "配置内容");
-      const rollout = parseJson("#rc-rollout", "灰度规则");
       const item = await api(`/items/${encodeURIComponent(state.item.configKey)}/draft`, {
         method: "PUT",
-        body: JSON.stringify({ expectedDraftVersion: state.item.draftVersion, payload, rollout }),
+        body: JSON.stringify({ expectedDraftVersion: state.item.draftVersion, payload }),
       });
       state.item = item;
       await loadItems(item.configKey);

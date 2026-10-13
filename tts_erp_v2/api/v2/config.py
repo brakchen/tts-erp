@@ -10,7 +10,6 @@ DELETE /v2/config/enum-map/{id} — 删除单条映射（admin）
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
@@ -31,18 +30,17 @@ from tts_erp_v2.db.models.config import (
 )
 from tts_erp_v2.runtime_config.repository import (
     RetiredSecretError,
+    lock_referenced_secrets,
     locked_item,
     publish,
     published_revision,
     secret_is_referenced_by_active_config,
     upsert_secret,
 )
-from tts_erp_v2.runtime_config.resolver import select_payload
 from tts_erp_v2.runtime_config.validation import (
     ConfigValidationError,
     infer_schema,
     validate_payload,
-    validate_rollout,
     validate_schema,
     validate_spu_deterioration_alert_runtime_mutation,
 )
@@ -194,11 +192,17 @@ class _RuntimeWireModel(BaseModel):
 
 
 class RuntimeConfigCreate(_RuntimeWireModel):
-    config_key: str = Field(alias="configKey", min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.-]*$")
+    # ``extra="forbid"`` is scoped to the two payload-bearing write models only.
+    # It is what turns a retired ``draftRollout``/``rollout`` field into an
+    # explicit 422 instead of a silently dropped input.
+    model_config = ConfigDict(extra="forbid")
+
+    config_key: str = Field(
+        alias="configKey", min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.-]*$"
+    )
     display_name: str = Field(alias="displayName", min_length=1, max_length=256)
     json_schema: dict[str, Any] | None = Field(default=None, alias="jsonSchema")
     draft_payload: dict[str, Any] | None = Field(default=None, alias="draftPayload")
-    draft_rollout: list[dict[str, Any]] = Field(default_factory=list, alias="draftRollout")
 
 
 class RuntimeSchemaPreview(_RuntimeWireModel):
@@ -206,9 +210,10 @@ class RuntimeSchemaPreview(_RuntimeWireModel):
 
 
 class RuntimeDraftUpdate(_RuntimeWireModel):
+    model_config = ConfigDict(extra="forbid")
+
     expected_draft_version: int = Field(alias="expectedDraftVersion", ge=0)
     payload: dict[str, Any]
-    rollout: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RuntimePublish(_RuntimeWireModel):
@@ -245,13 +250,17 @@ def _active_runtime_item_or_409(sess: Session, config_key: str) -> RuntimeConfig
     if item is None:
         raise HTTPException(status_code=404, detail="runtime config not found")
     if item.retired_at is not None:
-        raise HTTPException(status_code=409, detail="runtime config is retired; restore it first")
+        raise HTTPException(
+            status_code=409, detail="runtime config is retired; restore it first"
+        )
     return item
 
 
 def _validate_secret_name(name: str) -> None:
-    if not name or len(name) > 128 or any(
-        char not in "abcdefghijklmnopqrstuvwxyz0123456789_.-" for char in name
+    if (
+        not name
+        or len(name) > 128
+        or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789_.-" for char in name)
     ):
         raise HTTPException(
             status_code=422,
@@ -278,14 +287,14 @@ def _detail_out(sess: Session, item: RuntimeConfigItem) -> dict[str, Any]:
         **_published_out(sess, item),
         "jsonSchema": item.json_schema,
         "draftPayload": item.draft_payload,
-        "draftRollout": item.draft_rollout,
         "draftVersion": item.draft_version,
         "publishedPayload": revision.payload if revision else None,
-        "publishedRollout": revision.rollout if revision else [],
     }
 
 
-def _validation_error(exc: ConfigValidationError | KeyError | ValueError) -> HTTPException:
+def _validation_error(
+    exc: ConfigValidationError | KeyError | ValueError,
+) -> HTTPException:
     return HTTPException(status_code=422, detail=str(exc))
 
 
@@ -333,18 +342,17 @@ def create_runtime_config_item(
     try:
         if body.json_schema is None:
             if body.draft_payload is None:
-                raise ConfigValidationError("draftPayload is required when jsonSchema is omitted")
+                raise ConfigValidationError(
+                    "draftPayload is required when jsonSchema is omitted"
+                )
             json_schema = infer_schema(body.draft_payload)
         else:
             json_schema = body.json_schema
         validate_schema(json_schema)
         if body.draft_payload is not None:
             validate_payload(body.draft_payload, json_schema)
-            body.draft_rollout = validate_rollout(body.draft_rollout, json_schema)
-        elif body.draft_rollout:
-            raise ConfigValidationError("draftRollout requires draftPayload")
         validate_spu_deterioration_alert_runtime_mutation(
-            body.config_key, payload=body.draft_payload, draft_rollout=body.draft_rollout
+            body.config_key, payload=body.draft_payload
         )
     except ConfigValidationError as exc:
         raise _validation_error(exc) from exc
@@ -353,7 +361,6 @@ def create_runtime_config_item(
         display_name=body.display_name,
         json_schema=json_schema,
         draft_payload=body.draft_payload,
-        draft_rollout=body.draft_rollout,
         draft_version=1 if body.draft_payload is not None else 0,
     )
     sess.add(item)
@@ -361,7 +368,9 @@ def create_runtime_config_item(
         sess.commit()
     except IntegrityError as exc:
         sess.rollback()
-        raise HTTPException(status_code=409, detail="runtime config key already exists") from exc
+        raise HTTPException(
+            status_code=409, detail="runtime config key already exists"
+        ) from exc
     return _detail_out(sess, item)
 
 
@@ -385,17 +394,17 @@ def save_runtime_config_draft(
     require_role_at_least(request, "readwrite")
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
-        raise HTTPException(status_code=409, detail="draft version conflict; reload before saving")
+        raise HTTPException(
+            status_code=409, detail="draft version conflict; reload before saving"
+        )
     try:
         validate_payload(body.payload, item.json_schema)
-        rollout = validate_rollout(body.rollout, item.json_schema)
         validate_spu_deterioration_alert_runtime_mutation(
-            config_key, payload=body.payload, rollout=rollout
+            config_key, payload=body.payload
         )
     except ConfigValidationError as exc:
         raise _validation_error(exc) from exc
     item.draft_payload = body.payload
-    item.draft_rollout = rollout
     item.draft_version += 1
     sess.commit()
     return _detail_out(sess, item)
@@ -411,15 +420,18 @@ def publish_runtime_config_item(
     require_role_at_least(request, "readwrite")
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
-        raise HTTPException(status_code=409, detail="draft version conflict; reload before publishing")
+        raise HTTPException(
+            status_code=409, detail="draft version conflict; reload before publishing"
+        )
     if item.draft_payload is None:
-        raise HTTPException(status_code=422, detail="a draft payload is required before publishing")
+        raise HTTPException(
+            status_code=422, detail="a draft payload is required before publishing"
+        )
     try:
         revision = publish(
             sess,
             item=item,
             payload=item.draft_payload,
-            rollout=item.draft_rollout,
             comment=body.comment,
             actor=_runtime_actor(request),
         )
@@ -447,7 +459,6 @@ def list_runtime_config_revisions(
             {
                 "version": row.version,
                 "payload": row.payload,
-                "rollout": row.rollout,
                 "comment": row.comment,
                 "createdBy": row.created_by,
                 "createdAt": row.created_at.isoformat(),
@@ -468,7 +479,9 @@ def rollback_runtime_config_item(
     require_role_at_least(request, "readwrite")
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
-        raise HTTPException(status_code=409, detail="draft version conflict; reload before rolling back")
+        raise HTTPException(
+            status_code=409, detail="draft version conflict; reload before rolling back"
+        )
     target = sess.execute(
         select(RuntimeConfigRevision).where(
             RuntimeConfigRevision.config_key == config_key,
@@ -478,18 +491,26 @@ def rollback_runtime_config_item(
     if target is None:
         raise HTTPException(status_code=404, detail="runtime config revision not found")
     try:
+        # A revision may predate the rollout retirement, so validate the stored
+        # sidecar too: retained rollout data must never become active behavior.
+        validate_spu_deterioration_alert_runtime_mutation(
+            config_key, payload=target.payload, rollout=target.rollout
+        )
         revision = publish(
             sess,
             item=item,
             payload=target.payload,
-            rollout=target.rollout,
             comment=body.comment or f"rollback to version {target.version}",
             actor=_runtime_actor(request),
         )
     except (ConfigValidationError, KeyError) as exc:
         raise _validation_error(exc) from exc
     sess.commit()
-    return {"configKey": config_key, "publishedVersion": revision.version, "rolledBackFrom": target.version}
+    return {
+        "configKey": config_key,
+        "publishedVersion": revision.version,
+        "rolledBackFrom": target.version,
+    }
 
 
 @router.post("/runtime/items/{config_key}/retire")
@@ -520,6 +541,18 @@ def restore_runtime_config_item(
     item = locked_item(sess, config_key)
     if item is None:
         raise HTTPException(status_code=404, detail="runtime config not found")
+    revision = published_revision(sess, item)
+    if revision is not None:
+        missing = lock_referenced_secrets(sess, revision.payload)
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "published payload references secrets that are retired or "
+                    f"missing: {names}; restore them first"
+                ),
+            )
     item.retired_at = None
     item.retired_by = None
     sess.commit()
@@ -529,15 +562,12 @@ def restore_runtime_config_item(
 @router.get("/runtime/snapshot")
 def runtime_config_snapshot(
     request: Request,
-    subject: str | None = Query(default=None, max_length=256),
     sess: Session = Depends(get_session),
 ) -> Response:
-    """Return published configs with deterministic rollout selection and ETag caching.
+    """Return each active published default payload/version with ETag caching.
 
-    Secret references remain references here; only in-process resolver callers
-    may decrypt values.
+    Secret references stay references here: no HTTP route ever decrypts them.
     """
-    salt = os.environ.get("TTS_ERP_RUNTIME_CONFIG_SALT", "tts-erp-runtime-config-v1")
     items = sess.execute(
         select(RuntimeConfigItem)
         .where(
@@ -551,21 +581,21 @@ def runtime_config_snapshot(
     for item in items:
         revision = published_revision(sess, item)
         assert revision is not None
-        payload, rule_index = select_payload(
-            revision.payload,
-            revision.rollout,
-            rollout_salt=salt,
-            config_key=item.config_key,
-            subject=subject,
-        )
-        values[item.config_key] = {"version": revision.version, "payload": payload, "rolloutRuleIndex": rule_index}
+        values[item.config_key] = {
+            "version": revision.version,
+            "payload": revision.payload,
+        }
         versions[item.config_key] = revision.version
-    etag_material = {"subject": subject, "versions": versions}
-    etag = '"' + sha256(json.dumps(etag_material, sort_keys=True).encode()).hexdigest() + '"'
+    etag_material = {"versions": versions}
+    etag = (
+        '"'
+        + sha256(json.dumps(etag_material, sort_keys=True).encode()).hexdigest()
+        + '"'
+    )
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag})
     return JSONResponse(
-        content={"items": values, "subject": subject},
+        content={"items": values},
         headers={"ETag": etag, "Cache-Control": "private, max-age=60"},
     )
 
@@ -610,7 +640,11 @@ def save_runtime_config_secret(
     except RetiredSecretError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     sess.commit()
-    return {"name": row.name, "ref": f"secret://{row.name}", "fingerprint": row.fingerprint}
+    return {
+        "name": row.name,
+        "ref": f"secret://{row.name}",
+        "fingerprint": row.fingerprint,
+    }
 
 
 @router.post("/runtime/secrets/{name}/retire")
@@ -630,7 +664,9 @@ def retire_runtime_config_secret(
     if row is None:
         raise HTTPException(status_code=404, detail="runtime config secret not found")
     if row.retired_at is None and secret_is_referenced_by_active_config(sess, name):
-        raise HTTPException(status_code=409, detail="secret is referenced by an active config or draft")
+        raise HTTPException(
+            status_code=409, detail="secret is referenced by an active config or draft"
+        )
     if row.retired_at is None:
         row.retired_at = datetime.now(UTC)
         row.retired_by = _runtime_actor(request)

@@ -124,7 +124,12 @@ def validate_spu_deterioration_alert_runtime_mutation(
     rollout: list[dict[str, Any]] | None = None,
     draft_rollout: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Validate the global alert key without changing generic rollout semantics."""
+    """Validate the global alert key and reject any stored rollout sidecar.
+
+    Generic rollout is a retired capability, so the ``rollout``/``draft_rollout``
+    arguments exist only so readers of historical rows fail closed instead of
+    treating retained rollout data as active behavior.
+    """
     if config_key != "analytics.spu_profit_deterioration_alert.v1":
         return
     if payload is not None:
@@ -148,33 +153,6 @@ def validate_spu_deterioration_alert_runtime_mutation(
         raise ConfigValidationError(
             "draftRollout is not supported for the global deterioration alert"
         )
-
-
-def validate_rollout(rollout: Any, schema: dict[str, Any]) -> list[dict[str, Any]]:
-    """Validate ordered basis-point rollout rules and their alternate payloads."""
-    if not isinstance(rollout, list):
-        raise ConfigValidationError("rollout must be an array")
-    normalized: list[dict[str, Any]] = []
-    for index, rule in enumerate(rollout):
-        if not isinstance(rule, dict):
-            raise ConfigValidationError(f"rollout[{index}] must be an object")
-        if set(rule) - {"basisPoints", "name", "payload"}:
-            raise ConfigValidationError(f"rollout[{index}] contains unsupported fields")
-        basis_points = rule.get("basisPoints")
-        if not isinstance(basis_points, int) or isinstance(basis_points, bool):
-            raise ConfigValidationError(f"rollout[{index}].basisPoints must be an integer")
-        if not 0 <= basis_points <= 10_000:
-            raise ConfigValidationError(f"rollout[{index}].basisPoints must be between 0 and 10000")
-        if "payload" not in rule:
-            raise ConfigValidationError(f"rollout[{index}].payload is required")
-        validate_payload(rule["payload"], schema, path=f"rollout[{index}].payload")
-        name = rule.get("name")
-        if name is not None and (not isinstance(name, str) or not name.strip()):
-            raise ConfigValidationError(f"rollout[{index}].name must be a non-empty string")
-        normalized.append(
-            {"basisPoints": basis_points, "payload": rule["payload"], **({"name": name} if name else {})}
-        )
-    return normalized
 
 
 def infer_schema(value: Any) -> dict[str, Any]:
