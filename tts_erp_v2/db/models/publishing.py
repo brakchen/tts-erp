@@ -109,8 +109,8 @@ class VideoPublishTask(Base):
             name="video_publish_task_cleanup_status_check",
         ),
         Index(
-            "uq_video_publish_one_running",
-            text("(1)"),
+            "uq_video_publish_one_running_per_device",
+            "target_device_serial",
             unique=True,
             postgresql_where=text("status = 'running'"),
         ),
@@ -134,6 +134,7 @@ class VideoPublishTask(Base):
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger)
     created_by_key_hash: Mapped[str | None] = mapped_column(Text)
     caption: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_override: Mapped[str | None] = mapped_column(Text)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     object_filename: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'video.mp4'")
@@ -171,6 +172,11 @@ class VideoPublishTask(Base):
         Integer, nullable=False, server_default=text("0")
     )
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Only settable before the first Artemis admission; a non-null value makes
+    # the publish parameters permanently read-only.
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     lease_owner: Mapped[str | None] = mapped_column(Text)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -186,11 +192,15 @@ class VideoPublishTask(Base):
     )
     target_device_serial: Mapped[str] = mapped_column(Text, nullable=False)
     target_app_package: Mapped[str] = mapped_column(Text, nullable=False)
+    params_locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     execution_generation: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     device_path: Mapped[str | None] = mapped_column(Text)
     spool_path: Mapped[str | None] = mapped_column(Text)
     last_error_code: Mapped[str | None] = mapped_column(Text)
     last_error_message: Mapped[str | None] = mapped_column(Text)
+    # Latest read-only verification verdict (published | not_published |
+    # inconclusive): a clue for the UI, never a status transition.
+    last_verify_verdict: Mapped[str | None] = mapped_column(Text)
     device_cleanup_status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'not_started'")
     )
@@ -221,6 +231,9 @@ class VideoPublishTask(Base):
     object_cleanup_next_attempt_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed_by_user_id: Mapped[int | None] = mapped_column(BigInteger)
+    confirmed_by_key_hash: Mapped[str | None] = mapped_column(Text)
     queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -348,6 +361,48 @@ class VideoPublishAttempt(Base):
     )
 
 
+class VideoPublishConfirmation(Base):
+    """Audit source of truth for the manual 'confirm published' action.
+
+    ``operator_*`` comes from the authenticated request principal and
+    ``created_at`` from database time; neither may be supplied by the client.
+    """
+
+    __tablename__ = "video_publish_confirmations"
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_video_publish_confirmation_request_id"),
+        Index(
+            "uq_video_publish_confirm_once",
+            "task_id",
+            unique=True,
+            postgresql_where=text(
+                "action = 'confirm_published' AND to_status = 'succeeded'"
+            ),
+        ),
+        {"schema": "publishing"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_always_as_identity()"),
+    )
+    task_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("publishing.video_publish_tasks.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    from_status: Mapped[str] = mapped_column(Text, nullable=False)
+    to_status: Mapped[str] = mapped_column(Text, nullable=False)
+    operator_user_id: Mapped[int | None] = mapped_column(BigInteger)
+    operator_key_hash: Mapped[str | None] = mapped_column(Text)
+    request_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class PublishWorkerHeartbeat(Base):
     __tablename__ = "worker_heartbeats"
     __table_args__ = (
@@ -384,4 +439,9 @@ class PublishWorkerHeartbeat(Base):
     )
 
 
-__all__ = ["PublishWorkerHeartbeat", "VideoPublishAttempt", "VideoPublishTask"]
+__all__ = [
+    "PublishWorkerHeartbeat",
+    "VideoPublishAttempt",
+    "VideoPublishConfirmation",
+    "VideoPublishTask",
+]
