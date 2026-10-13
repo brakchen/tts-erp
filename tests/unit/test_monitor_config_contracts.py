@@ -1910,6 +1910,193 @@ def test_source_versions_empty_object_is_allowed() -> None:
     assert env.source_versions == {}
 
 
+# ---------------------------------------------------------------------------
+# Typed constructors enforce the same delivery-block invariants
+# ---------------------------------------------------------------------------
+
+
+def _typed_payload() -> MonitorBusinessSettings:
+    """A seller-bound typed settings object usable as a delivery payload."""
+    return merge_business_settings(
+        seller_id=TEST_SELLER_ID,
+        global_default=_complete_settings(),
+        shop_override={},
+    )
+
+
+def _tampered_current(
+    *,
+    version: str = "17",
+    source_versions: Any = None,
+    content_hash: Any = "sha256:abc",
+) -> Current:
+    """Build a :class:`Current` bypassing ``__post_init__``.
+
+    Used to prove that :class:`DeliveryEnvelope.Force` enforces the
+    delivery-block contract on its own, rather than only relying on the
+    target having passed :class:`Current` construction. ``frozen=True``
+    blocks normal assignment, so the fields are written directly.
+    """
+    if source_versions is None:
+        source_versions = {"global": "4", "shop": None}
+    current = Current.__new__(Current)
+    object.__setattr__(current, "version", version)
+    object.__setattr__(current, "source_versions", source_versions)
+    object.__setattr__(current, "content_hash", content_hash)
+    object.__setattr__(current, "payload", _typed_payload())
+    return current
+
+
+@pytest.mark.parametrize("bad_hash", ["", None, 123, 18.5, True, ["x"], b"abc"])
+def test_typed_current_rejects_non_empty_string_content_hash(
+    bad_hash: Any,
+) -> None:
+    """A typed ``Current`` must not smuggle a contentHash past the
+    mapping-path guard; ``Current`` is also used as ``force.target``.
+    """
+    with pytest.raises(ConfigContractError, match="current.contentHash"):
+        Current(
+            version="18",
+            source_versions={"global": "4", "shop": None},
+            content_hash=bad_hash,  # type: ignore[arg-type]
+            payload=_typed_payload(),
+        )
+
+
+@pytest.mark.parametrize("bad_value", ["", 4, 4.5, True, ["4"]])
+def test_typed_current_rejects_invalid_source_versions_value(
+    bad_value: Any,
+) -> None:
+    with pytest.raises(ConfigContractError, match="current.sourceVersions.shop"):
+        Current(
+            version="18",
+            source_versions={"shop": bad_value},  # type: ignore[dict-item]
+            content_hash="sha256:abc",
+            payload=_typed_payload(),
+        )
+
+
+@pytest.mark.parametrize("bad_source_versions", ["4", ["4"], None, 4])
+def test_typed_current_rejects_non_mapping_source_versions(
+    bad_source_versions: Any,
+) -> None:
+    with pytest.raises(ConfigContractError, match="current.sourceVersions"):
+        Current(
+            version="18",
+            source_versions=bad_source_versions,  # type: ignore[arg-type]
+            content_hash="sha256:abc",
+            payload=_typed_payload(),
+        )
+
+
+def test_typed_current_accepts_valid_source_versions_and_content_hash() -> None:
+    """Counterpart: ``null`` entries and non-decimal revision labels stay
+    legal so the typed path is not stricter than the mapping path.
+    """
+    current = Current(
+        version="18",
+        source_versions={"global": "global-rev-a", "shop": None},
+        content_hash="sha256:abc",
+        payload=_typed_payload(),
+    )
+    assert current.source_versions == {"global": "global-rev-a", "shop": None}
+    assert current.content_hash == "sha256:abc"
+
+
+def test_typed_current_accepts_empty_source_versions_object() -> None:
+    current = Current(
+        version="18",
+        source_versions={},
+        content_hash="sha256:abc",
+        payload=_typed_payload(),
+    )
+    assert current.source_versions == {}
+
+
+@pytest.mark.parametrize("bad_hash", ["", None, 123])
+def test_typed_force_target_rejects_non_empty_string_content_hash(
+    bad_hash: Any,
+) -> None:
+    """``Force.target`` must carry the delivery-block contract even when
+    the target was not built through ``Current.__post_init__``, and must
+    report the force-scoped path.
+    """
+    with pytest.raises(ConfigContractError, match="force.target.contentHash"):
+        DeliveryEnvelope.Force(
+            version="17",
+            target=_tampered_current(content_hash=bad_hash),
+        )
+
+
+@pytest.mark.parametrize("bad_value", ["", 4])
+def test_typed_force_target_rejects_invalid_source_versions_value(
+    bad_value: Any,
+) -> None:
+    with pytest.raises(
+        ConfigContractError, match="force.target.sourceVersions.shop"
+    ):
+        DeliveryEnvelope.Force(
+            version="17",
+            target=_tampered_current(
+                source_versions={"shop": bad_value},
+            ),
+        )
+
+
+def test_typed_force_target_rejects_non_mapping_source_versions() -> None:
+    with pytest.raises(
+        ConfigContractError, match="force.target.sourceVersions must be an object"
+    ):
+        DeliveryEnvelope.Force(
+            version="17",
+            target=_tampered_current(source_versions=["4"]),
+        )
+
+
+def test_typed_force_accepts_valid_target() -> None:
+    """Counterpart: a well-formed typed force block is accepted."""
+    force = DeliveryEnvelope.Force(
+        version="17",
+        target=Current(
+            version="17",
+            source_versions={"global": "global-rev-a", "shop": None},
+            content_hash="sha256:abc",
+            payload=_typed_payload(),
+        ),
+    )
+    assert force.version == "17"
+    assert force.target.content_hash == "sha256:abc"
+
+
+def test_typed_current_with_empty_content_hash_cannot_reach_envelope() -> None:
+    """End-to-end guard for the typed ``current=`` bypass: an envelope
+    built from a tampered typed block must still be rejected.
+    """
+    current = _tampered_current(version="18", content_hash="")
+    with pytest.raises(ConfigContractError, match="current.contentHash"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=current,
+            force=None,
+        )
+
+
+def test_typed_force_with_tampered_target_cannot_reach_envelope() -> None:
+    """Same guard for the typed ``force=`` bypass: a force block whose
+    target carries an invalid ``sourceVersions`` entry is rejected at
+    construction, before it can be handed to :class:`DeliveryEnvelope`.
+    """
+    with pytest.raises(
+        ConfigContractError, match="force.target.sourceVersions.shop"
+    ):
+        DeliveryEnvelope.Force(
+            version="17",
+            target=_tampered_current(source_versions={"shop": ""}),
+        )
+
+
 
 # ---------------------------------------------------------------------------
 # Immutability and immutability-of-derived-views

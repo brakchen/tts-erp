@@ -257,6 +257,69 @@ def _decimal_identifier(value: Any, *, path: str) -> str:
     return value
 
 
+def _validate_source_versions(value: Any, *, path: str) -> None:
+    """Validate a delivery block's ``sourceVersions`` map.
+
+    Shared by the wire-shape path (:func:`_validate_delivery_block`) and the
+    typed path (:class:`Current`) so both enforce one rule:
+
+    - the value must be a mapping (the plugin's ``requireObject``);
+    - every key must be a string;
+    - every entry is either ``None`` (that source has no revision yet) or a
+      **non-empty** string — the plugin applies ``requireNonEmptyString`` to
+      each entry, so ``""`` is a protocol violation and ``null`` is the only
+      way to say "no revision".
+    """
+    if not isinstance(value, Mapping):
+        raise ConfigContractError(f"{path} must be an object")
+    for key, entry in value.items():
+        if not isinstance(key, str):
+            raise ConfigContractError(f"{path} keys must be strings")
+        if entry is None:
+            continue
+        if not isinstance(entry, str):
+            raise ConfigContractError(
+                f"{path}.{key} must be a string or null"
+            )
+        if entry == "":
+            raise ConfigContractError(
+                f"{path}.{key} must be a non-empty string or null"
+            )
+
+
+def _validate_content_hash(value: Any, *, path: str) -> None:
+    """Validate a delivery block's ``contentHash``.
+
+    Shared by the wire-shape path and :class:`Current`. The plugin applies
+    ``requireNonEmptyString``; it is deliberately *not* a decimal identifier,
+    so any non-empty string is accepted and no ``str()`` coercion happens
+    here.
+    """
+    if not isinstance(value, str) or value == "":
+        raise ConfigContractError(f"{path} must be a non-empty string")
+
+
+def _validate_current_fields(
+    version: Any,
+    source_versions: Any,
+    content_hash: Any,
+    *,
+    prefix: str,
+) -> None:
+    """Enforce the delivery-block contract on one block's scalar fields.
+
+    Single implementation shared by the typed dataclasses
+    (:class:`Current`, :class:`DeliveryEnvelope.Force`) and the coercion
+    boundaries (:func:`_coerce_current_block`, :func:`_coerce_force`), so a
+    typed block cannot bypass the rules the mapping path enforces — whether
+    it was constructed normally or assembled with ``object.__setattr__`` on
+    a frozen dataclass.
+    """
+    _decimal_identifier(version, path=f"{prefix}.version")
+    _validate_source_versions(source_versions, path=f"{prefix}.sourceVersions")
+    _validate_content_hash(content_hash, path=f"{prefix}.contentHash")
+
+
 def _string_tuple(values: Any, *, path: str) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)) or not isinstance(values, list):
         raise ConfigContractError(f"{path} must be an array of strings")
@@ -822,6 +885,11 @@ class Current:
     ``version`` is validated at construction time so a typed instance
     cannot carry a version the wire-shape path would have rejected —
     typed and mapping construction stay at parity.
+
+    ``source_versions`` and ``content_hash`` are validated by the same
+    :func:`_source_versions` / :func:`_content_hash` helpers the mapping
+    path uses, so a typed :class:`Current` cannot bypass the delivery-block
+    contract (it is also used as ``force.target``).
     """
 
     version: str
@@ -830,7 +898,12 @@ class Current:
     payload: MonitorBusinessSettings
 
     def __post_init__(self) -> None:
-        _decimal_identifier(self.version, path="current.version")
+        _validate_current_fields(
+            self.version,
+            self.source_versions,
+            self.content_hash,
+            prefix="current",
+        )
 
 
 # Allowed keys for a complete delivery block (used by both ``current``
@@ -898,14 +971,16 @@ class DeliveryEnvelope:
         target: Current
 
         def __post_init__(self) -> None:
-            # Both sides of the equality must be canonical decimal
-            # identifiers: the force block and its target are two separate
+            # ``force.version`` and ``force.target.version`` are two separate
             # wire fields the plugin validates independently, so a
             # non-decimal value cannot be excused by the other one being
             # equal to it.
             _decimal_identifier(self.version, path="force.version")
-            _decimal_identifier(
-                self.target.version, path="force.target.version"
+            _validate_current_fields(
+                self.target.version,
+                self.target.source_versions,
+                self.target.content_hash,
+                prefix="force.target",
             )
             # Defensive check; the surrounding constructor already
             # enforces this, but the dataclass contract should stand
@@ -1044,36 +1119,8 @@ def _validate_delivery_block(block: Mapping[str, Any], *, shape: str) -> None:
             raise ConfigContractError(f"{shape} missing field: {key}")
     version = block["version"]
     _decimal_identifier(version, path=f"{shape}.version")
-    source_versions = block["sourceVersions"]
-    if not isinstance(source_versions, Mapping):
-        raise ConfigContractError(
-            f"{shape}.sourceVersions must be an object"
-        )
-    for key, value in source_versions.items():
-        if not isinstance(key, str):
-            raise ConfigContractError(
-                f"{shape}.sourceVersions keys must be strings"
-            )
-        if value is None:
-            # ``null`` means "this source has no revision yet".
-            continue
-        if not isinstance(value, str):
-            raise ConfigContractError(
-                f"{shape}.sourceVersions.{key} must be a string or null"
-            )
-        if value == "":
-            # The plugin applies ``requireNonEmptyString`` to every
-            # ``sourceVersions`` entry, so an empty string is a protocol
-            # violation, not an absent value — ``null`` is the only way to
-            # say "no revision".
-            raise ConfigContractError(
-                f"{shape}.sourceVersions.{key} must be a non-empty string or null"
-            )
-    content_hash = block["contentHash"]
-    if not isinstance(content_hash, str) or content_hash == "":
-        raise ConfigContractError(
-            f"{shape}.contentHash must be a non-empty string"
-        )
+    _validate_source_versions(block["sourceVersions"], path=f"{shape}.sourceVersions")
+    _validate_content_hash(block["contentHash"], path=f"{shape}.contentHash")
     payload = block["payload"]
     if not isinstance(payload, Mapping):
         raise ConfigContractError(f"{shape}.payload must be an object")
@@ -1123,8 +1170,20 @@ def _validate_force_block(force_block: Mapping[str, Any]) -> tuple[str, Mapping[
 
 
 def _coerce_current_block(value: Any) -> Current:
-    """Validate a current-block wire mapping or accept a typed :class:`Current`."""
+    """Validate a current-block wire mapping or accept a typed :class:`Current`.
+
+    A typed block is re-validated rather than passed through: the
+    constructor already ran the checks, but a frozen dataclass can still be
+    assembled with ``object.__setattr__``, and the envelope must not become
+    a way to smuggle an unchecked block onto the wire.
+    """
     if isinstance(value, Current):
+        _validate_current_fields(
+            value.version,
+            value.source_versions,
+            value.content_hash,
+            prefix="current",
+        )
         return value
     if not isinstance(value, Mapping):
         raise ConfigContractError("current must be an object or Current")
@@ -1223,6 +1282,14 @@ def _coerce_force(
     if value is None:
         return None
     if isinstance(value, DeliveryEnvelope.Force):
+        # Same re-validation reasoning as :func:`_coerce_current_block`.
+        _decimal_identifier(value.version, path="force.version")
+        _validate_current_fields(
+            value.target.version,
+            value.target.source_versions,
+            value.target.content_hash,
+            prefix="force.target",
+        )
         target_settings = value.target.payload
         if (
             target_settings.seller_id is not None
