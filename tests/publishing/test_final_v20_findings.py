@@ -141,7 +141,6 @@ async def test_spool_is_owned_before_download_rename_and_object_loss_recovery(
             instance_id="TEST-v20-worker",
             device_serial="T20SERIAL",
             lease_seconds=30,
-            max_attempts=3,
             store=Store(),
             adb=Adb(),
             spool_dir=tmp_path,
@@ -169,6 +168,11 @@ async def test_spool_is_owned_before_download_rename_and_object_loss_recovery(
     db_session.expire_all()
     assert not destination.exists()
     assert task.spool_cleanup_status == "succeeded"
+    # 02 §14.1: the object is never deleted and CONFIRMED_OBJECT_MISSING no
+    # longer arms the retired object status, so once the spool drains the row
+    # releases its cleanup marker entirely.
+    assert task.object_deleted_at is None
+    assert task.object_cleanup_status == "not_started"
     assert task.cleanup_intent == "none"
 
 

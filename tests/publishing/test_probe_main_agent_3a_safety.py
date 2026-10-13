@@ -10,14 +10,13 @@ C) 只脏 spool 的 retry -> 清理工作确实 due（不会永久滞留，无�
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 import pytest
 
 pytestmark = [pytest.mark.domain_publishing]
 
 from sqlalchemy.orm import Session
 
+from tests.publishing.test_publish_action_gates import _seed
 from tts_erp_v2.publishing import repository as R
 from tts_erp_v2.publishing.repository import (
     CleanupClaimRequest,
@@ -26,13 +25,11 @@ from tts_erp_v2.publishing.repository import (
     has_pending_device_cleanup,
 )
 
-from tests.publishing.test_publish_action_gates import _seed
-
 
 def _queue_and_probe(db_session: Session, label: str, **seed_kw) -> dict:
     """把失败任务交给 retry 的入队路径，然后观察闸门与可领取性。"""
     task = _seed(db_session, **seed_kw)
-    R.queue_task(db_session, task)          # <-- 被测函数
+    R.queue_task(db_session, task)  # <-- 被测函数
     db_session.commit()
     db_session.refresh(task)
 
@@ -42,7 +39,9 @@ def _queue_and_probe(db_session: Session, label: str, **seed_kw) -> dict:
         "device_cleanup_status": task.device_cleanup_status,
         "spool_cleanup_status": task.spool_cleanup_status,
         "gate_says_dirty": has_pending_device_cleanup(db_session, "TEST_device"),
-        "claimed": claim_one(db_session, "probe-worker", "TEST_device", lease_seconds=30)
+        "claimed": claim_one(
+            db_session, "probe-worker", "TEST_device", lease_seconds=30
+        )
         is not None,
     }
     print(
@@ -83,7 +82,9 @@ def test_safety_B_dirty_device_retry_is_blocked(db_session: Session) -> None:
     )
 
 
-def test_safety_B2_dirty_spool_retry_is_not_claimable_either(db_session: Session) -> None:
+def test_safety_B2_dirty_spool_retry_is_not_claimable_either(
+    db_session: Session,
+) -> None:
     """spool 未清理同样登记所有权（本地残留文件不该被下一次 staging 覆盖）。"""
     r = _queue_and_probe(
         db_session,
@@ -112,7 +113,12 @@ def test_safety_C_no_permanent_stall(db_session: Session) -> None:
 
     work = claim_cleanup_work(
         lambda: db_session,
-        CleanupClaimRequest(owner="probe-cleaner", lease_seconds=30, scope="device"),
+        CleanupClaimRequest(
+            owner="probe-cleaner",
+            lease_seconds=30,
+            scope="device",
+            device_serial="TEST_device",
+        ),
     )
     print(f"\n[probe:C-no-stall] claim_cleanup_work(device) -> {work!r}")
     assert work, (

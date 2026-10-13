@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import subprocess
-import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -139,7 +137,10 @@ async def test_process_kill_part_residue_is_removed_by_selector_cleanup(
     work = claim_cleanup_work(
         factory,
         CleanupClaimRequest(
-            owner="TEST-v22-cleaner", lease_seconds=30, scope="background"
+            owner="TEST-v22-cleaner",
+            lease_seconds=30,
+            scope="background",
+            device_serial="TESTV22SERIAL",
         ),
     )
     assert work is not None
@@ -246,137 +247,14 @@ def test_cancel_never_schedules_object_cleanup(
         claim_cleanup_work(
             factory,
             CleanupClaimRequest(
-                owner="TEST-after-expiry", lease_seconds=30, scope="background"
+                owner="TEST-after-expiry",
+                lease_seconds=30,
+                scope="background",
+                device_serial="TESTV22SERIAL",
             ),
         )
         is None
     )
-
-
-def test_cleanup_work_keeps_retired_generation_identity(
-    db_session: Session,
-) -> None:
-    task = _task(status="cancelled", stage="done")
-    retired_key = task.object_key
-    task.object_upload_expires_at = datetime.now(UTC) - timedelta(minutes=16)
-    task.cleanup_intent = "preserve_state"
-    task.object_cleanup_status = "pending"
-    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
-    db_session.add(task)
-    db_session.commit()
-    retired_generation = task.object_generation
-
-    def factory() -> Session:
-        return Session(
-            bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
-        )
-
-    work = claim_cleanup_work(
-        factory,
-        CleanupClaimRequest(
-            owner="TEST-generation-cleaner", lease_seconds=30, scope="background"
-        ),
-    )
-
-    assert work is not None
-    assert work.object_generation == retired_generation
-    assert work.object_key == retired_key
-    assert work.object_etag == "TEST-v22-etag"
-
-
-@pytest.mark.asyncio
-async def test_stale_cleaner_can_only_delete_its_retired_generation(
-    db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    task = _task(status="failed", stage="done")
-    task.object_upload_expires_at = datetime.now(UTC) - timedelta(minutes=16)
-    task.cleanup_intent = "preserve_state"
-    task.object_cleanup_status = "pending"
-    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
-    db_session.add(task)
-    db_session.commit()
-    retired_key = task.object_key
-
-    def factory() -> Session:
-        return Session(
-            bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
-        )
-
-    stale_work = claim_cleanup_work(
-        factory,
-        CleanupClaimRequest(owner="TEST-stale", lease_seconds=1, scope="background"),
-    )
-    assert stale_work is not None
-    started = threading.Event()
-    release = threading.Event()
-    removed: list[str] = []
-
-    class Store:
-        def remove(self, key: str, _expected_etag: str | None = None) -> None:
-            removed.append(key)
-            if len(removed) == 1:
-                started.set()
-                assert release.wait(timeout=5)
-
-    monkeypatch.setattr(
-        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
-        lambda **_kwargs: None,
-    )
-    stale_deps = cast(
-        PublishDependencies,
-        SimpleNamespace(
-            session_factory=factory,
-            instance_id="TEST-stale",
-            device_serial="TESTV22SERIAL",
-            lease_seconds=1,
-            spool_dir=tmp_path,
-            store=Store(),
-            adb=SimpleNamespace(),
-        ),
-    )
-    stale_execution = asyncio.create_task(_execute_cleanup(stale_work, stale_deps))
-    assert await asyncio.to_thread(started.wait, 2)
-    db_session.execute(
-        text(
-            "UPDATE publishing.video_publish_tasks "
-            "SET cleanup_lease_expires_at = clock_timestamp() - interval '1 second' "
-            "WHERE id = :task_id"
-        ),
-        {"task_id": task.id},
-    )
-    db_session.commit()
-    await asyncio.sleep(0.4)
-
-    takeover = claim_cleanup_work(
-        factory,
-        CleanupClaimRequest(
-            owner="TEST-takeover", lease_seconds=30, scope="background"
-        ),
-    )
-    assert takeover is not None
-    takeover_deps = cast(
-        PublishDependencies,
-        SimpleNamespace(
-            session_factory=factory,
-            instance_id="TEST-takeover",
-            device_serial="TESTV22SERIAL",
-            lease_seconds=30,
-            spool_dir=tmp_path,
-            store=stale_deps.store,
-            adb=SimpleNamespace(),
-        ),
-    )
-    await _execute_cleanup(takeover, takeover_deps)
-    db_session.expire_all()
-    replacement = replace_upload(db_session, task.public_id)
-    replacement_key = replacement.object_key
-
-    release.set()
-    await stale_execution
-
-    assert removed == [retired_key, retired_key]
-    assert replacement_key != retired_key
-    assert replacement_key not in removed
 
 
 def _active_attempt(task: VideoPublishTask, *, package: str) -> VideoPublishAttempt:
@@ -423,7 +301,6 @@ async def test_dispatch_uses_immutable_attempt_package_snapshot(
             instance_id="TEST-v22-worker",
             device_serial="TESTV22SERIAL",
             lease_seconds=30,
-            max_attempts=3,
             poll_seconds=0,
             store=SimpleNamespace(),
             adb=SimpleNamespace(),
@@ -477,7 +354,6 @@ async def test_unexpected_post_creation_exception_preserves_same_session_recover
             instance_id="TEST-v22-crashing-worker",
             device_serial="TESTV22SERIAL",
             lease_seconds=30,
-            max_attempts=3,
             poll_seconds=0,
             store=SimpleNamespace(),
             adb=SimpleNamespace(),

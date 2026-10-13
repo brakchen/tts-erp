@@ -18,6 +18,7 @@ pytestmark = [pytest.mark.domain_publishing]
 
 from sqlalchemy.orm import Session
 
+from tests.publishing.test_publish_action_gates import _seed
 from tts_erp_v2.publishing import repository as R
 from tts_erp_v2.publishing.repository import (
     CleanupClaimRequest,
@@ -25,8 +26,6 @@ from tts_erp_v2.publishing.repository import (
     claim_one,
     has_pending_device_cleanup,
 )
-
-from tests.publishing.test_publish_action_gates import _seed
 
 
 def _factory(db_session: Session):
@@ -62,12 +61,16 @@ def _dirty_retry_task(db_session: Session):
 def test_readiness_gate_full_loop_releases_after_cleanup(db_session: Session) -> None:
     """完整闭环：踩住 -> 清理 -> 松开 -> 活被领走。任一步断掉就是设计缺口。"""
     task = _dirty_retry_task(db_session)
-    print(f"\n[gate:1-retry] intent={task.cleanup_intent!r} "
-          f"device={task.device_cleanup_status!r}")
+    print(
+        f"\n[gate:1-retry] intent={task.cleanup_intent!r} "
+        f"device={task.device_cleanup_status!r}"
+    )
 
     # ---- 1) 刹车应踩住 ----
     assert task.cleanup_intent == "requeue_publish", task.cleanup_intent
-    assert has_pending_device_cleanup(db_session, "TEST_device") is True, "闸门必须认定设备脏"
+    assert has_pending_device_cleanup(db_session, "TEST_device") is True, (
+        "闸门必须认定设备脏"
+    )
     blocked = claim_one(db_session, "w1", "TEST_device", lease_seconds=30)
     print(f"[gate:2-blocked] claim_one -> {blocked!r}")
     assert blocked is None, "设备清理未完成时不得领取（安全底线）"
@@ -75,7 +78,9 @@ def test_readiness_gate_full_loop_releases_after_cleanup(db_session: Session) ->
     # ---- 2) 清理 worker 必须领得到活，否则会死锁 ----
     work = claim_cleanup_work(
         _factory(db_session),
-        CleanupClaimRequest(owner="w2", lease_seconds=30, scope="device"),
+        CleanupClaimRequest(
+            owner="w2", lease_seconds=30, scope="device", device_serial="TEST_device"
+        ),
     )
     print(f"[gate:3-claim-cleanup] -> {work is not None and work.resources}")
     assert work is not None, (
@@ -93,9 +98,11 @@ def test_readiness_gate_full_loop_releases_after_cleanup(db_session: Session) ->
     )
     db_session.expire_all()
     after = db_session.get(type(task), task.id)
-    print(f"[gate:4-finished] intent={after.cleanup_intent!r} "
-          f"device={after.device_cleanup_status!r} status={after.status!r} "
-          f"stage={after.stage!r}")
+    print(
+        f"[gate:4-finished] intent={after.cleanup_intent!r} "
+        f"device={after.device_cleanup_status!r} status={after.status!r} "
+        f"stage={after.stage!r}"
+    )
     assert after.cleanup_intent == "none", (
         f"清理成功后 intent 应复位成 'none'，实际 {after.cleanup_intent!r}"
     )
@@ -109,7 +116,9 @@ def test_readiness_gate_full_loop_releases_after_cleanup(db_session: Session) ->
     )
 
     # ---- 4) 刹车松开，活应能被领走 ----
-    assert has_pending_device_cleanup(db_session, "TEST_device") is False, "闸门应已松开"
+    assert has_pending_device_cleanup(db_session, "TEST_device") is False, (
+        "闸门应已松开"
+    )
     released = claim_one(db_session, "w3", "TEST_device", lease_seconds=30)
     # 每个字段独立成行、带字段名：避免 `bool and (uuid, stage)` 挤在一行导致
     # 打印串里 ID 与阶段粘连（截图/OCR 时会被读成一个不存在的编号）。
@@ -119,9 +128,7 @@ def test_readiness_gate_full_loop_releases_after_cleanup(db_session: Session) ->
         print(f"    taskId  = {released.public_id}")
         print(f"    stage   = {released.stage}")
         print(f"    status  = {released.status}")
-    assert released is not None, (
-        "清理完成后任务仍领不到 = 闭环断裂：该发布被永久卡住"
-    )
+    assert released is not None, "清理完成后任务仍领不到 = 闭环断裂：该发布被永久卡住"
     assert str(released.public_id) == str(task.public_id), "应放行同一个任务"
     print("[gate:5-released] 放行的是同一个任务 ✅")
 
@@ -141,7 +148,9 @@ def test_readiness_gate_failure_path_backs_off_instead_of_spinning(
     # 领取清理活，故意报失败
     work = claim_cleanup_work(
         _factory(db_session),
-        CleanupClaimRequest(owner="w1", lease_seconds=30, scope="device"),
+        CleanupClaimRequest(
+            owner="w1", lease_seconds=30, scope="device", device_serial="TEST_device"
+        ),
     )
     assert work is not None, "清理工应领得到活"
     R.finish_cleanup_work(
@@ -150,11 +159,13 @@ def test_readiness_gate_failure_path_backs_off_instead_of_spinning(
     db_session.expire_all()
     after = db_session.get(type(task), task.id)
 
-    print("[gate:F1-failed] "
-          f"device={after.device_cleanup_status!r} intent={after.cleanup_intent!r} "
-          f"status={after.status!r} stage={after.stage!r} "
-          f"attempts={after.device_cleanup_attempts} "
-          f"next_in={after.device_cleanup_next_attempt_at is not None}")
+    print(
+        "[gate:F1-failed] "
+        f"device={after.device_cleanup_status!r} intent={after.cleanup_intent!r} "
+        f"status={after.status!r} stage={after.stage!r} "
+        f"attempts={after.device_cleanup_attempts} "
+        f"next_in={after.device_cleanup_next_attempt_at is not None}"
+    )
 
     # (a) 闸门必须继续踩住：清理还没成功，不得放行新任务
     assert has_pending_device_cleanup(db_session, "TEST_device") is True, (
@@ -170,13 +181,15 @@ def test_readiness_gate_failure_path_backs_off_instead_of_spinning(
     )
     again = claim_cleanup_work(
         _factory(db_session),
-        CleanupClaimRequest(owner="w3", lease_seconds=30, scope="device"),
+        CleanupClaimRequest(
+            owner="w3", lease_seconds=30, scope="device", device_serial="TEST_device"
+        ),
     )
-    print(f"[gate:F3-backoff] 立即再领 -> "
-          f"{'领到了(无退避!)' if again is not None else '领不到(已退避) OK'}")
-    assert again is None, (
-        "清理刚失败就立刻能再领到 = 没有退避，会形成紧循环打满 CPU"
+    print(
+        f"[gate:F3-backoff] 立即再领 -> "
+        f"{'领到了(无退避!)' if again is not None else '领不到(已退避) OK'}"
     )
+    assert again is None, "清理刚失败就立刻能再领到 = 没有退避，会形成紧循环打满 CPU"
 
     # (c) 失败原因必须落库，便于运维排查（不能吞）
     assert after.device_cleanup_error, "清理失败原因必须持久化"

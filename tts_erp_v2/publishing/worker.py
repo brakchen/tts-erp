@@ -1,4 +1,9 @@
-"""Entry point for the independent, one-task publishing worker."""
+"""Entry point for the independent, one-task publishing worker.
+
+One process serves exactly one device (02 §6.1): ``ARTEMIS_DEVICE_SERIAL`` is
+read once here and every claim, cleanup and readiness query below is scoped to
+that serial. A second device needs a second worker process.
+"""
 
 from __future__ import annotations
 
@@ -32,6 +37,12 @@ async def run() -> None:
     session_factory = get_session_factory()
     await asyncio.to_thread(_write_heartbeat, session_factory, instance_id, "starting")
     store = video_store_from_env()
+    device_serial = os.environ.get("ARTEMIS_DEVICE_SERIAL", "").strip()
+    if not device_serial:
+        logger.error(
+            "ARTEMIS_DEVICE_SERIAL is not configured; this worker would claim "
+            "nothing. Configure one serial per worker process (02 §6.1)."
+        )
     deps = PublishDependencies(
         session_factory=session_factory,
         store=store,
@@ -44,7 +55,7 @@ async def run() -> None:
         ),
         spool_dir=Path(os.environ["TTS_ERP_PUBLISH_SPOOL_DIR"]).expanduser(),
         instance_id=instance_id,
-        max_attempts=int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")),
+        device_serial=device_serial,
         lease_seconds=int(os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")),
         poll_seconds=float(os.environ.get("PUBLISH_POLL_INTERVAL_SECONDS", "2")),
         artemis_profile=os.environ.get("ARTEMIS_PROFILE", "pro"),
@@ -130,21 +141,25 @@ async def _heartbeat_loop(
 async def _probe_device_readiness(
     deps: PublishDependencies,
 ) -> tuple[str, str]:
-    serial = os.environ.get("ARTEMIS_DEVICE_SERIAL", "").strip()
+    serial = deps.device_serial
     if not serial:
         return "unknown", "未配置设备序列号"
 
     def cleanup_is_busy() -> bool:
+        # Only this worker's own device: a dirty device elsewhere must not make
+        # this device look busy (02 §6.1).
         with deps.session_factory() as session:
             return bool(
                 session.scalar(
-                    text("""
-                    SELECT EXISTS (
-                        SELECT 1 FROM publishing.video_publish_tasks
-                        WHERE cleanup_intent <> 'none'
-                          AND device_cleanup_status IN ('pending','failed')
+                    select(VideoPublishTask.id)
+                    .where(
+                        VideoPublishTask.target_device_serial == serial,
+                        VideoPublishTask.cleanup_intent != "none",
+                        VideoPublishTask.device_cleanup_status.in_(
+                            ["pending", "failed"]
+                        ),
                     )
-                    """)
+                    .limit(1)
                 )
             )
 
@@ -182,7 +197,10 @@ async def _probe_device_readiness(
             return (
                 session.scalar(
                     select(VideoPublishTask.id)
-                    .where(VideoPublishTask.status == "running")
+                    .where(
+                        VideoPublishTask.status == "running",
+                        VideoPublishTask.target_device_serial == serial,
+                    )
                     .limit(1)
                 )
                 is not None

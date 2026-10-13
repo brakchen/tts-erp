@@ -267,6 +267,7 @@ async def test_failure_stops_at_failed_and_fences_stale_worker(
         SimpleNamespace(
             session_factory=_factory(db_session),
             instance_id="worker-a",
+            device_serial="TEST_device",
         ),
     )
     await _mark_failed(task.public_id, "DOWNLOAD_TEMPORARY", deps)
@@ -344,7 +345,6 @@ async def test_success_cleanup_releases_device_gate_before_background_cleanup(
             instance_id="success-worker",
             device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=adb,
             store=store,
             spool_dir=tmp_path,
@@ -499,7 +499,8 @@ def test_cleanup_retry_resources_resets_only_requested_failed_rows(
     )
     assert result["cleanup"]["device"]["status"] == "pending"
     assert result["cleanup"]["object"]["status"] == "failed"
-    assert result["cleanupRetryableResources"] == ["object"]
+    # 02 §14.1: object is retired, so a failed object status is not retryable.
+    assert result["cleanupRetryableResources"] == []
     with pytest.raises(HTTPException) as exc_info:
         retry_cleanup(
             task.public_id,
@@ -539,8 +540,8 @@ async def test_worker_automatically_retries_due_cleanup_with_backoff(
         SimpleNamespace(
             session_factory=_factory(db_session),
             instance_id="cleanup-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=adb,
             store=store,
             spool_dir=tmp_path,
@@ -570,65 +571,14 @@ async def test_worker_automatically_retries_due_cleanup_with_backoff(
 
 
 @pytest.mark.asyncio
-async def test_worker_automatically_retries_object_cleanup_with_backoff(
-    db_session: Session,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+async def test_pending_object_cleanup_is_never_claimed_by_the_worker(
+    db_session: Session, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(
-        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
-        lambda **_kwargs: None,
-    )
-    task = _task(
-        status=TaskStatus.SUCCEEDED.value,
-        stage=TaskStage.DONE.value,
-        device_cleanup_status="succeeded",
-        object_cleanup_status="failed",
-    )
-    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
-    db_session.add(task)
-    db_session.flush()
-    db_session.commit()
-    adb = _CleanupAdb()
-    store = _CleanupStore(fail=True)
-    deps = cast(
-        PublishDependencies,
-        SimpleNamespace(
-            session_factory=_factory(db_session),
-            instance_id="cleanup-worker",
-            lease_seconds=30,
-            max_attempts=3,
-            adb=adb,
-            store=store,
-            spool_dir=tmp_path,
-        ),
-    )
-    assert await run_background_cleanup_batch(deps, limit=1) == 1
-    db_session.expire_all()
-    assert store.calls == 1
-    assert task.object_cleanup_attempts == 1
-    assert task.object_cleanup_status == "failed"
-    next_attempt = task.object_cleanup_next_attempt_at
-    assert next_attempt is not None and next_attempt > datetime.now(UTC)
-    store.fail = False
-    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
-    db_session.commit()
-    assert await run_background_cleanup_batch(deps, limit=1) == 1
-    db_session.expire_all()
-    assert task.object_cleanup_status == "succeeded"
-    assert task.object_cleanup_next_attempt_at is None
+    """02 §5.3: MinIO objects are never deleted, so no object work is claimable.
 
-
-@pytest.mark.asyncio
-async def test_cancelled_object_cleanup_supports_auto_and_manual_retry(
-    db_session: Session,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "tts_erp_v2.publishing.dispatcher.require_destructive_script_guard",
-        lambda **_kwargs: None,
-    )
+    The row must stay untouched rather than being picked up and "cleaned", which
+    is what used to happen once the ticket-expiry grace elapsed.
+    """
     task = _task(
         status=TaskStatus.CANCELLED.value,
         stage=TaskStage.DONE.value,
@@ -636,51 +586,57 @@ async def test_cancelled_object_cleanup_supports_auto_and_manual_retry(
         object_cleanup_status="failed",
         spool_cleanup_status="succeeded",
     )
-    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    task.object_upload_expires_at = datetime.now(UTC) - timedelta(minutes=16)
+    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(minutes=16)
     db_session.add(task)
     db_session.flush()
     db_session.commit()
+
     store = _CleanupStore(fail=True)
     deps = cast(
         PublishDependencies,
         SimpleNamespace(
             session_factory=_factory(db_session),
             instance_id="cleanup-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=_CleanupAdb(),
             store=store,
             spool_dir=tmp_path,
         ),
     )
-    assert await run_background_cleanup_batch(deps, limit=1) == 1
+    assert await run_background_cleanup_batch(deps, limit=2) == 0
     db_session.expire_all()
-    assert task.status == TaskStatus.CANCELLED.value
+    assert store.calls == 0
     assert task.object_cleanup_status == "failed"
-    assert task.object_cleanup_attempts == 1
-    store.fail = False
-    result = retry_cleanup(
-        task.public_id,
-        ActionIn(rowVersion=task.row_version),
-        _request(),
-        db_session,
+    assert task.object_deleted_at is None
+    assert task.cleanup_lease_owner is None
+
+
+def test_retry_cleanup_reports_no_retryable_resource_for_a_failed_object(
+    db_session: Session,
+) -> None:
+    """02 §14.1: object is retired, so it is not a retryable cleanup resource."""
+    task = _task(
+        status=TaskStatus.CANCELLED.value,
+        stage=TaskStage.DONE.value,
+        device_cleanup_status="succeeded",
+        object_cleanup_status="failed",
+        spool_cleanup_status="succeeded",
     )
-    assert result["status"] == TaskStatus.CANCELLED.value
-    assert result["stage"] == TaskStage.DONE.value
-    assert result["cleanup"]["object"]["status"] == "pending"
-    db_session.expire_all()
-    assert task.status == TaskStatus.CANCELLED.value
-    assert task.stage == TaskStage.DONE.value
-    assert task.lease_owner is None
-    assert task.object_cleanup_status == "pending"
-    next_attempt = task.object_cleanup_next_attempt_at
-    assert next_attempt is not None
-    assert next_attempt <= datetime.now(UTC)
-    processed = await run_background_cleanup_batch(deps, limit=1)
-    db_session.expire_all()
-    assert processed == 1
-    assert task.status == TaskStatus.CANCELLED.value
-    assert task.object_cleanup_status == "succeeded"
+    db_session.add(task)
+    db_session.flush()
+    with pytest.raises(HTTPException) as exc_info:
+        retry_cleanup(
+            task.public_id,
+            ActionIn(rowVersion=task.row_version, resources=["object"]),
+            _request(),
+            db_session,
+        )
+    assert cast(dict, exc_info.value.detail)["code"] == (
+        "CLEANUP_RESOURCE_NOT_RETRYABLE"
+    )
+    db_session.rollback()
 
 
 @pytest.mark.asyncio
@@ -709,8 +665,8 @@ async def test_spool_unlink_failure_persists_and_retries_with_fencing(
         SimpleNamespace(
             session_factory=_factory(db_session),
             instance_id="cleanup-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=_CleanupAdb(),
             store=_CleanupStore(),
             spool_dir=tmp_path,
@@ -760,7 +716,9 @@ async def test_cleanup_lease_fences_stale_worker(
     assert (
         claim_cleanup_work(
             _factory(db_session),
-            CleanupClaimRequest("worker-a", 30, "device", task.public_id),
+            CleanupClaimRequest(
+                "worker-a", 30, "device", "TEST_device", task.public_id
+            ),
         )
         is not None
     )
@@ -774,8 +732,8 @@ async def test_cleanup_lease_fences_stale_worker(
         SimpleNamespace(
             session_factory=_factory(db_session),
             instance_id="worker-a",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=_CleanupAdb(),
             store=_CleanupStore(),
             spool_dir=tmp_path,
@@ -1530,7 +1488,6 @@ async def test_verify_not_published_requires_review_without_requeue(
             instance_id="verify-worker",
             device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=_CleanupAdb(),
             store=_CleanupStore(),
             artemis=VerifyArtemis(),
@@ -1581,7 +1538,6 @@ async def test_verify_published_is_terminal_and_not_reclaimable(
             instance_id="verify-worker",
             device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=_CleanupAdb(),
             store=_CleanupStore(),
             artemis=PublishedVerify(),
@@ -1673,7 +1629,6 @@ async def test_queued_worker_reaches_staging_and_terminal_success(
             instance_id="pipeline-worker",
             device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=adb,
             store=Store(),
             artemis=Artemis(),
@@ -1709,7 +1664,8 @@ def test_selector_priority_gates_device_but_not_background_cleanup(
     db_session.add_all([device, background, queued])
     db_session.flush()
     claimed = claim_cleanup_work(
-        _factory(db_session), CleanupClaimRequest("selector", 30, "device")
+        _factory(db_session),
+        CleanupClaimRequest("selector", 30, "device", "TEST_device"),
     )
     assert claimed is not None and claimed.task_id == device.public_id
     device = db_session.get(VideoPublishTask, device.id)
@@ -1853,7 +1809,7 @@ async def test_cleanup_takeover_during_external_call_fences_final_write(
     db_session.flush()
     work = claim_cleanup_work(
         _factory(db_session),
-        CleanupClaimRequest("worker-a", 30, "device", task.public_id),
+        CleanupClaimRequest("worker-a", 30, "device", "TEST_device", task.public_id),
     )
     assert work is not None
     task = db_session.get(VideoPublishTask, task.id)
@@ -1871,8 +1827,8 @@ async def test_cleanup_takeover_during_external_call_fences_final_write(
         SimpleNamespace(
             session_factory=_factory(db_session),
             instance_id="worker-a",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=TakeoverAdb(),
             store=_CleanupStore(),
             spool_dir=tmp_path,
@@ -1927,7 +1883,6 @@ async def test_live_success_is_terminal_and_not_reclaimable(
             instance_id="publish-worker",
             device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=_CleanupAdb(),
             store=_CleanupStore(),
             artemis=SuccessArtemis(),
@@ -2163,7 +2118,6 @@ async def test_verify_not_published_keeps_review_without_publish_budget(
             instance_id="verify-budget-worker",
             device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             adb=_CleanupAdb(),
             store=_CleanupStore(),
             artemis=VerifyArtemis(),
@@ -2265,8 +2219,8 @@ async def test_artemis_locked_admission_waits_without_consuming_budget(
         SimpleNamespace(
             session_factory=_factory(db_session),
             instance_id="locked-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             artemis=LockedArtemis(),
             spool_dir=tmp_path,
         ),
@@ -2328,8 +2282,8 @@ async def test_same_session_resubmit_increments_transport_retry_count(
         SimpleNamespace(
             session_factory=_factory(db_session),
             instance_id="retry-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             artemis=RecoveringArtemis(),
             spool_dir=tmp_path,
         ),

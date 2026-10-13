@@ -531,7 +531,7 @@ def test_allowed_actions_matrix(client, db_session: Session) -> None:
                 "status": "cancelled",
                 "stage": "done",
                 "cleanup_intent": "preserve_state",
-                "object_cleanup_status": "failed",
+                "device_cleanup_status": "failed",
             },
             {"view", "retry_cleanup", "copy_artemis_id"},
         ),

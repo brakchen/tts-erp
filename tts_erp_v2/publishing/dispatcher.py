@@ -74,9 +74,6 @@ class PublishDependencies:
     device_serial: str = field(
         default_factory=lambda: os.environ.get("ARTEMIS_DEVICE_SERIAL", "")
     )
-    # Kept for the worker entry point; the publish budget is retired and no
-    # decision reads this value any more (02 §14.1).
-    max_attempts: int = 3
     lease_seconds: int = 30
     poll_seconds: float = 2.0
     artemis_profile: str = "pro"
@@ -112,6 +109,7 @@ async def dispatch_one(deps: PublishDependencies) -> str:
             owner=deps.instance_id,
             lease_seconds=deps.lease_seconds,
             scope="device",
+            device_serial=deps.device_serial,
         ),
     )
     if work is not None:
@@ -157,6 +155,7 @@ async def run_background_cleanup_batch(deps: PublishDependencies, *, limit: int)
                 owner=deps.instance_id,
                 lease_seconds=deps.lease_seconds,
                 scope="background",
+                device_serial=deps.device_serial,
             ),
         )
         if work is None:
@@ -941,12 +940,6 @@ async def _execute_cleanup(work: CleanupWork, deps: PublishDependencies) -> None
             "spool",
             spool_cleanup,
         )
-        await run(
-            "object",
-            lambda: asyncio.to_thread(
-                deps.store.remove, work.object_key, work.object_etag
-            ),
-        )
         await asyncio.to_thread(
             finish_cleanup_work, deps.session_factory, token, errors
         )
@@ -972,6 +965,7 @@ async def _cleanup_success(task_id: UUID, deps: PublishDependencies) -> None:
             owner=deps.instance_id,
             lease_seconds=deps.lease_seconds,
             scope="device",
+            device_serial=deps.device_serial,
             task_id=task_id,
         ),
     )

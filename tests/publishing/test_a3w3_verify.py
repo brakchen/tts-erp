@@ -453,7 +453,8 @@ def test_a3w3_deadlock_requeued_task_is_released_after_cleanup_succeeds(
 
     # 2. Background cleanup picks the row up on its own (no operator action).
     work = claim_cleanup_work(
-        _factory(db_session), CleanupClaimRequest("cleanup-worker", 30, "device")
+        _factory(db_session),
+        CleanupClaimRequest("cleanup-worker", 30, "device", "TEST_device"),
     )
     assert work is not None, "background cleanup never claimed the requeued task"
     assert work.resources == ("device",), f"resources={work.resources}"
@@ -487,7 +488,8 @@ def test_a3w3_deadlock_cleanup_failure_requeues_to_waiting_device(db_session: Se
     db_session.commit()
 
     work = claim_cleanup_work(
-        _factory(db_session), CleanupClaimRequest("cleanup-worker", 30, "device")
+        _factory(db_session),
+        CleanupClaimRequest("cleanup-worker", 30, "device", "TEST_device"),
     )
     assert work is not None
     outcome = finish_cleanup_work(

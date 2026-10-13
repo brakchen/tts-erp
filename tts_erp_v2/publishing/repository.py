@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import struct
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -23,6 +25,7 @@ from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_
 from tts_erp_v2.publishing.domain import (
     ACTIVE_ATTEMPT_STATUSES,
     AMBIGUOUS_FAILURE_CODES,
+    CLEANUP_RESOURCES,
     AttemptKind,
     AttemptStatus,
     CleanupIntent,
@@ -171,6 +174,7 @@ class CleanupClaimRequest:
     owner: str
     lease_seconds: int
     scope: Literal["device", "background"]
+    device_serial: str
     task_id: UUID | None = None
 
 
@@ -191,9 +195,6 @@ class CleanupWork:
     execution_generation: UUID | None
     device_path: str | None
     spool_path: str | None
-    object_generation: UUID
-    object_key: str
-    object_etag: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +205,10 @@ class CleanupOutcome:
     row_version: int
 
 
-OBJECT_UPLOAD_COMPLETION_GRACE = timedelta(minutes=15)
+# First key of the per-device publish/cleanup advisory lock. It keeps the historic
+# single-slot namespace so this lock can never collide with another lock in the
+# database; the second key is the device serial's CRC.
+DEVICE_SLOT_LOCK_NAMESPACE = 738041
 
 
 def database_now(session: Session) -> datetime:
@@ -232,7 +236,7 @@ def _stage_values(task: VideoPublishTask, stage: str, now: datetime) -> dict[str
 def _has_outstanding_cleanup(task: VideoPublishTask) -> bool:
     return any(
         getattr(task, f"{name}_cleanup_status") in {"pending", "failed"}
-        for name in ("device", "spool", "object")
+        for name in CLEANUP_RESOURCES
     )
 
 
@@ -241,22 +245,13 @@ def _cleanup_pending_values(
     now: datetime,
     *,
     intent: str,
-    include_object: bool,
 ) -> dict[str, Any]:
     values: dict[str, Any] = {"cleanup_intent": intent}
-    selected = {
-        "device": task.device_path is not None,
-        "spool": True,
-        "object": include_object,
-    }
+    selected = {"device": task.device_path is not None, "spool": True}
     for name, enabled in selected.items():
         if enabled and getattr(task, f"{name}_cleanup_status") == "not_started":
             values[f"{name}_cleanup_status"] = "pending"
-            values[f"{name}_cleanup_next_attempt_at"] = (
-                max(filter(None, (now, task.object_upload_expires_at)))
-                if name == "object"
-                else now
-            )
+            values[f"{name}_cleanup_next_attempt_at"] = now
     return values
 
 
@@ -266,7 +261,6 @@ def _terminal_cleanup_values(task: VideoPublishTask, now: datetime) -> dict[str,
         task,
         now,
         intent=CleanupIntent.PRESERVE_STATE.value,
-        include_object=False,
     )
 
 
@@ -494,20 +488,13 @@ def commit_publish_transition(
                 last_error_message=code,
             )
             task_values.update(_stage_values(task, TaskStage.DONE.value, now))
-            # Missing now is not permanent while a previously issued PUT ticket
-            # can still complete. Every recovery path remains tracked until the
-            # persisted generation expiry and one idempotent selector deletion.
-            task_values.update(
-                cleanup_intent=CleanupIntent.PRESERVE_STATE.value,
-                object_cleanup_status="pending",
-                object_cleanup_error=None,
-                object_cleanup_next_attempt_at=max(
-                    filter(None, (now, task.object_upload_expires_at))
-                ),
-                cleanup_lease_owner=None,
-                cleanup_lease_expires_at=None,
-                cleanup_heartbeat_at=None,
-            )
+            # MinIO objects are retained in every status (02 §5.3/§14.1), so
+            # the retired object_cleanup_* statuses are never armed: nothing
+            # drains them any more and the cleanup_owner check would keep
+            # cleanup_intent stuck at preserve_state forever. Only device/spool
+            # residue is tracked for the terminal round, exactly like the
+            # other failure paths.
+            task_values.update(_terminal_cleanup_values(task, now))
         elif isinstance(command, AdmissionRejected):
             if attempt is None:
                 raise LeaseLost(token.task_id)
@@ -573,7 +560,6 @@ def commit_publish_transition(
                     task,
                     now,
                     intent=CleanupIntent.PRESERVE_STATE.value,
-                    include_object=False,
                 )
             )
             follow_up = "claim_device_cleanup"
@@ -915,13 +901,27 @@ def commit_publish_transition(
 def claim_cleanup_work(
     session_factory: Callable[[], Session], request: CleanupClaimRequest
 ) -> CleanupWork | None:
-    """Atomically select and lease one explicit, database-time-due cleanup row."""
+    """Atomically select and lease one explicit, database-time-due cleanup row.
+
+    The selector is device-scoped: one worker owns one device's staged files and
+    its own spool directory, so it must never touch another device's round
+    (02 §5.3/§6.1). MinIO objects are never deleted, so only ``device`` and
+    ``spool`` are selectable resources.
+    """
+    if not request.device_serial:
+        raise ValueError("CLEANUP_DEVICE_SERIAL_REQUIRED")
     with session_factory() as session:
         if request.scope == "device":
-            _lock_publish_slot(session)
+            # Serialize only against work on this same device; the per-device
+            # running index is the arbiter, the advisory lock keeps the
+            # "no running task on this device" check from racing a claim.
+            _lock_device_slot(session, request.device_serial)
             running_task = session.scalar(
                 select(VideoPublishTask.id)
-                .where(VideoPublishTask.status == TaskStatus.RUNNING.value)
+                .where(
+                    VideoPublishTask.status == TaskStatus.RUNNING.value,
+                    VideoPublishTask.target_device_serial == request.device_serial,
+                )
                 .limit(1)
             )
             if running_task is not None:
@@ -946,23 +946,10 @@ def claim_cleanup_work(
             VideoPublishTask.spool_cleanup_status,
             VideoPublishTask.spool_cleanup_next_attempt_at,
         )
-        object_due = and_(
-            due(
-                VideoPublishTask.object_cleanup_status,
-                VideoPublishTask.object_cleanup_next_attempt_at,
-            ),
-            or_(
-                VideoPublishTask.object_upload_expires_at.is_(None),
-                VideoPublishTask.object_upload_expires_at
-                + OBJECT_UPLOAD_COMPLETION_GRACE
-                <= now,
-            ),
-        )
-        resource_due = (
-            device_due if request.scope == "device" else or_(spool_due, object_due)
-        )
+        resource_due = device_due if request.scope == "device" else spool_due
         predicates = [
             VideoPublishTask.cleanup_intent != CleanupIntent.NONE.value,
+            VideoPublishTask.target_device_serial == request.device_serial,
             resource_due,
             or_(
                 VideoPublishTask.cleanup_lease_owner.is_(None),
@@ -978,7 +965,6 @@ def claim_cleanup_work(
                 now.label("claimed_at"),
                 device_due.label("device_due"),
                 spool_due.label("spool_due"),
-                object_due.label("object_due"),
             )
             .select_from(VideoPublishTask)
             .join(clock, true())
@@ -1006,12 +992,8 @@ def claim_cleanup_work(
                 VideoPublishTask.execution_generation,
                 VideoPublishTask.device_path,
                 VideoPublishTask.spool_path,
-                VideoPublishTask.object_generation,
-                VideoPublishTask.object_key,
-                VideoPublishTask.object_etag,
                 candidate.c.device_due,
                 candidate.c.spool_due,
-                candidate.c.object_due,
             )
         )
         row = session.execute(statement).one_or_none()
@@ -1023,7 +1005,6 @@ def claim_cleanup_work(
             for name, selected in (
                 ("device", row.device_due and request.scope == "device"),
                 ("spool", row.spool_due and request.scope == "background"),
-                ("object", row.object_due and request.scope == "background"),
             )
             if selected
         )
@@ -1040,9 +1021,6 @@ def claim_cleanup_work(
             execution_generation=row.execution_generation,
             device_path=row.device_path,
             spool_path=row.spool_path,
-            object_generation=row.object_generation,
-            object_key=row.object_key,
-            object_etag=row.object_etag,
         )
         session.commit()
         return work
@@ -1106,8 +1084,7 @@ def finish_cleanup_work(
             "row_version": token.row_version + 1,
         }
         projected = {
-            name: getattr(task, f"{name}_cleanup_status")
-            for name in ("device", "spool", "object")
+            name: getattr(task, f"{name}_cleanup_status") for name in CLEANUP_RESOURCES
         }
         for name, error in resource_results.items():
             if name not in projected:
@@ -1130,8 +1107,6 @@ def finish_cleanup_work(
                 )
             else:
                 values[f"{name}_cleanup_next_attempt_at"] = None
-                if name == "object":
-                    values["object_deleted_at"] = now
         decision = SimpleNamespace(
             cleanup_intent=task.cleanup_intent,
             status=task.status,
@@ -1150,7 +1125,15 @@ def finish_cleanup_work(
             values["stage_started_at"] = decision.stage_started_at
         remaining = any(
             resource_status in {"pending", "failed"}
-            for resource_status in projected.values()
+            # video_publish_task_cleanup_owner_check only allows
+            # cleanup_intent='none' while the object status is not pending or
+            # failed. The object resource is retired and never claimable, so a
+            # legacy object row keeps cleanup ownership open until that status
+            # is discharged; it is never re-claimed meanwhile.
+            for resource_status in (
+                *projected.values(),
+                task.object_cleanup_status,
+            )
         )
         values["cleanup_intent"] = (
             task.cleanup_intent if remaining else CleanupIntent.NONE.value
@@ -1285,8 +1268,32 @@ def _lease_task(
     return task
 
 
-def _lock_publish_slot(session: Session) -> None:
-    session.execute(select(func.pg_advisory_xact_lock(738041)))
+def _device_slot_key(device_serial: str) -> int:
+    """Stable signed 32-bit advisory-lock key for one device serial.
+
+    PostgreSQL only exposes the two-key form as ``pg_advisory_xact_lock(int4,
+    int4)``, and ``zlib.crc32`` is unsigned, so the value must be wrapped back
+    into the signed 32-bit range before it is bound.
+    """
+    return struct.unpack(
+        "i", struct.pack("I", zlib.crc32(device_serial.encode("utf-8")))
+    )[0]
+
+
+def _lock_device_slot(session: Session, device_serial: str) -> None:
+    """Serialize device-scoped writers for exactly one device (02 §6.1).
+
+    The namespace keeps the historic global slot key so it cannot collide with
+    another lock in this database; the second key is a stable CRC of the serial,
+    so two devices never block each other.
+    """
+    session.execute(
+        select(
+            func.pg_advisory_xact_lock(
+                DEVICE_SLOT_LOCK_NAMESPACE, _device_slot_key(device_serial)
+            )
+        )
+    )
 
 
 def has_pending_device_cleanup(session: Session, device_serial: str) -> bool:
@@ -1500,10 +1507,19 @@ def _replay_confirmed(
 
 
 def request_verification(session: Session, task_id: UUID) -> VideoPublishTask:
-    # The device-scope cleanup selector still serializes on this advisory lock
-    # and yields while a task is running, so a verification must take the same
-    # lock before it reserves the device slot.
-    _lock_publish_slot(session)
+    # The device-scope cleanup selector serializes on the same per-device slot
+    # and yields while this device is running, so a verification must take that
+    # exact lock before it reserves the device. The serial is read before the
+    # lock to keep the lock order advisory-then-row, exactly as the cleanup
+    # selector does; target_device_serial never changes after creation.
+    device_serial = session.scalar(
+        select(VideoPublishTask.target_device_serial).where(
+            VideoPublishTask.public_id == task_id
+        )
+    )
+    if device_serial is None:
+        raise LookupError("TASK_NOT_FOUND")
+    _lock_device_slot(session, device_serial)
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
@@ -1563,7 +1579,7 @@ def retry_cleanup_resources(
     failed = cleanup_retryable_resources(task)
     if resources is not None:
         requested = tuple(dict.fromkeys(resources))
-        if any(name not in {"device", "spool", "object"} for name in requested):
+        if any(name not in CLEANUP_RESOURCES for name in requested):
             raise ValueError("CLEANUP_RESOURCE_NOT_RETRYABLE")
         if any(name not in failed for name in requested):
             raise ValueError("CLEANUP_RESOURCE_NOT_RETRYABLE")

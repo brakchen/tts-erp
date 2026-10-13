@@ -61,6 +61,12 @@ class CleanupIntent(StrEnum):
     PRESERVE_STATE = "preserve_state"
 
 
+# Resources a worker still owns. MinIO objects are retained in every status
+# (02 §5.3, §14.1), so a legacy ``object_cleanup_*`` value is inert residue: it
+# is never claimable and never keeps cleanup ownership open.
+CLEANUP_RESOURCES = ("device", "spool")
+
+
 @dataclass(frozen=True, slots=True)
 class CleanupPlan:
     intent: CleanupIntent
@@ -218,7 +224,15 @@ def replacement_cleanup_pending(task: Any) -> bool:
 
 
 def object_cleanup_blocks_input(task: Any) -> bool:
-    """Retention deletion must finish before retry or replacement mutates input."""
+    """Retention deletion must finish before retry or replacement mutates input.
+
+    The object resource itself is retired and no worker phase clears it any more
+    (02 §5.3), but ``video_publish_task_cleanup_owner_check`` only allows
+    ``cleanup_intent='none'`` while the object status is not pending/failed.
+    Queueing such a row would therefore violate the constraint, so the status
+    stays a hard input gate: it refuses with a clean 409 instead of failing the
+    commit. Discharging it needs a migration, which is out of scope here.
+    """
     return (
         getattr(task, "object_cleanup_status", None)
         in {CleanupStatus.PENDING.value, CleanupStatus.FAILED.value}
@@ -237,12 +251,16 @@ def replace_upload_allowed(task: Any) -> bool:
 
 
 def cleanup_retryable_resources(task: Any) -> tuple[str, ...]:
-    """Single policy used by list snapshots and cleanup retry commands."""
+    """Single policy used by list snapshots and cleanup retry commands.
+
+    Only the resources the worker still owns are retryable; MinIO objects are
+    retained forever, so ``object`` is not one of them (02 §5.3/§14.1).
+    """
     if getattr(task, "status", None) == TaskStatus.RUNNING:
         return ()
     return tuple(
         name
-        for name in ("device", "spool", "object")
+        for name in CLEANUP_RESOURCES
         if getattr(task, f"{name}_cleanup_status", None) == CleanupStatus.FAILED.value
     )
 

@@ -521,18 +521,10 @@ def retry_task(
         try:
             store.stat(task.object_key)
         except ObjectNotFound as exc:
-            now = database_now(session)
-            task.cleanup_intent = CleanupIntent.PRESERVE_STATE.value
-            task.object_cleanup_status = "pending"
-            task.object_cleanup_error = None
-            task.object_cleanup_next_attempt_at = max(
-                filter(None, (now, task.object_upload_expires_at))
-            )
-            task.cleanup_lease_owner = None
-            task.cleanup_lease_expires_at = None
-            task.cleanup_heartbeat_at = None
-            task.row_version += 1
-            session.commit()
+            # The retired object_cleanup_* statuses are never armed (02 §5.3):
+            # no worker phase drains them, so writing one would strand the task
+            # in preserve_state with a permanent 409 on every later retry. The
+            # operator gets the same actionable signal on every attempt instead.
             raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc
         except Exception as exc:
             raise ValueError("OBJECT_STORE_UNAVAILABLE") from exc

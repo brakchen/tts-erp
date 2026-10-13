@@ -200,11 +200,12 @@ async def test_transport_recovery_queries_before_same_session_resubmit() -> None
     ]
 
 
-def test_cleanup_guard_precedes_adb_and_object_deletion() -> None:
+def test_cleanup_guard_precedes_adb_and_spool_deletion() -> None:
+    """02 §5.3: MinIO objects are never deleted, so only device/spool remain."""
     source = (ROOT / "tts_erp_v2/publishing/dispatcher.py").read_text()
     guard = source.index('script_name="video_publish.cleanup_resources"')
     assert guard < source.index("remove_staged_video", guard)
-    assert guard < source.index("deps.store.remove", guard)
+    assert "deps.store.remove" not in source
 
 
 def test_destructive_guard_refuses_prod_shape_without_opt_in(

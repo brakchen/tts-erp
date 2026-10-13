@@ -239,7 +239,7 @@ async def test_future_cleanup_backoff_still_reports_device_busy(
             bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
         )
 
-    deps = SimpleNamespace(session_factory=factory)
+    deps = SimpleNamespace(session_factory=factory, device_serial="TEST_device")
     status_value, message = await _probe_device_readiness(cast(Any, deps))
     assert status_value == "busy"
     assert "清理" in message

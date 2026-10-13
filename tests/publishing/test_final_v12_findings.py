@@ -571,9 +571,6 @@ async def test_slow_cleanup_renews_lease_until_operation_finishes(
         None,
         "/sdcard/Movies/TTSERP/tts_erp_TEST.mp4",
         None,
-        uuid4(),
-        "TEST/object.mp4",
-        None,
     )
     deps = cast(
         PublishDependencies,
@@ -671,7 +668,11 @@ async def test_worker_heartbeat_probe_reports_locked_device_without_raw_error(
     status_value, message = await _probe_device_readiness(
         cast(
             PublishDependencies,
-            SimpleNamespace(adb=Adb(), session_factory=NoCleanupSession),
+            SimpleNamespace(
+                adb=Adb(),
+                session_factory=NoCleanupSession,
+                device_serial="TEST_device",
+            ),
         )
     )
     assert status_value == "locked"
@@ -798,7 +799,6 @@ async def test_recovery_resubmit_transport_ambiguity_preserves_same_attempt(
             session_factory=_factory(db_session),
             instance_id="worker-a",
             lease_seconds=30,
-            max_attempts=3,
             artemis=Artemis(),
             spool_dir=tmp_path,
         ),
@@ -859,9 +859,6 @@ async def test_cleanup_heartbeat_owner_loss_stops_finalization(
         "TEST_device",
         None,
         "/sdcard/Movies/TTSERP/tts_erp_TEST.mp4",
-        None,
-        uuid4(),
-        "TEST/object.mp4",
         None,
     )
     deps = cast(

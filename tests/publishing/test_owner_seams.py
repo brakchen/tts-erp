@@ -238,6 +238,7 @@ def test_concurrent_cleanup_claim_has_one_winner(
                 owner=owner,
                 lease_seconds=30,
                 scope="device",
+                device_serial="TEST_device",
                 task_id=task_id if exact else None,
             ),
         )
@@ -274,7 +275,7 @@ def test_cleanup_completion_after_takeover_cannot_write(db_engine) -> None:
         task_id = task.public_id
     work = claim_cleanup_work(
         factory,
-        CleanupClaimRequest("cleanup-a", 30, "device", task_id),
+        CleanupClaimRequest("cleanup-a", 30, "device", "TEST_device", task_id),
     )
     assert work is not None
     try:
@@ -317,7 +318,7 @@ def test_cleanup_claim_blocks_live_owner_and_allows_database_expiry(db_engine) -
         assert (
             claim_cleanup_work(
                 factory,
-                CleanupClaimRequest("cleanup-b", 30, "device", task_id),
+                CleanupClaimRequest("cleanup-b", 30, "device", "TEST_device", task_id),
             )
             is None
         )
@@ -333,7 +334,7 @@ def test_cleanup_claim_blocks_live_owner_and_allows_database_expiry(db_engine) -
             session.commit()
         work = claim_cleanup_work(
             factory,
-            CleanupClaimRequest("cleanup-b", 30, "device", task_id),
+            CleanupClaimRequest("cleanup-b", 30, "device", "TEST_device", task_id),
         )
         assert work is not None
         assert work.token.owner == "cleanup-b"
@@ -367,7 +368,9 @@ def test_cleanup_claim_returns_only_database_time_due_resources(
     try:
         work = claim_cleanup_work(
             factory,
-            CleanupClaimRequest("cleanup-due", 30, "background", task_id),
+            CleanupClaimRequest(
+                "cleanup-due", 30, "background", "TEST_device", task_id
+            ),
         )
         assert work is not None
         assert work.resources == ("spool",)
@@ -390,7 +393,7 @@ def test_cleanup_retry_deadline_uses_database_time(
         task_id = task.public_id
     work = claim_cleanup_work(
         factory,
-        CleanupClaimRequest("cleanup-clock", 30, "device", task_id),
+        CleanupClaimRequest("cleanup-clock", 30, "device", "TEST_device", task_id),
     )
     assert work is not None
 
