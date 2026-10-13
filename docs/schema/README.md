@@ -7,7 +7,7 @@
 
 | 文件 | 是什么 |
 | --- | --- |
-| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：14 个业务 schema、73 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
+| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：14 个业务 schema、74 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
 | [`schema_storage.sql`](schema_storage.sql) | `procurement.spu_images`（SPU 图片元数据）的补丁式幂等 DDL，不走 ORM；测试在 `tests/api/conftest.py` 会用到它描述的表 |
 
 ## 2. 维护规则（怎么保持"是现在的数据结构"）
@@ -19,7 +19,7 @@
    ```
    `scripts/regen_schema.py` 只读不写库；它剥掉序列/`\restrict` 等噪音、给
    `CREATE TABLE`/`CREATE FUNCTION` 加 `IF NOT EXISTS`，使快照可重复执行。
-2. **生成源必须在当前 alembic head**（当前 head：`0068_spu_deterioration_alert`）：
+2. **生成源必须在当前 alembic head**（当前 head：`0069_video_publish_confirmation`）：
    ```bash
    docker exec postgres psql -U postgres -tAc "SELECT version_num FROM alembic_version" -d tts_erp_test_template
    ```
@@ -30,7 +30,7 @@
 4. 历史漂移教训（2026-08-25）：手维护的 schema.sql 曾漏 7 张表、列名写错，
    healthz/sync/db 三处互相矛盾——**只有"生成 + 同步"这条路是可靠的**。
 
-## 3. 数据结构索引（截至 migration 0068）
+## 3. 数据结构索引（截至 migration 0069）
 
 领域模型与表间关系见 [`docs/architecture/data-model-target-v3.md`](../architecture/data-model-target-v3.md)；
 「业务概念 ↔ 物理表字段」映射见 [`docs/business/spu-profitability.md`](../business/spu-profitability.md) 附录 A；
