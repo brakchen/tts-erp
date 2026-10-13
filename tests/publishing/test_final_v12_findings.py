@@ -158,11 +158,11 @@ def _request(*, request_id: str = "TEST-request-id") -> Request:
     return request
 
 
-def test_cancelled_or_rejected_execution_is_never_retry_safe() -> None:
+def test_cancelled_or_rejected_execution_is_never_certain() -> None:
     for status in ("cancelled", "canceled", "rejected"):
         result = classify_failure(artemis_status=status, steps_count=0)
-        assert result.retry_safe is not True
-        assert result.requires_verification is True
+        # 02 §7.3: a cancelled/rejected session stays ambiguous → needs_review.
+        assert result.ambiguous is True
 
 
 @pytest.mark.asyncio
@@ -214,17 +214,17 @@ async def test_unknown_or_malformed_409_is_transport_ambiguity(
 
 
 @pytest.mark.parametrize(
-    ("status", "verdict", "expected_status"),
+    ("status", "verdict"),
     [
-        ("failed", "published", TaskStatus.NEEDS_REVIEW.value),
-        ("cancelled", "not_published", TaskStatus.NEEDS_REVIEW.value),
-        ("success", "PUBLISHED", TaskStatus.NEEDS_REVIEW.value),
-        ("success", "unknown", TaskStatus.NEEDS_REVIEW.value),
-        ("success", "published", TaskStatus.SUCCEEDED.value),
+        ("failed", "published"),
+        ("cancelled", "not_published"),
+        ("success", "PUBLISHED"),
+        ("success", "unknown"),
+        ("success", "published"),
     ],
 )
 def test_verify_verdict_requires_success_and_strict_enum(
-    db_session: Session, status: str, verdict: str, expected_status: str
+    db_session: Session, status: str, verdict: str
 ) -> None:
     task, verify = _verify_task(db_session)
     outcome = commit_publish_transition(
@@ -238,15 +238,16 @@ def test_verify_verdict_requires_success_and_strict_enum(
         ),
         ObserveAttempt(
             AttemptObservation(status=status, terminal=True, verdict=verdict),
-            max_attempts=3,
         ),
     )
-    assert outcome.task_status == expected_status
+    # 02 §7.3/§7.4: a verification verdict is only a clue. Every verdict,
+    # including 'published', leaves the task in needs_review/done until a human
+    # confirms it.
+    assert outcome.task_status == TaskStatus.NEEDS_REVIEW.value
     db_session.expire_all()
-    assert task.status == expected_status
-    if expected_status == TaskStatus.NEEDS_REVIEW.value:
-        assert task.stage == TaskStage.DONE.value
-        assert task.cleanup_intent == CleanupIntent.NONE.value
+    assert task.status == TaskStatus.NEEDS_REVIEW.value
+    assert task.stage == TaskStage.DONE.value
+    assert task.cleanup_intent == CleanupIntent.PRESERVE_STATE.value
 
 
 def test_rejected_verify_stays_needs_review_and_never_queues_publish(
@@ -262,7 +263,7 @@ def test_rejected_verify_stays_needs_review_and_never_queues_publish(
             verify.id,
             AttemptStatus.RUNNING.value,
         ),
-        AdmissionRejected("DEVICE_BUSY", max_attempts=3),
+        AdmissionRejected("DEVICE_BUSY"),
     )
     assert (outcome.task_status, outcome.task_stage) == (
         TaskStatus.NEEDS_REVIEW.value,
@@ -291,7 +292,7 @@ def test_rejected_automatic_verify_preserves_registered_cleanup(
             verify.id,
             AttemptStatus.RUNNING.value,
         ),
-        AdmissionRejected("DEVICE_LOCKED", max_attempts=3),
+        AdmissionRejected("DEVICE_LOCKED"),
     )
     assert outcome.task_status == TaskStatus.NEEDS_REVIEW.value
     db_session.expire_all()
@@ -300,7 +301,7 @@ def test_rejected_automatic_verify_preserves_registered_cleanup(
     assert task.spool_cleanup_status == "pending"
 
 
-def test_publish_admission_refunds_budget_without_rewriting_audit_count(
+def test_publish_admission_rejection_keeps_audit_count_without_requeue(
     db_session: Session,
 ) -> None:
     task = _task(stage=TaskStage.DISPATCHING_ARTEMIS.value)
@@ -330,11 +331,14 @@ def test_publish_admission_refunds_budget_without_rewriting_audit_count(
             publish.id,
             AttemptStatus.SUBMITTING.value,
         ),
-        AdmissionRejected("DEVICE_LOCKED", max_attempts=3),
+        AdmissionRejected("DEVICE_LOCKED"),
     )
     db_session.expire_all()
     assert task.attempt_count == 1
-    assert cast(Any, task).publish_budget_used == 0
+    # 02 §7.1/§14.1: no budget is written or refunded any more; a rejected
+    # admission simply stops at failed/done and waits for a human retry.
+    assert task.status == TaskStatus.FAILED.value
+    assert task.stage == TaskStage.DONE.value
 
 
 def test_retention_cleanup_suppresses_and_rejects_retry(db_session: Session) -> None:
@@ -484,7 +488,7 @@ def test_stateful_error_envelope_has_request_and_retry_contract(
     assert detail["retryable"] is False
     assert detail["requestId"] == "TEST-request-id"
     assert detail["rowVersion"] == task.row_version
-    assert detail["allowedActions"] == ["view", "cancel"]
+    assert detail["allowedActions"] == ["view", "edit_settings", "cancel"]
     # ★ P2-3 逆向守护：message 不得是机器码本身（之前透出 "TASK_ACTION_NOT_ALLOWED" 是 bug）
     assert detail["message"] != detail["code"], (
         f"P2-3 回归：message 仍是机器码 {detail['message']!r}，"
@@ -566,9 +570,6 @@ async def test_slow_cleanup_renews_lease_until_operation_finishes(
         "TEST_device",
         None,
         "/sdcard/Movies/TTSERP/tts_erp_TEST.mp4",
-        None,
-        uuid4(),
-        "TEST/object.mp4",
         None,
     )
     deps = cast(
@@ -667,7 +668,11 @@ async def test_worker_heartbeat_probe_reports_locked_device_without_raw_error(
     status_value, message = await _probe_device_readiness(
         cast(
             PublishDependencies,
-            SimpleNamespace(adb=Adb(), session_factory=NoCleanupSession),
+            SimpleNamespace(
+                adb=Adb(),
+                session_factory=NoCleanupSession,
+                device_serial="TEST_device",
+            ),
         )
     )
     assert status_value == "locked"
@@ -794,7 +799,6 @@ async def test_recovery_resubmit_transport_ambiguity_preserves_same_attempt(
             session_factory=_factory(db_session),
             instance_id="worker-a",
             lease_seconds=30,
-            max_attempts=3,
             artemis=Artemis(),
             spool_dir=tmp_path,
         ),
@@ -855,9 +859,6 @@ async def test_cleanup_heartbeat_owner_loss_stops_finalization(
         "TEST_device",
         None,
         "/sdcard/Movies/TTSERP/tts_erp_TEST.mp4",
-        None,
-        uuid4(),
-        "TEST/object.mp4",
         None,
     )
     deps = cast(

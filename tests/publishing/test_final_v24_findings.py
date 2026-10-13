@@ -114,8 +114,8 @@ async def test_execution_generation_is_persisted_before_download_side_effect(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v24-worker",
+            device_serial="TESTV24SERIAL",
             lease_seconds=30,
-            max_attempts=3,
             poll_seconds=0,
             store=Store(),
             adb=SimpleNamespace(),
@@ -165,7 +165,9 @@ async def test_stale_spool_cleaner_cannot_address_new_execution_generation(
 
     stale = claim_cleanup_work(
         factory,
-        CleanupClaimRequest("TEST-stale-spool", 1, "background", task_public_id),
+        CleanupClaimRequest(
+            "TEST-stale-spool", 1, "background", "TESTV24SERIAL", task_public_id
+        ),
     )
     assert stale is not None
     assert getattr(stale, "execution_generation", None) == old_generation
@@ -192,6 +194,7 @@ async def test_stale_spool_cleaner_cannot_address_new_execution_generation(
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-stale-spool",
+            device_serial="TESTV24SERIAL",
             lease_seconds=1,
             spool_dir=tmp_path,
             store=SimpleNamespace(remove=lambda *_args: None),
@@ -212,7 +215,9 @@ async def test_stale_spool_cleaner_cannot_address_new_execution_generation(
     await asyncio.sleep(0.4)
     takeover = claim_cleanup_work(
         factory,
-        CleanupClaimRequest("TEST-takeover-spool", 30, "background", task_public_id),
+        CleanupClaimRequest(
+            "TEST-takeover-spool", 30, "background", "TESTV24SERIAL", task_public_id
+        ),
     )
     assert takeover is not None
     deps.instance_id = "TEST-takeover-spool"
@@ -262,7 +267,9 @@ async def test_stale_device_cleaner_cannot_address_new_execution_generation(
 
     stale = claim_cleanup_work(
         factory,
-        CleanupClaimRequest("TEST-stale-device", 1, "device", task_public_id),
+        CleanupClaimRequest(
+            "TEST-stale-device", 1, "device", "TESTV24SERIAL", task_public_id
+        ),
     )
     assert stale is not None
     assert getattr(stale, "execution_generation", None) == old_generation
@@ -285,6 +292,7 @@ async def test_stale_device_cleaner_cannot_address_new_execution_generation(
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-stale-device",
+            device_serial="TESTV24SERIAL",
             lease_seconds=1,
             spool_dir=tmp_path,
             store=SimpleNamespace(remove=lambda *_args: None),
@@ -305,7 +313,9 @@ async def test_stale_device_cleaner_cannot_address_new_execution_generation(
     await asyncio.sleep(0.4)
     takeover = claim_cleanup_work(
         factory,
-        CleanupClaimRequest("TEST-takeover-device", 30, "device", task_public_id),
+        CleanupClaimRequest(
+            "TEST-takeover-device", 30, "device", "TESTV24SERIAL", task_public_id
+        ),
     )
     assert takeover is not None
     deps.instance_id = "TEST-takeover-device"
@@ -382,10 +392,9 @@ def test_existing_ticket_issuance_serializes_with_cancellation(
     assert replay is True
     assert url
     assert cancelled.object_upload_expires_at is not None
-    assert cancelled.object_cleanup_next_attempt_at is not None
-    assert (
-        cancelled.object_cleanup_next_attempt_at >= cancelled.object_upload_expires_at
-    )
+    # Cancelling never queues a MinIO deletion (02 §5.3).
+    assert cancelled.object_cleanup_next_attempt_at is None
+    assert cancelled.object_cleanup_status == "not_started"
     _delete_task(factory, task.public_id)
 
 
@@ -423,8 +432,8 @@ async def test_attempt_profile_and_verification_level_are_immutable_submit_snaps
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v24-worker",
+            device_serial="TESTV24SERIAL",
             lease_seconds=30,
-            max_attempts=3,
             poll_seconds=0,
             store=SimpleNamespace(),
             adb=SimpleNamespace(),
@@ -513,6 +522,7 @@ async def test_background_cleanup_progresses_while_publish_queue_remains_sustain
         SimpleNamespace(
             session_factory=factory,
             instance_id="TEST-v24-background",
+            device_serial="TESTV24SERIAL",
             lease_seconds=30,
             spool_dir=tmp_path,
             store=SimpleNamespace(remove=lambda *_args: None),
@@ -747,7 +757,7 @@ def test_ticket_ttl_above_migration_safety_bound_is_rejected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_retry_object_stays_selector_owned_until_expiry_grace(
+async def test_missing_object_is_never_deleted_and_yields_no_cleanup_work(
     db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     task = _task(status="failed", stage="done")
@@ -780,59 +790,37 @@ async def test_missing_retry_object_stays_selector_owned_until_expiry_grace(
 
     db_session.refresh(task)
     assert task.object_deleted_at is None
-    assert task.object_cleanup_status == "pending"
-    assert task.cleanup_intent == "preserve_state"
-    assert task.object_cleanup_next_attempt_at == task.object_upload_expires_at
-    with pytest.raises(ValueError, match="OBJECT_CLEANUP_IN_PROGRESS"):
-        replace_upload(db_session, task.public_id)
-
-    retired_generation = task.object_generation
-    db_session.execute(
-        update(VideoPublishTask)
-        .where(VideoPublishTask.id == task.id)
-        .values(
-            object_upload_expires_at=datetime.now(UTC) - timedelta(minutes=16),
-            object_cleanup_next_attempt_at=datetime.now(UTC) - timedelta(minutes=16),
-        )
-    )
-    db_session.commit()
+    # The retired object statuses are never armed (02 §5.3): nothing drains
+    # them, so writing one would strand the row in preserve_state with a
+    # permanent 409 on every later retry.
+    assert task.object_cleanup_status == "not_started"
+    assert task.cleanup_intent == "none"
+    assert task.object_cleanup_next_attempt_at is None
 
     def factory() -> Session:
         return Session(
             bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
         )
 
-    removed: list[str] = []
-    monkeypatch.setattr(
-        dispatcher, "require_destructive_script_guard", lambda **_kwargs: None
-    )
-    cleanup_store = SimpleNamespace(remove=lambda key, _etag=None: removed.append(key))
-    work = claim_cleanup_work(
-        factory,
-        CleanupClaimRequest("TEST-missing-object-cleaner", 30, "background"),
-    )
-    assert work is not None
-    await _execute_cleanup(
-        work,
-        cast(
-            PublishDependencies,
-            SimpleNamespace(
-                session_factory=factory,
-                instance_id="TEST-missing-object-cleaner",
-                lease_seconds=30,
-                spool_dir=tmp_path,
-                store=cleanup_store,
-                adb=SimpleNamespace(),
-            ),
-        ),
-    )
+    # 02 §5.3/§14.1: the object resource is retired, so this row exposes no
+    # cleanup work in either scope and nothing ever deletes the object.
+    for scope in ("device", "background"):
+        assert (
+            claim_cleanup_work(
+                factory,
+                CleanupClaimRequest(
+                    "TEST-missing-object-cleaner", 30, scope, "TESTV24SERIAL"
+                ),
+            )
+            is None
+        )
     db_session.expire_all()
-    assert task.object_cleanup_status == "succeeded"
-    assert task.object_deleted_at is not None
-    assert removed == [task.object_key]
-
-    replacement = replace_upload(db_session, task.public_id)
-    assert replacement.object_generation != retired_generation
+    assert task.object_cleanup_status == "not_started"
+    assert task.object_deleted_at is None
+    # object_deleted_at is never set under "objects are never deleted" (02
+    # §5.3), so replace_upload stays dormant; the operator creates a new task.
+    with pytest.raises(ValueError, match="UPLOAD_REPLACEMENT_REQUIRED"):
+        replace_upload(db_session, task.public_id)
 
 
 def test_concurrent_replays_persist_monotonic_maximum_ticket_expiry(
@@ -896,46 +884,3 @@ def test_concurrent_replays_persist_monotonic_maximum_ticket_expiry(
     assert persisted_expiry is not None
     assert persisted_expiry >= before + timedelta(minutes=29)
     _delete_task(factory, task.public_id)
-
-
-def test_object_cleanup_claim_enforces_ticket_expiry_completion_grace(
-    db_session: Session,
-) -> None:
-    task = _task(status="cancelled", stage="done")
-    task.lease_owner = None
-    task.lease_expires_at = None
-    task.cleanup_intent = "preserve_state"
-    task.object_cleanup_status = "pending"
-    task.object_cleanup_next_attempt_at = datetime.now(UTC) - timedelta(hours=1)
-    task.object_upload_expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    db_session.add(task)
-    db_session.commit()
-
-    def factory() -> Session:
-        return Session(
-            bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
-        )
-
-    assert (
-        claim_cleanup_work(
-            factory,
-            CleanupClaimRequest("TEST-before-grace", 30, "background", task.public_id),
-        )
-        is None
-    )
-    db_session.execute(
-        update(VideoPublishTask)
-        .where(VideoPublishTask.id == task.id)
-        .values(
-            object_upload_expires_at=datetime.now(UTC) - timedelta(minutes=16),
-            object_cleanup_next_attempt_at=datetime.now(UTC) - timedelta(minutes=16),
-        )
-    )
-    db_session.commit()
-
-    work = claim_cleanup_work(
-        factory,
-        CleanupClaimRequest("TEST-after-grace", 30, "background", task.public_id),
-    )
-    assert work is not None
-    assert work.resources == ("object",)

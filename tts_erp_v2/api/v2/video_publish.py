@@ -9,11 +9,11 @@ import json
 import os
 from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, false, func, or_, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, selectinload
 
@@ -28,20 +28,29 @@ from tts_erp_v2.api.v2._common import request_id
 from tts_erp_v2.db.models.publishing import (
     PublishWorkerHeartbeat,
     VideoPublishAttempt,
+    VideoPublishConfirmation,
     VideoPublishTask,
 )
 from tts_erp_v2.publishing.artemis_client import ArtemisClient, ArtemisTransportError
 from tts_erp_v2.publishing.diagnostics import sanitize_artemis_output, sanitize_text
-from tts_erp_v2.publishing.domain import allowed_actions, cleanup_retryable_resources
+from tts_erp_v2.publishing.domain import (
+    TaskStatus,
+    allowed_actions,
+    cleanup_retryable_resources,
+)
 from tts_erp_v2.publishing.object_store import VideoObjectStore, video_store_from_env
 from tts_erp_v2.publishing.repository import (
-    _lock_publish_slot,
+    ConfirmationActor,
     request_verification,
     retry_cleanup_resources,
+)
+from tts_erp_v2.publishing.repository import (
+    confirm_published as confirm_published_service,
 )
 from tts_erp_v2.publishing.safe_values import mask_device_serial
 from tts_erp_v2.publishing.submission import (
     CreateCommand,
+    SettingsCommand,
     TaskConflict,
     cancel_task,
     confirm_upload,
@@ -51,6 +60,7 @@ from tts_erp_v2.publishing.submission import (
     refresh_upload_ticket,
     replace_upload,
     retry_task,
+    update_settings,
 )
 
 router = APIRouter(prefix="/v2/video-publish", tags=["video-publish"])
@@ -98,6 +108,104 @@ class ActionIn(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ConfirmPublishedIn(BaseModel):
+    """Manual success confirmation input (02 §17.1).
+
+    Only ``rowVersion`` and ``requestId`` are accepted. The operator identity
+    is never client input: it comes from the authenticated request principal.
+    """
+
+    row_version: int | None = Field(default=None, alias="rowVersion")
+    request_id: UUID | None = Field(default=None, alias="requestId")
+    model_config = {"populate_by_name": True}
+
+
+class SettingsIn(BaseModel):
+    """Pre-submission parameter edit input (02 §9.5)."""
+
+    row_version: int | None = Field(default=None, alias="rowVersion")
+    prompt: str | None = None
+    device_serial: str | None = Field(default=None, alias="deviceSerial")
+    app_package: str | None = Field(default=None, alias="appPackage")
+    model_config = {"populate_by_name": True}
+
+
+# Snapshot keys that must never reach a 304 payload (02 §9.6).
+_UNSET = object()
+
+
+# ``confirm_published`` writes the audit row and the status change in one
+# transaction of its own, so it is handed a factory instead of the
+# request-scoped session. Binding it to the request's engine keeps it on the
+# same database (and inside the caller's transaction, when the session was
+# bound with savepoint joins).
+def _confirmation_factory(session: Session):
+    def factory() -> Session:
+        return Session(
+            bind=session.get_bind(),
+            join_transaction_mode="create_savepoint",
+            expire_on_commit=False,
+        )
+
+    return factory
+
+
+# Domain codes that answer 409 on the confirmation endpoint.
+_CONFIRM_CONFLICT_CODES = frozenset(
+    {"ROW_VERSION_CONFLICT", "TASK_VERSION_CONFLICT", "TASK_ACTION_NOT_ALLOWED"}
+)
+
+# Domain codes that answer 409 on the pre-submission settings endpoint
+# (02 §9.5). The lock boundary is checked before the version CAS, so a task
+# that was already submitted always answers TASK_ALREADY_SUBMITTED.
+_SETTINGS_CONFLICT_CODES = frozenset(
+    {
+        "TASK_ALREADY_SUBMITTED",
+        "TASK_BUSY",
+        "TASK_VERSION_CONFLICT",
+        "ROW_VERSION_CONFLICT",
+    }
+)
+
+
+def _actor_label(user_id: int | None, key_hash: str | None) -> str:
+    """Render an authenticated principal without leaking the key itself."""
+    if user_id is not None:
+        return f"user:{user_id}"
+    return "api-key" if key_hash else "system"
+
+
+def _confirmation_of(
+    session: Session, task: VideoPublishTask
+) -> VideoPublishConfirmation | None:
+    return session.scalar(
+        select(VideoPublishConfirmation)
+        .where(
+            VideoPublishConfirmation.task_id == task.id,
+            VideoPublishConfirmation.action == "confirm_published",
+            VideoPublishConfirmation.to_status == TaskStatus.SUCCEEDED.value,
+        )
+        .order_by(VideoPublishConfirmation.id)
+        .limit(1)
+    )
+
+
+def _confirmation_payload(
+    confirmation: VideoPublishConfirmation | None,
+) -> dict | None:
+    """Wire the confirmation audit row (02 §9.6). Legacy auto-success tasks
+    have no audit row and report ``null`` rather than a fabricated operator."""
+    if confirmation is None:
+        return None
+    return {
+        "confirmedBy": _actor_label(
+            confirmation.operator_user_id, confirmation.operator_key_hash
+        ),
+        "confirmedAt": confirmation.created_at,
+        "fromStatus": confirmation.from_status,
+    }
+
+
 def _attempt(a: VideoPublishAttempt, *, diagnostics: bool = False) -> dict:
     output = sanitize_artemis_output(a.artemis_output) if diagnostics else None
     result = {
@@ -129,6 +237,7 @@ def _snapshot(
     verify_attempt_count: int | None = None,
     related_publish_attempt: VideoPublishAttempt | None = None,
     queue_position: int | None = None,
+    confirmation: dict | None | object = _UNSET,
 ) -> dict:
     attempts = sorted(
         summary_attempts if summary_attempts is not None else task.attempts,
@@ -199,19 +308,21 @@ def _snapshot(
         # is the next retry time, not a stage start, and reporting it here pinned
         # the rail's 已耗时 to 0 for the whole backoff window (P2-21).
         "operationalStageStartedAt": (
-            task.cleanup_heartbeat_at
-            or task.updated_at
+            task.cleanup_heartbeat_at or task.updated_at
             if operational_stage == "cleaning"
             else task.stage_started_at
         ),
         # Backoff target for the current cleanup phase, reported separately so it
         # can be shown as 下次重试 instead of being folded into the elapsed time.
         "cleanupNextAttemptAt": (
-            task.device_cleanup_next_attempt_at if operational_stage == "cleaning" else None
+            task.device_cleanup_next_attempt_at
+            if operational_stage == "cleaning"
+            else None
         ),
         "latestArtemisSessionId": str(latest.artemis_session_id) if latest else None,
+        # attempt_count is an append-only audit counter; the publish budget is
+        # retired, so no retryBudgetUsed field is emitted (02 §14.1).
         "attemptCount": task.attempt_count,
-        "retryBudgetUsed": task.publish_budget_used,
         "publishAttemptCount": (
             publish_attempt_count
             if publish_attempt_count is not None
@@ -243,6 +354,8 @@ def _snapshot(
     }
     if expose_client_request_id:
         data["clientRequestId"] = str(task.client_request_id)
+    if confirmation is not _UNSET:
+        data["confirmation"] = confirmation
     if "continue_upload" in data["allowedActions"]:
         data["caption"] = task.caption
     if latest:
@@ -255,6 +368,12 @@ def _snapshot(
                 "contentType": task.content_type,
                 "caption": task.caption,
                 "rowVersion": task.row_version,
+                # 02 §9.6: the task detail states whether the parameters are
+                # frozen, and reports the manual confirmation audit if there is
+                # one. Legacy auto-success tasks report null instead of a
+                # fabricated operator.
+                "paramsLockedAt": task.params_locked_at,
+                "confirmation": None if confirmation is _UNSET else confirmation,
                 "target": {
                     "appName": "TikTok",
                     "appPackage": task.target_app_package,
@@ -281,12 +400,8 @@ def _snapshot(
                         if task.spool_cleanup_error
                         else None,
                     },
-                    "object": {
-                        "status": task.object_cleanup_status,
-                        "error": sanitize_text(task.object_cleanup_error)
-                        if task.object_cleanup_error
-                        else None,
-                    },
+                    # 02 §14.1: object cleanup is retired. MinIO objects are kept
+                    # forever, so there is no object resource to report or retry.
                 },
             }
         )
@@ -297,43 +412,17 @@ def _mask(value: str) -> str:
     return mask_device_serial(value)
 
 
-def _is_privileged(request: Request) -> bool:
-    grant = request.scope.get("access_grant")
-    role = getattr(getattr(grant, "role", None), "value", None)
-    return bool(
-        getattr(grant, "bypass", False)
-        or role == "admin"
-        or request.scope.get("api_key_role") == "admin"
-    )
-
-
-def _owner_clause(request: Request):
-    if _is_privileged(request):
-        return None
-    user_id = request.scope.get("user_id")
-    if user_id is not None:
-        return VideoPublishTask.created_by_user_id == user_id
-    key_hash = caller_key_hash(request)
-    if key_hash:
-        return VideoPublishTask.created_by_key_hash == key_hash
-    return false()
-
-
-def _owns_task(task: VideoPublishTask, request: Request) -> bool:
-    if _is_privileged(request):
-        return True
-    user_id = request.scope.get("user_id")
-    if user_id is not None:
-        return task.created_by_user_id == user_id
-    key_hash = caller_key_hash(request)
-    return bool(key_hash and task.created_by_key_hash == key_hash)
-
-
-def _task_for_actor(
+def _task_or_404(
     session: Session, task_id: UUID, request: Request, *, lock: bool = False
 ) -> VideoPublishTask:
+    """Load one task or answer the single 404 of the error contract.
+
+    Authorization is page-level (02 §9): ``page:video-publish`` already grants
+    read of every task and every legal action, so the task is no longer filtered
+    by its creator. ``created_by_*`` stays for audit only.
+    """
     try:
-        task = _task(session, task_id, lock=True) if lock else _task(session, task_id)
+        task = _task(session, task_id, lock=lock)
     except HTTPException as exc:
         if exc.status_code != status.HTTP_404_NOT_FOUND:
             raise
@@ -341,11 +430,6 @@ def _task_for_actor(
             status.HTTP_404_NOT_FOUND,
             _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
         ) from exc
-    if not _owns_task(task, request):
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
-        )
     return task
 
 
@@ -380,14 +464,21 @@ def _error_detail(
 # surfaces an obvious "unknown error" signal to triage.
 _ERROR_DETAIL_MESSAGES: dict[str, str] = {
     # 4xx — caller/owner input problems
-    "TASK_NOT_FOUND": "任务不存在或你无权访问。",
+    "TASK_NOT_FOUND": "任务不存在。",
     "TASK_ACTION_NOT_ALLOWED": "当前任务状态不允许此操作。",
     "TASK_VERSION_CONFLICT": "任务状态已变化，请刷新后重试。",
+    "ROW_VERSION_CONFLICT": "任务状态已变化，请刷新后重试。",
+    # Cancellation boundary (02 §6.5). Once Artemis admitted the publish the
+    # parameters are frozen and no cancel/stop/edit may ever be accepted.
+    "TASK_ALREADY_SUBMITTED": "任务已成功提交给发布端，无法再取消或修改参数。",
+    "TASK_SUBMITTING": "任务正在提交发布请求，请稍后按真实状态重试。",
+    "TASK_BUSY": "任务正在执行中，请等本轮结束或取消后再修改参数。",
     "OBJECT_CLEANUP_IN_PROGRESS": "对象清理尚未完成，任务当前不能重试。",
     "CLEANUP_REQUIRED": "设备或本地暂存清理失败，请先「重试清理」成功后再重试发布。",
-    "TASK_RETRY_NOT_SAFE": "上一次执行结果不确定，自动重试不安全；请先运行自动核验。",
     "UPLOAD_REPLACEMENT_REQUIRED": "原视频对象已不可用，请使用「重新上传」而不是重试。",
-    "RETRY_BUDGET_EXHAUSTED": "发布预算已用尽，请查看执行历史，不再自动重试。",
+    "PROMPT_INVALID": "发布 Prompt 包含非法字符。",
+    "PROMPT_TOO_LONG": "发布 Prompt 超过长度上限。",
+    "APP_PACKAGE_INVALID": "App 包名格式无效。",
     "IDEMPOTENCY_PAYLOAD_MISMATCH": "幂等键对应任务的参数与本次不同。",
     "INVALID_CURSOR": "分页游标无效，请刷新后再翻页。",
     "CSRF_HEADER_REQUIRED": "cookie 认证需在请求头加 X-Requested-With: tts-erp。",
@@ -401,6 +492,9 @@ _ERROR_DETAIL_MESSAGES: dict[str, str] = {
     "DEVICE_LOCKED": "设备在线但仍处于锁屏状态。",
     "APP_NOT_INSTALLED": "TikTok 未安装在目标设备上。",
     "MEDIA_SCAN_FAILED": "设备扫描上传的视频失败。",
+    "DEVICE_BUSY": "该设备已被其它任务占用，请等本轮结束后再核验。",
+    "DEVICE_CLEANUP_BLOCKED": "该设备仍有待清理的暂存文件，请先「重试清理」成功后再核验。",
+    "TIKTOK_NOT_LOGGED_IN": "发布端报告 TikTok 未登录；请先在该手机上登录 TikTok，再重试原任务。",
     "VERIFY_ALREADY_RUNNING": "已经有一次自动核验在跑，请等其结束。",
     "VERIFY_INCONCLUSIVE": "自动核验结果不确定，请查看执行历史。",
     # 503 — infrastructure / external dependency unavailable
@@ -627,7 +721,7 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
         "acceptedExtensions": [".mp4"],
         "maxVideoBytes": max_video_bytes(),
         "maxCaptionCharacters": max_caption_chars(),
-        "maxPublishAttempts": int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")),
+        # No maxPublishAttempts: there is no publish budget any more (02 §14.1).
         "uploadUrlTtlSeconds": int(
             os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900")
         ),
@@ -659,7 +753,6 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
             ),
         },
         "canWrite": can_write,
-        "canViewDiagnostics": _is_privileged(request),
         "writeBlockReason": None
         if can_write
         else "发布权限不足"
@@ -804,7 +897,7 @@ def refresh_upload_url(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    task = _task_for_actor(session, task_id, request)
+    task = _task_or_404(session, task_id, request)
     if task.stage != "awaiting_upload":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -820,7 +913,7 @@ def refresh_upload_url(
         code = str(exc)
         if code in {"TASK_ACTION_NOT_ALLOWED", "TASK_VERSION_CONFLICT"}:
             session.expire_all()
-            current = _task_for_actor(session, task_id, request)
+            current = _task_or_404(session, task_id, request)
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 _action_conflict(request, current, code, code),
@@ -867,7 +960,7 @@ def confirm(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    task_snapshot = _task_for_actor(session, task_id, request)
+    task_snapshot = _task_or_404(session, task_id, request)
     _require_row_version(request, task_snapshot, body.row_version)
     if task_snapshot.stage != "awaiting_upload":
         raise HTTPException(
@@ -985,51 +1078,44 @@ def current(
     session: Annotated[Session, Depends(get_session)],
     response: Response,
 ) -> dict | Response:
-    current_query = (
-        select(VideoPublishTask)
-        .where(
-            (VideoPublishTask.status == "running")
-            | (
-                (VideoPublishTask.cleanup_intent != "none")
-                & VideoPublishTask.device_cleanup_status.in_(["pending", "failed"])
+    # 02 §17.2: one in-flight task per device track, several devices in
+    # parallel. The per-device running index guarantees at most one running row
+    # per serial, so this list is already the per-device grouping; running rows
+    # sort ahead of rows that are only still cleaning up.
+    rows = list(
+        session.scalars(
+            select(VideoPublishTask)
+            .where(
+                (VideoPublishTask.status == "running")
+                | (
+                    (VideoPublishTask.cleanup_intent != "none")
+                    & VideoPublishTask.device_cleanup_status.in_(["pending", "failed"])
+                )
+            )
+            .order_by(
+                case((VideoPublishTask.status == "running", 0), else_=1),
+                VideoPublishTask.target_device_serial,
+                VideoPublishTask.id,
             )
         )
-        # §10.5: the rail shows the single current *device* task, so a running
-        # task must win over an older task that is only still cleaning up.
-        # Ordering by id alone returned whichever row was created first, which
-        # put a cleaning task on screen while another task was really running.
-        .order_by(
-            case((VideoPublishTask.status == "running", 0), else_=1),
-            VideoPublishTask.id,
-        )
-        .limit(1)
     )
-    owner_clause = _owner_clause(request)
-    if owner_clause is not None:
-        current_query = current_query.where(owner_clause)
-    task = session.scalar(current_query)
-    poll_state = _poll_state(session)
-    summary = _attempt_summaries(session, [task]) if task else {}
-    current_summary = summary.get(task.id if task else 0)
-    attempts = current_summary[0] if current_summary else []
-    publish_count = current_summary[1] if current_summary else 0
-    verify_count = current_summary[2] if current_summary else 0
-    related_publish = current_summary[3] if current_summary else None
+    summaries = _attempt_summaries(session, rows)
+    entries = []
+    for row in rows:
+        entry = _snapshot(
+            row,
+            expose_client_request_id=True,
+            summary_attempts=summaries[row.id][0],
+            publish_attempt_count=summaries[row.id][1],
+            verify_attempt_count=summaries[row.id][2],
+            related_publish_attempt=summaries[row.id][3],
+        )
+        entry["deviceSerialMasked"] = _mask(row.target_device_serial)
+        entries.append({"currentAttempt": None, **entry})
     payload = {
-        "task": (
-            _snapshot(
-                task,
-                expose_client_request_id=True,
-                summary_attempts=attempts,
-                publish_attempt_count=publish_count,
-                verify_attempt_count=verify_count,
-                related_publish_attempt=related_publish,
-            )
-            if task
-            else None
-        ),
-        "pollState": poll_state,
-        "suggestedPollSeconds": 2 if task else 30,
+        "tasks": entries,
+        "pollState": _poll_state(session),
+        "suggestedPollSeconds": 2 if rows else 30,
         "serverTime": datetime.now(UTC),
     }
     cached = _conditional(request, response, payload)
@@ -1048,9 +1134,6 @@ def list_tasks(
     query = select(VideoPublishTask).order_by(
         VideoPublishTask.created_at.desc(), VideoPublishTask.id.desc()
     )
-    owner_clause = _owner_clause(request)
-    if owner_clause is not None:
-        query = query.where(owner_clause)
     if status_filter:
         query = query.where(VideoPublishTask.status == status_filter)
     if cursor:
@@ -1111,7 +1194,11 @@ def metrics(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
 ) -> dict:
-    """Return content-free operational gauges at the caller's visibility scope."""
+    """Page-level operational gauges (02 §19).
+
+    指标为页面级全局口径: the ``page:video-publish`` scope is the only human
+    gate, so every gauge counts every task instead of the caller's own rows.
+    """
     require_role_at_least(request, "readonly")
     query = select(
         func.count()
@@ -1136,23 +1223,13 @@ def metrics(
         func.count()
         .filter(VideoPublishTask.spool_cleanup_status == "failed")
         .label("spool_failed"),
-        func.count()
-        .filter(VideoPublishTask.object_cleanup_status == "pending")
-        .label("object_pending"),
-        func.count()
-        .filter(VideoPublishTask.object_cleanup_status == "failed")
-        .label("object_failed"),
+        # 02 §14.1/§19: no object gauge exists any more; objects are never deleted.
     ).select_from(VideoPublishTask)
-    owner_clause = _owner_clause(request)
-    if owner_clause is not None:
-        query = query.where(owner_clause)
     row = session.execute(query).one()
 
     task_counts_query = select(VideoPublishTask.status, func.count()).group_by(
         VideoPublishTask.status
     )
-    if owner_clause is not None:
-        task_counts_query = task_counts_query.where(owner_clause)
     tasks_by_status = {
         str(task_status): int(count)
         for task_status, count in session.execute(task_counts_query)
@@ -1163,8 +1240,6 @@ def metrics(
         .join(VideoPublishTask, VideoPublishTask.id == VideoPublishAttempt.task_id)
         .group_by(VideoPublishAttempt.kind, VideoPublishAttempt.status)
     )
-    if owner_clause is not None:
-        attempts_query = attempts_query.where(owner_clause)
     attempts_by_kind_status: dict[str, dict[str, int]] = {}
     for kind, attempt_status, count in session.execute(attempts_query):
         attempts_by_kind_status.setdefault(str(kind), {})[str(attempt_status)] = int(
@@ -1184,8 +1259,6 @@ def metrics(
         .where(VideoPublishTask.stage_started_at.is_not(None))
         .group_by(VideoPublishTask.stage)
     )
-    if owner_clause is not None:
-        durations_query = durations_query.where(owner_clause)
     current_stage_ages = {
         str(stage_name): {
             "count": int(count),
@@ -1218,8 +1291,6 @@ def metrics(
             "deviceFailed": int(row.device_failed),
             "spoolPending": int(row.spool_pending),
             "spoolFailed": int(row.spool_failed),
-            "objectPending": int(row.object_pending),
-            "objectFailed": int(row.object_failed),
         },
         "serverTime": datetime.now(UTC),
     }
@@ -1233,15 +1304,16 @@ def detail(
     response: Response,
     include_diagnostics: bool = Query(default=False, alias="includeDiagnostics"),
 ) -> dict | Response:
-    if include_diagnostics:
-        require_role_at_least(request, "admin")
-    task = _task_for_actor(session, task_id, request)
+    # 02 §9/§20: page:video-publish is the only human gate, so the diagnostics
+    # dump is part of the business record every page holder may read.
+    task = _task_or_404(session, task_id, request)
     payload = _snapshot(
         task,
         detail=True,
         diagnostics=include_diagnostics,
         expose_client_request_id=True,
         queue_position=_queue_position(session, task),
+        confirmation=_confirmation_payload(_confirmation_of(session, task)),
     )
     cached = _conditional(request, response, payload)
     return cached if cached is not None else payload
@@ -1258,7 +1330,7 @@ def cancel(
     require_role_at_least(request, "readwrite")
     _csrf(request)
     require_destructive_guard(request, op_name="video_publish.cancel_object")
-    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    task_snapshot = _task_or_404(session, task_id, request, lock=True)
     _require_row_version(request, task_snapshot, body.row_version)
     try:
         return _snapshot(
@@ -1283,13 +1355,15 @@ def cancel(
 # retry endpoint passed the code as both, so the operator saw a raw
 # "CLEANUP_REQUIRED" string. See docs/design §10.12 (errors must state where
 # they happened and what to do next).
+#
+# There is no budget and no retry-safety gate any more (02 §7.1): a failed task
+# may be retried as often as the operator needs, so RETRY_BUDGET_EXHAUSTED and
+# TASK_RETRY_NOT_SAFE are no longer part of this contract.
 _RETRY_ACTION_MESSAGES = {
     "TASK_ACTION_NOT_ALLOWED": "当前状态不允许重试该任务。",
     "OBJECT_CLEANUP_IN_PROGRESS": "对象清理尚未完成，任务当前不能重试。",
     "CLEANUP_REQUIRED": "设备或本地暂存清理失败，请先「重试清理」成功后再重试发布。",
-    "TASK_RETRY_NOT_SAFE": "上一次执行结果不确定，自动重试不安全；请先运行自动核验。",
     "UPLOAD_REPLACEMENT_REQUIRED": "原视频对象已不可用，请使用「重新上传」而不是重试。",
-    "RETRY_BUDGET_EXHAUSTED": "发布预算已用尽，请查看执行历史，不再自动重试。",
     "OBJECT_STORE_UNAVAILABLE": "对象存储暂不可用，请稍后重试。",
 }
 
@@ -1304,7 +1378,7 @@ def retry(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    task_snapshot = _task_or_404(session, task_id, request, lock=True)
     _require_row_version(request, task_snapshot, body.row_version)
     try:
         task = retry_task(session, task_id, store)
@@ -1364,7 +1438,7 @@ def replace_upload_task(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    task_snapshot = _task_or_404(session, task_id, request, lock=True)
     _require_row_version(request, task_snapshot, body.row_version)
     try:
         return _snapshot(
@@ -1391,8 +1465,7 @@ def verify(
 ) -> dict:
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    _lock_publish_slot(session)
-    task_snapshot = _task_for_actor(session, task_id, request, lock=True)
+    task_snapshot = _task_or_404(session, task_id, request, lock=True)
     _require_row_version(request, task_snapshot, body.row_version)
     try:
         task = request_verification(session, task_id)
@@ -1409,14 +1482,21 @@ def verify(
             _action_conflict(request, task_snapshot, str(exc), str(exc)),
         ) from exc
     except IntegrityError as exc:
+        # ``claim_one`` no longer takes the global advisory lock, so a worker
+        # can claim this device between our DEVICE_BUSY pre-check and the
+        # insert. The per-device running unique index is the real arbiter and
+        # reports the loss as an IntegrityError; it must never escape as 500
+        # because the console only redraws buttons on a mapped 409.
         session.rollback()
+        session.expire_all()
+        current = _task_or_404(session, task_id, request)
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             _action_conflict(
                 request,
-                task_snapshot,
-                "VERIFY_ALREADY_RUNNING",
-                "A verification attempt is already running",
+                current,
+                "DEVICE_BUSY",
+                "该设备已被其它任务占用，请等本轮结束后再核验。",
             ),
         ) from exc
 
@@ -1431,7 +1511,7 @@ def retry_cleanup(
     require_role_at_least(request, "readwrite")
     _csrf(request)
     require_destructive_guard(request, op_name="video_publish.retry_cleanup")
-    task = _task_for_actor(session, task_id, request, lock=True)
+    task = _task_or_404(session, task_id, request, lock=True)
     _require_row_version(request, task, body.row_version)
     try:
         retry_cleanup_resources(session, task, resources=body.resources)
@@ -1442,7 +1522,116 @@ def retry_cleanup(
         ) from exc
     session.commit()
     return _snapshot(
-        _task_for_actor(session, task_id, request),
+        _task_or_404(session, task_id, request),
         detail=True,
         expose_client_request_id=True,
+    )
+
+
+@router.post("/tasks/{task_id}/confirm-published")
+def confirm_published_task(
+    task_id: UUID,
+    body: ConfirmPublishedIn,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict:
+    """Manual success confirmation: the only path to succeeded (02 §7.4).
+
+    The operator is the authenticated principal and the timestamp is database
+    time; neither is ever taken from the request body. A repeated click, or a
+    click that races another operator, replays the first confirmation and
+    answers 200 with the same facts instead of writing a second audit row.
+    """
+    require_role_at_least(request, "readwrite")
+    _csrf(request)
+    _task_or_404(session, task_id, request)
+    try:
+        confirm_published_service(
+            _confirmation_factory(session),
+            task_id,
+            actor=ConfirmationActor(
+                user_id=request.scope.get("user_id"),
+                key_hash=caller_key_hash(request),
+            ),
+            request_id=body.request_id or uuid4(),
+            row_version=body.row_version,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
+    except ValueError as exc:
+        code = str(exc)
+        if code not in _CONFIRM_CONFLICT_CODES:
+            raise
+        session.expire_all()
+        current = _task_or_404(session, task_id, request)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            _action_conflict(request, current, code, code),
+        ) from exc
+    # The service committed on its own session; refresh this one so the snapshot
+    # reports the committed row rather than a stale identity-map copy.
+    session.expire_all()
+    task = _task_or_404(session, task_id, request)
+    return _snapshot(
+        task,
+        detail=True,
+        expose_client_request_id=True,
+        confirmation=_confirmation_payload(_confirmation_of(session, task)),
+        queue_position=_queue_position(session, task),
+    )
+
+
+@router.patch("/tasks/{task_id}/settings")
+def edit_settings(
+    task_id: UUID,
+    body: SettingsIn,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict:
+    """Edit publish parameters before submission (02 §9.5).
+
+    Once Artemis admitted the publish (``params_locked_at``) the parameters are
+    frozen for good, so that refusal wins over every other check and the
+    endpoint never performs a partial write.
+    """
+    require_role_at_least(request, "readwrite")
+    _csrf(request)
+    _task_or_404(session, task_id, request)
+    try:
+        task = update_settings(
+            session,
+            task_id,
+            SettingsCommand(
+                prompt=body.prompt,
+                device_serial=body.device_serial,
+                app_package=body.app_package,
+            ),
+            expected_version=body.row_version,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            _error_detail(request, "TASK_NOT_FOUND", "TASK_NOT_FOUND", retryable=False),
+        ) from exc
+    except ValueError as exc:
+        code = str(exc)
+        if code in _SETTINGS_CONFLICT_CODES:
+            session.expire_all()
+            current = _task_or_404(session, task_id, request)
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                _action_conflict(request, current, code, code),
+            ) from exc
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            _error_detail(request, code, code, retryable=False),
+        ) from exc
+    return _snapshot(
+        task,
+        detail=True,
+        expose_client_request_id=True,
+        queue_position=_queue_position(session, task),
     )

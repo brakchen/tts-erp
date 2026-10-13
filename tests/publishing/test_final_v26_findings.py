@@ -5,8 +5,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -17,11 +15,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.db.models.publishing import VideoPublishAttempt, VideoPublishTask
-from tts_erp_v2.publishing import dispatcher
-from tts_erp_v2.publishing.dispatcher import PublishDependencies, _execute_cleanup
 from tts_erp_v2.publishing.repository import (
     CleanupClaimRequest,
-    _lock_publish_slot,
+    _lock_device_slot,
     claim_cleanup_work,
     request_verification,
 )
@@ -297,7 +293,7 @@ def test_device_cleanup_selector_waits_for_verification_slot_and_then_yields(
         cleanup_claim = pool.submit(
             claim_cleanup_work,
             factory,
-            CleanupClaimRequest("TEST-v26-cleaner", 30, "device"),
+            CleanupClaimRequest("TEST-v26-cleaner", 30, "device", "TEST_v26_device"),
         )
         threading.Event().wait(0.2)
         assert not cleanup_claim.done()
@@ -327,7 +323,7 @@ def test_verification_waits_for_device_cleanup_slot_and_then_refuses(
 
     def reserve_cleanup() -> None:
         with factory() as session:
-            _lock_publish_slot(session)
+            _lock_device_slot(session, "TEST_v26_device")
             row = session.get(VideoPublishTask, cleanup_id)
             assert row is not None
             row.cleanup_lease_owner = "TEST-v26-cleaner"
@@ -355,65 +351,6 @@ def test_verification_waits_for_device_cleanup_slot_and_then_refuses(
         cleanup_reservation.result(timeout=5)
         assert verification.result(timeout=5) == "DEVICE_CLEANUP_BLOCKED"
     _delete_tasks(factory, [review.id, cleanup.id])
-
-
-@pytest.mark.asyncio
-async def test_reopened_historical_generation_removes_delayed_put_after_hold(
-    db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    task = _runtime_task(status="cancelled", stage="done")
-    task.cleanup_intent = "preserve_state"
-    task.object_deleted_at = None
-    task.object_cleanup_status = "pending"
-    task.object_cleanup_error = "HISTORICAL_PUT_CAPABILITY_REOPENED"
-    task.object_upload_expires_at = datetime.now(UTC) - timedelta(minutes=16)
-    task.object_cleanup_next_attempt_at = task.object_upload_expires_at
-    db_session.add(task)
-    db_session.commit()
-
-    def factory() -> Session:
-        return Session(
-            bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
-        )
-
-    removed: list[tuple[str, str | None]] = []
-    monkeypatch.setattr(
-        dispatcher, "require_destructive_script_guard", lambda **_kwargs: None
-    )
-    work = claim_cleanup_work(
-        factory,
-        CleanupClaimRequest("TEST-v26-object-cleaner", 30, "background"),
-    )
-    assert work is not None
-    assert work.resources == ("object",)
-
-    await _execute_cleanup(
-        work,
-        cast(
-            PublishDependencies,
-            SimpleNamespace(
-                session_factory=factory,
-                instance_id="TEST-v26-object-cleaner",
-                lease_seconds=30,
-                spool_dir=tmp_path,
-                store=SimpleNamespace(
-                    remove=lambda key, etag=None: removed.append((key, etag))
-                ),
-                adb=SimpleNamespace(),
-            ),
-        ),
-    )
-
-    db_session.expire_all()
-    assert removed == [(task.object_key, task.object_etag)]
-    assert task.object_cleanup_status == "succeeded"
-    assert task.object_deleted_at is not None
-    task_pk = task.id
-    db_session.execute(
-        delete(VideoPublishAttempt).where(VideoPublishAttempt.task_id == task_pk)
-    )
-    db_session.execute(delete(VideoPublishTask).where(VideoPublishTask.id == task_pk))
-    db_session.commit()
 
 
 def test_v26_design_uses_attempt_and_execution_generation_snapshots() -> None:

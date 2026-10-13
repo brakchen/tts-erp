@@ -31,15 +31,17 @@ ROOT = Path(__file__).parents[2]
 
 def test_failed_artemis_result_requires_read_only_verification() -> None:
     result = classify_failure(artemis_status="failed", steps_count=4)
-    assert result.requires_verification is True
-    assert result.retry_safe is None
+    # 02 §7.3: an uncertain result waits for a human and never auto-verifies.
+    assert result.code == "ambiguous_artemis_failure"
+    assert result.ambiguous is True
 
 
 def test_missing_artemis_session_is_terminal_for_classification() -> None:
     result = ArtemisResult(session_id=uuid4(), status="missing")
     assert result.terminal is True
     classification = classify_failure(artemis_status="missing")
-    assert classification.requires_verification is True
+    assert classification.code == "session_missing"
+    assert classification.ambiguous is True
 
 
 def test_detail_api_returns_304_for_matching_etag(
@@ -56,7 +58,12 @@ def test_detail_api_returns_304_for_matching_etag(
             "api_key_role": "admin",
         }
     )
-    monkeypatch.setattr(video_publish, "_task", lambda session, task_id: object())
+    monkeypatch.setattr(
+        video_publish, "_task", lambda session, task_id, **kwargs: object()
+    )
+    # ``detail`` reads the confirmation audit row for 02 §9.6; stub it so this
+    # unit test keeps exercising only the ETag/304 branch.
+    monkeypatch.setattr(video_publish, "_confirmation_of", lambda session, task: None)
     monkeypatch.setattr(video_publish, "_snapshot", lambda task, **kwargs: payload)
     monkeypatch.setattr(video_publish, "_queue_position", lambda session, task: None)
     response = video_publish.detail(
@@ -193,11 +200,12 @@ async def test_transport_recovery_queries_before_same_session_resubmit() -> None
     ]
 
 
-def test_cleanup_guard_precedes_adb_and_object_deletion() -> None:
+def test_cleanup_guard_precedes_adb_and_spool_deletion() -> None:
+    """02 §5.3: MinIO objects are never deleted, so only device/spool remain."""
     source = (ROOT / "tts_erp_v2/publishing/dispatcher.py").read_text()
     guard = source.index('script_name="video_publish.cleanup_resources"')
     assert guard < source.index("remove_staged_video", guard)
-    assert guard < source.index("deps.store.remove", guard)
+    assert "deps.store.remove" not in source
 
 
 def test_destructive_guard_refuses_prod_shape_without_opt_in(
@@ -266,18 +274,21 @@ def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
     assert 'headers["If-None-Match"]' in source
     assert "new AbortController()" in source
     assert "document.hidden" in source
-    assert "state.currentChannel.failures" in source
-    assert "state.listChannel.failures" in source
-    assert "state.detailChannel.failures" in source
-    assert "scheduleCurrent(mode)" in source
-    assert "scheduleList(mode)" in source
-    assert "scheduleDetail(mode)" in source
-    assert "shared.queued ? 8" in source
-    assert "function sharedPollState()" in source
+    # 02 §18: fixed 5s cadence — the failure backoff table, the per-channel
+    # counters and the smart/interval picker are all retired.
+    assert "const REFRESH_SECONDS = 5;" in source
+    assert "scheduleCurrent()" in source
+    assert "scheduleList()" in source
+    assert "scheduleDetail()" in source
+    assert "backoffSeconds" not in source
+    assert "sharedPollState" not in source
+    assert "[5, 10, 30, 60]" not in source
+    assert "currentChannel.failures" not in source
+    assert "listChannel.failures" not in source
+    assert "detailChannel.failures" not in source
     assert "localStorage.setItem(REFRESH_KEY, mode)" in source
     assert "Array.from(value).length" in source
     assert ".maxLength =" not in source
-    assert "[5, 10, 30, 60]" in source
     assert 'window.addEventListener("pagehide", destroy)' in source
     assert "operationalStageStartedAt" in source
     assert "publish-preview-metadata" in source

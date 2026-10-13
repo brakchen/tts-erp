@@ -84,7 +84,9 @@ def client(db_session: Session):
         )
     )
     db_session.commit()
-    with TestClient(_app(db_session, _PresentStore()), raise_server_exceptions=False) as c:
+    with TestClient(
+        _app(db_session, _PresentStore()), raise_server_exceptions=False
+    ) as c:
         yield c
 
 
@@ -263,19 +265,19 @@ def test_a3w3_d_gate_still_blocks_claim_after_requeue(
         f"expected 200, got {response.status_code}: {_detail(response)}"
     )
     after = _reload(db_session, task.public_id)
-    assert has_pending_device_cleanup(db_session) is True, (
+    assert after.status == "pending", f"status={after.status}"
+    assert after.stage == "queued", f"stage={after.stage}"
+    assert has_pending_device_cleanup(db_session, "TEST_device") is True, (
         "has_pending_device_cleanup() went False: the gate is blind to the task"
     )
-    claimed = claim_one(db_session, "TEST-a3w3-worker")
+    claimed = claim_one(db_session, "TEST-a3w3-worker", "TEST_device")
     assert claimed is None, (
         f"claim_one returned {getattr(claimed, 'public_id', claimed)!r}: the dirty "
         "device would receive a new publish"
     )
 
 
-def test_a3w3_d2_gate_blocks_claim_for_manual_requeue_state(
-    db_session: Session
-):
+def test_a3w3_d2_gate_blocks_claim_for_manual_requeue_state(db_session: Session):
     """(d) gate behaviour on the post-fix state, independent of the HTTP path.
 
     Constructed directly so the guard is verified even if the endpoint regresses.
@@ -287,8 +289,8 @@ def test_a3w3_d2_gate_blocks_claim_for_manual_requeue_state(
     fresh.cleanup_intent = "requeue_publish"
     fresh.device_cleanup_status = "failed"
     db_session.commit()
-    assert has_pending_device_cleanup(db_session) is True
-    assert claim_one(db_session, "TEST-a3w3-worker") is None
+    assert has_pending_device_cleanup(db_session, "TEST_device") is True
+    assert claim_one(db_session, "TEST-a3w3-worker", "TEST_device") is None
 
 
 def test_a3w3_f_requeue_publish_branch_satisfies_db_check(
@@ -325,9 +327,7 @@ def test_a3w3_f_requeue_publish_branch_satisfies_db_check(
 def test_a3w3_e1_object_cleanup_still_blocks_retry(
     client: TestClient, db_session: Session, object_cleanup_status: str
 ):
-    task = _seed_failed(
-        db_session, object_cleanup_status=object_cleanup_status
-    )
+    task = _seed_failed(db_session, object_cleanup_status=object_cleanup_status)
     response = _retry(client, task, task.row_version)
     assert response.status_code == 409, (
         f"expected 409 for object_cleanup_status={object_cleanup_status}, "
@@ -336,15 +336,16 @@ def test_a3w3_e1_object_cleanup_still_blocks_retry(
     assert "OBJECT_CLEANUP_IN_PROGRESS" in _detail(response), _detail(response)
 
 
-def test_a3w3_e2_retry_budget_exhausted_still_blocks(
+def test_a3w3_e2_retry_is_allowed_after_many_attempts(
     client: TestClient, db_session: Session
 ):
+    """02 §7.1: no attempt budget, so a long history must still be retryable."""
     task = _seed_failed(db_session, publish_budget_used=3)
     response = _retry(client, task, task.row_version)
-    assert response.status_code == 409, (
-        f"expected 409, got {response.status_code}: {_detail(response)}"
+    assert response.status_code == 200, (
+        f"expected 200, got {response.status_code}: {_detail(response)}"
     )
-    assert "RETRY_BUDGET_EXHAUSTED" in _detail(response), _detail(response)
+    assert response.json()["status"] == "pending"
 
 
 def test_a3w3_e3_deleted_object_still_requires_replacement(
@@ -362,9 +363,7 @@ def test_a3w3_e4_replace_upload_keeps_its_own_cleanup_gate(
     client: TestClient, db_session: Session
 ):
     """replace_upload has its own gate; it must NOT be relaxed by 3A."""
-    task = _seed_failed(
-        db_session, device_cleanup_status="failed", object_deleted=True
-    )
+    task = _seed_failed(db_session, device_cleanup_status="failed", object_deleted=True)
     response = client.post(
         f"/v2/video-publish/tasks/{task.public_id}/replace-upload",
         json={"rowVersion": task.row_version},
@@ -379,9 +378,13 @@ def test_a3w3_e4_replace_upload_keeps_its_own_cleanup_gate(
 @pytest.mark.parametrize(
     ("status", "stage", "expect"),
     [
-        ("pending", "awaiting_upload", {"CONTINUE_UPLOAD", "CANCEL", "VIEW"}),
-        ("pending", "queued", {"CANCEL", "VIEW"}),
-        ("pending", "waiting_device", {"CANCEL", "VIEW"}),
+        (
+            "pending",
+            "awaiting_upload",
+            {"CONTINUE_UPLOAD", "EDIT_SETTINGS", "CANCEL", "VIEW"},
+        ),
+        ("pending", "queued", {"EDIT_SETTINGS", "CANCEL", "VIEW"}),
+        ("pending", "waiting_device", {"EDIT_SETTINGS", "CANCEL", "VIEW"}),
         ("running", "verifying", {"VIEW"}),
         ("succeeded", "done", {"VIEW"}),
         ("cancelled", "done", {"VIEW"}),
@@ -426,7 +429,7 @@ def test_a3w3_e5_allowed_actions_state_matrix(
 
 
 def test_a3w3_deadlock_requeued_task_is_released_after_cleanup_succeeds(
-    db_session: Session
+    db_session: Session,
 ):
     """Empirical answer: the requeued task is released once cleanup succeeds.
 
@@ -445,12 +448,13 @@ def test_a3w3_deadlock_requeued_task_is_released_after_cleanup_succeeds(
     db_session.commit()
 
     # 1. Gate holds: not claimable while device cleanup is failed.
-    assert has_pending_device_cleanup(db_session) is True
-    assert claim_one(db_session, "TEST-a3w3-worker") is None
+    assert has_pending_device_cleanup(db_session, "TEST_device") is True
+    assert claim_one(db_session, "TEST-a3w3-worker", "TEST_device") is None
 
     # 2. Background cleanup picks the row up on its own (no operator action).
     work = claim_cleanup_work(
-        _factory(db_session), CleanupClaimRequest("cleanup-worker", 30, "device")
+        _factory(db_session),
+        CleanupClaimRequest("cleanup-worker", 30, "device", "TEST_device"),
     )
     assert work is not None, "background cleanup never claimed the requeued task"
     assert work.resources == ("device",), f"resources={work.resources}"
@@ -466,15 +470,13 @@ def test_a3w3_deadlock_requeued_task_is_released_after_cleanup_succeeds(
     )
 
     # 4. Now, and only now, the task is claimable.
-    assert has_pending_device_cleanup(db_session) is False
-    claimed = claim_one(db_session, "TEST-a3w3-worker")
+    assert has_pending_device_cleanup(db_session, "TEST_device") is False
+    claimed = claim_one(db_session, "TEST-a3w3-worker", "TEST_device")
     assert claimed is not None, "task never became claimable after cleanup succeeded"
     assert claimed.public_id == task.public_id
 
 
-def test_a3w3_deadlock_cleanup_failure_requeues_to_waiting_device(
-    db_session: Session
-):
+def test_a3w3_deadlock_cleanup_failure_requeues_to_waiting_device(db_session: Session):
     """If cleanup keeps failing, the task parks in waiting_device (not lost)."""
     task = _seed_failed(db_session, device_cleanup_status="failed")
     fresh = _reload(db_session, task.public_id)
@@ -486,7 +488,8 @@ def test_a3w3_deadlock_cleanup_failure_requeues_to_waiting_device(
     db_session.commit()
 
     work = claim_cleanup_work(
-        _factory(db_session), CleanupClaimRequest("cleanup-worker", 30, "device")
+        _factory(db_session),
+        CleanupClaimRequest("cleanup-worker", 30, "device", "TEST_device"),
     )
     assert work is not None
     outcome = finish_cleanup_work(
@@ -497,4 +500,4 @@ def test_a3w3_deadlock_cleanup_failure_requeues_to_waiting_device(
         "waiting_device",
     ), f"status={outcome.task_status} stage={outcome.task_stage}"
     assert outcome.cleanup_intent == "requeue_publish", outcome.cleanup_intent
-    assert claim_one(db_session, "TEST-a3w3-worker") is None
+    assert claim_one(db_session, "TEST-a3w3-worker", "TEST_device") is None

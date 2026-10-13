@@ -17,11 +17,11 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.publishing import VideoPublishTask
 from tts_erp_v2.publishing.domain import (
+    CANCELLABLE_RUNNING_STAGES,
     CleanupIntent,
     TaskStage,
     TaskStatus,
     object_cleanup_blocks_input,
-    plan_cleanup,
     replace_upload_allowed,
     replacement_cleanup_pending,
     set_task_stage,
@@ -29,6 +29,7 @@ from tts_erp_v2.publishing.domain import (
 from tts_erp_v2.publishing.object_store import VideoObjectStore
 from tts_erp_v2.publishing.observability import emit_publish_event
 from tts_erp_v2.publishing.repository import (
+    active_attempt_exists,
     database_now,
     get_task,
     queue_task,
@@ -40,6 +41,7 @@ _BUCKET = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
 _PACKAGE = os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
 MAX_UPLOAD_TICKET_TTL = timedelta(days=7)
 _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+_APP_PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
 
 
 def max_video_bytes() -> int:
@@ -48,6 +50,10 @@ def max_video_bytes() -> int:
 
 def max_caption_chars() -> int:
     return int(os.environ.get("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "4000"))
+
+
+def max_prompt_chars() -> int:
+    return int(os.environ.get("TIKTOK_PUBLISH_MAX_PROMPT_CHARS", "4000"))
 
 
 def configured_device_serial() -> str:
@@ -383,74 +389,145 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
     return task
 
 
-def cancel_task(
-    session: Session, task_id: UUID, store: VideoObjectStore
+@dataclass(frozen=True, slots=True)
+class SettingsCommand:
+    """Pre-submission parameter edit (02 §9.5/§16.3).
+
+    ``None`` means "field not supplied" and leaves the stored value alone; an
+    empty ``prompt`` clears the override so the default body is used again.
+    """
+
+    prompt: str | None = None
+    device_serial: str | None = None
+    app_package: str | None = None
+
+
+def update_settings(
+    session: Session,
+    task_id: UUID,
+    command: SettingsCommand,
+    *,
+    expected_version: int | None = None,
 ) -> VideoPublishTask:
+    """Edit publish parameters before Artemis admits the task (02 §16.3).
+
+    ``params_locked_at`` is the permanent boundary: once it is set the phone
+    owns the outcome and the parameters may never change again, so every later
+    edit is refused with ``TASK_ALREADY_SUBMITTED``.
+    """
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
-    if task.stage not in {
+    if task.params_locked_at is not None:
+        raise ValueError("TASK_ALREADY_SUBMITTED")
+    if task.status != TaskStatus.PENDING.value:
+        raise ValueError("TASK_BUSY")
+    if expected_version is not None and expected_version != task.row_version:
+        raise ValueError("TASK_VERSION_CONFLICT")
+    # Validate every supplied field before touching the row: a rejected edit
+    # must never leave half of the parameters written (02 §9.5).
+    prompt = command.prompt
+    if prompt is not None:
+        prompt = prompt.replace("\r\n", "\n").replace("\r", "\n")
+        if "\x00" in prompt:
+            raise ValueError("PROMPT_INVALID")
+        if len(prompt) > max_prompt_chars():
+            raise ValueError("PROMPT_TOO_LONG")
+    device_serial = command.device_serial
+    if device_serial is not None:
+        device_serial = device_serial.strip()
+        if not _DEVICE_SERIAL_RE.fullmatch(device_serial):
+            raise ValueError("DEVICE_SERIAL_INVALID")
+    app_package = command.app_package
+    if app_package is not None:
+        app_package = app_package.strip()
+        if not _APP_PACKAGE_RE.fullmatch(app_package):
+            raise ValueError("APP_PACKAGE_INVALID")
+    if prompt is not None:
+        task.prompt_override = prompt or None
+    if device_serial is not None:
+        task.target_device_serial = device_serial
+    if app_package is not None:
+        task.target_app_package = app_package
+    task.row_version += 1
+    session.commit()
+    return task
+
+
+def cancel_task(
+    session: Session, task_id: UUID, store: VideoObjectStore
+) -> VideoPublishTask:
+    """Cancel an unpublished task (02 §6.5). Never deletes the source video."""
+    task = get_task(session, task_id, lock=True)
+    if task is None:
+        raise LookupError("TASK_NOT_FOUND")
+    if task.params_locked_at is not None:
+        # Artemis already accepted the publish: the phone owns the outcome.
+        raise ValueError("TASK_ALREADY_SUBMITTED")
+    now = database_now(session)
+    if task.status == TaskStatus.PENDING.value and task.stage in {
         TaskStage.AWAITING_UPLOAD.value,
         TaskStage.QUEUED.value,
         TaskStage.WAITING_DEVICE.value,
     }:
-        raise ValueError("TASK_ACTION_NOT_ALLOWED")
-    now = database_now(session)
-    task.status = TaskStatus.CANCELLED.value
-    set_task_stage(task, TaskStage.DONE, now=now)
-    plan_cleanup(task, CleanupIntent.PRESERVE_STATE, object=True)
-    task.completed_at = now
-    task.row_version += 1
-    release_lease(task)
-    task.object_cleanup_next_attempt_at = max(
-        filter(None, (now, task.object_upload_expires_at))
-    )
-    session.commit()
-    return task
+        task.status = TaskStatus.CANCELLED.value
+        set_task_stage(task, TaskStage.DONE, now=now)
+        task.completed_at = now
+        task.row_version += 1
+        release_lease(task)
+        session.commit()
+        return task
+    if task.status == TaskStatus.RUNNING.value and (
+        task.stage == TaskStage.DISPATCHING_ARTEMIS.value
+    ):
+        # The admission request is already in flight; the caller must retry
+        # once the real outcome is visible instead of trusting a cancel flag
+        # the worker would never read (02 §6.5).
+        raise ValueError("TASK_SUBMITTING")
+    if task.status == TaskStatus.RUNNING.value and (
+        task.stage in CANCELLABLE_RUNNING_STAGES
+    ):
+        # The worker stops at the next stage boundary and never submits.
+        task.cancel_requested = True
+        task.row_version += 1
+        session.commit()
+        return task
+    raise ValueError("TASK_ACTION_NOT_ALLOWED")
 
 
 def retry_task(
     session: Session, task_id: UUID, store: VideoObjectStore | None = None
 ) -> VideoPublishTask:
+    """Re-queue a failed task for another human-triggered round (02 §7.1).
+
+    There is no attempt counter and no budget: a failed task may be retried as
+    often as the operator needs, and the attempt history stays for display.
+    """
     task = get_task(session, task_id, lock=True)
     if task is None:
         raise LookupError("TASK_NOT_FOUND")
-    if task.status != TaskStatus.FAILED.value:
+    if task.status != TaskStatus.FAILED.value or task.stage != TaskStage.DONE.value:
         raise ValueError("TASK_ACTION_NOT_ALLOWED")
     if object_cleanup_blocks_input(task):
         raise ValueError("OBJECT_CLEANUP_IN_PROGRESS")
     # Device/spool cleanup does NOT block retry (design §10.7: failed（可重试）→
     # 重试原任务). queue_task keeps the cleanup-gated marker so the readiness
     # gate still holds the task until the cleanup drains.
-    attempts = task.attempts or []
-    latest = max(attempts, key=lambda attempt: attempt.sequence_no, default=None)
-    if latest is None or latest.kind != "publish" or latest.retry_safe is not True:
-        raise ValueError("TASK_RETRY_NOT_SAFE")
+    if active_attempt_exists(session, task.id):
+        raise ValueError("TASK_ACTION_NOT_ALLOWED")
     if task.object_uploaded_at is None or task.object_deleted_at is not None:
         raise ValueError("UPLOAD_REPLACEMENT_REQUIRED")
     if store is not None:
         try:
             store.stat(task.object_key)
         except ObjectNotFound as exc:
-            now = database_now(session)
-            task.cleanup_intent = CleanupIntent.PRESERVE_STATE.value
-            task.object_cleanup_status = "pending"
-            task.object_cleanup_error = None
-            task.object_cleanup_next_attempt_at = max(
-                filter(None, (now, task.object_upload_expires_at))
-            )
-            task.cleanup_lease_owner = None
-            task.cleanup_lease_expires_at = None
-            task.cleanup_heartbeat_at = None
-            task.row_version += 1
-            session.commit()
+            # The retired object_cleanup_* statuses are never armed (02 §5.3):
+            # no worker phase drains them, so writing one would strand the task
+            # in preserve_state with a permanent 409 on every later retry. The
+            # operator gets the same actionable signal on every attempt instead.
             raise ValueError("UPLOAD_REPLACEMENT_REQUIRED") from exc
         except Exception as exc:
             raise ValueError("OBJECT_STORE_UNAVAILABLE") from exc
-    if task.publish_budget_used >= int(
-        os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3")
-    ):
-        raise ValueError("RETRY_BUDGET_EXHAUSTED")
     queue_task(session, task)
     task.row_version += 1
     session.commit()

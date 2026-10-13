@@ -321,7 +321,6 @@ def test_plain_text_credentials_are_redacted_at_persistence_and_response(
         OperationalFailure(
             action="failed",
             code="TEST_FAILURE",
-            max_attempts=3,
             message=f"password={sensitive_value}" + "x" * 5000,
         ),
     )
@@ -530,14 +529,13 @@ def test_conditional_download_fails_closed_on_replacement_or_missing(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("error", "code", "object_cleanup_required"),
+    ("error", "code"),
     [
         (
             ObjectVersionMismatch("CONFIRMED_OBJECT_REPLACED"),
             "CONFIRMED_OBJECT_REPLACED",
-            True,
         ),
-        (ObjectNotFound("TEST/key"), "CONFIRMED_OBJECT_MISSING", True),
+        (ObjectNotFound("TEST/key"), "CONFIRMED_OBJECT_MISSING"),
     ],
 )
 async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
@@ -545,14 +543,10 @@ async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
     tmp_path: Path,
     error: Exception,
     code: str,
-    object_cleanup_required: bool,
 ) -> None:
     class Store:
         def download(self, _key, _destination, _expected_etag):
             raise error
-
-        def remove(self, _key, _expected_etag=None):
-            return None
 
     class Adb:
         def device_path(self, _task_id):
@@ -572,8 +566,8 @@ async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
                 join_transaction_mode="create_savepoint",
             ),
             instance_id="TEST-v14-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             store=Store(),
             adb=Adb(),
             spool_dir=tmp_path,
@@ -585,15 +579,18 @@ async def test_dispatch_exposes_replacement_after_confirmed_object_recovery(
     assert task.attempt_count == 0
     first_actions = api._snapshot(task, summary_attempts=[])["allowedActions"]
     assert task.spool_cleanup_status == "pending"
-    assert task.object_cleanup_status == (
-        "pending" if object_cleanup_required else "succeeded"
-    )
+    # 02 §5.3: MinIO objects are never deleted and the retired object
+    # statuses are never armed, so replace_upload can never unlock.
+    assert task.object_cleanup_status == "not_started"
+    assert task.object_deleted_at is None
     assert "replace_upload" not in first_actions
     assert await run_background_cleanup_batch(deps, limit=1) == 1
     db_session.expire_all()
-    assert task.object_deleted_at is not None
+    assert task.object_cleanup_status == "not_started"
+    assert task.object_deleted_at is None
     assert (
-        "replace_upload" in api._snapshot(task, summary_attempts=[])["allowedActions"]
+        "replace_upload"
+        not in api._snapshot(task, summary_attempts=[])["allowedActions"]
     )
     assert (
         db_session.scalar(
@@ -630,8 +627,8 @@ async def test_download_size_mismatch_keeps_tracked_spool_cleanup(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v18-size-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             store=Store(),
             adb=Adb(),
             spool_dir=tmp_path,
@@ -639,10 +636,12 @@ async def test_download_size_mismatch_keeps_tracked_spool_cleanup(
     )
     assert await dispatch_one(deps) == "processed"
     db_session.expire_all()
-    assert (task.status, task.stage) == ("pending", "queued")
+    # 02 §7.1: a pre-Artemis worker failure stops at failed/done and waits for
+    # a human retry instead of re-queueing itself.
+    assert (task.status, task.stage) == ("failed", "done")
     assert task.last_error_code == "WORKER_OPERATION_FAILED"
     assert task.spool_cleanup_status == "pending"
-    assert task.cleanup_intent == "requeue_publish"
+    assert task.cleanup_intent == "preserve_state"
 
 
 @pytest.mark.asyncio
@@ -686,8 +685,8 @@ async def test_album_residue_stops_workflow_before_artemis_attempt(
                 join_transaction_mode="create_savepoint",
             ),
             instance_id="TEST-v14-album-worker",
+            device_serial="TEST_device",
             lease_seconds=30,
-            max_attempts=3,
             store=Store(),
             adb=Adb(),
             artemis=Artemis(),
@@ -696,14 +695,15 @@ async def test_album_residue_stops_workflow_before_artemis_attempt(
     )
     assert await dispatch_one(deps) == "processed"
     db_session.expire_all()
-    assert (task.status, task.stage) == ("pending", "waiting_device"), (
+    # 02 §7.1: an ADB album-residue failure stops at failed/done.
+    assert (task.status, task.stage) == ("failed", "done"), (
         task.last_error_code,
         task.last_error_message,
         task.spool_cleanup_status,
         task.cleanup_intent,
     )
     assert task.spool_cleanup_status == "pending"
-    assert task.cleanup_intent == "requeue_publish"
+    assert task.cleanup_intent == "preserve_state"
     assert task.attempt_count == 0
     assert (
         db_session.scalar(
@@ -791,6 +791,7 @@ async def test_readiness_reports_due_or_leased_cleanup_busy_before_dependency_pr
         adb=Adb(),
         artemis=Artemis(),
         store=Store(),
+        device_serial="TEST_device",
         session_factory=lambda: Session(
             # pi-lens-ignore: python-sql-injection
             bind=db_session.get_bind(),
@@ -829,6 +830,7 @@ async def test_full_readiness_probe_checks_package_artemis_and_minio(
         adb=Adb(),
         artemis=Artemis(),
         store=Store(),
+        device_serial="TEST_device",
         session_factory=lambda: Session(
             # pi-lens-ignore: python-sql-injection
             bind=db_session.get_bind(),

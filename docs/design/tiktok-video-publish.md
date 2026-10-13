@@ -29,7 +29,7 @@
 6. Artemis 支持按 `session_id` 查询状态，并支持通过 `device_serial` 指定设备。
 7. Artemis 明确失败后可在同一个原任务下重试，所有执行历史必须保留。
 8. 尽量自动完成状态确认；只有自动核验仍无法判定时才进入人工处理。
-9. 前端任务状态必须定时刷新，并允许用户选择智能、固定间隔或关闭自动刷新。
+9. 前端任务状态必须定时刷新，采用固定 5 秒节奏，开关只有「开/关」加「立即刷新」；无智能模式和自定义间隔。
 10. 前端必须展示每次执行对应的完整 Artemis session ID，并提供一键复制，方便进入 Artemis 排障。
 11. 发布成功后由后台清理手机、本地临时文件和 MinIO 视频。
 
@@ -153,7 +153,7 @@ CREATE TABLE publishing.video_publish_tasks (
     stage                 text NOT NULL,
     stage_started_at      timestamptz NOT NULL DEFAULT now(),
     attempt_count         integer NOT NULL DEFAULT 0,
-    publish_budget_used   integer NOT NULL DEFAULT 0,
+    publish_budget_used   integer NOT NULL DEFAULT 0,  -- 退役列：保留兼容，不再写入/读取
     next_attempt_at       timestamptz,
 
     lease_owner           text,
@@ -333,7 +333,7 @@ object key：
 video-publish/YYYY/MM/<task_public_id>/<sanitized_filename>.mp4
 ```
 
-数据库保存 `object_bucket + object_generation + object_key + object_etag`，并持久化该 generation 已签发 PUT ticket 的最晚 `object_upload_expires_at`；预签名 URL 本身只在响应中短暂存在。初次上传和每次 replacement 都生成从未复用的新 generation/key。既有任务的每次 PUT ticket 签发先锁定 task row，锁内校验 stage/generation、签名并把 expiry 以单调 `max` 持久化后才返回 URL；失去 stage 的请求不暴露已签 URL而返回结构化 conflict/retry。票据 TTL 不得超过 MinIO/SigV4 的 7 天硬上限。取消、保留期和 replacement 的对象清理使用 PostgreSQL 时间；selector 除 `object_cleanup_next_attempt_at` 外独立要求 `object_upload_expires_at + 15 minutes completion grace <= clock_timestamp()`。cleanup work 快照并只删除退休 generation 的 key/已确认 ETag；missing object 同样保持 pending 到该屏障后执行幂等 absence/delete，旧 cleaner 永远不能触及新 generation。MinIO 必须为 ttsERP 页面来源配置仅允许 PUT/HEAD 所需 header 的 CORS；浏览器 URL 通过既有 `MINIO_PUBLIC_HOST` 重写，不能把服务器内部 `127.0.0.1` 地址返回给远端浏览器。
+数据库保存 `object_bucket + object_generation + object_key + object_etag`，并持久化该 generation 已签发 PUT ticket 的最晚 `object_upload_expires_at`；预签名 URL 本身只在响应中短暂存在。初次上传和每次 replacement 都生成从未复用的新 generation/key。既有任务的每次 PUT ticket 签发先锁定 task row，锁内校验 stage/generation、签名并把 expiry 以单调 `max` 持久化后才返回 URL；失去 stage 的请求不暴露已签 URL而返回结构化 conflict/retry。票据 TTL 不得超过 MinIO/SigV4 的 7 天硬上限。取消、保留期和 replacement 的对象清理使用 PostgreSQL 时间；selector 除 `object_cleanup_next_attempt_at` 外独立要求 `object_upload_expires_at + 15 minutes completion grace <= clock_timestamp()`。cleanup work 快照并只删除退休 generation 的 key/已确认 ETag；missing object 同样保持 pending 到该屏障后执行幂等 absence/delete，旧 cleaner 永远不能触及新 generation。MinIO 必须为 ttsERP 页面来源配置仅允许 PUT/HEAD 所需 header 的 CORS；浏览器 URL 通过既有 `MINIO_PUBLIC_HOST` 重写，不能把服务器内部 `127.0.0.1` 地址返回给远端浏览器。（注：对象删除路径已整体退役，见 §20.10 与[实施计划](03-implementation-plan.md) §遗留现状；本节保留票据隔离与 generation 复用规则，因为它们仍约束上传票据签发。）
 
 ### 5.2 校验
 
@@ -727,7 +727,7 @@ MINIO ●━━━━ 手机相册 ●━━━━ Artemis ◉━━━━ TikTo
 │ 227 / 4000                       │                                       │
 ├──────────────────────────────────┴───────────────────────────────────────┤
 │ 任务记录 [全部][排队][执行中][失败][需核验][成功]                       │
-│ 自动刷新 [智能 ▼] · 上次 10:42:15                         [立即刷新]    │
+│ 自动刷新 [开（每 5 秒） ▼] · 上次 10:42:15                  [立即刷新]    │
 │ #1006 queued  video-a.mp4  Artemis 尚未创建             10:42 [查看]    │
 │ #1005 failed  video-b.mp4  c8af5a6c…391d2 [复制]        10:31 [重试]    │
 │ #1004 running video-c.mp4  41d9d326…8a104 [复制]        10:20 [查看]    │
@@ -891,7 +891,7 @@ Prompt 快照和 Artemis 原始 output 默认折叠，仅 admin 或诊断权限�
 `failed` 且服务端返回 `retry` 时：
 
 1. 用户点击“重试原任务”；
-2. dialog 显示上一条 attempt 的失败阶段、错误、`retryBudgetUsed/maxAttempts` 发布预算；追加式 `attemptCount` 只作审计，不得冒充已消耗预算；
+2. dialog 显示上一条 attempt 的失败阶段与错误，并提示“AI 报告失败可能有误，请先自行核验作品页再决定是否重试”；不再显示任何次数或上限，追加式 `attemptCount` 只作审计展示；
 3. 明确说明“将使用原视频和原文案创建新的 Artemis 执行记录”；
 4. 用户确认后 POST `/retry`；
 5. 服务端原子检查状态并排队；
@@ -915,19 +915,17 @@ Prompt 快照和 Artemis 原始 output 默认折叠，仅 admin 或诊断权限�
 任务工具栏提供可见的定时刷新控制：
 
 ```text
-自动刷新 [智能 | 2 秒 | 5 秒 | 10 秒 | 30 秒 | 关闭]
-上次刷新 10:42:15 · 下次约 2 秒后              [立即刷新]
+自动刷新 [开（每 5 秒） | 关]                     上次刷新 10:42:15
+                                                     [立即刷新]
 ```
 
-默认选择“智能”，规则为：
+节奏固定，没有“智能”模式、没有 2/10/30 秒自定义间隔：
 
-- 存在运行中的 publish/verify attempt：`/current` 每 2 秒；当前列表每 5 秒；
-- 无运行任务但存在排队任务：当前任务/列表每 8 秒；
-- 只有终态历史任务：列表每 30 秒；
-- 页面隐藏：暂停高频轮询，最多每 30 秒一次；恢复可见时立即刷新；
-- 用户选择固定间隔后，当前任务、当前列表页和已打开详情都使用该间隔；
-- 用户选择“关闭”后只保留“立即刷新”，运行中轨道显示“自动刷新已暂停”，避免用户误以为状态仍实时；
-- 用户选择保存在 `localStorage`，只保存刷新偏好，不保存任务、文案或凭据。
+- 上一响应结束后再计时 5 秒，触发下一次刷新；
+- 页面隐藏暂停计时，恢复可见且开关为「开」时立即刷新一次；
+- 关闭后只保留「立即刷新」，不再自动请求；
+- 用户选择保存在 `localStorage`，只保存 on/off 偏好，不保存任务、文案或凭据；旧版本遗留的 `smart`/数字值被忽略并回落到默认的 5 秒节奏；
+- 过滤当前任务、列表页和已打开详情使用同一节奏；刷新失败时显示退避提示，但不改变间隔。
 
 轮询实现约束：
 
@@ -1060,8 +1058,12 @@ ARTEMIS_VERIFICATION_LEVEL=strict
 TIKTOK_PUBLISH_ALBUM=TTSERP
 TTS_ERP_PUBLISH_SPOOL_DIR=~/.local/share/tts-erp/video-publish
 TIKTOK_PUBLISH_MAX_VIDEO_BYTES=524288000
-TIKTOK_PUBLISH_MAX_ATTEMPTS=3
+TIKTOK_PUBLISH_MAX_PROMPT_CHARS=4000
 ```
+
+`TIKTOK_PUBLISH_MAX_PROMPT_CHARS` 是提交前可编辑 Prompt 正文（`prompt_override`）的长度上限，默认 4000 字符；强制安全段由服务端追加，不计入该上限。
+
+发布预算已退役：不再有 attempt 次数上限，也没有 `TIKTOK_PUBLISH_MAX_ATTEMPTS`（该变量已无任何读取方）。失败一律落 `failed/done`，只有人工点「重试原任务」才会再排一轮。
 
 凭据、Artemis token 和 MinIO secret 只来自环境或既有 secret 管理；不得写入代码、Prompt、浏览器响应或日志。
 
@@ -1125,7 +1127,7 @@ bash scripts/test_isolated.sh ...
 - needs_review 不显示直接重试；
 - drawer 执行历史、每条 attempt 的完整 Artemis ID 和清理状态；
 - Artemis ID 一键复制，复制值为完整 UUID，排队未建 attempt 时显示“尚未创建”；
-- 智能/固定/关闭三类定时刷新、手动刷新、页面可见恢复、失败退避和 stale response 防护；
+- 固定 5 秒定时刷新、开关开/关、手动刷新、页面可见恢复、失败退避和 stale response 防护；
 - 401 登录跳转、403 只读模式；
 - 键盘、dialog 焦点、aria-live、reduced motion；
 - 390px、768px、1440px 三档视觉冒烟。
@@ -1175,7 +1177,7 @@ bash scripts/test_isolated.sh ...
 8. 全局唯一 running task 由数据库部分唯一索引保证。
 9. 成功与清理分开建模；清理失败不会改写业务成功。
 10. 前端的“单线发布轨道”直接表达全局串行约束；状态与允许操作全部由服务端真相驱动。
-11. 页面提供智能或固定间隔定时刷新，任务、attempt 和 Artemis ID 的变化无需手工刷新即可出现。
+11. 页面提供固定 5 秒的定时刷新开关，任务、attempt 和 Artemis ID 的变化无需手工刷新即可出现。
 12. 每条 Artemis attempt 的完整 session ID 都在详情中保留并可复制；列表展示当前或最近一次 ID。
 
 ## 18. 实现级数据字典
@@ -1212,7 +1214,7 @@ bash scripts/test_isolated.sh ...
 | `stage` | enum text, 非空 | Domain service | 当前细分阶段，含义见 §18.5。 |
 | `stage_started_at` | timestamptz, 非空 | Repository | 当前 stage 的数据库时间起点。 |
 | `attempt_count` | int, 非空 | Domain service | 追加式审计计数：已创建的 `kind=publish` 数量，永不因 admission refund 递减。 |
-| `publish_budget_used` | int, 非空 | Domain service | 已消耗的正式发布预算；只有白名单内、已证明发生在 admission 前的设备 locked/busy 拒绝可退款。verify 不计入。 |
+| `publish_budget_used` | int, 非空 | —（**退役**） | 列保留兼容，不再写入也不再读取；不存在发布预算与次数上限。 |
 | `next_attempt_at` | timestamptz, 可空 | Dispatcher | 退避截止时间；为空表示可立即领取。 |
 | `lease_owner` | text, 可空 | Worker | 当前领取实例 ID；业务终态和 pending 时必须为空。 |
 | `lease_expires_at` | timestamptz, 可空 | Worker | 崩溃恢复租约；运行时每次 heartbeat 向后延长。 |
@@ -1323,6 +1325,8 @@ bash scripts/test_isolated.sh ...
 
 ### 18.7 `RetryClassification`
 
+这些值**只用于详情诊断展示**，不再驱动任何自动重排或自动核验：`retry_safe` 与 `retry_budget_exhausted` 语义已删除，人工重试无次数上限。
+
 | 值 | `retry_safe` | 后续动作 |
 | --- | --- | --- |
 | `pre_artemis_failure` | true | 原任务退避后重新排队，不创建无效 Artemis attempt。 |
@@ -1354,9 +1358,9 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 | `view` | 查看详情 | 所有任务。 |
 | `continue_upload` | 继续上传 | awaiting_upload。 |
 | `cancel` | 取消任务 | awaiting_upload/queued/waiting_device。 |
-| `retry` | 重试原任务 | failed 且对象仍存在、分类安全、预算允许。 |
+| `retry` | 重试原任务 | failed、无活跃 attempt、对象可用；无次数上限、无预算校验。 |
 | `verify` | 再次自动核验 | needs_review。 |
-| `retry_cleanup` | 重试清理 | 任一 cleanup status=failed。 |
+| `retry_cleanup` | 重试清理 | device/spool cleanup=failed；MinIO 对象永久保留，不是可重试资源。 |
 | `copy_artemis_id` | 复制 Artemis ID | 至少存在一个 attempt。 |
 
 ## 19. 合法状态转换
@@ -1366,22 +1370,24 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 | 当前 | 事件 | 下一状态 | 事务内副作用 |
 | --- | --- | --- | --- |
 | pending/awaiting_upload | `UPLOAD_CONFIRMED` | pending/queued | 保存 ETag、uploaded_at、queued_at。 |
-| pending/awaiting_upload | `USER_CANCEL` | cancelled/done | 标记对象清理 pending。 |
+| pending/awaiting_upload | `USER_CANCEL` | cancelled/done | 不安排对象删除；MinIO 原视频保留。 |
 | pending/queued | `CLAIM` | running/downloading | 写 lease、heartbeat、started_at。 |
 | pending/queued | `DEVICE_NOT_READY` | pending/waiting_device | 写错误、next_attempt_at，不占运行槽。 |
 | pending/waiting_device | `DEVICE_READY` | pending/queued | 清错误并重新排队。 |
 | running/downloading | `DOWNLOAD_OK` | running/staging_device | 写 SHA-256。 |
 | running/staging_device | `MEDIA_VISIBLE` | running/dispatching_artemis | 写 device_path、device cleanup pending。 |
 | running/dispatching_artemis | `ATTEMPT_CREATED` | running/dispatching_artemis | insert attempt，生成 session ID。 |
-| running/dispatching_artemis | `ARTEMIS_ADMITTED` | running/waiting_artemis | attempt queued/running。 |
-| running/waiting_artemis | `ARTEMIS_SUCCESS` | succeeded/done | attempt success；同事务写 cleanup intent，设备清理由 selector 领取。 |
-| running/waiting_artemis | `SAFE_FAILURE_RETRY` | pending/queued | attempt failed，释放 lease，设置退避。 |
-| running/waiting_artemis | `AMBIGUOUS_FAILURE` | running/verifying | attempt unknown，创建 verify。 |
-| running/verifying | `FOUND_PUBLISHED` | succeeded/done | verify success；同事务写 cleanup intent。 |
+| running/dispatching_artemis | `ARTEMIS_ADMITTED` | running/waiting_artemis | attempt queued/running；同事务写 `params_locked_at`，参数从此永久只读。 |
+| running/waiting_artemis | `ARTEMIS_SUCCESS` | needs_review/done | attempt success；释放 lease，**不置成功**——唯一成功路径是人工 `confirm-published`（设计 02 §7.4）。 |
+| running/waiting_artemis | `ARTEMIS_FAILURE`（**仅** `planner_zero_steps`，即 planner 未打开发布 UI） | failed/done | 写错误与分类；**不自动重排**，只有人工「重试原任务」再排一轮。有步骤的 `failed`、`rejected/cancelled`、`missing` 都属于「不确定」，落 `needs_review/done`（与 02 §15 “含未登录归 ARTEMIS_FAILURE” 的字面写法不同，详见《测试计划和结果》）。 |
+| running/waiting_artemis | `AMBIGUOUS_FAILURE` | needs_review/done | 记录不确定原因；不自动核验。 |
+| running/verifying | `FOUND_PUBLISHED` | needs_review/done | verify success；核验只是线索，**不置成功**。 |
 | running/verifying | `CONFIRMED_ABSENT` | needs_review/done | verify success；释放 lease但不重试 publish，只允许用户之后显式再次核验。 |
 | running/verifying | `INCONCLUSIVE` | needs_review/done | 释放 lease，保留对象。 |
-| 任意 pending | `USER_CANCEL` | cancelled/done | 清理对象；运行态不允许普通取消。 |
-| failed | `USER_RETRY` | pending/queued | 校验对象/预算，清主表错误和 completed_at。 |
+| 未锁定 pending | `USER_CANCEL` | cancelled/done | 同事务完成；不清理对象。 |
+| 未锁定 running（未 admission） | `USER_CANCEL` | running（置 `cancel_requested`）→ 收尾后 cancelled/done | 阶段边界停止，禁止提交 Artemis；`dispatching_artemis` 在途时返回 `409 TASK_SUBMITTING`。 |
+| needs_review / failed | `HUMAN_CONFIRM` | succeeded/done | 同事务插入 `video_publish_confirmations` 审计（操作人=认证主体、时间=数据库 now()）并写 `confirmed_*`。 |
+| failed | `USER_RETRY` | pending/queued | 校验对象可用（无预算校验），清主表错误和 completed_at。 |
 | needs_review | `USER_VERIFY` | running/verifying | 在同一事务取得全局 PostgreSQL advisory/device slot，确认不存在其他 running task，也不存在全局 pending/failed/leased device cleanup 后创建 verify attempt；API 不伪造 Worker lease，由真实 Worker 随后领取。 |
 
 额外不变量：
@@ -1400,7 +1406,7 @@ API 返回以下稳定字符串，前端只按返回值显示按钮：
 - `publishing.submission.CreateCommand` 与 `create_upload_ticket()` 创建/幂等重放上传票据；
 - `publishing.submission.confirm_upload()`、`cancel_task()`、`retry_task()`、`replace_upload()` 持有对应任务写入；
 - `api.v2.video_publish.refresh_upload_url()` 只负责 owner 校验和 wire envelope；`submission.refresh_upload_ticket()` 在返回 URL 前以 PostgreSQL 时间持久化该 generation 的 ticket expiry；
-- `api.v2.video_publish.current()`、`list_tasks()`、`detail()` 持有 owner-scoped 只读查询与 snapshot；
+- `api.v2.video_publish.current()`、`list_tasks()`、`detail()` 是页面级只读查询与 snapshot：不按创建人过滤，`page:video-publish` 即可读全部任务；
 - `publishing.repository.request_verification()` 与 device cleanup selector 使用同一事务 advisory/device slot：verification 在创建 attempt 前检查全局 running/cleanup，device selector 在领取 lease 前检查全局 running；持久化的 running 状态与 pending/failed cleanup 状态让 advisory lock 释放后的物理设备操作继续互斥；Worker 侧 task/attempt 结果只由 `commit_publish_transition()` 原子提交；
 - `publishing.dispatcher.dispatch_one()` 与 `recover_active()` 编排 adapter，但 adapter 不得自行修改数据库状态；
 - cleanup 删除只由 `claim_cleanup_work()` 领取的 executor 执行，并由 `renew_cleanup_work()` / `finish_cleanup_work()` fence。
@@ -1637,14 +1643,12 @@ async def cleanup_task(work):
     # work 由单条 CTE / UPDATE ... RETURNING 原子领取，包含明确 due resources。
     await cleanup_one("device", lambda: adb.remove(work.device_path))
     await cleanup_one("spool", lambda: unlink_exact_final_and_part(work.spool_path))
-    await cleanup_one(
-        "object",
-        lambda: object_store.remove(work.object_key, work.object_etag),
-    )  # work 绑定退休 generation；PUT expiry 到期前不得领取
-    finish_cleanup_work(work.token, resource_results)  # owner/expiry/version CAS
+finish_cleanup_work(work.token, resource_results)  # owner/expiry/version CAS
 ```
 
-失败/needs_review 的 MinIO 对象默认保留。awaiting_upload 超过 24 小时自动取消并删除；failed 对象按 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` 保留，过期删除前仍保留任务和 attempt 审计记录。
+**对象清理已退役**：cleanup work 只含 `device` 与 `spool`；MinIO 对象任何状态都不删除，`object_store.remove(...)` 不再是清理路径。历史遗留 `object_cleanup_status='pending'/'failed'` 的行因 0058 的 `video_publish_task_cleanup_owner_check` 永久持有 `preserve_state`，不会因为“对象不再删除”而被自动抹平（见[实施计划](03-implementation-plan.md) §遗留现状）。
+
+`schedule_retention_cleanup()` 仍会在 `awaiting_upload` 超过 24 小时时把任务自动转为 `cancelled/done`，并按 `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` 给超期 `failed` 行写 `object_cleanup_status='pending'`；但该标记没有执行方，属于遗留调度（同样见实施计划）。
 
 ### 20.11 Repository 与事务规则
 
@@ -2095,10 +2099,11 @@ VideoPublishPage
 | 页面 notice | `#publish-notice` | 全局非阻塞提示，`aria-live=polite`。 |
 | 设备状态 | `#publish-device-status` | ready/busy/offline/locked/unknown。 |
 | 设备选择 | `#publish-device-select` | select：首项为配置默认设备，其余来自 §21.15 实时列表；列表不可用时仅剩默认项。 |
-| 刷新模式 | `#publish-refresh-mode` | select：smart/2/5/10/30/off。 |
+| 刷新模式 | `#publish-refresh-mode` | select：`on`（固定每 5 秒）/ `off`；无 smart、无自定义间隔。 |
 | 上次刷新 | `#publish-last-refreshed` | 服务端时间和本地展示。 |
 | 立即刷新 | `#publish-refresh-now` | 手动执行 current/list/detail refresh。 |
-| 轨道 | `#publish-rail` | 当前任务阶段。 |
+| 设备轨道容器 | `#publish-rail-tracks` | 每台目标设备一条轨道（`aria-label=设备 <name> 发布阶段`），轨道数量由 `/tasks/current` 的 `tasks[]` 决定。 |
+| 轨道空态 | `#publish-rail-empty` | 无任何运行任务时显示「当前没有运行中的发布任务。」 |
 | 当前任务 ID | `#active-task-id` | ttsERP UUID。 |
 | 当前 Artemis ID | `#active-artemis-id` | 完整 UUID。 |
 | 复制当前 ID | `[data-copy-artemis-id]` | 复制对应完整 UUID。 |
@@ -2279,7 +2284,7 @@ const state = {
   selectedTaskId: null,
   selectedTask: null,
   refresh: {
-    mode: 'smart',
+    mode: 'on',
     timer: null,
     generation: 0,
     currentEtag: null,
@@ -2495,7 +2500,7 @@ UMask=0077
 WantedBy=default.target
 ```
 
-该 unit 以当前用户运行，以便继承其 USB/ADB 权限；确保 `PrivateDevices` 等 hardening 不阻断 USB/ADB。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 可启动但设备 readiness 为 `unknown`，API 创建任务会失败关闭；缺少 `ARTEMIS_BASE_URL` 或 `TTS_ERP_PUBLISH_SPOOL_DIR` 时 Worker 启动失败。先在 staging 主机验证再收紧 sandbox。
+该 unit 以当前用户运行，以便继承其 USB/ADB 权限；确保 `PrivateDevices` 等 hardening 不阻断 USB/ADB。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍会启动，但只记录一条错误日志并空转（不领取任何任务，cleanup selector 直接拒绝），设备 readiness 报 `unknown`；缺少 `ARTEMIS_BASE_URL` 或 `TTS_ERP_PUBLISH_SPOOL_DIR` 时 Worker 启动失败。先在 staging 主机验证再收紧 sandbox。
 
 常用命令：
 
@@ -2524,13 +2529,14 @@ journalctl --user -u tts-erp-publish.service -f
 | `TIKTOK_PUBLISH_MAX_VIDEO_BYTES` | 否 | 524288000 | 视频上限。 |
 | `TIKTOK_PUBLISH_MAX_CAPTION_CHARS` | 否 | 4000 | 文案字符上限。 |
 | `TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS` | 否 | 900 | 预签名 PUT 有效期。 |
-| `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` | 否 | 30 | 失败媒资保留期。 |
-| `TIKTOK_PUBLISH_MAX_ATTEMPTS` | 否 | 3 | 正式发布 attempt 上限。 |
+| `TIKTOK_PUBLISH_FAILED_RETENTION_DAYS` | 否 | 30 | 仅参与遗留 retention 调度：`schedule_retention_cleanup()` 用它算 failed 行的到期时间。**MinIO 对象现在永不删除**，Worker 的 cleanup selector 只处理 `device`/`spool`，所以该值只影响遗留行的 `object_cleanup_*` 标记。 |
+| `TIKTOK_PUBLISH_MAX_PROMPT_CHARS` | 否 | 4000 | 提交前可编辑的 Prompt 正文（`prompt_override`）长度上限；服务端强制安全段不计入。 |
+| `TIKTOK_PUBLISH_MAX_ATTEMPTS` | — | — | **已退役**：发布预算取消后不再有任何读取方，保留此行仅为说明其消失。 |
 | `TIKTOK_PUBLISH_ALBUM` | 否 | TTSERP | 设备相册/目录名。 |
 | `TTS_ERP_PUBLISH_SPOOL_DIR` | 是 | 无 | 本地 spool 根目录。 |
 | `ARTEMIS_BASE_URL` | 是 | 无 | Artemis daemon URL。 |
 | `ARTEMIS_TOKEN` | 视部署 | 无 | Artemis 鉴权 token。 |
-| `ARTEMIS_DEVICE_SERIAL` | API 创建任务必需 | 无 | 唯一目标设备；缺失时 Worker 仍启动但 readiness=`unknown`，API 创建失败关闭。 |
+| `ARTEMIS_DEVICE_SERIAL` | 是（一进程一设备） | 无 | 该 Worker 进程唯一负责的设备。缺失时进程仍会启动，但只打一条错误日志并空转：不领取任何任务，cleanup selector 直接拒绝。 |
 | `ARTEMIS_APP_PACKAGE` | 否 | com.zhiliaoapp.musically | TikTok package。 |
 | `ARTEMIS_PROFILE` | 否 | pro | 执行 profile。 |
 | `ARTEMIS_VERIFICATION_LEVEL` | 否 | strict | Pro checker 强度。 |
@@ -2538,7 +2544,7 @@ journalctl --user -u tts-erp-publish.service -f
 | `PUBLISH_TASK_LEASE_SECONDS` | 否 | 30 | DB task lease。 |
 | `PUBLISH_WORKER_HEARTBEAT_SECONDS` | 否 | 5 | Worker 心跳周期。 |
 
-Worker 启动直接要求 `ARTEMIS_BASE_URL` 与 `TTS_ERP_PUBLISH_SPOOL_DIR`，缺少任一项即失败；bucket 有受校验的 `tiktok-video` 默认值。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍可启动，设备 readiness=`unknown`，API 创建任务失败关闭；不得静默选择“第一台设备”。
+Worker 启动直接要求 `ARTEMIS_BASE_URL` 与 `TTS_ERP_PUBLISH_SPOOL_DIR`，缺少任一项即失败；bucket 有受校验的 `tiktok-video` 默认值。一个进程只服务一台设备（`ARTEMIS_DEVICE_SERIAL` 读一次，领取/清理/心跳全部按该 serial 限定）；多设备并行靠多开 Worker 进程，不靠进程内切换设备。缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍可启动，但只记录一条错误日志并空转——不领取任务，设备 readiness 报 `unknown`，`/config` 的 `canWrite=false`（原因为“发布设备未配置”）；不得静默选择“第一台设备”。
 
 ### 23.10 部署顺序
 
@@ -2688,7 +2694,7 @@ worker_recovered_task
 - [ ] 上传进度、取消、失败重试与 confirm 闭环；
 - [ ] 双击提交只创建一个任务；
 - [ ] 轨道阶段、状态 badge、队列位置与服务端一致；
-- [ ] 智能/固定/关闭刷新模式和 localStorage 偏好正确；
+- [ ] 固定 5 秒刷新开关（开/关）和 localStorage 偏好正确，旧 `smart`/数字值回落到 5 秒；
 - [ ] 轮询不重叠、隐藏降频、失败退避、旧响应不覆盖；
 - [ ] 列表和 drawer 展示/复制完整 Artemis ID；
 - [ ] 每条 attempt 都保留自己的 ID；
@@ -2755,11 +2761,11 @@ Luna 每个 Phase 的输出必须包含：
 
 ## 28. 已实现的最终安全边界
 
-当前 migration head 为 `0066_publish_execution_fences`（parent `0065_publish_generation_identity`）。实现还明确保证：
+当前 migration head 为 `0069_video_publish_confirmation`（parent `0068_spu_deterioration_alert`）。`0069` 新增 `publishing.video_publish_confirmations` 审计表、任务确认/锁定/覆盖列，并把全局单 running 索引改为按设备的 `uq_video_publish_one_running_per_device`；再前一版的 `0066_publish_execution_fences` 引入的 `execution_generation` 隔离规则仍然生效。实现还明确保证：
 
 - verify 只有在 Artemis execution `success` 且 `verdict` 严格等于 `published`、`not_published` 或 `inconclusive` 时才采信；`published` 才确认成功，单次 `not_published` 与 `inconclusive` 均保守进入 `needs_review/done`，不得自动重新发布；其他终态同样进入 `needs_review`；
 - `cancelled`/`canceled` publish 与未知/格式错误的 Artemis 409 都是结果不确定，必须沿同 session 查询/核验，不能进入安全重发；
-- `attempt_count` 是追加式审计数，`publish_budget_used` 独立表达预算；
+- `attempt_count` 是追加式审计数；`publish_budget_used` 列保留兼容但不再写入也不再读取（发布预算已退役，人工重试无上限）；
 - retention object cleanup pending/failed/leased 时，服务端不提供且拒绝 retry/replace；
 - cleanup 删除期间持续续租，失去 owner 后旧 Worker 不写完成结果；每轮执行先持久化唯一 `execution_generation`，spool final/`.part` 与 device filename 都含该值，因此已开始的旧 cleaner 即使稍后恢复也只能命中退休路径；
 - spool/object 由独立有界后台 cleanup coroutine 使用短 DB session 与 cleanup lease 处理，持续发布队列不会饿死清理，慢 MinIO 删除也不进入 publish-critical loop；
@@ -2775,7 +2781,7 @@ Luna 每个 Phase 的输出必须包含：
 - confirm-upload 在入队前要求非空字符串 ETag；缺失时返回可重试 `UPLOAD_ETAG_MISSING` 并保持 awaiting_upload；
 - 排队 snapshot 返回 `queuedAt/queuePosition/statusLabel/stageLabel`，列表批量计算队列位置；
 - needs_review 摘要同时返回 `relatedPublishAttempt`，核验 dialog 不能把最新 verify session 冒充待核验 publish session；
-- 结构化日志覆盖 claim、download/stage、attempt、verification、terminal、cleanup/recovery commit boundary，设备身份仅掩码；`/v2/video-publish/metrics` 返回 owner-scoped status/attempt/stage/cleanup 聚合与 heartbeat age；两者都不含 caption/Prompt/output/secret；
+- 结构化日志覆盖 claim、download/stage、attempt、verification、terminal、cleanup/recovery commit boundary，设备身份仅掩码；`/v2/video-publish/metrics` 返回页面级全局的 status/attempt/stage/cleanup 聚合与 heartbeat age（无 owner 过滤、无 admin-only 聚合）；两者都不含 caption/Prompt/output/secret；
 - migration/seed 仅自动授权 admin；operator session 权限必须在最终人工验证后显式授予；API key 默认也只有 admin tier 可访问 `/v2/video-publish/*`，未来 readwrite key 放行只能通过文档化的 `TTS_ERP_VIDEO_PUBLISH_ALLOW_READWRITE_API_KEYS=1` feature gate。
 
 390/768/1440 像素视觉检查、模拟器全流程、SIGTERM 恢复以及 staging-only 真机检查仍按 §26 保留为人工发布门禁；本文不声称已执行这些检查。

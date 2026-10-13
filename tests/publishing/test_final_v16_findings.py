@@ -138,7 +138,6 @@ def test_underscore_credentials_are_redacted_at_persistence_and_response(
         OperationalFailure(
             action="failed",
             code="TEST_FAILURE",
-            max_attempts=3,
             message="\n".join(
                 f"{identifier}={value}"
                 for identifier, value in zip(
@@ -240,7 +239,7 @@ async def test_future_cleanup_backoff_still_reports_device_busy(
             bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
         )
 
-    deps = SimpleNamespace(session_factory=factory)
+    deps = SimpleNamespace(session_factory=factory, device_serial="TEST_device")
     status_value, message = await _probe_device_readiness(cast(Any, deps))
     assert status_value == "busy"
     assert "清理" in message
@@ -533,7 +532,7 @@ def test_0066_is_live_linear_head_with_admin_only_default(
     db_session: Session,
 ) -> None:
     assert db_session.scalar(text("SELECT version_num FROM alembic_version")) == (
-        "0068_spu_deterioration_alert"
+        "0069_video_publish_confirmation"
     )
     grants = set(
         db_session.execute(
@@ -592,4 +591,4 @@ def test_architecture_inventory_is_derived_from_live_schema(
         """)
     ).all()
     assert len(rows) == 14
-    assert sum(int(row[1]) for row in rows) == 73
+    assert sum(int(row[1]) for row in rows) == 74

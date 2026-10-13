@@ -139,8 +139,8 @@ async def test_spool_is_owned_before_download_rename_and_object_loss_recovery(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v20-worker",
+            device_serial="T20SERIAL",
             lease_seconds=30,
-            max_attempts=3,
             store=Store(),
             adb=Adb(),
             spool_dir=tmp_path,
@@ -168,6 +168,11 @@ async def test_spool_is_owned_before_download_rename_and_object_loss_recovery(
     db_session.expire_all()
     assert not destination.exists()
     assert task.spool_cleanup_status == "succeeded"
+    # 02 §14.1: the object is never deleted and CONFIRMED_OBJECT_MISSING no
+    # longer arms the retired object status, so once the spool drains the row
+    # releases its cleanup marker entirely.
+    assert task.object_deleted_at is None
+    assert task.object_cleanup_status == "not_started"
     assert task.cleanup_intent == "none"
 
 
@@ -333,7 +338,7 @@ def test_attempt_events_only_report_real_insert_and_status_change(
             attempt_id=attempt_id,
             expected_attempt_status="running",
         ),
-        PrepareAttempt(attempt_id=attempt_id, lease_seconds=30, max_attempts=3),
+        PrepareAttempt(attempt_id=attempt_id, lease_seconds=30),
     )
     assert prepared.retained_token is not None
     commit_publish_transition(
@@ -341,7 +346,6 @@ def test_attempt_events_only_report_real_insert_and_status_change(
         prepared.retained_token,
         ObserveAttempt(
             observation=AttemptObservation(status="running", terminal=False),
-            max_attempts=3,
             lease_seconds=30,
         ),
     )
@@ -382,7 +386,7 @@ def test_attempt_events_report_actual_insert_and_status_change(
             lease_owner="TEST-v20-new-attempt-owner",
             row_version=task.row_version,
         ),
-        PrepareAttempt(lease_seconds=30, max_attempts=3),
+        PrepareAttempt(lease_seconds=30),
     )
     assert prepared.retained_token is not None
     commit_publish_transition(
@@ -390,7 +394,6 @@ def test_attempt_events_report_actual_insert_and_status_change(
         prepared.retained_token,
         ObserveAttempt(
             observation=AttemptObservation(status="running", terminal=False),
-            max_attempts=3,
             lease_seconds=30,
         ),
     )
@@ -429,6 +432,7 @@ async def test_recover_active_logs_only_after_leasing_existing_running_task(
                 bind=db_session.get_bind(), join_transaction_mode="create_savepoint"
             ),
             instance_id="TEST-v20-recovery-worker",
+            device_serial="T20SERIAL",
             lease_seconds=30,
             spool_dir=tmp_path,
         ),
@@ -512,15 +516,22 @@ def test_transition_event_reports_the_completed_stage_duration(
     assert transitions[0]["duration_ms"] >= 3000
 
 
-def test_retry_dialog_uses_consumed_publish_budget_not_audit_attempt_count() -> None:
+def test_retry_dialog_states_the_manual_verify_hint_and_no_budget() -> None:
+    """02 §18/§14.1: the retry dialog no longer shows counts or a ceiling.
+
+    The publish budget is retired, so a remaining/limit readout would be a lie;
+    the dialog instead tells the operator the AI verdict can be wrong.
+    """
     source = (ROOT / "tts_erp_v2/static/js/video-publish.js").read_text()
     dialog = source[
         source.index("function confirmationMessage") : source.index(
             "function confirmTaskAction"
         )
     ]
-    assert "task.retryBudgetUsed" in dialog
+    assert "AI 报告失败可能有误，请先自行核验作品页再决定是否重试" in dialog
+    assert "task.retryBudgetUsed" not in dialog
     assert "task.attemptCount" not in dialog
+    assert "maxPublishAttempts" not in dialog
 
 
 def test_test_dependency_help_uses_real_path_and_accurate_pg_client_contract() -> None:
@@ -540,7 +551,13 @@ def test_implemented_layout_and_deployment_docs_match_checked_in_files() -> None
     assert "tests/api/test_video_publish.py" not in design
     assert "tests/browser/test_video_publish_page.py" not in design
     assert unit in design
-    assert "缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 可启动" in design
+    # VP-D made a worker process serve exactly one device, so a missing serial
+    # no longer means "starts and creates are refused": the process still starts
+    # but logs an error and idles (no claim, cleanup selector refuses).
+    assert (
+        "缺少 `ARTEMIS_DEVICE_SERIAL` 时 Worker 仍会启动，但只记录一条错误日志并空转"
+        in design
+    )
     assert (
         "缺少 `ARTEMIS_BASE_URL` 或 `TTS_ERP_PUBLISH_SPOOL_DIR` 时 Worker 启动失败"
         in design

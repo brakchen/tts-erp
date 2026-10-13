@@ -1,8 +1,7 @@
-"""Pure publishing state vocabulary and retry policy."""
+"""Pure publishing state vocabulary and action policy."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -62,6 +61,12 @@ class CleanupIntent(StrEnum):
     PRESERVE_STATE = "preserve_state"
 
 
+# Resources a worker still owns. MinIO objects are retained in every status
+# (02 §5.3, §14.1), so a legacy ``object_cleanup_*`` value is inert residue: it
+# is never claimable and never keeps cleanup ownership open.
+CLEANUP_RESOURCES = ("device", "spool")
+
+
 @dataclass(frozen=True, slots=True)
 class CleanupPlan:
     intent: CleanupIntent
@@ -73,9 +78,11 @@ class CleanupPlan:
 class AllowedAction(StrEnum):
     VIEW = "view"
     CONTINUE_UPLOAD = "continue_upload"
+    EDIT_SETTINGS = "edit_settings"
     CANCEL = "cancel"
     RETRY = "retry"
     VERIFY = "verify"
+    CONFIRM_PUBLISHED = "confirm_published"
     RETRY_CLEANUP = "retry_cleanup"
     REPLACE_UPLOAD = "replace_upload"
     COPY_ARTEMIS_ID = "copy_artemis_id"
@@ -83,9 +90,46 @@ class AllowedAction(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class FailureClassification:
+    """Diagnostic code for a finished publish round (02 §14.4).
+
+    ``ambiguous`` only routes the terminal status: an ambiguous result waits
+    for a human decision (``needs_review``), a certain failure stops at
+    ``failed``. It never re-queues, retries or starts a verification.
+    """
+
     code: str
-    retry_safe: bool | None
-    requires_verification: bool = False
+    ambiguous: bool
+
+
+# Codes that do not prove the publish action was absent. They are the only
+# reason a finished round may end in needs_review instead of failed.
+AMBIGUOUS_FAILURE_CODES = frozenset(
+    {
+        "ambiguous_artemis_failure",
+        "ambiguous_terminal_execution",
+        "publish_action_observed",
+        "recovered_ambiguous_failure",
+        "session_missing",
+    }
+)
+
+# One attempt per task may be unfinished at a time; the partial unique index
+# uq_video_publish_task_active_attempt enforces it in the database.
+ACTIVE_ATTEMPT_STATUSES = frozenset(
+    {"created", "submitting", "queued", "running", "unknown"}
+)
+
+# Running stages that a user may still cancel: params_locked_at stays NULL
+# until Artemis admits the publish, so no submission can exist yet (02 §6.5).
+# dispatching_artemis is excluded on purpose: the admission request is already
+# in flight there, so the API answers 409 TASK_SUBMITTING instead of setting a
+# cancel flag the worker would never read (02 §6.5).
+CANCELLABLE_PENDING_STAGES = frozenset({"awaiting_upload", "queued", "waiting_device"})
+CANCELLABLE_RUNNING_STAGES = frozenset({"downloading", "staging_device"})
+
+
+def attempt_is_active(attempt: Any) -> bool:
+    return attempt is not None and attempt.status in ACTIVE_ATTEMPT_STATUSES
 
 
 def _set_cleanup_status(task: Any, name: str, status: CleanupStatus) -> None:
@@ -154,20 +198,20 @@ def classify_failure(
 ) -> FailureClassification:
     """Classify only stable execution facts, never free-form error text."""
     if final_publish_observed:
-        return FailureClassification("publish_action_observed", False, True)
+        return FailureClassification("publish_action_observed", True)
     if session_missing:
-        return FailureClassification("session_missing", None, True)
+        return FailureClassification("session_missing", True)
     status = artemis_status.lower()
     if status in {"rejected", "cancelled", "canceled"}:
-        return FailureClassification("ambiguous_terminal_execution", None, True)
+        return FailureClassification("ambiguous_terminal_execution", True)
     if steps_count == 0:
-        return FailureClassification("planner_zero_steps", True)
+        # The planner never opened the publish UI: nothing was published.
+        return FailureClassification("planner_zero_steps", False)
     if status in {"failed", "error"}:
         # A failed transport/execution report does not prove that the final
-        # publish action was not observed. Only an explicit zero-step result
-        # is safe to retry without a read-only verification session.
-        return FailureClassification("ambiguous_artemis_failure", None, True)
-    return FailureClassification("session_missing", None, True)
+        # publish action was not observed, so it stays ambiguous.
+        return FailureClassification("ambiguous_artemis_failure", True)
+    return FailureClassification("session_missing", True)
 
 
 def replacement_cleanup_pending(task: Any) -> bool:
@@ -180,7 +224,15 @@ def replacement_cleanup_pending(task: Any) -> bool:
 
 
 def object_cleanup_blocks_input(task: Any) -> bool:
-    """Retention deletion must finish before retry or replacement mutates input."""
+    """Retention deletion must finish before retry or replacement mutates input.
+
+    The object resource itself is retired and no worker phase clears it any more
+    (02 §5.3), but ``video_publish_task_cleanup_owner_check`` only allows
+    ``cleanup_intent='none'`` while the object status is not pending/failed.
+    Queueing such a row would therefore violate the constraint, so the status
+    stays a hard input gate: it refuses with a clean 409 instead of failing the
+    commit. Discharging it needs a migration, which is out of scope here.
+    """
     return (
         getattr(task, "object_cleanup_status", None)
         in {CleanupStatus.PENDING.value, CleanupStatus.FAILED.value}
@@ -189,23 +241,26 @@ def object_cleanup_blocks_input(task: Any) -> bool:
 
 
 def replace_upload_allowed(task: Any) -> bool:
+    """Replacing the source video is never capped: there is no publish budget."""
     return (
         task.status == TaskStatus.FAILED.value
         and task.object_deleted_at is not None
         and not replacement_cleanup_pending(task)
         and not object_cleanup_blocks_input(task)
-        and getattr(task, "publish_budget_used", task.attempt_count)
-        < int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3"))
     )
 
 
 def cleanup_retryable_resources(task: Any) -> tuple[str, ...]:
-    """Single policy used by list snapshots and cleanup retry commands."""
+    """Single policy used by list snapshots and cleanup retry commands.
+
+    Only the resources the worker still owns are retryable; MinIO objects are
+    retained forever, so ``object`` is not one of them (02 §5.3/§14.1).
+    """
     if getattr(task, "status", None) == TaskStatus.RUNNING:
         return ()
     return tuple(
         name
-        for name in ("device", "spool", "object")
+        for name in CLEANUP_RESOURCES
         if getattr(task, f"{name}_cleanup_status", None) == CleanupStatus.FAILED.value
     )
 
@@ -219,45 +274,58 @@ def allowed_actions(
     *,
     latest_attempt: Any = _LATEST_ATTEMPT_UNSET,
     has_attempts: Any = _HAS_ATTEMPTS_UNSET,
+    has_active_attempt: bool | None = None,
 ) -> tuple[AllowedAction, ...]:
     """Compute UI actions without lazy loading when a summary is supplied."""
     attempts = None
-    if latest_attempt is _LATEST_ATTEMPT_UNSET or has_attempts is _HAS_ATTEMPTS_UNSET:
+    summary_supplied = (
+        latest_attempt is not _LATEST_ATTEMPT_UNSET
+        and has_attempts is not _HAS_ATTEMPTS_UNSET
+    )
+    if not summary_supplied:
         attempts = getattr(task, "attempts", ()) or ()
+    if has_active_attempt is None:
+        # Only one attempt per task may be unfinished, so the latest one
+        # decides whether the task still owns the device slot.
+        if summary_supplied:
+            has_active_attempt = attempt_is_active(latest_attempt)
+        elif attempts is not None:
+            has_active_attempt = any(attempt_is_active(item) for item in attempts)
+        else:
+            has_active_attempt = False
+    idle = not has_active_attempt
+    locked = getattr(task, "params_locked_at", None) is not None
+    cancellable = not locked and (
+        (task.status == TaskStatus.PENDING and task.stage in CANCELLABLE_PENDING_STAGES)
+        or (
+            task.status == TaskStatus.RUNNING
+            and task.stage in CANCELLABLE_RUNNING_STAGES
+        )
+    )
     actions: list[AllowedAction] = [AllowedAction.VIEW]
     if task.status == TaskStatus.PENDING and task.stage == TaskStage.AWAITING_UPLOAD:
-        actions += [AllowedAction.CONTINUE_UPLOAD, AllowedAction.CANCEL]
-    elif task.status == TaskStatus.PENDING and task.stage in {
-        TaskStage.QUEUED,
-        TaskStage.WAITING_DEVICE,
-    }:
+        actions.append(AllowedAction.CONTINUE_UPLOAD)
+    # Pre-submission editing shares the cancel boundary: once Artemis admitted
+    # the publish (params_locked_at) the parameters are frozen for good.
+    if not locked and task.status == TaskStatus.PENDING:
+        actions.append(AllowedAction.EDIT_SETTINGS)
+    if cancellable:
         actions.append(AllowedAction.CANCEL)
-    elif (
-        task.status == TaskStatus.FAILED
-        and getattr(task, "publish_budget_used", task.attempt_count)
-        < int(os.environ.get("TIKTOK_PUBLISH_MAX_ATTEMPTS", "3"))
-        and not object_cleanup_blocks_input(task)
-    ):
-        latest = (
-            max(
-                attempts or (),
-                key=lambda attempt: attempt.sequence_no,
-                default=None,
-            )
-            if latest_attempt is _LATEST_ATTEMPT_UNSET
-            else latest_attempt
-        )
+    if idle and task.status in {TaskStatus.FAILED, TaskStatus.NEEDS_REVIEW}:
+        # Human confirmation is the only success path (02 §7.4).
+        actions.append(AllowedAction.CONFIRM_PUBLISHED)
+    if task.status == TaskStatus.FAILED and idle:
         if replace_upload_allowed(task):
             actions.append(AllowedAction.REPLACE_UPLOAD)
         elif (
-            latest is not None
-            and latest.kind == "publish"
-            and latest.retry_safe is True
-            and task.object_uploaded_at is not None
+            task.object_uploaded_at is not None
+            and task.object_deleted_at is None
+            and not object_cleanup_blocks_input(task)
         ):
             actions.append(AllowedAction.RETRY)
-    elif (
+    if (
         task.status == TaskStatus.NEEDS_REVIEW
+        and idle
         and getattr(task, "cleanup_intent", CleanupIntent.NONE.value)
         == CleanupIntent.NONE.value
         and getattr(task, "device_cleanup_status", None)
