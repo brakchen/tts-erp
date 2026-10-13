@@ -265,6 +265,8 @@ def test_a3w3_d_gate_still_blocks_claim_after_requeue(
         f"expected 200, got {response.status_code}: {_detail(response)}"
     )
     after = _reload(db_session, task.public_id)
+    assert after.status == "pending", f"status={after.status}"
+    assert after.stage == "queued", f"stage={after.stage}"
     assert has_pending_device_cleanup(db_session, "TEST_device") is True, (
         "has_pending_device_cleanup() went False: the gate is blind to the task"
     )
@@ -376,9 +378,13 @@ def test_a3w3_e4_replace_upload_keeps_its_own_cleanup_gate(
 @pytest.mark.parametrize(
     ("status", "stage", "expect"),
     [
-        ("pending", "awaiting_upload", {"CONTINUE_UPLOAD", "CANCEL", "VIEW"}),
-        ("pending", "queued", {"CANCEL", "VIEW"}),
-        ("pending", "waiting_device", {"CANCEL", "VIEW"}),
+        (
+            "pending",
+            "awaiting_upload",
+            {"CONTINUE_UPLOAD", "EDIT_SETTINGS", "CANCEL", "VIEW"},
+        ),
+        ("pending", "queued", {"EDIT_SETTINGS", "CANCEL", "VIEW"}),
+        ("pending", "waiting_device", {"EDIT_SETTINGS", "CANCEL", "VIEW"}),
         ("running", "verifying", {"VIEW"}),
         ("succeeded", "done", {"VIEW"}),
         ("cancelled", "done", {"VIEW"}),

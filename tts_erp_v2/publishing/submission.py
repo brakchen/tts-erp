@@ -41,6 +41,7 @@ _BUCKET = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
 _PACKAGE = os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
 MAX_UPLOAD_TICKET_TTL = timedelta(days=7)
 _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+_APP_PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
 
 
 def max_video_bytes() -> int:
@@ -49,6 +50,10 @@ def max_video_bytes() -> int:
 
 def max_caption_chars() -> int:
     return int(os.environ.get("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "4000"))
+
+
+def max_prompt_chars() -> int:
+    return int(os.environ.get("TIKTOK_PUBLISH_MAX_PROMPT_CHARS", "4000"))
 
 
 def configured_device_serial() -> str:
@@ -379,6 +384,71 @@ def replace_upload(session: Session, task_id: UUID) -> VideoPublishTask:
     release_lease(task)
     task.last_error_code = None
     task.last_error_message = None
+    task.row_version += 1
+    session.commit()
+    return task
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsCommand:
+    """Pre-submission parameter edit (02 §9.5/§16.3).
+
+    ``None`` means "field not supplied" and leaves the stored value alone; an
+    empty ``prompt`` clears the override so the default body is used again.
+    """
+
+    prompt: str | None = None
+    device_serial: str | None = None
+    app_package: str | None = None
+
+
+def update_settings(
+    session: Session,
+    task_id: UUID,
+    command: SettingsCommand,
+    *,
+    expected_version: int | None = None,
+) -> VideoPublishTask:
+    """Edit publish parameters before Artemis admits the task (02 §16.3).
+
+    ``params_locked_at`` is the permanent boundary: once it is set the phone
+    owns the outcome and the parameters may never change again, so every later
+    edit is refused with ``TASK_ALREADY_SUBMITTED``.
+    """
+    task = get_task(session, task_id, lock=True)
+    if task is None:
+        raise LookupError("TASK_NOT_FOUND")
+    if task.params_locked_at is not None:
+        raise ValueError("TASK_ALREADY_SUBMITTED")
+    if task.status != TaskStatus.PENDING.value:
+        raise ValueError("TASK_BUSY")
+    if expected_version is not None and expected_version != task.row_version:
+        raise ValueError("TASK_VERSION_CONFLICT")
+    # Validate every supplied field before touching the row: a rejected edit
+    # must never leave half of the parameters written (02 §9.5).
+    prompt = command.prompt
+    if prompt is not None:
+        prompt = prompt.replace("\r\n", "\n").replace("\r", "\n")
+        if "\x00" in prompt:
+            raise ValueError("PROMPT_INVALID")
+        if len(prompt) > max_prompt_chars():
+            raise ValueError("PROMPT_TOO_LONG")
+    device_serial = command.device_serial
+    if device_serial is not None:
+        device_serial = device_serial.strip()
+        if not _DEVICE_SERIAL_RE.fullmatch(device_serial):
+            raise ValueError("DEVICE_SERIAL_INVALID")
+    app_package = command.app_package
+    if app_package is not None:
+        app_package = app_package.strip()
+        if not _APP_PACKAGE_RE.fullmatch(app_package):
+            raise ValueError("APP_PACKAGE_INVALID")
+    if prompt is not None:
+        task.prompt_override = prompt or None
+    if device_serial is not None:
+        task.target_device_serial = device_serial
+    if app_package is not None:
+        task.target_app_package = app_package
     task.row_version += 1
     session.commit()
     return task

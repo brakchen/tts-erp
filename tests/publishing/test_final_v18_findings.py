@@ -69,9 +69,15 @@ def _task(
     )
 
 
-def test_config_exposes_admin_diagnostics_capability(
+def test_config_no_longer_advertises_a_diagnostics_role_gate(
     db_session: Session, monkeypatch
 ) -> None:
+    """02 §9/§20: page:video-publish is the only human gate.
+
+    The diagnostics dump is part of the business record every page holder may
+    read, so the admin-only capability flag is gone from /config instead of
+    merely widened. The frontend slice drops the flag read that fed it.
+    """
     now = datetime.now(UTC)
     db_session.add(
         PublishWorkerHeartbeat(
@@ -88,19 +94,17 @@ def test_config_exposes_admin_diagnostics_capability(
     db_session.commit()
     monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_DEVICE_12345678")
 
-    assert (
-        api.config(_request(Role.READONLY, user_id=1), db_session)["canViewDiagnostics"]
-        is False
-    )
-    assert (
-        api.config(_request(Role.ADMIN, user_id=1), db_session)["canViewDiagnostics"]
-        is True
-    )
+    for role in (Role.READONLY, Role.ADMIN):
+        config = api.config(_request(role, user_id=1), db_session)
+        assert "canViewDiagnostics" not in config
 
 
-def test_expanded_metrics_are_owner_scoped_bounded_and_content_free(
+def test_expanded_metrics_are_page_scoped_bounded_and_content_free(
     db_session: Session,
 ) -> None:
+    """02 §19: the gauges use one page-level scope, so a holder sees every
+    device's queue and every task's attempts rather than only their own rows.
+    Content (prompts, serials) still never reaches the payload."""
     own = _task(user_id=101)
     other = _task(user_id=202)
     own.attempts.append(
@@ -127,7 +131,7 @@ def test_expanded_metrics_are_owner_scoped_bounded_and_content_free(
         )
     )
     # The related-attempt constraint requires verify rows to reference publish;
-    # use a publish kind for the foreign owner's row since only scoping matters.
+    # use a publish kind for the other creator's row since only scope matters.
     other.attempts[0].kind = "publish"
     db_session.add_all([own, other])
     db_session.commit()
@@ -143,10 +147,11 @@ def test_expanded_metrics_are_owner_scoped_bounded_and_content_free(
     finally:
         event.remove(db_session.get_bind(), "before_cursor_execute", capture)
 
-    assert payload["queueDepth"] == 1
-    assert payload["tasksByStatus"] == {"pending": 1}
-    assert payload["attemptsByKindStatus"] == {"publish": {"failed": 1}}
-    assert payload["currentStageAgeSeconds"]["queued"]["count"] == 1
+    # Page-level scope: both creators' rows count, not just user 101's.
+    assert payload["queueDepth"] == 2
+    assert payload["tasksByStatus"] == {"pending": 2}
+    assert payload["attemptsByKindStatus"] == {"publish": {"failed": 1, "success": 1}}
+    assert payload["currentStageAgeSeconds"]["queued"]["count"] == 2
     assert (
         len(
             [

@@ -72,6 +72,7 @@ class CleanupPlan:
 class AllowedAction(StrEnum):
     VIEW = "view"
     CONTINUE_UPLOAD = "continue_upload"
+    EDIT_SETTINGS = "edit_settings"
     CANCEL = "cancel"
     RETRY = "retry"
     VERIFY = "verify"
@@ -286,6 +287,10 @@ def allowed_actions(
     actions: list[AllowedAction] = [AllowedAction.VIEW]
     if task.status == TaskStatus.PENDING and task.stage == TaskStage.AWAITING_UPLOAD:
         actions.append(AllowedAction.CONTINUE_UPLOAD)
+    # Pre-submission editing shares the cancel boundary: once Artemis admitted
+    # the publish (params_locked_at) the parameters are frozen for good.
+    if not locked and task.status == TaskStatus.PENDING:
+        actions.append(AllowedAction.EDIT_SETTINGS)
     if cancellable:
         actions.append(AllowedAction.CANCEL)
     if idle and task.status in {TaskStatus.FAILED, TaskStatus.NEEDS_REVIEW}:

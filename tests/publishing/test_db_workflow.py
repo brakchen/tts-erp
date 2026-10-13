@@ -840,7 +840,7 @@ def test_upload_url_illegal_state_uses_structured_conflict(
     assert conflict["retryable"] is False
     assert conflict["requestId"]
     assert conflict["rowVersion"] == task.row_version
-    assert conflict["allowedActions"] == ["view", "cancel"]
+    assert conflict["allowedActions"] == ["view", "edit_settings", "cancel"]
 
 
 def test_confirm_head_then_cas_detects_concurrent_task_update(
@@ -1031,9 +1031,16 @@ def test_api_key_owner_can_list_detail_and_replay(
     assert replayed["taskId"] == str(task.public_id)
 
 
-def test_api_key_b_cannot_list_detail_or_replay_key_a_task(
+def test_page_scope_reads_cross_creator_tasks_but_idempotency_stays_owned(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """02 §9/§20: page:video-publish is the only human gate.
+
+    Any page holder reads every task, whatever created it, so a foreign API key
+    now lists and opens a task created by another key. The idempotency key
+    stays bound to its creator: replaying someone else's clientRequestId must
+    not hand the caller that task's upload ticket.
+    """
     monkeypatch.setenv("ARTEMIS_DEVICE_SERIAL", "TEST_device")
     monkeypatch.setenv("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
     key_a = "a" * 64
@@ -1065,33 +1072,37 @@ def test_api_key_b_cannot_list_detail_or_replay_key_a_task(
             cursor=None,
         ),
     )
-    assert listed["items"] == []
-    with pytest.raises(HTTPException) as detail_error:
+    assert [item["taskId"] for item in listed["items"]] == [str(task.public_id)]
+    viewed = cast(
+        dict,
         detail(
             task.public_id,
             request,
             db_session,
             Response(),
             include_diagnostics=False,
-        )
-        assert detail_error.value.status_code == 404
-        assert cast(dict, detail_error.value.detail)["code"] == "TASK_NOT_FOUND"
+        ),
+    )
+    assert viewed["taskId"] == str(task.public_id)
+    # The creator is still recorded for audit, not used as a filter.
+    assert viewed["createdBy"] == "api-key"
 
     session_request = _request(
         role="readwrite",
         user_id=2,
         grant=AccessGrant(mode=AuthMode.ENFORCE, role=Role.READWRITE),
     )
-    with pytest.raises(HTTPException) as session_error:
+    session_viewed = cast(
+        dict,
         detail(
             task.public_id,
             session_request,
             db_session,
             Response(),
             include_diagnostics=False,
-        )
-    assert session_error.value.status_code == 404
-    assert cast(dict, session_error.value.detail)["code"] == "TASK_NOT_FOUND"
+        ),
+    )
+    assert session_viewed["taskId"] == str(task.public_id)
     store = UploadStore()
     with pytest.raises(HTTPException) as replay_error:
         create_task(
@@ -1351,8 +1362,10 @@ def test_current_exposes_device_cleaning_but_not_background_cleanup(
     db_session.add_all([device_cleanup, background_cleanup])
     db_session.flush()
     payload = cast(dict, current(_request(), db_session, Response()))
-    assert payload["task"]["taskId"] == str(device_cleanup.public_id)
-    assert payload["task"]["operationalStage"] == "cleaning"
+    assert [entry["taskId"] for entry in payload["tasks"]] == [
+        str(device_cleanup.public_id)
+    ]
+    assert payload["tasks"][0]["operationalStage"] == "cleaning"
     assert payload["pollState"] == {
         "running": False,
         "cleaning": True,
@@ -1361,9 +1374,12 @@ def test_current_exposes_device_cleaning_but_not_background_cleanup(
     db_session.rollback()
 
 
-def test_task_list_and_detail_are_owner_scoped(
+def test_task_list_and_detail_are_page_scoped_not_creator_scoped(
     db_session: Session,
 ) -> None:
+    """02 §9: every task is one page-level list, so a readwrite holder sees the
+    other creator's task instead of a 404. ``created_by_*`` is audit metadata
+    only and no longer narrows what the page may read."""
     owned = _task(created_by_user_id=1)
     other = _task(created_by_user_id=2)
     db_session.add_all([owned, other])
@@ -1379,18 +1395,23 @@ def test_task_list_and_detail_are_owner_scoped(
             cursor=None,
         ),
     )
-    assert [item["taskId"] for item in payload["items"]] == [str(owned.public_id)]
-    assert payload["items"][0]["clientRequestId"] == str(owned.client_request_id)
-    with pytest.raises(HTTPException) as exc_info:
+    assert {item["taskId"] for item in payload["items"]} == {
+        str(owned.public_id),
+        str(other.public_id),
+    }
+    assert any(item["clientRequestId"] for item in payload["items"])
+    viewed = cast(
+        dict,
         detail(
             other.public_id,
             _request(role="readwrite", user_id=1),
             db_session,
             Response(),
             include_diagnostics=False,
-        )
-    assert exc_info.value.status_code == 404
-    assert cast(dict, exc_info.value.detail)["code"] == "TASK_NOT_FOUND"
+        ),
+    )
+    assert viewed["taskId"] == str(other.public_id)
+    assert viewed["createdBy"] == "user:2"
 
 
 def test_awaiting_upload_is_not_reported_as_queued_poll_work(
@@ -1994,9 +2015,14 @@ def test_cleanup_retry_rejects_live_lease_and_requeues_expired_lease(
     assert task.lease_owner is None
 
 
-def test_diagnostics_are_admin_only_and_redacted_by_default(
+def test_diagnostics_are_page_scoped_and_redacted_by_default(
     db_session: Session,
 ) -> None:
+    """02 §9/§20: page:video-publish is the only human gate.
+
+    Diagnostics are part of the business record every page holder may read, so
+    the admin-only gate is gone; the default (non-diagnostics) response still
+    withholds prompt snapshots and raw Artemis output."""
     task = _task()
     _add_verify_attempt(
         db_session,
@@ -2009,20 +2035,11 @@ def test_diagnostics_are_admin_only_and_redacted_by_default(
         publish_output={"secret": "SECRET_OUTPUT"},
     )
     db_session.flush()
-    with pytest.raises(HTTPException) as denied:
-        detail(
-            task.public_id,
-            _request(role="readwrite"),
-            db_session,
-            Response(),
-            include_diagnostics=True,
-        )
-    assert denied.value.status_code == 403
     normal = cast(
         dict,
         detail(
             task.public_id,
-            _request(role="admin"),
+            _request(role="readwrite"),
             db_session,
             Response(),
             include_diagnostics=False,
@@ -2036,7 +2053,7 @@ def test_diagnostics_are_admin_only_and_redacted_by_default(
         dict,
         detail(
             task.public_id,
-            _request(role="admin"),
+            _request(role="readwrite"),
             db_session,
             Response(),
             include_diagnostics=True,
@@ -2207,7 +2224,7 @@ def test_confirm_illegal_state_is_structured_and_does_not_head(
     assert conflict["retryable"] is False
     assert conflict["requestId"]
     assert conflict["rowVersion"] == task.row_version
-    assert conflict["allowedActions"] == ["view", "cancel"]
+    assert conflict["allowedActions"] == ["view", "edit_settings", "cancel"]
 
 
 @pytest.mark.asyncio

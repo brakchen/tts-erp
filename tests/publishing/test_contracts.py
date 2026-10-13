@@ -58,7 +58,12 @@ def test_detail_api_returns_304_for_matching_etag(
             "api_key_role": "admin",
         }
     )
-    monkeypatch.setattr(video_publish, "_task", lambda session, task_id: object())
+    monkeypatch.setattr(
+        video_publish, "_task", lambda session, task_id, **kwargs: object()
+    )
+    # ``detail`` reads the confirmation audit row for 02 §9.6; stub it so this
+    # unit test keeps exercising only the ETag/304 branch.
+    monkeypatch.setattr(video_publish, "_confirmation_of", lambda session, task: None)
     monkeypatch.setattr(video_publish, "_snapshot", lambda task, **kwargs: payload)
     monkeypatch.setattr(video_publish, "_queue_position", lambda session, task: None)
     response = video_publish.detail(

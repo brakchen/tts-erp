@@ -477,13 +477,14 @@ def test_retry_requires_csrf_header_for_cookie_auth(
     )
 
 
-def test_retry_hides_foreign_task(client, db_session: Session) -> None:
+def test_retry_reaches_task_created_by_another_key(client, db_session: Session) -> None:
+    """02 §9/§20: page:video-publish is the only human gate, so a retry is not
+    filtered by the task's creator. ``created_by_key_hash`` is audit metadata."""
     task = _seed(db_session, cleanup_intent="none", owner_key=OWNER_KEY)
     response = _post(client, task, row_version=task.row_version, key=FOREIGN_KEY)
-    assert response.status_code == 404, _explain("R-foreign", response)
-    assert response.json()["detail"]["code"] == "TASK_NOT_FOUND", _explain(
-        "R-foreign", response
-    )
+    assert response.status_code == 200, _explain("R-cross-creator", response)
+    assert response.json()["taskId"] == str(task.public_id)
+    assert response.json()["status"] == "pending"
 
 
 def test_retry_rejects_stale_row_version(client, db_session: Session) -> None:
@@ -502,12 +503,12 @@ def test_allowed_actions_matrix(client, db_session: Session) -> None:
         (
             "pending/awaiting_upload",
             {"status": "pending", "stage": "awaiting_upload", "cleanup_intent": "none"},
-            {"view", "continue_upload", "cancel", "copy_artemis_id"},
+            {"view", "continue_upload", "edit_settings", "cancel", "copy_artemis_id"},
         ),
         (
             "pending/queued",
             {"status": "pending", "stage": "queued", "cleanup_intent": "none"},
-            {"view", "cancel", "copy_artemis_id"},
+            {"view", "edit_settings", "cancel", "copy_artemis_id"},
         ),
         (
             "failed",
@@ -647,7 +648,7 @@ def test_p1_5_current_prefers_running_over_older_cleaning_task(
     response = client.get("/v2/video-publish/tasks/current")
     assert response.status_code == 200, _explain("P1-5-current", response)
     body = response.json()
-    returned = body["task"]
+    returned = body["tasks"][0] if body["tasks"] else None
     print(
         f"\n[probe:P1-5-current] cleaning.id={cleaning.id} running.id={running.id} "
         f"returned={returned['taskId'] if returned else None} "
@@ -680,7 +681,7 @@ def test_p1_5_current_returns_cleaning_when_nothing_runs(
     db_session.commit()
     response = client.get("/v2/video-publish/tasks/current")
     assert response.status_code == 200, _explain("P1-5-cleaning-only", response)
-    task = response.json()["task"]
+    task = response.json()["tasks"][0]
     assert task is not None, "a lone cleaning task must still be reported"
     assert task["taskId"] == str(cleaning.public_id), _explain(
         "P1-5-cleaning-only", response
@@ -710,7 +711,7 @@ def test_p2_21_operational_stage_started_at_is_never_in_the_future(
     response = client.get("/v2/video-publish/tasks/current")
     assert response.status_code == 200, _explain("P2-21-future", response)
     body = response.json()
-    task_body = body["task"]
+    task_body = body["tasks"][0]
     started = task_body.get("operationalStageStartedAt")
     print(
         f"\n[probe:P2-21-future] operationalStage={task_body.get('operationalStage')!r} "

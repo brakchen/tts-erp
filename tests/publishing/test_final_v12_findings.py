@@ -488,7 +488,7 @@ def test_stateful_error_envelope_has_request_and_retry_contract(
     assert detail["retryable"] is False
     assert detail["requestId"] == "TEST-request-id"
     assert detail["rowVersion"] == task.row_version
-    assert detail["allowedActions"] == ["view", "cancel"]
+    assert detail["allowedActions"] == ["view", "edit_settings", "cancel"]
     # ★ P2-3 逆向守护：message 不得是机器码本身（之前透出 "TASK_ACTION_NOT_ALLOWED" 是 bug）
     assert detail["message"] != detail["code"], (
         f"P2-3 回归：message 仍是机器码 {detail['message']!r}，"
