@@ -1666,6 +1666,252 @@ def test_content_hash_stays_plain_non_empty_string() -> None:
 
 
 # ---------------------------------------------------------------------------
+# force.target is a full delivery block, not an unvalidated mapping
+# ---------------------------------------------------------------------------
+
+_DELIVERY_BLOCK_FIELDS = ("version", "sourceVersions", "contentHash", "payload")
+
+
+def _force_over(target: Any) -> dict[str, Any]:
+    return {"version": "18", "target": target}
+
+
+@pytest.mark.parametrize("missing", _DELIVERY_BLOCK_FIELDS)
+def test_force_target_missing_field_is_a_contract_error(missing: str) -> None:
+    """``force.target`` must be shape-validated like ``current``; a
+    missing key must surface as ``ConfigContractError``, never ``KeyError``.
+    """
+    target = _wire_current_block("18")
+    del target[missing]
+    with pytest.raises(
+        ConfigContractError, match=f"force.target missing field: {missing}"
+    ):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_force_over(target),
+        )
+
+
+def test_force_target_unknown_field_is_a_contract_error() -> None:
+    target = dict(_wire_current_block("18"), bogusField="x")
+    with pytest.raises(ConfigContractError, match="force.target has unknown field"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_force_over(target),
+        )
+
+
+def test_force_target_payload_must_be_an_object() -> None:
+    target = dict(_wire_current_block("18"), payload=["not", "an", "object"])
+    with pytest.raises(
+        ConfigContractError, match="force.target.payload must be an object"
+    ):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_force_over(target),
+        )
+
+
+def test_force_target_payload_settings_must_be_an_object() -> None:
+    target = dict(_wire_current_block("18"))
+    target["payload"] = {"sellerId": TEST_SELLER_ID, "schemaVersion": 1}
+    with pytest.raises(ConfigContractError, match="force.target.payload.settings"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_force_over(target),
+        )
+
+
+def test_force_target_payload_settings_reject_forbidden_fields() -> None:
+    """The forbidden-field guard must name the ``force.target`` shape
+    instead of falling through to the generic settings validator.
+    """
+    target = dict(_wire_current_block("18"))
+    target["payload"] = {
+        "sellerId": TEST_SELLER_ID,
+        "schemaVersion": 1,
+        "settings": {"monitorEnabled": True},
+    }
+    with pytest.raises(
+        ConfigContractError,
+        match="force.target.payload.settings contains forbidden field",
+    ):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_force_over(target),
+        )
+
+
+def test_force_target_source_versions_must_be_an_object() -> None:
+    target = dict(_wire_current_block("18"), sourceVersions=["4"])
+    with pytest.raises(
+        ConfigContractError, match="force.target.sourceVersions must be an object"
+    ):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_force_over(target),
+        )
+
+
+# ---------------------------------------------------------------------------
+# contentHash is never str()-coerced (both delivery paths)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_hash", [123, 18.5, None, True, "", ["x"], {"a": 1}, b"abc"]
+)
+def test_current_content_hash_must_be_a_non_empty_string(bad_hash: Any) -> None:
+    block = _wire_current_block("18")
+    block["contentHash"] = bad_hash
+    with pytest.raises(ConfigContractError, match="current.contentHash"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=block,
+            force=None,
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_hash", [123, 18.5, None, True, "", ["x"], {"a": 1}, b"abc"]
+)
+def test_force_target_content_hash_must_be_a_non_empty_string(
+    bad_hash: Any,
+) -> None:
+    """Regression: ``contentHash: 123`` used to be accepted because the
+    coercion path called ``str()`` on it, producing ``"123"``.
+    """
+    target = dict(_wire_current_block("18"), contentHash=bad_hash)
+    with pytest.raises(ConfigContractError, match="force.target.contentHash"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_force_over(target),
+        )
+
+
+def test_force_target_content_hash_is_preserved_verbatim() -> None:
+    """No ``str()`` normalization: the validated string is stored as-is."""
+    env = DeliveryEnvelope(
+        schemaVersion=1,
+        sellerId=TEST_SELLER_ID,
+        shopPk="101",
+        current=_wire_current_block("18"),
+        force=_force_over(
+            dict(_wire_current_block("18"), contentHash="sha256:target-hash")
+        ),
+    )
+    assert env.force is not None
+    assert env.force.target.content_hash == "sha256:target-hash"
+
+
+# ---------------------------------------------------------------------------
+# sourceVersions values follow the plugin's requireNonEmptyString
+# ---------------------------------------------------------------------------
+
+
+def _current_with_source_versions(source_versions: Any) -> dict[str, Any]:
+    return dict(_wire_current_block("18"), sourceVersions=source_versions)
+
+
+@pytest.mark.parametrize("empty_value", ["", {}])
+def test_current_source_versions_reject_empty_string_value(empty_value: Any) -> None:
+    with pytest.raises(
+        ConfigContractError, match="current.sourceVersions.global"
+    ):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_current_with_source_versions({"global": empty_value}),
+            force=None,
+        )
+
+
+@pytest.mark.parametrize("empty_value", ["", {}])
+def test_force_target_source_versions_reject_empty_string_value(
+    empty_value: Any,
+) -> None:
+    target = dict(_wire_current_block("18"))
+    target["sourceVersions"] = {"shop": empty_value}
+    with pytest.raises(
+        ConfigContractError, match="force.target.sourceVersions.shop"
+    ):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_wire_current_block("18"),
+            force=_force_over(target),
+        )
+
+
+@pytest.mark.parametrize("bad_value", [4, 4.5, True, ["4"]])
+def test_current_source_versions_reject_non_string_value(bad_value: Any) -> None:
+    with pytest.raises(ConfigContractError, match="current.sourceVersions.global"):
+        DeliveryEnvelope(
+            schemaVersion=1,
+            sellerId=TEST_SELLER_ID,
+            shopPk="101",
+            current=_current_with_source_versions({"global": bad_value}),
+            force=None,
+        )
+
+
+def test_source_versions_still_accept_null_and_arbitrary_strings() -> None:
+    """``null`` means "no such source revision" and non-decimal revision
+    labels are legal; only the empty string is rejected.
+    """
+    env = DeliveryEnvelope(
+        schemaVersion=1,
+        sellerId=TEST_SELLER_ID,
+        shopPk="101",
+        current=_current_with_source_versions(
+            {"global": "global-rev-a", "shop": None}
+        ),
+        force=None,
+    )
+    assert env.source_versions == {"global": "global-rev-a", "shop": None}
+
+
+def test_source_versions_empty_object_is_allowed() -> None:
+    """An empty ``sourceVersions`` object is a valid object on the plugin
+    side (``requireObject`` only rejects non-objects).
+    """
+    env = DeliveryEnvelope(
+        schemaVersion=1,
+        sellerId=TEST_SELLER_ID,
+        shopPk="101",
+        current=_current_with_source_versions({}),
+        force=None,
+    )
+    assert env.source_versions == {}
+
+
+
+# ---------------------------------------------------------------------------
 # Immutability and immutability-of-derived-views
 # ---------------------------------------------------------------------------
 

@@ -41,7 +41,7 @@ from types import MappingProxyType
 from typing import Any, ClassVar, Optional, Union, cast
 
 #: Public type alias for the documented wire-shape ``force`` block.
-#: Matches ``design.md`` §6.1 (``{"version": "...", "target":
+#: Matches ``docs/monitor-config-sync.md`` §6.1 (``{"version": "...", "target":
 #: <complete delivery block>}``). The runtime contract is enforced
 #: exclusively by :func:`_coerce_force` — a static type checker that
 #: sees a dict literal can accept it via this alias without widening
@@ -54,7 +54,7 @@ WireShapeForce = Mapping[str, Any]
 # Constants
 # ---------------------------------------------------------------------------
 
-#: Sole advertised wire schema version. ``int`` per design.md §6.1.
+#: Sole advertised wire schema version. ``int`` per docs/monitor-config-sync.md §6.1.
 WIRE_SCHEMA_VERSION: int = 1
 
 #: Matches ``plugins/monitor/src/core/scheduler.ts::MIN_CHROME_ALARM_DELAY_SECONDS``.
@@ -82,13 +82,13 @@ FORBIDDEN_WIRE_FIELDS: frozenset[str] = frozenset(
         "shopName",
         # Deprecated fields
         "queryRecentDays",
-        # Identity-only (per design.md §3.1)
+        # Identity-only (per docs/monitor-config-sync.md §3.1)
         "advertiserId",
         # Transport secrets (never wire-released)
         "token",
         "cookie",
         "serviceUrl",
-        # Runtime structures (per design.md §3.1: "不得下发/覆盖")
+        # Runtime structures (per docs/monitor-config-sync.md §3.1: "不得下发/覆盖")
         "requestTemplate",
         "campaigns",
         "campaignsComplete",
@@ -768,7 +768,8 @@ def _validate_cross_field_invariants(settings: MonitorBusinessSettings) -> None:
 def config_to_payload(settings: MonitorBusinessSettings) -> dict[str, Any]:
     """Serialize a ``MonitorBusinessSettings`` back to wire payload shape.
 
-    Decimals serialize to ``str`` (matching design.md §3.1's preference
+    Decimals serialize to ``str`` (matching
+    docs/monitor-config-sync.md §3.1's preference
     for stable precision). Tuples serialize to lists. The normalized
     ``campaignThresholds`` view serializes back to object form.
     """
@@ -805,7 +806,7 @@ def _serialize_campaign_thresholds(
 
 
 # ---------------------------------------------------------------------------
-# Delivery envelope (response shape, from design.md §6.1)
+# Delivery envelope (response shape, from docs/monitor-config-sync.md §6.1)
 # ---------------------------------------------------------------------------
 
 
@@ -834,13 +835,13 @@ class Current:
 
 # Allowed keys for a complete delivery block (used by both ``current``
 # and ``force.target``). The wire format is identical for both, per
-# design.md §6.1 ("target 与 current 相同结构的完整快照").
+# docs/monitor-config-sync.md §6.1 ("target 与 current 相同结构的完整快照").
 _DELIVERY_BLOCK_ALLOWED_KEYS: frozenset[str] = frozenset(
     {"version", "sourceVersions", "contentHash", "payload"}
 )
 
 # Allowed keys for the outer ``force`` envelope: just ``version`` and
-# ``target`` (design.md §6.1 force-block). Any other key is unknown.
+# ``target`` (docs/monitor-config-sync.md §6.1 force-block). Any other key is unknown.
 _FORCE_BLOCK_ALLOWED_KEYS: frozenset[str] = frozenset({"version", "target"})
 
 
@@ -860,7 +861,7 @@ class DeliveryEnvelope:
     :class:`Current` instance.
 
     When ``force`` is provided, it is the document-correct shape from
-    design.md §6.1::
+    docs/monitor-config-sync.md §6.1::
 
         {"version": "...", "target": <complete delivery block>}
 
@@ -884,7 +885,7 @@ class DeliveryEnvelope:
 
     @dataclass(frozen=True, slots=True)
     class Force:
-        """Force-delivery block (design.md §6.1).
+        """Force-delivery block (docs/monitor-config-sync.md §6.1).
 
         Field names mirror the wire format. ``target`` is a complete
         delivery block with the same shape as :class:`Current`; the
@@ -941,7 +942,7 @@ class DeliveryEnvelope:
         normalized_current = _coerce_current_block(current)
         typed_force = _coerce_force(force, default_seller_id=sellerId)
         # Cross-shop snapshot guard. The wire payload may carry a
-        # ``sellerId`` inside ``payload`` (design.md §6.1 response
+        # ``sellerId`` inside ``payload`` (docs/monitor-config-sync.md §6.1 response
         # shape) and a typed :class:`Current` may carry an explicit
         # ``payload.seller_id``. Both paths converge after coercion:
         # ``_extract_typed_settings`` already promotes the wire
@@ -1005,7 +1006,7 @@ class DeliveryEnvelope:
 
     @property
     def payload(self) -> Mapping[str, Any]:
-        """Wire-shape payload (design.md §6.1 ``payload`` block).
+        """Wire-shape payload (docs/monitor-config-sync.md §6.1 ``payload`` block).
 
         Returns the nested dict containing ``sellerId``,
         ``schemaVersion``, ``settings``, and the serialized campaign
@@ -1053,9 +1054,20 @@ def _validate_delivery_block(block: Mapping[str, Any], *, shape: str) -> None:
             raise ConfigContractError(
                 f"{shape}.sourceVersions keys must be strings"
             )
-        if value is not None and not isinstance(value, str):
+        if value is None:
+            # ``null`` means "this source has no revision yet".
+            continue
+        if not isinstance(value, str):
             raise ConfigContractError(
                 f"{shape}.sourceVersions.{key} must be a string or null"
+            )
+        if value == "":
+            # The plugin applies ``requireNonEmptyString`` to every
+            # ``sourceVersions`` entry, so an empty string is a protocol
+            # violation, not an absent value — ``null`` is the only way to
+            # say "no revision".
+            raise ConfigContractError(
+                f"{shape}.sourceVersions.{key} must be a non-empty string or null"
             )
     content_hash = block["contentHash"]
     if not isinstance(content_hash, str) or content_hash == "":
@@ -1089,7 +1101,7 @@ def _validate_force_block(force_block: Mapping[str, Any]) -> tuple[str, Mapping[
         names = ", ".join(sorted(unknown))
         raise ConfigContractError(
             f"force has unknown field(s): {names}; force must be "
-            "{version, target} per design.md §6.1"
+            "{version, target} per docs/monitor-config-sync.md §6.1"
         )
     if "version" not in force_block:
         raise ConfigContractError("force missing field: version")
@@ -1100,7 +1112,14 @@ def _validate_force_block(force_block: Mapping[str, Any]) -> tuple[str, Mapping[
     target = force_block["target"]
     if not isinstance(target, Mapping):
         raise ConfigContractError("force.target must be an object")
-    return version, cast(Mapping[str, Any], target)
+    target_mapping = cast(Mapping[str, Any], target)
+    # ``force.target`` is a full delivery block, not a loose mapping. The
+    # plugin validates it with ``validateDeliveryBlock(raw.target,
+    # "force.target")`` before reading anything out of it, so an unvalidated
+    # target would otherwise leak ``KeyError`` (missing keys) or smuggle in
+    # unknown fields and non-string values the plugin would reject.
+    _validate_delivery_block(target_mapping, shape="force.target")
+    return version, target_mapping
 
 
 def _coerce_current_block(value: Any) -> Current:
@@ -1131,10 +1150,10 @@ def parse_envelope(
     """Build the response envelope for one delivery snapshot.
 
     The settings come from :func:`merge_business_settings`; this helper
-    wraps them in the wire-shape envelope (design.md §6.1) without
+    wraps them in the wire-shape envelope (docs/monitor-config-sync.md §6.1) without
     exposing forbidden runtime fields or leaking empty content.
 
-    The envelope's ``current.payload`` mirrors design.md §6.1: a
+    The envelope's ``current.payload`` mirrors docs/monitor-config-sync.md §6.1: a
     nested object that includes ``sellerId``, ``schemaVersion``, and the
     serialized business settings under ``settings``. When ``force`` is
     provided, the force block is the document-correct shape::
@@ -1223,15 +1242,12 @@ def _coerce_force(
     version_str, target_mapping = _validate_force_block(value)
     target_settings = _extract_typed_settings(target_mapping["payload"])
     target = Current(
-        # ``force.target`` is a delivery block the plugin validates
-        # independently (``validateDeliveryBlock(raw.target,
-        # "force.target")``), so its version needs the same canonical
-        # decimal check — not just the outer ``force.version``.
-        version=_decimal_identifier(
-            target_mapping["version"], path="force.target.version"
-        ),
+        version=target_mapping["version"],
         source_versions=dict(target_mapping["sourceVersions"]),
-        content_hash=str(target_mapping["contentHash"]),
+        # ``_validate_force_block`` already guaranteed a non-empty string;
+        # calling ``str()`` here would silently accept a numeric value that
+        # the plugin rejects, so the validated value is used verbatim.
+        content_hash=target_mapping["contentHash"],
         payload=target_settings,
     )
     if version_str != target.version:

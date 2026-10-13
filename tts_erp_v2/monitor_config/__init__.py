@@ -21,7 +21,7 @@ Invariants inherited from the maintained plugin side
 - ``skuOrderLimit`` is a non-negative integer
 
 The wire schema is the strict subset of the local plugin settings
-defined in ``design.md`` §3.1. Runtime state (``monitorEnabled``,
+defined in ``docs/monitor-config-sync.md`` §3.1. Runtime state (``monitorEnabled``,
 ``status``, ``nextScanAt``, ...), browser cookies, ERP tokens,
 service URLs, and the deprecated ``queryRecentDays`` field are
 explicitly forbidden — see :data:`FORBIDDEN_WIRE_FIELDS`.
