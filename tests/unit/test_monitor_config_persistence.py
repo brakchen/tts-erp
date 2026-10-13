@@ -1034,11 +1034,16 @@ def test_first_publish_race_is_resolved_without_a_primary_key_collision(
 
     ``SELECT ... FOR UPDATE`` 对**尚不存在**的行不加锁，所以两个并发首次
     发布会同时未命中并同时 INSERT，其中一个撞 ``monitor_shop_state_pkey``。
-    这里用显式交错（A 先插入不提交，B 在线程里跟进）让这个竞态确定性地
-    复现，而不是依赖线程调度运气。
+
+    交错用 SQLAlchemy ``before_cursor_execute`` 钩子**证成**：B 线程真的把
+    ``INSERT ... ON CONFLICT (shop_pk) DO NOTHING`` 发到了数据库之后，
+    A 才提交。单靠 ``join(timeout)/is_alive`` 只能说明 B 还没结束，无法区分
+    “B 已经堵在 upsert 上”和“B 根本没走到那一步”。
     """
 
     import threading
+
+    from sqlalchemy import event
 
     from tts_erp_v2.monitor_config.delivery import publish_delivery
 
@@ -1054,6 +1059,8 @@ def test_first_publish_race_is_resolved_without_a_primary_key_collision(
 
     request_id = uuid.uuid4()
     outcome: dict[str, Any] = {}
+    upsert_issued = threading.Event()
+    follower_thread: list[threading.Thread] = []
 
     # A：抢先插入 state 行并发布，但**不提交**。
     session_a = Session(db_engine)
@@ -1086,12 +1093,36 @@ def test_first_publish_race_is_resolved_without_a_primary_key_collision(
             except BaseException as exc:  # noqa: BLE001 - reported below
                 outcome["error"] = exc
 
+        def _note_upsert(
+            conn, cursor, statement, parameters, context, executemany
+        ) -> None:
+            """Latch when the follower actually emits the atomic upsert."""
+
+            current = threading.current_thread()
+            if not follower_thread or current is not follower_thread[0]:
+                return
+            normalized = " ".join(statement.upper().split())
+            if "INSERT INTO CONFIG.MONITOR_SHOP_STATE" in normalized and (
+                "ON CONFLICT (SHOP_PK) DO NOTHING" in normalized
+            ):
+                upsert_issued.set()
+
+        event.listen(db_engine, "before_cursor_execute", _note_upsert)
         thread = threading.Thread(target=_follower)
+        follower_thread.append(thread)
         thread.start()
 
-        # A 提交前，B 必须还在等待（A 的未提交 state 行对 B 不可见）。
-        thread.join(timeout=1.0)
-        assert thread.is_alive(), "follower must wait for the in-flight first publish"
+        try:
+            # 等到 B 真的发出了原子 upsert，而不是猜一个超时。
+            assert upsert_issued.wait(timeout=30), (
+                "follower never issued the atomic upsert before A committed"
+            )
+            # B 已发出 upsert，但必然还堵在 A 未提交的行上。
+            assert thread.is_alive(), (
+                "follower must still be blocked on A's uncommitted state row"
+            )
+        finally:
+            event.remove(db_engine, "before_cursor_execute", _note_upsert)
 
         session_a.commit()
         thread.join(timeout=30)
