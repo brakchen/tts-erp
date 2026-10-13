@@ -373,10 +373,15 @@ def test_monitor_delivery_primitive_rejects_unknown_keys() -> None:
 
 
 def test_delivery_primitive_evicts_a_stale_positive_entry(monitor_key: str) -> None:
+    """下发边界拒绝时必须自己清掉陈旧正缓存，不能靠测试手动清。
+
+    若实现不驱逐，`authenticate_key` 会命中那条 <=60s 的旧成功记录，
+    被禁用的 key 就能继续通行。
+    """
+
     assert authenticate_key(monitor_key) is not None
     _set_key_state(monitor_key, status="disabled")
 
     assert authenticate_monitor_delivery_key(monitor_key) is None
-    # 陈旧正缓存不得继续存活：通用路径随后也必须重新核对。
-    clear_credential_cache()
+    # 不做任何手动 clear：通用路径随后也必须重新核对并拒绝。
     assert authenticate_key(monitor_key) is None

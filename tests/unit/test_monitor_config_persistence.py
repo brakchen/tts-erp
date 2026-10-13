@@ -6,12 +6,15 @@
 
 from __future__ import annotations
 
+import importlib.util
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select, text
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
@@ -378,3 +381,163 @@ def test_api_keys_accept_both_allowed_purposes(
 def test_migration_source_pins_the_purpose_domain() -> None:
     source = MIGRATION.read_text()
     assert "purpose IN ('general', 'monitor_config')" in source
+
+
+# ─── f-8fb58645-aec：真实 Operations/MigrationContext 降级覆盖 ────
+
+
+def _load_migration():
+    spec = importlib.util.spec_from_file_location("migration_0070_test", MIGRATION)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _table_names(conn, schema: str) -> set[str]:
+    return set(inspect(conn).get_table_names(schema=schema))
+
+
+def _column_names(conn, schema: str, table: str) -> set[str]:
+    return {row["name"] for row in inspect(conn).get_columns(table, schema=schema)}
+
+
+def _api_key_columns(conn) -> set[str]:
+    return _column_names(conn, "security", "api_keys")
+
+
+def _monitor_tables(conn) -> set[str]:
+    return _table_names(conn, "config") & {
+        "monitor_shop_state",
+        "monitor_config_deliveries",
+    }
+
+
+def _insert_shop(conn) -> int:
+    # pi-lens-ignore: python-sql-injection
+    return conn.execute(
+        text(
+            "INSERT INTO commerce.shops (platform, shop_id, account_name) "
+            "VALUES ('tiktok', :shop_id, 'TEST_monitor_downgrade') RETURNING id"
+        ),
+        {"shop_id": f"TEST_monitor_downgrade_{uuid.uuid4().hex[:12]}"},
+    ).scalar_one()
+
+
+def test_0070_downgrade_on_empty_projection_reverses_and_reapplies(
+    db_engine,
+) -> None:
+    """空投影时 0070 必须能完整回滚并重新 apply（down/up 对称）。"""
+
+    migration = _load_migration()
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            assert _monitor_tables(conn) == {
+                "monitor_shop_state",
+                "monitor_config_deliveries",
+            }
+            assert {"purpose", "shop_pk"} <= _api_key_columns(conn)
+
+            migration.downgrade()
+            assert _monitor_tables(conn) == set()
+            assert not {"purpose", "shop_pk"} & _api_key_columns(conn)
+
+            migration.upgrade()
+            assert _monitor_tables(conn) == {
+                "monitor_shop_state",
+                "monitor_config_deliveries",
+            }
+            assert {"purpose", "shop_pk"} <= _api_key_columns(conn)
+            triggers = [
+                row[0]
+                for row in conn.execute(  # pi-lens-ignore: python-sql-injection
+                    text(
+                        "SELECT trigger_name FROM information_schema.triggers "
+                        "WHERE event_object_schema='config' "
+                        "AND event_object_table='monitor_shop_state'"
+                    )
+                ).all()
+            ]
+            assert triggers == ["trg_config_monitor_shop_state_touch"]
+        finally:
+            transaction.rollback()
+
+
+def test_0070_downgrade_refuses_each_populated_data_guard(db_engine) -> None:
+    """三道拒绝护栏必须逐一生效，且清除后能正常回滚。"""
+
+    migration = _load_migration()
+    with db_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            migration.__dict__["op"] = Operations(MigrationContext.configure(conn))
+            shop_pk = _insert_shop(conn)
+
+            # 1) 已发布交付行：不能靠 re-apply 重建，必须拒绝。
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text(
+                    "INSERT INTO config.monitor_config_deliveries "
+                    "(shop_pk, version, schema_version, content_hash, "
+                    "encrypted_payload, created_by) "
+                    "VALUES (:shop_pk, 1, 1, 'sha256:test', :payload, "
+                    "'TEST_monitor_downgrade')"
+                ),
+                {"shop_pk": shop_pk, "payload": b"TEST_blob"},
+            )
+            savepoint = conn.begin_nested()
+            with pytest.raises(Exception, match="monitor delivery rows exist"):
+                migration.downgrade()
+            savepoint.rollback()
+
+            # 2) 已纳管店铺但无交付行：仍不能丢失纳管事实。
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text(
+                    "DELETE FROM config.monitor_config_deliveries WHERE shop_pk=:pk"
+                ),
+                {"pk": shop_pk},
+            )
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text("INSERT INTO config.monitor_shop_state (shop_pk) VALUES (:pk)"),
+                {"pk": shop_pk},
+            )
+            savepoint = conn.begin_nested()
+            with pytest.raises(Exception, match="onboarded monitor shops exist"):
+                migration.downgrade()
+            savepoint.rollback()
+
+            # 3) 受限 api key：purpose/shop_pk 列即将消失，带绑定的凭证会成孤儿。
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text("DELETE FROM config.monitor_shop_state WHERE shop_pk=:pk"),
+                {"pk": shop_pk},
+            )
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text(
+                    "INSERT INTO security.api_keys "
+                    "(key_hash, key_prefix, name, role, status, purpose, shop_pk) "
+                    "VALUES (:h, 'TEST_monitor_down', 'TEST_monitor_downgrade_key', "
+                    "'readonly', 'active', 'monitor_config', :pk)"
+                ),
+                {"h": uuid.uuid4().hex * 2, "pk": shop_pk},
+            )
+            savepoint = conn.begin_nested()
+            with pytest.raises(Exception, match="restricted api keys exist"):
+                migration.downgrade()
+            savepoint.rollback()
+
+            # 清除事实后必须能真正回滚，而不是永久卡死。
+            # pi-lens-ignore: python-sql-injection
+            conn.execute(
+                text("DELETE FROM security.api_keys WHERE name='TEST_monitor_downgrade_key'")
+            )
+            migration.downgrade()
+            assert _monitor_tables(conn) == set()
+            assert not {"purpose", "shop_pk"} & _api_key_columns(conn)
+        finally:
+            transaction.rollback()
