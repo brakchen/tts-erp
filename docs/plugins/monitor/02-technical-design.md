@@ -124,6 +124,10 @@ export function extractCampaignRows(response: unknown, api: CampaignListApi): un
 
 已核对 `tests/core-coverage.test.ts` 两个 fetch 用例：额外授权仅将两处正向模板 URL 和一处对应断言 URL 的 `https://example.test` 改为合法 Seller Center origin，保持用例意图和其他断言不变。其余允许文件中的正向/传输 fixture 同理；专门验证非法 origin 的负向测试不得机械替换。必须测试非法 origin 在网络调用前被拒绝。此为测试 fixture 修正，不放宽 §3.1 的 exact-origin 规则，也不引入第二套路由。
 
+第二轮确认：同文件原先把 `null` 与 `{data:{unknown:[]}}` 当空列表的两条断言，批准改为验证对应结构错误（而非捕获任意异常）；这与 §3.2 / R3 的既定要求一致。合法显式空容器仍返回空列表。owner 另外发现 legacy 容器候选优先级被交错，要求先增加 data.list 与 root.table 同时存在的 RED 回归，再恢复原来的“全部 data 候选先于全部 root 候选”顺序。
+
+page-hook 原有双重类型断言与 unknown 返回类型的静态告警不在本轮修复范围，不追加抑制注释；须保留准确告警及基线比对证据，不宣称静态诊断零告警。本机默认 `NODE_ENV=production`，安装使用 `npm ci --include=dev`，测试/coverage 命令显式使用 `NODE_ENV=test`，生产构建显式使用 `NODE_ENV=production`，不修改全局环境。
+
 ### T2：协议链路贯通（同一个 writer，顺序执行）
 
 1. 先增加 page fetch/XHR、后台 URL/capture、2 页 v2 live、坏第二页、业务失败、active-filter 请求、完整空结果及关闭后回查测试并观察 RED。
@@ -157,13 +161,13 @@ export function extractCampaignRows(response: unknown, api: CampaignListApi): un
 在**独立插件仓根目录**执行（不要用 ERP 的 Python isolated runner）：
 
 ```sh
-npm ci
-npx vitest run tests/campaign-list-contract.test.ts tests/core.test.ts
-npx vitest run tests/live-campaign-fetch.test.ts tests/page-hook.test.ts tests/background.test.ts
-npm test
-npm run test:coverage
+npm ci --include=dev
+NODE_ENV=test npx vitest run tests/campaign-list-contract.test.ts tests/core.test.ts tests/core-coverage.test.ts
+NODE_ENV=test npx vitest run tests/live-campaign-fetch.test.ts tests/page-hook.test.ts tests/background.test.ts
+NODE_ENV=test npm test
+NODE_ENV=test npm run test:coverage
 npx tsc --noEmit
-npm run build
+NODE_ENV=production npm run build
 git diff --check
 ```
 
