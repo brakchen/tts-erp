@@ -194,6 +194,7 @@ def _admin_http_error(exc: Exception) -> HTTPException:
         exc,
         (
             admin.ForeignSecretReference,
+            admin.LiteralSecretValue,
             admin.MissingSecret,
             admin.ConfigItemRetired,
             admin.UnknownShop,

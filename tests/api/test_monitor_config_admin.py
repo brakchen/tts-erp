@@ -34,6 +34,7 @@ from tts_erp_v2.db.models.monitor_config import (
     MonitorShopState,
 )
 from tts_erp_v2.db.models.security import ApiKey
+from tts_erp_v2.monitor_config import admin
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -42,8 +43,10 @@ SHOP_B = "TEST_monitor_admin_seller_b"
 
 HOOK_SECRET = "monitor_test_feishu_hook"
 SIGNING_SECRET = "monitor_test_feishu_signing"
+APP_SECRET = "monitor_test_feishu_app"
 HOOK_PLAINTEXT = "https://open.feishu.cn/hook/TEST_HOOK_PLAINTEXT"
 SIGNING_PLAINTEXT = "TEST_SIGNING_PLAINTEXT"
+APP_PLAINTEXT = "TEST_APP_SECRET_PLAINTEXT"
 
 ADMIN = "/v2/monitor/admin"
 DEFAULTS_DRAFT = f"{ADMIN}/defaults/draft"
@@ -73,8 +76,9 @@ def _complete_settings(**overrides: Any) -> dict[str, Any]:
         "notifyAutoCloseFailureRepeatEnabled": True,
         "feishuWebhookUrl": f"secret://{HOOK_SECRET}",
         "feishuSigningSecret": f"secret://{SIGNING_SECRET}",
-        "feishuAppId": "TEST_app_id",
-        "feishuAppSecret": "TEST_app_secret",
+        # 白名单飞书字段只接受 secret:// 引用或空串（Terra P1-1）。
+        "feishuAppId": "",
+        "feishuAppSecret": f"secret://{APP_SECRET}",
         "feishuRecipientIdentifiers": ["ou_TEST_recipient"],
         "autoCloseEnabled": True,
         "campaignThresholds": {},
@@ -158,7 +162,7 @@ def shops(db_engine) -> Iterator[dict[str, int]]:
         )
         session.execute(
             delete(RuntimeConfigSecret).where(
-                RuntimeConfigSecret.name.in_([HOOK_SECRET, SIGNING_SECRET])
+                RuntimeConfigSecret.name.in_([HOOK_SECRET, SIGNING_SECRET, APP_SECRET])
             )
         )
         for seller in (SHOP_A, SHOP_B):
@@ -209,12 +213,13 @@ def secrets(db_engine) -> Iterator[None]:
     with Session(db_engine) as session:
         upsert_secret(session, name=HOOK_SECRET, value=HOOK_PLAINTEXT)
         upsert_secret(session, name=SIGNING_SECRET, value=SIGNING_PLAINTEXT)
+        upsert_secret(session, name=APP_SECRET, value=APP_PLAINTEXT)
         session.commit()
     yield
     with Session(db_engine) as session:
         session.execute(
             delete(RuntimeConfigSecret).where(
-                RuntimeConfigSecret.name.in_([HOOK_SECRET, SIGNING_SECRET])
+                RuntimeConfigSecret.name.in_([HOOK_SECRET, SIGNING_SECRET, APP_SECRET])
             )
         )
         session.commit()
@@ -485,6 +490,89 @@ def test_draft_rejects_a_secret_reference_outside_the_release_whitelist(
         "TEST_campaign": {"spendThreshold": f"secret://{HOOK_SECRET}"}
     }
     assert _put_defaults(api_client, keys["readwrite"], payload).status_code == 422
+
+
+# ─── 白名单飞书字段不得以明文入库/回显（Terra P1-1）────────────────
+
+
+@pytest.mark.parametrize(
+    "field,literal",
+    [
+        ("feishuWebhookUrl", "https://open.feishu.cn/hook/LITERAL_LEAK"),
+        ("feishuSigningSecret", "LITERAL_SIGNING_SECRET"),
+        ("feishuAppId", "LITERAL_APP_ID"),
+        ("feishuAppSecret", "LITERAL_APP_SECRET"),
+    ],
+)
+def test_defaults_draft_rejects_a_literal_feishu_secret(
+    api_client, keys, shops, secrets, field, literal
+) -> None:
+    rw = keys["readwrite"]
+    payload = _complete_settings()
+    payload[field] = literal
+    response = _put_defaults(api_client, rw, payload)
+    assert response.status_code == 422
+    # 被拒的载荷不得留在任何地方：草稿版本仍为零，且字面量不在任何响应里。
+    stored = api_client.get(DEFAULTS_DRAFT, headers=_auth(rw)).json()
+    assert stored["draftVersion"] == 0
+    assert stored["draftPayload"] is None
+    assert literal not in response.text
+    assert literal not in api_client.get(DEFAULTS_DRAFT, headers=_auth(rw)).text
+
+
+def test_shop_draft_rejects_a_literal_feishu_secret(
+    api_client, keys, shops, secrets
+) -> None:
+    rw = keys["readwrite"]
+    response = _put_shop_draft(
+        api_client, rw, shops["a"], {"feishuAppSecret": "LITERAL_SHOP_SECRET"}
+    )
+    assert response.status_code == 422
+    stored = api_client.get(
+        f"{ADMIN}/shops/{shops['a']}/draft", headers=_auth(rw)
+    ).json()
+    assert stored["draftVersion"] == 0
+    assert stored["draftPayload"] is None
+
+
+def test_defaults_draft_accepts_a_reference_on_a_released_field(
+    api_client, keys, shops, secrets
+) -> None:
+    """拒绝字面量不能顺带拒绝正确的 secret:// 引用（§4.3 的正常路径）。"""
+
+    response = _put_defaults(api_client, keys["readwrite"])
+    assert response.status_code == 200
+    assert (
+        response.json()["draftPayload"]["feishuAppSecret"] == f"secret://{APP_SECRET}"
+    )
+    assert response.json()["draftPayload"]["feishuAppId"] == ""
+
+
+def test_publish_rejects_a_literal_feishu_secret_before_freezing_a_delivery(
+    api_client, keys, shops, secrets
+) -> None:
+    """历史遗留的字面量 payload 也不能绕过草稿校验进入交付快照。"""
+
+    rw = keys["readwrite"]
+    with _session(api_client) as session:
+        session.add(
+            RuntimeConfigItem(
+                config_key="monitor.defaults",
+                display_name="TEST monitor defaults",
+                json_schema=admin.defaults_settings_schema(),
+                draft_payload=_complete_settings()
+                | {"feishuWebhookUrl": "https://open.feishu.cn/hook/LITERAL_LEAK"},
+                draft_version=1,
+            )
+        )
+        session.commit()
+
+    # 草稿本身可以存在（直接写库），但发布必须拒绝并整体回滚。
+    assert _publish_defaults(api_client, rw, expected=1).status_code == 422
+    with _session(api_client) as session:
+        item = session.get(RuntimeConfigItem, "monitor.defaults")
+        published = None if item is None else item.published_version
+    assert published is None, "被拒绝的发布不得留下 revision"
 
 
 def test_shop_draft_accepts_an_empty_override(api_client, keys, shops, secrets) -> None:

@@ -34,6 +34,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.commerce import ChannelAccount
@@ -101,6 +102,15 @@ class ConfigItemRetired(RuntimeError):
 
 class ForeignSecretReference(RuntimeError):
     """A ``secret://`` reference appeared outside the §4.3 release whitelist."""
+
+
+class LiteralSecretValue(RuntimeError):
+    """A released Feishu field carried a literal instead of a reference.
+
+    See :func:`_reject_literal_released_secrets`. Distinct from
+    :class:`ForeignSecretReference` on purpose: that one is a reference in the
+    wrong place, this one is a secret typed straight into a draft field.
+    """
 
 
 class MissingSecret(RuntimeError):
@@ -199,6 +209,39 @@ def _reject_foreign_references(payload: Mapping[str, Any]) -> None:
                 f"settings.{field} must not carry a secret:// reference; only "
                 f"{', '.join(sorted(RELEASABLE_SECRET_FIELDS))} may be released"
             )
+
+
+def _reject_literal_released_secrets(payload: Mapping[str, Any]) -> None:
+    """Refuse a literal value on any field that can be released to a browser.
+
+    The four whitelisted Feishu fields accept exactly two forms:
+
+    * ``secret://<name>`` — the stored value stays a reference; the plaintext
+      lives only in ``config.runtime_config_secrets`` and is decrypted once, at
+      publish time, into the frozen delivery.
+    * ``""`` — §3.2's fixed meaning for "this channel is not configured".
+      It is not a truthy-fallback slot, so an empty value stays empty.
+
+    Anything else would put a webhook token, signing secret or app secret in
+    clear text into ``config.runtime_config_items`` — where ``GET`` draft hands
+    it straight back and where the generic ``/v2/config/runtime/snapshot``
+    republishes it to any ``readwrite`` caller. §4.3's release exception is a
+    *download* boundary for a value the server already holds encrypted; it is
+    not permission to type a secret into a draft field.
+
+    Non-string values fall through to the contract layer, which reports the
+    precise type error instead of this one.
+    """
+
+    for field in RELEASABLE_SECRET_FIELDS:
+        value = payload.get(field)
+        if not isinstance(value, str) or value == "" or is_secret_reference(value):
+            continue
+        raise LiteralSecretValue(
+            f"settings.{field} must be a secret:// reference or an empty string "
+            "(empty means the channel is not configured); plaintext secrets are "
+            "never stored in a monitor draft"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +346,7 @@ def validate_draft_payload(config_key: str, payload: Mapping[str, Any]) -> None:
     """
 
     _reject_foreign_references(payload)
+    _reject_literal_released_secrets(payload)
     if config_key == GLOBAL_DEFAULTS_KEY:
         contracts.validate_complete_business_settings(payload)
     else:
@@ -370,15 +414,33 @@ def save_draft(
             raise DraftVersionConflict(
                 "expectedDraftVersion does not match a key that does not exist yet"
             )
-        session.add(
-            RuntimeConfigItem(
+        # ``SELECT ... FOR UPDATE`` does not lock a row that does not exist yet,
+        # so two concurrent first saves both miss and both INSERT — and one dies
+        # on ``runtime_config_items_pkey``. A bare IntegrityError would surface
+        # as a 500 for what is really a stale-UI retry. Creating the row with
+        # ``ON CONFLICT DO NOTHING`` makes the create itself atomic: the loser
+        # waits on the winner's uncommitted row, then skips it. A skip means the
+        # key now exists at a version the caller did not expect, which is
+        # exactly DraftVersionConflict.
+        # ``RETURNING`` reports the outcome without touching the driver-specific
+        # ``rowcount``: a skipped insert returns no row at all.
+        created = session.execute(
+            pg_insert(RuntimeConfigItem)
+            .values(
                 config_key=config_key,
                 display_name=display_name,
                 json_schema=_schema_for(config_key),
                 draft_payload=dict(payload),
                 draft_version=1,
             )
+            .on_conflict_do_nothing(index_elements=["config_key"])
+            .returning(RuntimeConfigItem.config_key)
         )
+        if created.scalar_one_or_none() is None:
+            raise DraftVersionConflict(
+                "draft version conflict; another request created this key first, "
+                "reload before saving"
+            )
         session.flush()
         return _draft_view(
             session, config_key, session.get(RuntimeConfigItem, config_key)
@@ -439,6 +501,10 @@ def _compose(
     )
     payload = contracts.config_to_payload(composed)
     _reject_foreign_references(payload)
+    # Re-checked at the publish entrance, not only at draft-save: a literal
+    # could reach here through a row written by an older build or direct DB
+    # access, and freezing it would put plaintext into the delivery.
+    _reject_literal_released_secrets(payload)
     return payload
 
 
@@ -552,6 +618,11 @@ def publish_defaults(
     """Publish the global defaults and re-freeze every onboarded shop (§5.3)."""
 
     item = _locked_draft(session, GLOBAL_DEFAULTS_KEY, expected_draft_version)
+    # Re-validated at the publish entrance: the draft may predate the
+    # no-plaintext rule or may have been written straight to the DB, and a
+    # literal must never become an immutable revision. This also covers the
+    # no-shop-yet case, where per-shop composition never runs.
+    validate_draft_payload(GLOBAL_DEFAULTS_KEY, item.draft_payload or {})
     revision = publish(
         session,
         item=item,
@@ -598,6 +669,9 @@ def publish_shop(
     shop_source: int | None = None
     shop_payload: dict[str, Any] | None = None
     if item is not None and item.draft_payload is not None:
+        # Same re-validation rationale as publish_defaults: the revision is
+        # permanent storage, so the no-plaintext rule is enforced here too.
+        validate_draft_payload(config_key, item.draft_payload)
         revision = publish(
             session,
             item=item,
@@ -752,6 +826,7 @@ __all__ = [
     "DraftVersionConflict",
     "DraftView",
     "ForeignSecretReference",
+    "LiteralSecretValue",
     "MissingGlobalDefault",
     "MissingSecret",
     "NothingToPublish",

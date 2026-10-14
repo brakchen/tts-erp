@@ -293,12 +293,14 @@ If-None-Match: W/"monitor-example-validator"
 - **保留命名空间**：通用 `/v2/config/runtime/items/*` 的 create/draft/publish/rollback/retire/restore 六个入口对 `monitor.*` 一律返回 409 并指向 `/v2/monitor/admin`（§5.1 选的“通用 mutation 拒绝保留键”）。通用读取仍不解密。
 - **固定受控 schema**：`monitor.*` 的 `json_schema` 由 `admin.defaults_settings_schema()` / `admin.override_settings_schema()` 生成并封闭对象（`additionalProperties: false`），不使用 `infer_schema`。字段类型/范围仍由契约层判定，它比受支持的 JSON Schema 子集更严格。
 - **释放白名单**：只有 `feishuWebhookUrl` / `feishuSigningSecret` / `feishuAppId` / `feishuAppSecret` 允许携带 `secret://` 引用。其他字段（嵌套也算）出现引用一律 422。一次发布把所需 secret 按名称升序加行锁后**只读一次**，五店共用同一份快照，避免同一次全局发布混入两代密钥。解冻后重新跑一遍契约校验。
+- **白名单飞书字段不得以明文入库**：这四个字段只接受 `secret://<name>` 引用或 `""`（§3.2 固定的“该通知渠道未配置”空串语义）。任何其他字面量在**入库前**就 422，且不会进入 `draft_payload`、revision 或 delivery。校验点有三个：草稿保存（`validate_draft_payload`）、发布入口（`publish_defaults` / `publish_shop` 在写 revision 前复验）、合成入口（`_compose`，防止旧构建或直接写库的字面量被冻结进交付）。理由：§4.3 的释放例外是“服务端已持有密文”的**下发**边界，不是允许把密钥敲进草稿字段的许可；明文一旦入库，`GET` draft 会原样回显，`/v2/config/runtime/snapshot` 也会把它重发给任意 `readwrite` 调用方。
+- **首次草稿原子创建**：键不存在时用 `INSERT ... ON CONFLICT (config_key) DO NOTHING ... RETURNING` 建行。`SELECT ... FOR UPDATE` 不锁不存在的行，两个并发的 `expectedDraftVersion=0` 会同时未命中并同时 INSERT；裸 IntegrityError 会变成 500，而正确结果是败者得到文档化的 409 `DraftVersionConflict`（`RETURNING` 无行即表示被跳过）。这也意味着 `PUT` 首次建键永远不会把“存在了但版本不是 0”报成 500。
 - **锁顺序**：全局行 → 按 `shop_pk` 升序的店铺配置行 → 按 `shop_pk` 升序的店铺 state 行；全局发布与单店发布使用同一顺序。
 - **回滚**：任一店铺合成失败则整次全局发布回滚，不留下半份 revision 或半推进的指针。
 
 本阶段**未**实施（仍在阶段 C 剩余范围或后续阶段）：Token 创建/禁用/轮换路由（§6.3 末行，仍复用既有 key 管理 owner）、`runtime-configs` 页面视图与合成预览（§8.2）、CORS 的 monitor origin / `If-None-Match` / `ETag` 暴露（§6.3 末段，属部署前置）。
 
-`docs/api/external-api.md` 的角色矩阵仍需补上 `/v2/monitor/admin/* = readwrite` 一行；该文件归 `video-publish-design` lane，未在本 lane 擅改。
+`docs/api/external-api.md` 的角色矩阵仍需补上 `/v2/monitor/admin/* = readwrite` 一行，以及这四个飞书字段只接受 `secret://` 引用或空串的写入约束；该文件归 `video-publish-design` lane（`docs/{api,architecture,design,ops,schema}`），**不在**本 lane 的 owned files 内，按 AGENTS.md §7 未擅改。本条需由该 lane owner 补齐，或在它 ready 后开 successor lane。
 
 必须核对 app 的 CORS 配置。当前 `tts_erp_v2/app.py` 的 `DEFAULT_CORS_ALLOW_HEADERS` 是
 `Authorization` / `X-API-Key` / `X-Request-Id` / `Content-Type`，**不含 `If-None-Match`**，
