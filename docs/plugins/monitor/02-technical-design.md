@@ -107,7 +107,7 @@ export function extractCampaignRows(response: unknown, api: CampaignListApi): un
 | `entrypoints/page-hook.content.ts` | shared matcher |
 | `entrypoints/background.ts` | 仅 URL 校验与 capture parser 传 api；不增加 v2 专用编排函数 |
 | `tests/campaign-list-contract.test.ts`（新增） | URL/协议边界与畸形 cell/容器 |
-| `tests/{core,core-coverage,live-campaign-fetch,page-hook,background}.test.ts` | 新旧回归和端到端 mocked capture/close verification（按实际既有文件名放置） |
+| `tests/{core,core-coverage,live-campaign-fetch,page-hook,background,close-safety}.test.ts` | 新旧回归；close-safety 复用真实 storage/fetch/parser/queue，仅 mock 浏览器与 HTTP 边界，验证原始 v2 cell 的自动关闭与关闭回查链路 |
 | `package.json`, `package-lock.json`, `wxt.config.ts`, `README.md`, `CHANGELOG.md` | GREEN 后按当前 master patch 升级（基线 0.4.22 → 0.4.23） |
 
 `campaign-pagination.ts` 原则上不需要改动；若必须修改，只能保持旧请求改写语义并先提交原因供 owner 确认。大文件 background 约 2954 行，不继续内嵌解析；协议能力下沉纯 core。新 helper 是协议 seam，不是第二个 campaign 业务 owner。
@@ -127,6 +127,8 @@ export function extractCampaignRows(response: unknown, api: CampaignListApi): un
 第二轮确认：同文件原先把 `null` 与 `{data:{unknown:[]}}` 当空列表的两条断言，批准改为验证对应结构错误（而非捕获任意异常）；这与 §3.2 / R3 的既定要求一致。合法显式空容器仍返回空列表。owner 另外发现 legacy 容器候选优先级被交错，要求先增加 data.list 与 root.table 同时存在的 RED 回归，再恢复原来的“全部 data 候选先于全部 root 候选”顺序。
 
 page-hook 原有双重类型断言与 unknown 返回类型的静态告警不在本轮修复范围，不追加抑制注释；须保留准确告警及基线比对证据，不宣称静态诊断零告警。本机默认 `NODE_ENV=production`，安装使用 `npm ci --include=dev`，测试/coverage 命令显式使用 `NODE_ENV=test`，生产构建显式使用 `NODE_ENV=production`，不修改全局环境。
+
+第三轮 owner 审核 `c7fd9e4`：405 tests、coverage、tsc、build 独立重跑均通过，但新增 background 关闭回查测试 mock 了整个 `fetchLiveCampaigns`，只能证明编排转发/错误传播，不能称为真实 v2 分页/解析联动。补授权 `tests/close-safety.test.ts`，复用现有真实 storage/fetch/parser/queue harness：初始有效 v2 行可触发阈值关闭；目标仍存在/完整空列表/坏后页分别不能误报成功/可以确认/不能确认；首次聚合坏后页不能用部分数据关停。不触碰真实广告；沿用已有实现的行为以受控 mutation-kill 提供行为性 RED→恢复 GREEN，不能把缺失新模块的 import 错误算作业务性 RED。最终报告须对照最终 HEAD 更新计数、准确诊断规则与各层 mock 边界。
 
 ### T2：协议链路贯通（同一个 writer，顺序执行）
 
