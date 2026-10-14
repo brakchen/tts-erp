@@ -185,15 +185,79 @@ def db_url() -> str:
     return _db_url  # type: ignore[return-value]
 
 
-@pytest.fixture()
+# Schema prerequisite probe result. The answer ("does this database have the
+# tables the suite needs") cannot change during a run — the ephemeral clone is
+# already at its final revision before pytest starts. Probing it once per
+# session instead of once per test is behaviour-preserving.
+_SCHEMA_PREREQ_CACHE: frozenset[str] | None = None
+
+
+def _probe_schema_tables(db_url: str) -> frozenset[str]:
+    """Return ``schema.table`` names the suite depends on. Memoized per process."""
+    global _SCHEMA_PREREQ_CACHE
+    if _SCHEMA_PREREQ_CACHE is not None:
+        return _SCHEMA_PREREQ_CACHE
+
+    from sqlalchemy import create_engine
+
+    # A throwaway engine, not the shared session engine: the probe must not
+    # seed the pool that ``db_engine`` later hands out.
+    eng = create_engine(db_url, pool_pre_ping=False, pool_size=1, max_overflow=0)
+    try:
+        with eng.connect() as conn:
+            # pi-lens-ignore: python-sql-injection — static schema introspection, no user input
+            rows = conn.execute(
+                text(
+                    "SELECT table_schema || '.' || table_name FROM information_schema.tables "
+                    "WHERE table_schema IN ('integration','commerce','procurement','fulfillment',"
+                    "'after_sales','finance','reporting','security','fx','plugin')"
+                )
+            ).fetchall()
+    finally:
+        eng.dispose()
+
+    _SCHEMA_PREREQ_CACHE = frozenset(r[0] for r in rows)
+    return _SCHEMA_PREREQ_CACHE
+
+
+@pytest.fixture(scope="session")
 def db_engine(db_url: str):
-    """Per-test engine. sessionmaker cache in base.py is reset between tests."""
+    """Session-scoped engine.
+
+    Was function-scoped: ``reset_for_testing()`` disposed the engine before and
+    after every test, so all 2258 tests paid a fresh TCP connect + auth
+    handshake (~20 ms each, ~43 s of the ~7 min suite) for a pool that is
+    connection-per-test-safe anyway — ``db_session`` hands each test its own
+    ``Connection`` and rolls back an outer transaction.
+
+    The sessionmaker cache in ``db/base.py`` is still dropped between tests by
+    the autouse ``_reset_session_factory`` below, so tests that swap the bound
+    session keep their isolation; only the connection pool is shared.
+    """
     from tts_erp_v2.db.base import get_engine, reset_for_testing
 
     reset_for_testing()
     eng = get_engine(db_url)
     yield eng
     reset_for_testing()
+
+
+@pytest.fixture(autouse=True)
+def _reset_session_factory() -> Iterator[None]:
+    """Drop the cached sessionmaker between tests, keeping the shared pool.
+
+    This is the piece ``db_engine`` used to do per test via
+    ``reset_for_testing()``. It stays function-scoped and autouse so the
+    sessionmaker cache is still cleared for every test; only the engine (and
+    its warm connection pool) survives.
+    """
+    from tts_erp_v2.db.base import reset_session_factory
+
+    reset_session_factory()
+    try:
+        yield
+    finally:
+        reset_session_factory()
 
 
 @pytest.fixture()
@@ -220,11 +284,19 @@ def db_session(db_engine) -> Iterator[Session]:
 
 
 @pytest.fixture(autouse=True)
-def _check_schema_prereq(db_engine) -> None:
+def _check_schema_prereq(db_url: str) -> None:
     """Skip tests when alembic hasn't been applied yet.
 
     Smoke tests assume all current business tables exist. The session-end cleanup
     fixture (below) wipes any TEST_-prefixed data after the suite runs.
+
+    The probe is memoized per process by :func:`_probe_schema_tables`: the
+    ephemeral clone is already at its final revision before pytest starts, so the
+    answer is identical for every test in the run. It previously re-queried
+    ``information_schema`` — and re-derived a connection — 2258 times.
+
+    Note this no longer depends on ``db_engine``, so tests that never touch the
+    database no longer build an engine just to satisfy this autouse check.
     """
     expected = {
         "integration.credentials",
@@ -261,16 +333,7 @@ def _check_schema_prereq(db_engine) -> None:
         "plugin.settlements",
         "plugin.settlement_details",
     }
-    with db_engine.connect() as conn:
-        # pi-lens-ignore: python-sql-injection — static schema introspection, no user input
-        rows = conn.execute(
-            text(
-                "SELECT table_schema || '.' || table_name FROM information_schema.tables "
-                "WHERE table_schema IN ('integration','commerce','procurement','fulfillment',"
-                "'after_sales','finance','reporting','security','fx','plugin')"
-            )
-        ).fetchall()
-    actual = {r[0] for r in rows}
+    actual = _probe_schema_tables(db_url)
     missing = expected - actual
     if missing:
         pytest.skip(
