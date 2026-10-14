@@ -3,6 +3,8 @@
 > This file contains **live work only**. Completed and abandoned history lives in Git history, not in this table.
 > The canonical lifecycle is `docs/guides/agent-git-workflow.md`.
 
+| test-perf-baseline | 测试耗时与 DoD 基线差分优化：套件单次运行 + 会话级连接池复用 | 01a138f7-3b537f45 | `chore/test-perf-baseline` / `/home/schan/tts-erp/.worktrees/test-perf` | `scripts/test_baseline.sh`, `tests/conftest.py`, `tts_erp_v2/db/base.py`(仅新增函数), `docs/testing/baseline-fast.txt`, `AGENTS.md`, `docs/guides/agent-testing.md`, `docs/guides/commands-reference.md` | active | `5908aa2584cd57e3a4d88346ff19f7c0d278c2ed` | `ae23b36` | 2026-10-14T06:36:45Z |
+
 ## Registry rules
 
 - States: `draft` -> `active` -> `ready`; temporary `blocked (<reason>)` is allowed. Delete the row after merge or abandonment.
