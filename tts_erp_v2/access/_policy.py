@@ -62,6 +62,11 @@ _READONLY_EXACT = {
 #: “绑定到单个 shop_pk 的 monitor_config 专用 key”，而非角色。
 MONITOR_CONFIG_DELIVERY_PATH = "/v2/monitor/config"
 
+#: monitor 管理面（§6.3）：草稿、发布、强制覆盖均为 readwrite。
+#: monitor 专用 key 不能调用它们 —— ``_access`` 的用途层跨路由拒绝已在
+#: §4.2 约束 2/4 生效，这里只声明角色下限。
+MONITOR_ADMIN_PATH_PREFIX = "/v2/monitor/admin"
+
 
 def is_monitor_config_delivery_route(method: str, route_path: str) -> bool:
     """True only for the shop-scoped monitor config read.
@@ -109,6 +114,8 @@ def required_role(method: str, route_path: str) -> Role | None:
     if path == MONITOR_CONFIG_DELIVERY_PATH and normalized_method == "GET":
         # 角色只是下限；用途/店铺绑定在 ``_access`` 层单独收紧。
         return Role.READONLY
+    if path.startswith(MONITOR_ADMIN_PATH_PREFIX):
+        return Role.READWRITE
     if path.startswith(_READWRITE_PREFIXES):
         return Role.READWRITE
     if normalized_method == "POST" and path == "/v2/spu-images/upload-url":

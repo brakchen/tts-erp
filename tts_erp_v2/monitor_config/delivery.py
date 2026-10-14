@@ -59,6 +59,14 @@ class ForceRequiresRequestId(RuntimeError):
     """
 
 
+class ForceVersionConflict(RuntimeError):
+    """The caller's ``expectedDeliveryVersion`` no longer matches the pointer.
+
+    The management UI must not be able to force-copy a snapshot the operator
+    was not looking at (§5.4).
+    """
+
+
 def resolve_shop(session: Session, seller_id: str) -> ChannelAccount | None:
     """Resolve the single identity field ``sellerId`` to a registered shop.
 
@@ -164,18 +172,11 @@ def publish_delivery(
     # Idempotency is checked before any version conflict so a client that lost a
     # response can safely retry the same request_id (§5.4).
     if request_id is not None:
-        existing = session.execute(
-            select(MonitorConfigDelivery).where(
-                MonitorConfigDelivery.shop_pk == shop_pk,
-                MonitorConfigDelivery.request_id == request_id,
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            if existing.request_digest != request_digest:
-                raise PublishConflict(
-                    "request_id replayed with different request metadata"
-                )
-            return existing.version
+        replayed = _replayed_delivery(
+            session, shop_pk, request_id, request_digest or ""
+        )
+        if replayed is not None:
+            return replayed.version
 
     version = (state.current_delivery_version or 0) + 1
     session.add(
@@ -201,6 +202,114 @@ def publish_delivery(
         state.last_force_version = version
     session.flush()
     return version
+
+
+def _delivery_row(
+    session: Session, shop_pk: int, version: int
+) -> MonitorConfigDelivery:
+    return session.execute(
+        select(MonitorConfigDelivery).where(
+            MonitorConfigDelivery.shop_pk == shop_pk,
+            MonitorConfigDelivery.version == version,
+        )
+    ).scalar_one()
+
+
+def _replayed_delivery(
+    session: Session, shop_pk: int, request_id: uuid.UUID, request_digest: str
+) -> MonitorConfigDelivery | None:
+    """Return the delivery a previous identical request already produced.
+
+    Callers must hold the shop state row lock, otherwise two concurrent
+    retries can both miss and both write.
+    """
+
+    existing = session.execute(
+        select(MonitorConfigDelivery).where(
+            MonitorConfigDelivery.shop_pk == shop_pk,
+            MonitorConfigDelivery.request_id == request_id,
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        return None
+    if existing.request_digest != request_digest:
+        raise PublishConflict("request_id replayed with different request metadata")
+    return existing
+
+
+def force_publish(
+    session: Session,
+    *,
+    shop_pk: int,
+    expected_delivery_version: int,
+    request_id: uuid.UUID,
+    request_digest: str,
+    created_by: str,
+) -> MonitorConfigDelivery:
+    """Copy the current published snapshot as a new ``is_force`` delivery (§5.4).
+
+    The copy happens even when the payload is byte-identical, so an offline
+    instance can still tell "a force happened after my last check" from
+    "nothing changed" (§11.1.3).
+
+    Check order is deliberate and matches §5.4:
+
+    1. Preconditions (a published delivery exists, a full idempotency key was
+       supplied) are refused up front, before any state is created.
+    2. The per-shop row lock is taken **before** the idempotency replay check,
+       so a retried request cannot slip a second write past a live one.
+    3. Only then is ``expected_delivery_version`` compared. Idempotency wins
+       over the version check, which is what makes a lost-response retry
+       recoverable instead of a permanent 409.
+    """
+
+    if request_id is None or request_digest is None:
+        raise ForceRequiresRequestId(
+            "force publish requires both request_id and request_digest"
+        )
+    peek = session.get(MonitorShopState, shop_pk)
+    if peek is None or peek.current_delivery_version is None:
+        raise ForceRequiresPublishedDelivery(
+            "force publish requires an already published delivery"
+        )
+
+    state = _lock_state(session, shop_pk)
+
+    replayed = _replayed_delivery(session, shop_pk, request_id, request_digest)
+    if replayed is not None:
+        return replayed
+
+    current_version = state.current_delivery_version
+    if current_version is None:
+        # Re-checked under the lock: the pointer cannot be read as NULL here
+        # because the peek above, but the lock must not be trusted to carry
+        # the earlier non-NULL read across this reload.
+        raise ForceRequiresPublishedDelivery(
+            "force publish requires an already published delivery"
+        )
+    if current_version != expected_delivery_version:
+        raise ForceVersionConflict(
+            "expectedDeliveryVersion does not match the shop's current delivery"
+        )
+
+    target = _delivery_row(session, shop_pk, current_version)
+    # The stored payload is the frozen settings document; decrypting it here
+    # keeps a force copy from depending on the current global defaults.
+    frozen = json.loads(token_service.decrypt(target.encrypted_payload))
+    version = publish_delivery(
+        session,
+        shop_pk=shop_pk,
+        payload=frozen,
+        source_global_version=target.source_global_version,
+        source_shop_version=target.source_shop_version,
+        created_by=created_by,
+        is_force=True,
+        request_id=request_id,
+        request_digest=request_digest,
+    )
+    row = _delivery_row(session, shop_pk, version)
+    session.refresh(row)
+    return row
 
 
 class DeliveryView(NamedTuple):
@@ -262,9 +371,7 @@ def _settings_of(
     return replace(settings, seller_id=seller_id)
 
 
-def _block(
-    row: MonitorConfigDelivery, seller_id: str
-) -> contracts.Current:
+def _block(row: MonitorConfigDelivery, seller_id: str) -> contracts.Current:
     return contracts.Current(
         version=str(row.version),
         source_versions={
@@ -353,6 +460,4 @@ def load_delivery(
             ),
         }
     )
-    return DeliveryView(
-        envelope=envelope, etag=etag, body=wire_body(envelope)
-    )
+    return DeliveryView(envelope=envelope, etag=etag, body=wire_body(envelope))

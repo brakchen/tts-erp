@@ -275,6 +275,31 @@ If-None-Match: W/"monitor-example-validator"
 
 所有新路径进入统一 role matrix（`tts_erp_v2/middleware/auth.py::required_role()` 与 `docs/api/external-api.md`）；管理接口不能被 monitor key 调用。Cookie 写请求沿用 CSRF header 和 JSON 限制。复用现有运行配置页面权限，不新增独立认证入口。
 
+#### 6.3.1 阶段 C 实施记录（lane `monitor-config-erp`）
+
+已实施（`tts_erp_v2/monitor_config/{keys,admin}.py`、`tts_erp_v2/api/v2/monitor_config.py`）：
+
+| 路径 | 说明 |
+| --- | --- |
+| `GET /v2/monitor/admin/shops` | 纳管店铺列表（已有交付指针 **或** 已有店铺草稿/revision），含发布版本、最近强制编号、contentHash、源版本、店铺草稿版本。不返回任何明文密钥。 |
+| `GET/PUT /v2/monitor/admin/defaults/draft` | `monitor.defaults` 草稿。GET 对尚不存在的键返回**零状态**（`draftVersion: 0`），PUT 以 `expectedDraftVersion: 0` 完成首次创建，因此不需要单独的建键入口。 |
+| `POST /v2/monitor/admin/defaults/publish` | 发布全局默认，并在一个事务内为**已纳管**店铺重新冻结交付。 |
+| `GET/PUT /v2/monitor/admin/shops/{shop_pk}/draft` | `monitor.shop.<shop_pk>` 覆盖草稿；未知 `shop_pk` 返回 404。 |
+| `POST /v2/monitor/admin/shops/{shop_pk}/publish` | 无覆盖草稿的店铺也在这里首次纳管：`sourceVersions.shop = null`、只继承全局，**不**杜撰空 revision。尚无已发布全局默认时返回 409。 |
+| `POST /v2/monitor/admin/shops/{shop_pk}/force` | 需要 `expectedDeliveryVersion`（十进制字符串）与客户端生成的 `requestId`。幂等检查先于版本冲突；同 `requestId` 不同请求为 409；无已发布交付为 409；缺 `requestId` 为 422。 |
+
+实现中固定下来的几个决定：
+
+- **保留命名空间**：通用 `/v2/config/runtime/items/*` 的 create/draft/publish/rollback/retire/restore 六个入口对 `monitor.*` 一律返回 409 并指向 `/v2/monitor/admin`（§5.1 选的“通用 mutation 拒绝保留键”）。通用读取仍不解密。
+- **固定受控 schema**：`monitor.*` 的 `json_schema` 由 `admin.defaults_settings_schema()` / `admin.override_settings_schema()` 生成并封闭对象（`additionalProperties: false`），不使用 `infer_schema`。字段类型/范围仍由契约层判定，它比受支持的 JSON Schema 子集更严格。
+- **释放白名单**：只有 `feishuWebhookUrl` / `feishuSigningSecret` / `feishuAppId` / `feishuAppSecret` 允许携带 `secret://` 引用。其他字段（嵌套也算）出现引用一律 422。一次发布把所需 secret 按名称升序加行锁后**只读一次**，五店共用同一份快照，避免同一次全局发布混入两代密钥。解冻后重新跑一遍契约校验。
+- **锁顺序**：全局行 → 按 `shop_pk` 升序的店铺配置行 → 按 `shop_pk` 升序的店铺 state 行；全局发布与单店发布使用同一顺序。
+- **回滚**：任一店铺合成失败则整次全局发布回滚，不留下半份 revision 或半推进的指针。
+
+本阶段**未**实施（仍在阶段 C 剩余范围或后续阶段）：Token 创建/禁用/轮换路由（§6.3 末行，仍复用既有 key 管理 owner）、`runtime-configs` 页面视图与合成预览（§8.2）、CORS 的 monitor origin / `If-None-Match` / `ETag` 暴露（§6.3 末段，属部署前置）。
+
+`docs/api/external-api.md` 的角色矩阵仍需补上 `/v2/monitor/admin/* = readwrite` 一行；该文件归 `video-publish-design` lane，未在本 lane 擅改。
+
 必须核对 app 的 CORS 配置。当前 `tts_erp_v2/app.py` 的 `DEFAULT_CORS_ALLOW_HEADERS` 是
 `Authorization` / `X-API-Key` / `X-Request-Id` / `Content-Type`，**不含 `If-None-Match`**，
 且未设置 `expose_headers`，因此 ETag 默认对扩展不可见；`DEFAULT_CORS_ORIGINS` 只列了

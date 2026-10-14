@@ -14,19 +14,23 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.deps import get_session, require_role_at_least
+from tts_erp_v2.api.deps import SessionDep, require_role_at_least
 from tts_erp_v2.db.models.config import (
     EnumMap,
     RuntimeConfigItem,
     RuntimeConfigRevision,
     RuntimeConfigSecret,
+)
+from tts_erp_v2.monitor_config.keys import ReservedConfigKeyError
+from tts_erp_v2.monitor_config.keys import (
+    ensure_generic_mutation_allowed as _refuse_monitor_key,
 )
 from tts_erp_v2.runtime_config.repository import (
     RetiredSecretError,
@@ -74,7 +78,7 @@ class EnumMapOut(BaseModel):
 
 
 @router.get("/enum-map")
-def get_enum_map(sess: Session = Depends(get_session)) -> dict[str, dict[str, str]]:
+def get_enum_map(sess: SessionDep) -> dict[str, dict[str, str]]:
     """返回所有枚举映射，按 enum_type 分组。
 
     返回格式：
@@ -104,7 +108,7 @@ def get_enum_map(sess: Session = Depends(get_session)) -> dict[str, dict[str, st
 
 
 @router.get("/enum-map/list")
-def list_enum_map(sess: Session = Depends(get_session)) -> list[dict]:
+def list_enum_map(sess: SessionDep) -> list[dict]:
     """返回所有枚举映射（带 id），管理页面 CRUD 用。"""
     rows = (
         sess.execute(
@@ -132,7 +136,7 @@ def list_enum_map(sess: Session = Depends(get_session)) -> list[dict]:
 def upsert_enum_map(
     body: EnumMapUpsert,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict:
     """新增或更新一条枚举映射。admin 角色。"""
     require_role_at_least(request, "admin")
@@ -170,7 +174,7 @@ def upsert_enum_map(
 def delete_enum_map(
     id: int,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict:
     """删除一条枚举映射。admin 角色。"""
     require_role_at_least(request, "admin")
@@ -256,6 +260,22 @@ def _active_runtime_item_or_409(sess: Session, config_key: str) -> RuntimeConfig
     return item
 
 
+def _refuse_reserved_key(config_key: str) -> None:
+    """Keep ``monitor.*`` out of the generic mutation entrances (§5.1).
+
+    The monitor namespace has exactly one publish exit — the dedicated
+    orchestration in :mod:`tts_erp_v2.monitor_config.admin` — which composes
+    global and shop layers and freezes a delivery per shop in one transaction.
+    Letting a generic draft/publish/rollback/retire bypass it would produce a
+    published revision with no delivery behind it.
+    """
+
+    try:
+        _refuse_monitor_key(config_key)
+    except ReservedConfigKeyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 def _validate_secret_name(name: str) -> None:
     if (
         not name
@@ -300,9 +320,9 @@ def _validation_error(
 
 @router.get("/runtime/items")
 def list_runtime_config_items(
+    sess: SessionDep,
     request: Request,
     include_retired: bool = Query(default=False, alias="includeRetired"),
-    sess: Session = Depends(get_session),
 ) -> dict[str, list[dict[str, Any]]]:
     """List runtime keys; retired records are operator-only and opt-in."""
     if include_retired:
@@ -328,9 +348,10 @@ def preview_runtime_config_schema(
 def create_runtime_config_item(
     body: RuntimeConfigCreate,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
+    _refuse_reserved_key(body.config_key)
     existing = sess.get(RuntimeConfigItem, body.config_key)
     if existing is not None:
         detail = (
@@ -378,7 +399,7 @@ def create_runtime_config_item(
 def get_runtime_config_item(
     config_key: str,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
     return _detail_out(sess, _runtime_item_or_404(sess, config_key))
@@ -389,9 +410,10 @@ def save_runtime_config_draft(
     config_key: str,
     body: RuntimeDraftUpdate,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
+    _refuse_reserved_key(config_key)
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(
@@ -415,9 +437,10 @@ def publish_runtime_config_item(
     config_key: str,
     body: RuntimePublish,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
+    _refuse_reserved_key(config_key)
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(
@@ -445,7 +468,7 @@ def publish_runtime_config_item(
 def list_runtime_config_revisions(
     config_key: str,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, list[dict[str, Any]]]:
     require_role_at_least(request, "readwrite")
     _runtime_item_or_404(sess, config_key)
@@ -473,10 +496,11 @@ def rollback_runtime_config_item(
     config_key: str,
     body: RuntimeRollback,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, Any]:
     """Republish a historical revision as a higher immutable version."""
     require_role_at_least(request, "readwrite")
+    _refuse_reserved_key(config_key)
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(
@@ -517,10 +541,11 @@ def rollback_runtime_config_item(
 def retire_runtime_config_item(
     config_key: str,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, str]:
     """Retire a key without deleting its immutable audit history."""
     require_role_at_least(request, "readwrite")
+    _refuse_reserved_key(config_key)
     item = locked_item(sess, config_key)
     if item is None:
         raise HTTPException(status_code=404, detail="runtime config not found")
@@ -535,9 +560,10 @@ def retire_runtime_config_item(
 def restore_runtime_config_item(
     config_key: str,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, str]:
     require_role_at_least(request, "readwrite")
+    _refuse_reserved_key(config_key)
     item = locked_item(sess, config_key)
     if item is None:
         raise HTTPException(status_code=404, detail="runtime config not found")
@@ -562,7 +588,7 @@ def restore_runtime_config_item(
 @router.get("/runtime/snapshot")
 def runtime_config_snapshot(
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> Response:
     """Return each active published default payload/version with ETag caching.
 
@@ -602,9 +628,9 @@ def runtime_config_snapshot(
 
 @router.get("/runtime/secrets")
 def list_runtime_config_secrets(
+    sess: SessionDep,
     request: Request,
     include_retired: bool = Query(default=False, alias="includeRetired"),
-    sess: Session = Depends(get_session),
 ) -> dict[str, list[dict[str, Any]]]:
     """List secret metadata; encrypted values are never returned."""
     require_role_at_least(request, "readwrite")
@@ -631,7 +657,7 @@ def save_runtime_config_secret(
     name: str,
     body: RuntimeSecretUpsert,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, str]:
     require_role_at_least(request, "readwrite")
     _validate_secret_name(name)
@@ -651,7 +677,7 @@ def save_runtime_config_secret(
 def retire_runtime_config_secret(
     name: str,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, str]:
     """Retire an unreferenced secret; history remains encrypted and intact."""
     require_role_at_least(request, "readwrite")
@@ -678,7 +704,7 @@ def retire_runtime_config_secret(
 def restore_runtime_config_secret(
     name: str,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: SessionDep,
 ) -> dict[str, str]:
     require_role_at_least(request, "readwrite")
     _validate_secret_name(name)
