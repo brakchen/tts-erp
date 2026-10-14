@@ -91,15 +91,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Normalize pytest's short summary into a sorted, reason-free id list.
+# Extract failing test ids from raw pytest output.
 #
-# We deliberately strip the " - <reason>" tail: the reason text is unstable
-# across runs (line numbers, assertion reprs, timings) and would make every
-# diff look like churn. Only "which test id is red" is the DoD signal.
-normalize_failures() {
-  sed -n -E 's/^(FAILED|ERROR) ([^ ]+).*/\2/p' "$1" \
-    | grep -v '^$' \
-    | LC_ALL=C sort -u
+# We deliberately keep only the ``FAILED``/``ERROR`` short-summary lines and drop
+# the " - <reason>" tail: reason text is unstable across runs (line numbers,
+# assertion reprs, timings) and would make every diff look like churn. Only
+# "which test id is red" is the DoD signal.
+#
+# Do NOT broaden this to a loose "any line mentioning a test id" match. pytest's
+# warnings summary prints bare ``tests/foo.py::test_bar`` lines that are warning
+# *sources*, not failures — matching them would invent failures that never
+# happened.
+pytest_failure_ids() {
+  sed -n -E 's/^(FAILED|ERROR) ([^ ]+).*/\2/p' "$1" | LC_ALL=C sort -u
+}
+
+# Read an already-normalized baseline file: one bare test id per line, ``#``
+# comments and blank lines ignored.
+baseline_ids() {
+  sed -n -E '/^[^#]/ { /^tests\/[^ ]*::[^ ]+$/ p }' "$1" | LC_ALL=C sort -u
 }
 
 case "$MODE" in
@@ -124,10 +134,16 @@ rc=0
 # shellcheck disable=SC2086
 bash scripts/test_isolated.sh "$SCOPE" -p no:cacheprovider >"$RUN_LOG" 2>&1 || rc=$?
 
-normalize_failures "$RUN_LOG" >"$RUN_TMP/current.txt"
+pytest_failure_ids "$RUN_LOG" >"$RUN_TMP/current.txt"
 
-if ! grep -qE "passed|no tests ran" "$RUN_LOG"; then
-  fail "the suite did not produce a recognizable summary; inspect the run output"
+# Sanity-check that pytest actually ran and produced a summary section.
+# pytest 9's `-q` output has no trailing "N passed, M failed" count line, so we
+# key off the short-summary header / durations header instead. A missing header
+# means the run aborted (collection error, wrapper failure) and any diff we
+# computed from it would be silently empty — which would read as "zero new
+# failures" and wrongly pass the DoD.
+if ! grep -qE "short test summary info|slowest .* durations|no tests ran" "$RUN_LOG"; then
+  fail "the suite did not produce a recognizable pytest summary; inspect the run output"
 fi
 
 echo "[test-baseline] suite exit code: $rc"
@@ -160,7 +176,7 @@ if [[ "$MODE" == "update" ]]; then
 fi
 
 # compare mode
-normalize_failures "$BASELINE_FILE" >"$RUN_TMP/base.txt"
+baseline_ids "$BASELINE_FILE" >"$RUN_TMP/base.txt"
 
 LC_ALL=C comm -13 "$RUN_TMP/base.txt" "$RUN_TMP/current.txt" >"$RUN_TMP/new.txt"
 LC_ALL=C comm -23 "$RUN_TMP/base.txt" "$RUN_TMP/current.txt" >"$RUN_TMP/fixed.txt"

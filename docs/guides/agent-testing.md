@@ -24,7 +24,10 @@ installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` firs
 
 | Scope | Command |
 | --- | --- |
-| Fast suite | `bash scripts/test_isolated.sh fast` |
+| **DoD validation (one run, diffed vs committed master baseline)** | `bash scripts/test_baseline.sh` |
+| Show the committed master baseline | `bash scripts/test_baseline.sh --show` |
+| Refresh the master baseline (master worktree only) | `bash scripts/test_baseline.sh --update` |
+| Fast suite (raw, no baseline diff) | `bash scripts/test_isolated.sh fast` |
 | Unit-layer tests | `bash scripts/test_isolated.sh unit` |
 | Business domain | `bash scripts/test_isolated.sh <domain>` |
 | Specific file within fast selection | `bash scripts/test_isolated.sh fast tests/path/test_file.py` |
@@ -89,28 +92,48 @@ If template cloning or PostgreSQL client tooling is unavailable, stop and repair
 
 The default completion criterion is zero failures.
 
-When master has an explicitly recorded stable failure baseline:
-
-1. Capture the baseline before merging the lane.
-2. Run the same command after merging.
-3. Compare normalized failure identifiers.
-4. The lane may introduce zero new stable failures.
-
-Suggested capture:
+The master baseline is a property of **master**, not of your lane. It is
+committed at `docs/testing/baseline-fast.txt`, so a lane does **not** re-measure
+it. `scripts/test_baseline.sh` runs the suite once and produces the diff
+mechanically:
 
 ```bash
-bash scripts/test_isolated.sh fast 2>&1 | grep '^FAILED' | sort > /tmp/fail-before.txt
-# merge the lane
-bash scripts/test_isolated.sh fast 2>&1 | grep '^FAILED' | sort > /tmp/fail-after.txt
-diff -u /tmp/fail-before.txt /tmp/fail-after.txt
+bash scripts/test_baseline.sh              # run fast once, diff vs baseline, exit 0 = pass
+bash scripts/test_baseline.sh --show       # print the committed baseline
+bash scripts/test_baseline.sh --keep-log /tmp/lane.log   # also keep raw pytest output
 ```
 
-For every failure:
+Exit codes: `0` zero new stable failures (DoD pass), `1` new failures present,
+`2` usage/baseline error.
 
-1. Rerun the smallest failing test selection once through `scripts/test_isolated.sh`.
+The diff is computed on normalized test ids only (`FAILED`/`ERROR <id>` with the
+reason text stripped), because reason text carries line numbers and assertion
+reprs that churn between runs and would make every diff look like noise.
+
+**Run the suite once.** The old procedure — capture a baseline, merge, run
+again, then rerun the suite per failure — cost 2+ full runs per lane and was the
+main reason worker sessions hit their wall-clock cap. Only if the tool reports
+new failures do you rerun, and then only the smallest failing selection.
+
+For every reported failure:
+
+1. Rerun the smallest failing test selection once through the isolated runner.
 2. If the isolated rerun passes, record it as a likely flake.
 3. If it fails consistently, treat it as a real failure and fix it before completion.
 4. Do not classify an unrerun failure as pre-existing or flaky.
+
+### When the baseline goes stale
+
+If `--show` reports that previously failing tests are now passing, master itself
+fixed them and the committed baseline is out of date. Regenerate it **from a
+clean master worktree**:
+
+```bash
+bash scripts/test_baseline.sh --update
+```
+
+A lane must never regenerate the baseline to make its own run look clean — that
+would silently absorb a real regression into the master baseline.
 
 A documentation/config-only lane may compare validation appropriate to its changed files, but must not claim the application test suite passed unless it was actually run.
 
