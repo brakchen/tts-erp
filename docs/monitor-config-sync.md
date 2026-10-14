@@ -346,13 +346,14 @@ POST /v2/monitor/admin/defaults/publish     → expectedDraftVersion + comment
 
 **残留风险（如实告知）**：已发布的历史 revision 是不可变的，**仍保留原明文**。本特性不删除它们（§5.4/§5.3 的历史不可变原则），而是让所有读取面一律脱敏。若需要彻底清除历史明文，需另开一个显式的数据清理变更并经人工授权，不属于本手册。
 
-`docs/api/external-api.md` 已经有一个 “Monitor remote configuration (`/v2/monitor/config`)” 小节及其 endpoint 清单表，但内容停在阶段 B，**现已过期**：
+`docs/api/external-api.md` 的 “Monitor remote configuration” 小节原先只写了阶段 B 的下发读取，并有一句已过时的 `Status: Phase B read path only. Publish/admin endpoints (§6.3) are not yet exposed.`。经用户明确授权，该小节**已在本轮更新**：
 
-- 该小节结尾写着 `Status: Phase B read path only. Publish/admin endpoints (§6.3) are not yet exposed.` —— 阶段 C 已经把这 6 个管理接口挂上了，这句话不再成立。
-- 缺的是：把 `GET/PUT /v2/monitor/admin/defaults/draft`、`POST /v2/monitor/admin/defaults/publish`、`GET/PUT /v2/monitor/admin/shops/{shop_pk}/draft`、`POST /v2/monitor/admin/shops/{shop_pk}/publish`、`POST /v2/monitor/admin/shops/{shop_pk}/force`、`GET /v2/monitor/admin/shops` 补进该清单表（角色 `readwrite`，且 monitor 专用 token 不可调用），并补上四个飞书字段只接受 `secret://` 引用或空串、存量明文一律脱敏/503 的语义。
-- **不需要**改动的一点：CORS 尚未配置（monitor origin / `If-None-Match` / `ETag` 暴露）的描述**依然准确**，仍属部署前置。
+- 标题与引言扩为 `` `/v2/monitor/config` `` 与 `` `/v2/monitor/admin/*` `` 两部分，并删去上述过时的 Status 声明。
+- endpoint 清单表补齐阶段 C 的 6 个管理接口（`GET /admin/shops`、`GET|PUT /admin/defaults/draft`、`POST /admin/defaults/publish`、`GET|PUT /admin/shops/{shop_pk}/draft`、`POST /admin/shops/{shop_pk}/publish`、`POST /admin/shops/{shop_pk}/force`），角色标注为 `readwrite`，并新增“Management path (operator)”小节说明：monitor 专用 token 不得调用管理接口（403）、`expectedDraftVersion`/`requestId` 的乐观并发与幂等语义、四个飞书字段只接受 `secret://` 引用或空串（字面量 422）、读取面脱敏为 `__quarantined_plaintext_secret__`。
+- 下发读取新增 **fail closed（503）** 语义，并写明检查覆盖 `current` **与** 保留的 `force.target`、位于 `If-None-Match` 之前且不签发 `ETag`。
+- CORS 仍未配置的描述**保留不动**，仍属部署前置。
 
-该文件归 `video-publish-design` lane（`docs/{api,architecture,design,ops,schema}`，当前仍为 `active`），**不在**本 lane 的 owned files 内，按 AGENTS.md §7 未擅改。需由该 lane owner 补齐，或在它 ready 后开 successor lane。
+该文件原属 `video-publish-design` lane（`docs/{api,architecture,design,ops,schema}`），本轮由用户显式授权后修改；清单内容已逐项与 `build_app().openapi()` 的实际挂载路径做集合比对（9/9 完全一致），并与 `required_role()` 实际返回值校对（admin 均为 `readwrite`，下发为 `readonly`）。
 
 必须核对 app 的 CORS 配置。当前 `tts_erp_v2/app.py` 的 `DEFAULT_CORS_ALLOW_HEADERS` 是
 `Authorization` / `X-API-Key` / `X-Request-Id` / `Content-Type`，**不含 `If-None-Match`**，

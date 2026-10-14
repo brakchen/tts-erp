@@ -277,16 +277,25 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 Focused membership 按 `(shop_pk, spu_id)` 隔离；每店 active 关注总数没有业务上限。新增 ID 必须属于路径店铺；add/remove trim/去空/去重后重叠返回 422。详见 [`analytics/focused-spus.md`](../design/focused-spus.md)。
 
-### Monitor remote configuration (`/v2/monitor/config`)
+### Monitor remote configuration (`/v2/monitor/config`, `/v2/monitor/admin/*`)
 
-Plugin-side read of one shop's frozen monitor configuration. Contract, threat
-model and rollout are in
+Plugin-side read of one shop's frozen monitor configuration, plus the ERP-side
+management surface that produces it. Contract, threat model and rollout are in
 [`docs/monitor-config-sync.md`](../monitor-config-sync.md) (§4.2 token boundary,
-§6.1 wire shape, §6.2 conditional semantics); this is the endpoint inventory.
+§4.3 Feishu secret exception, §5 publishing, §6.1 wire shape, §6.2 conditional
+semantics, §6.3 management); this is the endpoint inventory.
 
 | Endpoint | Role | Purpose |
 | --- | --- | --- |
 | `GET /v2/monitor/config?sellerId=…` | `readonly` **and** a shop-bound `monitor_config` key | Returns the shop's frozen delivery snapshot `{schemaVersion, sellerId, shopPk, current:{version, sourceVersions, contentHash, payload}, force}` |
+| `GET /v2/monitor/admin/shops` | `readwrite` | Lists managed shops with published/force version pointers and content hashes |
+| `GET/PUT /v2/monitor/admin/defaults/draft` | `readwrite` | Global business defaults draft (`monitor.defaults`); `PUT` takes `expectedDraftVersion` |
+| `POST /v2/monitor/admin/defaults/publish` | `readwrite` | Publishes the global defaults and re-freezes a delivery per onboarded shop |
+| `GET/PUT /v2/monitor/admin/shops/{shop_pk}/draft` | `readwrite` | Per-shop override draft (`monitor.shop.<shop_pk>`) |
+| `POST /v2/monitor/admin/shops/{shop_pk}/publish` | `readwrite` | Publishes the shop override (if any) and freezes its delivery |
+| `POST /v2/monitor/admin/shops/{shop_pk}/force` | `readwrite` | Issues a one-shot force directive; requires `expectedDeliveryVersion` + client-generated `requestId` |
+
+#### Read path (plugin)
 
 This path is deliberately narrower than its nominal `readonly` role:
 
@@ -307,9 +316,35 @@ This path is deliberately narrower than its nominal `readonly` role:
 - No credential, cookie, Fernet key, or ciphertext is returned in the body, the
   headers, or logs.
 
-Status: Phase B read path only. Publish/admin endpoints (§6.3) are not yet
-exposed. CORS for the monitor extension origin is **not** configured yet, so a
-browser extension cannot currently call this route cross-origin.
+#### Management path (operator)
+
+- Every `/v2/monitor/admin/*` route requires `readwrite` or above, and a
+  `monitor_config` delivery token **cannot** call any of them (403): a shop-bound
+  read key must not reach management or other ERP data. A general `readwrite`
+  or `admin` key, or a browser session, may.
+- Draft reads return `quarantinedFields`; draft writes are guarded by
+  `expectedDraftVersion` and return **409** on conflict. Force is idempotent on
+  `requestId`: an identical retry replays the same delivery version, the same
+  `requestId` with different request metadata is **409**, and `requestId` is
+  required.
+- The four Feishu fields that may be released to a browser
+  (`feishuWebhookUrl`, `feishuSigningSecret`, `feishuAppId`, `feishuAppSecret`)
+  accept **only** a `secret://<name>` reference or `""` (empty = channel not
+  configured) in a draft. A literal value is rejected with **422** before
+  storage, so no admin or generic response ever echoes a plaintext secret.
+- Operator reads and the generic `/v2/config/runtime/*` reads **redact** any
+  plaintext found in a pre-existing record to the sentinel
+  `__quarantined_plaintext_secret__` and report the affected field names; other
+  config keys are unaffected.
+- The read path **fails closed with 503** when the delivery — or the retained
+  `force.target`, which is a separate delivery row with its own provenance — was
+  frozen from a source revision that still holds plaintext. The check runs
+  before `If-None-Match` and emits no `ETag`, so a correct ETag cannot downgrade
+  it to a 304. Plugins treat 503 like any other 5xx: log the sync failure and
+  keep the current local configuration (monitoring is not interrupted).
+
+CORS for the monitor extension origin is **not** configured yet, so a browser
+extension cannot currently call these routes cross-origin.
 
 ### Intercept statistics (`/v2/intercept/requests/stats`)
 
