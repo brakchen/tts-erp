@@ -47,6 +47,7 @@ from tts_erp_v2.analytics.spu_profitability import (
     read_overview,
 )
 from tts_erp_v2.analytics.spu_profitability import _implementation as profitability_impl
+from tts_erp_v2.analytics.spu_profitability import _snapshot as profitability_snapshot
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -161,6 +162,27 @@ def _fx_online_consts(db_engine, _isolate_state):
     _seed_fx(db_engine)
     yield
     _del_fx(db_engine)
+
+
+# ─── 冻结投影时钟 ───
+# 投影样本窗口由 consistent_read_snapshot 的 datetime.now(UTC) 滚动推导
+# ([now-37d, now-8d]，与 w_start/w_end 无关)。种子订单钉死在 2026-09-01，
+# 真实时间越过 2026-10-08 后种子滑出窗口 → 投影字段全 0（时间炸弹）。
+# 冻结 calculated_at 到本文件最后全绿日 2026-10-06，让投影窗口永久覆盖种子。
+# 先例：tests/publishing/test_owner_seams.py 的 SkewedDateTime monkeypatch。
+_PROJECTION_FROZEN_NOW = datetime(2026, 10, 6, tzinfo=UTC)
+
+
+class _FrozenDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return _PROJECTION_FROZEN_NOW.astimezone(tz) if tz else _PROJECTION_FROZEN_NOW
+
+
+@pytest.fixture(autouse=True)
+def _freeze_projection_clock(monkeypatch):
+    """冻结投影窗口的滚动时钟，让钉死的种子日期永久落在投影样本窗内。"""
+    monkeypatch.setattr(profitability_snapshot, "datetime", _FrozenDateTime)
 
 
 def _wipe(db_engine) -> None:
