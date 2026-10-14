@@ -107,7 +107,7 @@ export function extractCampaignRows(response: unknown, api: CampaignListApi): un
 | `entrypoints/page-hook.content.ts` | shared matcher |
 | `entrypoints/background.ts` | 仅 URL 校验与 capture parser 传 api；不增加 v2 专用编排函数 |
 | `tests/campaign-list-contract.test.ts`（新增） | URL/协议边界与畸形 cell/容器 |
-| `tests/{core,live-campaign-fetch,page-hook,background}.test.ts` | 新旧回归和端到端 mocked capture/close verification（按实际既有文件名放置） |
+| `tests/{core,core-coverage,live-campaign-fetch,page-hook,background}.test.ts` | 新旧回归和端到端 mocked capture/close verification（按实际既有文件名放置） |
 | `package.json`, `package-lock.json`, `wxt.config.ts`, `README.md`, `CHANGELOG.md` | GREEN 后按当前 master patch 升级（基线 0.4.22 → 0.4.23） |
 
 `campaign-pagination.ts` 原则上不需要改动；若必须修改，只能保持旧请求改写语义并先提交原因供 owner 确认。大文件 background 约 2954 行，不继续内嵌解析；协议能力下沉纯 core。新 helper 是协议 seam，不是第二个 campaign 业务 owner。
@@ -119,6 +119,10 @@ export function extractCampaignRows(response: unknown, api: CampaignListApi): un
 1. 使用独立插件 worktree `/home/schan/pi-workspace/monitor-api-01a13a78`，分支 `feature/campaign-list-v2-compat`，先读 AGENTS/README、相关源码与测试。
 2. 增加 URL 矩阵、v2-only、空数组、错误 schema、重复 name、旧/v2 不互相 fallback 测试；`npx vitest run tests/campaign-list-contract.test.ts tests/core.test.ts` 观察预期 RED。
 3. 加最小 shared contract 和 parser 接入，同命令取得 GREEN；不得以放宽 strict 模式让混合 live 结果通过。
+
+#### Owner 范围确认（2026-10-14）
+
+已核对 `tests/core-coverage.test.ts` 两个 fetch 用例：额外授权仅将两处正向模板 URL 和一处对应断言 URL 的 `https://example.test` 改为合法 Seller Center origin，保持用例意图和其他断言不变。其余允许文件中的正向/传输 fixture 同理；专门验证非法 origin 的负向测试不得机械替换。必须测试非法 origin 在网络调用前被拒绝。此为测试 fixture 修正，不放宽 §3.1 的 exact-origin 规则，也不引入第二套路由。
 
 ### T2：协议链路贯通（同一个 writer，顺序执行）
 
