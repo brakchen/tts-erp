@@ -295,10 +295,54 @@ If-None-Match: W/"monitor-example-validator"
 - **释放白名单**：只有 `feishuWebhookUrl` / `feishuSigningSecret` / `feishuAppId` / `feishuAppSecret` 允许携带 `secret://` 引用。其他字段（嵌套也算）出现引用一律 422。一次发布把所需 secret 按名称升序加行锁后**只读一次**，五店共用同一份快照，避免同一次全局发布混入两代密钥。解冻后重新跑一遍契约校验。
 - **白名单飞书字段不得以明文入库**：这四个字段只接受 `secret://<name>` 引用或 `""`（§3.2 固定的“该通知渠道未配置”空串语义）。任何其他字面量在**入库前**就 422，且不会进入 `draft_payload`、revision 或 delivery。校验点有三个：草稿保存（`validate_draft_payload`）、发布入口（`publish_defaults` / `publish_shop` 在写 revision 前复验）、合成入口（`_compose`，防止旧构建或直接写库的字面量被冻结进交付）。理由：§4.3 的释放例外是“服务端已持有密文”的**下发**边界，不是允许把密钥敲进草稿字段的许可；明文一旦入库，`GET` draft 会原样回显，`/v2/config/runtime/snapshot` 也会把它重发给任意 `readwrite` 调用方。
 - **首次草稿原子创建**：键不存在时用 `INSERT ... ON CONFLICT (config_key) DO NOTHING ... RETURNING` 建行。`SELECT ... FOR UPDATE` 不锁不存在的行，两个并发的 `expectedDraftVersion=0` 会同时未命中并同时 INSERT；裸 IntegrityError 会变成 500，而正确结果是败者得到文档化的 409 `DraftVersionConflict`（`RETURNING` 无行即表示被跳过）。这也意味着 `PUT` 首次建键永远不会把“存在了但版本不是 0”报成 500。
+- **存量明文载荷的读取面（fail closed / 脱敏）**：写入口拒绝字面量，但旧构建或直接写库可能已留下明文草稿、已发布 revision 与由此冻结的交付。规则与写入口**共用同一条判定**（`_holds_literal_secret`）：
+  - 面向管理员的读取（`/v2/monitor/admin/*/draft`）**脱敏**为哨兵 `__quarantined_plaintext_secret__`，并用 `quarantinedFields`（仅字段名）告知待修项；运维修复仍需看到并编辑其余部分。哨兵既不是合法 `secret://` 引用也不是空串，原样回写会被写入口拒绝，避免隔离自我延续。
+  - 通用读取（`/v2/config/runtime/items/{key}`、`/revisions`、`/snapshot`）对 `monitor.*` 同样脱敏；非 monitor 键语义不变。
+  - 下发 GET **fail closed（503）**：交付快照本身可以合法地携带明文（§4.3），但那必须来自 `config.runtime_config_secrets`。交付行无法自证来源（两种情况下明文长得一样），因此回查它冻结时的源 revision；源 revision 含明文则 503 且不返回正文。该检查**位于条件请求之前**，避免被降级成 304 让插件继续沿用。503 对插件等同其他 5xx（§7.2：只记日志、保留本地配置），不会中断监控。
 - **锁顺序**：全局行 → 按 `shop_pk` 升序的店铺配置行 → 按 `shop_pk` 升序的店铺 state 行；全局发布与单店发布使用同一顺序。
 - **回滚**：任一店铺合成失败则整次全局发布回滚，不留下半份 revision 或半推进的指针。
 
 本阶段**未**实施（仍在阶段 C 剩余范围或后续阶段）：Token 创建/禁用/轮换路由（§6.3 末行，仍复用既有 key 管理 owner）、`runtime-configs` 页面视图与合成预览（§8.2）、CORS 的 monitor origin / `If-None-Match` / `ETag` 暴露（§6.3 末段，属部署前置）。
+
+#### 6.3.2 存量明文密钥的排查与修复（运维手册）
+
+本特性的写入口已拒绝明文，但**上一轮构建或直接写库**可能已经留下明文飞书字段。以下流程**只做非破坏性修复**，不包含任何生产 `DELETE` / `UPDATE` / 迁移。
+
+**第 1 步 · 排查（只读）**
+
+逐项查看，关注 `quarantinedFields` 是否为数组且非空：
+
+```
+GET /v2/monitor/admin/defaults/draft
+GET /v2/monitor/admin/shops/{shop_pk}/draft          # 每纳管店铺一次
+GET /v2/config/runtime/items/monitor.shop.{shop_pk}/revisions
+```
+
+判定：字段值等于 `__quarantined_plaintext_secret__` 即为存量明文；`quarantinedFields` 直接给出待修字段名。同一问题也会让该店的 `GET /v2/monitor/config` 返回 **503**，这是提示而非故障——插件会按 §7.2 保留本地配置继续运行。
+
+**第 2 步 · 先轮换（推荐）**
+
+明文可能已出现在旧备份、历史日志或页面响应中。**先到飞书开放平台轮换**对应的 webhook / 签名密钥 / App Secret，再用新值继续。轮换是厂商侧动作，不涉及本仓生产数据。
+
+**第 3 步 · 存入 secret 表（加密入库）**
+
+```
+PUT /v2/config/runtime/secrets/{name}     body: {"value": "<新明文>"}
+```
+
+`name` 需小写字母/数字/点/横线/下划线。写入即用 `token_service.encrypt()` 加密，响应只回 `fingerprint`，不回显明文。
+
+**第 4 步 · 改写为引用并重新发布**
+
+```
+GET  /v2/monitor/admin/defaults/draft       → 记下 draftVersion
+PUT  /v2/monitor/admin/defaults/draft       → expectedDraftVersion + payload（明文字段改为 "secret://{name}" 或 ""）
+POST /v2/monitor/admin/defaults/publish     → expectedDraftVersion + comment
+```
+
+店铺覆盖同理走 `.../shops/{shop_pk}/draft` 与 `.../publish`。发布后新建的 revision 与交付快照不再含明文，`quarantinedFields` 变空，503 消失。
+
+**残留风险（如实告知）**：已发布的历史 revision 是不可变的，**仍保留原明文**。本特性不删除它们（§5.4/§5.3 的历史不可变原则），而是让所有读取面一律脱敏。若需要彻底清除历史明文，需另开一个显式的数据清理变更并经人工授权，不属于本手册。
 
 `docs/api/external-api.md` 的角色矩阵仍需补上 `/v2/monitor/admin/* = readwrite` 一行，以及这四个飞书字段只接受 `secret://` 引用或空串的写入约束；该文件归 `video-publish-design` lane（`docs/{api,architecture,design,ops,schema}`），**不在**本 lane 的 owned files 内，按 AGENTS.md §7 未擅改。本条需由该 lane owner 补齐，或在它 ready 后开 successor lane。
 

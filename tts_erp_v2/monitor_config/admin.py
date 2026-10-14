@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.config import (
     RuntimeConfigItem,
+    RuntimeConfigRevision,
     RuntimeConfigSecret,
 )
 from tts_erp_v2.db.models.monitor_config import MonitorShopState
@@ -79,6 +80,12 @@ RELEASABLE_SECRET_FIELDS: frozenset[str] = frozenset(
 )
 
 _ADMIN_HINT = "manage it through /v2/monitor/admin instead"
+
+#: Placeholder shown in place of a plaintext secret found in a stored payload.
+#: It is intentionally neither a valid ``secret://`` reference nor the empty
+#: string, so a redacted value can never be mistaken for a managed or disabled
+#: channel, and re-submitting it is refused by the write-time guard.
+QUARANTINE_SENTINEL = "__quarantined_plaintext_secret__"
 
 
 # ─── errors ──────────────────────────────────────────────────────
@@ -211,6 +218,16 @@ def _reject_foreign_references(payload: Mapping[str, Any]) -> None:
             )
 
 
+def _holds_literal_secret(value: Any) -> bool:
+    """Whether one released-field value is a plaintext secret in disguise.
+
+    Non-string values are *not* counted here: they are a type error the
+    contract layer reports precisely, not stored plaintext.
+    """
+
+    return isinstance(value, str) and value != "" and not is_secret_reference(value)
+
+
 def _reject_literal_released_secrets(payload: Mapping[str, Any]) -> None:
     """Refuse a literal value on any field that can be released to a browser.
 
@@ -233,15 +250,54 @@ def _reject_literal_released_secrets(payload: Mapping[str, Any]) -> None:
     precise type error instead of this one.
     """
 
-    for field in RELEASABLE_SECRET_FIELDS:
-        value = payload.get(field)
-        if not isinstance(value, str) or value == "" or is_secret_reference(value):
-            continue
+    for field in _literal_released_fields(payload):
         raise LiteralSecretValue(
             f"settings.{field} must be a secret:// reference or an empty string "
             "(empty means the channel is not configured); plaintext secrets are "
             "never stored in a monitor draft"
         )
+
+
+def _literal_released_fields(payload: Mapping[str, Any]) -> list[str]:
+    """Released fields currently holding a literal, in stable field order.
+
+    Single source of truth for the rule: the write-time rejection and the
+    read-time quarantine below must never drift apart.
+    """
+
+    return [
+        field
+        for field in sorted(RELEASABLE_SECRET_FIELDS)
+        if _holds_literal_secret(payload.get(field))
+    ]
+
+
+def quarantined_fields(payload: Mapping[str, Any] | None) -> list[str]:
+    """Which released fields of an existing payload hold plaintext.
+
+    Used by the read paths to decide that a stored record predates (or bypassed)
+    the no-plaintext rule and must therefore be redacted rather than served.
+    """
+
+    if not payload:
+        return []
+    return _literal_released_fields(payload)
+
+
+def redact_quarantined(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy with every plaintext released field replaced by the sentinel.
+
+    Operator-facing reads redact rather than fail: an operator still needs to
+    see and repair the rest of a legacy record. The sentinel is deliberately
+    not a valid ``secret://`` reference and not the empty string, so a
+    redacted value can never be mistaken for a managed or disabled channel —
+    and re-saving it is rejected by the write-time guard.
+    """
+
+    redacted = dict(payload)
+    for field in quarantined_fields(payload):
+        redacted[field] = QUARANTINE_SENTINEL
+    return redacted
 
 
 @dataclass(frozen=True, slots=True)
@@ -487,6 +543,46 @@ def _published_payload(
     if revision is None:
         return None, None
     return revision.version, revision.payload
+
+
+def quarantined_source_keys(
+    session: Session,
+    shop_pk: int,
+    source_versions: Mapping[str, str | None],
+) -> list[str]:
+    """Which of a delivery's source revisions hold plaintext released fields.
+
+    A frozen delivery legitimately carries plaintext (§4.3). What it must not
+    do is serve material that never came through ``config.runtime_config_secrets``.
+    The delivery row itself cannot tell the two apart — the plaintext looks the
+    same either way — so provenance is re-established from the source revisions
+    the delivery was frozen from.
+
+    Only non-sensitive config keys are returned; they are safe to log and to
+    show an operator, and they name exactly which record needs remediation.
+    """
+
+    dirty: list[str] = []
+    for layer, config_key in (
+        ("global", GLOBAL_DEFAULTS_KEY),
+        ("shop", shop_config_key(shop_pk)),
+    ):
+        version = source_versions.get(layer)
+        if version is None:
+            continue
+        # Source versions cross the delivery wire as canonical decimal strings
+        # (§5.2), while runtime_config_revisions.version is an integer column.
+        # Coerce explicitly: comparing the two directly raises
+        # "operator does not exist: integer = character varying".
+        revision = session.execute(
+            select(RuntimeConfigRevision).where(
+                RuntimeConfigRevision.config_key == config_key,
+                RuntimeConfigRevision.version == int(version),
+            )
+        ).scalar_one_or_none()
+        if revision is not None and quarantined_fields(revision.payload):
+            dirty.append(config_key)
+    return dirty
 
 
 def _compose(
@@ -820,6 +916,7 @@ def force_request_digest(shop_pk: int, expected_delivery_version: int) -> str:
 
 
 __all__ = [
+    "QUARANTINE_SENTINEL",
     "RELEASABLE_SECRET_FIELDS",
     "ConfigItemRetired",
     "DeliveryOutcome",
@@ -844,7 +941,10 @@ __all__ = [
     "publish_defaults",
     "publish_shop",
     "publish_shop_deliveries",
+    "quarantined_fields",
+    "quarantined_source_keys",
     "read_draft",
+    "redact_quarantined",
     "release_secret_references",
     "save_draft",
     "validate_draft_payload",

@@ -28,7 +28,11 @@ from tts_erp_v2.db.models.config import (
     RuntimeConfigRevision,
     RuntimeConfigSecret,
 )
-from tts_erp_v2.monitor_config.keys import ReservedConfigKeyError
+from tts_erp_v2.monitor_config.admin import redact_quarantined
+from tts_erp_v2.monitor_config.keys import (
+    ReservedConfigKeyError,
+    is_reserved_config_key,
+)
 from tts_erp_v2.monitor_config.keys import (
     ensure_generic_mutation_allowed as _refuse_monitor_key,
 )
@@ -301,14 +305,34 @@ def _published_out(sess: Session, item: RuntimeConfigItem) -> dict[str, Any]:
     }
 
 
+def _readable_payload(
+    config_key: str, payload: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Never echo a plaintext secret stored under a reserved monitor key.
+
+    The write path refuses literals, but a record written by an older build or
+    straight into the DB still holds clear-text Feishu secrets. Every generic
+    read below routes its payload through here so those fields come back as a
+    sentinel instead. Non-monitor keys are returned untouched: redaction is a
+    monitor-namespace concern, not a change to generic runtime-config
+    behaviour.
+    """
+
+    if payload is None or not is_reserved_config_key(config_key):
+        return payload
+    return redact_quarantined(payload)
+
+
 def _detail_out(sess: Session, item: RuntimeConfigItem) -> dict[str, Any]:
     revision = published_revision(sess, item)
     return {
         **_published_out(sess, item),
         "jsonSchema": item.json_schema,
-        "draftPayload": item.draft_payload,
+        "draftPayload": _readable_payload(item.config_key, item.draft_payload),
         "draftVersion": item.draft_version,
-        "publishedPayload": revision.payload if revision else None,
+        "publishedPayload": _readable_payload(
+            item.config_key, revision.payload if revision else None
+        ),
     }
 
 
@@ -330,6 +354,9 @@ def list_runtime_config_items(
     statement = select(RuntimeConfigItem).order_by(RuntimeConfigItem.config_key)
     if not include_retired:
         statement = statement.where(RuntimeConfigItem.retired_at.is_(None))
+    # `statement` is a bound-parameter select() built from ORM columns, never
+    # interpolated SQL; the analyzer flags it on the variable name alone.
+    # pi-lens-ignore: python-sql-injection
     items = sess.execute(statement).scalars()
     return {"items": [_published_out(sess, item) for item in items]}
 
@@ -481,7 +508,7 @@ def list_runtime_config_revisions(
         "items": [
             {
                 "version": row.version,
-                "payload": row.payload,
+                "payload": _readable_payload(row.config_key, row.payload),
                 "comment": row.comment,
                 "createdBy": row.created_by,
                 "createdAt": row.created_at.isoformat(),
@@ -609,7 +636,7 @@ def runtime_config_snapshot(
         assert revision is not None
         values[item.config_key] = {
             "version": revision.version,
-            "payload": revision.payload,
+            "payload": _readable_payload(item.config_key, revision.payload),
         }
         versions[item.config_key] = revision.version
     etag_material = {"versions": versions}
@@ -637,6 +664,9 @@ def list_runtime_config_secrets(
     statement = select(RuntimeConfigSecret).order_by(RuntimeConfigSecret.name)
     if not include_retired:
         statement = statement.where(RuntimeConfigSecret.retired_at.is_(None))
+    # `statement` is a bound-parameter select() built from ORM columns, never
+    # interpolated SQL; the analyzer flags it on the variable name alone.
+    # pi-lens-ignore: python-sql-injection
     rows = sess.execute(statement).scalars()
     return {
         "items": [

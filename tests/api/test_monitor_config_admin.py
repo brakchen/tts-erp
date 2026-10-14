@@ -1004,3 +1004,164 @@ def test_generic_runtime_snapshot_never_decrypts_monitor_secrets(
     raw = api_client.get("/v2/config/runtime/snapshot", headers=_auth(rw)).text
     assert f"secret://{HOOK_SECRET}" in raw
     assert HOOK_PLAINTEXT not in raw
+
+
+# ─── 存量明文载荷的读取面（Terra P1-3）──────────────────────────
+#
+# 写入口已拒绝字面量，但旧构建或直接写库可能已经留下明文草稿、已发布
+# revision 与由此冻结的交付快照。这些读取面必须一致地脱敏或 fail closed，
+# 绝不能把明文回显给 readwrite 调用方或插件。
+
+LEGACY_WEBHOOK = "https://open.feishu.cn/hook/LEGACY_PLAINTEXT_LEAK"
+LEGACY_APP_SECRET = "LEGACY_PLAINTEXT_APP_SECRET"
+
+
+def _seed_legacy_defaults(client: TestClient, *, with_published: bool) -> None:
+    """Write a legacy monitor.defaults row straight into the DB (as an old build would)."""
+
+    payload = _complete_settings(
+        feishuWebhookUrl=LEGACY_WEBHOOK, feishuAppSecret=LEGACY_APP_SECRET
+    )
+    with _session(client) as session:
+        session.add(
+            RuntimeConfigItem(
+                config_key="monitor.defaults",
+                display_name="TEST monitor defaults",
+                json_schema=admin.defaults_settings_schema(),
+                draft_payload=payload,
+                draft_version=1,
+                published_version=1 if with_published else None,
+            )
+        )
+        if with_published:
+            session.add(
+                RuntimeConfigRevision(
+                    config_key="monitor.defaults",
+                    version=1,
+                    payload=payload,
+                    created_by="TEST_legacy_actor",
+                )
+            )
+        session.commit()
+
+
+def test_admin_defaults_draft_redacts_a_legacy_plaintext_secret(
+    api_client, keys, shops, secrets
+) -> None:
+    _seed_legacy_defaults(api_client, with_published=True)
+    rw = keys["readwrite"]
+    body = api_client.get(DEFAULTS_DRAFT, headers=_auth(rw)).json()
+    assert body["draftPayload"]["feishuWebhookUrl"] == admin.QUARANTINE_SENTINEL
+    assert body["publishedPayload"]["feishuAppSecret"] == admin.QUARANTINE_SENTINEL
+    # 字段名可安全展示（运维修复需要知道改哪一项），值不可。
+    assert body["quarantinedFields"] == ["feishuAppSecret", "feishuWebhookUrl"]
+
+    raw = api_client.get(DEFAULTS_DRAFT, headers=_auth(rw)).text
+    assert LEGACY_WEBHOOK not in raw
+    assert LEGACY_APP_SECRET not in raw
+
+
+def test_admin_shop_draft_redacts_a_legacy_plaintext_secret(
+    api_client, keys, shops, secrets
+) -> None:
+    with _session(api_client) as session:
+        session.add(
+            RuntimeConfigItem(
+                config_key=f"monitor.shop.{shops['b']}",
+                display_name="TEST shop b",
+                json_schema=admin.override_settings_schema(),
+                draft_payload={"feishuSigningSecret": LEGACY_APP_SECRET},
+                draft_version=1,
+            )
+        )
+        session.commit()
+    raw = api_client.get(
+        f"{ADMIN}/shops/{shops['b']}/draft", headers=_auth(keys["readwrite"])
+    ).text
+    assert LEGACY_APP_SECRET not in raw
+
+
+def test_generic_runtime_reads_never_echo_a_monitor_plaintext_secret(
+    api_client, keys, shops, secrets
+) -> None:
+    """通用 /v2/config/runtime/* 读取面同样不得回显明文。"""
+
+    _seed_legacy_defaults(api_client, with_published=True)
+    rw = keys["readwrite"]
+    for url in (
+        "/v2/config/runtime/items/monitor.defaults",
+        "/v2/config/runtime/items/monitor.defaults/revisions",
+        "/v2/config/runtime/snapshot",
+    ):
+        raw = api_client.get(url, headers=_auth(rw)).text
+        assert LEGACY_WEBHOOK not in raw, url
+        assert LEGACY_APP_SECRET not in raw, url
+
+
+def test_generic_runtime_reads_do_not_redact_other_config_keys(
+    api_client, keys, shops, secrets
+) -> None:
+    """脱敏只作用于 monitor 命名空间，不得改变其他配置的读取语义。"""
+
+    with _session(api_client) as session:
+        session.add(
+            RuntimeConfigItem(
+                config_key="video_publish.probe_nonmonitor",
+                display_name="TEST non-monitor",
+                json_schema={"type": "object"},
+                draft_payload={"feishuWebhookUrl": LEGACY_WEBHOOK},
+                draft_version=1,
+            )
+        )
+        session.commit()
+    body = api_client.get(
+        "/v2/config/runtime/items/video_publish.probe_nonmonitor",
+        headers=_auth(keys["readwrite"]),
+    ).json()
+    assert body["draftPayload"]["feishuWebhookUrl"] == LEGACY_WEBHOOK
+
+
+def test_delivery_get_fails_closed_on_a_quarantined_source_revision(
+    api_client, keys, shops, secrets
+) -> None:
+    """由明文 revision 冻结出的交付不得下发：fail closed，绝不回显明文。"""
+
+    _seed_legacy_defaults(api_client, with_published=True)
+    # The frozen payload itself is healthy (references were resolved at
+    # publish time); what makes this delivery unservable is the *source
+    # revision* it was frozen from. Using the real primitive also creates the
+    # MonitorShopState pointer the read path follows.
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    with _session(api_client) as session:
+        publish_delivery(
+            session,
+            shop_pk=shops["a"],
+            payload=_complete_settings(),
+            source_global_version=1,
+            source_shop_version=None,
+            created_by="TEST_legacy_actor",
+        )
+        session.commit()
+
+    response = _delivery(api_client, keys["monitor"], SHOP_A)
+    assert response.status_code == 503
+    assert LEGACY_WEBHOOK not in response.text
+    assert LEGACY_APP_SECRET not in response.text
+    assert "monitor.defaults" in response.json()["detail"]
+
+
+def test_delivery_get_still_serves_a_managed_delivery(
+    api_client, keys, shops, secrets
+) -> None:
+    """引用写法的交付照常下发，确保 fail closed 不误伤正常路径。"""
+
+    rw = keys["readwrite"]
+    _put_defaults(api_client, rw)
+    _publish_defaults(api_client, rw, expected=1)
+    _publish_shop(api_client, rw, shops["a"])
+    response = _delivery(api_client, keys["monitor"], SHOP_A)
+    assert response.status_code == 200
+    assert response.json()["current"]["payload"]["settings"]["feishuWebhookUrl"] == (
+        HOOK_PLAINTEXT
+    )

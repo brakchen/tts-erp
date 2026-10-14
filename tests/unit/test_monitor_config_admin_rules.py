@@ -477,3 +477,180 @@ def test_concurrent_first_shop_draft_is_a_conflict_not_a_crash(db_engine) -> Non
         with Session(db_engine) as cleanup:
             cleanup.execute(delete(ChannelAccount).where(ChannelAccount.id == shop_pk))
             cleanup.commit()
+
+
+# ─── 存量明文载荷的隔离与脱敏（Terra P1-3）──────────────────────
+#
+# 写入口已经拒绝字面量，但**存量数据**可能来自旧构建或直接写库：草稿、
+# 已发布 revision、以及由它冻结出的交付快照。读取面必须一致地脱敏，
+# 绝不把明文回显给 readwrite 调用方或插件。
+
+
+def test_quarantined_fields_lists_every_literal_released_field() -> None:
+    payload = _complete(
+        feishuWebhookUrl="https://open.feishu.cn/hook/LEGACY_LEAK",
+        feishuAppSecret="LEGACY_APP_SECRET",
+    )
+    assert admin.quarantined_fields(payload) == [
+        "feishuAppSecret",
+        "feishuWebhookUrl",
+    ]
+
+
+def test_quarantined_fields_is_empty_for_a_managed_payload() -> None:
+    """引用与空串都是合规写法，不算隔离对象。"""
+
+    assert admin.quarantined_fields(_complete()) == []
+    empty = _complete()
+    for field in admin.RELEASABLE_SECRET_FIELDS:
+        empty[field] = ""
+    assert admin.quarantined_fields(empty) == []
+
+
+def test_redact_quarantined_replaces_literals_with_a_sentinel() -> None:
+    payload = _complete(
+        feishuWebhookUrl="https://open.feishu.cn/hook/LEGACY_LEAK",
+        feishuSigningSecret=f"secret://{SECRET_A}",
+    )
+    redacted = admin.redact_quarantined(payload)
+    assert redacted["feishuWebhookUrl"] == admin.QUARANTINE_SENTINEL
+    # 引用与业务字段原样保留，管理员仍能看见并修复其余部分。
+    assert redacted["feishuSigningSecret"] == f"secret://{SECRET_A}"
+    assert redacted["globalThreshold"] == payload["globalThreshold"]
+
+
+def test_redact_quarantined_does_not_mutate_its_input() -> None:
+    payload = _complete(feishuAppSecret="LEGACY_APP_SECRET")
+    admin.redact_quarantined(payload)
+    assert payload["feishuAppSecret"] == "LEGACY_APP_SECRET"
+
+
+def test_redact_quarantined_keeps_an_absent_field_absent() -> None:
+    """覆盖草稿没有这些字段时不得凭空造出哨兵值。"""
+
+    redacted = admin.redact_quarantined({"globalThreshold": "1.0"})
+    assert set(redacted) == {"globalThreshold"}
+
+
+def test_quarantine_detection_agrees_with_the_write_time_rejection() -> None:
+    """隔离判定与写入口的拒绝必须是同一条规则，不能各说各话。"""
+
+    payload = _complete(feishuWebhookUrl="LEGACY_LITERAL")
+    with pytest.raises(admin.LiteralSecretValue):
+        admin.validate_draft_payload(GLOBAL_DEFAULTS_KEY, payload)
+    assert admin.quarantined_fields(payload) == ["feishuWebhookUrl"]
+
+
+def test_redacted_sentinel_cannot_be_saved_back() -> None:
+    """哨兵值必须重新被写入口拒绝。
+
+    否则管理员把 GET 到的脱敏结果原样 POST 回去，就能把一个标记当成配置写进
+    草稿，隔离就会变成自我延续的静默损坏。
+    """
+
+    payload = _complete(feishuWebhookUrl="https://open.feishu.cn/hook/LEGACY_LEAK")
+    redacted = admin.redact_quarantined(payload)
+    with pytest.raises(admin.LiteralSecretValue):
+        admin.validate_draft_payload(GLOBAL_DEFAULTS_KEY, redacted)
+
+
+def test_quarantined_source_keys_flags_a_literal_source_revision(db_session) -> None:
+    """交付快照无法自证来源，必须回查它冻结时的源 revision。"""
+
+    from sqlalchemy import delete
+
+    from tts_erp_v2.db.models.config import (
+        RuntimeConfigItem,
+        RuntimeConfigRevision,
+    )
+
+    db_session.add(
+        RuntimeConfigItem(
+            config_key=GLOBAL_DEFAULTS_KEY,
+            display_name="TEST defaults",
+            json_schema=admin.defaults_settings_schema(),
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        RuntimeConfigRevision(
+            config_key=GLOBAL_DEFAULTS_KEY,
+            version=1,
+            payload=_complete(feishuWebhookUrl="https://open.feishu.cn/hook/LEGACY"),
+            created_by="TEST_actor",
+        )
+    )
+    db_session.flush()
+
+    try:
+        assert admin.quarantined_source_keys(
+            db_session, 7, {"global": "1", "shop": None}
+        ) == [GLOBAL_DEFAULTS_KEY]
+        # None 层不参与判定；干净版本也不该被误报。
+        assert (
+            admin.quarantined_source_keys(db_session, 7, {"global": None, "shop": None})
+            == []
+        )
+        assert (
+            admin.quarantined_source_keys(db_session, 7, {"global": "99", "shop": None})
+            == []
+        )
+    finally:
+        db_session.execute(
+            delete(RuntimeConfigRevision).where(
+                RuntimeConfigRevision.config_key == GLOBAL_DEFAULTS_KEY
+            )
+        )
+        db_session.execute(
+            delete(RuntimeConfigItem).where(
+                RuntimeConfigItem.config_key == GLOBAL_DEFAULTS_KEY
+            )
+        )
+        db_session.flush()
+
+
+def test_quarantined_source_keys_ignores_a_managed_source_revision(db_session) -> None:
+    """引用写法是正常路径，绝不能被误判为隔离。"""
+
+    from sqlalchemy import delete
+
+    from tts_erp_v2.db.models.config import (
+        RuntimeConfigItem,
+        RuntimeConfigRevision,
+    )
+
+    db_session.add(
+        RuntimeConfigItem(
+            config_key=GLOBAL_DEFAULTS_KEY,
+            display_name="TEST defaults",
+            json_schema=admin.defaults_settings_schema(),
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        RuntimeConfigRevision(
+            config_key=GLOBAL_DEFAULTS_KEY,
+            version=1,
+            payload=_complete(),
+            created_by="TEST_actor",
+        )
+    )
+    db_session.flush()
+
+    try:
+        assert (
+            admin.quarantined_source_keys(db_session, 7, {"global": "1", "shop": None})
+            == []
+        )
+    finally:
+        db_session.execute(
+            delete(RuntimeConfigRevision).where(
+                RuntimeConfigRevision.config_key == GLOBAL_DEFAULTS_KEY
+            )
+        )
+        db_session.execute(
+            delete(RuntimeConfigItem).where(
+                RuntimeConfigItem.config_key == GLOBAL_DEFAULTS_KEY
+            )
+        )
+        db_session.flush()

@@ -97,7 +97,26 @@ def monitor_delivery_config(
     if view is None:
         raise HTTPException(status_code=404, detail="no published configuration")
 
-    # 4. Only now may If-None-Match short-circuit the body.
+    # 4. Fail closed on a delivery frozen from a quarantined source revision.
+    #    A delivery legitimately carries plaintext (§4.3), but it must come
+    #    from config.runtime_config_secrets. The row itself cannot show that,
+    #    so provenance is re-checked against the source revisions. This sits
+    #    ahead of the conditional comparison on purpose: a quarantined delivery
+    #    must never be downgraded into a 304 that the plugin would keep using.
+    quarantined = admin.quarantined_source_keys(
+        sess, shop.id, view.envelope.current.source_versions
+    )
+    if quarantined:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "delivery source revision is quarantined for plaintext secrets; "
+                "republish after moving them to secret:// references: "
+                + ", ".join(quarantined)
+            ),
+        )
+
+    # 5. Only now may If-None-Match short-circuit the body.
     if is_not_modified(request.headers.get("if-none-match"), view.etag):
         return Response(status_code=304, headers=delivery_headers(view.etag))
     return JSONResponse(content=view.body, headers=delivery_headers(view.etag))
@@ -148,15 +167,36 @@ def _actor(request: Request) -> str:
     return "browser-session"
 
 
+def _readable_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Redact plaintext secrets from a stored payload, tolerating ``None``."""
+
+    return None if payload is None else admin.redact_quarantined(payload)
+
+
 def _draft_out(view: admin.DraftView) -> dict[str, Any]:
+    """Serialize one draft, redacting plaintext secrets from legacy records.
+
+    Operator-facing reads redact rather than refuse: the operator still has to
+    see and repair the rest of a legacy record. ``quarantinedFields`` names the
+    fields that need remediation using field names only — never values — so it
+    is safe to render and to log.
+    """
+
+    quarantined = sorted(
+        {
+            *admin.quarantined_fields(view.draft_payload),
+            *admin.quarantined_fields(view.published_payload),
+        }
+    )
     return {
         "configKey": view.config_key,
-        "draftPayload": view.draft_payload,
+        "draftPayload": _readable_payload(view.draft_payload),
         "draftVersion": view.draft_version,
         "publishedVersion": view.published_version,
-        "publishedPayload": view.published_payload,
+        "publishedPayload": _readable_payload(view.published_payload),
         "publishedAt": view.published_at.isoformat() if view.published_at else None,
         "updatedAt": view.updated_at.isoformat() if view.updated_at else None,
+        "quarantinedFields": quarantined,
     }
 
 
