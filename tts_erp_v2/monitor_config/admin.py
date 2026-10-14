@@ -548,9 +548,9 @@ def _published_payload(
 def quarantined_source_keys(
     session: Session,
     shop_pk: int,
-    source_versions: Mapping[str, str | None],
+    *source_versions: Mapping[str, str | None],
 ) -> list[str]:
-    """Which of a delivery's source revisions hold plaintext released fields.
+    """Which source revisions hold plaintext released fields.
 
     A frozen delivery legitimately carries plaintext (§4.3). What it must not
     do is serve material that never came through ``config.runtime_config_secrets``.
@@ -558,11 +558,46 @@ def quarantined_source_keys(
     same either way — so provenance is re-established from the source revisions
     the delivery was frozen from.
 
+    Accepts more than one delivery block: ``current`` and the retained
+    ``force.target`` are separate rows with separate provenance, and §5.4 keeps
+    an older force directive alive precisely so offline browsers can still apply
+    it. Checking only the current block would let a legacy force target through.
+
     Only non-sensitive config keys are returned; they are safe to log and to
     show an operator, and they name exactly which record needs remediation.
     """
 
-    dirty: list[str] = []
+    dirty: set[str] = set()
+    for versions in source_versions:
+        dirty.update(_quarantined_keys_for(session, shop_pk, versions))
+    return sorted(dirty)
+
+
+def quarantined_delivery_sources(
+    session: Session,
+    shop_pk: int,
+    envelope: contracts.DeliveryEnvelope,
+) -> list[str]:
+    """Every source revision behind the served envelope, force target included.
+
+    The wrapper the delivery route uses, so no caller can forget the retained
+    force block.
+    """
+
+    blocks = [envelope.current.source_versions]
+    if envelope.force is not None:
+        blocks.append(envelope.force.target.source_versions)
+    return quarantined_source_keys(session, shop_pk, *blocks)
+
+
+def _quarantined_keys_for(
+    session: Session,
+    shop_pk: int,
+    source_versions: Mapping[str, str | None],
+) -> set[str]:
+    """Released fields held in plaintext by one delivery block's sources."""
+
+    dirty: set[str] = set()
     for layer, config_key in (
         ("global", GLOBAL_DEFAULTS_KEY),
         ("shop", shop_config_key(shop_pk)),
@@ -581,7 +616,7 @@ def quarantined_source_keys(
             )
         ).scalar_one_or_none()
         if revision is not None and quarantined_fields(revision.payload):
-            dirty.append(config_key)
+            dirty.add(config_key)
     return dirty
 
 
@@ -941,6 +976,7 @@ __all__ = [
     "publish_defaults",
     "publish_shop",
     "publish_shop_deliveries",
+    "quarantined_delivery_sources",
     "quarantined_fields",
     "quarantined_source_keys",
     "read_draft",

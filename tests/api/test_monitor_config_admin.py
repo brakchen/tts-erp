@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.commerce import ChannelAccount
@@ -293,11 +293,16 @@ def _force(
     return client.post(f"{ADMIN}/shops/{shop_pk}/force", json=body, headers=_auth(key))
 
 
-def _delivery(client: TestClient, key: str, seller: str) -> Any:
+def _delivery(
+    client: TestClient, key: str, seller: str, *, etag: str | None = None
+) -> Any:
+    headers = {"Authorization": f"Bearer {key}"}
+    if etag is not None:
+        headers["If-None-Match"] = etag
     return client.get(
         DELIVERY_URL,
         params={"sellerId": seller},
-        headers={"Authorization": f"Bearer {key}"},
+        headers=headers,
     )
 
 
@@ -1165,3 +1170,141 @@ def test_delivery_get_still_serves_a_managed_delivery(
     assert response.json()["current"]["payload"]["settings"]["feishuWebhookUrl"] == (
         HOOK_PLAINTEXT
     )
+
+
+# ─── 保留的强制指令目标同样要过隔离检查（Terra P1-4）───────────
+#
+# force.target 是**另一条**交付行（state.last_force_version），有自己的
+# source_versions 和自己的明文 payload。只查 current 会让一条由存量明文
+# revision 冻结出来的强制指令照样下发——正是 §5.4「保留旧强制目标」所要
+# 支持的离线场景。
+
+
+def _seed_legacy_force_scenario(client: TestClient, shop_pk: int) -> None:
+    """monitor.defaults: v1 含明文（旧构建），v2 合规；交付 v1 强制、v2 当前。"""
+
+    from tts_erp_v2.monitor_config.delivery import publish_delivery
+
+    legacy = _complete_settings(
+        feishuWebhookUrl=LEGACY_WEBHOOK, feishuAppSecret=LEGACY_APP_SECRET
+    )
+    managed = _complete_settings()
+    with _session(client) as session:
+        session.add(
+            RuntimeConfigItem(
+                config_key="monitor.defaults",
+                display_name="TEST monitor defaults",
+                json_schema=admin.defaults_settings_schema(),
+                draft_payload=managed,
+                draft_version=2,
+                published_version=2,
+            )
+        )
+        session.add(
+            RuntimeConfigRevision(
+                config_key="monitor.defaults",
+                version=1,
+                payload=legacy,
+                created_by="TEST_legacy_actor",
+            )
+        )
+        session.add(
+            RuntimeConfigRevision(
+                config_key="monitor.defaults",
+                version=2,
+                payload=managed,
+                created_by="TEST_actor",
+            )
+        )
+        session.flush()
+        # v1 首次纳管 -> v2 强制指令 -> v3 普通发布。§5.4：普通发布不删除
+        # 尚可能被离线插件看到的强制指令，所以 last_force 停在 v2 而 current
+        # 前进到 v3 —— 正是「current 合规、force 目标另行冻结」的真实形态。
+        publish_delivery(
+            session,
+            shop_pk=shop_pk,
+            payload=managed,
+            source_global_version=2,
+            source_shop_version=None,
+            created_by="TEST_actor",
+        )
+        publish_delivery(
+            session,
+            shop_pk=shop_pk,
+            payload=managed,
+            source_global_version=2,
+            source_shop_version=None,
+            created_by="TEST_actor",
+            is_force=True,
+            request_id=uuid.uuid4(),
+            request_digest="sha256:force-seed",
+        )
+        publish_delivery(
+            session,
+            shop_pk=shop_pk,
+            payload=managed,
+            source_global_version=2,
+            source_shop_version=None,
+            created_by="TEST_actor",
+        )
+        session.commit()
+
+
+def test_force_target_from_a_legacy_revision_is_not_served(
+    api_client, keys, shops, secrets
+) -> None:
+    """current 合规、force 目标来源含明文时：503，且绝不回显明文。"""
+
+    _seed_legacy_force_scenario(api_client, shops["a"])
+    # 把强制目标的来源改指到含明文的 v1；payload/hash/version 不变，
+    # 因此 ETag 也不变——正好证明隔离检查与条件请求无关。
+    with _session(api_client) as session:
+        session.execute(
+            update(MonitorConfigDelivery)
+            .where(MonitorConfigDelivery.shop_pk == shops["a"])
+            .where(MonitorConfigDelivery.version == 2)
+            .values(source_global_version=1)
+        )
+        session.commit()
+
+    response = _delivery(api_client, keys["monitor"], SHOP_A)
+    assert response.status_code == 503
+    assert LEGACY_WEBHOOK not in response.text
+    assert LEGACY_APP_SECRET not in response.text
+    assert "monitor.defaults" in response.json()["detail"]
+
+
+def test_matching_etag_cannot_downgrade_a_legacy_force_target(
+    api_client, keys, shops, secrets
+) -> None:
+    """current 合规、force 目标来源含明文时：即使带正确 ETag 也必须 503 + 空正文。
+
+    若隔离检查排在条件请求之后，带 ETag 的请求会被降级成 304，插件便继续
+    沿用那份含明文的强制目标。
+    """
+
+    _seed_legacy_force_scenario(api_client, shops["a"])
+
+    # 先在两侧都合规时取一个真实 ETag。
+    warm = _delivery(api_client, keys["monitor"], SHOP_A)
+    assert warm.status_code == 200
+    etag = warm.headers["etag"]
+
+    with _session(api_client) as session:
+        session.execute(
+            update(MonitorConfigDelivery)
+            .where(MonitorConfigDelivery.shop_pk == shops["a"])
+            .where(MonitorConfigDelivery.version == 2)
+            .values(source_global_version=1)
+        )
+        session.commit()
+
+    response = _delivery(api_client, keys["monitor"], SHOP_A, etag=etag)
+    assert response.status_code == 503
+    assert "ETag" not in response.headers, "不得对隔离中的交付签发 ETag"
+    assert LEGACY_WEBHOOK not in response.text
+    assert LEGACY_APP_SECRET not in response.text
+    # 正文里不得出现任何交付内容（current/force/payload/settings）；
+    # 只允许带非敏感修复提示的 detail。
+    assert set(response.json()) == {"detail"}
+    assert "monitor.defaults" in response.json()["detail"]

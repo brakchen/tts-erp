@@ -100,12 +100,13 @@ def monitor_delivery_config(
     # 4. Fail closed on a delivery frozen from a quarantined source revision.
     #    A delivery legitimately carries plaintext (§4.3), but it must come
     #    from config.runtime_config_secrets. The row itself cannot show that,
-    #    so provenance is re-checked against the source revisions. This sits
-    #    ahead of the conditional comparison on purpose: a quarantined delivery
-    #    must never be downgraded into a 304 that the plugin would keep using.
-    quarantined = admin.quarantined_source_keys(
-        sess, shop.id, view.envelope.current.source_versions
-    )
+    #    so provenance is re-checked against the source revisions. BOTH the
+    #    current block and the retained force target are checked: they are
+    #    separate rows with separate provenance, and §5.4 deliberately keeps an
+    #    older force directive alive for offline browsers. This sits ahead of
+    #    the conditional comparison so a quarantined delivery can never be
+    #    downgraded into a 304 the plugin would keep using.
+    quarantined = admin.quarantined_delivery_sources(sess, shop.id, view.envelope)
     if quarantined:
         raise HTTPException(
             status_code=503,

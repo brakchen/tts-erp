@@ -298,7 +298,7 @@ If-None-Match: W/"monitor-example-validator"
 - **存量明文载荷的读取面（fail closed / 脱敏）**：写入口拒绝字面量，但旧构建或直接写库可能已留下明文草稿、已发布 revision 与由此冻结的交付。规则与写入口**共用同一条判定**（`_holds_literal_secret`）：
   - 面向管理员的读取（`/v2/monitor/admin/*/draft`）**脱敏**为哨兵 `__quarantined_plaintext_secret__`，并用 `quarantinedFields`（仅字段名）告知待修项；运维修复仍需看到并编辑其余部分。哨兵既不是合法 `secret://` 引用也不是空串，原样回写会被写入口拒绝，避免隔离自我延续。
   - 通用读取（`/v2/config/runtime/items/{key}`、`/revisions`、`/snapshot`）对 `monitor.*` 同样脱敏；非 monitor 键语义不变。
-  - 下发 GET **fail closed（503）**：交付快照本身可以合法地携带明文（§4.3），但那必须来自 `config.runtime_config_secrets`。交付行无法自证来源（两种情况下明文长得一样），因此回查它冻结时的源 revision；源 revision 含明文则 503 且不返回正文。该检查**位于条件请求之前**，避免被降级成 304 让插件继续沿用。503 对插件等同其他 5xx（§7.2：只记日志、保留本地配置），不会中断监控。
+  - 下发 GET **fail closed（503）**：交付快照本身可以合法地携带明文（§4.3），但那必须来自 `config.runtime_config_secrets`。交付行无法自证来源（两种情况下明文长得一样），因此回查它冻结时的源 revision；源 revision 含明文则 503 且不返回正文。**必须同时查 `current` 与保留的 `force.target`**：二者是两条独立的交付行、有各自的 provenance，而 §5.4 刻意保留较旧的强制指令供离线浏览器应用——只查 current 会让存量 force 目标照样下发。该检查**位于条件请求之前**，且不签发 `ETag`，避免被降级成 304 让插件继续沿用。503 对插件等同其他 5xx（§7.2：只记日志、保留本地配置），不会中断监控。
 - **锁顺序**：全局行 → 按 `shop_pk` 升序的店铺配置行 → 按 `shop_pk` 升序的店铺 state 行；全局发布与单店发布使用同一顺序。
 - **回滚**：任一店铺合成失败则整次全局发布回滚，不留下半份 revision 或半推进的指针。
 
@@ -306,7 +306,9 @@ If-None-Match: W/"monitor-example-validator"
 
 #### 6.3.2 存量明文密钥的排查与修复（运维手册）
 
-本特性的写入口已拒绝明文，但**上一轮构建或直接写库**可能已经留下明文飞书字段。以下流程**只做非破坏性修复**，不包含任何生产 `DELETE` / `UPDATE` / 迁移。
+本特性的写入口已拒绝明文，但**上一轮构建或直接写库**可能已经留下明文飞书字段。以下流程是**非破坏性且保留历史**的：它不执行任何生产 `DELETE` / `TRUNCATE` / 不可逆 `UPDATE` / 迁移，也不删除任何已发布 revision。
+
+但请注意：**本手册并非只读**。只有第 1 步是只读排查；第 3、4 步会**真实写入**（`PUT /v2/config/runtime/secrets/{name}` 写入加密 secret、`PUT .../draft` 改写草稿、`POST .../publish` 发布新 revision）。请把它理解为“只使用受支持的写入口、且不破坏既有历史”，而不是“无需写入”。涉及密钥轮换的第 2 步则是厂商侧动作，不在本仓数据面内。
 
 **第 1 步 · 排查（只读）**
 
@@ -344,7 +346,13 @@ POST /v2/monitor/admin/defaults/publish     → expectedDraftVersion + comment
 
 **残留风险（如实告知）**：已发布的历史 revision 是不可变的，**仍保留原明文**。本特性不删除它们（§5.4/§5.3 的历史不可变原则），而是让所有读取面一律脱敏。若需要彻底清除历史明文，需另开一个显式的数据清理变更并经人工授权，不属于本手册。
 
-`docs/api/external-api.md` 的角色矩阵仍需补上 `/v2/monitor/admin/* = readwrite` 一行，以及这四个飞书字段只接受 `secret://` 引用或空串的写入约束；该文件归 `video-publish-design` lane（`docs/{api,architecture,design,ops,schema}`），**不在**本 lane 的 owned files 内，按 AGENTS.md §7 未擅改。本条需由该 lane owner 补齐，或在它 ready 后开 successor lane。
+`docs/api/external-api.md` 已经有一个 “Monitor remote configuration (`/v2/monitor/config`)” 小节及其 endpoint 清单表，但内容停在阶段 B，**现已过期**：
+
+- 该小节结尾写着 `Status: Phase B read path only. Publish/admin endpoints (§6.3) are not yet exposed.` —— 阶段 C 已经把这 6 个管理接口挂上了，这句话不再成立。
+- 缺的是：把 `GET/PUT /v2/monitor/admin/defaults/draft`、`POST /v2/monitor/admin/defaults/publish`、`GET/PUT /v2/monitor/admin/shops/{shop_pk}/draft`、`POST /v2/monitor/admin/shops/{shop_pk}/publish`、`POST /v2/monitor/admin/shops/{shop_pk}/force`、`GET /v2/monitor/admin/shops` 补进该清单表（角色 `readwrite`，且 monitor 专用 token 不可调用），并补上四个飞书字段只接受 `secret://` 引用或空串、存量明文一律脱敏/503 的语义。
+- **不需要**改动的一点：CORS 尚未配置（monitor origin / `If-None-Match` / `ETag` 暴露）的描述**依然准确**，仍属部署前置。
+
+该文件归 `video-publish-design` lane（`docs/{api,architecture,design,ops,schema}`，当前仍为 `active`），**不在**本 lane 的 owned files 内，按 AGENTS.md §7 未擅改。需由该 lane owner 补齐，或在它 ready 后开 successor lane。
 
 必须核对 app 的 CORS 配置。当前 `tts_erp_v2/app.py` 的 `DEFAULT_CORS_ALLOW_HEADERS` 是
 `Authorization` / `X-API-Key` / `X-Request-Id` / `Content-Type`，**不含 `If-None-Match`**，
