@@ -93,10 +93,19 @@ owner 在最终审核重新从原 Pi 会话消息 `043834da`、`7ecdee03` 提取
 6. **依赖审计基线**：`npm ci --include=dev` 报 **30 vulnerabilities（7 moderate / 16 high / 7 critical）** 与旧 tar/glob 弃用警告；剔除包自身版本后 lockfile JSON 与 e49d00b 完全一致，未新增依赖风险。此为 npm 摘要，不等同已确认运行期可利用漏洞；需独立依赖维护任务逐项 triage，不在本轮自动 audit fix/升级。TowerDo `f-97be4a56-b03`。
 7. **集成边界**：远程配置 lane 同时涉及 background/storage，未将其未合并代码混入此分支。最终实现与当前 e49d00b master 对齐；未来 master 非文档变化后必须重新同步验证，不能直接复用本次检查。
 
-## 6. 交付状态与后续验收
+## 6. 离线审核完成时的交付状态（合并前历史）
 
 - 源码：最终 a9aae99 已普通 push 到独立插件 task branch，保留旧接口，不推插件 master、不推进父仓 gitlink。
 - 文档：本目录三个文档由父仓分支提交推送；registry 记录该文档 HEAD 与同步 master。父仓存在更早 ready lanes，本轮不越过默认 FIFO 合并顺序；文档分支保留待集成，插件分支保留供实店验证/后续合入。
 - 本次审核 stop state：**离线协议兼容切片 done；实店/部署 needs-verification**。证据强度 B：直接目标及旧行为回归通过，保留明确私有 API/浏览器/审计风险。
 - 下一步价值最高的验证：人工在已授权店铺确认 v2 的 active-only 过滤及完整分页，先只读，不用自动关闭试探服务端支持。若不支持则报告不支持并回到 owner 决策，不新增 fallback。
 - 回滚：独立插件按需 revert 本任务两个提交；无持久化 schema 迁移或源数据清理，不涉及生产数据恢复。
+
+## 7. 用户授权后的合并追记（2026-10-14）
+
+用户在离线终审报告后明确要求“完成了就合并并且推送”。本次据此集成此已验证 lane，覆盖默认等待 FIFO 的此前交付安排；不集成其他 ready lanes，不推进父仓插件 gitlink，不部署、不进行真实广告操作。
+
+- 插件：从最新 e49d00b master 构造 `--no-ff` 合并提交 **`68ecacd58d9be8cb04582f6e4939743d9a4f2ef7`**，树与 a9aae99 完全相同；已普通 push 至 `brakchen/ads-monitor` 的 master，并读回远端 SHA 一致。
+- 对该精确插件合并提交重新安装依赖，focused 59 passed、全量 409 passed、coverage 97.35/93.73/98.34/97.35、tsc、生产 build、diff check 全部 exit 0。日志：`/tmp/monitor-api-master-merge-01a13a78/plugin-{integration,install,focused,test,coverage,tsc,build}.log`。
+- 父仓：从记录的 ready HEAD e65edc1 合入最新 master，另提交本追记与本 lane registry 清理；只含本目录文档和 registry，不含 Python、tests 或 gitlink 变更。精确 prospective master 需重新检查本地文档链接、抓包 hash 与差异，成功后才普通推送。最终 master SHA 以 Git merge/cleanup 历史及远端读回为准，避免文档自引用 commit hash。
+- §5 的实店 active-filter、真实浏览器、旧静态规则与依赖审计风险继续存在；合并成功不表示这些项目已验证。
