@@ -1,17 +1,20 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "status-erp-core + status-monitor-core",
+  "currentTodo": "status-erp-runtime + status-monitor-runtime",
   "completedTodos": [
-    "status-impl-plan"
+    "status-impl-plan",
+    "status-erp-core",
+    "status-monitor-core"
   ],
-  "activeSlice": "core-spec7 BLOCKED：完整持久化封套未计容量；seq宽度及有限超大等待sentinel已交付",
+  "activeSlice": "Core spec8/quality1最终JSON均OK；已推送ERP f2c0fa7/plugin718c83e；原workflow进入runtime两worker",
   "evidenceRefs": [
-    "owner queue storage probe exit0：985合法8-result条目，accounted2097028，分配后JSON实际2133524>2097152，19位seq隔离宽度影响",
-    "23ebd1e6 owner gate要求完整UTF8 JSON队列上界；旧maximal零result样例不能证明容量不可达",
-    "prepared真实enqueue/assignment全路径独立验证脚本/tmp/plugin-status-owner-queue-storage-bound-verify-01a1406d.ts，尚未运行，非GREEN证据"
+    "owner real enqueue/all assignments967条，actual peak2095540<=2097152，超量入队拒绝；queue-storage-bound-green.log exit0",
+    "fresh owner112/112+tsc exit0；ERP isolated100%且clone dropped，ruff/format exit0；LSP有1silentinconclusive并非全clean",
+    "explicit inventory7ERP/12plugin staged/pushed，无env/secret/foreign文件；Tower620 completed两core+启动两runtime",
+    "registry-onlymaster49bc355锁内仅改自身两行：补正unitfixture迟登记，登记无他人active owner的纯binding/fetch及未来接线路径，未取得storage/ERP共享热点授权"
   ],
-  "blockedOn": "完整队列序列化上界及8-result近界回归，fresh spec8/quality；共享热点继任/patch协调",
-  "nextStep": "40b173a9继续原writer；完成后owner运行独立全路径容量验证，再spec/quality，不能以仅wire计量放行",
+  "blockedOn": "storage及ERP auth/model注册明确handoff；完整快照f03窄修已登记尚待实现；最终baseline/version/integration/真实HTTPSChrome通知证据",
+  "nextStep": "继续40b173a9同mission原MiniMax runtime阶段，保留T5唯一接线owner；校验worker对scope follow-up的消费ack和actual files，不把queued当执行证明",
   "updatedAt": "2026-10-16"
 }

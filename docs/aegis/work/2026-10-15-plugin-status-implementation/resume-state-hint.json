@@ -2,9 +2,11 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "读20-checkpoint/core-review-1 review7；活动40b173a9-f68a-4304-960b-167ae1bf1d6a；最新plugin8dd4252d，ERP83009f1d no-change已交付。不要重开writer或重复旧ERP整改。",
+  "resumeInstruction": "当前子run ERP931fa261-ba6d-4890-9927-061f150cf394/plugin99e75517-bbf6-407f-aaaf-1b053e9c8d3e；无需启动新workflow。读review8+quality1记录。canonical ACTIVE用origin/master49bc355，不用落后main/docs worktree副本。",
   "knownPartialWork": [
-    "status-impl-plan"
+    "status-impl-plan",
+    "status-erp-core",
+    "status-monitor-core"
   ],
   "mustReadBeforeContinuing": [
     "docs/aegis/work/2026-10-15-plugin-status-implementation/10-intent.md",
@@ -12,6 +14,6 @@
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "statusQueueByteLength之和不是实际持久化JSON；cap不允许降低，事实不允许丢弃，assigned报告不可修改；sentinel是手动等待不可直接交给超长平台timer；runtime和真实环境未验收"
+    "纯核完成不等于整体完成；runtime不允许动已有owner storage/access/security/app/base/scheduler，不允许prod migration/restart/真实凭证TikTok写；T5修复fullsnapshot前不得信任旧campaignsComplete标志"
   ]
 }

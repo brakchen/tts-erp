@@ -1,14 +1,18 @@
 # 通用插件状态与单目标恢复实施 - Checkpoint
 
 - Task ID: 2026-10-15-plugin-status-implementation
-- Current todo: status-erp-core + status-monitor-core
-- Active slice: Core spec review 7 BLOCKED：19位seq预留未计完整持久化队列封套，实际JSON超出2MiB
-- Blocked on: 完整序列化队列容量不变量及合法8-result近界回归、fresh spec/quality；共享热点接线仍需明确successor/patch协调
-- Next step: 当前workflow恢复原writer修正队列计量（不重写ERP），再spec8/quality；owner独立运行真实enqueue/assignment+UTF8序列化验证后才放行
-- Owner disposition: [core-review-1.md](core-review-1.md)（含review3–7、完整持久化边界复现、真实loopback对照、UTC公式来源及基础设施恢复）
+- Current todo: status-erp-runtime + status-monitor-runtime
+- Active slice: Core spec8与owner质量闸已放行；两端纯核已提交推送，进入独占模块runtime实施
+- Blocked on: storage.ts与ERP已有owner权限/注册热点的明确交接；完整快照窄修已登记、尚未实现；最终baseline/真实HTTPS-CORS-Chrome-通知证据仍未完成
+- Next step: 当前workflow继续T3持久化/API/outbox及T4 controller；只编辑已授权文件，共享热点先交patch/联系owner，不能把沉默当放行
+- Owner disposition: [core-review-1.md](core-review-1.md)（含review3–8、质量裁决、核心提交与独立边界验证；不等于整体完成）
 - Current workflow: `40b173a9-f68a-4304-960b-167ae1bf1d6a`，同mission continuation，从已核实native handoff开始；不是重新启动核心writer
 - Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked
-- Latest plugin handoff: `8dd4252d-e04f-401e-b821-f91797b863cc`（seq预留和有限等待sentinel已交付；完整存储开销未通过）；新repair ID由当前workflow原生事件给出
+- Core delivery: ERP `f2c0fa7`（7文件）、独立plugin `718c83e`（12文件），均已push；发布版本仍0.4.26，未对既有runtime接线
+- Latest plugin handoff: `6a32ef0a-d4ce-4fdb-84fd-4f1036ea0213`；spec8 `eba15195-54ff-4c2d-bf1e-425d91c0587f`；quality `6acc5cbc-2183-4901-876f-5d20dbc22237`，owner reply `4d80c122-666a-4640-a2fa-3cc315798b3f` OK
+- Tower receipt: revision620，core两项completed附changedFiles，runtime两项in_progress，整体integration仍依赖阻塞
+- Registry: canonical origin/master `49bc355` 已推送（仅我方两行metadata）；root/docs工作树ACTIVE可能陈旧。补正ERP unit fixture登记迟到这一流程缺口；登记此前无active/draft owner的binding/fetch/background/popup/messages/版本路径，未接管storage或ERP共享权限文件
+- Runtime children: ERP `931fa261-ba6d-4890-9927-061f150cf394`；plugin `99e75517-bbf6-407f-aaaf-1b053e9c8d3e`；native follow-up已排队，排队不等于已消费，验收时核对ack/文件范围
 
 ## Checkpoint Update
 
@@ -100,3 +104,19 @@
 - prepared真实enqueue/assignment全路径独立验证脚本/tmp/plugin-status-owner-queue-storage-bound-verify-01a1406d.ts，尚未运行，非GREEN证据
 - Blocked on: 完整队列序列化上界及8-result近界回归，fresh spec8/quality；共享热点继任/patch协调
 - Next step: 40b173a9继续原writer；完成后owner运行独立全路径容量验证，再spec/quality，不能以仅wire计量放行
+
+## Checkpoint Update
+
+- Current todo: status-erp-runtime + status-monitor-runtime
+- Active slice: Core spec8/quality1最终JSON均OK；已推送ERP f2c0fa7/plugin718c83e；原workflow进入runtime两worker
+- Completed todos:
+- status-impl-plan
+- status-erp-core
+- status-monitor-core
+- Evidence refs:
+- owner real enqueue/all assignments967条，actual peak2095540<=2097152，超量入队拒绝；queue-storage-bound-green.log exit0
+- fresh owner112/112+tsc exit0；ERP isolated100%且clone dropped，ruff/format exit0；LSP有1silentinconclusive并非全clean
+- explicit inventory7ERP/12plugin staged/pushed，无env/secret/foreign文件；Tower620 completed两core+启动两runtime
+- registry-onlymaster49bc355锁内仅改自身两行：补正unitfixture迟登记，登记无他人active owner的纯binding/fetch及未来接线路径，未取得storage/ERP共享热点授权
+- Blocked on: storage及ERP auth/model注册明确handoff；完整快照f03窄修已登记尚待实现；最终baseline/version/integration/真实HTTPSChrome通知证据
+- Next step: 继续40b173a9同mission原MiniMax runtime阶段，保留T5唯一接线owner；校验worker对scope follow-up的消费ack和actual files，不把queued当执行证明
