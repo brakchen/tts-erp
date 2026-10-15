@@ -2,13 +2,13 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-core + status-monitor-core
-- Active slice: Core spec review 6 BLOCKED：队列seq位数进位导致超过2MiB；Retry-After极大但合法整数仍降为15s重试
-- Blocked on: 队列容量跨身份分配保持上界、不可表示服务端等待fail-closed、fresh spec/quality；共享热点接线仍需明确successor/patch协调
-- Next step: 当前workflow恢复原writer窄修两项（不重写ERP），再spec7/quality；通过且owner验收后提交核心并放行runtime
-- Owner disposition: [core-review-1.md](core-review-1.md)（含review3–6、边界复现、真实loopback对照、UTC公式来源及基础设施恢复）
+- Active slice: Core spec review 7 BLOCKED：19位seq预留未计完整持久化队列封套，实际JSON超出2MiB
+- Blocked on: 完整序列化队列容量不变量及合法8-result近界回归、fresh spec/quality；共享热点接线仍需明确successor/patch协调
+- Next step: 当前workflow恢复原writer修正队列计量（不重写ERP），再spec8/quality；owner独立运行真实enqueue/assignment+UTF8序列化验证后才放行
+- Owner disposition: [core-review-1.md](core-review-1.md)（含review3–7、完整持久化边界复现、真实loopback对照、UTC公式来源及基础设施恢复）
 - Current workflow: `40b173a9-f68a-4304-960b-167ae1bf1d6a`，同mission continuation，从已核实native handoff开始；不是重新启动核心writer
 - Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked
-- Latest plugin handoff: `2cda8855-bc72-41a8-822e-6719836d4c93`（普通长Retry-After修正；极端值及queue边界未通过）；新repair ID由当前workflow原生事件给出
+- Latest plugin handoff: `8dd4252d-e04f-401e-b821-f91797b863cc`（seq预留和有限等待sentinel已交付；完整存储开销未通过）；新repair ID由当前workflow原生事件给出
 
 ## Checkpoint Update
 
@@ -87,3 +87,16 @@
 - body actualloopback关闭确认；owner106目标测试及tsc exit0；普通长等待worker108测试GREEN不覆盖这两个残留
 - Blocked on: queue容量不变量与不可表示服务端等待fail-closed，fresh spec7/quality；后续共享热点显式successor/patch协调
 - Next step: 继续当前40b173a9原生workflow事件及owner复核，不重复core writer；通过spec和quality后提交核心，才放行runtime
+
+## Checkpoint Update
+
+- Current todo: status-erp-core + status-monitor-core
+- Active slice: core-spec7 BLOCKED：完整持久化封套未计容量；seq宽度及有限超大等待sentinel已交付
+- Completed todos:
+- status-impl-plan
+- Evidence refs:
+- owner queue storage probe exit0：985合法8-result条目，accounted2097028，分配后JSON实际2133524>2097152，19位seq隔离宽度影响
+- 23ebd1e6 owner gate要求完整UTF8 JSON队列上界；旧maximal零result样例不能证明容量不可达
+- prepared真实enqueue/assignment全路径独立验证脚本/tmp/plugin-status-owner-queue-storage-bound-verify-01a1406d.ts，尚未运行，非GREEN证据
+- Blocked on: 完整队列序列化上界及8-result近界回归，fresh spec8/quality；共享热点继任/patch协调
+- Next step: 40b173a9继续原writer；完成后owner运行独立全路径容量验证，再spec/quality，不能以仅wire计量放行

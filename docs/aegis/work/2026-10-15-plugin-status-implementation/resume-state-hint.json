@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "读20-checkpoint/core-review-1 review6；活动40b173a9-f68a-4304-960b-167ae1bf1d6a。最近plugin2cda8855；新repair由workflow管理。root主工作树ACTIVE可能落后注册提交，应读当前origin/master/协调工作树版本核验归属。",
+  "resumeInstruction": "读20-checkpoint/core-review-1 review7；活动40b173a9-f68a-4304-960b-167ae1bf1d6a；最新plugin8dd4252d，ERP83009f1d no-change已交付。不要重开writer或重复旧ERP整改。",
   "knownPartialWork": [
     "status-impl-plan"
   ],
@@ -12,6 +12,6 @@
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "巨大数字仍是语法合法Retry-After，不能一律当malformed退回jitter；byte bound须跨身份分配保持；不采信旧ERP残留，尚无完整运行接线/真实HTTPSChrome验收"
+    "statusQueueByteLength之和不是实际持久化JSON；cap不允许降低，事实不允许丢弃，assigned报告不可修改；sentinel是手动等待不可直接交给超长平台timer；runtime和真实环境未验收"
   ]
 }
