@@ -2,9 +2,9 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-runtime + status-monitor-runtime
-- Active slice: Runtime spec2 BLOCKED：首轮修正已交，仍有8项P1及2项P2；同workflow继续原writer修正
-- Blocked on: purpose默认拒绝/受限mint、全动作结果原子性、整体deadline、纠正登录、上下文CAS、历史carrier/ACK隔离、CSRF、分页与外发事务；共享热点仍待明确handoff
-- Next step: 保留原writer按spec2与OWNER裁决修正；不因组件测试GREEN推进T5，下一fresh spec/quality必须逐项核查
+- Active slice: Runtime spec4最终BLOCKED（6P1/1P2）；R3两writer已交但未验收，同workflow继续补修
+- Blocked on: sticky心跳重复计失败、重启ACK义务/响应中HOLD竞争、剩余deadline缺口、被动负面证据丢失、disabled人工许可及误通知、exception终结路径；共享热点仍待handoff
+- Next step: 原writer按R4窄修后fresh spec→quality；用实际跨端报告序列及重启/旧ACK行为测试，不再以NONE替身放行
 - Owner disposition: [runtime-review-1.md](runtime-review-1.md)（当前BLOCKED与6项独立复现）；纯核历史见[core-review-1.md](core-review-1.md)
 - Current workflow: `40b173a9-f68a-4304-960b-167ae1bf1d6a`，同mission continuation，从已核实native handoff开始；不是重新启动核心writer
 - Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked
@@ -16,7 +16,10 @@
 - Runtime spec1: reviewer`42c30001` BLOCKED；修正C7与A7均已交，A7明确ack并报告复跑6项反例，无整体放行
 - Runtime spec2: reviewer`c25ded39-6914-4573-a34c-8dc73544ce9c`最终BLOCKED（8P1/2P2），owner reply`77007b54-8735-4b50-be16-9afe1b290a55`与`17b0257b-dc1a-4c05-9ae3-bce9e5e06883`；源码副本及SHA保存`/tmp/plugin-status-owner-runtime-r2-01a1406d/`
 - Owner行为证据: `/tmp/plugin-status-owner-runtime-r1-01a1406d/`冻结源码+模拟I/O探针；旧draft获执行、失效被心跳节流、错身份wake仍running、ACK前清incident、HOLD未停scheduler，并发同decision实际执行2次
-- ERP修后额外OWNER BLOCK: 已读canonical来源且ack，但`purpose_allows_status(None)=True`与`_mint_status_key`仍铸造无purpose普通RW key，不可作为“过渡可用”放行。必须在依赖未就绪时fail closed，不能用测试通过或docstring代替权限；见runtime-review-1后续裁决
+- Runtime spec3: reviewer`f663c92d-7bcf-4949-b620-729f86b1fe48`，OWNER reply`2c81934e-a3b3-4747-b182-b0fdd1d5b07d`；最终6P1 BLOCKED。ERP R3`a5abf9ca-c45a-4cfe-986c-c33bdc25cc1d`与plugin R3`c85638b8-626d-459c-b209-1d3b41a17603`均已交，未验收
+- Runtime spec4: reviewer`8624cdfb-ba50-4d54-a5dc-0a4d7be515ab`；OWNER有效reply`ff5e9618-2815-4cc5-adb2-3e24404af525`确认继续BLOCK，最终JSON为6P1/1P2，含HOLD ACK竞争、disabled人工发许可及exception报告缺口。源码/SHA快照`/tmp/plugin-status-owner-runtime-r4-01a1406d/`不是新执行证明
+- 已修旧项: R3 reviewer源级确认purpose默认拒绝/受限mint、CSRF、connectivity SQL与outbox事务边界已修，不再将R1旧fallback写成当前事实；实际共享权限/mount/migration/browser接线仍待交接
+- Follow-up: manual disabled优先级补充发往a5但仅排队到下次resume；plugin真实端口/ACK/总deadline指引发往c856待核ack。不能把queued当已执行
 
 ## Checkpoint Update
 

@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "当前workflow40b173a9继续第二轮runtime修正；C7/A7已交，spec2 c25ded39最终BLOCKED（8P1/2P2），owner已回复两次并保存R2源码/SHA。native事件唤醒，不轮询或新开workflow。先读runtime-review-1.md与最新checkpoint；canonical ACTIVE用origin/master e11b5bc，Tower622，T5仍blocked。",
+  "resumeInstruction": "workflow40b173a9继续；R3两writer已交，spec4 reviewer8624cdfb最终BLOCKED6P1/1P2，owner已回有效threadff5e9618，含HOLD ACK竞争/manual disabled/异常终结报告缺口。先读runtime-review-1最新R4与源码快照；无本轮新owner执行证明。native唤醒，不轮询或新开writer；canonical ACTIVE e11b5bc，Tower最近receipt622，T5仍blocked。",
   "knownPartialWork": [
     "status-impl-plan",
     "status-erp-core",

@@ -7,15 +7,15 @@
     "status-erp-core",
     "status-monitor-core"
   ],
-  "activeSlice": "Runtime spec2最终BLOCKED（8P1/2P2）；C7/A7首轮修正已交但未验收，原workflow继续保留writer修正",
+  "activeSlice": "Runtime spec4最终BLOCKED（6P1/1P2）；R3两writer已交但未验收，同workflow保留writer补修",
   "evidenceRefs": [
-    "runtime-review-1.md；reviewer42c30001最终JSON含13P1/2P2，ownerreply79876f2f确认BLOCK",
-    "owner冻结R1真实模块、模拟I/O探针exit0：旧draft获执行、失效节流、错身份wake、ACK前清incident、HOLD未停；并发同decision执行2次，日志/tmp/plugin-status-owner-runtime-r1-{probes,concurrency}.log",
-    "core f2c0fa7/718c83e仍已push；core112/112/tsc及ERPisolatedGREEN不代表runtime验收",
-    "Tower622两runtime仍in_progress、T5blocked；registrye11b5bc仅改我方metadata，补记coord/identity及登记page-hook/content；未接管共享storage/auth/model",
-    "C7已ack只读canonical03d595fb；实际purpose_allows_status(None)仍True，mint无purpose，owner拒绝该过渡fallback；71API tests是worker证据不是owner放行"
+    "runtime-review-1.md包含R1-R4；R4 owner有效replyff5e9618，通知问题按P2，其余确认阻断并补充HOLD ACK竞争/disabled人工发许可",
+    "R4实际源码/SHA冻结于/tmp/plugin-status-owner-runtime-r4-01a1406d；未宣称运行本轮新探针或真实浏览器",
+    "R1冻结探针只证明旧候选：并发同decision执行2次等；不能称修后仍失败",
+    "core f2c0fa7/718c83e已push；Tower622两runtime in_progress、T5blocked，registrye11b5bc仍不包含共享热点接管",
+    "R3 reviewer确认旧purpose/CSRF/SQL分页/outbox事务项已修；实际canonical接线及整体验证仍未完成"
   ],
-  "blockedOn": "runtime正确性及purpose默认拒绝；共享storage/ERP权限热点handoff；完整快照f03窄修；最终baseline/version/integration与真实HTTPS/Chrome/通知证据",
-  "nextStep": "继续同workflow第二轮runtime修正；下一fresh spec→quality必须OWNER裁决，关闭spec2全部问题，禁止purpose过渡放行和共享热点默接管",
+  "blockedOn": "sticky失败重复计数、ACK重启及HOLD竞争、剩余deadline、被动负证据丢失、manual disabled及误通知、exception结果报告；共享handoff/完整分页/最终环境证据",
+  "nextStep": "按R4最终6P1/1P2保留writer窄修并验证真实模块链；不重复新开writer、轮询或接管热点",
   "updatedAt": "2026-10-16"
 }
