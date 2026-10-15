@@ -127,7 +127,7 @@ def list_spu_profit_deterioration(
             status_code=422, detail="spu_ids must contain 1..100 positive ids"
         )
     try:
-        rows, total, all_rows, config_basis = read_alerts(
+        result = read_alerts(
             session,
             shop_pk=shop_pk,
             spu_pks=parsed_spu_ids,
@@ -143,7 +143,10 @@ def list_spu_profit_deterioration(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    payload, source, version, payload_hash, updated_at, updated_by = config_basis
+    rows = result.items
+    total = result.filtered_total
+    all_rows = result.scope_rows
+    payload, source, version, payload_hash, updated_at, updated_by = result.config
     latest = all_rows[0] if all_rows else None
     totals = {
         "warningCount": sum(row.severity == "warning" for row in all_rows),
@@ -152,6 +155,7 @@ def list_spu_profit_deterioration(
             row.sample_status != "sufficient" for row in all_rows
         ),
         "shopSpuCount": len({row.spu_pk for row in all_rows}),
+        "scopeTotal": result.scope_total,
     }
     request_id = request.headers.get("x-request-id") or ""
     # SPU 列展示业务 spu_id：按本页 spu_pk 批量回查 commerce.products_spu。
