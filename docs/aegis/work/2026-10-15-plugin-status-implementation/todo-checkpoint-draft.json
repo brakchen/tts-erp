@@ -5,13 +5,13 @@
   "completedTodos": [
     "status-impl-plan"
   ],
-  "activeSlice": "core-spec-2 BLOCKED；原writer第二轮修正，尚未进入runtime",
+  "activeSlice": "ERP最后修正已交付且owner isolated GREEN；plugin原writer a919dd61-90d3-47b1-b85a-a16f4ef49e3b同协议补完未完成seam和checked acceptance",
   "evidenceRefs": [
-    "core-review-1.md review2：owner源码复核及vite-node反例；非法日期、NaN快照和decision窗口均复现",
-    "reviewer ae296447-8dd9-4243-9bd3-f5136ce9f383；supervisor reply b5b72b18-a199-4944-8ee0-366419cd38e9",
-    "ERP repair 2de2a5ee-5ead-4298-9f5c-8f13e37cc34f；额外queue-full/disabled优先级steer e1d32fc8-4ce4-4acc-9ef9-570176ee7ae0"
+    "core-review-1.md review3与恢复记录；review artifact恢复4010ddc4成功且verdict仍BLOCKED",
+    "owner ERP isolated 2 files exit0/100%/clone dropped；/tmp/plugin-status-owner-erp-core-green.log；LSP6files辅助规则误报已逐项处置",
+    "workflows 920f5138、b6532428均terminal；plugin两版partial diff已保存/tmp/plugin-status-recovery-snapshot-01a1406d与/tmp/plugin-status-recovery2-snapshot-01a1406d"
   ],
-  "blockedOn": "core spec/quality尚未通过；共享热点和完整快照窄修归属待协调",
-  "nextStep": "同一workflow继续保留writer修正及fresh spec/quality gates；owner处理原生求助事件并直接核查，不新开writer或提前放行",
+  "blockedOn": "plugin剩余修正+真实acceptance，之后fresh spec/quality；共享热点归属协调",
+  "nextStep": "native a919dd61完成后核对实际checked结果，复用已交付ERP handoff，按同协议恢复core spec4/quality及后续runtime；不能把terminal workflow当作运行",
   "updatedAt": "2026-10-16"
 }

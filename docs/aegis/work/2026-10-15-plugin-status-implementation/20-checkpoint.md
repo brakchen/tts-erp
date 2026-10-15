@@ -2,11 +2,12 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-core + status-monitor-core
-- Active slice: Core spec review 2 BLOCKED；第一轮修正已交付，仍有HTTP/日期/episode/NaN门禁问题，禁止提前进入runtime
-- Blocked on: 核心协议修正及重新审查；共享热点与分页完整性窄修范围仍待协调
-- Next step: 同一workflow自动继续原ERP/plugin writer的第二轮修正，再做spec与quality审查；不重复启动writer
-- Owner disposition: [core-review-1.md](core-review-1.md)（含review 2和独立反例）
-- Active repair: `2de2a5ee-5ead-4298-9f5c-8f13e37cc34f`（ERP）
+- Active slice: Core spec review 3 BLOCKED；ERP队列满修正已交付且owner isolated验证通过；原插件writer修复提前结束/缺少acceptance的失败
+- Blocked on: plugin剩余body断流/微秒时间修正和checked acceptance；之后仍需fresh spec-4与quality gate；共享热点待协调
+- Next step: 原插件repair完成原生事件到达后，先核验真实acceptance与源码；再通过同协议恢复后续审查/runtime，不重做已交付ERP核心
+- Owner disposition: [core-review-1.md](core-review-1.md)（含review 3、独立反例、两次基础设施恢复及owner ERP验证）
+- Workflows: `920f5138-1015-4db1-801f-c971795deed5`已终结失败；`b6532428-5f5d-4a11-bf80-484d2f33000f`已终结blocked，均不可当作仍运行
+- Active native repair: plugin `a919dd61-90d3-47b1-b85a-a16f4ef49e3b`；ERP最后交付`826a67e2-fc97-4fcf-995f-ad9597768ddc`，等待gate
 
 ## Checkpoint Update
 
@@ -46,3 +47,16 @@
 - ERP repair 2de2a5ee-5ead-4298-9f5c-8f13e37cc34f；额外queue-full/disabled优先级steer e1d32fc8-4ce4-4acc-9ef9-570176ee7ae0
 - Blocked on: core spec/quality尚未通过；共享热点和完整快照窄修归属待协调
 - Next step: 同一workflow继续保留writer修正及fresh spec/quality gates；owner处理原生求助事件并直接核查，不新开writer或提前放行
+
+## Checkpoint Update
+
+- Current todo: status-erp-core + status-monitor-core
+- Active slice: ERP最后修正已交付且owner isolated GREEN；plugin原writer a919dd61-90d3-47b1-b85a-a16f4ef49e3b同协议补完未完成seam和checked acceptance
+- Completed todos:
+- status-impl-plan
+- Evidence refs:
+- core-review-1.md review3与恢复记录；review artifact恢复4010ddc4成功且verdict仍BLOCKED
+- owner ERP isolated 2 files exit0/100%/clone dropped；/tmp/plugin-status-owner-erp-core-green.log；LSP6files辅助规则误报已逐项处置
+- workflows 920f5138、b6532428均terminal；plugin两版partial diff已保存/tmp/plugin-status-recovery-snapshot-01a1406d与/tmp/plugin-status-recovery2-snapshot-01a1406d
+- Blocked on: plugin剩余修正+真实acceptance，之后fresh spec/quality；共享热点归属协调
+- Next step: native a919dd61完成后核对实际checked结果，复用已交付ERP handoff，按同协议恢复core spec4/quality及后续runtime；不能把terminal workflow当作运行
