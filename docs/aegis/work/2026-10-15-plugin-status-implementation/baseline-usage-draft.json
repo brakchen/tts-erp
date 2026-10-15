@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-10-15-plugin-status-implementation",
+  "requiredBaselineRefs": [
+    "docs/plugins/plugin-status-report.md@fb42e16"
+  ],
+  "deliveredContextRefs": [],
+  "acknowledgedBeforePlanRefs": [],
+  "citedInPlanRefs": [],
+  "missingRefs": [
+    "docs/plugins/plugin-status-report.md@fb42e16"
+  ],
+  "decision": "needs-baseline-readback"
+}

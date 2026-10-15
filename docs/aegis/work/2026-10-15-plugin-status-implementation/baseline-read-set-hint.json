@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "candidateDocs": [
+    "docs/plugins/plugin-status-report.md@fb42e16"
+  ],
+  "whyRelevant": "唯一产品协议与S01-S14验收基线",
+  "missingAuthority": []
+}

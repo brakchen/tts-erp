@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-10-15-plugin-status-implementation",
+  "currentTodo": "status-impl-plan",
+  "completedTodos": [],
+  "activeSlice": "独立核心契约/纯状态并行handoff准备",
+  "evidenceRefs": [],
+  "blockedOn": null,
+  "nextStep": "派发T1 ERP core与T2 monitor core，owner逐片审查后接入runtime",
+  "updatedAt": "2026-10-15"
+}

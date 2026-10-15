@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "affectedLayers": [
+    "API/database/worker/browser-extension"
+  ],
+  "owners": [
+    "01a1406d-2041-7452-8338-3d7de574337f"
+  ],
+  "invariants": [
+    "失效先安全暂停；只有服务端授权且完整新证据才能恢复"
+  ],
+  "compatBoundary": "单Seller/Advertiser；保留原业务门禁和配置隔离；不执行生产迁移/重启/真实写请求",
+  "nonGoals": [
+    "多店并行、通用远程执行平台、跨插件后台依赖"
+  ]
+}

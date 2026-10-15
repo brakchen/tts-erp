@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-10-15-plugin-status-implementation",
+  "taskIntentRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/task-intent-draft.json",
+  "baselineRefs": [
+    "docs/plugins/plugin-status-report.md@fb42e16"
+  ],
+  "scopeStatus": "not-yet-verified",
+  "compatStatus": "not-yet-verified",
+  "retirementStatus": "not-yet-verified",
+  "newRiskSignals": [
+    "high：权限/持久化/恢复与真实关停门禁"
+  ],
+  "decision": "needs-baseline-readback"
+}
