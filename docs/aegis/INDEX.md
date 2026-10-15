@@ -17,3 +17,6 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-10-15 | artifact | docs/aegis/work/2026-10-15-plugin-status-implementation/drift-check-draft.json | 通用插件状态与单目标恢复实施 drift check draft |
 | 2026-10-16 | plan | docs/aegis/plans/2026-10-15-plugin-status-implementation.md | 通用插件状态与单目标恢复实施计划 |
 | 2026-10-16 | plan | docs/aegis/plans/2026-10-05-spu-profit-deterioration-alert.md | 既有SPU利润恶化告警计划（补索引，不改原文） |
+| 2026-10-16 | artifact | docs/aegis/work/2026-10-15-plugin-status-implementation/resume-state-hint.json | 2026-10-15-plugin-status-implementation resume state hint |
+| 2026-10-16 | artifact | docs/aegis/work/2026-10-15-plugin-status-implementation/gate-input-pack.json | 2026-10-15-plugin-status-implementation gate input pack |
+| 2026-10-16 | work | docs/aegis/work/2026-10-15-plugin-status-implementation/proof-bundle.md | 2026-10-15-plugin-status-implementation proof bundle |

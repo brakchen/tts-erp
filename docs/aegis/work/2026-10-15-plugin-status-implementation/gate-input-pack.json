@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "baselineRefs": [
+    "docs/plugins/plugin-status-report.md@fb42e16"
+  ],
+  "impactStatement": "docs/aegis/work/2026-10-15-plugin-status-implementation/impact-statement-draft.json",
+  "compatPlan": "单Seller/Advertiser；保留原业务门禁和配置隔离；不执行生产迁移/重启/真实写请求",
+  "retirementPlan": "not-yet-verified",
+  "evidenceBundle": []
+}
