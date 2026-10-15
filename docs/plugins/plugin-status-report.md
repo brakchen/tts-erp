@@ -170,7 +170,7 @@ x-request-id: 620be3ac-9727-4d5c-88e4-3204e21cb201
 
 字段约束：
 
-- UUID 为规范格式；`reportSeq`、后文 revision 为正十进制字符串，范围 `1..9223372036854775807`，客户端不能转为 JavaScript Number。序号由本地存储短事务分配，进程唤醒不归零。
+- UUID wire 值使用小写、带连字符的规范字符串；整数/布尔字段不得将字符串或布尔值强制转换为整数。`reportSeq`、后文 revision 为正十进制字符串，范围 `1..9223372036854775807`，客户端不能转为 JavaScript Number。序号由本地存储短事务分配，进程唤醒不归零。
 - `observedAt` 为 aware UTC；服务端另存 `received_at`，不以客户端时钟排列报告。超过未来 5 分钟拒绝；旧报告可以归档，但恢复/放行只采信相对服务端时间年龄在 -5..120 秒内的观测，不能借明显未来时间延长新鲜度。
 - `pluginId` 最长 64、版本最长 64、seller/advertiser 最长 128、capabilities 最多 16、`candidateCount` 为 `0..1000`；能力必须为服务端登记值，不接受 arbitrary extensions/context。
 - shop scope 的 advertiser 未知时可省略，但 monitor 的 `ready` 必须具备它；installation scope 不允许夹带 seller。除 §4.1 明确的一次性空 advertiser 锁定外，与凭证目标不符为 403，不据此改变登记范围。
@@ -266,7 +266,7 @@ expiresAt 限制该次动作的接收/开始，不是健康运行的周期续租
 2. status key 与服务端实例记录绑定，实例记录限定 pluginId、scope 和获准 capabilities；接口重新核验活动凭证与实例状态，不接受客户端声明的角色/插件身份作为授权。专用边界在 off/shadow 模式也不能匿名获得恢复许可。
 3. **不扩大 `purpose=monitor_config` Token 的权限**，它仍只读原配置 GET。本轮建议独立 status key，本地 ERP origin 可共用；两类凭证不混用。若以后希望统一凭证，应由配置/鉴权 owner 另行批准能力模型，不能偷偷追加路径。
 4. 首期管理接口统一 admin：`POST /v2/plugin/admin/instances` 开通实例并生成专用 status key（只展示一次），`GET /v2/plugin/admin/instances` 列表，`GET /v2/plugin/admin/instances/{instanceId}` 查看状态/报告/决策，`POST /v2/plugin/admin/instances/{instanceId}/decisions` 人工改变 hold/recover/require_user 决策。列表按 limit/offset，支持 shop_pk、pluginId、connectivity 过滤。实例开通要求 pluginId、scope、capabilities，shop scope 必须映射唯一有效店铺；未映射/歧义拒绝，不自动注册店铺。installation scope 不映射店铺，也不得取得 monitor 能力。
-5. 人工决策使用 `requestId` 幂等、`expectedRevision` 乐观锁及当前 incident/epoch 条件，不支持强制跨身份放行。人工 hold/require_user 对当前 episode 锁存，普通心跳不能自动覆盖；管理员明确 recover 才解除该锁存，之后仍需就绪/放行流程。cookie-auth 管理 mutation 沿用 CSRF header/JSON；status 插件客户端 credentials omit。
+5. 人工决策使用 `requestId` 幂等、`expectedRevision` 乐观锁及必填的 `incidentId`、`expectedBindingEpoch` 当前上下文条件；后两项必须为规范 UUID，并在实例行锁内精确比较，不允许省略条件后猜测当前 episode。无当前 incident/epoch 时不创建绑定指令，不支持强制跨身份放行。人工 hold/require_user 对当前 episode 锁存，普通心跳不能自动覆盖；管理员明确 recover 才解除该锁存，之后仍需就绪/放行流程。cookie-auth 管理 mutation 沿用 CSRF header/JSON；status 插件客户端 credentials omit。
 6. 新目的字段及关联模型属于未来 access/security 变更，必须与 monitor-config-erp lane 协调；不另立 token 服务，不复用未来 monitor-config schema 作为状态表。
 7. TLS 是上线前置。本次未验证真实入口证书，禁止凭历史 HTTP 域名发送真实 key、忽略证书或降级 HTTP。精确允许插件 ERP host、实际签名扩展 origin；CORS 允许 Authorization、Content-Type、x-request-id，并暴露 x-request-id、Retry-After；不改 middleware 注册顺序。
 8. Token、Cookie、Authorization、webhook、Fernet/app secret、query 参数和完整 HTTP 响应不得进入 report、日志或通知。本地凭证与 instance 身份不进入业务配置导入/导出或远程 force；Chrome storage 不是加密保险箱。清空 Profile 后需重新开通实例。

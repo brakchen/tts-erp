@@ -20,3 +20,4 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-10-16 | artifact | docs/aegis/work/2026-10-15-plugin-status-implementation/resume-state-hint.json | 2026-10-15-plugin-status-implementation resume state hint |
 | 2026-10-16 | artifact | docs/aegis/work/2026-10-15-plugin-status-implementation/gate-input-pack.json | 2026-10-15-plugin-status-implementation gate input pack |
 | 2026-10-16 | work | docs/aegis/work/2026-10-15-plugin-status-implementation/proof-bundle.md | 2026-10-15-plugin-status-implementation proof bundle |
+| 2026-10-16 | review | docs/aegis/work/2026-10-15-plugin-status-implementation/core-review-1.md | 插件状态核心首轮spec审查与owner处置 |

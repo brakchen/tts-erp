@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "读取此checkpoint、设计与计划；subagent status精确workflow ID；处理pending supervisor请求。禁止重启重复writer或新建第二顶层workflow；原脚本已覆盖core→runtime→integration及审查修正循环。",
+  "resumeInstruction": "读取20-checkpoint及core-review-1；按精确workflow ID查看active run，优先回应supervisor；原工作流已负责修正循环及后续runtime/integration。",
   "knownPartialWork": [
     "status-impl-plan"
   ],
@@ -12,6 +12,6 @@
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "工作流在后台运行不等于实现完成；production/live验证未执行；shared-hotspot未获得owner释放前不可直接编辑"
+    "组件GREEN不是协议完成；steer queued不是已修复；所有真实HTTPS/Chrome证据仍未验证"
   ]
 }

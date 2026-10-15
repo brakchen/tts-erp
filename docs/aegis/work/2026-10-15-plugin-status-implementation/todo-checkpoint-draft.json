@@ -5,13 +5,13 @@
   "completedTodos": [
     "status-impl-plan"
   ],
-  "activeSlice": "MiniMax M3.1 Flash Preview：T1后端契约/纯策略与T2插件协议/纯状态并行开发；无共享文件并发writer",
+  "activeSlice": "core-spec-1 BLOCKED；原MiniMax writer按owner确认的七项协议问题及上下文前置条件修正",
   "evidenceRefs": [
-    "docs branch 8813897；workspace check通过；isolated prerequisites通过",
-    "workflow 920f5138-1015-4db1-801f-c971795deed5；mission 0000bcb6-3aea-4584-8f76-b33ff35101b7",
-    "erp-core run f68dc2c3-9a1b-4613-bd18-de26e449ff3c；plugin-core run f7be6413-1916-48dc-9e6d-fa4fd4d7d61f"
+    "core-review-1.md：owner直接源码复核、额外HTTP body timeout/未知code反例、installation能力约束",
+    "core-spec-1 reviewer 2c25078c-9fd8-47b4-a75d-8f5187aa3a03；ERP repair f6f1a26a-7b3a-4b2f-96d1-524a00bc24a2",
+    "/tmp/plugin-status-core-plugin-delta-01a1406d.patch；Markdown LSP 3 files/0 diagnostics"
   ],
-  "blockedOn": null,
-  "nextStep": "Native child/reviewer supervisor事件唤醒owner；先直接spec审查，再quality；通过后提交组件并推进runtime，不以派发为完成",
+  "blockedOn": "核心修正及spec/quality重新审查；共享接线路径尚待协调",
+  "nextStep": "ERP repair完成原生事件到达后，将owner额外HTTP findings 8/9与日期parity发至同一workflow的plugin repair run；之后复审，不重复派writer",
   "updatedAt": "2026-10-16"
 }
