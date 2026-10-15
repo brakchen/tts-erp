@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "先读20-checkpoint与core-review-1；精确native repair a919dd61-90d3-47b1-b85a-a16f4ef49e3b。最新ERP交付826a67e2-fc97-4fcf-995f-ad9597768ddc。原脚本与recovery脚本仍可用于同协议continuation，避免重复writer或重写ERP。",
+  "resumeInstruction": "读20-checkpoint/core-review-1 review6；活动40b173a9-f68a-4304-960b-167ae1bf1d6a。最近plugin2cda8855；新repair由workflow管理。root主工作树ACTIVE可能落后注册提交，应读当前origin/master/协调工作树版本核验归属。",
   "knownPartialWork": [
     "status-impl-plan"
   ],
@@ -12,6 +12,6 @@
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "artifact恢复不是协议通过；缺报告的半成品不能伪造acceptance；core未交付runtime；没有真实HTTPS/Chrome证据"
+    "巨大数字仍是语法合法Retry-After，不能一律当malformed退回jitter；byte bound须跨身份分配保持；不采信旧ERP残留，尚无完整运行接线/真实HTTPSChrome验收"
   ]
 }

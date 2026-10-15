@@ -5,13 +5,13 @@
   "completedTodos": [
     "status-impl-plan"
   ],
-  "activeSlice": "ERP最后修正已交付且owner isolated GREEN；plugin原writer a919dd61-90d3-47b1-b85a-a16f4ef49e3b同协议补完未完成seam和checked acceptance",
+  "activeSlice": "core-spec6 BLOCKED：queue身份进位超2MiB及不可表示的合法Retry-After降为15s；40b173a9继续原writer窄修",
   "evidenceRefs": [
-    "core-review-1.md review3与恢复记录；review artifact恢复4010ddc4成功且verdict仍BLOCKED",
-    "owner ERP isolated 2 files exit0/100%/clone dropped；/tmp/plugin-status-owner-erp-core-green.log；LSP6files辅助规则误报已逐项处置",
-    "workflows 920f5138、b6532428均terminal；plugin两版partial diff已保存/tmp/plugin-status-recovery-snapshot-01a1406d与/tmp/plugin-status-recovery2-snapshot-01a1406d"
+    "queue probe exit0：993entries/before2097070/after2098062/limit2097152/seq9->10；此前16results诊断被schema正确拒绝，不作为产品证据",
+    "Retry-After owner probe：600/date/86400保留；400digit -> null/15000；core-review-1含03c97d56裁决",
+    "body actualloopback关闭确认；owner106目标测试及tsc exit0；普通长等待worker108测试GREEN不覆盖这两个残留"
   ],
-  "blockedOn": "plugin剩余修正+真实acceptance，之后fresh spec/quality；共享热点归属协调",
-  "nextStep": "native a919dd61完成后核对实际checked结果，复用已交付ERP handoff，按同协议恢复core spec4/quality及后续runtime；不能把terminal workflow当作运行",
+  "blockedOn": "queue容量不变量与不可表示服务端等待fail-closed，fresh spec7/quality；后续共享热点显式successor/patch协调",
+  "nextStep": "继续当前40b173a9原生workflow事件及owner复核，不重复core writer；通过spec和quality后提交核心，才放行runtime",
   "updatedAt": "2026-10-16"
 }

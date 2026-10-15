@@ -2,12 +2,13 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-core + status-monitor-core
-- Active slice: Core spec review 3 BLOCKED；ERP队列满修正已交付且owner isolated验证通过；原插件writer修复提前结束/缺少acceptance的失败
-- Blocked on: plugin剩余body断流/微秒时间修正和checked acceptance；之后仍需fresh spec-4与quality gate；共享热点待协调
-- Next step: 原插件repair完成原生事件到达后，先核验真实acceptance与源码；再通过同协议恢复后续审查/runtime，不重做已交付ERP核心
-- Owner disposition: [core-review-1.md](core-review-1.md)（含review 3、独立反例、两次基础设施恢复及owner ERP验证）
-- Workflows: `920f5138-1015-4db1-801f-c971795deed5`已终结失败；`b6532428-5f5d-4a11-bf80-484d2f33000f`已终结blocked，均不可当作仍运行
-- Active native repair: plugin `a919dd61-90d3-47b1-b85a-a16f4ef49e3b`；ERP最后交付`826a67e2-fc97-4fcf-995f-ad9597768ddc`，等待gate
+- Active slice: Core spec review 6 BLOCKED：队列seq位数进位导致超过2MiB；Retry-After极大但合法整数仍降为15s重试
+- Blocked on: 队列容量跨身份分配保持上界、不可表示服务端等待fail-closed、fresh spec/quality；共享热点接线仍需明确successor/patch协调
+- Next step: 当前workflow恢复原writer窄修两项（不重写ERP），再spec7/quality；通过且owner验收后提交核心并放行runtime
+- Owner disposition: [core-review-1.md](core-review-1.md)（含review3–6、边界复现、真实loopback对照、UTC公式来源及基础设施恢复）
+- Current workflow: `40b173a9-f68a-4304-960b-167ae1bf1d6a`，同mission continuation，从已核实native handoff开始；不是重新启动核心writer
+- Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked
+- Latest plugin handoff: `2cda8855-bc72-41a8-822e-6719836d4c93`（普通长Retry-After修正；极端值及queue边界未通过）；新repair ID由当前workflow原生事件给出
 
 ## Checkpoint Update
 
@@ -60,3 +61,29 @@
 - workflows 920f5138、b6532428均terminal；plugin两版partial diff已保存/tmp/plugin-status-recovery-snapshot-01a1406d与/tmp/plugin-status-recovery2-snapshot-01a1406d
 - Blocked on: plugin剩余修正+真实acceptance，之后fresh spec/quality；共享热点归属协调
 - Next step: native a919dd61完成后核对实际checked结果，复用已交付ERP handoff，按同协议恢复core spec4/quality及后续runtime；不能把terminal workflow当作运行
+
+## Checkpoint Update
+
+- Current todo: status-erp-core + status-monitor-core
+- Active slice: same-mission40b173a9原writer修复spec5 Retry-After提前重试；旧acceptance故障和review3/4行为缺陷已验证关闭
+- Completed todos:
+- status-impl-plan
+- Evidence refs:
+- owner focused106/106+tsc exit0；/tmp/plugin-status-owner-plugin-core-final-green.log；实际loopback post-fix abort/bodyClosed都true
+- worker a919dd61 native COMPLETE且真实acceptance已核实；ae02274b body cleanup handoff；ERP121ec26b no-change handoff
+- core-review-1含spec4/5裁决、upstream公有领域公式commit c4852d230081ba5504e60db12f5f55c57990ed0b、LSP结果限制
+- Blocked on: Retry-After>300s两种格式及overflow修正，fresh spec6/quality；共享热点接线尚未获释放
+- Next step: 继续当前40b173a9 workflow，接原生修正/reviewer事件；owner对照方案检查再放行，未通过质量不得进runtime
+
+## Checkpoint Update
+
+- Current todo: status-erp-core + status-monitor-core
+- Active slice: core-spec6 BLOCKED：queue身份进位超2MiB及不可表示的合法Retry-After降为15s；40b173a9继续原writer窄修
+- Completed todos:
+- status-impl-plan
+- Evidence refs:
+- queue probe exit0：993entries/before2097070/after2098062/limit2097152/seq9->10；此前16results诊断被schema正确拒绝，不作为产品证据
+- Retry-After owner probe：600/date/86400保留；400digit -> null/15000；core-review-1含03c97d56裁决
+- body actualloopback关闭确认；owner106目标测试及tsc exit0；普通长等待worker108测试GREEN不覆盖这两个残留
+- Blocked on: queue容量不变量与不可表示服务端等待fail-closed，fresh spec7/quality；后续共享热点显式successor/patch协调
+- Next step: 继续当前40b173a9原生workflow事件及owner复核，不重复core writer；通过spec和quality后提交核心，才放行runtime
