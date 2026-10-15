@@ -5,13 +5,13 @@
   "completedTodos": [
     "status-impl-plan"
   ],
-  "activeSlice": "core-spec-1 BLOCKED；原MiniMax writer按owner确认的七项协议问题及上下文前置条件修正",
+  "activeSlice": "core-spec-2 BLOCKED；原writer第二轮修正，尚未进入runtime",
   "evidenceRefs": [
-    "core-review-1.md：owner直接源码复核、额外HTTP body timeout/未知code反例、installation能力约束",
-    "core-spec-1 reviewer 2c25078c-9fd8-47b4-a75d-8f5187aa3a03；ERP repair f6f1a26a-7b3a-4b2f-96d1-524a00bc24a2",
-    "/tmp/plugin-status-core-plugin-delta-01a1406d.patch；Markdown LSP 3 files/0 diagnostics"
+    "core-review-1.md review2：owner源码复核及vite-node反例；非法日期、NaN快照和decision窗口均复现",
+    "reviewer ae296447-8dd9-4243-9bd3-f5136ce9f383；supervisor reply b5b72b18-a199-4944-8ee0-366419cd38e9",
+    "ERP repair 2de2a5ee-5ead-4298-9f5c-8f13e37cc34f；额外queue-full/disabled优先级steer e1d32fc8-4ce4-4acc-9ef9-570176ee7ae0"
   ],
-  "blockedOn": "核心修正及spec/quality重新审查；共享接线路径尚待协调",
-  "nextStep": "ERP repair完成原生事件到达后，将owner额外HTTP findings 8/9与日期parity发至同一workflow的plugin repair run；之后复审，不重复派writer",
+  "blockedOn": "core spec/quality尚未通过；共享热点和完整快照窄修归属待协调",
+  "nextStep": "同一workflow继续保留writer修正及fresh spec/quality gates；owner处理原生求助事件并直接核查，不新开writer或提前放行",
   "updatedAt": "2026-10-16"
 }

@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "读取20-checkpoint及core-review-1；按精确workflow ID查看active run，优先回应supervisor；原工作流已负责修正循环及后续runtime/integration。",
+  "resumeInstruction": "先读20-checkpoint和core-review-1.md的review2；精确workflow920f5138-1015-4db1-801f-c971795deed5，查看需处置的active run。状态板核心仍in_progress，下游依赖未解除。",
   "knownPartialWork": [
     "status-impl-plan"
   ],
@@ -12,6 +12,6 @@
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "组件GREEN不是协议完成；steer queued不是已修复；所有真实HTTPS/Chrome证据仍未验证"
+    "第一轮修正GREEN未消除全部边界反例；队列满不能发恢复；ready不等于episode解决；S13真实验证仍缺失"
   ]
 }

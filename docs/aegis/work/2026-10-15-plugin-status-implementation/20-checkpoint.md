@@ -2,11 +2,11 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-core + status-monitor-core
-- Active slice: Core spec review 1 BLOCKED；原 MiniMax writer 按确认 findings 修正，禁止提前进入 runtime
-- Blocked on: 核心协议修正及重新审查；共享热点归属协调仍待回复
-- Next step: ERP repair 完成事件到达后，将 owner 的额外 HTTP findings 8/9 发送至同一 workflow 的 plugin repair run；不重复启动 writer
-- Owner disposition: [core-review-1.md](core-review-1.md)
-- Active repair: `f6f1a26a-7b3a-4b2f-96d1-524a00bc24a2`（ERP）
+- Active slice: Core spec review 2 BLOCKED；第一轮修正已交付，仍有HTTP/日期/episode/NaN门禁问题，禁止提前进入runtime
+- Blocked on: 核心协议修正及重新审查；共享热点与分页完整性窄修范围仍待协调
+- Next step: 同一workflow自动继续原ERP/plugin writer的第二轮修正，再做spec与quality审查；不重复启动writer
+- Owner disposition: [core-review-1.md](core-review-1.md)（含review 2和独立反例）
+- Active repair: `2de2a5ee-5ead-4298-9f5c-8f13e37cc34f`（ERP）
 
 ## Checkpoint Update
 
@@ -33,3 +33,16 @@
 - /tmp/plugin-status-core-plugin-delta-01a1406d.patch；Markdown LSP 3 files/0 diagnostics
 - Blocked on: 核心修正及spec/quality重新审查；共享接线路径尚待协调
 - Next step: ERP repair完成原生事件到达后，将owner额外HTTP findings 8/9与日期parity发至同一workflow的plugin repair run；之后复审，不重复派writer
+
+## Checkpoint Update
+
+- Current todo: status-erp-core + status-monitor-core
+- Active slice: core-spec-2 BLOCKED；原writer第二轮修正，尚未进入runtime
+- Completed todos:
+- status-impl-plan
+- Evidence refs:
+- core-review-1.md review2：owner源码复核及vite-node反例；非法日期、NaN快照和decision窗口均复现
+- reviewer ae296447-8dd9-4243-9bd3-f5136ce9f383；supervisor reply b5b72b18-a199-4944-8ee0-366419cd38e9
+- ERP repair 2de2a5ee-5ead-4298-9f5c-8f13e37cc34f；额外queue-full/disabled优先级steer e1d32fc8-4ce4-4acc-9ef9-570176ee7ae0
+- Blocked on: core spec/quality尚未通过；共享热点和完整快照窄修归属待协调
+- Next step: 同一workflow继续保留writer修正及fresh spec/quality gates；owner处理原生求助事件并直接核查，不新开writer或提前放行

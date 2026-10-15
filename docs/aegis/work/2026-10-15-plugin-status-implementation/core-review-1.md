@@ -1,4 +1,4 @@
-# Core spec review 1 — owner disposition
+# Core spec reviews — owner dispositions
 
 ## Evidence and gate
 
@@ -32,5 +32,16 @@
 - New plugin files are untracked; an empty tracked Git diff does not mean no implementation. No existing tracked plugin file was modified during T2.
 - Owner probe: `/tmp/plugin-status-owner-client-probes-01a1406d.ts`, executed by the existing plugin `vite-node`, exit 0. Observed: body timeout category `protocol`, `permanent=true`; unknown code forwarded `true`. These are defect reproductions, not passing acceptance tests.
 - ERP repair run: `f6f1a26a-7b3a-4b2f-96d1-524a00bc24a2`. Extra scope-capability/admin-precondition guidance queued via native steer `fbe0d528-5b01-400b-b482-872abd74f88d`; queued is not consumed/fixed evidence.
-- Plugin HTTP additions 8/9 must be sent to the workflow's next retained plugin repair run once it starts; no second writer is launched.
+- Plugin HTTP additions 8/9 were confirmed again and included in review 2's blocking verdict; no second writer is launched.
 - No production migration, service restart, live credentials, real browser profile or TikTok/Feishu request was used. S13 remains unverified.
+
+## Review 2 — still blocked
+
+- Reviewer `ae296447-8dd9-4243-9bd3-f5136ce9f383`; owner reply `b5b72b18-a199-4944-8ee0-366419cd38e9` confirmed source findings after direct rereads. ERP repair 2: `2de2a5ee-5ead-4298-9f5c-8f13e37cc34f`.
+- Prior fixes for recovery freshness, empty parameters/exact 90s, integer/UTC/UUID strictness, verified candidates, non-ready episode timeout, admin preconditions and installation capability denial are now present; that is not full core acceptance.
+- Still blocking: HTTP header-only deadline and arbitrary error-code forwarding; TypeScript normalizes February 30 through Date.parse; Python episode predicate uses AND where the state contract needs OR; invalid snapshot timestamps can still authorize resume.
+- Independent owner probe `/tmp/plugin-status-owner-rereview-probes-01a1406d.ts`, existing vite-node, exit 0: February 30 accepted `true`; invalid snapshot authorized `resume_monitoring`; invalid decision notBefore/expiresAt authorized `recover_binding`. These are concrete failing safety observations, not passing tests. All timestamp comparisons must reject nonfinite/unreadable instants.
+- Owner ruling: any unresolved not-running episode at 600s, including ready+suspended with stale or fresh snapshot, enters require_user. Mere readiness does not finish the episode. Manual/disabled priorities and healthy-running null remain ahead of timeout. Add 599/600 boundary coverage.
+- Owner additionally inspected policy precedence: REPORT_QUEUE_FULL must beat generic verified-candidate recovery; top-level USER_DISABLED must remain hold even if other fields are momentarily inconsistent. ERP writer guidance queued as `e1d32fc8-4ce4-4acc-9ef9-570176ee7ae0`; queued is not fixed evidence.
+- Future T4 prerequisite: the known duplicate/missing-page completeness defect `f-03dab10a-559` would make the new complete-snapshot gate falsely ready if reused unchanged. Requested narrow file ownership coordination from the existing monitor owner; no edits to that file or shared runtime paths yet.
+- requestId string-vs-UUID is a P2 compatibility consideration, not a default-path blocker because the current client generates UUIDs. Do not alter project-wide request-ID semantics as a side effect.
