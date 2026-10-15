@@ -217,8 +217,19 @@ def test_generated_schema_and_architecture_cover_publishing_head() -> None:
     schema_readme = (ROOT / "docs/schema/README.md").read_text()
     schema_sql = (ROOT / "docs/schema/schema_tts_erp.sql").read_text()
     process = (ROOT / "docs/architecture/process-architecture.md").read_text()
-    assert "0068_spu_deterioration_alert" in schema_readme
-    assert "14 个业务 schema、73 张表" in schema_readme
+    # 不硬编码 head revision id / 表数：每次新迁移落地后 README 再生会同步推进，
+    # 硬编码只会再次过期（0068→0069 已教训一次）。从 live 迁移目录推导当前 head，
+    # 从生成的 SQL 快照推导业务表数/schema 数，断言 README 与之同步。
+    head = max(
+        p.stem for p in (ROOT / "alembic/versions").glob("[0-9][0-9][0-9][0-9]_*.py")
+    )
+    assert head in schema_readme
+    # schema_sql 的 CREATE TABLE 含 public.alembic_version 一行，扣除后才是业务表数。
+    table_count = schema_sql.count("CREATE TABLE IF NOT EXISTS") - 1
+    schema_count = sum(
+        1 for line in schema_sql.splitlines() if line.startswith("CREATE SCHEMA ")
+    )
+    assert f"{schema_count} 个业务 schema、{table_count} 张表" in schema_readme
     assert "### publishing" in schema_readme
     assert "CREATE SCHEMA publishing" in schema_sql
     assert "CREATE TABLE IF NOT EXISTS publishing.video_publish_tasks" in schema_sql
