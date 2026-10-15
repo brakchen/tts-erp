@@ -2,17 +2,21 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-runtime + status-monitor-runtime
-- Active slice: Core spec8与owner质量闸已放行；两端纯核已提交推送，进入独占模块runtime实施
-- Blocked on: storage.ts与ERP已有owner权限/注册热点的明确交接；完整快照窄修已登记、尚未实现；最终baseline/真实HTTPS-CORS-Chrome-通知证据仍未完成
-- Next step: 当前workflow继续T3持久化/API/outbox及T4 controller；只编辑已授权文件，共享热点先交patch/联系owner，不能把沉默当放行
-- Owner disposition: [core-review-1.md](core-review-1.md)（含review3–8、质量裁决、核心提交与独立边界验证；不等于整体完成）
+- Active slice: Runtime spec2 BLOCKED：首轮修正已交，仍有8项P1及2项P2；同workflow继续原writer修正
+- Blocked on: purpose默认拒绝/受限mint、全动作结果原子性、整体deadline、纠正登录、上下文CAS、历史carrier/ACK隔离、CSRF、分页与外发事务；共享热点仍待明确handoff
+- Next step: 保留原writer按spec2与OWNER裁决修正；不因组件测试GREEN推进T5，下一fresh spec/quality必须逐项核查
+- Owner disposition: [runtime-review-1.md](runtime-review-1.md)（当前BLOCKED与6项独立复现）；纯核历史见[core-review-1.md](core-review-1.md)
 - Current workflow: `40b173a9-f68a-4304-960b-167ae1bf1d6a`，同mission continuation，从已核实native handoff开始；不是重新启动核心writer
 - Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked
 - Core delivery: ERP `f2c0fa7`（7文件）、独立plugin `718c83e`（12文件），均已push；发布版本仍0.4.26，未对既有runtime接线
-- Latest plugin handoff: `6a32ef0a-d4ce-4fdb-84fd-4f1036ea0213`；spec8 `eba15195-54ff-4c2d-bf1e-425d91c0587f`；quality `6acc5cbc-2183-4901-876f-5d20dbc22237`，owner reply `4d80c122-666a-4640-a2fa-3cc315798b3f` OK
-- Tower receipt: revision620，core两项completed附changedFiles，runtime两项in_progress，整体integration仍依赖阻塞
-- Registry: canonical origin/master `49bc355` 已推送（仅我方两行metadata）；root/docs工作树ACTIVE可能陈旧。补正ERP unit fixture登记迟到这一流程缺口；登记此前无active/draft owner的binding/fetch/background/popup/messages/版本路径，未接管storage或ERP共享权限文件
-- Runtime children: ERP `931fa261-ba6d-4890-9927-061f150cf394`；plugin `99e75517-bbf6-407f-aaaf-1b053e9c8d3e`；native follow-up已排队，排队不等于已消费，验收时核对ack/文件范围
+- Core gates: spec8 `eba15195-54ff-4c2d-bf1e-425d91c0587f`；quality `6acc5cbc-2183-4901-876f-5d20dbc22237`；owner reply `4d80c122-666a-4640-a2fa-3cc315798b3f` OK仅适用于纯核
+- Tower receipt: revision622，core两项completed附changedFiles，两runtime仍in_progress；T4收窄纯模块，GUI/MAIN/版本明确归T5，T5显式blocked
+- Registry: canonical origin/master `e11b5bc`已推送；继`49bc355`后补登记coord/identity helper与测试及无他人owner的page-hook/content后续接线。初交fixture/helper迟登记如实记录；storage与ERP既有owner权限/注册热点仍未接管
+- Runtime初交children: ERP `931fa261-ba6d-4890-9927-061f150cf394`；plugin `99e75517-bbf6-407f-aaaf-1b053e9c8d3e`；两者ack边界，但运行实现未通过审查
+- Runtime spec1: reviewer`42c30001` BLOCKED；修正C7与A7均已交，A7明确ack并报告复跑6项反例，无整体放行
+- Runtime spec2: reviewer`c25ded39-6914-4573-a34c-8dc73544ce9c`最终BLOCKED（8P1/2P2），owner reply`77007b54-8735-4b50-be16-9afe1b290a55`与`17b0257b-dc1a-4c05-9ae3-bce9e5e06883`；源码副本及SHA保存`/tmp/plugin-status-owner-runtime-r2-01a1406d/`
+- Owner行为证据: `/tmp/plugin-status-owner-runtime-r1-01a1406d/`冻结源码+模拟I/O探针；旧draft获执行、失效被心跳节流、错身份wake仍running、ACK前清incident、HOLD未停scheduler，并发同decision实际执行2次
+- ERP修后额外OWNER BLOCK: 已读canonical来源且ack，但`purpose_allows_status(None)=True`与`_mint_status_key`仍铸造无purpose普通RW key，不可作为“过渡可用”放行。必须在依赖未就绪时fail closed，不能用测试通过或docstring代替权限；见runtime-review-1后续裁决
 
 ## Checkpoint Update
 

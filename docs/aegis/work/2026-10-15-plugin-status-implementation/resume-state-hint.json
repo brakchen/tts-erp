@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "当前子run ERP931fa261-ba6d-4890-9927-061f150cf394/plugin99e75517-bbf6-407f-aaaf-1b053e9c8d3e；无需启动新workflow。读review8+quality1记录。canonical ACTIVE用origin/master49bc355，不用落后main/docs worktree副本。",
+  "resumeInstruction": "当前workflow40b173a9继续第二轮runtime修正；C7/A7已交，spec2 c25ded39最终BLOCKED（8P1/2P2），owner已回复两次并保存R2源码/SHA。native事件唤醒，不轮询或新开workflow。先读runtime-review-1.md与最新checkpoint；canonical ACTIVE用origin/master e11b5bc，Tower622，T5仍blocked。",
   "knownPartialWork": [
     "status-impl-plan",
     "status-erp-core",
@@ -11,9 +11,12 @@
   "mustReadBeforeContinuing": [
     "docs/aegis/work/2026-10-15-plugin-status-implementation/10-intent.md",
     "docs/aegis/work/2026-10-15-plugin-status-implementation/20-checkpoint.md",
+    "docs/aegis/work/2026-10-15-plugin-status-implementation/runtime-review-1.md",
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "纯核完成不等于整体完成；runtime不允许动已有owner storage/access/security/app/base/scheduler，不允许prod migration/restart/真实凭证TikTok写；T5修复fullsnapshot前不得信任旧campaignsComplete标志"
+    "纯核完成或worker GREEN不等于runtime正确；R1模拟I/O反例不是Chrome/真实HTTPS证据",
+    "runtime不得改已有owner storage/access/security/app/base/scheduler；无prod migration/restart/真实凭证TikTok写；T5完整分页窄修前不得信任campaignsComplete",
+    "canonical依赖未到不允许purpose=None放行或先铸造普通RW key；必须failclosed，不用错误授权断言或docstring掩盖权限缺口"
   ]
 }
