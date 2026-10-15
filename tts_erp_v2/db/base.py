@@ -123,6 +123,18 @@ def reset_for_testing() -> None:
     _SessionLocal = None
 
 
+def reset_session_factory() -> None:
+    """Drop only the cached sessionmaker, keeping the engine (and its pool).
+
+    Tests that rebind a session need the factory cleared between cases, but
+    disposing the whole engine forces every following test to pay a fresh
+    connection handshake. Splitting the two lets the test suite share one
+    connection pool while preserving per-test session isolation.
+    """
+    global _SessionLocal
+    _SessionLocal = None
+
+
 def session_scope() -> Iterator[Session]:
     """Context manager-style session helper for one-off scripts."""
     SessionLocal = get_session_factory()

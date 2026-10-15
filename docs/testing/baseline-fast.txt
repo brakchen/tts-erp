@@ -1,0 +1,18 @@
+# tts-erp committed test baseline
+#
+# Known-failing / erroring test ids for the selection below, measured on
+# master. This is a property of master, NOT of any feature lane.
+#
+# Lane workflow (one suite run per lane):
+#   bash scripts/test_baseline.sh            # run + compare, exit 0 = pass
+#
+# Regenerate ONLY when master itself changes the failure set, and only
+# from a clean master worktree:
+#   bash scripts/test_baseline.sh --update
+#
+# scope:   fast
+# master:  e04c5e114573b2b6aca1da9c8acfcc8a514e1c6f
+# updated: 2026-10-15T16:39:57Z
+# count:   0
+#
+# One normalized pytest test id per line. Sorted; no reason text.

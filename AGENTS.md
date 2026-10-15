@@ -108,6 +108,8 @@ The purpose of this boundary is not “the frontend may never calculate”. It i
 
 | Task | Command |
 | --- | --- |
+| DoD validation (run once + diff vs committed master baseline) | `bash scripts/test_baseline.sh` |
+| Show / refresh the committed master baseline | `bash scripts/test_baseline.sh --show` · `--update` (master only) |
 | Fast test suite (isolated DB) | `bash scripts/test_isolated.sh fast` |
 | One test domain (isolated DB) | `bash scripts/test_isolated.sh <domain>` |
 | Unit layer (isolated DB) | `bash scripts/test_isolated.sh unit` |
@@ -196,8 +198,9 @@ conn.execute(text("..."))
 Definition of done:
 
 1. Run the narrowest relevant test command.
-2. For code/test changes, run `bash scripts/test_isolated.sh fast`.
-3. The default requirement is zero failures. If master has an explicitly recorded stable baseline, the change must introduce zero new stable failures; isolate and rerun failures once to distinguish flakes.
+2. For code/test changes, run `bash scripts/test_baseline.sh`. This runs the fast suite **once** and mechanically diffs it against the committed master baseline in `docs/testing/baseline-fast.txt`; exit 0 means zero new stable failures. Do not re-run the suite to capture a baseline — the baseline is a property of master and is already committed. Regenerating it (`--update`) is a master-only operation.
+3. The default requirement is zero failures. If master has an explicitly recorded stable baseline, the change must introduce zero new stable failures; isolate and rerun only the individual failing tests once to distinguish flakes.
+4. A lane needs **one** suite execution in the normal case. If the tool reports new failures, rerun the smallest failing selection — never the whole suite — to classify them. Repeated full-suite runs are what previously pushed worker sessions past their wall-clock cap.
 4. Update contracts and operational documentation affected by the change.
 5. Confirm no secrets, production data, unrelated WIP, or staged foreign files are included.
 6. Confirm the lane was synchronized with the master revision it integrated, then confirm the worktree and master are clean and the required branch/master pushes succeeded.

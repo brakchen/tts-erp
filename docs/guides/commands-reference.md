@@ -6,7 +6,14 @@
 ## 1. 测试命令
 
 ```bash
-# 日常全量测试（默认入口；每个 session 克隆独立临时测试库，避免并发互删 TEST_ 行）
+# DoD 验证：只跑一次套件，并与已提交的 master 失败基线做机械差分（退出 0 = 通过）
+bash scripts/test_baseline.sh
+
+# 查看 / 重建已提交的 master 基线（--update 仅限干净 master 工作区）
+bash scripts/test_baseline.sh --show
+bash scripts/test_baseline.sh --update
+
+# 日常全量测试（不差分；每个 session 克隆独立临时测试库，避免并发互删 TEST_ 行）
 bash scripts/test_isolated.sh fast
 
 # 单域/单文件/单测试都走 isolated wrapper
@@ -21,6 +28,8 @@ sudo bash scripts/envsetup/install-test-deps.sh
 ```
 
 > `scripts/test_isolated.sh` 是 agent 的**唯一测试入口**。如果 isolated 前置依赖不可用，先运行依赖检查/安装；不得降级到共享数据库或绕过 wrapper。`TTS_ERP_TEST_OFF=1` 对 agent 永久禁用。
+
+> **一条 lane 只需一次套件运行。** master 的失败基线是 master 的属性，已提交在 `docs/testing/baseline-fast.txt`，不需要每条 lane 重新采集。旧的「采基线 + 合并后再跑 + 每个失败再复跑」流程要跑 2 轮以上全量套件，正是 worker 会撞上 30 分钟上限的主因。现在用 `scripts/test_baseline.sh`：它跑一次套件并输出归一化差分，退出码 0 即为「零新增稳定失败」。**lane 不得用 `--update` 重建基线来让自己变绿。**
 
 ## 2. 数据导入
 
