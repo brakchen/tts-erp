@@ -4,9 +4,9 @@
 
 纯核已交付；runtime 仍实施中，未合并、发布或整体验收。唯一协议是 `docs/plugins/plugin-status-report.md`（批准基线 `fb42e16575a241fec88740d69137ae6a8153c2bb`）。当前技术断点与证据见本目录 work record 的 `20-checkpoint.md`、`runtime-review-1.md`。
 
-已局部接受九段：runtime typed result、snapshot、空 bootstrap、safe-stop、passive observation、invalidate canonical fact、wake rebuild、resume fenced、recovery fenced producers。当前 controller`dbc8c4c9…` / tests`2065fb2f…`经 OWNER实际39named/本地unpipedtsc0、五source控制和scope/harness证明，获第九独立gate`e3e236ab-5a0c-4e4a-83e0-268d261de471`；native终态/七字段/两path/精确gate已核，报告errata单列保留原artifact。这不是全部callers/T4、预算或发布接受。
+已局部接受十段：原九段producer/result迁移，加第十`mandatory-commit-union`。第十独立postGREEN gate为`f038bef7-2b27-49c3-8592-085445c61658`；native root`fd998ff2-d905-438c-b126-c2db229734fe` / child`3afb1272-caf3-4d96-a940-ad6d0f36e232`已terminal，实际七字段/四path/完整gate已核。OWNER独立57个去重named PASS、product-cwd unpipedtsc0、两个隔离静态控制及scope证明；当前controller`b8cdbf86…`，controller test仍`2065fb2f…`。这不是全部callers/T4、预算或发布接受。
 
-recovery沿用首attempt代次、首read scalar PRE及原capture budget，入口/初始化后/failed组合前/bind await后消费原frame；正常ready与failure经唯一runtime出口真实应用，已知失权不返proposal。OWNER曾在36GREEN候选发现三个真实结果缺口，补三案后39GREEN；physical bind本身仍可能迟到，不能将fact fence说成physical fence。下一步：mandatory union及完整callsite inventory → 单预算/实际mutation fence → action-start → Cookie原因 → fresh spec→quality → ERP/T5/最终验证。各段仍须新RED/新预审/独立postGREEN。
+recovery沿用首attempt代次、首read scalar PRE及原capture budget，入口/初始化后/failed组合前/bind await后消费原frame；正常ready与failure经唯一runtime出口真实应用，已知失权不返proposal。OWNER曾在36GREEN候选发现三个真实结果缺口，补三案后39GREEN；physical bind本身仍可能迟到，不能将fact fence说成physical fence。第十仅收紧storage两臂type、controller既有commit helper和八处正向runtime fixture；不改runtime算法或增加authority。orphan fence原runtime会忽略，静态排除是新硬化；fixture从原seed复制nullable scalar，不借最新context。未批准的whole runtime/storage/chain命令已披露，保日志但不追认；最新四文件LSP有104项hint/warning/information、无error，不能称clean。Tower635将callers置blocked，新增`status-runtime-chain`诊断实际STALE_CONTEXT，原因未证，不预设snapshot预写即首拒绝根因。之后单预算/实际mutation fence → action-start → Cookie原因 → fresh spec→quality → ERP/T5/最终验证；各修复仍须新RED/新预审/独立postGREEN。
 
 ## Goal
 

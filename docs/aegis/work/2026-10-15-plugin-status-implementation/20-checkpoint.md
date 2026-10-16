@@ -1,10 +1,9 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
 - Task ID: `2026-10-15-plugin-status-implementation`。
-- Current todo: `status-runtime-callers`仍`in_progress`；不是T4或全功能完成。
-- 最新局部接受：第九`recovery-fenced-producers`，完整gate`e3e236ab-5a0c-4e4a-83e0-268d261de471`。root/child已terminal，七字段/两path/精确gate已读核。
-- 当前第十段mandatory union：root`fd998ff2-d905-438c-b126-c2db229734fe` exact原5233 native resume，child`3afb1272-caf3-4d96-a940-ad6d0f36e232`。storage test四案静态载体已产生真实tsc TS2578×2契约RED，非业务RED；新预审`3e72d2d8-cd2e-4526-b2ef-9c4d52059df1`批准最小type/helper与8处正向fixture适配，尚无本段postGREEN。
-- Blocked on：union、aggregate budget/实际业务写点fence、action、Cookie、fresh spec→quality、ERP/T5；无当前full/coverage/build或发布验收。
+- Current todo: Tower635新增`status-runtime-chain`为`in_progress`，`status-runtime-callers`明确`blocked`依赖它；不是T4或全功能完成。
+- 最新局部接受：第十`mandatory-commit-union`，独立postGREEN完整gate`f038bef7-2b27-49c3-8592-085445c61658`。root`fd998ff2-d905-438c-b126-c2db229734fe` / child`3afb1272-caf3-4d96-a940-ad6d0f36e232`已terminal，实际七字段/四path/完整gate已读核。预审/triage均不是该DONE gate。
+- Blocked on：chain实际STALE_CONTEXT、aggregate budget/实际业务写点fence、action、Cookie、fresh spec→quality、ERP/T5；无当前full/coverage/build或发布验收。
 
 ## 技术方案与不可变约束
 
@@ -18,7 +17,7 @@
 6. 已知失权在入口/结果组合owner拒绝proposal，不能只检查一次前缀。physical bind/clear/scheduler自身awaited mutation fence仍未完成，fact fence不等于物理写点fence。
 7. Strict TDD、ArchitectureReviewRequired=yes；真实entered后交错，主Promise创建即观察，try/finally无条件release并await。setup/type/timeout/recorder不包装成实际mutation。
 
-## 已局部接受的实现（九段）
+## 已局部接受的实现（十段）
 
 | 微切片 | 已验证责任 | 最终OWNER gate |
 | --- | --- | --- |
@@ -31,6 +30,7 @@
 | wake-rebuild-producer | 原bootstrap许可先消费、own generation、discovering新episode事实先clear | `55f416c9-a968-47c1-a3cb-5d1bddcc1730` |
 | resume-fenced-producer | 复用snapshot原frame，已知tuple不符先拒绝start，原fence交唯一出口 | `f997085d-f73a-4dda-bbfe-56c56dac68f8` |
 | recovery-fenced-producers | 原attempt/首scalar/同budget全传required frame，已知失权不proposal，正常ready/failure真应用 | `e3e236ab-5a0c-4e4a-83e0-268d261de471` |
+| mandatory-commit-union | type强制observation-only或binding+fence；required既有helper；八正向fixture原seed迁移 | `f038bef7-2b27-49c3-8592-085445c61658` |
 
 ## 第十段当前技术决策
 
@@ -38,9 +38,15 @@
 - 真实静态RED：accepted source未改时，storage test仅两处expected-unused @ts-expect-error TS2578；Vitest四案PASS只是载体执行，不是类型证明。无效重复import已修且不计RED。
 - OWNER独立type-only私有preview确认8处runtime fixture需迁移：默认/custom snapshot、3次reportObservation、3个executor-return commit。它们不是故意malformed负案；5个相关旧runtime正案在accepted基线已FAIL，独立记录，不算union引入。
 - 仅storage type、controller commit required参数/directfence/local comment、storage载体及runtime八fixture；算法/runtime/source其他方法不改。共享default frame须复制原seed options.state（含healthy case incidentId:null，state:null是真absence），不硬编码incident或借late context。fixture true predicate不充当生产代次/交错证明。
-- 证据`/tmp/plugin-status-union-owner-static-red-01a1406d.log`、`/tmp/plugin-status-union-owner-fixture-baseline-01a1406d.log`、`/tmp/plugin-status-union-owner-footprint-01a1406d/type-only-preview.log`；预审不是完成，修后old39+carrier4+指定runtime named/实际tsc，独立新postGREEN。
+- OWNER实际39 controller + 4 carrier + 12 distinct related runtime + 另外两个真实typed-result case = **57去重named PASS**；product-cwd实际unpipedtsc0。`result` regex选择4个旧result标题案，不等于两个实际typed-refusal/live-fence案，不能错标或重复计数。
+- 两隔离type控制分别只报TS2578 at966/971，验证binding无fence与orphan fence的静态排除。never/deny-all私有控制有非隔离narrowing诊断，保留但排除，不拿作业务/物理mutation证明。
+- scope：storage type外、controller commit helper外源码逐字同第九；storage旧38 case body精确；runtime除buildHarness及五原case外逐字同，所有expect calls及case names不变；protected src/tests/entrypoints含chain/runtime implementation保持。
+- 原seed捕获在module/config setup awaits后、binding初写及snapshot/case交错前，不称字面“所有首await前”。保incident:null与optional nonce definedness，seed:null返回observation-only；fixture true predicate不是生产代次证明。
+- 当前四hash：storage`ffe6cc65748d8ec73f79be7455f827327adc87984842e8c13fa83fd43b5b18b0`；controller`b8cdbf862b9a4fb7259549c4f48596671d430b147287c2b0dfece18489f1d0c2`；storage test`ef3336b99e44cfc01161ce53352416a2c52cf6702290b2d72233362fae874d9e`；runtime test`11b43257ed7ae8d889750d32d6a55b2c31dec0a9d34f446bce1cfc8a5f86881d`。
+- fresh LSP四文件104项hint/warning/information、无error，**不是clean/0diagnostic**；actual tsc0另证。未授权whole runtime37/storage42/chain8保日志并记scope breach，不追认。worker报告candidate/第九冻结chain均8/8 STALE_CONTEXT，实际首次fence/PRE/因果仍待独立诊断，不能据stack宣称snapshot预写就是根因。
+- OWNER证据`/tmp/plugin-status-owner-mandatory-union-01a1406d/{owner-review.md,checks.json,scope-proof.json,control-dispositions.json,controller.log,carrier.log,runtime.log,runtime-typed-two.log,current-tsc.log}`；RED/preview日志沿用。原native artifact不改写；其中“helper signature only”应读为signature/direct fence body/local comment，“其余unfenced producers”泛称不建立新缺口，以已核inventory和明确剩余项为准。
 
-## 当前冻结与第九验证
+## 第九历史冻结与验证（第十仅覆盖helper）
 
 - controller：`dbc8c4c95642cb5de8b477cbec1a4610cbe6d09ef35e4e526a90faaf41d6efd1`。
 - tests：`2065fb2fc6b5eb13bf56770ab490055513955b10c941a8f39ad36d21390783cb`。
@@ -50,7 +56,7 @@
 - HOLD468虽36GREEN，OWNER发现later-probe撤权仍返proposal、bind await过窗仍ready、firstRead过窗后第二read；准确2输出行为RED+1真实I/O边界RED。三新增案及越界helper删除后才接受。无效undefined-enter/type setup日志保留，不计RED。
 - 五source控制：去gen/重开budget使旧proposal真实canonical apply；借晚tuple/删known-mismatch各实际bind11；拒绝returned-ready fence使正常canonical apply false。各variant实际tsc0，非type/setup kill。
 - AST屏蔽三既有函数后，其余源码与接受基线c281逐字同；旧103literal body逐字同。仅10新case+授权的nullable bindEntryGate/armBindEntry/consume-before-await/reset，其余harness tokens/unarmed bind保留。protected src/tests/entrypoints/package/lock/config不变。
-- 当前active LSP两文件clean、0diagnostic；不代表workspace/full lint，不改历史第八inconclusive。复杂度压力披露，不在本scope抽取重构。
+- 第九当次active LSP两文件clean、0diagnostic；不代表当前四文件/workspace/full lint，不改历史第八inconclusive。复杂度压力披露，不在本scope抽取重构。
 
 证据：`/tmp/plugin-status-owner-recovery-fenced-01a1406d/`的checks/scope-proof/harness-proof/protected-root及current/tsc/五controls logs；HOLD和私有三RED在`/tmp/plugin-status-owner-recovery-fenced-hold-01a1406d/`。root`a6e08374-6fc8-4538-9e13-01e04edc720c` / child`5233faed-09c8-48da-aac3-d528bf79dd7b`已terminal。产品changedFiles仅controller/test两path。
 
@@ -70,8 +76,8 @@
 - Plugin：`/home/schan/pi-workspace/monitor-status-01a1406d`，`feature/plugin-status-auto-bind`；core718c83e已push，runtime WIP，v0.4.26。
 - ERP：`.worktrees/plugin-status-erp`，`feature/plugin-status-erp`；coref2c0fa7已push，锁populate_existing真实两Session/ACK高revision拒绝已验证，不重开。
 - Docs：`.worktrees/monitor-auto-bind-status`，`docs/monitor-auto-bind-status`。主仓foreign gitlink/node_modules不碰；共享热点须明确handoff。
-- Tower revision633：callers仍进行中，之后budget→actions→cookies→spec→quality；owner/status/deps没变只传实质talk，不no-op写板。
-- 下一mandatory union/inventory；再关90秒全ports/两release/physical mutation、action TOCTOU、Cookie原因、fresh spec→quality、ERP isolated baseline/共享purpose/auth/model/migration/scheduler/GUI/MAIN/metadata/分页、T5/browser。
+- Tower revision635：callers blocked依赖新增chain诊断项in_progress；之后budget→actions→cookies→spec→quality。只有真实status/deps改变才更新板，其余实质进展用talk。
+- 下一先最小命名chain复现/实际fence与canonical PRE诊断，经独立tests-first/pre-edit门禁才修；不预设去掉snapshot预写可解决首拒绝。再关90秒全ports/两release/physical mutation、action TOCTOU、Cookie原因、fresh spec→quality、ERP isolated baseline/共享purpose/auth/model/migration/scheduler/GUI/MAIN/metadata/分页、T5/browser。
 - 当前无full/coverage/build/最终ERP baseline、真实浏览器/HTTPS/CORS/TikTok/通知验收，未合并发布。禁生产迁移/重启/真实凭证/真实写操作。完整验证与prospective merge另执行，不提前记完成。
 
 ## 历史范围

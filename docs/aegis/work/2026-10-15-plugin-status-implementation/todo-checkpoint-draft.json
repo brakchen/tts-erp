@@ -1,20 +1,19 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "status-runtime-callers仍in_progress；整体runtime、ERP质量和T5未通过",
+  "currentTodo": "status-runtime-chain in_progress；status-runtime-callers blocked依赖它（Tower635），整体runtime、ERP质量和T5未通过",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core"],
-  "activeSlice": "九个micro局部接受；第十mandatory union rootfd998ff2-d905-438c-b126-c2db229734fe/child3afb1272-caf3-4d96-a940-ad6d0f36e232，storage原test追加4静态案得到实际tsc TS2578×2契约RED。新预审3e72d2d8-cd2e-4526-b2ef-9c4d52059df1批准仅storage type/controller helper与runtime8fixture，尚无postGREEN。原MiniMax/model/session/cwd/tools/native checked contract不变。",
+  "activeSlice": "十micro局部接受。第十mandatory-commit-union独立postGREEN f038bef7-2b27-49c3-8592-085445c61658，rootfd998ff2-d905-438c-b126-c2db229734fe/child3afb1272-caf3-4d96-a940-ad6d0f36e232已terminal，实际7字段/四path/完整gate已核。原MiniMax/model/session/cwd/tools/native checked contract不变。下一chain因果诊断，尚无repair许可。",
   "evidenceRefs": [
-    "唯一协议docs/plugins/plugin-status-report.md；技术状态见20-checkpoint.md、runtime-review-1.md。微接受不等callers/T4完成",
-    "第六/tmp/plugin-status-owner-invalidate-final-01a1406d：22/tsc0、五source控制、迟到read unhandled0/live原error保留，实际64f2b158监督回复为准，retained错误gate另记errata",
-    "第七/tmp/plugin-status-owner-wake-rebuild-01a1406d：25/tsc0、三业务RED、own-gen/late-tuple/私有early-parent控制，准确55f416c9 gate/terminal已核",
-    "第八/tmp/plugin-status-owner-resume-fenced-01a1406d：29/tsc0、1start业务+3缺fence契约RED、四source控制，准确f997085d gate/terminal已核；nullable私有probe invalid fixture排除且保log，历史LSP实际0diagnostic/2inconclusive不是2 hints",
-    "第九controller dbc8c4c95642cb5de8b477cbec1a4610cbe6d09ef35e4e526a90faaf41d6efd1 / tests2065fb2fc6b5eb13bf56770ab490055513955b10c941a8f39ad36d21390783cb；完整poste3e236ab-5a0c-4e4a-83e0-268d261de471，roota6e08374-6fc8-4538-9e13-01e04edc720c/child5233faed-09c8-48da-aac3-d528bf79dd7b已terminal、7字段/两path/精确gate已核",
-    "第九/tmp/plugin-status-owner-recovery-fenced-01a1406d：OWNER39named/actual product-cwd unpipedtsc0、五source-only controls各tsc0且被真实结果杀死、三函数外源码逐字同c281/旧103literal body精确/10新案+窄bind hook。原七RED正确为1真实bind+1staleproposal行为+5缺fence契约；HOLD468的2proposal行为+1实际IO边界另复现修正。fresh activeLSP2clean/0diagnostic，不代表workspace/full lint",
-    "第九HOLD证据/tmp/plugin-status-owner-recovery-fenced-hold-01a1406d保留；artifact中间held hash拼错且重复remaining措辞过宽，真实468660c37aa4afa0172763f161a4b3c601a2b9419831d830473a83eef761186a，以冻结/新inventory为准，原artifact不改。无效setup日志保留不计RED",
-    "Fixture firstReadGate误清stopGate另记f-b7b24e8c-ef9，未修/不同时arm；ERP锁/ACK独立修正已验证，core两端已push，runtime仍WIP/v0.4.26"
+    "唯一协议docs/plugins/plugin-status-report.md；当前技术方案/完整hash/gates/前九证据见20-checkpoint.md与runtime-review-1.md。微接受不等callers/T4完成，历史日志/native/artifact不改写",
+    "第十/tmp/plugin-status-owner-mandatory-union-01a1406d：owner-review.md、checks.json、scope-proof.json、control-dispositions.json、controller/carrier/runtime/runtime-typed-two/current-tsc logs。OWNER39+4+12+另两typed case=57去重named PASS、actual product-cwd unpipedtsc0。result regex4不等于真正typed测试，不重复计数",
+    "两隔离static controls分别只报TS2578 at966/971；never/deny-all非隔离控制排除保留；carrier Vitest PASS不是type proof/runtime拒绝。type/helper外源码精确，旧38storage body、runtime其余harness/case/全部expect/name与protected含chain保持",
+    "default原seed复制nullable incident/nonce definedness，在module/config setup awaits后、binding初写/snapshot交错前，seed:null observation-only，不制造bootstrap/absence权限。orphan fence原runtime忽略，union静态排除是新硬化；算法不变",
+    "第十最新LSP四文件104项hint/warning/information，无error而非clean。第九当次39named/五source controls/tsc0及LSP2clean、其HOLD468正确hash和三缺口修正仍见原证据；第八历史0diag2inconclusive及invalid nullable probe不改",
+    "whole runtime37/storage42/chain8是未授权范围扩张，保日志不追认。worker报告chain candidate/第九冻结均8/8 STALE_CONTEXT；首次实际fence/canonical PRE/原因未独立证明，snapshot预写只是观察。原artifact泛称其余unfenced producers不建立新缺口，helper实际含signature/body/comment",
+    "Fixture firstReadGate误清stopGate另记f-b7b24e8c-ef9，未修/不同时arm；ERP锁populate_existing真实两Session与ACK高revision拒绝已验证不重开，core两端已push，runtime WIP/v0.4.26"
   ],
-  "blockedOn": "mandatory union/inventory、单90秒全ports/两release/实际业务写点fence、action-start、Cookie、fresh spec→quality、ERP baseline/共享接线/T5/browser；无当前full/coverage/build。物理bind仍可能迟到，fact fence不解决它。",
-  "nextStep": "原writer按新预审最小union实现；8fixture为default/customsnapshot、3reportObservation、3executor commit，5旧正案基线已FAIL，不作故意malformed或union新失败。defaultframe取实际seed原scalar（nullable incident/seed null）而非统用常量；不latest借权、不改runtime算法。old39+carrier4+指定runtime named/实际tsc0后独立新postGREEN，union后再budget→actions→Cookie→freshspec/quality→ERP/T5。",
+  "blockedOn": "chain因果/真实恢复handoff、单90秒全ports/两release/实际业务写点fence、action-start、Cookie、freshspec→quality、ERP baseline/共享接线/T5/browser；无当前full/coverage/build。fact fence不解决潜在late physical bind。",
+  "nextStep": "先最小命名chain复现并记录actual fence/canonical PRE/liveness、单变量区分fixture/生产owner；不预设删除snapshot预写可修首拒绝。tests-first有效RED→新pre-edit WAIT→既有owner最小修复→明确named/actualtsc→独立新postGREEN。之后budget→actions→Cookie→freshspec/quality→ERP/T5。原writer唯一产品写者，OWNER不代写；scope外缺陷另案，禁止自扩命令、换model/CLI、生产或真实凭证/写操作。",
   "updatedAt": "2026-10-16"
 }
