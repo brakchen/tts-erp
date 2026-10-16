@@ -1,307 +1,61 @@
-# Runtime review 1 — 闭环未通过
+# Runtime review — 当前技术裁决
 
-## 裁决与边界
+## 接受边界
 
-- Workflow：`40b173a9-f68a-4304-960b-167ae1bf1d6a`；reviewer `42c30001-c0be-4df0-8025-7167fda56bdb`。
-- 最终结构化产物 `reviews/runtime-spec-1.json`：**BLOCKED，13项P1、2项P2**。Owner逐项直接阅读当前代码和方案§4–12，reply `79876f2f-ae8a-4380-a2e7-8232da79fa57` 确认。不是照收外部意见，也不以未挂载/缺真实环境当作本轮源码缺陷。
-- T1/T2纯核已有提交和两轴认可不回退；T3/T4任务仍in_progress，T5不得进入。ERP初交71 tests与插件初交641 tests/coverage/build通过只能证明原测试覆盖范围，不能证明运行闭环正确。
-- 修正仍用原workflow、原MiniMax writer协议；当前ERP续跑 `c7ff7bbc-b20f-4803-954e-3bfecdef4652`，之后由workflow继续原plugin writer。无另起CLI或新顶层workflow。
+整体仍 **BLOCKED / 未交付**。纯核和七个 controller/runtime 微切片的局部接受，不等于全部 callers、完整预算、真实浏览器副作用、ERP 接线或发布通过。
 
-## Owner确认的修正项
+唯一产品/协议基线：`docs/plugins/plugin-status-report.md`。旧候选的全量计数、coverage/build、过期门禁和 native complete 不作为当前完整验收。
 
-| 等级 | 唯一owner/问题 | 必须验证的可观察行为 |
-| --- | --- | --- |
-| P1 | ERP ingest在seq判断前推进episode/transport计数、清人工锁存 | 低seq不同incident只归档，不改变当前episode、锁存、预算或投影；网络last_seen可更新 |
-| P1 | ERP结果匹配/解决episode仅检查instance/id/revision | 旧resume结果可补历史，但只有当前incident/epoch/revision及当前running确认能解决当前episode |
-| P1 | ERP现有decision复用忽略epoch和terminal状态 | ready新epoch不得取得旧epoch指令；failed/rejected不作为同一可执行命令重发 |
-| P1 | ERP忽略服务端登记capabilities；installation binding=null落入无epoch错误 | 客户端声明不授予能力；空grant不能取得recover/resume；合法installation遥测200且无不兼容绑定指令 |
-| P1 | ERP缺observedAt相对now的未来5分钟拒绝 | 超界报告在落当前状态/事实前受控拒绝，不能200推进投影 |
-| P1 | admin recover绕过60秒/600秒/3次预算 | 解除manual latch不重置恢复预算；第四次不得插入attempt4后500 |
-| P1 | plugin周期/freshness/并发owner错误 | 心跳建议不延迟失效；旧draft不冒充本次snapshot；历史补报拒绝不永久阻止新鲜证据；所有入口single-flight，started必须独占声明 |
-| P1 | plugin完成结果/报告非原子，生成running snapshot即清incident | terminal结果与其报告一起落盘；保留incident直到服务端确认applied+running回执 |
-| P1 | controller被动观察只计tab，初始化/登录修正无法产生候选证据 | 允许有界只读身份核验并上报；仍必须等server recover/ready/resume，不自主刷新或启动 |
-| P1 | controller给顺序端口分别90秒且reload无界 | 一次总deadline、取消/晚到提交闸；不能仅测常量90 |
-| P1 | wake/reload后仅tabId弱证明，Cookie Store/身份未持续复核 | 同tab变店/变store/离开origin不能保留running或提交旧证据；不新增server wire Cookie Store字段 |
-| P1 | HOLD只改显示状态，未停scheduler或撤销generation | 对running和deferred recovery均立即停危险执行，晚到恢复不能重开 |
-| P1 | invalidation先清业务绑定，provision跨多个写操作且保留旧binding | 即时generation停机，同时持久失效事实无断电丢口；切instance与队列/账本/绑定在同一序列化事务，禁止跨实例携带可执行上下文 |
-| P2 | resolved后用no-episode构造去重键；恢复正文却提示人工 | 不同episode各一次恢复通知，重复同episode幂等；正文与恢复状态一致 |
-| P2 | 在线NO_CANDIDATE持续180秒无通知 | 以episode内持续观察计时，按约定阈值通知一次，不等到失联或600秒人工升级 |
+## 当前实现
 
-巡检超时仅按方案明确事实推进；不能伪造“已执行”或实际未发生的终结结果。共享purpose/mount/model/migration/browser接线本轮不当作缺陷，但整体仍必须补齐。
+- storage 以 raw absent/present/unknown 区分状态，实际 mutation 前原子核验原 context 与同步 predicate；返回 typed `ObservationWriteResult`。
+- runtime 原样传播 result/fence；不把 rejected 当已应用，不 dispatch 拒绝状态。
+- controller 已迁移 snapshot、空 bootstrap、safe-stop、passive observation 和 invalidation；首次 generation、scalar PRE tuple、同一 budget 由原操作拥有。
+- `applied` 与 `accepted` 分离；canonical commit 统一状态与报告。满队列可以有事实应用而无报告入队，不能把这两者合成授权。
+- negative-parent delegation 同步先消费父许可，然后才做合法自身 generation 撤权；不借子操作新读到的 nonce/gen，也不因自己的撤权拒绝全部正常父操作。
+- durable lifecycle fact/report 在 business clear 前实际存在。已应用事实不因后续 cleanup 失权被抹去。
 
-## 独立行为复现（模拟I/O，不是真浏览器）
+## 第六微切片最终局部通过
 
-冻结源码副本：`/tmp/plugin-status-owner-runtime-r1-01a1406d/`；仅复制插件源码及合成fixture，未修改worker工作树。执行真实runtime/controller/storage/client/queue/ledger模块，只替换Chrome storage、page/scheduler端口和HTTP Response。无网络、凭证或TikTok写操作。
+OWNER postGREEN gate：`64f2b158-82fd-42e2-87ca-7c60b33cd06e`，只接受 `invalidate-canonical-fact`。
 
-命令：在插件工作树运行 `./node_modules/.bin/vite-node /tmp/plugin-status-owner-runtime-r1-01a1406d/probe.ts`，exit0；日志 `/tmp/plugin-status-owner-runtime-r1-probes.log`。
+- controller：`bf2f3c5c3ee3fd4b40337b80ea5cd0180ddbd1ff447a7580406ee5142405818f`。
+- tests：`317f975d7415c843ff61f8607a5ceb2b25757104a11896e27b6f0228bdfcc40d`。
+- OWNER 冻结全 src/tests/entrypoints/config，亲跑 **22 named PASS、实际 unpiped tsc exit0**。
+- 五个 source-only 控制重新执行并分别失败于真实结果断言：移除自身 generation、stop 后借 tuple、单独移除 ensure/observe 的 parent origin、always-reject-origin（两个正常父路径均失败）。不只检查 recorder。
+- 迟到 read 拒绝探针：同样真实三 read/两 probe、原预算过期、主流程 `STALE_CONTEXT`，修前 unhandled1，最终 unhandled0；canonical/report/clear 不变。
+- 额外 live-budget read-error 探针保留原 error 对象/消息，无 unhandled、无写入，证明 observer 没把 I/O 错误转成 null/permission。
+- 从上一候选到最终版本，invalidator 以外源码 AST 屏蔽后字节相同；原89个 literal case body无改动（其中包含旧15），runtime/storage/runtime tests/chain/package 与基线相同，package-lock diff0。
+- LSP：7个既有 unused hints，controller push-only inconclusive；**不称全 clean**。实际 tsc0 独立成立。
 
-1. 合法历史`binding_ready` draft observedAt **17:00:09**，本次新snapshot **17:00:10**：发送并执行旧报告响应一次，而新snapshot仍在队列。
-2. 健康心跳成功后立即失效：发送数 **1→1**，失效报告仍pending=1，被下一心跳时间阻挡。
-3. 允许`/ads-creation`同tab，但business binding Seller/Advertiser已不符：wake仍 **running/gate=true/stop=0**。
-4. 没有任何网络确认：生成snapshot后 **incident=null/reportsSent=0**。
-5. HOLD后持久状态为suspended，但 **schedulerRunning=true/stop=0**。
+完整证据：`/tmp/plugin-status-owner-invalidate-final-01a1406d/{checks.json,scope-proof.json,current.log,tsc.log,owner-unobserved-read.ts.log,owner-read-live-error.ts.log}`；同目录五个 mutant logs。
 
-并发命令：同目录 `concurrency-probe.ts`，exit0；日志 `/tmp/plugin-status-owner-runtime-r1-concurrency.log`。两次并发observation在可控HTTP barrier同时进入 **2** 个请求，同一冻结decisionId的executor调用 **2** 次。不是仅mock函数计数：实际周期、出队、授权、accepted/started/terminal账本均运行，barrier证明重叠顺序。
+预修候选 `1d8/02be` 的 OWNER 证据和 HOLD 原因见 `/tmp/plugin-status-owner-invalidate-canonical-fact-01a1406d/owner-review.md`。初始新七案准确分类是 **3业务RED + 2 recorder契约RED + 2旧源码已PASS的行为coverage**；后续 raw-read 是独立真实异步安全 RED。无效 setup/timeout、移除的无效额外 case 不追认为有效 RED；原日志、supervisor过期、tsx自动安装尝试及比较 seed-normalisation 的诊断错误均保留，不扩写成当前业务漏洞。
 
-首次诊断setup使用heartbeat draft（被正确合并）和非允许`/product`路径，不能证明上述缺陷；已改为不可合并的`binding_ready`及允许origin/path后才记录有效结果。禁止把首次未复现当作RED或错误地修改产品匹配规则。
+## 尚待关闭的技术缺口
 
-这些日志证明R1冻结候选的缺陷，不代表正在修正中的新候选状态。后续须对完成的真实候选重跑对应反证，不以副本通过代替当前源码验证。
+| 范围 | 所需实现与证明 |
+| --- | --- |
+| 其余 producers / mandatory union | ensure rebuild、recover/failed、resume 等不再发送 unfenced binding；所有真实消费者消费 applied/refused；类型强制 observation-only 与 binding+fence 分支 |
+| 原90秒窗口 | 初始化、read/stop/commit、两个 refresh-release、晚到值共享同一 budget，不以 Promise.race 假称取消 I/O；恢复有效 entered-boundary 回归 |
+| 实际业务写点 | bindTab/clearBinding 必须在自身 await 后实际 mutation 点消费原 fence；外层清理检查不能关闭此缺口，真实 Chrome/shared adapter 仍 T5 |
+| Action-start TOCTOU | authorize→await persistDecisionStarted 后，首个 reload/capture/start 前检查 deadline、epoch、nonce、enablement；terminal CAS 不能撤销已发副作用 |
+| Cookie 原因保真 | throw/unavailable/timeout 不等 verified different store；wake 和 post-reload 都应只将真实不同身份归为 conflict |
+| Fresh reviews | 精确新 candidate 先 spec 再 quality；修后重 spec，不能复用此前 gate |
+| ERP / shared / T5 | 最终 isolated baseline、明确 auth/purpose/model/migration/scheduler/storage/GUI/MAIN/metadata/分页 handoff，真实 HTTPS/CORS/Chrome 等分层验证 |
 
-## 共享purpose兼容源已定位
+ERP `lock_instance.populate_existing` 的真实两 Session 交错、canonical ACK 对更高 revision/superseder 的拒绝已独立验证，不重开。共享 purpose 缺失必须 fail closed，不能借普通 RW 或新 registry 绕过。
 
-- ERP初交因在当前clone `git cat-file 03d595fb`不存在而未读维护中的purpose实现。实际源在另一个clone：`/home/schan/pi-workspace/monitor-managed-01a129a2/.worktrees/monitor-config-erp`。
-- Owner验证HEAD **03d595fb9b079b541ed6425173fc257854160fa2**；仅foreign WIP `tests/unit/test_monitor_config_persistence.py`，`access/`及`db/models/security.py`相对该提交无差异。
-- ERP续跑`c7ff7bbc-b20f-4803-954e-3bfecdef4652`已在handoff明确ack并读完规范来源；此前“排队”状态已消费。没有修改外部工作树，准备了`/tmp/plugin-status-purpose.patch`及待核对revision的迁移草案；尚未应用或通过共享owner审核。
-- access/security/app/base等仍需明确handoff；不得整分支cherry-pick或另立purpose owner。T3可备最小patch，但未挂载测试不证明canonical purpose已经接通。
+## 后续执行契约
 
-### ERP修后额外OWNER BLOCK（独立于R1冻结清单）
+保持原 MiniMax 唯一产品 writer、原 cwd/profile/native checked contract；OWNER负责独立验收、协调和 Git。每段有效 RED→新 pre-edit WAIT→最小 canonical 修复→相关 GREEN/实际 tsc→独立新 postGREEN。不得改生产数据库、真实凭证、TikTok 写请求或真实通知。
 
-C7交付自身API71 tests GREEN后，owner直接读取实际`purpose_allows_status`（service.py:127–144）与`_mint_status_key`（:300–323），发现两项相连的权限缺口：
+第六native rootc971/childb1已terminal；七字段/两changedFiles正确，但ownerGateRef错误展开为`64f2f1e1-2c39-4b7a-9f4e-0d5a6c8e1b47`，不认可该虚构ID，实际接受以完整64f2b158监督回复为准。原artifact保留；writer在新预审已承认，OWNER以后回复正文写完整ID而不让其猜短前缀。
 
-- `purpose is None`仍返回True，含义是缺canonical字段时把绑定的普通RW key当status key；这不是fail-closed，也不因“尚未集成”成为合法授权。
-- mint只填role=readwrite，不写purpose；docstring说以后integration必须补，不能阻止当前helper铸造有普通RW权限的凭证。C7 acceptance prose称fallback已移除，与实际None分支不符。
+当前root`614318f3-4705-4ef1-8598-070be1b87b0c` exact原b1续接`wake-rebuild-producer`，childabcdec02。只迁移ensureInitialized的unprovable重建分支，保持fresh episode/discovering/INITIALIZING及instance_started WORKER_CONTEXT_UNKNOWN领域含义。新预审`04104954-f51c-42de-8812-efa64bc990a9`要求先真实business断言移到callOrder前、补新incident RED，再原bootstrap tuple/live在自身撤权前消费、typed实际fact-before-clear；保护旧22，相关实际tsc后须独立新postGREEN。随后按条件先在旧bf2直接证明业务null-vs11 RED，再修现有branch；实际新gate`55f416c9-a968-47c1-a3cb-5d1bddcc1730`已局部接受controller`f60eeddbe6540436ee491aa22527877c49582134afc6d0a998699e0ff838328a`/tests`0dc5352287c8da1eaa4e18597a1017406fc2d93e2545a843ddad0d33739a057f`。OWNER25named/tsc0，同finaltests旧bf2三业务RED，own-gen/late-tuple各返回错误重建state致FAIL；额外私有early-list+HOLD隔离current1PASS、删bootstrapLive precheck1FAIL，非产品第26案。AST屏蔽branch其余源码逐字同，旧22不变。证据`/tmp/plugin-status-owner-wake-rebuild-01a1406d`；root/child已terminal，七字段/两path/准确完整postGate已核，非全部callers接受。
 
-**Owner不接受该过渡状态。** 依赖字段/规范provider未就绪时应明确拒绝或报受控unavailable，并在写实例/key前停止；仅明确`plugin_status`事实允许放行，缺失值不得当已授权。确实铸造专用key必须使用规范purpose；不能先发普通RW key再靠调用者记住限制。无需为此越权修改共享model/access，测试可使用明确的外部事实/provider边界，但不能把缺purpose放行断言作为正确GREEN，亦不得mock整个权限域。真实canonical接线及跨路由负例仍待T5/owner交接。
+完整 full/coverage/build、版本同步、ERP baseline、prospective merge 和发布均另行执行，不提前记完成。
 
-这不要求重做现有purpose体系，恰好是拒绝第二套宽松兼容语义。下一次fresh spec OWNER gate必须确认该点关闭；当前不发布runtime、不将T3标为完成。
+## 历史证据
 
-## Runtime spec2 — OWNER继续BLOCK
-
-Reviewer `c25ded39-6914-4573-a34c-8dc73544ce9c`，reply `77007b54-8735-4b50-be16-9afe1b290a55`。两writer R1修正已交，A7明确ack scope及owner探针并报告6项原反例已修；这仍是worker证据。Owner再次读当前真实源码，确认以下未关闭/新增问题，不把原冻结源码当修后失败证据：
-
-- purpose缺失默认放行及普通RW mint仍未关闭，继续P1。
-- recover先独立提交ready，再返回无commit的applied，runtime允许只落terminal ledger：恢复结果/报告仍非原子，P1。
-- passive verify保留invalid/login_required/conflict，服务端只接受discovering/verifying候选，纠正登录后仍卡住，P1。
-- await端口无整体deadline race，最后snapshot返回后也无预算检查，仍可挂起或超90秒提交ready，P1。
-- resume返回running commit后存在await口，storage无同事务instance/epoch/generation CAS，失效可被旧running覆盖，P1。
-- connectivity在LIMIT/OFFSET后才过滤、total未过滤：派生时间条件应进入查询与count，不应持久化标签，P2。
-- enable/disable仅role guard，漏既有cookie CSRF helper；角色不证明请求意图，P1。
-- OWNER新增：ACK只看全局pending/non-null incident/running，回调无expected context，controller又以分开的read/write清当前incident。必须绑定同一instance/incident/epoch/revision和applied-resume证据，并CAS；旧running心跳/冻结回执不能清新episode。
-- 历史响应先触timeDenial就会被terminal-settle，即使它不是当前snapshot。应在账本裁决前识别历史carrier；回归要证明历史NotBefore/skew后同命令新鲜响应确实可合法开始，不能只用本来已过期的命令。
-- 默认outbox sender在claim commit后以同session查secret，autobegin又跨HTTP；必须把secret与message DTO读取放短事务并在发送前关闭，以默认resolver路径测试，不仅测试绕过resolver的注入sender，P2。
-
-需用真实文本重新锚定行号，policy.py当前只375行，不能引用缓存图的392行。namespaceStillCurrent已存在，不笼统宣称所有namespace情况失败；关键是await窗口内的原子上下文声明与晚到写入。最终`reviews/runtime-spec-2.json`已返回BLOCKED，8P1/2P2；补充thread`17b0257b-dc1a-4c05-9ae3-bce9e5e06883`确认历史案例：observed t0在server t110合法获得recover[110,230]、回包丢失；t140重试旧报告时观测已过期，但命令仍有90秒开始窗口，新鲜t140证据本可复用。旧carrier触STALE_OBSERVATION却终结指令是可达源码反证，不宣称已执行此案例。源码及SHA保存`/tmp/plugin-status-owner-runtime-r2-01a1406d/`。整体未放行。
-
-## Runtime spec3 — 6项P1继续BLOCK
-
-最终`reviews/runtime-spec-3.json`为BLOCKED。Reviewer `f663c92d-7bcf-4949-b620-729f86b1fe48`首次OWNER请求超时后重新等待；owner已直接读当前runtime/storage/controller/service与指定测试，回复有效thread `2c81934e-a3b3-4747-b182-b0fdd1d5b07d`，没有跳过门禁。
-
-1. LOCAL_DISABLED分支仍保存旧running commit，常规CAS只比较instance/incident/epoch；HOLD保留该三元组，不能阻止晚到resume。需要同一最终写入内的执行权限fence；不能用改变物理binding epoch偷换HOLD语义。
-2. budget仅包reload/final snapshot，其他端口仍可永久挂起；而且在ensureInitialized之后才开始计时。总90秒要覆盖第一个await起的所有步骤。所谓hung测试创建未使用promise、没有await recovering，不是取消证据，必须替换为实际注入deferred端口并等待结果、释放晚到值验证无副作用。
-3. denial/unsupported/throw/revoked/stale等终结路径仍可只存ledger，测试还期待等未来心跳再报。每条终结路径必须原子保存报告，容量/不可读失败保留明确pending-report与暂停义务，不丢结果、不借机恢复旧绑定。
-4. ACK虽有三元组CAS，仍未证明匹配applied resume/revision及当前running/pending权限；同epoch HOLD后可被旧ACK清incident。冻结projectionUpdated=true不能单独证明当前授权。
-5. createSnapshotCommit一律NONE，下一次新鲜快照会清掉服务端持续NO_CANDIDATE和transport计数。以真实controller→runtime报告链验证，不人为重复构造同reason；也不能把同一sticky失败的每次心跳当新的业务请求失败。
-6. manual recover只验证context/budget，未检查登记capabilities；admin不能创建未授予的能力，拒绝时不能改变decision/latch/budget。
-
-当前未运行新的owner行为探针或ERP测试，上述为直接源码与测试语义证据。R1可执行探针仍只证明R1旧候选。Reviewer认可上一轮purpose fail-closed/mint事务、CSRF、过滤SQL与outbox事务修正，不把这些旧项重开；实际canonical共享接线仍未放行。
-
-同workflow继续原writer：ERP R3 `a5abf9ca-c45a-4cfe-986c-c33bdc25cc1d`已交；frontend R3 `c85638b8-626d-459c-b209-1d3b41a17603`处理。Owner补充manual disabled同优先级检查：lock_instance不滤enabled、manual路径也未检查，新增recover不得在disabled时发新许可；发送至a5的follow-up仅排队到下次resume，**尚非消费证明**。Frontend已排队具体deadline/真实端口/原子结果/ACK复合测试指引，并指出pending getter的sync/async不一致不应靠新缓存权限owner掩盖；仍须查handoff ack。
-
-## Runtime spec4 — OWNER继续BLOCK
-
-R3两writer均已交，不等于验收。Reviewer `8624cdfb-ba50-4d54-a5dc-0a4d7be515ab`等待直接核查；初thread `34c33314-e151-4c45-b313-76bc6949dfea`在核查期间超时，owner已回复新的有效thread `ff5e9618-2815-4cc5-adb2-3e24404af525`。源级R4冻结副本及SHA位于`/tmp/plugin-status-owner-runtime-r4-01a1406d/`，不是执行探针或浏览器验收证据。
-
-- P1：controller已携带sticky transport reason，但ERP把每条该reason的心跳都计为新失败；单次失败+心跳就达到两次阈值。新测试却发送NONE替身，未覆盖真实跨端序列。
-- P1：appliedResume只在runtime内存，worker重启后即使ledger有applied结果，ACK也永远不清本地incident。必须恢复持久义务，不能靠重新执行resume。
-- ACK补充P1：runtime先清incident再处理响应里的HOLD。若admin已发新HOLD revision，ERP拒绝旧resume解决episode，却可同时确认报告并交付HOLD；客户端先清空incident会使HOLD授权失败，scheduler仍running。必须结合当前carrier/服务端响应和持久applied proof，先尊重superseding命令，不能清后重新认领旧episode掩盖问题。
-- P1：总deadline仍漏status read、businessBinding.readBinding/bindTab，final snapshot成功后也没有再验剩余时间。非可取消的RPC不能承诺被Promise.race撤销，但晚到结果不得提交ready或启动监控。
-- 通知问题确认，**按P2而非直接接受P1**：USER_DISABLED后仍保留no_candidate_since，sweep没有重检停用/monitor/execution状态，能错误发送故障通知。清连续无候选条件不意味着重置episode恢复预算。
-- P1：passive probe比较仅count/verified，丢掉reason/phase变更。初始count1、false→LOGIN_REQUIRED不报告；更强路径是初始化probe成功、随后passive probe登录失败，OR保留true并返回旧running。实际探到负面身份事实必须立即走失效/停机，不能只加文案。
-- OWNER新增P1：manual_decision修了capability但仍漏instance.enabled，新的disabled recover可发许可/清latch/占预算；上一轮追加消息未被消费不能算修复。
-- exception终结仍需精确核查：正常settleDecision能生成当前报告，不能笼统指控所有拒绝；但真实businessBinding.bindTab抛错会到runtime catch、commit缺失的直接路径，绕过报告生成，仅pendingReport而无pause。已要求reviewer核实该可达性后列入最终问题。
-
-最终`reviews/runtime-spec-4.json`已核为**BLOCKED，6P1/1P2**，含上述ACK复合问题、manual disabled与已确认可达的exception报告缺口。未运行本轮新的owner行为测试。继续保留原writer窄修与行为RED/GREEN；已修purpose/CSRF/SQL/outbox旧项不重开，T5共享接线与真实环境验收仍blocked。
-
-## Runtime spec5 — 4P1/1P2与实际旧候选RED
-
-Reviewer `95cf664a-559d-4c0f-b952-4e08a9841634`最终JSON为BLOCKED，OWNER有效回复`dad804ae-abe7-4258-9a74-34327fee20b1`及`51d7e8a4-e8de-4e09-8a36-45d07df04307`。
-
-- 四P1：历史running draft仍可清incident、terminal原子写后另写applied proof产生crash gap、first store read及初始化仍漏总budget、capture/recheck transport被误判identity conflict。
-- 一P2：通知停用判据只覆盖reason USER_DISABLED，遗漏独立monitorEnabled/disabled execution，与policy不一致。
-- OWNER冻结旧R5真实模块，仅在副本启用原`it.skip`的HOLD chain case，得到业务断言RED：expected running to be suspended，exit1、1 failed/6 filtered。源码及SHA在`/tmp/plugin-status-owner-runtime-r5-01a1406d/`，日志`/tmp/plugin-status-owner-runtime-r5-hold-probe.log`。边界是假Chrome memory/pages/scheduler/HTTP，不是实际浏览器或服务端。
-- 两原writer修正`e922252d-6ef2-4247-b3ee-4faad32aeb1a` / `7f937f58-469f-459e-b2e9-7a1288f7987d`已交；R6源级确认历史carrier排除、同事务proof、分类及disabled判据已修，不将旧RED移用到新候选。Plugin报告708/708、无skip、coverage95.88/92.65/97.49/95.88为worker证据。
-- Plugin handoff主动承认F2/F3先实现后补测试；记录过程违规，后续回归不能逆改原始TDD顺序。
-
-## Runtime spec6 — 原生恢复成功，3P1仍BLOCKED
-
-原reviewer `70a77a59-45d5-41c1-a43f-71897e0b5af6`遇`fetch failed`且缺required structured output，导致root `40b173a9-f68a-4304-960b-167ae1bf1d6a`终结failed。32/40 used、8 remaining不等于额度耗尽。已保存三工作树状态/diff及23条改动源文件/SHA到`/tmp/plugin-status-recovery3-snapshot-01a1406d/`，不覆盖失败历史。
-
-新root `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`沿用同mission，最多8次子调用，原生恢复上述reviewer为`b6c9a9e0-0188-46af-be5c-8d717abe7ad6`。没有替换模型/CLI/checked-evidence、重复初始开发或豁免输出。`reviews/runtime-spec-6-recovered.json`已实际解析为3P1/BLOCKED。原thread 4605d433已超时，OWNER不冒称答复成功；实际回复新有效thread `0da14692-c945-484f-a868-4db4e441a64b`与`c97fffd2-b2f4-4302-adaa-b190836d5dc8`。
-
-1. **P1，ERP锁后仍使用旧ORM对象。** authenticate_report在同session加载并强引用StatusInstance，lock_instance的FOR UPDATE未populate_existing。并发manual HOLD/首个advertiser CAS提交后，后到report虽拿锁仍用旧revision/scope；必须在统一锁owner刷新，而非另加状态缓存。
-2. **P1，初始化总deadline仍不完整。** first read已guard，但initial commit、negative invalidate、scheduler stop、business clear及rebuilt commit仍可挂住ensureInitialized/runRecovery。要求从首await起统一90秒，逐真实deferred边界验收；Promise.race不等于撤销已发RPC，晚到值也不能授权。
-3. **P1，rejected HOLD不是ACK许可。** current carrier检查已修历史case，但handleDecision对rejected HOLD/非accepted ledger返回false，caller仍以!settled清incident。原子storage guard仅查旧applied resume、running/pending及tuple，没有无superseding authority的正向证明。合法新鲜HOLD可在本地证据await后过期被拒，旧resume随即被错误确认，服务端仍hold同episode；须修canonical ledger/gate，不堆平行旗标。
-
-### OWNER新候选执行证据与反例纠正
-
-- R6修正前当前候选：`NODE_ENV=test npm test -- tests/plugin-status-chain.test.ts tests/plugin-status-storage.test.ts tests/tab-binding-controller.test.ts`为109/109；tsc exit0；ERP只通过isolated runner跑API，100%且ephemeral clone dropped。日志`/tmp/plugin-status-owner-recovery3-{plugin-focused,plugin-tsc,erp-isolated}.log`。这不覆盖上述新缺口或后续修正。
-- 冻结全src/tests于`/tmp/plugin-status-owner-runtime-r6-01a1406d/plugin/`，保留原文件及SHA，派生`tests/owner-r6-clock-hold-probe.test.ts`。前两个变体错误加入非wire字段issuedAt，accepted=0而通过；它们只是前置校验拒绝，**不算反例RED**。已去掉错误字段，并给replacement runtime独立event ID，避免fixture复用UUID冒充新鲜carrier。
-- 有效变体使用zero-skew、120秒合法HOLD，仅在真实await的monitorEvidence推进注入wall/monotonic130秒。Vitest2.1.8实际exit1、1 failed/6 filtered；sent2/accepted2，HOLD outcome=rejected，却execution=running、incidentId=null、pendingIncidentClear=false，失败断言expected null not to be null。日志`/tmp/plugin-status-owner-runtime-r6-expired-hold-valid-probe.log`。是冻结修后R5候选的真实模块/模拟I/O行为RED，非import、未await、HTTP拒绝或实际Chrome/ERP证据，不外推未来fix仍失败。
-- ERP续修child `9221a1c8-3941-49a2-a844-37eb3e4c6d88`已交：canonical populate_existing、两个真实Session交错RED，报告93 API+18 models GREEN。仅worker证据，待新的spec/quality及OWNER核查。Plugin继续原MiniMax窄修；新probe发往7f937f58的follow-up `297e51e1-4929-4ac9-831a-6db4fca7b5e9`为queued，须后续handoff明确ack，不能当已消费。
-
-## Runtime spec7 — 两项定向GREEN，三P1仍BLOCKED
-
-Reviewer `14a699e9-389c-4b72-9f6d-c77e12427744`已产出`reviews/runtime-spec-7.json`，实际解析为3P1/BLOCKED。OWNER直接读当前函数与tests后有效回复`62f6becc-5547-422a-b905-9fa359793df5`及`6095ba1e-37de-491a-bc72-f2bfe75be6ce`；source-level发现不冒充reviewer执行测试。
-
-- **初始化总deadline仍P1，源码并未改。** Plugin修正handoff `workers/runtime-recovery3-2-1.md`明确承认三条测试void，却称源码fixed on merits。OWNER比较R6冻结和R7实际controller，整个文件字节一致，SHA `05d652c85ec23d1dccb12d60b9379d863874c6e18e73d1ba22501760aec9f1f0`；ensureInitialized仍直接commit/invalidate/stop/clear。测试未证明目标await到达即推进clock，stop adapter根本没消费deferredPorts，可能只是先让read/list超时。不是“测试不足但源码已修”。
-- **Action-start TOCTOU P1。** Runtime在authorize后await persistDecisionStarted再调用executor，没有重核deadline/当前epoch、nonce、enablement；controller只在入口捕获generation，不能察觉claim等待期间已经发生的失效，旧expected epoch也不在浏览器副作用前阻挡。terminal CAS不能撤销已发reload。需在canonical start/首副作用边界保留当前授权，并以真正进入的deferred started-write测试过期/失效后零reload/capture/start。
-- **Cookie Store unavailable误判identity P1。** readCookieStore把浏览器读错误折成null，wake/proof及post-reload recheck在明确authorisedCookieStoreId时把它当IDENTITY_MISMATCH，timeout sentinel同样可被折错；没有证明别的身份却走conflict/require_user。需所有caller保留unavailable/timeout原因，仅成功读到不同store才identity conflict。
-
-### 本轮OWNER直接验证
-
-- `repository.lock_instance`的populate_existing与两Session测试获source复核；OWNER通过isolated runner以`-k 'concurrent_operator_hold or concurrent_first_advertiser_assignment'`只跑两个case，exit0、100%、clone dropped。日志`/tmp/plugin-status-owner-runtime-r7-erp-two-session.log`。不重开R6旧ORM问题。
-- 将**同一个**合法expired-after-awaited-evidence的OWNER派生test放到冻结R7实际源码，Vitest exit0、1 passed/6 filtered；sent2/accepted2、HOLD rejected，但incident保留、pending=true。日志`/tmp/plugin-status-owner-runtime-r7-expired-hold-green.log`，源码/SHA在`/tmp/plugin-status-owner-runtime-r7-01a1406d/`。canonical ledger事务比较更高revision，关闭旧ACK缺陷；R6失败不移用本候选。
-- R6 plugin handoff报告712/712、coverage95.88/92.66/97.49/95.88仍只是worker回归，三条void测试不算deadline证明。其陈旧“ERP未修”残余列表不压过实际源码和独立定向GREEN。
-- 原writer续修。已向最新93fd会话排队follow-up `5b82e1b3-2d68-47f3-8b9f-a2b6c1d5fc2f`，要求真实running→bound tab失效进入wake边界、目标端口entered后才推进时间，并读回实际编辑/源码指纹；queued仍非消费证明。ERP no-change child `5ae4a69f-05e0-4fb4-83fa-d28b5ae6479f`已交，不当新功能或整体接受。
-
-## Runtime spec8 — 原writer未完成，回归丢失，流程交回BLOCKED
-
-最新plugin child `3b10dfa1-6cf2-4016-8a58-1d8de435b19c`的`workers/runtime-recovery3-5-1.md`明确**BLOCKED/INCOMPLETE**，不是DONE。其承认：上一轮初始化源码修复未落地；本轮仅部分加budget guard，controller指纹05d652c8变9843e9ec；stop case仍挂起，action-start及Cookie Store两项完全未动。三个目标回归虽报告timeout RED/部分GREEN，但因替换冲突出现TS1128后删除了整个三条初始化边界suite。最后709/709、coverage95.83/92.51/97.50/95.83、tsc/build GREEN只是worker结果，**删除回归后的绿色不予接受**。
-
-Reviewer `86c46407-1d6e-44d2-a7ad-df996d8a0ec2`最终`reviews/runtime-spec-8.json`实际解析为3P1/BLOCKED。OWNER直接读当前函数后回复有效gate `7e47d711-8e7c-4138-a6d8-d2350b941109`：
-
-1. 总90秒只部分修正。negative wake进入invalidateBinding后，stop fence到期分支仍直接await store read，正常分支read也不guard；releaseRefresh仍有无预算await。普通commit直接把binding/observation交异步port，Promise.race不撤销它，迟到状态写须有当前generation/epoch/authority保护。
-2. Durable start claim后权限TOCTOU仍未改；必须在首个reload/capture/start前验证当前deadline、expected epoch、nonce及enablement，不能依赖终结时CAS。
-3. Cookie Store throw/null/BUDGET_EXPIRED仍在wake及post-reload被当identity conflict；未知/transport不是verified different store，需保真原因并覆盖两条调用链。
-
-恢复有效entered-boundary测试是额外明确的验收阻断，可并入deadline验证而不重复计同一P1。所报5秒timeout只属actor证据；删除源码后，不能仅凭超时推断它发生在recover await而非未到达的entered等待。必须恢复并真正证明端口进入，再推进clock并等待结局，释放晚到值后验证不写旧状态/不启动。不得skip、删除或弱化断言获得GREEN。ERP锁及ACK现有修正保持，不采用handoff残余的陈旧“ERP未修”列表。
-
-### 终止状态与现场
-
-- 同mission恢复root `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`为**native complete、return.state=blocked**：已用7/8，尚余1，不足完整修复与独立复审。不是全部额度已耗尽，也不是本轮fetch/基础设施失败。没有启动quality、T5或额外writer，没有自增预算/替换模型/CLI。preflight提示是语义分组key与实际动态步骤key不相同的advisory，不作为验收证据或failed原因。
-- 部分代码、当前所有测试、可用142/144/147/148/149/150/151日志、writer handoff、tracked patch及84条源码/测试SHA保存在`/tmp/plugin-status-owner-runtime-r8-01a1406d/`。原工作树保留未提交runtime，核心提交不变；无运行时stage/push或发布。
-- Tower revision623将插件runtime按三P1+测试恢复阻断；revision624将ERP runtime按未完成的spec/quality阻断；T5仍依赖两者blocked，未触他人归属。
-- 最新handoff确实ack此前297e51e1及OWNER有效ACK RED/GREEN的边界；这只证明消费消息，不代表三P1已修。F2/F3先实现后测试、vacuous测试、错误merits声明与删除回归的历史均保留。
-
-## 历史batch4续修（8为OWNER配置，非用户数字批准）
-
-2026-10-16用户仅同意追加原生调用；当时OWNER自设最多8次、concurrency1，并非用户批准具体8次。此前归因错误已明确纠正，不改写旧root7/8及blocked历史。采用三次串行原MiniMax保留会话微切片：budget/恢复回归、action-start、cookie-cause；每次edit前通过contact_supervisor请求OWNER核真实entered-boundary RED和canonical方案，GREEN后再核当前源码；之后fresh spec→quality。原native checked-evidence不变，另要求精确JSON handoff供caller验证，不以worker DONE代替review。
-
-- TaskStart：docs e9c721c clean；两组件保留原WIP及HEAD，controller实际SHA9843e9ec。相同budget/gen/epoch/nonce在canonical mutation处约束迟到结果，不再声称race能取消已发I/O；内部port/CAS影响必须先请OWNER审查，无第二authority owner。
-- 初次从docs worktree绑定旧mission被project-root lookup拒绝，没有run ID；fleet0active，三树diff/status/HEAD及脚本/packet保存于`/tmp/plugin-status-batch4-launch-block-01a1406d/`。改回原主仓协调cwd后同协议重试成功，不是模型或执行方式fallback。
-- 首段root `5227c09e-aa16-4147-9f2c-6f6bb12951a6`现已native complete/return blocked，1child、1/8used；worker aafdf1dc只恢复部分tests，生产源码三个指纹不变。Tower625的T4保持in_progress表示OWNER仍在修复协议并推进原获准续跑，ERP与T5仍blocked。
-- 154的两个所谓RED被OWNER源码核查拒绝：ordinal只在闸内递增导致entered永不到、commit断言把合法clear误判；OWNER自身missing-tabs归因也因beforeEach末尾seedHealthyPage而撤回，worker已ack。156修正后OWNER冻结同案独立跑得exit1、2failed/2passed/71filtered，日志`/tmp/plugin-status-owner-batch4-gate1-red.log`，证明negative-invalidate read不settle及late commit覆盖新epoch，仍无GREEN。
-- a6110a7b已实际reply批准首edit：canonical事务处同时核prior-state tuple/nonce与同一budget/gen的live predicate；实际BusinessBindingPort写点必须消费fence；typed application与enqueue拒绝分离，未接线真实adapter仍T5，terminal/report原子与失败事实不得丢失。worker交回blocked仍说需精确接口，OWNER以`/tmp/monitor-status-batch4-recovery-contract-01a1406d.md`明确类型/许可，不把未实现称完成。release案仍void，业务clear/bind只actor证据待核。
-- OWNER的原caller把native `Output saved to:`尾注一起JSON.parse，错误判为非JSON；实际bound artifact5097chars是完整合法七字段JSON，且其status本身为blocked。旧root及reason不重写。恢复parser只接受与outputReference匹配的标准尾注并原样解析其余JSON，8/8正负门禁检查通过，不降native checked-evidence或字段/schema门禁。
-- 恢复worker0f01f568接受既有授权但以预计容量为由仍无source edit，提出A/B/C。OWNER实际reply de07de75选B并校正其边界：storage fence/type/result及必需的controller/runtime/fixture适配构成可编译、可窄测的增量，不是独立可发布整个budget；业务端口暂不动，相关RED保留。先真实RED再edit，子增量GREEN+tsc后在同call contact OWNER审源码，不可直接final budget DONE；不延长原生/增加额度。
-- 新恢复root `594095df-aef9-4fbb-862c-a8303bfc3c16`已原生async启动，同mission/max7/concurrency1；只许remaining7，累计上限仍原8；从最新aaf原生resume，不派新initial writer。script `/tmp/monitor-status-workflow-batch4-recovery-01a1406d.js`通过validate；三树partial diff/当前源/tests和原receipt保存于`/tmp/plugin-status-batch4-protocol-recovery-01a1406d/`。
-- Script `/tmp/monitor-status-workflow-batch4-01a1406d.js`，packet `/tmp/monitor-status-repair-batch4-context-01a1406d.md`；script validate0，动态调用数量由runtime max8实际约束，不伪称静态证明。
-
-## Batch4第二段终结及余6调用续修
-
-- root594095df已native complete/return blocked，child0f01f568正常结束约14分钟；没有被证明的deadline/tool/token硬限制。连首段累计2/8、余6，不是新预算。改动仅storage及其tests，controller9843e9ec/runtimef1c434da仍未改，storage为7ac55ceb，尚无post-GREEN OWNER接受。
-- 首版fence使用Python两function marker大切片误删commitDecisionResult/confirmIncidentAcknowledged，tsc发现后从cb869旧副本恢复再小块重施。OWNER AST函数体hash核两者与R8一致；事故与恢复均留历史，不扩大为已重开ACK/锁问题。
-- 实际OWNER gate35715eae读源码与181日志后继续阻断：a)binding?/fence?不是强制union，tsc绿不能证明消费者适配；b)parsed null同时表示缺键和损坏，expect:null不能据此放行；c)unreadable queue只写runtime却声称binding applied。另明确首await前immutable generation/真实前态、合法self-invalidation同步边界与不rebase原attemptGeneration、typed结果端到端消费规则。child仅修(c)，新增182真实RED→185 storage36/36、186 tsc0；a/b及caller未修。worker187全量55fail/665pass/720，不能据此单因归因所有55。
-- OWNER冻结实际候选并独立执行四文件：exit1、156总/101pass/55fail；storage36/0，controller59/18，runtime4/31，chain2/6。源/tests/9logs/ERP7路径/三树diff/status/HEAD/旧receipt与handoff保存在`/tmp/plugin-status-batch4-callers-snapshot-01a1406d/`，OWN运行日志`/tmp/plugin-status-owner-batch4-callers-pre-focus.log`及同名JSON；这是实际局部GREEN+整体RED，不是OWNER full/tsc/coverage证明。业务clear/bind与negative-read等未修，release仍void；不能把拒绝所有binding造成的个别passing当选择性修复。
-- 新root `1c3df827-6a5a-4631-a49c-7c3ffe8eb723`已async启动，同mission/主仓协调cwd/max6/concurrency1；从最新0f原生resume，原MiniMax/cwd/checked evidence不变。先storage-callers（a/b+必要真实消费者+相关回归恢复），再完整budget（含BusinessBindingPort fence/late mutation/两release）、action-start、cookie-cause、fresh spec、fresh quality，正常六步恰占余6，无额外修复预算假设。每个done仅限请求切片且需真实post-GREEN OWNER gate；不等于runtime或T5接受。
-- script `/tmp/monitor-status-workflow-batch4-callers-01a1406d.js`，superseding supplement `/tmp/monitor-status-batch4-callers-contract-01a1406d.md`。首次validate错误带globalConcurrencyLimit（仅launch支持）被拒，无run/child；移除后同协议ok/0errors，动态数量由runtime max6而非静态0证明约束。exact native footer/schema正负8/8，未降gate/字段门禁，无模型/CLI/新initial writer fallback。
-
-## 第三段再度blocked与执行策略暂停
-
-- root1c3df827 native complete/return blocked，只启动storage-callers child `433e9d38-ed2b-4143-8fe2-7576994afdf1`，05:25:44→05:28:14约2分31秒正常结束，acceptance review-required；没有已报告的deadline/tool/token硬限额。累计3/8used、尚余5，后续budget/action/cookie/spec/quality均未启动。
-- 最新storage `a6be6d4e84cb4c59eb584ba751a04858d7b69060ddfce1d5a721460a7d5c517d`，b按raw own-key存在性区分absent/present/unknown并将失败read failclosed；188为具体行为RED，192 worker storage38/38、191 tsc0。mandatory union与controller/runtime消费者依旧未改（原9843e9ec/f1c434da），worker193全量55fail/667pass/722，原handoff承认无post-GREEN接受。不能把所有55都归单因，先前有效/void案各自保留。
-- OWNER直接读readBindingPresence/bindingMutationPermitted与commit，冻结当前源码后亲自跑storage38/38 exit0；日志`/tmp/plugin-status-owner-batch4-third-storage.log`。此scope不覆盖caller迁移或完整runtime，前一候选156四文件的55失败也不冒充新候选全量实跑。最新源/tests/4logs/receipt/handoff/三树diff及SHA在`/tmp/plugin-status-batch4-third-stop-01a1406d/`。
-- 连续三个保留调用都未实际进入controller/runtime迁移；代码形状/权限已明确，不把估计容量或暂时编译错误当作再等授权的理由。按重复修复升级规则暂停第四次机械尝试，Tower626将T4置blocked，保留174keys及他人归属，不写任何runtime完成回执。
-- 请求用户执行策略裁决：是否解除原MiniMax唯一writer约束，允许OWNER直接收口T4纯模块或另选writer；未授权不更换模型/CLI/新initial writer。现有六步拆法大于余5，重新合并原S1可数学上五步但完成能力未证，不承诺成功或暗增额度。不将该停滞标成“native基础设施失败”“预算耗尽”或虚构模型hard-cap。Producer/consumer闭合及实际性能边界尚未证明，非根因已闭合。
-
-## 用户纠正后的明确指导续修（当前）
-
-- 原始用户“对”只答复OWNER未带数字的“是否批准追加原生调用……”；8是OWNER配置，不是用户额度。本轮用户明确要求继续调度MiniMax、分配时指导清楚；撤销“等待是否换writer/OWNER接手”作为当前阻断，但不抹掉当时暂停和三段partial历史。旧脚本/receipt原样保存，旧3/8或剩5只是旧脚本计数。
-- root `0808e372-d79e-4368-b80d-39607b93cb0f`及从433e9d38 resume的guided-callers child `07886337-4efa-46ad-ac6b-6e708e8c5211`现已正常终结needs-owner-triage（不是仍running），同mission/主仓协调cwd/concurrency1；原MiniMax/cwd/tools/checked-evidence未改。max12及最多2轮review-repair为OWNER内部保护，不是用户数字授权/订阅限制，遇到时先源级triage，不谎称需用户追加额度。未新起initial writer、无CLI fallback。
-- OWNER直接重读当前storage/controller/runtime和fixture：storage仍a6，controller9843/runtimef1c；controller commit仍忽略refusal，runtime仍bool，observeBinding在commit前直接预写是另一个应消除的绕路；不把55项全部归同因。Change Necessity=code-change，边界为已拥有的observation producer/consumer tightly-coupled seam；复用ExpectedBindingContext/gen/budget/串行事务，无新owner/缓存/依赖，不向大controller增加新职责。
-- 指导packet `/tmp/monitor-status-guided-minimax-01a1406d.md`：A先typed runtime+真实controller路径，记录正常链RED→GREEN及选择性拒绝；中途contact OWNER核实际代码后同call继续。B补其余初始/重建/passive/invalidate/suspend/failed/outcome/snapshot生产者，原context不在写时重建，先撤旧direct prewrite；C强制union、端到端applied/accepted及postGREEN门禁。可有正常中间tsc红，不因此final未实施proposal；始终保留其他slice有效RED和release void历史。
-- 终结事实不等capture许可；保留ledger/report/terminal原子与STALE_CONTEXT fallback。下一budget slice还必须覆盖commitDecisionResult实际binding set处的live fence、业务端口与两release，不能只因field存在便称所有写点已保护。首副作用与Cookie原因仍分别后续严格RED/OWNER。
-- Tower633保留174旧keys并拆出6个子任务（180总）：callers in_progress，budget→actions→cookies→spec→quality pending，T4聚合待依赖；没有新runtime完成回执。ERP质量与T5共享接线仍blocked。启动时仍未修，不把dispatch当成功。
-- 新script `/tmp/monitor-status-workflow-guided-minimax-01a1406d.js` validate0errors（dynamic warning不伪称静态证明）；严格七字段/精确native footer/错slice/extra/原生失败/缺gate/旧pre-edit gate正负8/8，native checked acceptance不变。2026-10-16 11:02Z quotas可用：MiniMax5h1%/week17%、OpenAIweek14%；无已证实hard-cap。
-
-## 0808实际终结、回滚证据与两文件微切片
-
-- 078正常跑242014ms/13turns/12tools，无contact_supervisor请求；native窗口/peak642370/contextLimit1000000、output10359未证明hard-limit耗尽。runtime-only302 tsc0；controller factory/强制第三参及typed result扩写后，tool9真实TS2554/2322/2339列出未迁移caller，不是编译遗漏（OWNER showConfig确认82文件含全部src/tests）。tool10自行从R8复制回controller/runtime；无postGREEN批准。
-- OWNER对比第三段冻结的77个src/tests现有文件：全部逐字相同。storage a6及38测试不是此次新改动；artifact所列changedFiles不能当本次增量，其“this-call defect(b)”是复用旧证据。worker301与304仍158总/103pass/55fail；OWNER未重跑这些测试，不用相同计数证明所有失败同因。源码/日志/原artifact/receipt不洗掉，triage在 `/tmp/plugin-status-guided-callers-stop-01a1406d/owner-triage.md`。
-- 纠偏不再重派整个coupled迁移：同原writer由078继续，仅runtime typed result及其测试；禁止动controller/storage/fixture，禁止再扫55项旧失败。先真实正常与拒绝返回结果新RED（旧bool可编译、业务断言失败），实际联系OWNER后最小源码，named GREEN+tsc并再联系OWNER审当前diff；若有真实下游type冲突精确报告并保留partial，不自回滚或预测capacity。后续producer仍单独未完成。
-- 最新root `65447207-9ee0-4bed-84b9-d6280e15b8d9`已async，从078原生resume；script `/tmp/monitor-status-workflow-runtime-result-01a1406d.js` validate0errors，packet `/tmp/monitor-status-runtime-result-only-01a1406d.md`。一个具体mutation步骤，不是用户数字额度；scope和7字段/native门禁保留，done必须实际变更runtime及其test、真实新postGREEN gate，仅表示微切片候选。T4 caller task继续in_progress，未写任何完成回执；其他五步尚未启动。
-
-- 最新child7058df8f-2699-4275-ba09-4d9dce42150b已实际发request a6fd6b8d-dc1d-4555-9378-73c274781e44，OWNER读当前tests1168–1235与305 exit1后拒绝pre-edit：拒绝案live=true贯穿await、返回后才false，所以收到true本身不是拒绝缺陷；正常案queue与不存在字段组成错误shape作notEqual恒真，不证明增长。已原生实答tests-only先纠正：实际before tuple、调用前撤许可/predicate消费、真实queue/发送载荷及状态/wire一致，再named306 RED重新问。拒绝原请求不动生产/不回滚；原production小形状原则认可不等preRED已通过。重复attention是旧请求提示，不另发nudge或复用该UUID为done。
-
-- 随后request9de20167-3695-4220-ac52-a8e51928b243由OWNER直接读tests和306实答：拒绝案已调用前撤许可，false→typed-refusal RED有效。批准tiny runtime形状，但先收紧positive测试：default正常ACK会drain队列，test内用现有jsonResponse503保留真实queue、断言新增dispatch和对应载荷；next与wire identityVerified一致、before明确null guard。两案preRED后直接edit/named GREEN/tsc再postGREEN源级问，不把该preEdit UUID当完成批准。未因此声明生产已改或测试已通过。
-
-## runtime-result微切片实际postGREEN通过（非callers/T4接受）
-
-- 7058df8f/65447207均已terminal，native return micro-candidate-only；当前runtime `f969953d3ee8f0fdf664d19ac857cac3cc5b8fe53fdd73626f19ae4dbd1685a0`，与f1c差异仅type import、public/internal返回ObservationWriteResult、原样返回written及原runExclusive保留。applied/accepted是本地应用/入队事实，不是未来执行许可或ERP receipt。storagea6与controller9843未改，不算本call工作。
-- e8c11eaa请求被OWNER读源码拒绝：默认snapshot携无fence binding，提交拒绝使allocatePendingReports未进入；删runExclusive也会使旧正案通过。将零dispatch解释为设计行为并弱化断言不接受。d71随后被拒绝：private RED用cb旧storage同时换runtime造成混杂，且snapshot闭包读before不是当前next；顺手删旧fixture两行不必要也恢复。所有旧日志/请求/错误解释保留，不追认假绿。
-- 最终正案snapshot真实读取canonical current，纯observation不写binding，503使用原global responder；要求原事件assigned/真实HTTP模拟dispatch/queue payload及current snapshot均匹配next。拒绝案调用前撤实际closure许可，谓词消费且canonical不变、无dispatch。测试旧fixture除新增两helpers/two cases逐字保留。
-- 307/308是原顺序pre-edit业务RED；最终安排经修订后，319/320因换storage+runtime两变量明确confounded、不背书。328/329私有对照全部CURRENT src/storagea6+同一最终tests，只换旧runtimef1c。OWNER逐文件SHA验证唯一生产差异runtime且tests相同，并亲自执行旧2RED exit1、新2GREEN exit0、工作树tsc0；冻结 `/tmp/plugin-status-owner-runtime-result-01a1406d`，logs `/tmp/plugin-status-owner-runtime-result-{red,green,tsc}.log`。单变量私有对照不倒写成最初pre-edit历史。
-- 实际postGREEN request `b32a5224-0cff-4490-a843-40c98c1a5968`已原生答复通过ONLY runtime-result；最终7字段artifact `.../outputs/65447207-9ee0-4bed-84b9-d6280e15b8d9/workers/runtime-result.json`、receipt保留。controller/union/budget/actions/cookie/spec/quality/T5仍未接受；旧55计数未在f969全量重跑，不宣称最新全量/coverage/build通过。活跃LSP两文件有5个既有ESM扩展名warnings已defer，不称全clean。
-
-## 原writer下一producer（已启动，未验收）
-
-- root `a8c78b60-11c6-4560-bee9-6b1b4a15d7ae`从7058df8f原生resume，原MiniMax/model/cwd/tools/checked-evidence不变，仅createSnapshotCommit及对应controller tests；runtime已接受小增量只读。script `/tmp/monitor-status-workflow-snapshot-producer-01a1406d.js` validate0errors，packet `/tmp/monitor-status-snapshot-producer-only-01a1406d.md`。
-- OWNER直接读actual producer1111：await ensureInitialized后返回binding无fence。小计划是在首await前captured generation、首次canonical实际读取的immutable PRE-state，后续ensureInitialized不能替旧工作借新代次/nonce。测试正常实际写入、真实entered第一读后generation撤销、same-epoch新nonce拒绝；不得复用只在pastSafetyStop才消费的storeRead闸当snapshot entered。cold-start/rebuild及其他producer不冒称已修，不扩全局commit/port/API，不以现成零拒绝/默认拒绝假绿。
-- Tower633 callers仍in_progress，五个后继依赖blocked/pending；未更新任何完成回执。通过talk向tower登记micro证据与限制，非no-op写板。2026-10-16 11:47Z quota MiniMax5h8%/week18%、OpenAIweek15%均available，不把原8/new单步保护说成用户额度。
-
-- snapshot原writerf35ee898已真实contact a5123154，OWNER直接读function/test/331并实答：330缺canonical setup无效，331仅fence field缺失；A改先实际canonical应用RED、去cast/完整tuple，B/C两钟在entered期间推进、fixture gate reset后才edit。332 A实际应用RED，B/C为predicate/原tuple契约RED（331曾passing仅coverage），334三named GREEN/333 tsc0为worker证据，不自动接受。
-- 首次snapshot postGREEN6844c672-26f4-4177-a1b0-bd21ff826f1e由OWNER读771 candidate源码暂缓：actual scalar tuple在ensureInitialized第二await之后才clone，先读返回即复制再跨await才符合已批准capture边界；非宣称真实Chrome alias漏洞。已实答仅提取原表达式到const expect、清理新增未用test type，保持同小scope后新named GREEN/tsc/新请求，OWNER将独立冻结及gen/nonce私有mutation-kill。尚无snapshot最终门禁，771不当已接受。
-
-## snapshot最终真实postGREEN通过（微切片only）
-
-最终controller20e8e7fa/testa5bcfce4已将expect复制提到第一read返回后、第二await前，test未用import已撤。OWNER4bc563c0-e586-4e60-b84a-5bef4f58b69d真实实答通过仅该producer；roota8/f35均terminal，7字段仅两changedFiles/gate、receipt complete/micro-candidate-only和原MiniMax continuation已核。runtimef969/storagea6/test3f6全字节未动。
-
-OWNER `/tmp/plugin-status-owner-snapshot-producer-01a1406d` 冻结核全src，仅controller与旧984不同、tests同字节，亲跑最终原tests3GREEN/旧controller3RED（A真实应用、B/C契约）和工作树tsc0。私有原tests gen=true mutant仅B失败、nonce借state.nonce mutant仅C失败，均另2过。为不夸大metadata失败，又仅在私有副本将B/C实际canonical拒绝断言提到metadata之前；三个variant的OWNER probe字节相同SHA24e3badb56001523bb83c92fb6d6d5bcbfc1adc75f7817bea77620fd3a8ab87a，current3GREEN，两mutant各在实际applied:true/accepted:true处1FAIL且另2PASS。产品tests不改，不将这些事后私有控制倒写成原始业务RED。
-
-logs `/tmp/plugin-status-owner-snapshot-{current,old,generation-mutant,nonce-mutant,tsc}.log` 及 `/tmp/plugin-status-owner-snapshot-business-{behavior-current,generation-mutant,nonce-mutant}.log`。worker335/336仅辅助。零dispatch/默认拒绝假绿不可替代此选择性证明，cold-start/rebuild等仍未接受。
-
-## typed bootstrap过程记录（以下为当时状态，后续验收见下）
-
-root `8ed7301a-8ef9-42ca-b54c-0a8970112cff` 从原f35 resume，packet `/tmp/monitor-status-bootstrap-typed-01a1406d.md`、script `/tmp/monitor-status-workflow-bootstrap-typed-01a1406d.js` validate0。ONLY controller source/tests+chain真实adapter结果转发（三file），runtime/snapshot函数保护。既有private commit消费ObservationWriteResult，不applied必须拒绝而非拟态return；applied:true/accepted:false只是本地事实不伪report/执行许可。耦合ONLY空bootstrap原gen/原absent expectation，BUDGET_EXPIRED不授权/不新budget，其他producer仍缺fence、不得合成默认true fallback或新compat facade。
-
-新真实normal empty初始化写入及entered read后generation/新canonical拒绝、必要真实queue-full分离；既有snapshot B因HOLD旧helper将不再静默忽略拒绝，必须更强地观察其reject同时保留真实gen撤销/tuple不变/entered/release/await，不删除弱化。仍真实RED→OWNER预审→最小edit→named bootstrap/snapshot GREEN+tsc→独立新postGREEN，b32/4bc不复用。无新full/old55/coverage/build，其他producer/预算/actions/cookie/union/spec/quality/T5不通过。Tower633 callers in_progress，已talk更新真实证据，无runtime完成回执。
-
-bootstrap child5550f7e1真实求助21f5f7c0-1b69-4cb6-ac97-1d2141e0342a：337三案均实际行为RED（normal返拟态未持久化、两真实entered race应拒却resolve）。此前已改type/import与实际adapter转发3file，未先拿源码预审，披露并保留；OWNER实际esbuild转译比较f830与accepted20e8生成JS逐字相同，确认行为尚未改，不能倒写成先获gate。已实答仅pre-edit批准helper+空bootstrap；HOLD outcome不能恒真二选一、MAIN不能任意rejects.toBeDefined，须具体STALE_CONTEXT且释放/await MAIN后断言；增真实满queue D区分applied/accepted，再小edit/目标GREEN/tsc/独立postGREEN，未接受bootstrap。以后production type edit也应先问。
-
-## typed bootstrap实际独立通过（仅micro）
-
-OWNER实答8709ea55-9c3a-44a5-8657-b806c5522916，仅接受controller7b8e6623/test6bcf1156及chain2db43458（机械adapter full result）。8ed/555 native terminal、complete receipt/七字段/gate/3file与resumable均核；原runtimef969/storagea6/runtime tests3f6字节同，snapshot函数未改。OWNER冻结 `/tmp/plugin-status-owner-bootstrap-typed-01a1406d`，4bootstrap+3snapshot七named GREEN、工作树tsc0；同最终tests及全src仅换旧20e8 controller则四bootstrap均RED。私有四单点控制：忽略applied拒绝只B/C失败、混淆accepted只D失败、去原gen只B失败、借新canonical只C失败，其余PASS。logs `/tmp/plugin-status-owner-bootstrap-{current,old,ignored-refusal,accepted-conflation,generation-mutant,borrowed-context,tsc}.log`。
-
-真实queue-full fixture由canonical readQueueStrict校验并实际commit；最新state+REPORT_QUEUE_FULL pause符合spec§12，plain observation不设pendingReport不是已证缺陷，341错误假设保留不改storage。只接空bootstrap，其他producer新helper会抛真实拒绝，不称旧55已修/最新全量GREEN/预算到期整体修复。LSP3file有2个既有TS unused及44aux，新增optional spread hint+既有unused session defer，非全clean。
-
-## 用户继续：safe-stop-producers（已启动，未验收）
-
-用户再次说继续，rootb060735b-0dfe-4c9b-9230-c31d6664b297原555 resume，packet `/tmp/monitor-status-safe-stop-producers-01a1406d.md`，script `/tmp/monitor-status-workflow-safe-stop-01a1406d.js` validate0。ONLY原HOLD/requireUser/suspend与controller tests两file。必要性：当前正常停止也缺fence而被真实helper拒绝，不能只改文档；local fix既有owner，不加责任/新owner/cache/fallback。首同步边界自身generation++后capture，read与stop立即启动且Promise都立即观测，原tuple read边界复制，不等慢read才stop、不在stop后借新nonce，commit消耗原permission。
-
-新正常2路径/older stop晚归+同epoch nonce共4case，真实adapter entered/两钟/await/release。原snapshot B及bootstrap B要先强证明HOLD实际持久化成功，再仅test fixture恢复原tuple或raw absence（不清queue/ledger）以继续单独验证generation；旧HOLD拒绝假设不再当已修停止producer的契约。先tests真实RED/OWNER pre-edit，任何production type edit也需gate，最小源码/原7+新4 relatedGREEN/tsc/新postGREEN；8709/4bc/b32不可复用。不扩其他producer/budget/actions/cookie/union/shared/T5，calls task仍in_progress，已talk给tower。13:03Z MiniMax5h4%/week18%available，无hard-cap故障。
-
-### Passive最终独立微门禁通过，非T4/完整预算接受
-
-真正新postGREEN ed21c35a-f31d-4975-9e47-7c8d62adaf5e已源级实答，仅第五micro。source85f2d6ab555667cfad34dc7e38fb4044268e1d41fb81846cfe1eb97751e11894/testac3588c3e70ee195bc5db82a88162470bb692ee73149481df96d33c0f938e121，新的expiry inner finally无论advance抛错均release+await main，outer恢复realTimers。OWNER读完整observe body和净diff：firstgen+同原budget、firstread即immutable tuple、expiry立刻STALE_CONTEXT不再ensure/list、不mintabsence、去预写只原typed commit、predicate原gen AND预算live；AST屏蔽observe声明后与前accepted cd67逐字同，其他function/type/owner未改。
-
-冻结 `/tmp/plugin-status-owner-passive-observation-01a1406d`，同步最终ac3588 tests到所有控制（不是590c），亲跑15namedGREEN及实际工作树tsc0；同finaltests/其他全部src只换旧cd67则四passive全RED，这是最终私有retro不倒写成360最初四案（360原3，366后加expiry另1）。四私有单轴控制且全部src唯一controller差异/所有finaltests同字节：恢复direct-prewrite→gen与nonce2FAIL、另2PASS；把gen capture移到ensure后→仅gen1FAIL另3PASS；借latest expect→仅nonce1FAIL另3PASS；重建expiry-as-null+OR permit→仅expiry1FAIL另3PASS。每个normal都实际apply通过，非默认拒绝绿；gen/nonce前提均真实interleaving且finalizer完成，expiry mutant明确私有重建、不把/tmp rejected目录已取样85f2当旧4b。logs `/tmp/plugin-status-owner-passive-{current,old,direct-prewrite,late-generation,nonce-borrow,expiry-permit,tsc}.log`，live source/test及runtimef969/storagea6/runtime tests3f6/chain2db均hash等于frozen。
-
-1f99是源级拒绝坏4b权限OR，c4b仅要求test收尾，只有ed21最终批准。worker380新4/381旧11/382实际tsc保留；取错anchor/line临时事故和357此前runner失败都不洗历史。随后82e1/7cd native terminal complete、7字段schema/ed21/仅两paths/receipt/resumable已核，native仍review-required；其handoff summary Five named实际FOUR，路径direct-pre-write实际direct-prewrite，OWNER记errata且不改原artifact、不造测试/alias，已要求writer下一preEdit精确承认。当前cf2b19f1-4999-4802-99fb-62da18bcc62d已async原7cd续接，child5e2新preEdit0ac6fb69-5729-4e49-9606-117a6f74a971已HOLD/NO source/type：407仅normal真业务RED，2/3/5 recorder契约RED，4在HOLD setup失败，不追认5业务；轮询waitForCallOrder及重复probe旧marker、提前release/HOLD竞跑、suspended未证ensure positive、只commit:start序皆不足。先MAIN单次captured-probe真实entry/consume-before-await/不动旧hook、保持negative直到HOLD已apply+tuple复原，RUNNING observe实际先positive再distinctnegative/finally两release+awaitmain，补两个live-parent正案与clear入口durablefact，old15/actualtsc/准确RED分类，再NEW preEdit并WAIT；原shape只是方向反馈不准生产。packet `/tmp/monitor-status-invalidate-canonical-fact-01a1406d.md`/script `/tmp/monitor-status-workflow-invalidate-fact-01a1406d.js` validate0：仅invalidator canonical事实+ensure/observe负证据两处原fence/同budget参数转发，防旧parent proof在await后被child freshread自增借权；parent live先同步消费后own mutationgen、原tuple保留，不回测因自身revocation已false的parent predicate。normal真实fact-before-clear与public gen/nonce/两个parent控制5业务RED，严格新预审/新postGREEN，保护旧15和其他bodies；physicalclear自身mutation-fence仍budget/T5，不以外层check假称完成。只完成micro不完成caller/T4，其他producer/强制union/全预算与两release/business实际mutation/actions/cookie/ERP质量/T5/shared/browser/release仍pending，不称full/coverage/build或native全面review accepted。
-
-### Passive恢复已实际运行，首次postGREEN因过期放行暂缓
-
-root82e1的原生继承child7cd3575b-c50a-47f4-a0d7-a5d1d87c17c3已实际续跑；先完成原275b要求tests净化（list只beforeEach/真实入口reset、旧fixture不改、两个main显式结果无cast并finally release+await、实际clear/bind counter不夸无navigation），359实际unpiped tsc0/360在cd67三业务RED，然后ONLY observeBinding edit。候选4b3d3e7983ae025f547f79bdcc5828a695e83c2d479b8de5e875391a84bc26b2/testbe5f787b，362新3GREEN、363旧11GREEN、364实际tsc0，受保护文件同。
-
-首次postGREEN1f992952-00ec-4474-bdf0-497f4af68b90，OWNER直接read完整当前body及ensureInitialized/startBudget，发现新readExpired虽自称separate，实际`read===null || readExpired ? null : tuple`，predicate又`operationGeneration===generation && (readExpired || budget.remaining()>0)`，过期反而被当absent且放行dead window，明确违反已批shape。因此源级暂缓，不接受14 GREEN作为此branch证明、不重写既定需求。已原生答要求先tests-only真实首read期间耗尽原窗口/实际guard sentinel/raw absent拒绝不写的新业务RED，再小修expiry立即明确STALE_CONTEXT拒绝（不继续ensure/list/构造expect）、expect:null仅真null、predicate只原gen AND same budget live，保护14、新caseGREEN/实际tsc及DISTINCT新postGREEN后再问。此1f99不是gate，通过前不声称第五micro已完成；总预算/两release等仍单独pending。
-
-OWNER尝试copy候选时worker已按条件修补，`/tmp/plugin-status-passive-expiry-rejected-01a1406d`实际source85f2d6ab/test590c7fbe，owner-note明确NOT旧4b被拒候选，不作其原件/旧RED；若后续重建坏OR分支必须标私有mutant并同finaltests，不冒充首次RED。历史记录全部保留。
-
-### Passive原执行器异常退出，保现场后同协议恢复
-
-原root11440a0e-1558-4bab-b099-3b9dfb2f4e55/childd6d36102-909a-4a20-993e-1559ac722ad6因runner PID2737747/4025838消失未写结果，被stale reconciliation标failed，child process terminal unknown/proof-write-failed；stderr只有SQLite experimental warning，不推断OOM/quota/deadline。没有postGREEN/七字段交付，不能当完成。OWNER一次proc扫描无source cwd/UUID/PID匹配活writer，先保存 `/tmp/plugin-status-passive-runner-failure-01a1406d` 的完整src/tests/config/native状态events/output及tracked/doc WIP patches。source仍cd67、tests ae8462b0ed5e5c58fdd60e42d506596327c9beb0a52d8112a92d2070eae8dc01；runtime/storage/runtime tests/chain保护字节同。中断工具tsc通过head/pipeline echo取状态不算tsc退出证据。
-
-原实际求助275b9401-2df3-4598-adf5-7f525d77296d已答条件pre-edit。356正常无fence拒绝及两race实际canonical被direct prewrite覆盖三业务RED有效；353/354/355错误未entered或先await后release的timeout不追认。OWNER读完整net diff发现新listGate reset误入firstRead/stop旧hook、两个旧专用fixture额外缩进，B/C在HOLD/assert失败时无finally release+await会挂MAIN、unused outcome/cast；要求先全部tests清理并再真RED后才生产edit，正常side-effect注释要有真实counter断言，拒绝不返回拟态state。执行器只去掉一个stop hook串扰即丢进程，余清理未完成、生产未改，旧275b不当微切片接受。
-
-用户再说继续，OWNER仅启动 `/tmp/monitor-status-workflow-passive-recover-01a1406d.js`（validate0），root82e1eea2-28b8-49da-b0ea-c3973082c42a exact原d6 native resume，同MiniMax/model/cwd/profile/tools/evidence不变；先读triage和原packet，承接残留tests/条件预审，不回滚。若eligibility拒绝则报准确原生原因，绝不换CLI/model/新writer。16:52Z MiniMax5h9%/week19%available；root单step cap仍仅内部scope，不伪用户数字上限。四micro保持仅局部验证，caller/T4/spec-quality/ERP/T5仍未完。
-
-### 第四micro safe-stop最终独立通过，非T4接受；下一passive已启动
-
-新postGREEN实际330af378-658c-4b2c-a0c4-1c71a98c45b1，OWNER直接读source/diff及原11，冻结 `/tmp/plugin-status-owner-safe-stop-01a1406d`。controllercd67b2e6a5914b166631347827e4f0e58516c01eeb98a057d3b00faa8bef9735/test0a701211096c705a35a8c2f36e6d6fe189976c1f88c6afc95149999434af20f5；实际suspend单同步gen++捕自己mutationGeneration、stop/read同时安排Promise.all观测、read.then即克隆scalar PRE expect、不等stop后借nonce、原state组成/原typed commit；wrappers去双自增/stop。原snapshot与bootstrap B先HOLD真实成功再test fixture还原tuple/raw absence隔离gen并保留queue，不删旧控制。runtimef969/storagea6/runtime test3f6/chain2db43458均字节同。
-
-OWNER亲跑当前新4+原7共11GREEN、实际工作树tsc0；同finaltests/其余全部src仅controller换旧7b：正常两路径及完整late案3RED，nonce案默认拒绝passing仍仅coverage。私有只借latest expect且仍保原gen的control仅nonce案FAIL、另3PASS：外部变化只nonce、generation仍live，worker此前声称两者都过期不实，最终已明确纠正。原case3仅断言无旧execution_changed，未断言整个queue逐字同；case4确有queue前后字节同，最终已修正措辞。为单独检验新suspend gen guard，OWNER额外私有诊断先newer真实apply再fixture写回原PRE tuple排除nonce（留audit），然后release/await older：同byte诊断current1GREEN，唯一生产变量suspend stillCurrent=true时实际旧写覆盖canonical致1FAIL。产品tests没改、私有诊断不倒写成原RED。所有source对照唯一controller变量，日志 `/tmp/plugin-status-owner-safe-stop-{current,old,nonce-borrow,isolated-current,isolated-generation-mutant,tsc}.log`。
-
-b060/ecf native terminal，7字段slice/gate/仅两changedFiles已核，receipt complete/continuation resumable；native状态仍review-required，不把微scope门禁当全任务review accepted。artifact `subagent-artifacts/outputs/b060735b-0dfe-4c9b-9230-c31d6664b297/workers/safe-stop-producers.json`，worker保345case3未执行完/346修正RED/351tsc/352各4+4+3GREEN及OWNER两个范围纠正。root11440a0e-1558-4bab-b099-3b9dfb2f4e55已原生从原ecf resume，ONLY observeBinding passive-observation/test两file，原model/cwd/tools/native contract不变；packet `/tmp/monitor-status-passive-observation-01a1406d.md`，script `/tmp/monitor-status-workflow-passive-observation-01a1406d.js` validate0。先existing canonical normal实写+真正entered first-proof/list期间原gen与同epoch仅nonce拒绝，撤绕canonical的预写并产首await前gen/first-read immutable tuple/同原预算，不借ensure后context。保护原11及四micro，negative delegate/invalidate/其余producer/union/全预算/actions/cookie/spec/quality/ERP/T5未修。13:27Z MiniMax5h7%/week19%available，无hard cap；单步数字仅内部scope保护，不是用户授权限额。docs先前三micro事实commit2b0d3a1已push，不是产品merge。
-
-safe-stop child ecf6124b此前实求助8782ab73-4db4-4303-8acd-51264c7bd545，controller仍7b8e未先改type/source。345正常两路径canonical refusal是有效业务RED；OWNER读case3发现await newer在旧拒绝时提前抛出，gate未release、older未await，故不背书该完整late交错；case4默认拒绝passing仍仅coverage。已原生答条件pre-edit：先.then完整观测两个outcome，finally release/await older后才断言newer已应用/older具体STALE_CONTEXT；比较newer report后的queue与释放older后queue防旧event，stop/commit index先确认非负避免-1假绿，requireUser也实际stop；收紧新RED后只改已批suspend+wrappers。后相关新4+原7/tsc及独立postGREEN，8782不是最终验收，不回滚旧成果。
-
-2026-10-16 12:13Z quota MiniMax5h1%/week18%、OpenAIweek15%均available；单步max1仅OWNER范围保护，非用户次数许可。保持有效RED→canonical fix→related GREEN→独立postGREEN gate，再fresh spec→quality，才考虑组件交付。保留已关闭缺陷回归，不以测试总数或单次GREEN替代因果证据。ERP只走isolated runner；T5共享storage/purpose/auth/model/migration/scheduler接线须明确交接，baseline、插件完整release及真实HTTPS/CORS/Chrome/通知仍未完成。
+早期过程不再进入当前技术摘要。完整历史保留在 Git 提交 `1f90588477314f59b0d1fa41308abdcefc00bb7c` 的本文件、原始 native artifacts、各 OWNER 冻结目录和本轮 `docs-before-condense/` 快照；没有改写门禁或删除原始产物。
