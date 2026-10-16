@@ -112,6 +112,48 @@ R3两writer均已交，不等于验收。Reviewer `8624cdfb-ba50-4d54-a5dc-0a4d7
 
 最终`reviews/runtime-spec-4.json`已核为**BLOCKED，6P1/1P2**，含上述ACK复合问题、manual disabled与已确认可达的exception报告缺口。未运行本轮新的owner行为测试。继续保留原writer窄修与行为RED/GREEN；已修purpose/CSRF/SQL/outbox旧项不重开，T5共享接线与真实环境验收仍blocked。
 
+## Runtime spec5 — 4P1/1P2与实际旧候选RED
+
+Reviewer `95cf664a-559d-4c0f-b952-4e08a9841634`最终JSON为BLOCKED，OWNER有效回复`dad804ae-abe7-4258-9a74-34327fee20b1`及`51d7e8a4-e8de-4e09-8a36-45d07df04307`。
+
+- 四P1：历史running draft仍可清incident、terminal原子写后另写applied proof产生crash gap、first store read及初始化仍漏总budget、capture/recheck transport被误判identity conflict。
+- 一P2：通知停用判据只覆盖reason USER_DISABLED，遗漏独立monitorEnabled/disabled execution，与policy不一致。
+- OWNER冻结旧R5真实模块，仅在副本启用原`it.skip`的HOLD chain case，得到业务断言RED：expected running to be suspended，exit1、1 failed/6 filtered。源码及SHA在`/tmp/plugin-status-owner-runtime-r5-01a1406d/`，日志`/tmp/plugin-status-owner-runtime-r5-hold-probe.log`。边界是假Chrome memory/pages/scheduler/HTTP，不是实际浏览器或服务端。
+- 两原writer修正`e922252d-6ef2-4247-b3ee-4faad32aeb1a` / `7f937f58-469f-459e-b2e9-7a1288f7987d`已交；R6源级确认历史carrier排除、同事务proof、分类及disabled判据已修，不将旧RED移用到新候选。Plugin报告708/708、无skip、coverage95.88/92.65/97.49/95.88为worker证据。
+- Plugin handoff主动承认F2/F3先实现后补测试；记录过程违规，后续回归不能逆改原始TDD顺序。
+
+## Runtime spec6 — 原生恢复成功，3P1仍BLOCKED
+
+原reviewer `70a77a59-45d5-41c1-a43f-71897e0b5af6`遇`fetch failed`且缺required structured output，导致root `40b173a9-f68a-4304-960b-167ae1bf1d6a`终结failed。32/40 used、8 remaining不等于额度耗尽。已保存三工作树状态/diff及23条改动源文件/SHA到`/tmp/plugin-status-recovery3-snapshot-01a1406d/`，不覆盖失败历史。
+
+新root `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`沿用同mission，最多8次子调用，原生恢复上述reviewer为`b6c9a9e0-0188-46af-be5c-8d717abe7ad6`。没有替换模型/CLI/checked-evidence、重复初始开发或豁免输出。`reviews/runtime-spec-6-recovered.json`已实际解析为3P1/BLOCKED。原thread 4605d433已超时，OWNER不冒称答复成功；实际回复新有效thread `0da14692-c945-484f-a868-4db4e441a64b`与`c97fffd2-b2f4-4302-adaa-b190836d5dc8`。
+
+1. **P1，ERP锁后仍使用旧ORM对象。** authenticate_report在同session加载并强引用StatusInstance，lock_instance的FOR UPDATE未populate_existing。并发manual HOLD/首个advertiser CAS提交后，后到report虽拿锁仍用旧revision/scope；必须在统一锁owner刷新，而非另加状态缓存。
+2. **P1，初始化总deadline仍不完整。** first read已guard，但initial commit、negative invalidate、scheduler stop、business clear及rebuilt commit仍可挂住ensureInitialized/runRecovery。要求从首await起统一90秒，逐真实deferred边界验收；Promise.race不等于撤销已发RPC，晚到值也不能授权。
+3. **P1，rejected HOLD不是ACK许可。** current carrier检查已修历史case，但handleDecision对rejected HOLD/非accepted ledger返回false，caller仍以!settled清incident。原子storage guard仅查旧applied resume、running/pending及tuple，没有无superseding authority的正向证明。合法新鲜HOLD可在本地证据await后过期被拒，旧resume随即被错误确认，服务端仍hold同episode；须修canonical ledger/gate，不堆平行旗标。
+
+### OWNER新候选执行证据与反例纠正
+
+- R6修正前当前候选：`NODE_ENV=test npm test -- tests/plugin-status-chain.test.ts tests/plugin-status-storage.test.ts tests/tab-binding-controller.test.ts`为109/109；tsc exit0；ERP只通过isolated runner跑API，100%且ephemeral clone dropped。日志`/tmp/plugin-status-owner-recovery3-{plugin-focused,plugin-tsc,erp-isolated}.log`。这不覆盖上述新缺口或后续修正。
+- 冻结全src/tests于`/tmp/plugin-status-owner-runtime-r6-01a1406d/plugin/`，保留原文件及SHA，派生`tests/owner-r6-clock-hold-probe.test.ts`。前两个变体错误加入非wire字段issuedAt，accepted=0而通过；它们只是前置校验拒绝，**不算反例RED**。已去掉错误字段，并给replacement runtime独立event ID，避免fixture复用UUID冒充新鲜carrier。
+- 有效变体使用zero-skew、120秒合法HOLD，仅在真实await的monitorEvidence推进注入wall/monotonic130秒。Vitest2.1.8实际exit1、1 failed/6 filtered；sent2/accepted2，HOLD outcome=rejected，却execution=running、incidentId=null、pendingIncidentClear=false，失败断言expected null not to be null。日志`/tmp/plugin-status-owner-runtime-r6-expired-hold-valid-probe.log`。是冻结修后R5候选的真实模块/模拟I/O行为RED，非import、未await、HTTP拒绝或实际Chrome/ERP证据，不外推未来fix仍失败。
+- ERP续修child `9221a1c8-3941-49a2-a844-37eb3e4c6d88`已交：canonical populate_existing、两个真实Session交错RED，报告93 API+18 models GREEN。仅worker证据，待新的spec/quality及OWNER核查。Plugin继续原MiniMax窄修；新probe发往7f937f58的follow-up `297e51e1-4929-4ac9-831a-6db4fca7b5e9`为queued，须后续handoff明确ack，不能当已消费。
+
+## Runtime spec7 — 两项定向GREEN，三P1仍BLOCKED
+
+Reviewer `14a699e9-389c-4b72-9f6d-c77e12427744`已产出`reviews/runtime-spec-7.json`，实际解析为3P1/BLOCKED。OWNER直接读当前函数与tests后有效回复`62f6becc-5547-422a-b905-9fa359793df5`及`6095ba1e-37de-491a-bc72-f2bfe75be6ce`；source-level发现不冒充reviewer执行测试。
+
+- **初始化总deadline仍P1，源码并未改。** Plugin修正handoff `workers/runtime-recovery3-2-1.md`明确承认三条测试void，却称源码fixed on merits。OWNER比较R6冻结和R7实际controller，整个文件字节一致，SHA `05d652c85ec23d1dccb12d60b9379d863874c6e18e73d1ba22501760aec9f1f0`；ensureInitialized仍直接commit/invalidate/stop/clear。测试未证明目标await到达即推进clock，stop adapter根本没消费deferredPorts，可能只是先让read/list超时。不是“测试不足但源码已修”。
+- **Action-start TOCTOU P1。** Runtime在authorize后await persistDecisionStarted再调用executor，没有重核deadline/当前epoch、nonce、enablement；controller只在入口捕获generation，不能察觉claim等待期间已经发生的失效，旧expected epoch也不在浏览器副作用前阻挡。terminal CAS不能撤销已发reload。需在canonical start/首副作用边界保留当前授权，并以真正进入的deferred started-write测试过期/失效后零reload/capture/start。
+- **Cookie Store unavailable误判identity P1。** readCookieStore把浏览器读错误折成null，wake/proof及post-reload recheck在明确authorisedCookieStoreId时把它当IDENTITY_MISMATCH，timeout sentinel同样可被折错；没有证明别的身份却走conflict/require_user。需所有caller保留unavailable/timeout原因，仅成功读到不同store才identity conflict。
+
+### 本轮OWNER直接验证
+
+- `repository.lock_instance`的populate_existing与两Session测试获source复核；OWNER通过isolated runner以`-k 'concurrent_operator_hold or concurrent_first_advertiser_assignment'`只跑两个case，exit0、100%、clone dropped。日志`/tmp/plugin-status-owner-runtime-r7-erp-two-session.log`。不重开R6旧ORM问题。
+- 将**同一个**合法expired-after-awaited-evidence的OWNER派生test放到冻结R7实际源码，Vitest exit0、1 passed/6 filtered；sent2/accepted2、HOLD rejected，但incident保留、pending=true。日志`/tmp/plugin-status-owner-runtime-r7-expired-hold-green.log`，源码/SHA在`/tmp/plugin-status-owner-runtime-r7-01a1406d/`。canonical ledger事务比较更高revision，关闭旧ACK缺陷；R6失败不移用本候选。
+- R6 plugin handoff报告712/712、coverage95.88/92.66/97.49/95.88仍只是worker回归，三条void测试不算deadline证明。其陈旧“ERP未修”残余列表不压过实际源码和独立定向GREEN。
+- 原writer续修。已向最新93fd会话排队follow-up `5b82e1b3-2d68-47f3-8b9f-a2b6c1d5fc2f`，要求真实running→bound tab失效进入wake边界、目标端口entered后才推进时间，并读回实际编辑/源码指纹；queued仍非消费证明。ERP no-change child `5ae4a69f-05e0-4fb4-83fa-d28b5ae6479f`已交，不当新功能或整体接受。
+
 ## 下一验证
 
-先保留writer修正并做每项行为RED/GREEN，再fresh spec→quality与owner直接核查。至少覆盖真实模块链：被动候选→server recover→新epoch ready→resume→terminal+report原子落盘→服务端ACK→incident清除，以及低seq/旧result/HOLD/重启/跨实例/总超时负例。ERP只走isolated runner；最终baseline和插件完整release检查、真实HTTPS/CORS/Chrome/通知仍是独立未完成边界。
+在总8次恢复额度内消费原writer的三P1修正，先核实际source change、目标端口entered及行为RED/GREEN，再fresh spec→quality与OWNER实际候选验收。保留完整recover→ready→resume→terminal/report→ACK及已关闭缺陷回归，不让总测试数替代因果证据。ERP只走isolated runner；T5共享storage/purpose/auth/model/migration/scheduler接线须明确交接，baseline、插件完整release及真实HTTPS/CORS/Chrome/通知仍是未完成边界。

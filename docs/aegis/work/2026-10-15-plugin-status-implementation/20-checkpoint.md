@@ -2,12 +2,12 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-runtime + status-monitor-runtime
-- Active slice: Runtime spec4最终BLOCKED（6P1/1P2）；R3两writer已交但未验收，同workflow继续补修
-- Blocked on: sticky心跳重复计失败、重启ACK义务/响应中HOLD竞争、剩余deadline缺口、被动负面证据丢失、disabled人工许可及误通知、exception终结路径；共享热点仍待handoff
-- Next step: 原writer按R4窄修后fresh spec→quality；用实际跨端报告序列及重启/旧ACK行为测试，不再以NONE替身放行
-- Owner disposition: [runtime-review-1.md](runtime-review-1.md)（当前BLOCKED与6项独立复现）；纯核历史见[core-review-1.md](core-review-1.md)
-- Current workflow: `40b173a9-f68a-4304-960b-167ae1bf1d6a`，同mission continuation，从已核实native handoff开始；不是重新启动核心writer
-- Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked
+- Active slice: Runtime spec7最终BLOCKED（3P1）；R6锁刷新及ACK已获OWNER定向GREEN，原writer继续修剩余插件边界
+- Blocked on: 初始化总90秒仍未实际修正；durable start claim后授权TOCTOU；Cookie Store unavailable误判identity。修后须fresh spec→quality/OWNER验收，共享热点仍待明确handoff
+- Next step: 用确实进入目标await的测试先RED再改真实源码；验证首副作用前deadline/epoch/nonce/enablement及cookie原因保真；不扩大权限，T5仍blocked
+- Owner disposition: [runtime-review-1.md](runtime-review-1.md)（当前BLOCKED及逐候选行为证据）；纯核历史见[core-review-1.md](core-review-1.md)
+- Current workflow: `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`，同mission原生恢复failed reviewer并沿用原writer/模型/checked-evidence；仅使用旧额度剩余8次，不启动T5
+- Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked；`40b173a9-f68a-4304-960b-167ae1bf1d6a`因spec6 fetch failed/缺required structured output而failed，不伪称仍running或通过
 - Core delivery: ERP `f2c0fa7`（7文件）、独立plugin `718c83e`（12文件），均已push；发布版本仍0.4.26，未对既有runtime接线
 - Core gates: spec8 `eba15195-54ff-4c2d-bf1e-425d91c0587f`；quality `6acc5cbc-2183-4901-876f-5d20dbc22237`；owner reply `4d80c122-666a-4640-a2fa-3cc315798b3f` OK仅适用于纯核
 - Tower receipt: revision622，core两项completed附changedFiles，两runtime仍in_progress；T4收窄纯模块，GUI/MAIN/版本明确归T5，T5显式blocked
@@ -18,7 +18,17 @@
 - Owner行为证据: `/tmp/plugin-status-owner-runtime-r1-01a1406d/`冻结源码+模拟I/O探针；旧draft获执行、失效被心跳节流、错身份wake仍running、ACK前清incident、HOLD未停scheduler，并发同decision实际执行2次
 - Runtime spec3: reviewer`f663c92d-7bcf-4949-b620-729f86b1fe48`，OWNER reply`2c81934e-a3b3-4747-b182-b0fdd1d5b07d`；最终6P1 BLOCKED。ERP R3`a5abf9ca-c45a-4cfe-986c-c33bdc25cc1d`与plugin R3`c85638b8-626d-459c-b209-1d3b41a17603`均已交，未验收
 - Runtime spec4: reviewer`8624cdfb-ba50-4d54-a5dc-0a4d7be515ab`；OWNER有效reply`ff5e9618-2815-4cc5-adb2-3e24404af525`确认继续BLOCK，最终JSON为6P1/1P2，含HOLD ACK竞争、disabled人工发许可及exception报告缺口。源码/SHA快照`/tmp/plugin-status-owner-runtime-r4-01a1406d/`不是新执行证明
-- 已修旧项: R3 reviewer源级确认purpose默认拒绝/受限mint、CSRF、connectivity SQL与outbox事务边界已修，不再将R1旧fallback写成当前事实；实际共享权限/mount/migration/browser接线仍待交接
+- Runtime spec5: 最终4P1/1P2 BLOCKED；R5两writer `e922252d-6ef2-4247-b3ee-4faad32aeb1a` / `7f937f58-469f-459e-b2e9-7a1288f7987d`已交。OWNER在冻结旧候选启用原skipped HOLD案得到真实RED，修后普通HOLD案已启用并通过窄回归；不把旧失败套到新候选
+- Runtime spec6: 原reviewer `70a77a59-45d5-41c1-a43f-71897e0b5af6`失败；恢复child `b6c9a9e0-0188-46af-be5c-8d717abe7ad6`已成功产出3P1/BLOCKED结构化结果。OWNER实际回复有效thread `0da14692-c945-484f-a868-4db4e441a64b` / `c97fffd2-b2f4-4302-adaa-b190836d5dc8`
+- Owner R6修前正向回归: plugin三文件109/109、tsc0；ERP isolated API100%且clone dropped，日志`/tmp/plugin-status-owner-recovery3-{plugin-focused,plugin-tsc,erp-isolated}.log`。不覆盖新增三P1，更不是后续修正验收
+- Owner R6行为RED: 冻结真实模块+模拟I/O，zero-skew合法HOLD在实际await evidence后过期；sent2/accepted2、HOLD rejected，仍错误清incident为null且execution running。日志`/tmp/plugin-status-owner-runtime-r6-expired-hold-valid-probe.log`，exit1为业务断言；不是Chrome/真实ERP证据
+- R6修正: ERP `9221a1c8-3941-49a2-a844-37eb3e4c6d88`与plugin `93fd990e-04ed-45f9-8151-a7016031ce68`均已交；后者明确三条deadline测试void，但所谓源码merits已修不符实际，不能验收
+- Runtime spec7: reviewer `14a699e9-389c-4b72-9f6d-c77e12427744`最终JSON为3P1/BLOCKED；OWNER有效回复 `62f6becc-5547-422a-b905-9fa359793df5`及`6095ba1e-37de-491a-bc72-f2bfe75be6ce`，未重开已修ERP/ACK
+- Owner R7正向定向: 同一合法expired-HOLD案在冻结新源码GREEN（accepted2/incident保留）；isolated两session两个case GREEN并drop clone。日志`/tmp/plugin-status-owner-runtime-r7-{expired-hold-green,erp-two-session}.log`；不是整体完成
+- Owner源码指纹: R6冻结与R7当前controller全文件字节相同，SHA见runtime-review-1；与handoff的初始化已修声明矛盾。三条测试在进入目标await前推进clock，stop adapter未消费deferred，不算验证
+- R7窄修: 原writer继续，ERP no-change child `5ae4a69f-05e0-4fb4-83fa-d28b5ae6479f`已交。发往93fd的 `5b82e1b3-2d68-47f3-8b9f-a2b6c1d5fc2f`含entered-boundary测试构造与实际source edit要求，仍须核handoff消费ack
+- TDD历史: plugin R5 handoff自报F2/F3先实现后写回归；R6补修deadline测试又自报void，均保留，不以总测试数或后续GREEN追认原始RED-first合规
+- 已修旧项: R6源级认可历史carrier排除、同事务applied proof、transport分类与统一disabled通知判据；R3已认可purpose/CSRF/SQL/outbox。实际共享权限/mount/migration/browser接线仍待交接
 - Follow-up: manual disabled优先级补充发往a5但仅排队到下次resume；plugin真实端口/ACK/总deadline指引发往c856待核ack。不能把queued当已执行
 
 ## Checkpoint Update

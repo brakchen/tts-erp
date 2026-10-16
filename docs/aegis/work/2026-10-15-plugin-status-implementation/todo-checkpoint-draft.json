@@ -7,15 +7,22 @@
     "status-erp-core",
     "status-monitor-core"
   ],
-  "activeSlice": "Runtime spec4最终BLOCKED（6P1/1P2）；R3两writer已交但未验收，同workflow保留writer补修",
+  "activeSlice": "Runtime spec7最终BLOCKED（3P1）；ERP锁与ACK已获OWNER定向GREEN，原writer修余下插件边界",
   "evidenceRefs": [
-    "runtime-review-1.md包含R1-R4；R4 owner有效replyff5e9618，通知问题按P2，其余确认阻断并补充HOLD ACK竞争/disabled人工发许可",
-    "R4实际源码/SHA冻结于/tmp/plugin-status-owner-runtime-r4-01a1406d；未宣称运行本轮新探针或真实浏览器",
+    "runtime-review-1.md包含R1-R6；R5最终4P1/1P2，恢复后的R6最终3P1；OWNER有效reply0da14692/c97fffd2",
+    "root40b173a9因fetch failed/缺structured output而failed；同mission恢复root533dc0c8，仅沿用旧额度剩余8次；原模型/writer/checked-evidence不变",
+    "OWNER R6修前正向回归：plugin3文件109/109、tsc0、ERP isolated API100%且clone dropped；不覆盖R6新缺陷",
+    "OWNER冻结R6候选真实模块/模拟I/O：合法zero-skew HOLD在await evidence后过期，accepted2仍清incident；/tmp/plugin-status-owner-runtime-r6-expired-hold-valid-probe.log真实exit1",
+    "两个无效probe变体accepted0因owner误加非wire issuedAt，不算RED；已纠正。旧R5 RED不移用后续候选；F2/F3 TDD顺序违规仍保留",
+    "R7实际JSON三P1/BLOCKED：初始化90秒源码未改、claim后action-start TOCTOU、Cookie Store unavailable误判identity",
+    "OWNER R7定向GREEN：同一合法expired-HOLD案accepted2且incident保留；isolated两session两个case通过并drop clone；日志见runtime-review-1",
+    "R6与R7controller字节一致SHA05d652c85ec23d1dccb12d60b9379d863874c6e18e73d1ba22501760aec9f1f0，handoff声称初始化已修不成立；三条deferred测试void",
+    "R7有效OWNER gates62f6becc/6095ba1e已答；follow-up5b82e1b3仅queued，须核实际消费，恢复额度不自增",
     "R1冻结探针只证明旧候选：并发同decision执行2次等；不能称修后仍失败",
     "core f2c0fa7/718c83e已push；Tower622两runtime in_progress、T5blocked，registrye11b5bc仍不包含共享热点接管",
     "R3 reviewer确认旧purpose/CSRF/SQL分页/outbox事务项已修；实际canonical接线及整体验证仍未完成"
   ],
-  "blockedOn": "sticky失败重复计数、ACK重启及HOLD竞争、剩余deadline、被动负证据丢失、manual disabled及误通知、exception结果报告；共享handoff/完整分页/最终环境证据",
-  "nextStep": "按R4最终6P1/1P2保留writer窄修并验证真实模块链；不重复新开writer、轮询或接管热点",
+  "blockedOn": "R7所有初始化await预算、claim后首副作用授权TOCTOU、cookie unavailable分类；共享handoff/完整分页/最终环境证据",
+  "nextStep": "原MiniMax先证明目标deferred端口entered并RED，再真正修改源码、读回指纹和GREEN；fresh spec→quality及OWNER验收，queued核ack且不扩大额度/权限",
   "updatedAt": "2026-10-16"
 }

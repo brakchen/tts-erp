@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "workflow40b173a9继续；R3两writer已交，spec4 reviewer8624cdfb最终BLOCKED6P1/1P2，owner已回有效threadff5e9618，含HOLD ACK竞争/manual disabled/异常终结报告缺口。先读runtime-review-1最新R4与源码快照；无本轮新owner执行证明。native唤醒，不轮询或新开writer；canonical ACTIVE e11b5bc，Tower最近receipt622，T5仍blocked。",
+  "resumeInstruction": "旧root40b173a9因spec6 fetch failed/缺structured output已failed；当前同mission恢复root533dc0c8-9e02-4397-ae54-0a8d9cd79c24仍执行，总上限8次。R6恢复成功但blocked；最新spec7 reviewer14a699e9最终三P1/BLOCKED，有效OWNER gates62f6becc/6095ba1e已答。先读runtime-review-1 R7：初始化源码仍与旧候选字节一致，三条测试void，另有claim后start TOCTOU/cookie unavailable误判identity。原MiniMax继续三项窄修，ERP no-change5ae4a69f已交；须核93fd下一resume实际消费queued5b82e1b3，不当queued已执行。ERP两session及同一合法expired-HOLD案已经OWNER新候选定向GREEN，勿重开旧问题；日志/tmp/plugin-status-owner-runtime-r7-{erp-two-session,expired-hold-green}.log。未发新wire字段issuedAt，早期两个无效probe不算RED。真正目标端口entered后推进clock，RED→实际edit→读回source/hash→GREEN，再fresh spec→quality/OWNER。native唤醒不轮询、不重开初交、不替换模型/CLI或门禁、不自增额度。canonical ACTIVE e11b5bc、最近Tower receipt622；T5共享热点仍待明确handoff。",
   "knownPartialWork": [
     "status-impl-plan",
     "status-erp-core",
@@ -15,7 +15,7 @@
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "纯核完成或worker GREEN不等于runtime正确；R1模拟I/O反例不是Chrome/真实HTTPS证据",
+    "纯核/worker GREEN/恢复审查成功不等于runtime通过；R5旧RED不代表后续fix失败，R6有效RED也只证明冻结候选；F2/F3原始TDD顺序违规不可追认合规",
     "runtime不得改已有owner storage/access/security/app/base/scheduler；无prod migration/restart/真实凭证TikTok写；T5完整分页窄修前不得信任campaignsComplete",
     "canonical依赖未到不允许purpose=None放行或先铸造普通RW key；必须failclosed，不用错误授权断言或docstring掩盖权限缺口"
   ]
