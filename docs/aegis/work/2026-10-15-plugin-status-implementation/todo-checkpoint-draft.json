@@ -3,7 +3,7 @@
   "taskId": "2026-10-15-plugin-status-implementation",
   "currentTodo": "status-runtime-callers；整体runtime、ERP质量和T5未通过",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core"],
-  "activeSlice": "第七wake-rebuild-producer已局部接受；root614318f3-4705-4ef1-8598-070be1b87b0c / childabcdec02-b392-4c4e-be94-7cc6260ab54c已terminal，七字段/两path/准确postGate55f416c9-a968-47c1-a3cb-5d1bddcc1730已核。原MiniMax/model/session/cwd/tools/native checked contract保留，尚未启动下一producer。",
+  "activeSlice": "第七wake-rebuild-producer已局部接受；root614318f3-4705-4ef1-8598-070be1b87b0c / childabcdec02-b392-4c4e-be94-7cc6260ab54c已terminal，七字段/两path/准确postGate55f416c9-a968-47c1-a3cb-5d1bddcc1730已核。原MiniMax/model/session/cwd/tools/native checked contract保留。下一resume-fenced-producer已由root5e886672-cf85-4567-92ff-1f5b1325af8d exact原abc续接，仅tests-first/新预审；复用既有createSnapshotCommit原frame，不改helper/terminalowner，尚无本段源码批准。",
   "evidenceRefs": [
     "唯一协议docs/plugins/plugin-status-report.md；技术状态/边界见20-checkpoint.md、runtime-review-1.md。六个既有微门禁加第七wake55f416c9，仅各自局部接受，不是callers/T4完成",
     "第六最终/tmp/plugin-status-owner-invalidate-final-01a1406d：bf2/controller、317f/tests，OWNER22/tsc0、五变体杀死、late-read unhandled0、live read-error原对象保留、无意外事实/报告/clear；raw-read旧1→新0对照保留，不改历史",
@@ -13,6 +13,6 @@
     "ERP锁populate_existing/真实两Session交错和canonical ACK更高revision比较已有独立验证；core ERPf2c0fa7/plugin718c83e已push，runtime仍WIP，v0.4.26"
   ],
   "blockedOn": "其余recover/failed/resume producer及mandatory union、单90秒/两release、实际bind/clear写点fence、action-start、Cookie原因、fresh spec→quality、ERP baseline/共享接线/T5/browser未验收；无当前full/coverage/build。",
-  "nextStep": "先完成本轮技术文档一致性/JSON/Aegis/diff/LSP与docs-only提交推送，再读真实剩余producer/consumer seam，只按原MiniMax原生续接下一个最小scope；新有效RED/预审/相关GREEN/独立新postGREEN，既有gate不扩范围。",
+  "nextStep": "五技术docs已43bc191推送，JSON/Aegis/diff均0、docs LSP无warning；controller41辅助既有规则warning在新branch外，不宣称全clean。当前resume producer新测试/精确预审，保原25，正常真实canonical应用/已观察nonce不start/原frame代次与nonce消费因果；独立新postGREEN，既有gate不扩范围。",
   "updatedAt": "2026-10-16"
 }

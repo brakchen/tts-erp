@@ -2,7 +2,7 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: `status-runtime-callers`，仍 `in_progress`；不是 T4 或全功能完成。
-- Active slice: `wake-rebuild-producer`源码已局部接受，native终态/七字段/两path/准确gate已核，待规划下一个producer。
+- Active slice: `resume-fenced-producer`，原MiniMax续接，仅resumeMonitoring body+新测试；当前tests-only/新预审门禁，尚无源码批准。第七wake源码已局部接受且终态/准确handoff已核。
 - Blocked on: recover/failed/resume等其余producers/mandatory union、预算/实际业务写点fence、action、Cookie、fresh spec→quality、ERP/T5 尚未闭合。
 - Next step: 原MiniMax按原生终态续接；下一段仍新有效RED/预审/最小源码/独立postGREEN，不能借本段gate扩范围。
 
@@ -61,8 +61,9 @@
 - 原 writer：MiniMax M3.1 Flash Preview；不换 writer/model/CLI，OWNER 不代写产品源码。
 - 上一 root `e1f1b5f4-c198-4465-a407-ddf414ba5af2` / child `ee27bcb6-af79-449c-a27f-b913a8deb436` 已 terminal blocked：postGREEN 监督请求过期，没有最终批准；非已证 quota/runner 故障。
 - 第六 root `c9712779-bb5e-4f2d-91dd-379a88ed3889` / child `b1ef1d62-0960-4cf3-b1dd-16f393c107de` 已terminal。七字段/两path正确，但handoff将gate误展开为`64f2f1e1-2c39-4b7a-9f4e-0d5a6c8e1b47`；真实接受以明确监督回复`64f2b158-82fd-42e2-87ca-7c60b33cd06e`为准。错误artifact保留，writer新预审已承认；以后OWNER回复正文附完整UUID，不猜短前缀。
-- 当前 root：`614318f3-4705-4ef1-8598-070be1b87b0c`，exact 原b1 native resume；child `abcdec02-b392-4c4e-be94-7cc6260ab54c`。
-- 最新 packet：`/tmp/monitor-status-wake-rebuild-producer-01a1406d.md`；script `/tmp/monitor-status-workflow-wake-rebuild-01a1406d.js`，validate0。
+- 第七root`614318f3-4705-4ef1-8598-070be1b87b0c` / child`abcdec02-b392-4c4e-be94-7cc6260ab54c`已terminal，七字段/两path/准确完整55f416c9 postGate已核。
+- 当前root`5e886672-cf85-4567-92ff-1f5b1325af8d` exact原abc native resume，scope仅resume producer；复用已有createSnapshotCommit原first-read frame，不重复读/clone代码、不改helper，返回原fence给runtime唯一terminal+fact出口；已观察到的初始化tuple不符先拒绝start，不冒称其awaited物理fence闭合。
+- 最新packet`/tmp/monitor-status-resume-fenced-producer-01a1406d.md`；script`/tmp/monitor-status-workflow-resume-fenced-01a1406d.js`，validate0。原25保护，新有效RED/新预审/独立新postGREEN逐段执行。
 - Strict 七字段 handoff + native checked evidence 保持；旧 pre-edit 或过期 post 请求不能充当 DONE gate。只按原生事件续接，不轮询等待。
 - 任务板：revision633，callers 进行中，其后 budget→actions→cookies→spec→quality；status/owner/deps未变时只传实质进度，不做 no-op 写板。
 - ERP core `f2c0fa7`、plugin core `718c83e` 已 push；版本仍0.4.26。runtime WIP 未整体交付/合并/发布；主仓 foreign gitlink/node_modules 不碰。
