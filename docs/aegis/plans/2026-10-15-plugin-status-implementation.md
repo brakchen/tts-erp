@@ -132,6 +132,16 @@ Multi-seam：ERP schema/策略、ERP 持久服务、插件纯协议、Chrome 生
 7. 更新external API、架构/运行契约、schema文档与正式ADR（独立status key、控制面/安全暂停边界）；保留报告事实，不编造部署结果。
 8. owner记录S01–S14代码位置、测试/命令/退出码、开放真实验证子项及安全运行说明；分支均提交推送，按实际状态更新registry和tower-do。没有全部代码/验证完成前不标全任务完成。
 
+## 2026-10-16 明确指导的原MiniMax续修
+
+用户最新要求继续调度MiniMax修改并指导清楚，不改成OWNER/其他模型写代码。此前max8为OWNER自设工作流参数，不能表述为用户批准的数字额度；原始用户只答“对”同意未带数字的追加请求。保留历史3次partial及所有native receipts，不以“剩余5次”要求用户另批额度。历史root0808e372的max12/最多2轮review-repair同样只是OWNER内部调度保护；其一child正常blocked后未继续其他阶段。
+
+- Resume TaskStart：docs325adb0 clean；plugin718c83e+原WIP，storage a6be6d4e/controller9843e9ec/runtimef1c434da；ERPf2c0fa7+7路径WIP。第三段冻结源storage38/38经OWNER实跑，55全量失败为worker证据，不称完整runtime通过。
+- T4拆为六个顺序门禁：status-runtime-callers → status-runtime-budget → status-runtime-actions → status-runtime-cookies → status-runtime-spec → status-runtime-quality；Tower633，6新任务+174旧任务全部保留。仅callers开始，T4聚合等依赖，ERP质量/T5不提前放行。
+- 当前同一观测提交seam需要单writer：storage强制fence/typed result、controller真正生产上下文及处理拒绝、runtime原样转发、测试生产/消费链相互耦合，拆并行writer会撞同三文件。先一条真实正常链vertical GREEN+选择性拒绝，联系OWNER看实际代码但不final；再补所有producer并强制union/相关回归/tsc，最终另取postGREEN OWNER gate。临时编译红是迁移工作，不是hard cap。
+- Decision=code-change；最低边界仍已注册T4纯模块。撤销observeBinding在报告前直接预写，复用canonical串行事务和既有ExpectedBindingContext/gen/budget；不新造owner/缓存/proof flag/依赖。先恢复producer/consumer闭环，再处理单90秒、真实业务/terminal写点、首副作用TOCTOU与Cookie原因；不谎称55全同因。
+- 当前指导packet /tmp/monitor-status-guided-minimax-01a1406d.md、script /tmp/monitor-status-workflow-guided-minimax-01a1406d.js；原writer433e9d38曾resume为07886337（root0808e372），同mission/原模型/cwd/tools/checked evidence；078回滚后77个既有src/tests文件净差0，未证明任何新caller修复。最新root65447207从078原生resume，仅runtime返回契约及对应测试，先新RED/OWNER再edit/GREEN/postGREEN，禁止宽化controller后回滚；packet /tmp/monitor-status-runtime-result-only-01a1406d.md，script /tmp/monitor-status-workflow-runtime-result-01a1406d.js已validate0。其他T4子任务与T5不提前推进。旧a611/de07/357只供pre-edit形状，不当postGREEN批准；新native schema不降。
+
 ## Risks and Stop Conditions
 
 - Hotspot归属未协调：先完成独立模块、给精确patch，不碰外来工作树；等待不阻止另一独立组件推进。

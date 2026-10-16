@@ -173,9 +173,9 @@ Reviewer `86c46407-1d6e-44d2-a7ad-df996d8a0ec2`最终`reviews/runtime-spec-8.jso
 - Tower revision623将插件runtime按三P1+测试恢复阻断；revision624将ERP runtime按未完成的spec/quality阻断；T5仍依赖两者blocked，未触他人归属。
 - 最新handoff确实ack此前297e51e1及OWNER有效ACK RED/GREEN的边界；这只证明消费消息，不代表三P1已修。F2/F3先实现后测试、vacuous测试、错误merits声明与删除回归的历史均保留。
 
-## 用户批准的batch4续修（仅启动，未验收）
+## 历史batch4续修（8为OWNER配置，非用户数字批准）
 
-2026-10-16用户明确批准追加调用；新批次最多8次、concurrency1，不改写旧root7/8及blocked历史。采用三次串行原MiniMax保留会话微切片：budget/恢复回归、action-start、cookie-cause；每次edit前通过contact_supervisor请求OWNER核真实entered-boundary RED和canonical方案，GREEN后再核当前源码；之后fresh spec→quality。原native checked-evidence不变，另要求精确JSON handoff供caller验证，不以worker DONE代替review。
+2026-10-16用户仅同意追加原生调用；当时OWNER自设最多8次、concurrency1，并非用户批准具体8次。此前归因错误已明确纠正，不改写旧root7/8及blocked历史。采用三次串行原MiniMax保留会话微切片：budget/恢复回归、action-start、cookie-cause；每次edit前通过contact_supervisor请求OWNER核真实entered-boundary RED和canonical方案，GREEN后再核当前源码；之后fresh spec→quality。原native checked-evidence不变，另要求精确JSON handoff供caller验证，不以worker DONE代替review。
 
 - TaskStart：docs e9c721c clean；两组件保留原WIP及HEAD，controller实际SHA9843e9ec。相同budget/gen/epoch/nonce在canonical mutation处约束迟到结果，不再声称race能取消已发I/O；内部port/CAS影响必须先请OWNER审查，无第二authority owner。
 - 初次从docs worktree绑定旧mission被project-root lookup拒绝，没有run ID；fleet0active，三树diff/status/HEAD及脚本/packet保存于`/tmp/plugin-status-batch4-launch-block-01a1406d/`。改回原主仓协调cwd后同协议重试成功，不是模型或执行方式fallback。
@@ -204,6 +204,27 @@ Reviewer `86c46407-1d6e-44d2-a7ad-df996d8a0ec2`最终`reviews/runtime-spec-8.jso
 - 连续三个保留调用都未实际进入controller/runtime迁移；代码形状/权限已明确，不把估计容量或暂时编译错误当作再等授权的理由。按重复修复升级规则暂停第四次机械尝试，Tower626将T4置blocked，保留174keys及他人归属，不写任何runtime完成回执。
 - 请求用户执行策略裁决：是否解除原MiniMax唯一writer约束，允许OWNER直接收口T4纯模块或另选writer；未授权不更换模型/CLI/新initial writer。现有六步拆法大于余5，重新合并原S1可数学上五步但完成能力未证，不承诺成功或暗增额度。不将该停滞标成“native基础设施失败”“预算耗尽”或虚构模型hard-cap。Producer/consumer闭合及实际性能边界尚未证明，非根因已闭合。
 
+## 用户纠正后的明确指导续修（当前）
+
+- 原始用户“对”只答复OWNER未带数字的“是否批准追加原生调用……”；8是OWNER配置，不是用户额度。本轮用户明确要求继续调度MiniMax、分配时指导清楚；撤销“等待是否换writer/OWNER接手”作为当前阻断，但不抹掉当时暂停和三段partial历史。旧脚本/receipt原样保存，旧3/8或剩5只是旧脚本计数。
+- root `0808e372-d79e-4368-b80d-39607b93cb0f`及从433e9d38 resume的guided-callers child `07886337-4efa-46ad-ac6b-6e708e8c5211`现已正常终结needs-owner-triage（不是仍running），同mission/主仓协调cwd/concurrency1；原MiniMax/cwd/tools/checked-evidence未改。max12及最多2轮review-repair为OWNER内部保护，不是用户数字授权/订阅限制，遇到时先源级triage，不谎称需用户追加额度。未新起initial writer、无CLI fallback。
+- OWNER直接重读当前storage/controller/runtime和fixture：storage仍a6，controller9843/runtimef1c；controller commit仍忽略refusal，runtime仍bool，observeBinding在commit前直接预写是另一个应消除的绕路；不把55项全部归同因。Change Necessity=code-change，边界为已拥有的observation producer/consumer tightly-coupled seam；复用ExpectedBindingContext/gen/budget/串行事务，无新owner/缓存/依赖，不向大controller增加新职责。
+- 指导packet `/tmp/monitor-status-guided-minimax-01a1406d.md`：A先typed runtime+真实controller路径，记录正常链RED→GREEN及选择性拒绝；中途contact OWNER核实际代码后同call继续。B补其余初始/重建/passive/invalidate/suspend/failed/outcome/snapshot生产者，原context不在写时重建，先撤旧direct prewrite；C强制union、端到端applied/accepted及postGREEN门禁。可有正常中间tsc红，不因此final未实施proposal；始终保留其他slice有效RED和release void历史。
+- 终结事实不等capture许可；保留ledger/report/terminal原子与STALE_CONTEXT fallback。下一budget slice还必须覆盖commitDecisionResult实际binding set处的live fence、业务端口与两release，不能只因field存在便称所有写点已保护。首副作用与Cookie原因仍分别后续严格RED/OWNER。
+- Tower633保留174旧keys并拆出6个子任务（180总）：callers in_progress，budget→actions→cookies→spec→quality pending，T4聚合待依赖；没有新runtime完成回执。ERP质量与T5共享接线仍blocked。启动时仍未修，不把dispatch当成功。
+- 新script `/tmp/monitor-status-workflow-guided-minimax-01a1406d.js` validate0errors（dynamic warning不伪称静态证明）；严格七字段/精确native footer/错slice/extra/原生失败/缺gate/旧pre-edit gate正负8/8，native checked acceptance不变。2026-10-16 11:02Z quotas可用：MiniMax5h1%/week17%、OpenAIweek14%；无已证实hard-cap。
+
+## 0808实际终结、回滚证据与两文件微切片
+
+- 078正常跑242014ms/13turns/12tools，无contact_supervisor请求；native窗口/peak642370/contextLimit1000000、output10359未证明hard-limit耗尽。runtime-only302 tsc0；controller factory/强制第三参及typed result扩写后，tool9真实TS2554/2322/2339列出未迁移caller，不是编译遗漏（OWNER showConfig确认82文件含全部src/tests）。tool10自行从R8复制回controller/runtime；无postGREEN批准。
+- OWNER对比第三段冻结的77个src/tests现有文件：全部逐字相同。storage a6及38测试不是此次新改动；artifact所列changedFiles不能当本次增量，其“this-call defect(b)”是复用旧证据。worker301与304仍158总/103pass/55fail；OWNER未重跑这些测试，不用相同计数证明所有失败同因。源码/日志/原artifact/receipt不洗掉，triage在 `/tmp/plugin-status-guided-callers-stop-01a1406d/owner-triage.md`。
+- 纠偏不再重派整个coupled迁移：同原writer由078继续，仅runtime typed result及其测试；禁止动controller/storage/fixture，禁止再扫55项旧失败。先真实正常与拒绝返回结果新RED（旧bool可编译、业务断言失败），实际联系OWNER后最小源码，named GREEN+tsc并再联系OWNER审当前diff；若有真实下游type冲突精确报告并保留partial，不自回滚或预测capacity。后续producer仍单独未完成。
+- 最新root `65447207-9ee0-4bed-84b9-d6280e15b8d9`已async，从078原生resume；script `/tmp/monitor-status-workflow-runtime-result-01a1406d.js` validate0errors，packet `/tmp/monitor-status-runtime-result-only-01a1406d.md`。一个具体mutation步骤，不是用户数字额度；scope和7字段/native门禁保留，done必须实际变更runtime及其test、真实新postGREEN gate，仅表示微切片候选。T4 caller task继续in_progress，未写任何完成回执；其他五步尚未启动。
+
+- 最新child7058df8f-2699-4275-ba09-4d9dce42150b已实际发request a6fd6b8d-dc1d-4555-9378-73c274781e44，OWNER读当前tests1168–1235与305 exit1后拒绝pre-edit：拒绝案live=true贯穿await、返回后才false，所以收到true本身不是拒绝缺陷；正常案queue与不存在字段组成错误shape作notEqual恒真，不证明增长。已原生实答tests-only先纠正：实际before tuple、调用前撤许可/predicate消费、真实queue/发送载荷及状态/wire一致，再named306 RED重新问。拒绝原请求不动生产/不回滚；原production小形状原则认可不等preRED已通过。重复attention是旧请求提示，不另发nudge或复用该UUID为done。
+
+- 随后request9de20167-3695-4220-ac52-a8e51928b243由OWNER直接读tests和306实答：拒绝案已调用前撤许可，false→typed-refusal RED有效。批准tiny runtime形状，但先收紧positive测试：default正常ACK会drain队列，test内用现有jsonResponse503保留真实queue、断言新增dispatch和对应载荷；next与wire identityVerified一致、before明确null guard。两案preRED后直接edit/named GREEN/tsc再postGREEN源级问，不把该preEdit UUID当完成批准。未因此声明生产已改或测试已通过。
+
 ## 下一验证
 
-等待用户执行策略授权，保持原MiniMax最新433e9d38可追溯，不重复派发。修复仍先有效RED、实际canonical实现、related GREEN及OWNER源级核验，再fresh spec→quality，才考虑组件交付。保留已关闭缺陷回归，不以测试总数或单次GREEN替代因果证据。ERP只走isolated runner；T5共享storage/purpose/auth/model/migration/scheduler接线须明确交接，baseline、插件完整release及真实HTTPS/CORS/Chrome/通知仍未完成。
+等待当前原writer的runtime-result实际小改动/GREEN及postGREEN请求，OWNER直接源码回复；此阶段不再要求一次迁完全controller。保持有效RED→canonical fix→related GREEN→独立postGREEN gate，再fresh spec→quality，才考虑组件交付。保留已关闭缺陷回归，不以测试总数或单次GREEN替代因果证据。ERP只走isolated runner；T5共享storage/purpose/auth/model/migration/scheduler接线须明确交接，baseline、插件完整release及真实HTTPS/CORS/Chrome/通知仍未完成。

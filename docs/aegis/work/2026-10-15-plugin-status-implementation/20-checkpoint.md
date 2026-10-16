@@ -1,18 +1,24 @@
 # 通用插件状态与单目标恢复实施 - Checkpoint
 
 - Task ID: 2026-10-15-plugin-status-implementation
-- Current todo: status-erp-runtime + status-monitor-runtime
-- Active slice: batch4三段均native complete/return blocked，累计3/8、尚余5；最新原writer433e9d38只修storage(b)，controller/runtime仍字节未改。OWNER暂停继续派发，等待执行策略裁决，不能把旧root当仍running或预算耗尽
-- Blocked on: mandatory union及真实caller迁移仍缺，worker全量55失败不减；storage最新a6be6d4e局部38/38经OWNER冻结实跑exit0，但不是增量接受。原三P1/业务端口/release有效证据、ERP质量和T5均未完成
-- Next step: 请用户裁决是否解除唯一原MiniMax writer限制、授权OWNER直接收口T4纯模块或另选writer；未经授权不切换模型/CLI/新initial writer，也不机械续烧尚余5次。若保持原限制，需明确重排producer-first迁移及原S1收口，不能跳fresh spec→quality
+- Current todo: status-runtime-callers（T4独立迁移子任务）；ERP质量/T5继续未通过
+- Active slice: broad root0808e372/child07886337已正常终结needs-owner-triage，回滚后77个既有src/tests文件净差0，无postGREEN/supervisor请求。用户继续原MiniMax的授权不变；最新root65447207-9ee0-4bed-84b9-d6280e15b8d9已async，只修runtime-result及tests，从078原生resume，不换writer/model/cwd/checked-evidence
+- Blocked on: 启动时仍是a6be6d4e storage局部38/38、controller9843e9ec/runtimef1c434da未迁移，worker全量55fail；不是权限待批准或用户额度耗尽。其后当前修改以native事件/实际源码为准，不能把启动当修复
+- Next step: runtime-result新命名正常/拒绝行为RED先实际contact OWNER，再最小typed result源码edit，named GREEN+tsc后另取postGREEN；本call不动controller/fixture/storage、不扫旧55、不因整特性未过而回滚。之后才逐producer/union，再budget/action/cookie/spec→quality
 - Owner disposition: [runtime-review-1.md](runtime-review-1.md)（当前BLOCKED及逐候选行为证据）；纯核历史见[core-review-1.md](core-review-1.md)
 - Prior recovery workflow: `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`已正常结束，**return.state=blocked**，不是通过或基础设施failed；已用7/8、尚余1次，不足完整修复+独立复审，quality未启动，不自增额度
 - Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked；`40b173a9-f68a-4304-960b-167ae1bf1d6a`因spec6 fetch failed/缺required structured output而failed，不伪称仍running或通过
 - Core delivery: ERP `f2c0fa7`（7文件）、独立plugin `718c83e`（12文件），均已push；发布版本仍0.4.26，未对既有runtime接线
 - Core gates: spec8 `eba15195-54ff-4c2d-bf1e-425d91c0587f`；quality `6acc5cbc-2183-4901-876f-5d20dbc22237`；owner reply `4d80c122-666a-4640-a2fa-3cc315798b3f` OK仅适用于纯核
-- Tower receipt: revision626将T4诚实blocked（retained-writer-caller-migration-unimplemented + owner-execution-strategy-authorization），174keys全保留，其他owner无改动；ERP质量/T5仍blocked，无任何新runtime完成回执
+- Tower receipt: revision633、180keys（原174全保留+6个具体验证子任务），status-runtime-callers in_progress，budget/actions/cookies/spec/quality依次pending；T4聚合等待子任务，不再以执行策略待批准阻断。ERP质量/T5不变，无runtime完成回执
 - Batch4 TaskStartSnapshot: docs HEAD e9c721c clean；plugin仍718c83e+原有16路径runtime WIP，ERP仍f2c0fa7+原有7路径WIP；controller实际SHA9843e9ec2486974a2bf7e62d77d9d1365e5a625a49e65d01678deb970b1716f6，R8现场仍保存，不碰主仓外来WIP
-- Batch4 Slice Card: Goal=三个现存P1与有效回归；Parent=原T4/spec §§4/5/7/11/12；Files=自有controller/runtime/storage及tests；Boundary=不共享接线/不新权限/不新owner；Verification=真实RED→canonical fix→GREEN+晚到值隔离，fresh spec→quality；Stop=未修/缺证据/超scope/native失败/8次上限则诚实blocked
+- Batch4历史Slice Card: Goal=三个现存P1与有效回归；Parent=原T4/spec §§4/5/7/11/12；Files=自有controller/runtime/storage及tests；Boundary=不共享接线/不新权限/不新owner；Verification=真实RED→canonical fix→GREEN+晚到值隔离，fresh spec→quality；旧8次仅OWNER自设调度保护，不是用户限制
+- 授权归因纠正：原始消息中OWNER只问“是否批准追加原生调用……”，用户答“对”，没有数字8；此前把脚本max8写成用户批准属OWNER错误。本轮用户明确说继续调度MiniMax并指导清楚；不是允许OWNER接手或换模型。旧receipt不改写，旧3次partial保留，但“剩余5次”不再当用户上限或再求额度的理由
+- 前一调度根：0808e372已终结、只用1child且未修成；同mission/主仓协调cwd/concurrency1，max12及最多2轮review-repair是OWNER内部保护，不是用户数字批准或provider quota。script /tmp/monitor-status-workflow-guided-minimax-01a1406d.js，priority packet /tmp/monitor-status-guided-minimax-01a1406d.md；validate0errors、动态数量靠runtime约束，七字段/精确footer/禁用旧pre-edit gate正负8/8，未降低native门禁
+- 新TaskStartSnapshot：docs325adb0 clean，plugin718c83e+原16路径WIP、ERPf2c0fa7+7路径WIP；源a6/9843/f1c与第三段冻结一致。没有真实deadline/tool/token hard cap；quota5h1%/week17%、OpenAIweek14%均available，不拿预计容量拒绝实施
+- 当前源码门禁：最新child7058df8f-2699-4275-ba09-4d9dce42150b已实际contact OWNER；request a6fd6b8d被直接读tests/305日志后拒绝pre-edit：live=false在await返回后才执行，不构成拒绝；queue拿错误shape作不等断言恒真。已实答先tests-only修正为调用前撤许可/真实predicate消费/真实queue与wire，再取新RED；305阶段production未获准，该request绝非postGREEN gate。随后9de20167在OWNER直接读当前修正tests/306日志后认可拒绝RED、条件批准tiny edit：先修positive ACK会drain队列的观测（test-only503保留queue）及identityVerified一致性，跑两案preRED，再edit/GREEN/tsc并另取真正postGREEN
+- 最新微切片：65447207，同mission/原writer，script /tmp/monitor-status-workflow-runtime-result-01a1406d.js、priority packet /tmp/monitor-status-runtime-result-only-01a1406d.md；validate0errors，一次只允许runtime源码+test两个文件，先小契约落地而非扩全controller再撤回。旧0808现场/301–304日志/receipt/triage在/tmp/plugin-status-guided-callers-stop-01a1406d/；runtime-only302曾tsc0，宽化controller后真实3args/result-vs-state错误属于中间迁移，不是hard cap。242014ms/13turns/12tools，未见硬限额错误；token window/peak642370/contextLimit1000000只是native telemetry，不宣称无穷容量
+- 源级指导：reportObservation返回ObservationWriteResult并原样保留fence；controller处理applied与accepted、拒绝后不return next/ready/bind/start；observeBinding直接预写必须撤掉；actual PRE-state+首await前generation、合法self-invalidation不rebase原recover。先一条真实正常链及选择性拒绝路径，通过中间代码反馈再全producer适配/强制union；测试暂红不是停止理由，后续预算/首副作用/identity各自RED不假称同因
 - ArchitectureReviewRequired=yes；重复race局部补丁不是取消。L3机制已定位但不先宣称root闭合：同一budget及既有generation/epoch/nonce约束canonical mutation，内部port/CAS变更先报OWNER；禁止新增平行authority或多个helper窗口
 - Batch4首段: root `5227c09e-aa16-4147-9f2c-6f6bb12951a6`已native complete/return blocked，1child、1/8已用；最新原writer `aafdf1dc-d24c-43c8-9ec9-f0fa553e8210`仅改tests，源码9843e9ec/f1c434da/cb869d4d不变。worker承认尚未实现且release案void；其artifact是有效status=blocked JSON
 - OWNER协议错误: 原脚本JSON.parse(r.output)误把tool追加的saved-file尾注当payload；实际文件5097chars有效，inline多205chars。原root错误reason保留不改，语义blocked独立成立；新脚本只剥匹配真实outputReference的标准尾注，再完整验证七字段，8/8正负测试通过，无schema/acceptance豁免
