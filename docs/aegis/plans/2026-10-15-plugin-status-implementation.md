@@ -8,6 +8,10 @@
 
 recovery沿用首attempt代次、首read scalar PRE及原capture budget，入口/初始化后/failed组合前/bind await后消费原frame；正常ready与failure经唯一runtime出口真实应用，已知失权不返proposal。OWNER曾在36GREEN候选发现三个真实结果缺口，补三案后39GREEN；physical bind本身仍可能迟到，不能将fact fence说成physical fence。第十仅收紧storage两臂type、controller既有commit helper和八处正向runtime fixture；不改runtime算法或增加authority。orphan fence原runtime会忽略，静态排除是新硬化；fixture从原seed复制nullable scalar，不借最新context。未批准的whole runtime/storage/chain命令已披露，保日志但不追认；最新四文件LSP有104项hint/warning/information、无error，不能称clean。Tower635将callers置blocked，新增`status-runtime-chain`诊断实际STALE_CONTEXT，原因未证，不预设snapshot预写即首拒绝根因。之后单预算/实际mutation fence → action-start → Cookie原因 → fresh spec→quality → ERP/T5/最终验证；各修复仍须新RED/新预审/独立postGREEN。
 
+只读chain诊断已进一步定位最早拒绝：首命名案在候选/第九各1FAIL/7skip，原predicate仍live但raw binding为own-key null→unknown；configure新instance的原子null写与absence-only bootstrap相冲突。私有仅移除snapshot预持久化仍同一失败，不能据此给假根因。finding`f-57bdab7b-eab`已认领，原writer read-only root`ab494011-10ea-4a26-8e08-088d15b27121`续接审查表示/原子性/最小owner修复，产品与测试仍冻结；不是修复授权或完整root closure。
+
+inventory ab494011/c108已terminal BLOCKED/空delta/空gate；其“一个set丢弃binding”建议被HOLD。官方StorageArea文档明确set遗漏key不受影响，remove独立；不能虚构原子删除或允许old在途absence操作跨namespace复活。现corrected-design只读root`437688b5-70fc-4d60-a633-82a19cf9791e`续接原c108，审查现有schema有效非执行初态/真正可复用reset；仍无tests/source修复权限。
+
 ## Goal
 
 实施已批准协议的 D1–D4：monitor 单 Seller/Advertiser 自动绑定、失效安全暂停、ERP 状态与生命周期通知、受限恢复。保持首次服务端放行、独立 status key、离线不得自行恢复、完整 fresh close 快照门禁。OWNER负责设计一致性、独立验收和协调，原 MiniMax M3.1 Flash Preview 是唯一产品 writer，不换模型/CLI。

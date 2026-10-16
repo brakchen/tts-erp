@@ -4,6 +4,11 @@
 - Current todo: Tower635新增`status-runtime-chain`为`in_progress`，`status-runtime-callers`明确`blocked`依赖它；不是T4或全功能完成。
 - 最新局部接受：第十`mandatory-commit-union`，独立postGREEN完整gate`f038bef7-2b27-49c3-8592-085445c61658`。root`fd998ff2-d905-438c-b126-c2db229734fe` / child`3afb1272-caf3-4d96-a940-ad6d0f36e232`已terminal，实际七字段/四path/完整gate已读核。预审/triage均不是该DONE gate。
 - Blocked on：chain实际STALE_CONTEXT、aggregate budget/实际业务写点fence、action、Cookie、fresh spec→quality、ERP/T5；无当前full/coverage/build或发布验收。
+- OWNER现已独立复现首chain命名案：候选/第九各1FAIL/7skip；首次实际check为live:true、expect:null、raw own-key:null→presence:unknown。configure新实例单次set写binding:null，与absence-only bootstrap相冲突，记录并认领`f-57bdab7b-eab`。私有仅移除snapshot adapter预持久化仍同一首拒绝，三诊断variant各tsc0；故不能将预写说成首次根因。只证最早机制，未遍历后续chain/关闭整体root。初始^selector零测试为INVALID，日志保留。
+- 原writer只读诊断/设计root`ab494011-10ea-4a26-8e08-088d15b27121`续接已接受的3afb native；packet`/tmp/monitor-status-chain-provision-inventory-01a1406d.md`、script`/tmp/monitor-status-workflow-chain-inventory-01a1406d.js` validate0。全产品/测试冻结，先联系OWNER审查canonical表示/原子性/最小tests与owner-fit；本workflow不授修复权限，不能用清fixture/null-as-absence掩盖provision问题。
+
+- 只读inventory rootab494011 / child`c1083666-cc72-4c66-9dcf-09cb85a4dcf9`已terminal BLOCKED，实际七字段/空changedFiles/空gate已核。triage`4793a99e-808d-42bc-b13a-fbcce455a969`未批准其“一个set删除binding”Option A；[官方StorageArea文档](https://developer.chrome.com/docs/extensions/reference/api/storage/StorageArea)明确set只更新所列key，其他pair不变，remove是独立方法，不能把遗漏/undefined当删除或虚构set+remove原子性。官方页面提取成功，直接ctx fetch超时另记，不是live浏览器证明。
+- 现原writer corrected design只读root`437688b5-70fc-4d60-a633-82a19cf9791e`续接c108，packet`/tmp/monitor-status-provision-reset-design-01a1406d.md`、workflow validate0。比较既有schema的有效非执行初态原子落位/真正可复用reset方案，需证明old非null绑定及old在途absence操作不能跨新namespace复活；产品/测试仍全冻结，未授tests/source修复门禁。
 
 ## 技术方案与不可变约束
 

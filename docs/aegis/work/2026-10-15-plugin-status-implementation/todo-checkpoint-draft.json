@@ -3,14 +3,14 @@
   "taskId": "2026-10-15-plugin-status-implementation",
   "currentTodo": "status-runtime-chain in_progress；status-runtime-callers blocked依赖它（Tower635），整体runtime、ERP质量和T5未通过",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core"],
-  "activeSlice": "十micro局部接受。第十mandatory-commit-union独立postGREEN f038bef7-2b27-49c3-8592-085445c61658，rootfd998ff2-d905-438c-b126-c2db229734fe/child3afb1272-caf3-4d96-a940-ad6d0f36e232已terminal，实际7字段/四path/完整gate已核。原MiniMax/model/session/cwd/tools/native checked contract不变。下一chain因果诊断，尚无repair许可。",
+  "activeSlice": "十micro局部接受。第十mandatory-commit-union独立postGREEN f038bef7-2b27-49c3-8592-085445c61658，rootfd998ff2-d905-438c-b126-c2db229734fe/child3afb1272-caf3-4d96-a940-ad6d0f36e232已terminal，实际7字段/四path/完整gate已核。原MiniMax/model/session/cwd/tools/native checked contract不变。OWNER已证首拒绝live:true/expect:null/raw own-key null→unknown与configure新instance原子null写冲突，f-57bdab7b-eab已认领；只证最早机制非完整root。原writer只读rootab494011-10ea-4a26-8e08-088d15b27121续接3afb、validate0，产品/测试冻结；inventory ab494011/c108已terminal BLOCKED实际7字段/空delta/空gate，triage4793 HOLD其一set删除假设。官方StorageArea明确遗漏key不变、remove独立；新corrected-design只读root437688b5-70fc-4d60-a633-82a19cf9791e续接c108、validate0，需现有schema/构造器复用、原子性及old在途absence反重放证明，尚无tests/source repair许可。",
   "evidenceRefs": [
     "唯一协议docs/plugins/plugin-status-report.md；当前技术方案/完整hash/gates/前九证据见20-checkpoint.md与runtime-review-1.md。微接受不等callers/T4完成，历史日志/native/artifact不改写",
     "第十/tmp/plugin-status-owner-mandatory-union-01a1406d：owner-review.md、checks.json、scope-proof.json、control-dispositions.json、controller/carrier/runtime/runtime-typed-two/current-tsc logs。OWNER39+4+12+另两typed case=57去重named PASS、actual product-cwd unpipedtsc0。result regex4不等于真正typed测试，不重复计数",
     "两隔离static controls分别只报TS2578 at966/971；never/deny-all非隔离控制排除保留；carrier Vitest PASS不是type proof/runtime拒绝。type/helper外源码精确，旧38storage body、runtime其余harness/case/全部expect/name与protected含chain保持",
     "default原seed复制nullable incident/nonce definedness，在module/config setup awaits后、binding初写/snapshot交错前，seed:null observation-only，不制造bootstrap/absence权限。orphan fence原runtime忽略，union静态排除是新硬化；算法不变",
     "第十最新LSP四文件104项hint/warning/information，无error而非clean。第九当次39named/五source controls/tsc0及LSP2clean、其HOLD468正确hash和三缺口修正仍见原证据；第八历史0diag2inconclusive及invalid nullable probe不改",
-    "whole runtime37/storage42/chain8是未授权范围扩张，保日志不追认。worker报告chain candidate/第九冻结均8/8 STALE_CONTEXT；首次实际fence/canonical PRE/原因未独立证明，snapshot预写只是观察。原artifact泛称其余unfenced producers不建立新缺口，helper实际含signature/body/comment",
+    "whole runtime37/storage42/chain8是未授权范围扩张，保日志不追认。worker报告chain candidate/第九冻结均8/8 STALE_CONTEXT；OWNER首命名案在候选/第九各1FAIL/7skip，trace/raw证明live:true、expect:null、raw own-key null→unknown；仅去snapshot adapter预写仍同一首失败，三variant各actualtsc0。证据/tmp/plugin-status-owner-chain-diagnostic-01a1406d；初始^selector零测试INVALID保留。snapshot预写不是已证首拒绝根因，后续chain/完整root仍未闭。原artifact泛称其余unfenced producers不建立新缺口，helper实际含signature/body/comment",
     "Fixture firstReadGate误清stopGate另记f-b7b24e8c-ef9，未修/不同时arm；ERP锁populate_existing真实两Session与ACK高revision拒绝已验证不重开，core两端已push，runtime WIP/v0.4.26"
   ],
   "blockedOn": "chain因果/真实恢复handoff、单90秒全ports/两release/实际业务写点fence、action-start、Cookie、freshspec→quality、ERP baseline/共享接线/T5/browser；无当前full/coverage/build。fact fence不解决潜在late physical bind。",

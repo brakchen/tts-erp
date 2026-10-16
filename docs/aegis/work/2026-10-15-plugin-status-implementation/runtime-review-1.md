@@ -54,6 +54,16 @@ root`a6e08374-6fc8-4538-9e13-01e04edc720c` / child`5233faed-09c8-48da-aac3-d528b
 - resume：OWNER29named/tsc0、1start业务RED+3缺fence契约RED及四source控制；证据`/tmp/plugin-status-owner-resume-fenced-01a1406d/`。私有nullable probe为invalid open-episode fixture，排除且保log；历史LSP实际0diagnostic/2inconclusive，不是handoff的2 hints。
 - firstReadGate误清stopGate独立记录`f-b7b24e8c-ef9`，未修，不同时arm；不据此否定既有合法entered证据。
 
+## Chain首阻塞独立诊断（不是修复接受）
+
+OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check记录live:true、expect:null、raw own-key:true/value:null、presence:unknown。新instance configure单次set写null，与absence-only bootstrap表示冲突；认领finding`f-57bdab7b-eab`。私有只去snapshot adapter预持久化仍同一失败，不能将其说成首拒绝根因。trace/trace-raw/no-adapter-prepersist各actualtsc0，未新增read/await且原predicate只调用一次；证据`/tmp/plugin-status-owner-chain-diagnostic-01a1406d/`。初始^selector零测试为INVALID保留，不算GREEN/RED。只确认最早机制，不宣称其后全部chain根因闭合。
+
+原writer只读inventory root`ab494011-10ea-4a26-8e08-088d15b27121`续接原3afb native，workflow validate0；全产品/测试冻结。先审查配置/bootstrapping的canonical表示、原子性、同instance轮换事实和最小修复边界，再另tests-first/架构门禁。禁止靠清fixture、把raw null/unknown当absence或放宽fence制造假绿。不是新增writer/CLI或已批准产品修复。
+
+只读inventory rootab494011 / child`c1083666-cc72-4c66-9dcf-09cb85a4dcf9`已terminal BLOCKED，实际七字段/空delta/空gate已核。triage`4793a99e-808d-42bc-b13a-fbcce455a969` HOLD Option A：官方StorageArea文档明确set遗漏key不受影响、remove是独立调用，不存在已证的“一个set删除旧binding”方案。不得猜undefined/null删除或set/remove原子性；官方页提取是文档证据非live浏览器。还须检查移除后重开absence是否允许old在途expect:null操作恢复OLD instance。
+
+现原writer只读corrected-design root`437688b5-70fc-4d60-a633-82a19cf9791e`续接c108，workflow validate0；只比较现有canonical schema的有效非执行初态/维护中的reset与构造器复用，审查原子性、旧操作反重放、轮换事实、owner-fit/最小测试矩阵。没有实现或测试修改权限。官方引文在`/tmp/plugin-status-owner-chain-diagnostic-01a1406d/api-contract.md`，原artifact不改。
+
 ## 尚待关闭的技术缺口
 
 | 范围 | 所需实现与证明 |
