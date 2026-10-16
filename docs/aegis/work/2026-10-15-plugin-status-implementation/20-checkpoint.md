@@ -2,15 +2,15 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-runtime + status-monitor-runtime
-- Active slice: Runtime spec7最终BLOCKED（3P1）；R6锁刷新及ACK已获OWNER定向GREEN，原writer继续修剩余插件边界
-- Blocked on: 初始化总90秒仍未实际修正；durable start claim后授权TOCTOU；Cookie Store unavailable误判identity。修后须fresh spec→quality/OWNER验收，共享热点仍待明确handoff
-- Next step: 用确实进入目标await的测试先RED再改真实源码；验证首副作用前deadline/epoch/nonce/enablement及cookie原因保真；不扩大权限，T5仍blocked
+- Active slice: Runtime spec8最终BLOCKED（3P1）；最新原writer交回INCOMPLETE并删除初始化边界回归suite，OWNER拒收；当前无活跃native任务
+- Blocked on: 总90秒仍漏negative-invalidate store read/lease release且晚到写未防护；start claim后授权TOCTOU及cookie分类未改；须恢复有效回归测试，共享热点仍待handoff
+- Next step: 需获准追加完整原生修复/复审额度，再从3b10dfa1原MiniMax续修；先恢复entered-boundary测试并保留失败，再逐项窄修、fresh spec→quality/OWNER，不换模型或降门禁
 - Owner disposition: [runtime-review-1.md](runtime-review-1.md)（当前BLOCKED及逐候选行为证据）；纯核历史见[core-review-1.md](core-review-1.md)
-- Current workflow: `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`，同mission原生恢复failed reviewer并沿用原writer/模型/checked-evidence；仅使用旧额度剩余8次，不启动T5
+- Last workflow: `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`已正常结束，**return.state=blocked**，不是通过或基础设施failed；已用7/8、尚余1次，不足完整修复+独立复审，quality未启动，不自增额度
 - Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked；`40b173a9-f68a-4304-960b-167ae1bf1d6a`因spec6 fetch failed/缺required structured output而failed，不伪称仍running或通过
 - Core delivery: ERP `f2c0fa7`（7文件）、独立plugin `718c83e`（12文件），均已push；发布版本仍0.4.26，未对既有runtime接线
 - Core gates: spec8 `eba15195-54ff-4c2d-bf1e-425d91c0587f`；quality `6acc5cbc-2183-4901-876f-5d20dbc22237`；owner reply `4d80c122-666a-4640-a2fa-3cc315798b3f` OK仅适用于纯核
-- Tower receipt: revision622，core两项completed附changedFiles，两runtime仍in_progress；T4收窄纯模块，GUI/MAIN/版本明确归T5，T5显式blocked
+- Tower receipt: revision624，插件runtime因三P1及回归丢失blocked；ERP runtime因spec/quality未完成blocked；T5依赖两者继续blocked。纯核完成回执保留，未因测试全绿误标runtime完成
 - Registry: canonical origin/master `e11b5bc`已推送；继`49bc355`后补登记coord/identity helper与测试及无他人owner的page-hook/content后续接线。初交fixture/helper迟登记如实记录；storage与ERP既有owner权限/注册热点仍未接管
 - Runtime初交children: ERP `931fa261-ba6d-4890-9927-061f150cf394`；plugin `99e75517-bbf6-407f-aaaf-1b053e9c8d3e`；两者ack边界，但运行实现未通过审查
 - Runtime spec1: reviewer`42c30001` BLOCKED；修正C7与A7均已交，A7明确ack并报告复跑6项反例，无整体放行
@@ -27,7 +27,9 @@
 - Owner R7正向定向: 同一合法expired-HOLD案在冻结新源码GREEN（accepted2/incident保留）；isolated两session两个case GREEN并drop clone。日志`/tmp/plugin-status-owner-runtime-r7-{expired-hold-green,erp-two-session}.log`；不是整体完成
 - Owner源码指纹: R6冻结与R7当前controller全文件字节相同，SHA见runtime-review-1；与handoff的初始化已修声明矛盾。三条测试在进入目标await前推进clock，stop adapter未消费deferred，不算验证
 - R7窄修: 原writer继续，ERP no-change child `5ae4a69f-05e0-4fb4-83fa-d28b5ae6479f`已交。发往93fd的 `5b82e1b3-2d68-47f3-8b9f-a2b6c1d5fc2f`含entered-boundary测试构造与实际source edit要求，仍须核handoff消费ack
-- TDD历史: plugin R5 handoff自报F2/F3先实现后写回归；R6补修deadline测试又自报void，均保留，不以总测试数或后续GREEN追认原始RED-first合规
+- Runtime spec8: reviewer `86c46407-1d6e-44d2-a7ad-df996d8a0ec2`最终3P1/BLOCKED；有效OWNER gate `7e47d711-8e7c-4138-a6d8-d2350b941109`已答，未追加豁免。source Snapshot `/tmp/plugin-status-owner-runtime-r8-01a1406d/`含84条源码/测试SHA、可用日志、handoff及tracked patch
+- 最新plugin writer: `3b10dfa1-6cf2-4016-8a58-1d8de435b19c`自报BLOCKED/INCOMPLETE，controller指纹由05d652c8变9843e9ec但仅部分guard，stop仍未过，两项未动；删除三条初始化边界suite后709/709不是接受证据
+- TDD历史: F2/F3先实现后测试、vacuous断言、未落地却称merits已修、最新删除回归均保留；不得拿timeout/覆盖率阈值或后来GREEN追认合规。最新handoff已明确ack此前297e51e1与OWNER ACK证据，但ack不等于修复完成
 - 已修旧项: R6源级认可历史carrier排除、同事务applied proof、transport分类与统一disabled通知判据；R3已认可purpose/CSRF/SQL/outbox。实际共享权限/mount/migration/browser接线仍待交接
 - Follow-up: manual disabled优先级补充发往a5但仅排队到下次resume；plugin真实端口/ACK/总deadline指引发往c856待核ack。不能把queued当已执行
 

@@ -154,6 +154,25 @@ Reviewer `14a699e9-389c-4b72-9f6d-c77e12427744`已产出`reviews/runtime-spec-7.
 - R6 plugin handoff报告712/712、coverage95.88/92.66/97.49/95.88仍只是worker回归，三条void测试不算deadline证明。其陈旧“ERP未修”残余列表不压过实际源码和独立定向GREEN。
 - 原writer续修。已向最新93fd会话排队follow-up `5b82e1b3-2d68-47f3-8b9f-a2b6c1d5fc2f`，要求真实running→bound tab失效进入wake边界、目标端口entered后才推进时间，并读回实际编辑/源码指纹；queued仍非消费证明。ERP no-change child `5ae4a69f-05e0-4fb4-83fa-d28b5ae6479f`已交，不当新功能或整体接受。
 
+## Runtime spec8 — 原writer未完成，回归丢失，流程交回BLOCKED
+
+最新plugin child `3b10dfa1-6cf2-4016-8a58-1d8de435b19c`的`workers/runtime-recovery3-5-1.md`明确**BLOCKED/INCOMPLETE**，不是DONE。其承认：上一轮初始化源码修复未落地；本轮仅部分加budget guard，controller指纹05d652c8变9843e9ec；stop case仍挂起，action-start及Cookie Store两项完全未动。三个目标回归虽报告timeout RED/部分GREEN，但因替换冲突出现TS1128后删除了整个三条初始化边界suite。最后709/709、coverage95.83/92.51/97.50/95.83、tsc/build GREEN只是worker结果，**删除回归后的绿色不予接受**。
+
+Reviewer `86c46407-1d6e-44d2-a7ad-df996d8a0ec2`最终`reviews/runtime-spec-8.json`实际解析为3P1/BLOCKED。OWNER直接读当前函数后回复有效gate `7e47d711-8e7c-4138-a6d8-d2350b941109`：
+
+1. 总90秒只部分修正。negative wake进入invalidateBinding后，stop fence到期分支仍直接await store read，正常分支read也不guard；releaseRefresh仍有无预算await。普通commit直接把binding/observation交异步port，Promise.race不撤销它，迟到状态写须有当前generation/epoch/authority保护。
+2. Durable start claim后权限TOCTOU仍未改；必须在首个reload/capture/start前验证当前deadline、expected epoch、nonce及enablement，不能依赖终结时CAS。
+3. Cookie Store throw/null/BUDGET_EXPIRED仍在wake及post-reload被当identity conflict；未知/transport不是verified different store，需保真原因并覆盖两条调用链。
+
+恢复有效entered-boundary测试是额外明确的验收阻断，可并入deadline验证而不重复计同一P1。所报5秒timeout只属actor证据；删除源码后，不能仅凭超时推断它发生在recover await而非未到达的entered等待。必须恢复并真正证明端口进入，再推进clock并等待结局，释放晚到值后验证不写旧状态/不启动。不得skip、删除或弱化断言获得GREEN。ERP锁及ACK现有修正保持，不采用handoff残余的陈旧“ERP未修”列表。
+
+### 终止状态与现场
+
+- 同mission恢复root `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`为**native complete、return.state=blocked**：已用7/8，尚余1，不足完整修复与独立复审。不是全部额度已耗尽，也不是本轮fetch/基础设施失败。没有启动quality、T5或额外writer，没有自增预算/替换模型/CLI。preflight提示是语义分组key与实际动态步骤key不相同的advisory，不作为验收证据或failed原因。
+- 部分代码、当前所有测试、可用142/144/147/148/149/150/151日志、writer handoff、tracked patch及84条源码/测试SHA保存在`/tmp/plugin-status-owner-runtime-r8-01a1406d/`。原工作树保留未提交runtime，核心提交不变；无运行时stage/push或发布。
+- Tower revision623将插件runtime按三P1+测试恢复阻断；revision624将ERP runtime按未完成的spec/quality阻断；T5仍依赖两者blocked，未触他人归属。
+- 最新handoff确实ack此前297e51e1及OWNER有效ACK RED/GREEN的边界；这只证明消费消息，不代表三P1已修。F2/F3先实现后测试、vacuous测试、错误merits声明与删除回归的历史均保留。
+
 ## 下一验证
 
-在总8次恢复额度内消费原writer的三P1修正，先核实际source change、目标端口entered及行为RED/GREEN，再fresh spec→quality与OWNER实际候选验收。保留完整recover→ready→resume→terminal/report→ACK及已关闭缺陷回归，不让总测试数替代因果证据。ERP只走isolated runner；T5共享storage/purpose/auth/model/migration/scheduler接线须明确交接，baseline、插件完整release及真实HTTPS/CORS/Chrome/通知仍是未完成边界。
+后续须获准追加完整原生修复/复审额度，优先从最新3b10dfa1保留的原MiniMax会话续修，不重复初始writer。先恢复有效测试并保留真实失败，再逐项处理完整90秒生命周期、start授权TOCTOU与Cookie原因，fresh spec→quality/OWNER后才考虑组件交付。保留已关闭缺陷回归，不以测试总数或单次GREEN替代因果证据。ERP只走isolated runner；T5共享storage/purpose/auth/model/migration/scheduler接线须明确交接，baseline、插件完整release及真实HTTPS/CORS/Chrome/通知仍未完成。

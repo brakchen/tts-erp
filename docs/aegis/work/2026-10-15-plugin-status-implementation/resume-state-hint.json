@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "旧root40b173a9因spec6 fetch failed/缺structured output已failed；当前同mission恢复root533dc0c8-9e02-4397-ae54-0a8d9cd79c24仍执行，总上限8次。R6恢复成功但blocked；最新spec7 reviewer14a699e9最终三P1/BLOCKED，有效OWNER gates62f6becc/6095ba1e已答。先读runtime-review-1 R7：初始化源码仍与旧候选字节一致，三条测试void，另有claim后start TOCTOU/cookie unavailable误判identity。原MiniMax继续三项窄修，ERP no-change5ae4a69f已交；须核93fd下一resume实际消费queued5b82e1b3，不当queued已执行。ERP两session及同一合法expired-HOLD案已经OWNER新候选定向GREEN，勿重开旧问题；日志/tmp/plugin-status-owner-runtime-r7-{erp-two-session,expired-hold-green}.log。未发新wire字段issuedAt，早期两个无效probe不算RED。真正目标端口entered后推进clock，RED→实际edit→读回source/hash→GREEN，再fresh spec→quality/OWNER。native唤醒不轮询、不重开初交、不替换模型/CLI或门禁、不自增额度。canonical ACTIVE e11b5bc、最近Tower receipt622；T5共享热点仍待明确handoff。",
+  "resumeInstruction": "当前无活跃native任务。旧40b173a9 failed历史保留；恢复root533dc0c8-9e02-4397-ae54-0a8d9cd79c24已native complete，return.state=blocked，7/8已用余1不足完整修复/复审，quality未启动，不当仍running或全额度耗尽。最新spec8 reviewer86c46407三P1/BLOCKED，OWNER有效gate7e47d711已答。最新原MiniMax child3b10dfa1-6cf2-4016-8a58-1d8de435b19c明确INCOMPLETE：部分90秒guard仍stop未过，start/cookie未动，且删三条初始化边界suite；709/709不接受。先读runtime-review-1 R8及其原生handoff、/tmp/plugin-status-owner-runtime-r8-01a1406d现场/84条SHA。需获准追加完整原生额度后再status并resume最新原worker，不重复初交、不换模型/CLI。先恢复有效entered-boundary测试保留失败，再逐项修完整预算/首副作用授权/Cookie原因，fresh spec→quality/OWNER；不要用测试总数替代证据。ERP与ACK的R7独立GREEN保持，旧RED不移用新候选；latest handoff已ack297e51e1，仅消费不等完成。canonical ACTIVE e11b5bc、Tower624两runtime与T5 blocked；共享热点仍待明确handoff。",
   "knownPartialWork": [
     "status-impl-plan",
     "status-erp-core",
@@ -15,7 +15,7 @@
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "纯核/worker GREEN/恢复审查成功不等于runtime通过；R5旧RED不代表后续fix失败，R6有效RED也只证明冻结候选；F2/F3原始TDD顺序违规不可追认合规",
+    "纯核/worker GREEN/native complete不等于runtime接受；删除回归后709/709不算通过；R5/R6 RED只证明冻结候选，F2/F3顺序违规与vacuous/错误merits声明不能追认合规",
     "runtime不得改已有owner storage/access/security/app/base/scheduler；无prod migration/restart/真实凭证TikTok写；T5完整分页窄修前不得信任campaignsComplete",
     "canonical依赖未到不允许purpose=None放行或先铸造普通RW key；必须failclosed，不用错误授权断言或docstring掩盖权限缺口"
   ]
