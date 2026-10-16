@@ -3,7 +3,7 @@
 - Task ID: `2026-10-15-plugin-status-implementation`。
 - Current todo: `status-runtime-callers`仍`in_progress`；不是T4或全功能完成。
 - 最新局部接受：第九`recovery-fenced-producers`，完整gate`e3e236ab-5a0c-4e4a-83e0-268d261de471`。root/child已terminal，七字段/两path/精确gate已读核。
-- 下一步：mandatory union与全callsite inventory，尚未实施；仍需新有效RED/新预审/独立postGREEN，不借第九gate扩范围。
+- 当前：mandatory union与全callsite inventory只读盘点/契约提案。root`fd998ff2-d905-438c-b126-c2db229734fe` exact原child5233 native resume，脚本validate0；尚无test/source/type批准，先OWNER定tests-only载体，再有效RED/新预审/独立postGREEN，不借第九gate扩范围。
 - Blocked on：union、aggregate budget/实际业务写点fence、action、Cookie、fresh spec→quality、ERP/T5；无当前full/coverage/build或发布验收。
 
 ## 技术方案与不可变约束

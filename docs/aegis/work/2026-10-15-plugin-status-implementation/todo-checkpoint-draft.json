@@ -3,7 +3,7 @@
   "taskId": "2026-10-15-plugin-status-implementation",
   "currentTodo": "status-runtime-callers仍in_progress；整体runtime、ERP质量和T5未通过",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core"],
-  "activeSlice": "九个micro局部接受，最新recovery-fenced-producers已terminal/七字段/两path/精确postGate核对；下一mandatory union与全callsite inventory尚未实施。原MiniMax/model/session/cwd/tools/native checked contract不变。",
+  "activeSlice": "九个micro局部接受，最新recovery已terminal/七字段/两path/精确postGate核对；当前rootfd998ff2-d905-438c-b126-c2db229734fe exact原5233 native resume，只读mandatory union全callsite inventory/契约提案，尚无test/source/type批准；先OWNER定tests-only载体，再有效RED/新预审。原MiniMax/model/session/cwd/tools/native checked contract不变。",
   "evidenceRefs": [
     "唯一协议docs/plugins/plugin-status-report.md；技术状态见20-checkpoint.md、runtime-review-1.md。微接受不等callers/T4完成",
     "第六/tmp/plugin-status-owner-invalidate-final-01a1406d：22/tsc0、五source控制、迟到read unhandled0/live原error保留，实际64f2b158监督回复为准，retained错误gate另记errata",
