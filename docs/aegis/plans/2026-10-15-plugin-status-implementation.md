@@ -12,6 +12,8 @@ recovery沿用首attempt代次、首read scalar PRE及原capture budget，入口
 
 inventory ab494011/c108已terminal BLOCKED/空delta/空gate；其“一个set丢弃binding”建议被HOLD。官方StorageArea文档明确set遗漏key不受影响，remove独立；不能虚构原子删除或允许old在途absence操作跨namespace复活。现corrected-design只读root`437688b5-70fc-4d60-a633-82a19cf9791e`续接原c108，审查现有schema有效非执行初态/真正可复用reset；仍无tests/source修复权限。
 
+corrected-design root437688b5/child4d7be134因原生`commands-run evidence missing`失败，空delta/空gate输出不算接受。已停止/保存WIP快照并确认产品冻结；同协议证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`仅授一次实际tsc命令证据，不降checked/换model或批准改码。valid canonical PRESENT不会重开absence，相关“第二独立缺陷”误断已撤回，设计仍未决。
+
 ## Goal
 
 实施已批准协议的 D1–D4：monitor 单 Seller/Advertiser 自动绑定、失效安全暂停、ERP 状态与生命周期通知、受限恢复。保持首次服务端放行、独立 status key、离线不得自行恢复、完整 fresh close 快照门禁。OWNER负责设计一致性、独立验收和协调，原 MiniMax M3.1 Flash Preview 是唯一产品 writer，不换模型/CLI。

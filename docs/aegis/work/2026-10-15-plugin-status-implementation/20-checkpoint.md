@@ -10,6 +10,10 @@
 - 只读inventory rootab494011 / child`c1083666-cc72-4c66-9dcf-09cb85a4dcf9`已terminal BLOCKED，实际七字段/空changedFiles/空gate已核。triage`4793a99e-808d-42bc-b13a-fbcce455a969`未批准其“一个set删除binding”Option A；[官方StorageArea文档](https://developer.chrome.com/docs/extensions/reference/api/storage/StorageArea)明确set只更新所列key，其他pair不变，remove是独立方法，不能把遗漏/undefined当删除或虚构set+remove原子性。官方页面提取成功，直接ctx fetch超时另记，不是live浏览器证明。
 - 现原writer corrected design只读root`437688b5-70fc-4d60-a633-82a19cf9791e`续接c108，packet`/tmp/monitor-status-provision-reset-design-01a1406d.md`、workflow validate0。比较既有schema的有效非执行初态原子落位/真正可复用reset方案，需证明old非null绑定及old在途absence操作不能跨新namespace复活；产品/测试仍全冻结，未授tests/source修复门禁。
 
+- corrected-design child`4d7be134-febb-4ef9-a802-6a678b0184d6`/root437688b5原生失败：`Acceptance rejected: commands-run evidence missing from child report.` 实际输出为needs_context/空delta/空gate，**不是已通过交接**。OWNER已停止该attempt、报告并保存`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/{product-wip.patch,product-status.txt}`；product HEAD718c83e/feature/plugin-status-auto-bind，src/tests/entrypoints仍与第十冻结逐字同。
+- 仅同协议证据修复root`6bc5edee-db7c-48de-864d-451aeb955482` exact resume4d7，workflow validate0；原model/session/cwd/profile/tools/checked不变、不降验收，仅新授一次真实product-cwd unpipedtsc写命令证据。不得伪造已执行或称修复业务；架构/测试/源码许可仍HOLD，失败原artifact保留。设计已撤回“valid record重开absence/第二独立defect”误断，PRESENT B会拒绝old-null与old-A tuple。
+- 协议引用纠正：fb42e165是Git commit，不是文件SHA256。实际approved doc SHA256 c2fa1b3a…与current d2667d16…不同；初始化episode锚点逐字在approved中，first-ready业务文本相同而批准状态尾句更新；不比较不同hash类型作“协议损坏”证明，也不称全部字节同。materialization仍待owner设计决策。
+
 ## 技术方案与不可变约束
 
 唯一协议：`docs/plugins/plugin-status-report.md`（批准基线`fb42e16575a241fec88740d69137ae6a8153c2bb`）。

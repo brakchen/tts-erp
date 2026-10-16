@@ -64,6 +64,8 @@ OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check�
 
 现原writer只读corrected-design root`437688b5-70fc-4d60-a633-82a19cf9791e`续接c108，workflow validate0；只比较现有canonical schema的有效非执行初态/维护中的reset与构造器复用，审查原子性、旧操作反重放、轮换事实、owner-fit/最小测试矩阵。没有实现或测试修改权限。官方引文在`/tmp/plugin-status-owner-chain-diagnostic-01a1406d/api-contract.md`，原artifact不改。
 
+上述corrected-design root437688b5/child4d7be134原生拒绝：`commands-run evidence missing from child report`；其needs_context/空delta/空gate保留但不算验收。快照`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/`已保存、产品逐字冻结未改。仅同协议exact-resume证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`运行，允许一次真实unpipedtsc并如实列Commands run，不换model/CLI、不降checked、不造命令证据、不授源码许可。valid-record→absence误断已撤回，独立missing-identity exploit仍未证；materialization/factory设计未决。fb42是Git commit非SHA256，approved/current文档确有后续修改，但初始化episode锚点在approved中，不能混hash类型推断协议损坏。
+
 ## 尚待关闭的技术缺口
 
 | 范围 | 所需实现与证明 |
