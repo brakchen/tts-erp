@@ -173,6 +173,15 @@ Reviewer `86c46407-1d6e-44d2-a7ad-df996d8a0ec2`最终`reviews/runtime-spec-8.jso
 - Tower revision623将插件runtime按三P1+测试恢复阻断；revision624将ERP runtime按未完成的spec/quality阻断；T5仍依赖两者blocked，未触他人归属。
 - 最新handoff确实ack此前297e51e1及OWNER有效ACK RED/GREEN的边界；这只证明消费消息，不代表三P1已修。F2/F3先实现后测试、vacuous测试、错误merits声明与删除回归的历史均保留。
 
+## 用户批准的batch4续修（仅启动，未验收）
+
+2026-10-16用户明确批准追加调用；新批次最多8次、concurrency1，不改写旧root7/8及blocked历史。采用三次串行原MiniMax保留会话微切片：budget/恢复回归、action-start、cookie-cause；每次edit前通过contact_supervisor请求OWNER核真实entered-boundary RED和canonical方案，GREEN后再核当前源码；之后fresh spec→quality。原native checked-evidence不变，另要求精确JSON handoff供caller验证，不以worker DONE代替review。
+
+- TaskStart：docs e9c721c clean；两组件保留原WIP及HEAD，controller实际SHA9843e9ec。相同budget/gen/epoch/nonce在canonical mutation处约束迟到结果，不再声称race能取消已发I/O；内部port/CAS影响必须先请OWNER审查，无第二authority owner。
+- 初次从docs worktree绑定旧mission被project-root lookup拒绝，没有run ID；fleet0active，三树diff/status/HEAD及脚本/packet保存于`/tmp/plugin-status-batch4-launch-block-01a1406d/`。改回原主仓协调cwd后同协议重试成功，不是模型或执行方式fallback。
+- 当前root `5227c09e-aa16-4147-9f2c-6f6bb12951a6`已原生async启动，同mission；只等待原生求助/完成事件。尚无本批RED/GREEN、source修正或新接受结论。Tower625仅插件runtime恢复in_progress，ERP与T5仍blocked。
+- Script `/tmp/monitor-status-workflow-batch4-01a1406d.js`，packet `/tmp/monitor-status-repair-batch4-context-01a1406d.md`；script validate0，动态调用数量由runtime max8实际约束，不伪称静态证明。
+
 ## 下一验证
 
-后续须获准追加完整原生修复/复审额度，优先从最新3b10dfa1保留的原MiniMax会话续修，不重复初始writer。先恢复有效测试并保留真实失败，再逐项处理完整90秒生命周期、start授权TOCTOU与Cookie原因，fresh spec→quality/OWNER后才考虑组件交付。保留已关闭缺陷回归，不以测试总数或单次GREEN替代因果证据。ERP只走isolated runner；T5共享storage/purpose/auth/model/migration/scheduler接线须明确交接，baseline、插件完整release及真实HTTPS/CORS/Chrome/通知仍未完成。
+当前批次从最新3b10dfa1保留的原MiniMax会话续修，不重复初始writer。先恢复有效测试并保留真实失败，再逐项处理完整90秒生命周期、start授权TOCTOU与Cookie原因，fresh spec→quality/OWNER后才考虑组件交付。保留已关闭缺陷回归，不以测试总数或单次GREEN替代因果证据。ERP只走isolated runner；T5共享storage/purpose/auth/model/migration/scheduler接线须明确交接，baseline、插件完整release及真实HTTPS/CORS/Chrome/通知仍未完成。

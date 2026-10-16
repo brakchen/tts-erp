@@ -26,10 +26,11 @@
 - Acknowledged before plan:
 - none
 - Cited in plan:
+- docs/plugins/plugin-status-report.md@fb42e16（原实施计划Baseline/Authority已引用）
+- Current readback (2026-10-16 batch4): 完整重读当前方案§1–17、原计划、checkpoint/resume hint、插件AGENTS及当前canonical registry；历史before-plan字段初建未填，不追写成当时已有确认
+- Missing current refs:
 - none
-- Missing refs:
-- docs/plugins/plugin-status-report.md@fb42e16
-- Advisory decision: needs-baseline-readback
+- Advisory decision: continue within approved T4 repair scope; original safety/ownership/test gates unchanged
 
 ## ImpactStatementDraft
 

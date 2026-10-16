@@ -2,15 +2,20 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-runtime + status-monitor-runtime
-- Active slice: Runtime spec8最终BLOCKED（3P1）；最新原writer交回INCOMPLETE并删除初始化边界回归suite，OWNER拒收；当前无活跃native任务
-- Blocked on: 总90秒仍漏negative-invalidate store read/lease release且晚到写未防护；start claim后授权TOCTOU及cookie分类未改；须恢复有效回归测试，共享热点仍待handoff
-- Next step: 需获准追加完整原生修复/复审额度，再从3b10dfa1原MiniMax续修；先恢复entered-boundary测试并保留失败，再逐项窄修、fresh spec→quality/OWNER，不换模型或降门禁
+- Active slice: 2026-10-16用户明确批准追加有界native批次4（最多8次）；从3b10dfa1原MiniMax续修，先恢复有效回归/完整budget，再action-start，再cookie原因
+- Blocked on: 三P1及回归丢失仍未修；原额度不足的等待已由用户授权解除，不等于代码问题解决。ERP quality及T5共享接线继续blocked
+- Next step: 启动单一batch4原生workflow；每项source edit前OWNER核entered-boundary RED及canonical方案、GREEN后再次核源码；三微切片后fresh spec→quality/OWNER，不换模型或门禁
 - Owner disposition: [runtime-review-1.md](runtime-review-1.md)（当前BLOCKED及逐候选行为证据）；纯核历史见[core-review-1.md](core-review-1.md)
 - Last workflow: `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`已正常结束，**return.state=blocked**，不是通过或基础设施failed；已用7/8、尚余1次，不足完整修复+独立复审，quality未启动，不自增额度
 - Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked；`40b173a9-f68a-4304-960b-167ae1bf1d6a`因spec6 fetch failed/缺required structured output而failed，不伪称仍running或通过
 - Core delivery: ERP `f2c0fa7`（7文件）、独立plugin `718c83e`（12文件），均已push；发布版本仍0.4.26，未对既有runtime接线
 - Core gates: spec8 `eba15195-54ff-4c2d-bf1e-425d91c0587f`；quality `6acc5cbc-2183-4901-876f-5d20dbc22237`；owner reply `4d80c122-666a-4640-a2fa-3cc315798b3f` OK仅适用于纯核
-- Tower receipt: revision624，插件runtime因三P1及回归丢失blocked；ERP runtime因spec/quality未完成blocked；T5依赖两者继续blocked。纯核完成回执保留，未因测试全绿误标runtime完成
+- Tower receipt: revision625，用户批准续修后仅插件runtime恢复in_progress；ERP runtime因spec/quality未完成blocked，T5仍blocked。未完成任何新的runtime回执
+- Batch4 TaskStartSnapshot: docs HEAD e9c721c clean；plugin仍718c83e+原有16路径runtime WIP，ERP仍f2c0fa7+原有7路径WIP；controller实际SHA9843e9ec2486974a2bf7e62d77d9d1365e5a625a49e65d01678deb970b1716f6，R8现场仍保存，不碰主仓外来WIP
+- Batch4 Slice Card: Goal=三个现存P1与有效回归；Parent=原T4/spec §§4/5/7/11/12；Files=自有controller/runtime/storage及tests；Boundary=不共享接线/不新权限/不新owner；Verification=真实RED→canonical fix→GREEN+晚到值隔离，fresh spec→quality；Stop=未修/缺证据/超scope/native失败/8次上限则诚实blocked
+- ArchitectureReviewRequired=yes；重复race局部补丁不是取消。L3机制已定位但不先宣称root闭合：同一budget及既有generation/epoch/nonce约束canonical mutation，内部port/CAS变更先报OWNER；禁止新增平行authority或多个helper窗口
+- Batch4 protocol: root `5227c09e-aa16-4147-9f2c-6f6bb12951a6`已async启动，同mission、max8/concurrency1；script /tmp/monitor-status-workflow-batch4-01a1406d.js，packet /tmp/monitor-status-repair-batch4-context-01a1406d.md。新8次是用户追加授权，旧root7/8历史不重置；不派无问题的ERP no-change writer
+- Batch4 launch failure: 首次把workflow cwd设docs worktree，被mission project-root lookup拒绝，未返回run ID，fleet确认0active；保存三树diff/status/HEAD和script/packet至/tmp/plugin-status-batch4-launch-block-01a1406d，controller指纹仍9843e9ec。纠正协调cwd为原/home/schan/tts-erp后原生重试成功；writer依然原plugin cwd、reviewer明确ERP cwd，无CLI/model/acceptance fallback
 - Registry: canonical origin/master `e11b5bc`已推送；继`49bc355`后补登记coord/identity helper与测试及无他人owner的page-hook/content后续接线。初交fixture/helper迟登记如实记录；storage与ERP既有owner权限/注册热点仍未接管
 - Runtime初交children: ERP `931fa261-ba6d-4890-9927-061f150cf394`；plugin `99e75517-bbf6-407f-aaaf-1b053e9c8d3e`；两者ack边界，但运行实现未通过审查
 - Runtime spec1: reviewer`42c30001` BLOCKED；修正C7与A7均已交，A7明确ack并报告复跑6项反例，无整体放行
