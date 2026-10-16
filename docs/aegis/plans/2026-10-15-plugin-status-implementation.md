@@ -1,5 +1,9 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
+## 当前执行快照（2026-10-16）
+
+第五passive-observation已获独立新门禁ed21c35a，仅observeBinding撤direct prewrite并产原gen/PREtuple/同budget；source85f2d6ab/testac3588c3，OWNER最终15namedGREEN/实际tsc0，私有同tests仅旧cd67四RED，direct-prewrite/gen-after-ensure/latestnonce/expiry-OR四控制选择性杀对应案；全src唯一controller变且AST屏蔽observe后与前版逐字同，其他owner不扩。1f99曾因过期放行暂缓、c4b补test finally，均非最终批准；总预算/其余producer/T4等未过。第四个safe-stop micro已独立门禁330af378通过，rootb060/原ecf terminal，仅controller+test；OWNER冻结11namedGREEN/tsc0，旧7b同最终tests3RED+1coveragePASS、nonce借权控制仅外部nonce案FAIL，独立私有fixture隔离gen控制current1GREEN/gen=true实际旧写致1FAIL，非callers/T4完成。controllercd67b2e6/test0a701211，runtimef969/storagea6/chain2db43458不动。native complete但仍review-required，fresh spec→quality未到。当前rootcf2b19f1-4999-4802-99fb-62da18bcc62d已同协议原7cd resume，仅invalidate-canonical-fact+ensure/observe两负证据callsite原fence/同预算转发及tests，保护原15/其他bodies，先5业务RED/源预审再局部修/新postGREEN，不claimphysicalclear mutation闭环。此前recovery82e1/7cd已complete、7字段/gate/paths/receipt/resumable核；handoff Five named应Four、direct-pre-write实际direct-prewrite，记录errata不改artifact。此前82e1从原d6同协议resume；原11440/d6 runner消失未写result，failed/proof-write-failed，非已证quota/deadline；已保存/tmp/plugin-status-passive-runner-failure-01a1406d现场且一次proc扫描无匹配活writer。275b仅条件pre-edit/source仍cd67，先完成tests-only清理新RED，不回滚四micro，只撤observeBinding直接预写绕过canonical owner并产原fence；严格新RED/预审/独立postGREEN，保护原11及四micro。packet `/tmp/monitor-status-passive-observation-01a1406d.md`；其他producer/union/全90秒与两release/actions/cookie/ERP/T5/浏览器发布未过。数字cap仅OWNER内部scope，不是用户限额，16:52Z MiniMax9%/19%available，不预测停工；恢复script `/tmp/monitor-status-workflow-passive-recover-01a1406d.js` validate0，若native eligibility拒绝报真实原因，不CLI/model fallback。
+
 ## Goal
 
 执行 `docs/plugins/plugin-status-report.md` 的 D1–D4 开发与验收。用户于 2026-10-15 明确授权：本会话担任 owner，调度 MiniMax M3.1 Flash Preview worker 开发，由 owner 审核实现与方案一致性，完成前持续推进。方案中的首次服务端放行、独立 status key、失效后离线暂停、有限恢复和 ERP 生命周期通知随此次实施批准。
