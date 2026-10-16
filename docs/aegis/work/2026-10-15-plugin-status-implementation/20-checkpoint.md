@@ -3,7 +3,7 @@
 - Task ID: `2026-10-15-plugin-status-implementation`。
 - Current todo: `status-runtime-callers`仍`in_progress`；不是T4或全功能完成。
 - 最新局部接受：第九`recovery-fenced-producers`，完整gate`e3e236ab-5a0c-4e4a-83e0-268d261de471`。root/child已terminal，七字段/两path/精确gate已读核。
-- 当前：mandatory union与全callsite inventory只读盘点/契约提案。root`fd998ff2-d905-438c-b126-c2db229734fe` exact原child5233 native resume，脚本validate0；尚无test/source/type批准，先OWNER定tests-only载体，再有效RED/新预审/独立postGREEN，不借第九gate扩范围。
+- 当前第十段mandatory union：root`fd998ff2-d905-438c-b126-c2db229734fe` exact原5233 native resume，child`3afb1272-caf3-4d96-a940-ad6d0f36e232`。storage test四案静态载体已产生真实tsc TS2578×2契约RED，非业务RED；新预审`3e72d2d8-cd2e-4526-b2ef-9c4d52059df1`批准最小type/helper与8处正向fixture适配，尚无本段postGREEN。
 - Blocked on：union、aggregate budget/实际业务写点fence、action、Cookie、fresh spec→quality、ERP/T5；无当前full/coverage/build或发布验收。
 
 ## 技术方案与不可变约束
@@ -31,6 +31,14 @@
 | wake-rebuild-producer | 原bootstrap许可先消费、own generation、discovering新episode事实先clear | `55f416c9-a968-47c1-a3cb-5d1bddcc1730` |
 | resume-fenced-producer | 复用snapshot原frame，已知tuple不符先拒绝start，原fence交唯一出口 | `f997085d-f73a-4dda-bbfe-56c56dac68f8` |
 | recovery-fenced-producers | 原attempt/首scalar/同budget全传required frame，已知失权不proposal，正常ready/failure真应用 | `e3e236ab-5a0c-4e4a-83e0-268d261de471` |
+
+## 第十段当前技术决策
+
+- union两臂都保observation/runtime；observation-only显式binding/fence undefined，binding分支两者required，不加wire kind/tag/framework。orphan fence原runtime会忽略，静态禁止是新硬化，不称已有runtime拒绝。
+- 真实静态RED：accepted source未改时，storage test仅两处expected-unused @ts-expect-error TS2578；Vitest四案PASS只是载体执行，不是类型证明。无效重复import已修且不计RED。
+- OWNER独立type-only私有preview确认8处runtime fixture需迁移：默认/custom snapshot、3次reportObservation、3个executor-return commit。它们不是故意malformed负案；5个相关旧runtime正案在accepted基线已FAIL，独立记录，不算union引入。
+- 仅storage type、controller commit required参数/directfence/local comment、storage载体及runtime八fixture；算法/runtime/source其他方法不改。共享default frame须复制原seed options.state（含healthy case incidentId:null，state:null是真absence），不硬编码incident或借late context。fixture true predicate不充当生产代次/交错证明。
+- 证据`/tmp/plugin-status-union-owner-static-red-01a1406d.log`、`/tmp/plugin-status-union-owner-fixture-baseline-01a1406d.log`、`/tmp/plugin-status-union-owner-footprint-01a1406d/type-only-preview.log`；预审不是完成，修后old39+carrier4+指定runtime named/实际tsc，独立新postGREEN。
 
 ## 当前冻结与第九验证
 

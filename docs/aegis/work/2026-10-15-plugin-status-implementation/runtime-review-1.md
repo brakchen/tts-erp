@@ -32,6 +32,14 @@
 
 root`a6e08374-6fc8-4538-9e13-01e04edc720c` / child`5233faed-09c8-48da-aac3-d528bf79dd7b`已terminal；七字段、两path、准确e3e gate已读核。Artifact中间468 hash多写字符且称equivalent，应以HOLD冻结真实`468660c37aa4afa0172763f161a4b3c601a2b9419831d830473a83eef761186a`为准；重复remaining中的“其余recover/failed producers”不是额外已证缺口，下一步应由mandatory-union inventory确认。原artifact不改写。
 
+## 第十段进行中：mandatory union
+
+- 原writer root`fd998ff2-d905-438c-b126-c2db229734fe` / child`3afb1272-caf3-4d96-a940-ad6d0f36e232`。预审`3e72d2d8-cd2e-4526-b2ef-9c4d52059df1`仅批准最小实现，尚无postGREEN。
+- storage现有test追加4个静态契约案；accepted source未改时，实际tsc仅2处TS2578 expected-unused directives，是真STATIC CONTRACT RED，不是业务mutation。Vitest4PASS只证明无害noop载体执行，非法shape也会传给本地noop，不称runtime拒绝。
+- union保留两臂observation/runtime，不加kind tag；binding arm binding+fence required。observation-only不带fence是新静态约束：现有runtime对orphan fence会忽略，而非拒绝；不改runtime算法。
+- OWNER私有type-only preview找到runtime测试8处非完整fixture：default/custom snapshot、3次reportObservation、3个executor commit。不是故意malformed负案；5个旧正案在accepted基线已失败，不算union引入。默认frame须取实际original seed（含incident:null/seed:null），不能泛用常量incident或借最新context。
+- 允许改storage type、controller commit required第三参数/directfence/local comment、storage载体/runtime八fixture；旧39行为保护。最终须指定named/实际tsc0/独立新postGREEN，不能借九段完成名义扩大到其他业务修复。
+
 ## 前八段技术证据索引
 
 完整gate表与技术断点见`20-checkpoint.md`；早期逐轮过程不再重放。
