@@ -179,7 +179,12 @@ Reviewer `86c46407-1d6e-44d2-a7ad-df996d8a0ec2`最终`reviews/runtime-spec-8.jso
 
 - TaskStart：docs e9c721c clean；两组件保留原WIP及HEAD，controller实际SHA9843e9ec。相同budget/gen/epoch/nonce在canonical mutation处约束迟到结果，不再声称race能取消已发I/O；内部port/CAS影响必须先请OWNER审查，无第二authority owner。
 - 初次从docs worktree绑定旧mission被project-root lookup拒绝，没有run ID；fleet0active，三树diff/status/HEAD及脚本/packet保存于`/tmp/plugin-status-batch4-launch-block-01a1406d/`。改回原主仓协调cwd后同协议重试成功，不是模型或执行方式fallback。
-- 当前root `5227c09e-aa16-4147-9f2c-6f6bb12951a6`已原生async启动，同mission；只等待原生求助/完成事件。尚无本批RED/GREEN、source修正或新接受结论。Tower625仅插件runtime恢复in_progress，ERP与T5仍blocked。
+- 首段root `5227c09e-aa16-4147-9f2c-6f6bb12951a6`现已native complete/return blocked，1child、1/8used；worker aafdf1dc只恢复部分tests，生产源码三个指纹不变。Tower625的T4保持in_progress表示OWNER仍在修复协议并推进原获准续跑，ERP与T5仍blocked。
+- 154的两个所谓RED被OWNER源码核查拒绝：ordinal只在闸内递增导致entered永不到、commit断言把合法clear误判；OWNER自身missing-tabs归因也因beforeEach末尾seedHealthyPage而撤回，worker已ack。156修正后OWNER冻结同案独立跑得exit1、2failed/2passed/71filtered，日志`/tmp/plugin-status-owner-batch4-gate1-red.log`，证明negative-invalidate read不settle及late commit覆盖新epoch，仍无GREEN。
+- a6110a7b已实际reply批准首edit：canonical事务处同时核prior-state tuple/nonce与同一budget/gen的live predicate；实际BusinessBindingPort写点必须消费fence；typed application与enqueue拒绝分离，未接线真实adapter仍T5，terminal/report原子与失败事实不得丢失。worker交回blocked仍说需精确接口，OWNER以`/tmp/monitor-status-batch4-recovery-contract-01a1406d.md`明确类型/许可，不把未实现称完成。release案仍void，业务clear/bind只actor证据待核。
+- OWNER的原caller把native `Output saved to:`尾注一起JSON.parse，错误判为非JSON；实际bound artifact5097chars是完整合法七字段JSON，且其status本身为blocked。旧root及reason不重写。恢复parser只接受与outputReference匹配的标准尾注并原样解析其余JSON，8/8正负门禁检查通过，不降native checked-evidence或字段/schema门禁。
+- 恢复worker0f01f568接受既有授权但以预计容量为由仍无source edit，提出A/B/C。OWNER实际reply de07de75选B并校正其边界：storage fence/type/result及必需的controller/runtime/fixture适配构成可编译、可窄测的增量，不是独立可发布整个budget；业务端口暂不动，相关RED保留。先真实RED再edit，子增量GREEN+tsc后在同call contact OWNER审源码，不可直接final budget DONE；不延长原生/增加额度。
+- 新恢复root `594095df-aef9-4fbb-862c-a8303bfc3c16`已原生async启动，同mission/max7/concurrency1；只许remaining7，累计上限仍原8；从最新aaf原生resume，不派新initial writer。script `/tmp/monitor-status-workflow-batch4-recovery-01a1406d.js`通过validate；三树partial diff/当前源/tests和原receipt保存于`/tmp/plugin-status-batch4-protocol-recovery-01a1406d/`。
 - Script `/tmp/monitor-status-workflow-batch4-01a1406d.js`，packet `/tmp/monitor-status-repair-batch4-context-01a1406d.md`；script validate0，动态调用数量由runtime max8实际约束，不伪称静态证明。
 
 ## 下一验证

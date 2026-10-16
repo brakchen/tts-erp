@@ -7,7 +7,7 @@
     "status-erp-core",
     "status-monitor-core"
   ],
-  "activeSlice": "用户批准追加batch4最多8次；原MiniMax从3b10dfa1续修，先恢复有效回归，再三项窄修与独立spec/quality",
+  "activeSlice": "batch4首段1/8交回blocked：仅恢复部分测试，无生产edit；OWNER独立RED两例及首edit授权a611已给，修正自身尾注解析后用余7从原aaf续修",
   "evidenceRefs": [
     "runtime-review-1.md包含R1-R6；R5最终4P1/1P2，恢复后的R6最终3P1；OWNER有效reply0da14692/c97fffd2",
     "root40b173a9因fetch failed/缺structured output而failed；同mission恢复root533dc0c8，仅沿用旧额度剩余8次；原模型/writer/checked-evidence不变",
@@ -18,7 +18,10 @@
     "OWNER R7定向GREEN：同一合法expired-HOLD案accepted2且incident保留；isolated两session两个case通过并drop clone；日志见runtime-review-1",
     "R6与R7controller字节一致SHA05d652c85ec23d1dccb12d60b9379d863874c6e18e73d1ba22501760aec9f1f0，handoff声称初始化已修不成立；三条deferred测试void",
     "R7有效OWNER gates62f6becc/6095ba1e已答；follow-up5b82e1b3仅queued，须核实际消费，恢复额度不自增",
-    "用户明确授权追加batch4最多8次；root5227c09e-aa16-4147-9f2c-6f6bb12951a6原生async启动，concurrency1；当前只是派发，不是修复或验收",
+    "获准batch4原上限8；root5227c09e-aa16-4147-9f2c-6f6bb12951a6已complete/return blocked，1/8used；实际handoff是有效blocked JSON，OWNER误解析工具尾注，原错误reason保留不改；剩余7同模型原生恢复，不追加额度",
+    "恢复worker0f01f568提出预计容量A/B/C（尚无生产edit）；OWNER实际答de07de75选B：storage fence/type/result及必需消费者先编译/定向验证，同call再联系OWNER审源码，业务fence/其他有效RED保留；不延长native、不额外调用、不把局部GREEN当整个budget DONE",
+    "OWNER实际复现156同一两RED：/tmp/plugin-status-owner-batch4-gate1-red.log exit1/2fail/2pass/71filtered；a6110a7b已批准首edit及最小canonical fence，不是postGREEN接受；refreshRelease仍void、所有源码未修",
+    "标准native saved-file尾注解析和七字段拒绝门禁8/8通过，旧artifact仍判blocked；新恢复script /tmp/monitor-status-workflow-batch4-recovery-01a1406d.js，接口supplement /tmp/monitor-status-batch4-recovery-contract-01a1406d.md；当前现场保存于/tmp/plugin-status-batch4-protocol-recovery-01a1406d/；新root594095df-aef9-4fbb-862c-a8303bfc3c16已async启动max7/concurrency1，累计上限仍8，不是追加额度",
     "首次docs cwd mission lookup失败无run ID，fleet确认0active；已存三树partial diff并改回原主仓cwd同协议重试，无model/CLI fallback；Tower625仅T4恢复in_progress",
     "spec8 reviewer86c46407最终三P1/BLOCKED，OWNER有效gate7e47d711已答；部分guard仍漏invalidate store read/release与迟到写，start/cookie两项未动",
     "最新原writer3b10dfa1自报INCOMPLETE，stop unresolved且删三条初始化回归；709/709或coverage过线不接受，actor timeout不追认为OWNER RED",
@@ -28,7 +31,7 @@
     "core f2c0fa7/718c83e已push；Tower622两runtime in_progress、T5blocked，registrye11b5bc仍不包含共享热点接管",
     "R3 reviewer确认旧purpose/CSRF/SQL分页/outbox事务项已修；实际canonical接线及整体验证仍未完成"
   ],
-  "blockedOn": "三P1与回归丢失未修；ERP/quality/T5共享handoff/完整分页/最终环境仍未通过；用户已批准新批次8次，不再等待预算批准",
+  "blockedOn": "三P1源码尚未修，回归部分恢复且两例OWNER RED；release案仍void；ERP/quality/T5共享handoff/完整分页/最终环境未通过；已获准8次只余7，不等待预算/泛化接口批准",
   "nextStep": "单一原生batch4顺序budget+恢复测试、action-start、cookie-cause；每项先OWNER核真实RED/方案再edit、GREEN核源码后交typed handoff，最后fresh spec/quality，禁止删除回归",
   "updatedAt": "2026-10-16"
 }
