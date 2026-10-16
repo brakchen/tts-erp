@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "用户2026-10-16已明确批准追加native batch4，最多8次，不是旧root额度重置。脚本/tmp/monitor-status-workflow-batch4-01a1406d.js与packet /tmp/monitor-status-repair-batch4-context-01a1406d.md：唯一原MiniMax从3b10dfa1续修三微切片budget/恢复有效测试→action-start→cookie-cause；首edit前与GREEN后均须contact OWNER实际核源码和RED/GREEN，再fresh spec→quality。原root5227c09e-aa16-4147-9f2c-6f6bb12951a6已complete/return blocked、1/8已用，最新原MiniMax aafdf1dc交回源码未改/tests恢复但未修。其文件JSON有效status=blocked，OWNER脚本误解析原生尾注导致错误reason；旧root保留，新解析8/8检查通过。下一剩余7调用由/tmp/monitor-status-workflow-batch4-recovery-01a1406d.js续同一aaf；首edit权限a611已答，精确接口见/tmp/monitor-status-batch4-recovery-contract-01a1406d.md，不再等待泛化批准；post-GREEN仍须OWNER。OWN独立RED两例/tmp/plugin-status-owner-batch4-gate1-red.log，release仍void。新恢复root594095df-aef9-4fbb-862c-a8303bfc3c16已async启动，max7/concurrency1/主仓协调cwd；活跃原worker0f01f568-faed-4c6e-a006-eb2baa86488a，de07de75已实际reply选B：同call先storage fence/type/result和必要消费者适配，业务端口暂不动；子增量GREEN+tsc后联系OWNER审源码，不可final整个budget DONE，不扩native额度；只接原生事件，先查该ID再续，不重复启动。第一次docs cwd的mission lookup拒绝已保存现场并同协议纠正，没有run ID或活跃child。Tower625只有插件runtime恢复in_progress，ERP质量及T5仍blocked。旧533dc0c8 native complete/return blocked的7/8与40b173a9 failed历史保持；spec8三P1/删回归709green不接受，R8快照84条SHA保存。controller当前9843e9ec；三P1尚未修，不用R7旧指纹推断当前源码。ArchitectureReviewRequired=yes：禁止继续堆race；用同一budget+既有gen/epoch/nonce在canonical mutation处防迟到，内部契约变更先问OWNER。保留ERP/ACK R7独立GREEN，TDD历史不洗掉。不重复初始writer、不换model/CLI、不碰shared hotspots/真实操作；新批次遇blocked/缺证据/额度不足诚实停。",
+  "resumeInstruction": "当前暂停：第三段root1c3df827-6a5a-4631-a49c-7c3ffe8eb723及child433e9d38-ed2b-4143-8fe2-7576994afdf1均已正常complete/return blocked，不仍running、不报native基础设施失败或hard-cap。用户批准batch4上限8，5227/594/1c三段各用1，累计3/8、尚余5；不得重置额度或重复启动。连续保留调用仍未触controller/runtime迁移，OWNER停止第四次机械续修，请用户裁决是否解除原MiniMax唯一writer约束、允许OWNER直接收口T4纯模块或另选writer；未获授权不换model/CLI/新initial writer。Tower626 T4 blocked，原因caller未迁移及执行策略待授权；ERP质量/T5仍blocked，174keys保留。最新storage a6be6d4e，controller9843e9ec/runtimef1c434da仍未变。仅storage局部b/c已实现，mandatory union和真正消费者fence/typed result未做，worker193全量722中55fail/667pass；OWNER冻结最新源storage38/38/exit0，/tmp/plugin-status-owner-batch4-third-storage.log，不冒称caller/runtime通过。此前OWNER156四文件101pass/55fail属于7ac旧候选，不套新源作全量证据；不称所有55同因，release仍void。现场/tmp/plugin-status-batch4-third-stop-01a1406d含源/tests/4logs/receipt/handoff/三树diff/SHA，之前snapshot也保留。最新可续原writer为433e9d38，原MiniMax/profile/cwd/checked evidence不变；只是可追溯，不据此自动续跑。a611/de07/357的既有精确source-edit授权已实际答，不等泛化接口权限，post-GREEN实际OWNER源码gate却从未通过。若获准恢复，必须先收口producer/consumer契约与新增回归，再完成原S1单90秒和业务mutation fence（两release、真正entered边界、same-context到期/同epoch nonce/late业务绑定保护），随后action-start/cookie及fresh spec→quality，不跳门禁。现有六步拆法超过余5，合并原S1数学上五步但完成能力未证，不暗增额度或承诺成功。原packet、recovery shape与callers supplement均在/tmp/monitor-status-*01a1406d*，脚本/receipt仅历史不要直接重跑。旧533的7/8 blocked、40b fetch失败、vacuous/错误merits/删suite709及误删两storage函数后恢复历史不洗掉，R7 ACK/ERP锁独立GREEN保持。ArchitectureReviewRequired=yes，同一budget+原gen/epoch/nonce保护canonical实际mutation，self-invalidation不rebase原recover，无新owner/持久flag/物理取消承诺；保持terminal/report原子及pending+pause。真实Chrome/shared adapter和所有共享热点/完整分页/GUI/metadata仍T5，runtime未提交、未发版，不动主仓外来WIP或真实业务操作。",
   "knownPartialWork": [
     "status-impl-plan",
     "status-erp-core",
@@ -15,8 +15,9 @@
     "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json"
   ],
   "unsafeToAssume": [
-    "纯核/worker GREEN/native complete不等于runtime接受；删除回归后709/709不算通过；R5/R6 RED只证明冻结候选，F2/F3顺序违规与vacuous/错误merits声明不能追认合规",
-    "runtime不得改已有owner storage/access/security/app/base/scheduler；无prod migration/restart/真实凭证TikTok写；T5完整分页窄修前不得信任campaignsComplete",
-    "canonical依赖未到不允许purpose=None放行或先铸造普通RW key；必须failclosed，不用错误授权断言或docstring掩盖权限缺口"
+    "storage38/38、tsc或native complete不等于caller迁移、runtime接受或整体交付；worker全量55失败保留，旧删除回归后709/709不能追认合规",
+    "原MiniMax唯一writer限制尚未被解除；剩余5次不是额度耗尽、不是允许切换模型/CLI或另起initial writer的授权；只有用户新策略决定才能改变此边界",
+    "runtime不得改已有owner storage/access/security/app/base/scheduler；无prod迁移/重启/真实凭证TikTok写；真实Chrome/shared storage及完整分页证据仍T5",
+    "canonical依赖未到不允许purpose=None或普通RW key绕过；ERP锁与ACK已独立GREEN，不根据陈旧handoff重开"
   ]
 }

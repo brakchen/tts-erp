@@ -7,8 +7,16 @@
     "status-erp-core",
     "status-monitor-core"
   ],
-  "activeSlice": "batch4首段1/8交回blocked：仅恢复部分测试，无生产edit；OWNER独立RED两例及首edit授权a611已给，修正自身尾注解析后用余7从原aaf续修",
+  "activeSlice": "batch4第三段1c3df827也已complete/blocked，child433e9d38只修storage(b)，未触controller/runtime；累计3/8、剩5。暂停继续派发，Tower626 T4blocked，等待用户执行策略授权，不换model/CLI或假称预算耗尽",
   "evidenceRefs": [
+    "第三段1c3df827 complete/blocked，433e9d38约2分31秒正常结束，无已报告hard-cap；最新storage a6be6d4e，controller9843e9ec/runtimef1c434da字节未动；worker188 b真实RED→192 storage38、191 tsc0，193全量722中55fail/667pass，无postGREEN gate",
+    "OWNER冻结最新源码直接storage38/38/exit0，/tmp/plugin-status-owner-batch4-third-storage.log；现场/tmp/plugin-status-batch4-third-stop-01a1406d含src/tests/4logs/receipt/hand-off/三树diff/SHA；不称最新全量或caller已修",
+    "Tower626仅T4转blocked，174keys保留；暂停下一机械native续跑，累计3/8仍有5不自增，待用户裁决是否允许OWNER接手T4纯模块/更换writer，未授权不执行模式fallback",
+    "第二段594095df native complete/return blocked、0f01f568正常结束：storage7ac55ceb，controller9843e9ec/runtimef1c434da未变；worker storage36/36、tsc0、全量720中55fail/665pass，不是切片接受；累计历史用2/8，最新段只许余6",
+    "OWNER gate35715eae直接读源码拒绝增量接受：mandatory union仍缺、expect:null混损坏与缺键、未写binding却applied=true；仅第三项后来修；decision/ACK函数误删后已恢复且AST函数体与R8一致",
+    "OWNER冻结新候选独立四文件exit1：156总/101pass/55fail，storage36/0、controller59/18、runtime4/31、chain2/6；/tmp/plugin-status-owner-batch4-callers-pre-focus.log及.json。不是所有55同因证明，无OWNER full/tsc/coverage claim",
+    "当前root1c3df827已启动；/tmp/monitor-status-workflow-batch4-callers-01a1406d.js及/tmp/monitor-status-batch4-callers-contract-01a1406d.md；6步占满剩余6，不降spec→quality及每项OWNER gates。旧594等receipt不改写",
+    "三树tracked diff/status/HEAD、plugin源/tests、ERP7路径、9logs、旧handoff/receipt与SHA存/tmp/plugin-status-batch4-callers-snapshot-01a1406d；parser正负8/8。首次validate带launch-only并发参数遭拒，无run/child，移除后validate0errors，runtime max6权威",
     "runtime-review-1.md包含R1-R6；R5最终4P1/1P2，恢复后的R6最终3P1；OWNER有效reply0da14692/c97fffd2",
     "root40b173a9因fetch failed/缺structured output而failed；同mission恢复root533dc0c8，仅沿用旧额度剩余8次；原模型/writer/checked-evidence不变",
     "OWNER R6修前正向回归：plugin3文件109/109、tsc0、ERP isolated API100%且clone dropped；不覆盖R6新缺陷",
@@ -31,7 +39,7 @@
     "core f2c0fa7/718c83e已push；Tower622两runtime in_progress、T5blocked，registrye11b5bc仍不包含共享热点接管",
     "R3 reviewer确认旧purpose/CSRF/SQL分页/outbox事务项已修；实际canonical接线及整体验证仍未完成"
   ],
-  "blockedOn": "三P1源码尚未修，回归部分恢复且两例OWNER RED；release案仍void；ERP/quality/T5共享handoff/完整分页/最终环境未通过；已获准8次只余7，不等待预算/泛化接口批准",
-  "nextStep": "单一原生batch4顺序budget+恢复测试、action-start、cookie-cause；每项先OWNER核真实RED/方案再edit、GREEN核源码后交typed handoff，最后fresh spec/quality，禁止删除回归",
+  "blockedOn": "a及真实caller迁移仍缺、worker55fail不减，storage38局部GREEN不构成接受；原三P1/业务端口/release证据/ERP质量/T5未过。累计3used/余5，暂停等待执行策略裁决，而非缺泛化接口批准或耗尽额度",
+  "nextStep": "请求用户授权是否由OWNER直接收口T4纯模块或更换writer；现有原MiniMax独占约束不自行越过。若保持原限制，需producer-first及原S1合并收口计划，不机械增加调用，不跳真实RED/postGREEN/spec→quality",
   "updatedAt": "2026-10-16"
 }

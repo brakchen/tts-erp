@@ -2,24 +2,30 @@
 
 - Task ID: 2026-10-15-plugin-status-implementation
 - Current todo: status-erp-runtime + status-monitor-runtime
-- Active slice: batch4首段5227c09e交回blocked，1/8已用、源码未改；OWNER独立复现两项有效RED，并修复自己的native尾注JSON解析错误；从最新aafdf1dc保留原MiniMax续修，最多只用余7次
-- Blocked on: 三P1及回归丢失仍未修；原额度不足的等待已由用户授权解除，不等于代码问题解决。ERP quality及T5共享接线继续blocked
-- Next step: 活跃原worker0f01f568在同call先做storage增量；de07de75已实际reply选B：storage fence/type/result及为其可编译必需的controller/runtime/fixture适配，暂不改BusinessBindingPort。各修正先有效RED，storage子增量窄测GREEN+tsc后contact OWNER审源码，再决定同call继续；局部GREEN不能final budget DONE，不延长native或增加额度
+- Active slice: batch4三段均native complete/return blocked，累计3/8、尚余5；最新原writer433e9d38只修storage(b)，controller/runtime仍字节未改。OWNER暂停继续派发，等待执行策略裁决，不能把旧root当仍running或预算耗尽
+- Blocked on: mandatory union及真实caller迁移仍缺，worker全量55失败不减；storage最新a6be6d4e局部38/38经OWNER冻结实跑exit0，但不是增量接受。原三P1/业务端口/release有效证据、ERP质量和T5均未完成
+- Next step: 请用户裁决是否解除唯一原MiniMax writer限制、授权OWNER直接收口T4纯模块或另选writer；未经授权不切换模型/CLI/新initial writer，也不机械续烧尚余5次。若保持原限制，需明确重排producer-first迁移及原S1收口，不能跳fresh spec→quality
 - Owner disposition: [runtime-review-1.md](runtime-review-1.md)（当前BLOCKED及逐候选行为证据）；纯核历史见[core-review-1.md](core-review-1.md)
-- Last workflow: `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`已正常结束，**return.state=blocked**，不是通过或基础设施failed；已用7/8、尚余1次，不足完整修复+独立复审，quality未启动，不自增额度
+- Prior recovery workflow: `533dc0c8-9e02-4397-ae54-0a8d9cd79c24`已正常结束，**return.state=blocked**，不是通过或基础设施failed；已用7/8、尚余1次，不足完整修复+独立复审，quality未启动，不自增额度
 - Historical workflows: `920f5138-1015-4db1-801f-c971795deed5`终结failed；`b6532428-5f5d-4a11-bf80-484d2f33000f`终结blocked；`40b173a9-f68a-4304-960b-167ae1bf1d6a`因spec6 fetch failed/缺required structured output而failed，不伪称仍running或通过
 - Core delivery: ERP `f2c0fa7`（7文件）、独立plugin `718c83e`（12文件），均已push；发布版本仍0.4.26，未对既有runtime接线
 - Core gates: spec8 `eba15195-54ff-4c2d-bf1e-425d91c0587f`；quality `6acc5cbc-2183-4901-876f-5d20dbc22237`；owner reply `4d80c122-666a-4640-a2fa-3cc315798b3f` OK仅适用于纯核
-- Tower receipt: revision625，用户批准续修后仅插件runtime恢复in_progress；ERP runtime因spec/quality未完成blocked，T5仍blocked。未完成任何新的runtime回执
+- Tower receipt: revision626将T4诚实blocked（retained-writer-caller-migration-unimplemented + owner-execution-strategy-authorization），174keys全保留，其他owner无改动；ERP质量/T5仍blocked，无任何新runtime完成回执
 - Batch4 TaskStartSnapshot: docs HEAD e9c721c clean；plugin仍718c83e+原有16路径runtime WIP，ERP仍f2c0fa7+原有7路径WIP；controller实际SHA9843e9ec2486974a2bf7e62d77d9d1365e5a625a49e65d01678deb970b1716f6，R8现场仍保存，不碰主仓外来WIP
 - Batch4 Slice Card: Goal=三个现存P1与有效回归；Parent=原T4/spec §§4/5/7/11/12；Files=自有controller/runtime/storage及tests；Boundary=不共享接线/不新权限/不新owner；Verification=真实RED→canonical fix→GREEN+晚到值隔离，fresh spec→quality；Stop=未修/缺证据/超scope/native失败/8次上限则诚实blocked
 - ArchitectureReviewRequired=yes；重复race局部补丁不是取消。L3机制已定位但不先宣称root闭合：同一budget及既有generation/epoch/nonce约束canonical mutation，内部port/CAS变更先报OWNER；禁止新增平行authority或多个helper窗口
 - Batch4首段: root `5227c09e-aa16-4147-9f2c-6f6bb12951a6`已native complete/return blocked，1child、1/8已用；最新原writer `aafdf1dc-d24c-43c8-9ec9-f0fa553e8210`仅改tests，源码9843e9ec/f1c434da/cb869d4d不变。worker承认尚未实现且release案void；其artifact是有效status=blocked JSON
 - OWNER协议错误: 原脚本JSON.parse(r.output)误把tool追加的saved-file尾注当payload；实际文件5097chars有效，inline多205chars。原root错误reason保留不改，语义blocked独立成立；新脚本只剥匹配真实outputReference的标准尾注，再完整验证七字段，8/8正负测试通过，无schema/acceptance豁免
 - OWNER gate: 2614857c拒绝154无效RED（entered未到、合法clear误断言）；tabs缺失归因经补读beforeEach撤回。a6110a7b已实际reply：接受156的两项有效RED并授权canonical fence源码edit；OWNER冻结并独立执行exit1、2fail/2pass/71filtered，/tmp/plugin-status-owner-batch4-gate1-red.log；157业务clear/bind仅worker证据，release159仍void，不追认为有效
-- 当前worker `0f01f568-faed-4c6e-a006-eb2baa86488a`已接受授权但以预计容量为由仍未edit而提出A/B/C；OWNER以de07de75明确B的可编译增量边界，不能称其独立可发布，真正hard cap才报告具体证据，不能以预估保持零源码修改
+- 历史0f01f568首个请求时尚无edit，接受授权但以预计容量提出A/B/C；OWNER以de07de75明确B的可编译增量边界，不能称其独立可发布，真正hard cap才报告具体证据，不能以预估保持零源码修改
 - 最小接口已授权：既有ExpectedBindingContext+同一budget/generation同步stillCurrent，在canonical实际set前重查；binding提交不得无fence默许，typed applied/refused与enqueue分开；BusinessBindingPort必须带fence，真实shared/Chrome adapter仍T5。不拦截终结失败事实或破坏ledger/report原子性，无新authority owner/AbortSignal/持久标志
-- Batch4恢复已启动: root `594095df-aef9-4fbb-862c-a8303bfc3c16`，原生async、同mission、max7/concurrency1；/tmp/monitor-status-workflow-batch4-recovery-01a1406d.js；精确接口及首edit授权 /tmp/monitor-status-batch4-recovery-contract-01a1406d.md。同mission、当前root上限7，script used从1计累计，合计最多原获准8次；旧段不重置。三树partial diff/当前src/tests/原blocked handoff及receipt保存在/tmp/plugin-status-batch4-protocol-recovery-01a1406d/
+- Batch4第二段root `594095df-aef9-4fbb-862c-a8303bfc3c16`已native complete/return blocked，child0f01f568正常结束约14分钟，不是已证明hard-cap/基础设施失败；本段1child，连前段累计2/8、余6。storage变7ac55ceb，controller9843e9ec/runtimef1c434da未变；仅storage及其test在本段改动，未提交runtime
+- OWNER实际源码gate35715eae已答但未接受：要求mandatory union、raw缺键不等于损坏parsed null、!intact未写binding不可applied=true，以及真实消费者按首await前generation/合法self-invalidation时点构造fence。child只修(c)得storage36/36；a/b与caller仍缺。误用Python marker大切片删两函数后已恢复，OWNER AST函数体hash确认decision/ACK同R8，历史仍保留
+- OWNER新候选独立执行: /tmp/plugin-status-batch4-callers-snapshot-01a1406d/plugin冻结实际7ac源码，四文件exit1、156总/101pass/55fail：storage36/0，controller59/18，runtime4/31，chain2/6。日志/tmp/plugin-status-owner-batch4-callers-pre-focus.log及JSON同名；不称OWNER full/tsc/coverage通过。worker全量720为55fail/665pass，仍blocked
+- Batch4第三段root `1c3df827-6a5a-4631-a49c-7c3ffe8eb723`已native complete/return blocked，只有storage-callers child433e9d38，约2分31秒正常结束、acceptance review-required，不是已证实hard-cap。共3/8used、余5；b的188真实RED→storage38/38，a及consumer仍未动，worker193全量55fail/667pass/722，无post-GREEN gate。budget/action/cookie/spec/quality均未启动
+- 第三段源码/当前tests/4logs/receipt/hand-off/三树diff及SHA保存于/tmp/plugin-status-batch4-third-stop-01a1406d/；OWNER直接读raw presence helper及fence，冻结源实跑storage38/38/exit0（/tmp/plugin-status-owner-batch4-third-storage.log），不移用此前156四文件证据当最新全量
+- 执行策略升级：连续保留调用仍未触caller，既有代码形状/权限已答，不以预计capacity或中间tsc错误风险继续逃避迁移。暂停第四次机械尝试；问题属于producer/consumer未闭合及执行策略，未宣称唯一根因/模型硬限额。原仅storage-callers/budget/action/cookie/spec/quality六步现在超过余5；重合并原S1可数学上五步但完成能力未证，不以此承诺成功或偷偷扩大额度
+- 最新调用协议验证: exact footer/schema正负8/8；首次validate误传globalConcurrencyLimit被拒、无child/run，移除该仅launch参数后同协议validate ok/0errors；动态0静态证明仅提示，runtime max6权威。三树diff/源码/tests/9logs/原handoff与receipt已保存/tmp/plugin-status-batch4-callers-snapshot-01a1406d/；旧现场及旧blocked receipts不重写
 - Batch4 launch failure: 首次把workflow cwd设docs worktree，被mission project-root lookup拒绝，未返回run ID，fleet确认0active；保存三树diff/status/HEAD和script/packet至/tmp/plugin-status-batch4-launch-block-01a1406d，controller指纹仍9843e9ec。纠正协调cwd为原/home/schan/tts-erp后原生重试成功；writer依然原plugin cwd、reviewer明确ERP cwd，无CLI/model/acceptance fallback
 - Registry: canonical origin/master `e11b5bc`已推送；继`49bc355`后补登记coord/identity helper与测试及无他人owner的page-hook/content后续接线。初交fixture/helper迟登记如实记录；storage与ERP既有owner权限/注册热点仍未接管
 - Runtime初交children: ERP `931fa261-ba6d-4890-9927-061f150cf394`；plugin `99e75517-bbf6-407f-aaaf-1b053e9c8d3e`；两者ack边界，但运行实现未通过审查
