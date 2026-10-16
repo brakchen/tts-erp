@@ -4,9 +4,9 @@
 
 纯核已交付；runtime 仍实施中，未合并、发布或整体验收。唯一协议是 `docs/plugins/plugin-status-report.md`（批准基线 `fb42e16575a241fec88740d69137ae6a8153c2bb`）。当前技术断点与证据见本目录 work record 的 `20-checkpoint.md`、`runtime-review-1.md`。
 
-已局部接受七段：runtime typed result、snapshot producer、空 bootstrap typed commit、safe-stop、passive canonical observation、invalidate canonical fact、wake rebuild producer。最新失效段 controller `bf2f3c5c…` / tests `317f975d…` 经 OWNER 实际22 named/tsc0、五个选择性生产变体、迟到 read rejection 和 live read-error 对照验收；实际 gate `64f2b158-82fd-42e2-87ca-7c60b33cd06e`。这不等于全部 callers、业务写点 fence 或预算完成。其 retained handoff gate ID误展开，OWNER按真实监督回复核对并另记errata，不改旧artifact。
+已局部接受九段：runtime typed result、snapshot、空 bootstrap、safe-stop、passive observation、invalidate canonical fact、wake rebuild、resume fenced、recovery fenced producers。当前 controller`dbc8c4c9…` / tests`2065fb2f…`经 OWNER实际39named/本地unpipedtsc0、五source控制和scope/harness证明，获第九独立gate`e3e236ab-5a0c-4e4a-83e0-268d261de471`；native终态/七字段/两path/精确gate已核，报告errata单列保留原artifact。这不是全部callers/T4、预算或发布接受。
 
-最新 `wake-rebuild-producer` controller`f60eedd…` / tests`0dc535…`经 OWNER25named/tsc0、同tests旧三业务RED、own-gen/late-tuple和早期bootstrap-gen选择性控制，获独立gate`55f416c9-a968-47c1-a3cb-5d1bddcc1730`局部接受。仅现有unprovable branch，其他已接受源码不变；保留discovering/INITIALIZING领域含义。后续顺序为其余 producer及mandatory union → budget/实际业务 mutation fence → action-start → Cookie 原因 → fresh spec → quality → ERP/T5/最终验证。
+recovery沿用首attempt代次、首read scalar PRE及原capture budget，入口/初始化后/failed组合前/bind await后消费原frame；正常ready与failure经唯一runtime出口真实应用，已知失权不返proposal。OWNER曾在36GREEN候选发现三个真实结果缺口，补三案后39GREEN；physical bind本身仍可能迟到，不能将fact fence说成physical fence。下一步：mandatory union及完整callsite inventory → 单预算/实际mutation fence → action-start → Cookie原因 → fresh spec→quality → ERP/T5/最终验证。各段仍须新RED/新预审/独立postGREEN。
 
 ## Goal
 

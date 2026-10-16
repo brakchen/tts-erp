@@ -2,7 +2,7 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "以技术方案/当前实现/验证边界为主，不重放早期流水。唯一协议docs/plugins/plugin-status-report.md，单目标monitor，原MiniMax唯一产品writer。callers仍in_progress，七micro只局部接受。第六bf2/317f实际gate64f2b158-82fd-42e2-87ca-7c60b33cd06e：22/tsc0、五控制、迟到read0、live error原对象保留；handoff误扩64f2f1e1不认可，保留artifact且writer承认，以实际监督回复为准。第七wake-rebuild-producer controllerf60eeddbe6540436ee491aa22527877c49582134afc6d0a998699e0ff838328a / tests0dc5352287c8da1eaa4e18597a1017406fc2d93e2545a843ddad0d33739a057f已准确gate55f416c9-a968-47c1-a3cb-5d1bddcc1730局部接受；原bootstrapLive同步先消费、own generation/原tuple/同budget typed实际fact-before-clear，领域fresh discovering/INITIALIZING episode不变。OWNER25named/tsc0、同tests旧三业务RED、own-gen/late-tuple变体、额外私有early-bootstrap-gen因果对照已核，其他源码/旧22未动。证据/tmp/plugin-status-owner-wake-rebuild-01a1406d。root614318f3-4705-4ef1-8598-070be1b87b0c / childabcdec02-b392-4c4e-be94-7cc6260ab54c已terminal，七字段/两changedFiles/准确55f416c9已读。五技术docs已43bc191检查提交推送（JSON/Aegis/diff0、docs LSP无warning；controller41既有辅助warning在新branch外，不宣称全clean）。当前root5e886672-cf85-4567-92ff-1f5b1325af8d exact原abc native resume，单一原MiniMax产品writer；仅resumeMonitoring body+新测试，复用既有createSnapshotCommit原first-read scalar frame/原fence，不重复读/clone代码或改helper，不在producer另存terminal事实。已观察的初始化tuple不符拒绝start，不冒称scheduler awaited写点已fence。当前tests-first/新预审，尚无本段源码批准，原25保护；packet /tmp/monitor-status-resume-fenced-producer-01a1406d.md、script workflow-resume-fenced validate0。每段新有效RED/OWNER pre-edit WAIT/相关GREEN和实际unpipedtsc/独立postGREEN WAIT，回复正文给完整UUID，不猜前缀。其余producer/mandatory union、aggregate预算/实际业务写点、action/Cookie/freshspec-quality/ERP/T5仍开，不把微gate或native complete当整体交付。",
+  "resumeInstruction": "只保技术方案/当前实现/验证边界，不重放早期流水。唯一协议docs/plugins/plugin-status-report.md，原MiniMax唯一产品writer。callers仍in_progress，九micro局部接受。最新recovery controllerdbc8c4c95642cb5de8b477cbec1a4610cbe6d09ef35e4e526a90faaf41d6efd1/tests2065fb2fc6b5eb13bf56770ab490055513955b10c941a8f39ad36d21390783cb获精确独立poste3e236ab-5a0c-4e4a-83e0-268d261de471。roota6e08374-6fc8-4538-9e13-01e04edc720c/child5233faed-09c8-48da-aac3-d528bf79dd7b已terminal、七字段/两path/精确gate已读核。OWNER39named/actual product-cwd unpipedtsc0/五source-only controls各tsc0及scope/harness/protected证明，证据/tmp/plugin-status-owner-recovery-fenced-01a1406d。三既有函数外源码逐字同c281，旧103literal body精确，只有10新案+授权nullablebindEntryGate/armBindEntry/consume-beforeawait/reset，其他harness tokens/unarmed语义保持。recovery首generation/首readscalar/同budgetframe，entry在ensure前及afterinit/failed组合前/bindawait后查live，required私有frame全传，producer不persist，runtime唯一terminal+fact出口。既有snapshot helper无budget，不拿它开无界前序或改API。初始七RED=1真实bind+1staleproposal行为+5缺fence契约。HOLD468虽36GREEN，OWNER独立发现2lateproposal行为+1spentfirstread额外IO，新增三案修正且删除越界helper才接受；无效undefined-enter/type setup不计RED且保log。第九handoff中间held hash多写字符，真实468660c37aa4afa0172763f161a4b3c601a2b9419831d830473a83eef761186a；remaining重复泛称额外recover/failed不作新已证缺口，下一inventory确认，原artifact不改。当前freshLSP2clean/0diag不改第八0diag2inconclusive历史，第八nullable私有probe invalid fixture排除。Fixture firstRead误清stopGate另记f-b7b24e8c-ef9不修/不同时arm。下一mandatory union/inventory未实施，原writer exact5233 native resume，先有效RED/新预审再源码，保原39/实际tsc，再独立postGREEN；aggregateports/physicalawait/actions/Cookie/specquality/ERP/T5仍open。按原生事件唤醒，不轮询或换writer/modelCLI。",
   "knownPartialWork": ["status-runtime-callers", "status-runtime-budget", "status-runtime-actions", "status-runtime-cookies", "status-runtime-spec", "status-runtime-quality", "status-monitor-runtime", "status-erp-runtime", "status-integration-review"],
   "mustReadBeforeContinuing": [
     "docs/plugins/plugin-status-report.md",
@@ -12,13 +12,13 @@
     "docs/aegis/plans/2026-10-15-plugin-status-implementation.md"
   ],
   "unsafeToAssume": [
-    "微GREEN/workerDONE/nativecomplete不是整体接受；门禁仅对应slice，preEdit不批准postGREEN；gateUUID必须逐字来自实际回复。",
-    "expired/unknown不是absence或授权；Promise创建即观察、真实entered后交错、finally释放await；setup/timeout/recorder不冒充业务mutation RED。",
-    "applied、accepted、执行/cleanup许可分离；已落库事实不回滚，unknown不proposal/clear；physical clear自身awaited mutation仍未fence。",
-    "首generation/首次read scalar PRE tuple/同budget不重借；合法自身撤权前同步消费parent predicate，之后不重测因自增失效的旧parent。",
-    "不换MiniMax writer/model/CLI，不代写产品源码；8/12/max1是内部配置非用户/provider额度。只依native事件，不轮询等待。",
-    "当前只named/related+实际tsc，旧full/55/coverage/build不是当前证明；ERP只isolated runner/baseline；禁生产迁移/重启/真实凭证/TikTok写/真实通知。",
-    "共享storage/auth/model/migration/scheduler/GUI/MAIN/metadata/分页须明确handoff；purpose缺失failclosed，不借普通RW或造registry。",
-    "历史Git1f905884及原native/artifact/probe保留；当前摘要收敛不改写旧门禁、失败或无效尝试。"
+    "微GREEN/workerDONE/nativecomplete不是整体接受；gate仅对应slice，preEdit/HOLD非postGREEN，UUID逐字来自实际回复，不扩短前缀。",
+    "expired/unknown不是absence或授权；主Promise创建即观察、真实entered交错、finally释放await。setup/type/timeout/recorder/失权proposal不包装成持久化mutation。",
+    "applied/accepted/执行及cleanup许可分离；proposal不是fact，canonical typed结果才证明应用；事实不回滚，unknown不proposal/clear。",
+    "首generation/首readscalar/同budget不重借；先消费parent再合法自身撤权，用own generation。入口检查不能替代每个结果owner/真实写点的fence。",
+    "physical scheduler/bind/clear自身awaited mutation仍未fence，bind仍可能迟到；fact fence/外层检查不能宣称解决。两release/aggregateports待验证。",
+    "不换MiniMax/model/CLI/代写产品；8/12/max1为内部配置不是用户/provider额度，无实际hardcap不预估停工。",
+    "只named/related+实际tsc；旧full/55/coverage/build不是当前证明。ERP仅isolated runner/baseline；禁生产迁移/重启/真实凭证/TikTok写/真实通知。",
+    "共享接线须明确handoff，purpose缺失failclosed，不借普通RW或新registry/cache/authority。历史Git/native/artifact/probe保留，不改写旧失败门禁。"
   ]
 }
