@@ -14,6 +14,27 @@
 - 仅同协议证据修复root`6bc5edee-db7c-48de-864d-451aeb955482` exact resume4d7，workflow validate0；原model/session/cwd/profile/tools/checked不变、不降验收，仅新授一次真实product-cwd unpipedtsc写命令证据。不得伪造已执行或称修复业务；架构/测试/源码许可仍HOLD，失败原artifact保留。设计已撤回“valid record重开absence/第二独立defect”误断，PRESENT B会拒绝old-null与old-A tuple。
 - 协议引用纠正：fb42e165是Git commit，不是文件SHA256。实际approved doc SHA256 c2fa1b3a…与current d2667d16…不同；初始化episode锚点逐字在approved中，first-ready业务文本相同而批准状态尾句更新；不比较不同hash类型作“协议损坏”证明，也不称全部字节同。materialization仍待owner设计决策。
 
+### 当前实现：第十一provision-initial-record局部接受，宏观T4未完成
+
+- 最终独立post gate **`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`**；root`7187c653-a34f-462c-a29c-cb995e31ed42`/child`6ee1cecc-5e82-401d-adf6-9489838837e1`已complete/terminal observed，实际七字段done/精确三path/该gate逐字核读。
+- 实现：provisioning单set写合法closed初始化episode，已有controller字段literal迁至storage唯一纯构造器（19原字段、三UUID顺序/注入不变），controller薄委托。首heartbeat报告同episode、真absence仍instance_started；同实例保事实，unknown/fence/union算法不改。修复首拒绝，不修adapter/physical fence。
+- 独立 **48去重产品named PASS=8storage+39controller+首chain1**，另1私有注入/顺序probe PASS；实际product unpipedtsc0。null-payload单变量控制恢复3业务RED/5guardPASS，忽略注入epoch源控制使probe2calls≠3，均counterfactualtsc0。84文件对比精确三path；构造器/模块边/旧case保留证据`/tmp/plugin-status-owner-provision-initial-record-01a1406d/{scope-proof.json,checks.json,final-comment-proof.json,final-owner-review.md,terminal-review.md}`。LSP error-filter0reported/3inconclusive，不是clean/0完整diagnostic。
+- 最终SHA storage7157c38d…/controller54844b00…/test91a4e368…。**artifact erratum**：worker终稿test-before fb11是其首个HOLD中间版本，实际微切片起点为第十ef3336b9…；原artifact不改，OWNER scope使用正确基线。591/600/601为fixture/type setup错误排除保留，5d/ccf/6eda HOLD和05666 pre-edit均不是DONE。
+- 协调者提交推送产品分支检查点 **`18d0887b47d8902f43e58b1b18bade451f97e44f`**，树clean：聚合原十一段16个本lane WIP文件（12034行）以免丢失，**不是这12034行已全量验收**。未合并master、未更新submodule pin、未发布，v0.4.26不变。f-57bdab7b-eab仅首表示冲突已done；Board636任务仍chain in_progress/callers blocked，其他七案/完整T4与后续仍开。
+
+### 本轮测试与门禁历史（原证据保留）
+
+最新source pre-edit **`05666f7b-cf27-40db-823c-f82202bdf1b8`已窄授权，非DONE gate**：OWNER实际读到seed B原样/一致heartbeat与真正accepted非空ledger断言，test SHA91a4e368…；603=3业务RED/5guardPASS/39skip、604tsc0空，storage/controller source仍逐字第十freeze。只准storage唯一纯factory+different-instance单set payload、controller已有import+initialState薄委托；测试91a4冻结，后八storage+39旧controller+首chain1+实际tsc，必须DISTINCT fresh postGREEN WAIT。原私有literal实际19字段，05666回复的20为OWNER计数笔误已明示纠正，不新增第20字段；保全部原值/三UUID调用顺序。591/600/601 fixture/type setup错误保留排除，不作业务RED；此前5d/ccf为HOLD。所有其他缺口仍开。
+
+较早pre-edit`ccf57c10-01a3-4505-88b3-67e2cf73dddd`仍HOLD：原B身份已改、old-A read/拒绝spy已补，但正案仍人为ready/incident:null提前丢初始化episode，未落实queued的seed-only heartbeat建议；所谓非空ledger只start/result一个未accepted的随机ID且未断言非空，仍空泛。只修这两个新case：actual B seed不变+一致heartbeat，以及已知工作的persistDecisionAccepted(statusDecision(), FIXTURE_OBSERVED_AT)+ledger.entries.length>0断言，保留既有全事实比较；八named/actualtsc后再NEW pre-edit，源码未准。591为已披露same-instance fixture defect，不算产品RED；592实际3RED/5guardPASS/39skip，593 type0。此为人工fixture纠偏而非第二生产漏洞。
+
+较早pre-edit request`5d113505-4c66-48ff-bc1f-92178e7dbfce`/child`6ee1cecc-5e82-401d-adf6-9489838837e1`为**HOLD，不是source gate**：OWNER核实际仅Storage test改动、log581=3业务FAIL/5guardPASS/39skip，580/582实际tsc0空输出。但新正案configure B后next/observation仍fixture A，且所谓同实例all-facts guard的ledger为空、runtime未设/未断言；不能把其将来PASS说成B正向事实。只准修新测试：actual seed B+一致heartbeat保同episode/closed gate、真实旧A scalar PRE、非空ledger/nondefault runtime全事实比较、拒绝案补set/remove未调用断言；八named/实际tsc后必须NEW source pre-edit WAIT。附加guidance receipt ba33bb2f仅queued，不是遵从证明；须下一实际请求/代码核验。未据人工fixture声称生产第二漏洞。
+
+- root`6bc5edee-db7c-48de-864d-451aeb955482`/child`45a0df7e-8d20-4a6a-8c74-b2df9d6b459f`已原生complete/terminal observed，实际七字段needs_context/空delta/空gate；log570实际product-cwd unpipedtsc0/0bytes。修复的是交接证据，不是产品或设计实现gate；原失败artifact不改。
+- OWNER私有反事实`/tmp/plugin-status-owner-chain-diagnostic-01a1406d/valid-seed-counterfactual/`仅改单set中的binding:null为已有closed构造形状，原首exact chain案1PASS/7skip、private tsc0；trace副本不额外读/await，只消费已有transport报告/读值，首report为heartbeat/NONE/discovering/suspended INITIALIZING，report incident=canonical incident，亦1PASS/7skip/private tsc0。不是产品GREEN、其他七案或真实ERP自动策略证明。
+- OWNER架构选择：provisioning同一namespace set物化合法closed初始化episode，首次heartbeat报告该episode；真正absence bootstrap仍保留instance_started。现有isContextProvable明确允许suspended，故不加bootstrap分支/新flag；共享纯构造器迁至已有storage模块，controller薄委托传原newId、顺序/字段不改。已有runtime import，不新增模块edge/cycle；同instance保事实，rawunknown与exactPRE/fence不放宽。ERP策略只读确认不依eventType，NONE/PAGE_LOADING无可信证据都hold；不得据chain替身运输就称真ERP首发现已闭合。
+- Board636实质扩chain scope至Storage test/source和controller source、181任务保留，status/deps不变；启动前84个src/tests/entrypoints文件与第十freeze逐字同。原writer新root`7187c653-a34f-462c-a29c-cb995e31ed42`，validate0/exact-resume45a0，packet`/tmp/monitor-status-provision-initial-record-01a1406d.md`：当前只准Storage五新+一原子reset断言迁移、八named/实际tsc；真实RED后必须NEW source pre-edit WAIT，再独立fresh postGREEN。源码仍未授权；其他七案/adapter/physicalawait/全局预算/actions/Cookie/ERP/T5/spec-quality/release仍开。
+
 ## 技术方案与不可变约束
 
 唯一协议：`docs/plugins/plugin-status-report.md`（批准基线`fb42e16575a241fec88740d69137ae6a8153c2bb`）。

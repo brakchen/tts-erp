@@ -66,6 +66,28 @@ OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check�
 
 上述corrected-design root437688b5/child4d7be134原生拒绝：`commands-run evidence missing from child report`；其needs_context/空delta/空gate保留但不算验收。快照`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/`已保存、产品逐字冻结未改。仅同协议exact-resume证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`运行，允许一次真实unpipedtsc并如实列Commands run，不换model/CLI、不降checked、不造命令证据、不授源码许可。valid-record→absence误断已撤回，独立missing-identity exploit仍未证；materialization/factory设计未决。fb42是Git commit非SHA256，approved/current文档确有后续修改，但初始化episode锚点在approved中，不能混hash类型推断协议损坏。
 
+### 第十一局部接受：canonical初态修复（不是全T4）
+
+最终独立gate **`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`**，root7187c653/child6ee1cecc-5e82-401d-adf6-9489838837e1 terminal、实际七字段/三path/gate核读。provisioning单set写closed初始化episode，唯一纯构造器保19字段/三UUID注入顺序，controller薄委托；首heartbeat报告同episode、真absence仍instance_started，不改unknown/guard/union/模块边。同实例真实非空ledger/nondefault runtime及全事实保留；old-null/old-A拒绝且无set/remove。
+
+OWNER独立48去重产品named=8storage+39controller+首chain1 PASS，另1私有probe PASS，实际producttsc0；null-only恢复3RED5PASS、注入控制probe2calls≠3，counterfactualtsc0。84文件仅3path，精确scope/oldcase/字段证明与日志见`/tmp/plugin-status-owner-provision-initial-record-01a1406d/`。最终storage7157c38d/controller54844b00/test91a4；worker所列test-before fb11是held中间态，实际第十起点ef333，erratum保留原稿。LSP error-filter0reported/3inconclusive，不称clean。setup591/600/601排除。
+
+产品16路径聚合检查点18d0887已push且树clean，保留原WIP不代表12034行完整通过；不合并master/推进pin/发布。首表示冲突finding已done，chain/callers仍未完成，七其他变体/adapter/physicalawait/全局预算/actions/Cookie/ERP/T5/specquality/fullrelease仍开。
+
+### 原只读决策与测试门禁历史
+
+最新source pre-edit`05666f7b-cf27-40db-823c-f82202bdf1b8`窄授权、非DONE：实际seed B原样heartbeat/accepted非空ledger已核，91a4测试冻结，603三业务RED五guardPASS39skip、604 actualtsc0，源仍同第十freeze。仅storage纯factory+namespace payload/controllerimport+薄委托；原literal19字段，OWNER回复20笔误已纠正，不新增字段；八storage+39controller+首chain1+实际tsc后必须独立freshpostGREEN。591/600/601 setup错误保留排除，其他七案/整体未验收。
+
+较早pre-edit`ccf57c10-01a3-4505-88b3-67e2cf73dddd` HOLD：B身份/read/no-write已改，但正案仍人为ready+incident:null、ledger仅start/result未accepted ID且无非空断言。只准actual B seed不变/一致heartbeat、已知persistDecisionAccepted fixture+显式ledger非空，再八named/tsc/NEW preedit；源码未准。591排除为fixture defect，592三业务RED/五guardPASS/39skip、593 type0，不当生产第二漏洞。
+
+较早pre-edit`5d113505-4c66-48ff-bc1f-92178e7dbfce` HOLD：child6ee1cecc实际Storage test-only，581=3业务RED/5guardPASS/39skip，580/582 actualtsc0。OWNER读代码发现新正案配置B却用A fixture写/断言、同实例all-facts案ledger空且无runtime证明；仅修新测试再八named/实际tsc/NEW pre-edit，不授源码。正案应actual B seed+一致heartbeat保episode/closed；old-A原read scalar、nonempty ledger/nondefault runtime保事实与no set/remove拒绝断言补齐。这个无效正向fixture不是已证生产exploit。
+
+补证root6bc5edee/child45a0df7e-8d20-4a6a-8c74-b2df9d6b459f已complete/terminal，真实七字段needs_context/空delta/空gate、实际product tsc0/log570空；原失败保留。OWNER私有valid-seed-counterfactual仅替换namespace set的null binding，原首chain案1PASS/7skip+private tsc0；trace副本首heartbeat/NONE/discovering/suspended INITIALIZING且incident=canonical，亦1PASS/7skip+private tsc0。没有修改产品、reader/fence或原案；其余七案/真ERP策略未知。
+
+采用provisioning物化已有closed初始化episode并由首次heartbeat报告；真正absence仍instance_started。isContextProvable的suspended既有语义无需新分支；复用唯一字段构造器至已有storage，controller传原注入newId薄委托、UUID顺序/字段不变。原已有runtime import故无新edge/cycle；同实例不重置，unknown不当absence。ERP policy只读确认不依eventType，NONE与PAGE_LOADING无核验候选都hold；chain替身自动recover不证明真实ERP首发现。
+
+新root`7187c653-a34f-462c-a29c-cb995e31ed42` exact-resume45a0、validate0，当前仅测试许可：Storage五新+一原断言迁移、八named/实际tsc；源码须有效RED后新pre-edit，GREEN后另新独立post。packet`/tmp/monitor-status-provision-initial-record-01a1406d.md`，Board636扩scope但chain仍in_progress/callers blocked，启动前84文件同第十freeze；其余缺口不关闭。
+
 ## 尚待关闭的技术缺口
 
 | 范围 | 所需实现与证明 |

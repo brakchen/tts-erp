@@ -14,6 +14,16 @@ inventory ab494011/c108已terminal BLOCKED/空delta/空gate；其“一个set丢
 
 corrected-design root437688b5/child4d7be134因原生`commands-run evidence missing`失败，空delta/空gate输出不算接受。已停止/保存WIP快照并确认产品冻结；同协议证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`仅授一次实际tsc命令证据，不降checked/换model或批准改码。valid canonical PRESENT不会重开absence，相关“第二独立缺陷”误断已撤回，设计仍未决。
 
+最新：补证root6bc5edee/child45a0df7e-8d20-4a6a-8c74-b2df9d6b459f已complete，七字段needs_context/空delta/空gate、实际tsc0，仅报告证据修复。OWNER私有仅改单namespace binding payload的closed有效初态反事实，使原首chain案1PASS/7skip+private tsc0；首heartbeat报告同canonical incident，不是真ERP或其余七案证明。选择provisioning物化初始化episode、复用已有字段构造器到storage/controller薄委托原newId（已有runtime import，无新edge），不动unknown/fence/同实例事实、真正absence的instance_started。Board636实质扩scope；新原writer root`7187c653-a34f-462c-a29c-cb995e31ed42` validate0/exact-resume45a0，仅Storage测试八named/实际tsc许可，源码须有效RED后新pre-edit、后独立postGREEN；packet`/tmp/monitor-status-provision-initial-record-01a1406d.md`。84源/测/入口文件启动前同第十freeze，完整T4仍未交付。
+
+最新source pre-edit`05666f7b-cf27-40db-823c-f82202bdf1b8`已窄授权非DONE：实际seed-only B heartbeat/accepted非空ledger、91a4test及603三业务RED五guardPASS39skip/604tsc0与源码冻结已核。仅storage共享原19字段factory+configpayload/controller薄委托，19不是OWNER笔误20；八storage+39controller+首chain1+tsc后另新独立postGREEN。setup591/600/601排除，整体仍开。
+
+此前pre-edit`ccf57c10-01a3-4505-88b3-67e2cf73dddd`仍HOLD：正案改B但仍ready/incident:null、ledger start/result未accepted ID却未断言非空；需actual B seed保持不变并heartbeat、真实accepted非空ledger，再named8/type/NEW preedit，源码未准。591 fixture defect排除，592实际3RED5PASS39skip/593 type0。
+
+此前pre-edit`5d113505-4c66-48ff-bc1f-92178e7dbfce` HOLD：实际test-only/3业务RED+5guardPASS/39skip/tsc0已核，但新正案configure B后仍写/断言A fixture，同实例ledger/runtime保护亦空泛。只准新测试纠正为actual B seed与一致heartbeat、实际old-A PRE、非空ledger/runtime保事实/no set-remove；再八named/实际tsc后NEW pre-edit，源码未准，不把该人工fixture当生产第二root。
+
+当前已接受**十一微切片**，第十一最终gate`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`/root7187c653/child6ee1cecc已原生terminal七字段核读。provisioning单set写已有closed初始化episode、纯构造器迁storage唯一19字段owner/controller传原newId，不改unknown/fence/union；首heartbeat报告同episode。独立48去重产品named+1私有probe PASS、producttsc0、两反事实杀死且tsc0/精确三path证明。LSP0reported errors但3inconclusive；其余七chain仍未知、完整T4未完成。产品聚合16-path检查点18d0887已push且树clean，仅保存原12034行WIP，不是全验收/发布或master/pin变更。原artifact test-before fb11为held中间态，真实微切片基线ef333→91a4已记erratum，不改原稿。证据`/tmp/plugin-status-owner-provision-initial-record-01a1406d/`。
+
 ## Goal
 
 实施已批准协议的 D1–D4：monitor 单 Seller/Advertiser 自动绑定、失效安全暂停、ERP 状态与生命周期通知、受限恢复。保持首次服务端放行、独立 status key、离线不得自行恢复、完整 fresh close 快照门禁。OWNER负责设计一致性、独立验收和协调，原 MiniMax M3.1 Flash Preview 是唯一产品 writer，不换模型/CLI。
