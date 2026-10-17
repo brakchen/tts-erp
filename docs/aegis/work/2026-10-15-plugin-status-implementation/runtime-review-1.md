@@ -4,7 +4,13 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：两release等待已局部accept，继续owned canonical等待
+## 当前：canonical提交等待局部accept，继续owned预算时钟
+
+产品65e331cb1ab304ebe3cfa17c1eb4681c24c70dfa已push；**63unique相关产品PASS/actualtsc0**，fresh **b78e8806-f9d8-44c6-8483-20f7b8cab7ff COMPLETE/localaccept/no issues**实际报告读核，20read0其他tools；Owner currentSHA/HEAD/upstream0/0确认后窄接纳，不是SDKchecked/physical/aggregate/merge/release。receipt `/tmp/plugin-status-budget-observe-commit-owner-01a1406d/owner-post-review-acceptance.json`。2真实deadline RED/type0后仅observeBinding finalcommit原promise/SAMEBudget.guard/立即observer/sentinelST/返回实际appliedfact不rollback；typedprivate freshwindow2FAIL/current2PASS。初0-witness wrong-storeobserver是INVALID fixture，修到实际async status.reportObservation后才业务RED；snapshot7vs9字段是metadata误比较非frozen变化，原件均保留。
+
+kernel原queue→runtime→freshpresence→permit/set已正确且未改，无陈旧presencefinding。真实canonicalStore+main全drain再恢复clock，未知响应COPY不改durablequeue，不回滚真实failclosed safety pause；old15wholecalls24roles/147only2/frozen全9字段/cache不变，LSP0errors1inconclusive非clean。**Tower662/188**完成observe-commit真实2path，新status-budget-core-clock OWNERactive，仅独立core预算clock核对/TDD，尚无其Source/tests新编辑；shared生产clock/actualports/CASABA/全cleanup/terminalIO/聚合budget仍开且须明确config handoff。无runningreviewer/worker，不poll已完成b78/301；拒读plan/protocopy及no bundle间接读持续，四非拒checkpoint独立核。以下7d及更早历史不得当当前pending gate。
+
+## 先前两release等待验收快照（7d/301）
 
 最新产品7d3b2a7已push/OWNER同HEAD两SHA及upstream0/0核实，61unique产品PASS/actualtsc0；fresh **301585f5-0541-402c-a4c7-1ae1086c4ff0 COMPLETE/实际报告全文已读/localaccept/no issues**，实际transcript **35read0其他tools**，无独立commands/Git/hash/stat，证据执行仍Owner负责。Owner据此仅接纳两existingwaits，receipt `/tmp/plugin-status-budget-release-waits-owner-01a1406d/owner-post-review-acceptance.json`，非SDKchecked/actualphysicalCASABA/全cleanup/clock/aggregatebudget/merge/release；报告Merge OK with notes不扩大此结论。
 

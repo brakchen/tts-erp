@@ -1,6 +1,14 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：两release等待已独立局部接受，继续owned canonical提交等待
+## 当前：canonical提交等待已独立局部接受，继续owned预算时钟
+
+产品 **`65e331cb1ab304ebe3cfa17c1eb4681c24c70dfa` 已push**，actual **24nonemit chain+39controller=63去重产品namedPASS/unpipedtsc0**。fresh **`b78e8806-f9d8-44c6-8483-20f7b8cab7ff` COMPLETE / observation-commit-wait local: accept / no issues**，实际24行报告已读，transcript **20read/0其他tools**；Owner另核当前HEAD/两SHA/upstream0/0后窄接纳，非SDKchecked/actualphysical/聚合budget/merge/release。Ownerreceipt=`/tmp/plugin-status-budget-observe-commit-owner-01a1406d/owner-post-review-acceptance.json`；候选/原始log/errata/typedcontrols/AST/冻结proof在同目录。SourceSHA`feeb3184104a86cc3e4f82fdf4cbb12538cc8987f33604734a67a6dc0b5edd87`，testSHA`1464d1a5bf3e0aa252fd31ba86796029b93599778d898424024e32d06e864eac`。
+
+真实PRESENT suspended初态、init耗40s、真实final canonicalqueueget与原Promise1进入，两intact/unreadable响应COPY案先**2业务RED24skip/type0**，Owner preedit后仅observeBinding末尾原commitWork立即观察/SAMEbudget.guard/sentinel STALE/no draft，其他返回实际committed（含appliedtrue/acceptedfalse，不rollback事实）；私有普通副本types双方0/current2PASS/newwindow2FAIL。原15完整it/it.each即24旧role精确、147only2delta/frozen全9字段/cache字节不变；产品2旧fixture仍dirty/未stage不称clean。LSP0errors/1inconclusive非clean，actualcompiler独立0。初snapshot7vs9字段误比较为metadata INVALID非实际冻结变化；初observer误挂unused store口，0-witness在deadline断言前失败为**INVALID fixture非业务RED**，已修到实际async status.reportObservation同实现同adoption，原件勘误保全。真实kernel既有queue→runtime→freshpresence→permit/set正确，没有陈旧presence finding；坏源真实安全pause保留不回滚，未声称physical cancellation。
+
+**Tower662/188**完成observe-commit真实2path回执/清旧blocker，新 **status-budget-core-clock OWNER in_progress**：先核既有clock/nowMs含义与官方monotonic/休眠语义，真实entered时钟交错业务RED/type0先于Source，保持一个原90s Budget owner，不加竞争clock/window、不改wire时间精度；当前这项尚无产品编辑/新case。Core默认预算时钟与共享生产clock接线分开，实际shared storage/background仍须config明确handoff，physical和aggregate仍blocked。当前无runningreviewer/worker，不poll已完成b78/301/d2/acf；OWNER直接继续独立scope，不扩大停工。拒读plan/protocopy/no settings或替代工具路径child/bundle间接读禁令不变，仍只四非拒checkpoint JSON/diff/LSP。
+
+## 先前两release等待验收快照（7d/301，早于本65e）
 
 **`7d3b2a7ff90af9ae4b5efeb60e8bfe4ff33a5e68` 已push，61unique产品namedPASS/actualtsc0。** fresh `301585f5-0541-402c-a4c7-1ae1086c4ff0`已COMPLETE，实际`/tmp/plugin-status-budget-release-waits-postgreen-owner-01a1406d/review.md`全文读核：**release-waits local: accept/no issues**。transcript实际**35read/0其他tools**；没有独立执行验证/Git/hash/stat，Owner已另核currentHEAD/两SHA/upstream0/0同候选，结合真实RED/GREEN/typedcontrols做**仅两现有等待的窄裁决**。Ownerreceipt=`/tmp/plugin-status-budget-release-waits-owner-01a1406d/owner-post-review-acceptance.json`。不是SDKchecked；其Merge OK with notes不等merge/release就绪，也不认证实际物理CAS/ABA/全cleanup/clock/聚合90秒。
 
