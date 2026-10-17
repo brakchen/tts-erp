@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：两条真实业务RED均独立复现，生产修复尚待四文件范围例外
+## 当前：OWNER直接完成terminal原fence最小修复并通过26命名回归，独立验收仍保留
+
+**最新用户指令覆盖旧worker流程**：后续由OWNER直接开发，不再调度worker；用户随后明确允许四枚举关联unit自动各一轮，不是full/coverage/build授权。本轮没有launch/resume任何worker/其他agent。接手后先重读产品AGENTS/README、canonical Source与7de独立架构建议，记录TaskStart(`/tmp/plugin-status-terminal-fence-direct-owner-01a1406d/task-start-snapshot.json`，e152612/147trackedhash/冻结2fixture全stat/cache)，并在现Source重跑两exactnamed得到**2FAIL9skip**。Change Necessity=code-change；TDD Route=strict(仓库+持久化授权风险)；Owner Fit=existing canonical owner/local-fix-without-new-responsibility，新增边界/预算/producer/runtime权威均不需要。当前用户授权与Owner pre-edit复核独立于旧c55 RED receipt，不编造新的独立reviewer UUID。
+
+仅改`src/extension/plugin-status-storage.ts::commitDecisionResult`：保留早期独立args.expect；捕获同commit、队列读取后按binding是否存在取fresh分类presence；复用bindingMutationPermitted形成同步permit，在normal/full与unreadable两个选定set前各检查，无await介入。拒绝直接返回previousLedger/queued:false/applied:false，不落拟议binding、completedledger、queue、runtimeproof；原runtime truthful STALE_CONTEXT处理继续。观察型/无proposal无需fence；合法ready/resume原子与满队列pending不改。不新增wire字段、flag、依赖、fallback、cast、runtime权威或物理写保护承诺。复杂度净增12行(+15/-3)，同owner，无新文件/新owner。
+
+第一修复即**两case2PASS9skip，actual产品unpiped tsc --noEmit exit0**；随后明确title选择：nonemit chain **9PASS2skip**（合法recover/resume/ack、HOLD、restart/superseder、queuefull、snapshot与两expiry），runtime **4PASS33skip**（observationonly原子terminal、真实appliedresume、typedrefusal/合法原fence），storage **13PASS34skip**（noproposal proof、queuefull/unreadable、absence/unknown/nonce/expiry、union）。唯一相关用例共**26PASS**，不把两case重复计成28。日志`direct-pre-RED.log`/`direct-GREEN.log`/`direct-tsc.log`/`related-*.log`与参数清单、direct-post-GREEN-proof.json在direct-owner目录。
+
+Owner新鲜Source检查确认两set都在last-read后且permit后无await；**这不是fresh独立postGREEN审查**。writer变为Owner后本轮没有独立评审agent，故只称局部GREEN candidate，不把既有7de pre-review、Owner自审或用户四文件例外当postGREEN独立验收。Caller仍in_progress，最终spec→quality与其余T4义务未关闭。
+
+代码commit/push **`809631f61551f26c201ca7707d858e7ae7e5d279`** `fix: 终态提交消费原始授权并拒绝过期事实`，仅stage该Source；SHA **`8f31558b77d89b2b863d05683b3d169a7773a62d55cf39bb2373b034c2e882fe`**。147tracked比TaskStart仅Source变；2旧生成fixture SHA/fullns/inode/nlink不变、modified未stage；产品自动runner cache字节不变（不能据此保证所有runner均无活动，未手动补跑四整文件）。active Source LSP **0error/33非error提示警告**，不称clean。未改SDK/global/profile，未重读被拒的installed/暂存清单；未做master/pin/version/release或真实网络/数据库操作。
+
+## 历史：两条真实业务RED均独立复现，生产修复当时尚待四文件范围例外
 
 Latequeue655实际1FAIL10skip（33ms）在本RECOVER ID非空ledger的phase为applied；原frame依然live时真实terminal调用携带**同commit/fence身份**，最后queue IO held期间sameclock使其false、samecanonical tuple后返回PRESENT malformed队列response COPY。654actualtype0；OWNER同named复现同appliedledger失败、实际产品unpipedtsc0。receipt前先核worker原始session：**EXACT2 Bash即654/655，无extra npx/compiler/Git/BashPython**，5次NativeEdit tool calls；old10整it、header、wholebuildWorld含snapshot精确，84仅test、2fixture SHA/fullns/inode/nlink/cache不变。当前test **`e455f333612948670beb1d272561ee1f77717e3204dbe4d069891c384f056bd4`**；独立proof/owner日志/actual-worker-command-audit在late-queue-owner目录。
 

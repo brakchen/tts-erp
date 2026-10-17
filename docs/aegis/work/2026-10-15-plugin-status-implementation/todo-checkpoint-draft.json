@@ -1,12 +1,22 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "Tower643/182 Caller in_progress：653与655两业务RED/OWNER各自复现，type0。fa/f8已native complete/terminal/review-required，DOMAIN7/c55 exact，actual2Bash无新增越权。仅test检查点e152612已push，2frozenfixtures未stage。Source4unit一次例外Operator尚未批准，生产不改；canonical owner已定，不扩大全项目停工。f408未闭。",
+  "currentTodo": "Caller in_progress：用户改为OWNER直接开发、禁止继续调度worker，已允许四unit自动各一轮。OWNER直接canonical Source修复809631f已push，fresh2RED->GREEN、26relatednamedPASS/actualtsc0；147trackedonlySourcechange，2fixture冻结未stage。独立postGREEN及最终specquality未做，不推整体Caller/T4完成。后续禁止resume/launch worker；保留独立审查欠账，不把Owner自审冒充独立。f408 broader风险未全闭。",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity"],
   "activeSlice": "继续最后queue await/坏队列分支RED：56/e03原生命令勘误+7de独立边界review已terminal，候选需覆盖两terminal写分支。当前fa4a8eee原writer先新preTEST WAIT，只允许integration一新增case及654/655，Source仍无权；未授权的13npx不追认。",
 
   "lastAcceptedSlice": "chain-integration-snapshot-fidelity：新root ae28e0da-0bdf-46df-a09c-f96f2bbc52bd exact-resumed478；先fresh架构/rename-only门禁，再精确改名+新路径同guard RED/type0/无自动9/fixture写，再distinct helper pre-edit后compose-only，再2产品named+7私有related+actual产品type0，再独立新postGREEN。A按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4已执行且独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad获批，独立2产品+7私有相关案/实际产品tsc0/全scope后局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受，已核Native complete/review-required/terminal与真实7字段/6425 hash；0bab已push，2fixture仍modified未stage，不扩全Caller/T4。",
   "currentExecution": {
+    "mode": "owner-direct-no-worker",
+    "operatorGrant": "用户明确直接接手、不调度worker，允许四枚举unit自动各一轮；非full/coverage/build授权",
+    "sourceCommit": "809631f61551f26c201ca7707d858e7ae7e5d279 pushed",
+    "snapshot": "/tmp/plugin-status-terminal-fence-direct-owner-01a1406d/task-start-snapshot.json",
+    "proof": "/tmp/plugin-status-terminal-fence-direct-owner-01a1406d/direct-post-GREEN-proof.json",
+    "state": "GREEN candidate:current2RED->2GREEN,related26PASS,producttsc0; onlycanonicalSource+15/-3, args.expect preserved, helper/freshpresence/two synchronous guards, no runtimeowner",
+    "integrity": "147trackedonlysource delta,2fixturesSHA+fullstatunchangedUNSTAGED,productcacheunchanged(notglobalguarantee); SourceLSP0errors/33nonerror",
+    "remaining": "independentpostGREEN notrun; Ownerdirectinspection notindependent, no fakegate. Caller/T4/physicalbudget/actions/Cookie/finalspecquality/ERP/T5/release incomplete. Never resume/launchworker."
+  },
+  "lastWorkerExecution": {
     "root": "fa4a8eee-fbf8-4735-adf3-69843ae9ac4a",
     "resumedFrom": "e03dda1d-3172-431a-8c0b-d5995adec493",
     "preTestGate": "979fd741-608f-4aef-8715-3591bd139842",

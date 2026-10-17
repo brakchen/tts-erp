@@ -66,7 +66,13 @@ OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check�
 
 上述corrected-design root437688b5/child4d7be134原生拒绝：`commands-run evidence missing from child report`；其needs_context/空delta/空gate保留但不算验收。快照`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/`已保存、产品逐字冻结未改。仅同协议exact-resume证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`运行，允许一次真实unpipedtsc并如实列Commands run，不换model/CLI、不降checked、不造命令证据、不授源码许可。valid-record→absence误断已撤回，独立missing-identity exploit仍未证；materialization/factory设计未决。fb42是Git commit非SHA256，approved/current文档确有后续修改，但初始化episode锚点在approved中，不能混hash类型推断协议损坏。
 
-### 当前：两真实RED与命令边界均已核，源码边界既定但未获执行权
+### 当前：OWNER直接实现canonical fence消费，GREEN候选未冒充独立验收
+
+用户改为Owner直接开发/不调度worker并批准四unit自动一轮；本轮无委派。沿用7de架构方案且重读现Source/测试，147tracked TaskStart+fresh两named RED在edit前保存；仅canonical Source通过fresh分类presence与两set前同步permit消费原fence，保留args.expect/obsonly/无proposal/fullqueue pending；不加runtime precheck。第一次修复两RED转GREEN，实际producttsc0，nonemit chain9/runtime4/storage13合计26namedPASS；Source809631f已push(+15/-3)，2旧fixture全stat不变未stage、产品cache不变，LSP0error/33非error。
+
+本轮postGREEN检查由实际writer Owner自做，**不独立，不替代fresh独立postGREEN或最终spec→quality**，Caller/T4未结束。后续禁止resume/launch worker；旧c55及native review-required仍只代表历史TESTS-ONLY RED阶段。物理mutation/单operation预算/actions/Cookie/T5仍另案。证据`/tmp/plugin-status-terminal-fence-direct-owner-01a1406d/direct-post-GREEN-proof.json`。
+
+### 历史：两真实RED与命令边界均已核，源码边界当时既定但未获执行权
 
 655与OWNER同named1FAIL10skip、654/OWNER实际type0；真实末次queue读取中原fence失效后，THIS nonemptydecision ledger仍applied。fa/f8 nativecomplete/process terminal/review-required非SDKaccepted；DOMAIN7/c55 exact。receipt前实际原session审计仅654/655两Bash/无extra npx；old10/header/wholehelper字节相同，84仅testdelta/2fixture全stat/cache不变。仅test检查点 **`e1526126f5ed4588a17b2d1149d9726974aa43c3`**已push；不是修复或完成。Owner明确canonical commitDecisionResult/helper末await后两写分支门禁，不采用runtime-onlyprecheck；Operator四unit一次例外仍待答复，Source不改，未到的后续断言不称通过。
 

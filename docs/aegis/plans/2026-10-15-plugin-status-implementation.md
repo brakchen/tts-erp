@@ -28,7 +28,13 @@ corrected-design root437688b5/child4d7be134因原生`commands-run evidence missi
 
 历史接受基线：当前已接受**十一微切片**，第十一最终gate`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`/root7187c653/child6ee1cecc已原生terminal七字段核读。provisioning单set写已有closed初始化episode、纯构造器迁storage唯一19字段owner/controller传原newId，不改unknown/fence/union；首heartbeat报告同episode。独立48去重产品named+1私有probe PASS、producttsc0、两反事实杀死且tsc0/精确三path证明。LSP0reported errors但3inconclusive；其余七chain仍未知、完整T4未完成。产品聚合16-path检查点18d0887已push且树clean，仅保存原12034行WIP，不是全验收/发布或master/pin变更。原artifact test-before fb11为held中间态，真实微切片基线ef333→91a4已记erratum，不改原稿。证据`/tmp/plugin-status-owner-provision-initial-record-01a1406d/`。
 
-### 当前：双业务RED已验证并推送检查点，生产权限另待确认
+### 当前：用户改为OWNER直接开发，terminal fence候选修复26命名用例通过
+
+用户已明确不再调度worker，随后允许四枚举关联unit自动各一轮；OWNER直接完成canonical `commitDecisionResult`原fence消费：freshpresence在queue await后，normal/full和unreadable两个set前同步复用helper，拒绝不落拟议terminal事实，保留args.expect/obsonly/noproposal兼容。不改runtime/producer/协议/版本，非物理mutation/budget修复。TaskStart与现Source2RED在edit前记录；第一修复2GREEN+actualproducttsc0，nonemit chain9+runtime4+storage13共26namedPASS。Source仅+15/-3，**`809631f61551f26c201ca7707d858e7ae7e5d279`**已push；2冻结fixture未stage/全stat不变，147tracked仅Sourcedelta。
+
+独立pre架构建议7de已复用，但**本轮postGREEN只有OWNER检查，没有独立评审，不称局部正式接受或Caller/T4完成**。保留独立审查欠账/最终spec→quality；不能再resume旧worker。当前候选的验证不是full/coverage/build/release或浏览器验证。详见checkpoint及`/tmp/plugin-status-terminal-fence-direct-owner-01a1406d/`。
+
+### 历史：双业务RED已验证并推送检查点，生产权限当时另待确认
 
 653与655均OWNER同named独立复现，actualtype0；后者1FAIL10skip在非空本decisionledger已applied。fa/f8 nativecomplete/terminal/review-required（非SDKaccepted）、DOMAIN7/c55精确，命令审计本pass EXACT654/655两Bash，无额外npx。仅test检查点 **`e1526126f5ed4588a17b2d1149d9726974aa43c3`**已push，2旧fixture未stage，生产P1未修。canonical storage/helper/最后await/两写分支边界已定，runtime-onlyprecheck不是等价候选。Operator一次自动四unit例外未确认，Source仍无授权，Caller仍in_progress，非全项目停止。
 
