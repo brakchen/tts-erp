@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：终态原预算c2dec65/122PASS已窄接纳；物理端口只读准备已交付，共享写等明确交接
+## 当前：测试门禁修复387fbe3/22PASS已窄接纳；生产c2不变，继续受共享交接边界约束
+
+fresh **31d97a91-b176-450d-b9ed-fc231e91107f / childc802851d-6994-4683-9845-4a76c3cef2db COMPLETE/localaccept/No issues found**，实际七字段JSON报告已全文读/parse；真实session **14read+1nativecontact/0其他/0工具错误/0白名单外读取**。OWNER同 **387fbe3622c60220e8a942a2aac5a18a26491514**/testSHA/upstream0-0/空index核后，仅接纳controller测试gate isolation；receipt `/tmp/plugin-status-gate-isolation-owner-01a1406d/owner-post-review-acceptance.json`。22unique相关namedPASS/actualunpipedtsc0为OWNER实际执行，reviewer未独立跑Git/编译/hash。此修复只退休无关stop reset、保合法one-shot/beforeEach，所有旧case相同、生产Source不改，不是physical或整体接受；LSP仍0error1inconclusive。**当前无running reviewer/worker，不重等已完成31d/c802或任何历史reviewer**。物理/CASABA/fullcleanup/sharedclock/actionsCookie/specqualityERP/T5/browser/build/release/f408仍开，新增拒读/no-bundle边界继续。
+
+## 测试门禁修复候选启动快照（历史；31d现已窄接纳）
+
+继续完成不因physical交接等待停掉独立owned工作。`status-controller-gate-isolation`（Tower672新建，f-b7b24e8c-ef9已accepted）仅改 `tests/tab-binding-controller.test.ts`：firstReadGate消费分支误清独立stopGate，真实未能证明进入stop的旧配置会直接完成。先新54行真实wake→storage→stop→canonical rebuild回归；actualunpipedtsc0、**1业务/harness行为FAIL/116skip**，明确expected stop-entered / received completed，非timeout/fixture/type。OWNER独立preedit后只移除此处stopGate=null，保beforeEach与stop adapter自身合法reset/所有旧case。新案1PASS与相关22PASS重叠，当前只报**22unique namedPASS/95skip、actualunpipedtsc0**，不加历史122。双gate全finally释放、原main立即观察并drain，无sleep/poll。Source/其他9watched文件SHA相同，frozen9/cache同，LSP0reportederror但1inconclusive/0clean。无生产变更或physical接线，版本/协议/既有canonical owner不改。
+
+候选 **387fbe3622c60220e8a942a2aac5a18a26491514** 已push/upstream0-0，仅1owned test54+/1-，2冻结fixture仍dirty unstaged不stage。证据 `/tmp/plugin-status-gate-isolation-owner-01a1406d/` 的TaskStartSnapshot、owner-preedit、RED/GREEN logs/results、named-selection、integrity-proof、candidate。fresh **31d97a91-b176-450d-b9ed-fc231e91107f** 新只读agent status-gate-isolation-readonly（仅read/nativecontact，无commands/search/board/extensions/skills继承），输出 `/tmp/plugin-status-gate-isolation-postgreen-owner-01a1406d/review.md`；这是LAUNCH快照，不推定接受或永远running，先实际报告/native终态/工具审计/同HEADSHA裁决。不resume任何历史reviewer；C2生产终态接受不因此重开，也不当作本新test接受。
+
+新增一次ctx_execute_file拒读 `/tmp/plugin-status-terminal-window-owner-01a1406d/post-witness-verification-results.json`（host错根/pi-web issue852），**未换工具/副本/child/settings重读**，本步不作证据；从当前可读Source真实TS resolved helper consumers另选22案。此路径加入既有拒读/no-bundle边界。物理静态prep已在Tower671完成/文档05b4ad3push，shared config branchHEAD/writequeue仍无明确回复，physical/CASABA/fullcleanup/clock及父项actionsCookie/specqualityERP/T5/browser/build/release仍开，整体未完成不合并发布。
+
+## 终态原预算接纳快照（历史c2dec65/122PASS；不授当前fixture接受）
 
 fresh **b1e57359-5932-4f7d-9cc7-68ffcd76ba0e / child7aa13667-80fa-46fa-9bd7-cdd5b29bc585 COMPLETE/localaccept/No issues found**，实际报告52逻辑行（51换行）已全文读核，真实session **44read/0其他tool/0工具错误/0拒读路径**。OWNER复核同 **c2dec65440ba614813eb328ebe8344c4e0b31918**、7ownedSHA、push/upstream0-0/空index，frozen九字段/specific cache/storage kernel仍同起点后，**仅接纳terminal-original-window-canonical-raw-drain**；receipt `/tmp/plugin-status-terminal-window-owner-01a1406d/owner-post-review-acceptance.json`。122=49chain+53controller+20runtime，actualunpipedtsc0，非累加历史/selected；reviewer没有执行Git/编译/hash/semantic核验，这些是OWNER证据。原expired/tail等终态反例已GREEN，不继续把历史2RED当当前；Merge字样不是合并/发布许可。首audit parser遇字符串content误用filter属INVALIDsetup，Array.isArray修后审计通过，原log保留；LSP仍0error/2clean3inconclusive。
 

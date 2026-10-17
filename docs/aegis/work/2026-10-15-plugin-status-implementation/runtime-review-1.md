@@ -4,7 +4,17 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：c2dec65终态原预算切片已窄接纳，后继physical仅静态准备，未整体交付
+## 当前：387fbe3测试门禁切片已窄接受/22PASS；生产Source不变，physical仍待共享交接
+
+fresh31d97a91/childc802851d **workflow和child COMPLETE/localaccept/No issues found**，实际七字段报告已全文读parse；session14read+1nativecontact、0其他/工具错误/白名单外读取。OWNER同387fbe3622c60220e8a942a2aac5a18a26491514/testSHA/upstream0-0/空index核后，只接纳test-harness gate isolation；receipt `/tmp/plugin-status-gate-isolation-owner-01a1406d/owner-post-review-acceptance.json`。22unique相关PASS/actualtsc0为OWNER执行，reviewer未跑独立Git/编译/hash；删除无关reset，保beforeEach/stop自身reset，无生产改动。不新建生产owner/ABI、不授physical/aggregate/SDKchecked/merge/release。当前无runningreviewer/worker，不等或poll31d/c802或其他已完成reviewer。后继物理共享交接/生产时钟与既有未闭门保持；LSP0error但1inconclusive，所有拒读/no-bundle继续。
+
+## 测试门禁候选启动快照（历史；31d已实际窄接受）
+
+独立推进f-b7b24e8c-ef9/Tower672 status-controller-gate-isolation，首read branch不应抹独立stopGate。新增真实wake canonical read→safety stop→rebuild回归，未改生产逻辑。RED actualunpipedtsc0、1FAIL116skip expected stop-entered/received completed（不是timeout）；OWNER preedit后只删getter无关reset，保beforeEach与stop自身reset。新54行test观察真实entry与main完成race，第二真实read证明one-shot，stop释放前canonical/business未变、释放后重建与clear真实发生；finally释放双gate并drain。**22unique相关namedPASS/95skip/type0**，新1PASS包含其中，不加历史122；所有旧case字节相同，其他9watched/source/frozen9/cache同；LSP0error但1inconclusive/0clean。
+
+候选387fbe3622c60220e8a942a2aac5a18a26491514已push/upstream0-0，仅owned test54+/1-，2frozen仍dirtyunstaged不碰。证据 `/tmp/plugin-status-gate-isolation-owner-01a1406d/`；fresh31d97a91-b176-450d-b9ed-fc231e91107f 全新只读profile仅read/nativecontact，输出 `/tmp/plugin-status-gate-isolation-postgreen-owner-01a1406d/review.md`，这是LAUNCH状态快照，等待实际报告/audit/OWNER同HEAD裁决，不提前accept、不resume历史reviewer。生产c2 terminal接受保留；physical/handoff及整体门仍开。新增post-witness-verification-results.json错根拒读不换工具/副本/child重读，改从当前Source语义选22案；所有拒读/no-bundle保持。
+
+## 终态原预算接纳快照（历史c2dec65；不是新fixture门接受）
 
 fresh **b1e57359/child7aa13667 COMPLETE/localaccept/No issues found**，实际52逻辑行报告已读，session **44read0其他/0工具错误/0拒读路径**；OWNER核同c2dec65440ba614813eb328ebe8344c4e0b31918/7SHA/upstream0-0/空index/frozen9/cache后，仅接纳terminal-original-window-canonical-raw-drain。receipt `/tmp/plugin-status-terminal-window-owner-01a1406d/owner-post-review-acceptance.json`。122unique相关PASS/actualunpipedtsc0和5controls业务FAIL为OWNER实际执行，reviewer未独立跑命令/Git/hash/semantic；不把Merge verdict当合并许可。初audit脚本字符串content误用filter已独立修正，不是Source或审查违规；原记录保留。Source LSP0error但2clean3inconclusive，非all-clean。
 
