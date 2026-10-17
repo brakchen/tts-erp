@@ -1,6 +1,14 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照（2026-10-16）
+## 当前执行快照（2026-10-17）
+
+用户要求继续完整产品，OWNER继续直接实现/测试/Git，**不再launch/resume任何worker**；只读独立reviewer仅承担既定复核，不写产品或跑命令。Terminal补丁`809631f`已由fresh只读reviewer **`6010e42d-f772-4bed-8e2a-8e084cf92304`**局部accept，OWNER据既有26named/type0及该报告接纳这一窄补丁；不是SDK checked接受、合并权或全Caller完成。同审查发现独立既存P1：旧snapshot/observe在首次read等待期间被新HOLD撤权，子ensureInitialized却借新generation先重建事实，外层随后拒绝已经太晚。
+
+OWNER现Source先得到两真实HOLD交错RED/type0，再在既有controller内传递父原frame/首次scalar PRE，child read已知mismatch或原parent失权即只返回带原拒绝fence的只读preview、不开始子变更/cleanup；合法self-revocation仍先消费parent再用own generation。snapshot/observe/recovery均沿用同原frame，不新增authority/schema/port/module。补same-epoch nonce两案，普通私有copy仅controller差异：旧Source4业务FAIL→候选4PASS；最初filter零选择15skip另存勘误，不算RED/GREEN。最终当前产品nonemit chain13+controller39共**52去重namedPASS**、实际unpiped `tsc --noEmit` exit0，旧11完整it字节精确；仅controller+integration两path，冻结两fixture全stat/cache不变。源码/测试检查点 **`0716442a37063868b862f717d386e509ef6781ee`**已push，候选不冒充已终审。
+
+其后5d独立审查正确changes-needed：已拒初始化preview仍被observe负选择委派进入invalidation、先撤gen/stop；虽无旧durable写，仍损伤当前producer许可。OWNER先新增LOGIN_REQUIRED/IDENTITY_MISMATCH真实2RED4PASS11skip/type0（同controller当前snapshot witness被错误撤权、实际canonical apply:false），再仅observe子入口加10行原liveness/原PRE精确比较；不新建owner/flag/schema/port或重开budget。最终当前产品 **15nonemit chain+39controller=54去重namedPASS、actualtsc0**；well-typed private denyallcontrol被现有真实live-parent正案杀死，invalidsetup/type/emptyselection均排除并存勘误。Source/tests **`130c395fd8d3ca04db80d1ca827e2dbb755636f0`**已push，仅两path；两冻结fixture全stat/cache不变、原11整it精确，LSP0reportederrors/1inconclusive非clean。
+
+Fresh独立 **`acfef23b-631a-4970-b778-d2b6facdd4ce`**已complete：corrected parent/observe **accept**、logicalCaller **ready-for-budget**。OWNER结合实际证据窄接纳；advisory不是SDKchecked/merge/全产品验收。Tower **647/184**仅完成Caller/7path回执；新`status-budget-init-read` in_progress，`status-budget-ports` pending待明确config热点handoff，聚合budget blocked依赖两子项。下一步直接读批准S1与Budget owner，先真实entered RED，不等用户再催、不启动worker或新reviewer空等。预算/physical/actions/Cookie/finalspec→quality/ERP/T5/browser/发布仍未闭。共享`storage.ts`/background/scheduler未答复前不写；独立controller不扩大停工。最新证据`/tmp/plugin-status-observe-denied-preview-owner-01a1406d/`；实际接受报告`/tmp/plugin-status-observe-denied-preview-postgreen-owner-01a1406d/review.md`。此前0716/52GREEN只是被5d纠正的候选，全部原件/历史worker流程保留但不再授新worker权。
 
 纯核已交付；runtime 仍实施中，未合并、发布或整体验收。唯一协议是 `docs/plugins/plugin-status-report.md`（批准基线 `fb42e16575a241fec88740d69137ae6a8153c2bb`）。当前技术断点与证据见本目录 work record 的 `20-checkpoint.md`、`runtime-review-1.md`。
 
@@ -28,7 +36,7 @@ corrected-design root437688b5/child4d7be134因原生`commands-run evidence missi
 
 历史接受基线：当前已接受**十一微切片**，第十一最终gate`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`/root7187c653/child6ee1cecc已原生terminal七字段核读。provisioning单set写已有closed初始化episode、纯构造器迁storage唯一19字段owner/controller传原newId，不改unknown/fence/union；首heartbeat报告同episode。独立48去重产品named+1私有probe PASS、producttsc0、两反事实杀死且tsc0/精确三path证明。LSP0reported errors但3inconclusive；其余七chain仍未知、完整T4未完成。产品聚合16-path检查点18d0887已push且树clean，仅保存原12034行WIP，不是全验收/发布或master/pin变更。原artifact test-before fb11为held中间态，真实微切片基线ef333→91a4已记erratum，不改原稿。证据`/tmp/plugin-status-owner-provision-initial-record-01a1406d/`。
 
-### 当前：用户改为OWNER直接开发，terminal fence候选修复26命名用例通过
+### 历史：OWNER直接开发的terminal初次候选（其后6010独立审查已局部accept）
 
 用户已明确不再调度worker，随后允许四枚举关联unit自动各一轮；OWNER直接完成canonical `commitDecisionResult`原fence消费：freshpresence在queue await后，normal/full和unreadable两个set前同步复用helper，拒绝不落拟议terminal事实，保留args.expect/obsonly/noproposal兼容。不改runtime/producer/协议/版本，非物理mutation/budget修复。TaskStart与现Source2RED在edit前记录；第一修复2GREEN+actualproducttsc0，nonemit chain9+runtime4+storage13共26namedPASS。Source仅+15/-3，**`809631f61551f26c201ca7707d858e7ae7e5d279`**已push；2冻结fixture未stage/全stat不变，147tracked仅Sourcedelta。
 
@@ -74,7 +82,7 @@ root986d1b1a-c8f5-437d-97ae-6aed9d9282a9/childd478332e-c442-40fe-a445-ed6c5bfd64
 
 ## Goal
 
-实施已批准协议的 D1–D4：monitor 单 Seller/Advertiser 自动绑定、失效安全暂停、ERP 状态与生命周期通知、受限恢复。保持首次服务端放行、独立 status key、离线不得自行恢复、完整 fresh close 快照门禁。OWNER负责设计一致性、独立验收和协调，原 MiniMax M3.1 Flash Preview 是唯一产品 writer，不换模型/CLI。
+实施已批准协议的 D1–D4：monitor 单 Seller/Advertiser 自动绑定、失效安全暂停、ERP 状态与生命周期通知、受限恢复。保持首次服务端放行、独立 status key、离线不得自行恢复、完整 fresh close 快照门禁。OWNER直接负责实现、测试、设计一致性、验收、协调和Git；只读独立reviewer不承担编码或命令，禁止恢复旧worker流程。历史原MiniMax唯一writer约束不再授予任何新worker启动权；不改SDK/profile/CLI绕过约束。
 
 ## Architecture
 

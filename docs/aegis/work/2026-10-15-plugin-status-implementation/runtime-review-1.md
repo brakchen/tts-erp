@@ -2,7 +2,23 @@
 
 ## 接受边界
 
-整体仍 **BLOCKED / 未交付**。纯核与十个微切片局部接受，不等于全部 callers/T4、完整预算、物理副作用、ERP 接线或发布通过。唯一协议：`docs/plugins/plugin-status-report.md`。旧 full/coverage/build、预审、HOLD和native complete不替代当前完整验收。
+整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
+
+## 当前：修正后Caller独立accept，转入原操作预算
+
+**`acfef23b-631a-4970-b778-d2b6facdd4ce`**已complete，实际报告`/tmp/plugin-status-observe-denied-preview-postgreen-owner-01a1406d/review.md`已全文核：corrected-parent/observe postGREEN **accept**、logicalCaller **ready-for-budget**，无findings。OWNER据54named/actualtsc0与该只读独立advisory窄接纳；不称SDKchecked、merge或完整产品接受。代码 **`130c395fd8d3ca04db80d1ca827e2dbb755636f0`**已push，仅controller+integration；两旧fixture冻结未stage、无pin/version/发布。
+
+前一5d审查正确否定0716候选：已拒绝初始化preview后，observe的负选择仍借gen/budget-only原predicate进入invalidation，先撤gen/stop再被canonical拒绝。OWNER新TaskStart/测试先行：LOGIN_REQUIRED和IDENTITY_MISMATCH两案实际**2RED4PASS11skip/type0**，三soft oracle均执行（stop、新当前witness live→false、真实canonical witness applied:false），并非旧fact写入。仅在observe子入口加10行原liveness+首scalar PRE精确比较，同frame透传；合法self-revocation/standalone及canonical owner保留，无newhelper/flag/port/schema/预算。第一修复6GREEN，相关 **15chain+39controller=54去重PASS、actualproducttsc0**。existing live observe-parent正案当前1PASS；typed private alwaysdeny追加Number.isFinite(0) control tsc0/同正案1FAIL，排除denyall。TS2339虚构fakeoption、literaltrue控制的TS18047、title截断导致17skip均INVALID排除保原件；正确source/type/selectedRED日志另存，不重写历史。原11it精确、147only2delta、fixture fullstat/cache相同，LSP0reportederror/1inconclusive非clean。证据`/tmp/plugin-status-observe-denied-preview-owner-01a1406d/`。
+
+Tower647只完成逻辑Caller（实际7path回执）。budget聚合仍blocked：`status-budget-init-read`现in_progress/OWNER，先验证初始化/negative read同原90秒、unknown不当absence；`status-budget-ports`待前项及config owner明确热点handoff，保护实际写/两release，不以外层race代替physical fence。当前无运行中的reviewer/worker，后续继续直接开发，不把已结束review写成pending而停工。actions/Cookie/fresh最终spec→quality/ERP/T5/browser/release仍开；共享storage/background未获答复不写，scope只是协调意向。
+
+## 历史候选：0716父→子初始化52GREEN及5d审查前快照
+
+只读独立reviewer **`6010e42d-f772-4bed-8e2a-8e084cf92304`**已complete：接受809631f terminal补丁，OWNER据26named/type0与该报告窄接纳；同时给logical Caller changes-needed，独立P1是旧parent首read后child ensureInitialized借新HOLD代次落重建事实，不是terminal修复引入的回归。
+
+OWNER先在现Source以真实snapshot/observation+pendingHOLD交错得到**2业务RED11skip/type0**，再给ensureInitialized传父原frame并冻结原scalar PRE；child已知mismatch/父失权只返回带原拒绝frame的只读preview，不能子重建/cleanup，自撤权前消费parent、后用own mutation generation。snapshot/observe/recovery均传同frame，standalone保留，不新增authority/schema/port/module。补同epoch nonce两案，普通私有旧Source4业务RED/候选4GREEN，已知mismatch不能仅靠outerguard而先stop。初filter15skip排除，原件和selection-erratum保留。最终当前产品nonemit13+controller39=**52namedPASS**、actualproducttsc0；旧11整it精确、仅controller/integration两path，冻结fixture fullstat/cache不变。Source两个新nestedternary提示原位if改写后复验；active LSP0reportederrors/1inconclusive，非clean。
+
+候选commit/push **`0716442a37063868b862f717d386e509ef6781ee`**，证据`/tmp/plugin-status-parent-init-owner-01a1406d/{post-GREEN-proof,final-results,control-results-selected,selection-erratum}.json`。Fresh只读postGREEN **`5d299aea-16f9-49ec-84c5-37b0ef65a55d`**运行中，输出`/tmp/plugin-status-parent-init-postgreen-owner-01a1406d/review.md`；分别审此patch与logical Caller是否可解锁budget，不预设接受，不替代最终spec→quality。无worker实现/跑命令；共享storage/background/popup待config owner明确handoff，未写。预算/physical/actions/Cookie/ERP/T5/browser/fullrelease仍分开待闭。下方先前候选欠账描述均是历史阶段。
 
 ## 当前实现与唯一 owner
 
@@ -66,7 +82,7 @@ OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check�
 
 上述corrected-design root437688b5/child4d7be134原生拒绝：`commands-run evidence missing from child report`；其needs_context/空delta/空gate保留但不算验收。快照`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/`已保存、产品逐字冻结未改。仅同协议exact-resume证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`运行，允许一次真实unpipedtsc并如实列Commands run，不换model/CLI、不降checked、不造命令证据、不授源码许可。valid-record→absence误断已撤回，独立missing-identity exploit仍未证；materialization/factory设计未决。fb42是Git commit非SHA256，approved/current文档确有后续修改，但初始化episode锚点在approved中，不能混hash类型推断协议损坏。
 
-### 当前：OWNER直接实现canonical fence消费，GREEN候选未冒充独立验收
+### 历史：OWNER直接实现terminal候选（其后6010独立审查已局部accept）
 
 用户改为Owner直接开发/不调度worker并批准四unit自动一轮；本轮无委派。沿用7de架构方案且重读现Source/测试，147tracked TaskStart+fresh两named RED在edit前保存；仅canonical Source通过fresh分类presence与两set前同步permit消费原fence，保留args.expect/obsonly/无proposal/fullqueue pending；不加runtime precheck。第一次修复两RED转GREEN，实际producttsc0，nonemit chain9/runtime4/storage13合计26namedPASS；Source809631f已push(+15/-3)，2旧fixture全stat不变未stage、产品cache不变，LSP0error/33非error。
 

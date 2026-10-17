@@ -1,12 +1,29 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "Caller in_progress：用户改为OWNER直接开发、禁止继续调度worker，已允许四unit自动各一轮。OWNER直接canonical Source修复809631f已push，fresh2RED->GREEN、26relatednamedPASS/actualtsc0；147trackedonlySourcechange，2fixture冻结未stage。独立postGREEN及最终specquality未做，不推整体Caller/T4完成。后续禁止resume/launch worker；保留独立审查欠账，不把Owner自审冒充独立。f408 broader风险未全闭。",
-  "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity"],
-  "activeSlice": "继续最后queue await/坏队列分支RED：56/e03原生命令勘误+7de独立边界review已terminal，候选需覆盖两terminal写分支。当前fa4a8eee原writer先新preTEST WAIT，只允许integration一新增case及654/655，Source仍无权；未授权的13npx不追认。",
+  "currentTodo": "Tower647/184：逻辑Caller已完成/7path回执；OWNER直接继续status-budget-init-read（初始化/negative read同原90秒），先读批准S1与现Budget owner，再真实entered RED/另Source裁决。聚合budget blocked依init-read与ports；ports需config owner明确热点handoff，不写共享storage/background。130c395已push，当前54unique相关PASS/actualtsc0及fresh独立acfaccept，只接受逻辑Caller，不扩T4/发布。无runningreviewer/worker，不轮询或等用户催；禁止launch/resume worker。四unit自动一次例外不扩futurefull授权，f408 broader未全闭。",
+  "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity", "status-runtime-callers"],
+  "activeSlice": "status-budget-init-read：先复核当前Budget.guard/初始化与negative-evidence I/O真正entered/原90秒边界和复用方案；此刻只转入摸底、未编辑该子项Source/tests或跑新预算用例；不得将expired/unknown视absence或借新window。实际physical/two-release另ports子项待handoff。Owner直接实现/测试，独立review仅审查。",
 
-  "lastAcceptedSlice": "chain-integration-snapshot-fidelity：新root ae28e0da-0bdf-46df-a09c-f96f2bbc52bd exact-resumed478；先fresh架构/rename-only门禁，再精确改名+新路径同guard RED/type0/无自动9/fixture写，再distinct helper pre-edit后compose-only，再2产品named+7私有related+actual产品type0，再独立新postGREEN。A按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4已执行且独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad获批，独立2产品+7私有相关案/实际产品tsc0/全scope后局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受，已核Native complete/review-required/terminal与真实7字段/6425 hash；0bab已push，2fixture仍modified未stage，不扩全Caller/T4。",
+  "lastAcceptedSlice": "Logical Caller corrected-parent/observe:130c395fd8d3ca04db80d1ca827e2dbb755636f0 pushed; fresh acfef23b-631a-4970-b778-d2b6facdd4ce COMPLETEaccept/logicalready-for-budget, OWNER据54actualnamed/type0与范围proof窄接纳；advisory非SDKchecked/merge/全产品。之前terminal809631f由6010局部accept；0716初候选被5dchanges-needed后才补10line child-entry guard。",
+  "lastChainAcceptedSlice": "chain-integration-snapshot-fidelity：新root ae28e0da-0bdf-46df-a09c-f96f2bbc52bd exact-resumed478；先fresh架构/rename-only门禁，再精确改名+新路径同guard RED/type0/无自动9/fixture写，再distinct helper pre-edit后compose-only，再2产品named+7私有related+actual产品type0，再独立新postGREEN。A按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4已执行且独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad获批，独立2产品+7私有相关案/实际产品tsc0/全scope后局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受，已核Native complete/review-required/terminal与真实7字段/6425 hash；0bab已push，2fixture仍modified未stage，不扩全Caller/T4。",
   "currentExecution": {
+    "mode": "owner-direct-no-worker",
+    "sourceCommit": "130c395fd8d3ca04db80d1ca827e2dbb755636f0 pushed",
+    "sourceSha": "ad75f2a7e469091a9a24cafd6e92875e445b5b808f275369d10a8153d70c5d3a",
+    "testSha": "c0a118ab2e8873087bcbff075464a8384ba66ce51708049ea6a95f6f53aeed85",
+    "snapshot": "/tmp/plugin-status-observe-denied-preview-owner-01a1406d/task-start-snapshot.json",
+    "proof": "/tmp/plugin-status-observe-denied-preview-owner-01a1406d/post-GREEN-proof.json",
+    "state": "LogicalCaller OWNERaccepted after actual54uniqueproductPASS/type0/freshreadonlyacf, Tower647complete7paths; nextbudget-init-readactive, no fullT4/release",
+    "precedingCorrection": "5d correctlychanges-needed on0716/52candidate: known-denied initpreview stilldelegatednegativechild, gen++/stopbeforecanonicalrefusal; fixedwithoriginalscalarPRE/liveness BEFOREchildentry, sameframe, no newowner/helper/flag/port/schema/window",
+    "tdd": "New real2negativepageRED4PASS11skip/type0 BEFOREsource; eachrealstop/currentwitnessgenfalse/actualcanonicalapplyfalse, no staleoverwrite. Firstfix6PASS; productrelated15chain+39controller=54UNIQUEPASS, actualunpipedproducttsc0; currentliveparentpositive1PASS/privatewelltypeddenyall1FAIL+tsc0 not countedextra",
+    "invalidExcluded": "TS2339 guessedfakeoption,Vitesttruncatedtitle17skip,private literaltrueTS18047 allINVALID/excluded, correctedlogs/errata retained; old15skip likewiseinvalid",
+    "integrity": "147trackedonlycontroller+integration;exact10linesourcefollowup,old11completeitbyteexact;twofixtureSHA/fullns/inode/nlinksameUNSTAGED/cachebytesunchanged(notglobalguarantee);LSP0reportederrors/1inconclusiveNOTclean",
+    "review": "acfef23b-631a-4970-b778-d2b6facdd4ce complete/accept/localready;actualreport /tmp/plugin-status-observe-denied-preview-postgreen-owner-01a1406d/review.md readfully. No reviewercommands/hashrecompute; OWNERprovenance separate, not SDKchecked",
+    "next": "budget-init-read in_progress before newTaskStart/RED; ports pendingconfig-ownerexplicit sharedhandoff; aggregatebudget blockedtwochildren; no reviewer/worker nowrunning",
+    "remaining": "physicalmutation/aggregate90s/negative-read/tworeleases/durableclaim/actions/Cookie/identityABA/sharedwiring/finalfreshspecquality/ERP/T5/browser/fullcoveragebuild/release incomplete; neverlaunch/resumeworker"
+  },
+  "lastTerminalExecution": {
     "mode": "owner-direct-no-worker",
     "operatorGrant": "用户明确直接接手、不调度worker，允许四枚举unit自动各一轮；非full/coverage/build授权",
     "sourceCommit": "809631f61551f26c201ca7707d858e7ae7e5d279 pushed",
@@ -101,7 +118,8 @@
     "此前Owner其余七private7PASS1skip+已验首案=八变体knownGREEN，setup缺wxt.config的TS2307排除、补齐private/producttsc0；不重新泛称余七未知。第十一48产品named+1私有factory probe、两control、19fields/3UUID顺序、scopeproof有效；LSP0error/3inconclusive非clean。",
     "frame仍d871，两个生成fixture modified封存未restore/stage，18d聚合WIP与d871 RED检查点都不是全验收/master/pin/version/release。可疑外部命令未经独立字节证实，不执行或解码。"
   ],
-  "blockedOn": "当前slice各步新supervisor门禁与独立证据；f-408自动scope防护尚未实际落地，native仅运输已修。后续physical own-awaited mutation/aggregate90s全ports两release、actions、Cookie、freshspec→quality、ERP isolated baseline/明确共享handoff、T5/browser/fullrelease均未接受。",
-  "nextStep": "消费root ae28新architecture/pre-edit请求，OWNER独立核当前源字节/ownership/角色语义/显式RED不丢的方案后只授A；再核A实际RED/type0/精确范围/无自动9或fixture写才另fresh helper pre-edit；GREEN后独立新postGREEN。保原MiniMax及native checked，实际DOMAIN7加原生必需元数据尾块，禁止旁路文件代替、降门禁或换协议。",
+  "blockedOn": "逻辑Caller已接纳不再等待review；budget-init-read active可独立推进，聚合budget待它及ports。ports actual awaitedmutation/两release需config owner明确共享storage/background/scheduler handoff；f408 broader尚未全闭。不扩大具体共享等待为全项目停止。actions/Cookie/finalspecquality/ERP/T5/browser/发布仍未完成。",
+  "nextStep": "直接继续status-budget-init-read：读批准S1、当前Budget.guard及初始化/negative read边界和现有复用；新TaskStart/真实entered RED后另Source preedit，最小修复/相关named+actualtsc/fresh独立postGREEN。Owner自己写测，无worker；不重跑旧命令、不复用旧gate、不改SDK/profile/全局开关，不动共享热点直到明确handoff。",
+  "historicalNextStep": "消费root ae28新architecture/pre-edit请求，OWNER独立核当前源字节/ownership/角色语义/显式RED不丢的方案后只授A；再核A实际RED/type0/精确范围/无自动9或fixture写才另fresh helper pre-edit；GREEN后独立新postGREEN。保原MiniMax及native checked，实际DOMAIN7加原生必需元数据尾块，禁止旁路文件代替、降门禁或换协议。",
   "updatedAt": "2026-10-17"
 }
