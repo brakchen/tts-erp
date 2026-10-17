@@ -4,7 +4,21 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：预算读取子项已独立局部接受，聚合budget仍未完成
+## 当前：两release等待已局部accept，继续owned canonical等待
+
+最新产品7d3b2a7已push/OWNER同HEAD两SHA及upstream0/0核实，61unique产品PASS/actualtsc0；fresh **301585f5-0541-402c-a4c7-1ae1086c4ff0 COMPLETE/实际报告全文已读/localaccept/no issues**，实际transcript **35read0其他tools**，无独立commands/Git/hash/stat，证据执行仍Owner负责。Owner据此仅接纳两existingwaits，receipt `/tmp/plugin-status-budget-release-waits-owner-01a1406d/owner-post-review-acceptance.json`，非SDKchecked/actualphysicalCASABA/全cleanup/clock/aggregatebudget/merge/release；报告Merge OK with notes不扩大此结论。
+
+**Tower658/187**release-waits completed真实2paths，清旧blocker、新 **status-budget-observe-commit OWNERin_progress**：真实canonicalqueue读取gate、init已耗时间只剩原window、actualbusinessRED/type0先于Source；真实canonicalwork和原main观察drain、unknown不是absence，不rollback真实facts，最小Source后related/actualtsc/fresh独立。此新slice尚无产品编辑/新case执行，当前无runningreviewer/worker，不poll已完成301；共享实际ports/clock仍须config明确handoff，不扩大成own停工。Caller130c/acf、readbudgete01/d2先前接受保留。以下61候选准备段为历史，不可再据它等301或启动worker；拒读plan/protocopy及no bundle间接读不变。
+
+## 两release候选准备快照（已由上文301接受覆盖）
+
+当前产品 **`7d3b2a7ff90af9ae4b5efeb60e8bfe4ff33a5e68`** 已push；仅runRecovery两现有releaseawait最小改动：原tuple cleanup照发/立即rawobserver，同原budget.guard，sentinel safe failed无proposal，活error仍传播；不改成功租约节流策略、不加owner/helper/flag/port/schema/clock/window。真实init40s→claim70s→真实HOLDgen或reload-error→cleanupheld，原90s不settle三案先**3业务RED1正案PASS/type0**；TS2375 errorundefined须omit为INVALID setup/no test保原件，不计RED。当前 **22nonemit chain+39controller=61去重产品PASS/actualtsc0**。
+
+typed私有current4PASS/newwindow3FAIL1PASS；noobserver4unitPASS但1Unhandled/exit1是runtimehygiene控制非业务RED，spent-only1PASS+1Unhandled vs live-error-only1PASS0error单独定位，不能借Vitest最新label归因。old14wholecall/20role精确、147only2delta/frozenfullstats/cache同TaskStart；sourceSHA2e1124f97b407b215b402559de19f351877808f85158664c76b509fd38e4c8a5、testSHAeac346970c5e3694b8199d6226e153d20ee0782189bd52a71476fbfbbd9e945b；0reportedLSPerrors/1inconclusive非clean。证据`/tmp/plugin-status-budget-release-waits-owner-01a1406d/`。
+
+Fresh独立 **`301585f5-0541-402c-a4c7-1ae1086c4ff0`**（mission0b4727a9-8add-4de1-afcf-75a5a4e61b0a）异步review中；输出目标`/tmp/plugin-status-budget-release-waits-postgreen-owner-01a1406d/review.md`，仅read/supervisor，禁commands/Git/源码编辑/board/网络/nested，待native非poll。release-waits仍in_progress，先前d2的read-budget接受不升级成新slice接受；只boundedawait非actualrelease CAS/ABA/全cleanup/clock/physical/aggregatebudget。共享热点未明确handoff不写，可独立owned canonical等待先规划，不扩大停工。当前唯一reviewer301，无worker；四checkpoint新状态可更新，拒读plan/protocopy或bundle间接读禁令保留。
+
+## 已验收预算读取：e01/d2（早于本release候选的快照）
 
 `e01d2399bb227ef1fd1c06df360b67a4e906606f`已push。OWNER真实TDD：首read跨原deadline后仍进入child读、init真实消耗40秒后passive list/probe挂过原90秒，actualtype0/3业务RED17skip；只observeBinding增加原frame入口检查、init后known-zero检查、同原Budget.guard两read及sentinel/knownzero处理，新raw立即观察，不静默活IOError。当前18nonemit chain+39controller=**57去重产品PASS/actualtsc0**，private再借90秒双typed control2FAIL1PASSvs当前3PASS，非deny-all/非每阶段新window。原11it+6role table完整call精确、147仅2path、fixture全stat/cache相同；0reportederrors/48nonerrorauxiliary非allclean。
 

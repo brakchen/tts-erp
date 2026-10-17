@@ -1,6 +1,26 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：预算读取已独立局部接受；继续两refresh等待子项
+## 当前：两release等待已独立局部接受，继续owned canonical提交等待
+
+**`7d3b2a7ff90af9ae4b5efeb60e8bfe4ff33a5e68` 已push，61unique产品namedPASS/actualtsc0。** fresh `301585f5-0541-402c-a4c7-1ae1086c4ff0`已COMPLETE，实际`/tmp/plugin-status-budget-release-waits-postgreen-owner-01a1406d/review.md`全文读核：**release-waits local: accept/no issues**。transcript实际**35read/0其他tools**；没有独立执行验证/Git/hash/stat，Owner已另核currentHEAD/两SHA/upstream0/0同候选，结合真实RED/GREEN/typedcontrols做**仅两现有等待的窄裁决**。Ownerreceipt=`/tmp/plugin-status-budget-release-waits-owner-01a1406d/owner-post-review-acceptance.json`。不是SDKchecked；其Merge OK with notes不等merge/release就绪，也不认证实际物理CAS/ABA/全cleanup/clock/聚合90秒。
+
+**Tower658/187**实际完成release-waits真实2path回执，清掉该旧blocker；新增**`status-budget-observe-commit` OWNER in_progress**（own controller/integration/controllerunit）：observeBinding末尾canonical提交等待尚未见原budgetguard，先实际serializedqueue readgate/同原windowframe、业务RED/actualtype0；原main及真实canonicalwork必须观察/drain，unknown不得作absence，不rollback已真实写入事实；最小修复/related/actualtsc/fresh独立后才验收。当前本新slice尚无产品编辑或新case执行；产品仍7d和两冻结fixture dirty。当前无运行reviewer/worker，不poll已结束301，不再等用户再催，独立owned工作继续；实际shared storage/background/scheduler/clock仍需config owner明确handoff，physical被此具体限制和新observe-commit阻塞，不能把boundedawait伪称物理完成。
+
+以下准备阶段仅历史快照，当前验收与active以上文/两JSON根currentExecution为准；plan/protocopy拒读禁令及四checkpoint独立验证边界不变。
+
+## 两release候选准备快照（已被上述301局部接受覆盖，非当前待审）
+
+`status-budget-release-waits`仍**in_progress/未验收**。OWNER先读维护中的page-coordination（ads-data-sync8d2245e迁入）：30s刷新排他/节流、原expectedClaimUntil条件释放/失效自恢复，没臆加成功release或改共享租约策略。新TaskStart基e01/147tracked/冻结全stat/cache后先tests：真实初始化耗40s，claim在40s才mint原70s tuple；实际claim→真实HOLDgen/stop或实际reload-error分支进入后持住原cleanup Promise，旧main未在原90ssettle。第三案原grant回应在HOLD撤权后赢race落到known-zero，只允许原tuple cleanup尝试、无执行许可；第四案窗口内liveError按原Error传播，正案原本PASS。初error:undefined不等省略触发TS2375，属**INVALID setup/no test**保原件，tests-only omit修正后actualtype0，再实际**3业务RED1正案PASS20skip**，不把编译错当RED。
+
+随后仅runRecovery两旧releaseawait改为先原tuple发起清理/立即观察raw、同existing Budget.guard等待；sentinel直接安全failed RECOVERY_FAILED/no proposedcommit，活IOError仍传播，不跳原cleanup/另借window，不增helper/flag/API/port/schema/module/clock。产品selected4GREEN20skip；相关 **22nonemit chain+39controller=61去重产品namedPASS/actualunpipedtsc0**。普通private current/newwindow/noobserver均type0；current4PASS，另借90s两guard改动杀3业务案/1正案仍PASS；删2rawobserver时4unitPASS但**1Unhandled/exit1（不是业务RED）**。Vitest全run最新label为live-error不能作因果，另单跑spent1PASS23skip+1unhandledexit1 vs live-error1PASS23skip/0error exit0精确归因，原log/勘误均保留。
+
+产品commit/pushed **`7d3b2a7ff90af9ae4b5efeb60e8bfe4ff33a5e68`**，仅两ownedpath，stage排两旧fixture；sourceSHA`2e1124f97b407b215b402559de19f351877808f85158664c76b509fd38e4c8a5`，integrationSHA`eac346970c5e3694b8199d6226e153d20ee0782189bd52a71476fbfbbd9e945b`。Source仅runRecovery字节变、原14完整it/it.eachcall即20旧role逐字精确，147仅2delta，冻结2fixture fullintns/inode/nlink/SHA、产品自动cache字节未变（非广义no-runner）；LSP0reported errors/1inconclusive，不称clean，actualcompiler0独立。无whole/full/coverage/build/emit/实网/DB/SDKprofile/master/pin/version/发布。
+
+Fresh严格只读独立 **`301585f5-0541-402c-a4c7-1ae1086c4ff0`** 异步中（mission`0b4727a9-8add-4de1-afcf-75a5a4e61b0a`），输出目标`/tmp/plugin-status-budget-release-waits-postgreen-owner-01a1406d/review.md`；仅read/原生supervisor，禁commands/Git/测试/编译/修改源码/board/网络/nested，不poll。等native实际结论再Owner裁决，不以61GREEN或先前d2接受替代新gate；当前Source冻结给该review，允许独立checkpoint和只读后继规划。全部证据`/tmp/plugin-status-budget-release-waits-owner-01a1406d/`（TaskStart/lease角色/Ownerpreedit/RED-corrected/GREEN/control/no-observer-attribution/AST/proof/candidate-commit）。
+
+聚合budget仍开。此局部只约束**两现有调用的等待**，未证明actualcanonical/BusinessBindingPort/scheduler/conditionalrelease物理CAS/ABA、完整cleanup路径或生产clock接线；实际shared热点仍需config owner明确handoff。不要说外层race解决物理迟到写；shared限制不等于owned后继全部停工，审查过后应先拆可独立推进的canonical等待再实际共享effect。plan/protocopy拒读仍尊重、无绕路/新settings、不改被拒plan或跑会读它的bundle/check；2106de5之前四checkpoint属于之前e01验收快照，本次只验证四非拒checkpoint JSON/diff/LSP。
+
+## 已验收预算读取：e01/d2及其后续办前快照
 
 预算子项`status-budget-init-read`已按**局部read契约**完成；fresh d2明确accept，OWNER核actual57/type0/同codeSHA/upstream0/0后窄接纳。不是SDKchecked/完整budget或physical验收。OWNER直接新增真实entered三案：首canonical真实data赢race但时钟已过原90秒，旧代码仍发3次bindingread及list/probe；初始化list消耗40秒后真正挂住后续passive list或probe，原90秒main未settle，迟到list还继续新probe。Source前actualtype0/3业务FAIL17skip，非setup/timeout/零选择。随后只改`observeBinding`：原frame在进子初始化前消费、初始化后known-zero拒绝、随后list/probe沿用同existingbudget.guard并区分sentinel/known-zero；新命名rawPromise立即观察、活IOError仍由原Promise传播。原PRE/继承初始化/selfrevoke/canonicalowner不变，不加helper/port/schema/module/flag/依赖/新window，不碰shared热点。
 
