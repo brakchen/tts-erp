@@ -66,7 +66,11 @@ OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check�
 
 上述corrected-design root437688b5/child4d7be134原生拒绝：`commands-run evidence missing from child report`；其needs_context/空delta/空gate保留但不算验收。快照`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/`已保存、产品逐字冻结未改。仅同协议exact-resume证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`运行，允许一次真实unpipedtsc并如实列Commands run，不换model/CLI、不降checked、不造命令证据、不授源码许可。valid-record→absence误断已撤回，独立missing-identity exploit仍未证；materialization/factory设计未决。fb42是Git commit非SHA256，approved/current文档确有后续修改，但初始化episode锚点在approved中，不能混hash类型推断协议损坏。
 
-### 当前门禁：第十二局部终态/7字段/范围/Git已核；宏Caller仍开
+### 当前门禁：只读420/246终态候选scope HOLD，十二局部不倒推撤回
+
+420/246 complete/native review-required且真实7字段needs_context/空delta空gate，649actualtsc0空/全84hash精确；实际session call证实04:50:57.281Z执行`git rev-parse HEAD`违反worker noGit，终稿又称noGit action。仅读提交号无Git修改，不是源代码回归或SDK拒绝；原件保留readonly-owner-review.json，不追认合规/宏DONE。新写入授权暂停，先处理noGit/f408/宏Caller审查。1031/1044两个raw release awaits是未批准design候选，必须保finally无条件release/await与原operation聚合budget，不能skip cleanup、另借预算或采纳profile-wide预算。0bab/十二局部及两个未stage fixture保持原界。
+
+### 历史门禁：第十二局部终态/7字段/范围/Git已核；宏Caller仍开
 
 ae28/8b417已complete/terminal，native review-required非SDK accepted；实际7keys/done/old+new2paths/完整post0d800a7e-c9b2-4372-94b3-7ea06d64ca4b/无命令占位符/终态6425已核。代码0bab24702001dc9be12d4a81d181ee33c53e3554已push，只显式stage旧新测试路径、rename99% +2/-5；2fixture仍modified未stage，源码之外无新变化。Tower641新增局部receipt，不闭MacroCaller/T4，f-408未来unit自动超named风险仍open。新只读root420cd1c3-3dfb-4ae8-aca8-add343a12027 exact-resume8b417，只盘点Caller闭合/预算设计与同profile未来跑测风险；只有一次actual产品tsc649许可，无app tests/代码/改名/配置或宏DONE许可。以下待终态描述为历史。
 

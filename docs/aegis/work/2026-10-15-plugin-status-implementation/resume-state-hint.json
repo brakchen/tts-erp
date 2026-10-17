@@ -2,16 +2,16 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "当前只读root420cd1c3-3dfb-4ae8-aca8-add343a12027盘点Caller宏闭合与后继预算边界，先消费原生通知，不轮询、不另起writer。此前ae28/8b417微切片终态和7字段/精确post0d800/6425 hash已核，代码0bab24702001dc9be12d4a81d181ee33c53e3554已push。原MiniMax唯一产品writer，OWNER只审查/协调/Git。原model/session/cwd/profile/tools/native checked均不变。当前方案分A内容精确integration改名+显式同guard RED/type0/no自动9/no fixture写，B另fresh helper pre-edit后compose-only测试适配器，2产品named+7私有related+actual产品tsc0，再distinct fresh postGREEN。任何一步无该步新UUID回复不得写；旧272496 HOLD/15c410 WAIT/3c1及carrier986/d478均不是新产品gate。final是DOMAIN恰七字段加原生必需acceptance-report尾块，原SDK验证strip后仍交付七字段；旧父层no-footer/fence禁令已撤回。StageA已按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4执行并独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad批准compose-only，OWNER独立2产品+7私有相关案/实际产品tsc0及精确范围已核，局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受；终态/真实7字段/终态scope已核，0bab仅旧新测试路径已commit/push，2fixture仍modified未stage；不是整体Caller或T4接受。",
+  "resumeInstruction": "只读root420cd1c3-3dfb-4ae8-aca8-add343a12027/child246a3d19-4d75-438f-bb5d-95b914d0ab09已complete/native review-required，Owner scope HOLD：actualGit rev-parse HEAD违反worker noGit（只读、84hash零差异，无破坏性Git）；不追认终稿的noGit action，原件/实际call已保全。先处理此边界及f408/宏Caller审查，再授权写入，不另起writer。此前ae28/8b417微切片终态和7字段/精确post0d800/6425 hash已核，代码0bab24702001dc9be12d4a81d181ee33c53e3554已push。原MiniMax唯一产品writer，OWNER只审查/协调/Git。原model/session/cwd/profile/tools/native checked均不变。当前方案分A内容精确integration改名+显式同guard RED/type0/no自动9/no fixture写，B另fresh helper pre-edit后compose-only测试适配器，2产品named+7私有related+actual产品tsc0，再distinct fresh postGREEN。任何一步无该步新UUID回复不得写；旧272496 HOLD/15c410 WAIT/3c1及carrier986/d478均不是新产品gate。final是DOMAIN恰七字段加原生必需acceptance-report尾块，原SDK验证strip后仍交付七字段；旧父层no-footer/fence禁令已撤回。StageA已按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4执行并独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad批准compose-only，OWNER独立2产品+7私有相关案/实际产品tsc0及精确范围已核，局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受；终态/真实7字段/终态scope已核，0bab仅旧新测试路径已commit/push，2fixture仍modified未stage；不是整体Caller或T4接受。",
   "currentExecution": {
     "root": "420cd1c3-3dfb-4ae8-aca8-add343a12027",
     "resumedFrom": "8b417e59-a5a2-446b-be22-eaf16ed4ba96",
     "slice": "callers-closure-inventory",
-    "state": "只读盘点逻辑Caller vs physical预算/actions/Cookie/specquality/T5边界及future unit自动超named风险，不授代码/宏DONE。",
+    "state": "complete/native review-required/needs_context/空delta空gate，649actualtsc0空、84hash精确；scope HOLD实际Git元数据命令违noGit，保留原件不追认合规/宏DONE。",
     "packet": "/tmp/monitor-status-callers-closure-inventory-01a1406d.md",
     "snapshot": "/tmp/plugin-status-callers-closure-inventory-owner-01a1406d/start-snapshot.json",
     "baseline": "0bab24702001dc9be12d4a81d181ee33c53e3554/feature branch/upstream0/0/staged空/84files；仅两个原fixture modified，冻结。",
-    "permission": "原MiniMax/session/cwd/profile/tools/checked，只准一次actual产品tsc到unused649；无app tests/任何产品改动/Git/board/配置/恢复。DOMAIN7 needs_context/空delta/空gate加必需native元数据。"
+    "permission": "无新代码授权。证据/tmp/plugin-status-callers-closure-inventory-owner-01a1406d/readonly-owner-review.json记录2026-10-17T04:50:57.281Z实际Git rev-parse及84零差异，违反原noGit并与remaining noGit action矛盾；不是SDK rejection或源代码破坏。两raw release await只候选，不能skip release/另借预算；profile-wide aggregate未采纳，预算是operation级。f408仍open。"
   },
   "lastImplementation": {
     "root": "ae28e0da-0bdf-46df-a09c-f96f2bbc52bd",

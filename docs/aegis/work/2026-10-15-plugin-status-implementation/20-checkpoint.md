@@ -1,6 +1,12 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：第十二局部门禁及终态已核、代码已push；只读盘点Caller宏边界
+## 当前：十二局部已push；只读盘点终态候选因noGit范围违约HOLD
+
+只读root420cd1c3-3dfb-4ae8-aca8-add343a12027/child246a3d19-4d75-438f-bb5d-95b914d0ab09已complete/native review-required、真实7字段needs_context/空delta空gate。649实际tsc0空、Owner全84hash零差异。但有界真实session tail证实2026-10-17T04:50:57.281Z同bash里实际运行`git rev-parse HEAD`，违反worker noGit；终稿remaining又称noGit action，不能追认。该命令只读提交号、没有Git修改/破坏，产品未变；原件及实际call保留`/tmp/plugin-status-callers-closure-inventory-owner-01a1406d/readonly-owner-review.json`。这是命令范围HOLD，**不是SDK rejection、源代码回归或已证安全入侵**。暂停新的代码授权，先审noGit边界/f408/宏Caller；不重写历史、不回滚0bab或十二已接受局部。
+
+只读建议的两raw release await（controller1031/1044，邻接reload1039有guard）为预算design候选、未授实现；Source305明确预算是each recovery or observation operation，并非profile-wide全局预算，不采纳后者。严守finally无条件release并await、最初generation/scalar/同budget；不得把guard包装当physical write fence或把bounded best-effort变成跳过cleanup。physical scheduler/bind/clear、actions/Cookie/后继fresh spec→quality仍未闭。这里只作静态观察，不冒充业务RED。
+
+## 历史：第十二局部门禁及终态已核、代码已push；只读盘点Caller宏边界
 
 rootae28/child8b417已complete/process terminal observed，native acceptance仍**review-required**非SDK accepted。真实DOMAIN7/done/精确old+new两路径/完整post0d800a7e-c9b2-4372-94b3-7ea06d64ca4b/无命令占位符已核；终态6425 hash未变、83其他源码精确。Parent仅显式stage旧新测试路径，cached diff check/有限凭证模式及生成文件名检查通过，无active hooks；commit/push **`0bab24702001dc9be12d4a81d181ee33c53e3554`**，rename99%+2/-5。slice路径Task clean，Repository NOT clean：两原自动生成fixture依旧modified未stage，未master merge/pin/version/release。历史失败原件和A/B/C门禁保留。
 

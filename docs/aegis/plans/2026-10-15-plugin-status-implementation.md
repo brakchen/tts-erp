@@ -28,7 +28,11 @@ corrected-design root437688b5/child4d7be134因原生`commands-run evidence missi
 
 历史接受基线：当前已接受**十一微切片**，第十一最终gate`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`/root7187c653/child6ee1cecc已原生terminal七字段核读。provisioning单set写已有closed初始化episode、纯构造器迁storage唯一19字段owner/controller传原newId，不改unknown/fence/union；首heartbeat报告同episode。独立48去重产品named+1私有probe PASS、producttsc0、两反事实杀死且tsc0/精确三path证明。LSP0reported errors但3inconclusive；其余七chain仍未知、完整T4未完成。产品聚合16-path检查点18d0887已push且树clean，仅保存原12034行WIP，不是全验收/发布或master/pin变更。原artifact test-before fb11为held中间态，真实微切片基线ef333→91a4已记erratum，不改原稿。证据`/tmp/plugin-status-owner-provision-initial-record-01a1406d/`。
 
-### 当前：第十二局部终态已核且push；继续只读Caller闭合盘点
+### 当前：十二局部push有效；只读盘点因noGit命令范围违约HOLD
+
+420/246已complete/native review-required/DOMAIN7 needs_context/空delta空gate，649actualtsc0空及全84hash零差异。但Owner实证同bash实际`git rev-parse HEAD`违反worker noGit，与终稿noGit action矛盾；仅只读提交号、没有Git修改或产品变化。原件/actualcall已保全，暂停新的代码授权，先审noGit/f408/宏Caller边界，不改SDK/profile或重写历史。0bab及十二局部接受不受该后续范围违约倒推撤销。两个raw release await只是design候选，不得skip finally cleanup/另借预算；Source305是每operation聚合，不采纳profile-wide预算说法。详细scope HOLD见checkpoint。
+
+### 历史：第十二局部终态已核且push；继续只读Caller闭合盘点
 
 ae28/8b417 complete/terminal、native review-required非SDK accepted，真实DOMAIN7/done/精确old+new paths/完整post0d800/无命令占位符/终态6425字节已核。仅旧新测试路径显式stage，commit/push0bab24702001dc9be12d4a81d181ee33c53e3554（rename99% +2/-5）；两原fixture deltas未stage仍modified，非Repo clean/master/pin/version/release。Tower641/182仅新增测试fidelity窄completed，Caller仍in_progress，f-408 broader未来unit自动超named风险open。新只读root420cd1c3-3dfb-4ae8-aca8-add343a12027 exact-resume8b417，盘点宏Caller vs预算/actions/Cookie/specquality/T5/共享owner边界及future named-only策略；仅准一次actual产品type到649，无app tests/代码/改名/配置授权，不能由微gate推MacroDONE。详细Scope Card/snapshot见checkpoint。
 

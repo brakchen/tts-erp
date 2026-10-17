@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "Tower641/182：新增status-chain-snapshot-fidelity窄completed回执；Caller仍in_progress，f-408 broader未来自动超named风险accepted/open，预算等仍blocked，不扩T4或发布。",
+  "currentTodo": "Tower642/182 Caller已blocked：f408、readonly-no-git-command-scope-hold、macro-caller-closure-review。readonly420/246实际Git元数据命令违noGit；其noGit action不能作为无Git命令或合规证明。84hash不变、649tsc0，非源码回归；十二局部回执有效，不扩T4。",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity"],
-  "activeSlice": "callers-closure-inventory只读root420cd1c3-3dfb-4ae8-aca8-add343a12027，盘点MacroCaller vs后继预算/ports/自动跑测风险，不能只据局部门禁推宏DONE。",
+  "activeSlice": "readonly420/246已terminal候选；OWNER scope HOLD noGit元数据命令违约，暂停新的代码授权，审查宏Caller与自动测试边界。",
   "lastAcceptedSlice": "chain-integration-snapshot-fidelity：新root ae28e0da-0bdf-46df-a09c-f96f2bbc52bd exact-resumed478；先fresh架构/rename-only门禁，再精确改名+新路径同guard RED/type0/无自动9/fixture写，再distinct helper pre-edit后compose-only，再2产品named+7私有related+actual产品type0，再独立新postGREEN。A按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4已执行且独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad获批，独立2产品+7私有相关案/实际产品tsc0/全scope后局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受，已核Native complete/review-required/terminal与真实7字段/6425 hash；0bab已push，2fixture仍modified未stage，不扩全Caller/T4。",
   "currentExecution": {
     "root": "420cd1c3-3dfb-4ae8-aca8-add343a12027",
     "resumedFrom": "8b417e59-a5a2-446b-be22-eaf16ed4ba96",
-    "state": "同协议只读Caller宏闭合盘点+最小预算design候选+future unit自动超named风险策略，未授权代码或宏DONE。",
+    "state": "complete/native review-required且7字段needs_context/空delta空gate，649actualtsc0空/84hash精确；actual Git rev-parse HEAD违noGit（只读无修改），与noGit action声明矛盾，scope HOLD非native拒绝。",
     "packet": "/tmp/monitor-status-callers-closure-inventory-01a1406d.md",
     "snapshot": "/tmp/plugin-status-callers-closure-inventory-owner-01a1406d/start-snapshot.json",
-    "permission": "仅actual产品unpipedtsc一次到unused649，无app tests/编辑/改名/配置/fixtures/Git/board。基线0bab已push/upstream0/0/staged空/84hash，仍2旧fixture modified。"
+    "permission": "禁止新的代码授权，先核noGit边界及f408/宏Caller审查；不改SDK/profile/tools/checked或fallback。实际call已保留readonly-owner-review.json。两个raw release await仅design候选，不得skip finally release或另借预算，profile-wide预算说法未采纳。"
   },
   "lastImplementation": {
     "packet": "/tmp/monitor-status-chain-layout-fidelity-01a1406d.md",
