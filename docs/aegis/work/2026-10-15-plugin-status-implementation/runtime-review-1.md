@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：publication准备局部69PASS/type0候选，独立1fe已accept/Owner窄接纳
+## 当前：只读终态观察1a06/89相关PASS已窄接纳，fresh bcca已accept；原预算仍2RED
+
+OWNER tests-only49be226先有效4业务RED+2合法正案PASS/type0（初healthy fixture不合法为INVALID已勘误），另Ownerpreedit后 **1a06e0f321e13ce057593743550d3de4fa6c1edb 已push/upstream0-0**：runtime必填terminalObservation与controller一次canonical read+compose独立投影，禁止初始化型snapshot/fence/binding/副作用/queue-full catch fallback。null/invalid/wrong-instance→unavailable，原canonical无observation原子记录known结果+pendingReport debt；实际IOError传播、未完成的ledger保持accepted，不映射RECOVERY_FAILED。正常snapshot初始化职责保留，不是兼容fallback。storage内核、Budget/恢复Promise ABI、rawowner/尾IO/physical未改。
+
+36chain+39controller+14runtime=**89unique相关PASS/实际unpipedcompiler0**；6selected重叠不另加；原4terminal角色现在2PASS(live/unavailable)/2业务FAIL(expired/tail)。4普通私有controls全type0，分别旧fallback4FAIL/alwaysunavailable2FAIL/swallowIO1FAIL/错namespace绕过1FAIL，非timeout/Unhandled/setup。真实native存储故障在authorisation首scalar读后注入；all main/nativework创建即观察并drain。TS真实resolvedsignature图仅2factory调用、requiredport消费者全迁移，37旧unit bodies及旧chain除wiring字节保留，旧controller函数全同/8f31558 storage同/frozen全9身份/cache同。LSP error阈值0但3clean1inconclusive，不能叫所有诊断clean。
+
+fresh严格只读 **bcca977d-ac08-4811-84b6-528a6d8e342b** / missionc56e1ff1-5ed6-4faf-8652-82b5c1cdb913 / `/tmp/plugin-status-terminal-readonly-postgreen-owner-01a1406d/review.md` COMPLETE/localaccept/no issues，实际19行报告全文读核、transcript30read0其他tool/无拒读路径；Owner同HEAD/7SHA/upstream0-0核后仅窄接纳readonly，receipt `/tmp/plugin-status-terminal-readonly-owner-01a1406d/owner-post-review-acceptance.json`。其merge措辞不授合并/发布许可；无runningreviewer/worker，不等已完成bcca/1fe/94，直接owned后继。证据 `/tmp/plugin-status-terminal-readonly-owner-01a1406d/`。Tower666/189 terminalactive/父blocked不变；不是overallGREEN/SDKchecked/最终window与raw-tail/physical/sharedclock/aggregate/merge/release。复杂度仍强压，仅正确既有owner局部职责修复、未解决广义拆分。2fixture永久冻结dirty不stage/restore，shared须明确config handoff；新增旧recovery-descriptor ctx_execute_file拒读后未绕路，也禁止重读；旧拒读plan/protocopy/installed-client/fanout与no-bundle继续。
+
+## publication准备接纳快照（历史69PASS/3RED，非当前gate）
 
 94 COMPLETE/no issues/**ready-for-currentAPI-RED ONLY**（实际报告读核22read0其他tools），不是Source/API实现接受。Owner实际CurrentAPI有效5业务RED1liveguardPASS30skip/actualunpipedcompiler0后独立pre-edit仅授权publication准备：用native Promise.then把现有single-flight发布置于实际端口前，原generation与唯一Budget仍同步原入口捕获/私有required参传入，公共async Promise接口保持；非最终task/no-window/readonly/wait ABI。Source **fcc6d38181467980a5b7b79b53091fe86fc67fa6 已push**，仅runtime/controller14+12-；startBudget与runRecovery工作body保持字节相同。2pub RED→GREEN，30chain+39controller=69unique相关PASS/真实compiler0。六新role重跑**3FAIL3PASS30skip**：expired/tail/unavailable仍真实业务失败，不能称整体GREEN；selected2与既有数字不重复累计。
 

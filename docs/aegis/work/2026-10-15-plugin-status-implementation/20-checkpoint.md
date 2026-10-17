@@ -1,6 +1,16 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：publication准备切片69相关PASS/type0，fresh1fe已accept/Owner窄接纳；终态仍3业务RED
+## 当前：只读终态观察89相关PASS/type0已push；fresh bcca已accept/Owner窄接纳，终态剩2业务RED
+
+OWNER直接实现/测试/Git，test-only **49be226**、修复 **1a06e0f321e13ce057593743550d3de4fa6c1edb 已push/upstream0-0**。先真实native存储4业务RED（absent/malformed/wrong-instance/io-error）+2合法正案PASS/actualunpipedcompiler0，另Ownerpreedit后最小职责分离：runtime REQUIRED terminalObservation独立端口，不再调用初始化型snapshot或catch为queue-full；controller只读canonical一次并复用composeObservation，null/坏值/错instance返回unavailable，真实IOError原样传播且不伪造completed。unavailable沿原canonical无observation原子落已知结果与pendingReport debt，storage内核未改；普通snapshot合法初始化职责保留。同步task/window ABI、rawlease与尾IO尚未实现。
+
+**36chain+39controller+14runtime=89unique相关PASS/实际unpipedtsc0**，selected6重叠不加95；当前原四终态role **2FAIL2PASS38skip**：unavailable和live通过，expired/tail仍实际main90000未settle/overlap额外alarm1vs0，不是整体GREEN。4普通私有controls全type0：旧fallback4FAIL2PASS、always-unavailable2FAIL4PASS、swallow-io1FAIL5PASS、错instance绕过1FAIL5PASS，无timeout/setup/Unhandled。初healthy null+discovering不合法为INVALID fixture（非业务RED），已修真正ready/running+完整snapshot并保原log。所有main/nativework观察drain后restore。
+
+新fresh严格只读 **bcca977d-ac08-4811-84b6-528a6d8e342b** / missionc56e1ff1-5ed6-4faf-8652-82b5c1cdb913，输出 `/tmp/plugin-status-terminal-readonly-postgreen-owner-01a1406d/review.md`，仅read/nativecontact，**COMPLETE/localaccept/noissues，实际19行报告已读，30read0其他tool/无拒读路径；Owner同HEAD/7SHA/upstream0-0核后仅窄接纳readonly**；receipt `/tmp/plugin-status-terminal-readonly-owner-01a1406d/owner-post-review-acceptance.json`。无runningreviewer/worker，不等或poll已完成bcca；其merge措辞不授合并/发布许可。证据 `/tmp/plugin-status-terminal-readonly-owner-01a1406d/`（candidate/preedit/原RED-GREEN/type/controls/AST与callgraph）。配置TS program真实signature解析仅2constructor调用，两owned适配器均迁移requiredport，无共享接线；旧37unit bodies/旧36chain角色字节相同（仅必要新端口wiring），旧controller函数全同，storageSHA8f31558未变。两冻结fixture全9身份/cache不变、仍dirty unstaged不称clean。LSP4path severityerror0，但3clean1inconclusive，不称全部诊断clean。
+
+Tower666/189 terminal仍in_progress/父blocked，与实际吻合不no-op写板。当前只读子项已窄接受，无runningreviewer/worker，不重等已完成bcca/1fe/94；直接后继原windowtask/explicitno-window/raw事实pipeline+尾IO/admittedset/queued-successor/join/throw/localdisabled，physical/sharedclock、actions/Cookie/specquality/ERP/T5/browser/release均未闭。大文件复杂度仍强压（controller1686/chain1962/runtime-unit1437附近），本步只在原canonical projection owner修职责，拆分是后继非已完成。config热点仍需明确branchHEADqueuehandoff；不借新90、早释serializer或回滚事实。新增一次旧review recovery-descriptor的ctx_execute_file被错根/issue852拒读，未换工具/路径/settings重读；该路径也列禁读，和旧plan/protocopy/installed-client/fanout禁令同样保留，不跑bundle/check。
+
+## publication准备接纳快照（历史：69PASS/3业务RED；非当前running）
 
 架构V2 **94c0e85e-4d90-409f-a7cc-43076c46f9de COMPLETE/no issues/ready-for-RED ONLY**，实际报告已读与22read0其他tool审计；不是Source或实现接受。Owner在现有Promise API先真实init40/terminal队列gate、89,999与90,000界限、只读unavailable、真实已applied后tailgate及真实firstport同步重入两案：**actualunpipedtsc0→5业务FAIL1live正案PASS30skip**。无timeout/setup/type/零选择RED，无mock核心outcome或permit。test-only两commit0b1a6c3/4040d22已push，旧30案/默认harness字节不变；两冻结fixture/cache不变。
 
