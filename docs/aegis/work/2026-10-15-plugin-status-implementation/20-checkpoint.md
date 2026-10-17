@@ -1,6 +1,22 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：只读终态观察89相关PASS/type0已push；fresh bcca已accept/Owner窄接纳，终态剩2业务RED
+## 当前：终态原预算c2dec65/122PASS已窄接纳；物理端口只读准备已交付，共享写等明确交接
+
+fresh **b1e57359-5932-4f7d-9cc7-68ffcd76ba0e / child7aa13667-80fa-46fa-9bd7-cdd5b29bc585 COMPLETE/localaccept/No issues found**，实际报告52逻辑行（51换行）已全文读核，真实session **44read/0其他tool/0工具错误/0拒读路径**。OWNER复核同 **c2dec65440ba614813eb328ebe8344c4e0b31918**、7ownedSHA、push/upstream0-0/空index，frozen九字段/specific cache/storage kernel仍同起点后，**仅接纳terminal-original-window-canonical-raw-drain**；receipt `/tmp/plugin-status-terminal-window-owner-01a1406d/owner-post-review-acceptance.json`。122=49chain+53controller+20runtime，actualunpipedtsc0，非累加历史/selected；reviewer没有执行Git/编译/hash/semantic核验，这些是OWNER证据。原expired/tail等终态反例已GREEN，不继续把历史2RED当当前；Merge字样不是合并/发布许可。首audit parser遇字符串content误用filter属INVALIDsetup，Array.isArray修后审计通过，原log保留；LSP仍0error/2clean3inconclusive。
+
+Tower **670** 完成terminal五真实path回执，physical/runtimebudget中已解决terminal blocker已清；后继 `status-budget-physical-prep` OWNER只读准备，成果 `/tmp/plugin-status-physical-prep-owner-01a1406d/boundary-assessment.md` 与semantic-port-inventory.json。实际读到shared storage的原pendingStorageWrite队列保有native完成，但setBoundAdTab callback内未消费原authority；controller positive/cleanup端口仍无物理fence/drain通道。TS真实signature选定37调用、7controller构造全tests、2runtime构造全tests，background有3个真实setBound调用；不能把abstract port或test-only coordination primitive叫生产接线。shared epoch lease nowMs不能盲换performance.now；原30s节流/conditional tuple cleanup/自失效与原Budget单owner保持。这里只读静态准备，未运行physical新RED/测试、未改Source或shared文件，**不是physical实现**。已请求config明确branch/HEAD/writequeue，scope/沉默/idle不等授权；拿到交接后才新的真实RED/type0/preedit/实现/GREEN/type0/fresh复核。
+
+**当前无running reviewer/worker，不poll已完成b1/bcca/1fe/94。整体未完成，不合并不发布**；physical/CASABA/fullcleanup/shared生产clock、actions/Cookie/specquality/ERP/T5/browser/build/release与f408仍开。两历史fixture仍dirty unstaged永久冻结；拒读plan/protocopy/installed-client/fanout/旧descriptor及新增workflows文档一律不绕路，不跑bundle/check。
+
+## 终态原预算候选启动快照（历史122GREEN；b1现已局部接纳）
+
+OWNER继续实际实现：test-only **df3c4d25b1fa77ee9f2184af0ae9b50a0b9a5f6a** 有效6业务RED/2正案PASS与actualtype0先于独立pre-edit；候选 **c2dec65440ba614813eb328ebe8344c4e0b31918 已push/upstream0-0**。controller同步冻结required RecoveryDecisionTask/work/同原Budget wait，join同task/window；其他action显式no-window，不借capture90/新90/Promise兼容fallback。runtime区分finite caller和canonical raw-drain：实际pipeline/native settle后才释execution/cycle owner；逐依赖懒创建旧尾IO并守原remaining，caller到期不造false/完成事实、不rollback/早解serializer；overlap idle无额外alarm，原周期alarm在capture前安装。仅executor拒绝映射RECOVERY_FAILED，canonical错误原样保留。storage内核、原PRE/GEN/Budget算法与physical/shared接线未改。
+
+最终实际unpiped compiler0；**49chain+53controller+20runtime=122unique相关namedPASS**（2/63/17skip，未选emit/full/build/release）。原expired/tail和新admitted-native-set/queued successor/revoked-no-proposal/page-port-throw/localdisabled反例已GREEN。5独占普通147文件controls各type0且业务FAIL（1/4/1/1/1FAIL）；late-fact初次6PASS曾survive，只验immutable ledger不足，补真实runtime.lastDecisionOutcome witness后1FAIL5PASS，原log不改。额外3旧测试失败在独立精确starting Source/type0复现，修测试设置/断言后都纳入GREEN，见legacy-test-diagnosis.md。最初mutation anchor及proof把ZIP转UTF8导致误比较属INVALID setup/metadata，原件与勘误保留，正确逆mutation token/bytes证明全147同Source。7SHA/两冻结fixture九字段/cache同，28旧controller函数相同，仅factory/recoverBinding改变；TS真实signature75recover调用/2runtime构造全在owned tests。LSP0error但2clean3inconclusive，非all-clean。runtime851/controller1696，复杂度压力未解除。
+
+fresh严格只读 **b1e57359-5932-4f7d-9cc7-68ffcd76ba0e** / mission **ac3f7086-ba42-423d-a568-3a8f9d9d6c8e** 已launch，输出绑定 `/tmp/plugin-status-terminal-window-postgreen-owner-01a1406d/review.md`；仅read/nativecontact，无worker，无命令/Git/测试/搜索/编辑/board/嵌套。此处是launch快照，先消费native终态/实际报告与工具审计，再OWNER同HEAD/SHA/upstream裁决，**当前仅candidate，不是已接受或整体GREEN**。证据 `/tmp/plugin-status-terminal-window-owner-01a1406d/candidate.md`、post-witness-verification-results.json、post-GREEN-proof-final.json、candidate-commit.json。Tower666 terminal仍in_progress/父blocked，状态准确不no-op写板；physical/CASABA/fullcleanup/sharedclock、actions/Cookie/specquality/ERP/T5/browser/release仍开，共享写仍等config明确branchHEADqueuehandoff。两冻结fixture仍dirty unstaged不stage/restore。新增pi-subagents/docs/workflows.md被ctx_execute_file错根issue852拒读，未换工具/路径重读；所有旧拒读及no-bundle继续。不要把旧bcca/1fe/94当当前待审。
+
+## 只读终态观察接纳快照（历史89PASS/2RED；非当前gate）
 
 OWNER直接实现/测试/Git，test-only **49be226**、修复 **1a06e0f321e13ce057593743550d3de4fa6c1edb 已push/upstream0-0**。先真实native存储4业务RED（absent/malformed/wrong-instance/io-error）+2合法正案PASS/actualunpipedcompiler0，另Ownerpreedit后最小职责分离：runtime REQUIRED terminalObservation独立端口，不再调用初始化型snapshot或catch为queue-full；controller只读canonical一次并复用composeObservation，null/坏值/错instance返回unavailable，真实IOError原样传播且不伪造completed。unavailable沿原canonical无observation原子落已知结果与pendingReport debt，storage内核未改；普通snapshot合法初始化职责保留。同步task/window ABI、rawlease与尾IO尚未实现。
 

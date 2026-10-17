@@ -4,7 +4,23 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：只读终态观察1a06/89相关PASS已窄接纳，fresh bcca已accept；原预算仍2RED
+## 当前：c2dec65终态原预算切片已窄接纳，后继physical仅静态准备，未整体交付
+
+fresh **b1e57359/child7aa13667 COMPLETE/localaccept/No issues found**，实际52逻辑行报告已读，session **44read0其他/0工具错误/0拒读路径**；OWNER核同c2dec65440ba614813eb328ebe8344c4e0b31918/7SHA/upstream0-0/空index/frozen9/cache后，仅接纳terminal-original-window-canonical-raw-drain。receipt `/tmp/plugin-status-terminal-window-owner-01a1406d/owner-post-review-acceptance.json`。122unique相关PASS/actualunpipedtsc0和5controls业务FAIL为OWNER实际执行，reviewer未独立跑命令/Git/hash/semantic；不把Merge verdict当合并许可。初audit脚本字符串content误用filter已独立修正，不是Source或审查违规；原记录保留。Source LSP0error但2clean3inconclusive，非all-clean。
+
+Tower670 terminal完成五真实path回执；新physical-prep只读报告 `/tmp/plugin-status-physical-prep-owner-01a1406d/boundary-assessment.md` +semantic-port-inventory.json。复用existing pendingStorageWrite，不能另造serializer；physical接口尚无原fence/rawdrain通道，guard返回不等native完成。7controller构造/2runtime构造均tests；background3setBound调用仍须实际共享adapter迁移，coordination primitive测试引用不是生产接线证明。epoch共享租约clock与monotonic Budget不能混为performance.now，30s节流/原tuple cleanup/自失效不改。此准备未运行physical新测试/未改Source，config branchHEAD/writequeue交接仍必需；不能因scope/idle/沉默自行写shared。下一实现需另新业务RED/type0/preedit/GREEN/type0/fresh gate。
+
+无running reviewer/worker，不等或poll已完成b1/bcca/1fe/94。physical/CASABA/fullcleanup/sharedclock/actions/Cookie/specquality/ERP/T5/browser/build/release及广义runner风险仍开，整体未完成不合并发布；两frozen fixture dirty不stage/restore及所有拒读/no-bundle边界继续。
+
+## 终态原预算候选启动快照（历史122GREEN；b1现已局部接纳）
+
+OWNER有效6业务RED/2正案与actualtype0先于独立pre-edit，test-only df3c4d25b1fa77ee9f2184af0ae9b50a0b9a5f6a已push；候选 **c2dec65440ba614813eb328ebe8344c4e0b31918 已push/upstream0-0**。controller同步冻结task/work/required同原Budget wait，join同task/window；其他action显式no-window，不借capture90或Promise兼容fallback。runtime单truth pipeline分离有限caller和真实canonical/native drain，实际settle才释owner，不回滚已admitted迟到事实、未知不造false/完成；逐依赖尾IO守原remaining/过期不启动下一尾，overlap idle无额外alarm；原周期alarm在capture前装一次。只有executor拒绝映射failed，canonical异常不重分类。原PRE/GEN/Budget算法/storage kernel/readonly projection及physical/shared端口未改。
+
+**49chain+53controller+20runtime=122unique相关namedPASS/actualunpipedtsc0**，2/63/17skip无emit/full/build；原expired/tail与新native-admitted/queued successor/no-proposal/throw/localdisabled均GREEN。五独占普通147文件controls各type0且1/4/1/1/1业务FAIL；late-fact旧witness仅看immutable ledger曾survive6PASS，补runtime.lastDecisionOutcome真实事实断言后1FAIL5PASS，非Source补丁。三旧测试失败已在独立精确starting Source/type0复现后修测试设置，纳入GREEN。mutation anchor与ZIP UTF8误比较属INVALIDsetup/metadata，原日志保留；最终逆mutation token/bytes全147一致。TS signature75recover+2factory全owned tests；28旧controller函数相同，frozen九字段/cache/storage同；LSP0error/2clean3inconclusive，非all-clean。runtime851/controller1696，大模块压力仍须审查。
+
+fresh严格只读 **b1e57359-5932-4f7d-9cc7-68ffcd76ba0e** / missionac3f7086-ba42-423d-a568-3a8f9d9d6c8e已launch，输出绑定 `/tmp/plugin-status-terminal-window-postgreen-owner-01a1406d/review.md`，此为launch快照，消费native终态后先读实际报告/审计工具，再OWNER同HEAD7SHA/upstream裁决；**未接受candidate，不是SDKchecked/overallGREEN/merge/release**。证据 `/tmp/plugin-status-terminal-window-owner-01a1406d/candidate.md`、post-witness-verification-results.json、post-GREEN-proof-final.json。Tower666该任务in_progress/父blocked准确不no-op改板；physical/CASABA/cleanup/sharedclock/actions/Cookie/specquality/ERP/T5/browser/发布仍开；shared config须明确branchHEADqueuehandoff。无worker，不poll旧bcca/1fe/94；两冻结fixture仍dirty unstaged不stage/restore。新增pi-subagents/docs/workflows.md被ctx错根issue852拒读未绕路，所有既有拒读/no-bundle保留。
+
+## 只读终态观察接纳快照（历史1a06/89PASS/2RED；非当前gate）
 
 OWNER tests-only49be226先有效4业务RED+2合法正案PASS/type0（初healthy fixture不合法为INVALID已勘误），另Ownerpreedit后 **1a06e0f321e13ce057593743550d3de4fa6c1edb 已push/upstream0-0**：runtime必填terminalObservation与controller一次canonical read+compose独立投影，禁止初始化型snapshot/fence/binding/副作用/queue-full catch fallback。null/invalid/wrong-instance→unavailable，原canonical无observation原子记录known结果+pendingReport debt；实际IOError传播、未完成的ledger保持accepted，不映射RECOVERY_FAILED。正常snapshot初始化职责保留，不是兼容fallback。storage内核、Budget/恢复Promise ABI、rawowner/尾IO/physical未改。
 
