@@ -1,13 +1,31 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "Tower647/184：逻辑Caller已完成/7path回执；OWNER直接继续status-budget-init-read（初始化/negative read同原90秒），先读批准S1与现Budget owner，再真实entered RED/另Source裁决。聚合budget blocked依init-read与ports；ports需config owner明确热点handoff，不写共享storage/background。130c395已push，当前54unique相关PASS/actualtsc0及fresh独立acfaccept，只接受逻辑Caller，不扩T4/发布。无runningreviewer/worker，不轮询或等用户催；禁止launch/resume worker。四unit自动一次例外不扩futurefull授权，f408 broader未全闭。",
-  "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity", "status-runtime-callers"],
-  "activeSlice": "status-budget-init-read：先复核当前Budget.guard/初始化与negative-evidence I/O真正entered/原90秒边界和复用方案；此刻只转入摸底、未编辑该子项Source/tests或跑新预算用例；不得将expired/unknown视absence或借新window。实际physical/two-release另ports子项待handoff。Owner直接实现/测试，独立review仅审查。",
+  "currentTodo": "Tower653/186：budget-init-read已完成2path回执，e01d239已push/upstream0/0；actual57uniquePASS/tsc0+freshd2localaccept/23read0其他tools后OWNER窄接纳，Caller130c亦已完成。聚合budget仍开；ports分owned release-waits in_progress与physical blocked等待明确config handoff，不因共享等待卡住独立controller。现在先核原lease节流/release语义再两真实entered RED，保原cleanup许可/tuple/90秒，不另借/跳cleanup/假称physicalCAS已安全。OWNER写测Git，不再worker；当前无runningreviewer，不poll。两fixture冻结、四unit自动一次非futurefullgrant，f408 broader未全闭。",
+  "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity", "status-runtime-callers", "status-budget-init-read"],
+  "activeSlice": "status-budget-release-waits：owned controller两existing release await原budget摸底/TDD；此刻未编辑本子项Source/tests或执行其新命名case。先核现有共享lease成功时节流/失败取消策略，不臆加成功release或改策略；原budget内boundedwait不得冒充实际storage/port/CAS/ABA/clock保证。共享physical子项须config owner明确handoff，scope只是意向。Owner直接做，后需fresh独立postGREEN。",
 
-  "lastAcceptedSlice": "Logical Caller corrected-parent/observe:130c395fd8d3ca04db80d1ca827e2dbb755636f0 pushed; fresh acfef23b-631a-4970-b778-d2b6facdd4ce COMPLETEaccept/logicalready-for-budget, OWNER据54actualnamed/type0与范围proof窄接纳；advisory非SDKchecked/merge/全产品。之前terminal809631f由6010局部accept；0716初候选被5dchanges-needed后才补10line child-entry guard。",
+  "lastAcceptedSlice": "budget-init-read local:e01d2399bb227ef1fd1c06df360b67a4e906606f pushed;actual57uniqueproductPASS/unpipedtsc0+typednewwindowcontrol;freshd2d65742-d006-4225-b9b4-8e60343d0eeb COMPLETEaccept,nofindings,23read/0othercommands. OWNER同codeSHA/HEAD/upstream0/0据证窄接纳，非SDKchecked/完整aggregatebudget/physical/merge/release。Tower653completed2paths。",
+  "lastLogicalCallerAcceptedSlice": "Logical Caller corrected-parent/observe:130c395fd8d3ca04db80d1ca827e2dbb755636f0 pushed; fresh acfef23b-631a-4970-b778-d2b6facdd4ce COMPLETEaccept/logicalready-for-budget, OWNER据54actualnamed/type0与范围proof窄接纳；advisory非SDKchecked/merge/全产品。之前terminal809631f由6010局部accept；0716初候选被5dchanges-needed后才补10line child-entry guard。",
   "lastChainAcceptedSlice": "chain-integration-snapshot-fidelity：新root ae28e0da-0bdf-46df-a09c-f96f2bbc52bd exact-resumed478；先fresh架构/rename-only门禁，再精确改名+新路径同guard RED/type0/无自动9/fixture写，再distinct helper pre-edit后compose-only，再2产品named+7私有related+actual产品type0，再独立新postGREEN。A按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4已执行且独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad获批，独立2产品+7私有相关案/实际产品tsc0/全scope后局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受，已核Native complete/review-required/terminal与真实7字段/6425 hash；0bab已push，2fixture仍modified未stage，不扩全Caller/T4。",
   "currentExecution": {
+    "mode": "owner-direct-no-worker",
+    "sourceCommit": "e01d2399bb227ef1fd1c06df360b67a4e906606f pushed;upstream0/0",
+    "sourceSha": "4ddb7c1d16f2c7053f79e289359682496d61b36622f2b83531280f1fbb02a0d2",
+    "testSha": "4d1f9b25523e616bd3674094a30580ca9be51c0a639b39cc6107ad685ff3bddb",
+    "snapshot": "/tmp/plugin-status-budget-init-read-owner-01a1406d/task-start-snapshot.json",
+    "proof": "/tmp/plugin-status-budget-init-read-owner-01a1406d/owner-post-review-acceptance.json",
+    "state": "initreadLOCALaccepted;Tower653complete2paths,portsparentblockedreleasewaits+physical;release-waits nowOWNERin_progress;NOTaggregate90s/physical/merge/release",
+    "tdd": "3truebusinessRED17skip/type0:knownexpiredfirstrealread stilllaunches3canonicalreads/pageIO;initentered40s+passivelist/probeheldoveroriginal90;sourceonlyobserveBindingoriginalframe/initpostzero/SAMEbudgetguards+rawobservers. selected3GREEN;related18chain+39controller=57UNIQUEPASS/actualunpipedproducttsc0",
+    "control": "ordinarycurrent/newwindowcopiesonly2guardsdifferent;bothactualtsc0,current3PASSvsnewbudgetperread2businessFAIL1PASS17skip;notextraPASS",
+    "integrity": "147onlycontroller/integration;onlyobserveBindingSourcechanged;old11literal+6rolewholecallsbyteexact;frozen2fixtureSHA/fullintns/inode/nlink/productcachebyteunchangedUNSTAGED,notglobalnoauto;productnotcleanbecausefrozen2dirty",
+    "review": "freshd2d65742-d006-4225-b9b4-8e60343d0eeb COMPLETEbudget-init-readlocalaccept;mission99d9b789-9eea-4eee-93eb-98476a85edb3;actual35linereportreadfully. Transcript23read0othertools;no commands/Git/edits;git/hash/statOWNERattestednotreviewerrecomputed,notSDKchecked",
+    "diagnostics": "active2paths0reportederrors/48nonerrorauxiliary(clean1findings1),notallclean;actualcompiler0 separate",
+    "next": "OWNERdirectstatus-budget-release-waits:verifymaintainedlease/throttle/cleanuprolesfirstthennewgenuineenteredRED;no runningworker/reviewer,no poll. sharedstorage/background/schedulerstillneedsconfigexplicitbranch/head/queuehandoff,notstoppingindependentcontroller",
+    "remaining": "Actualcanonicalphysical/2releasecleanup/productionclockwire/durableclaimactions/Cookie/identityABA/sharedwiring/finalspecquality/ERP/T5/browser/fullcoveragebuild/release",
+    "permission": "Two ctx_execute_fileplan/protocolrootdenials /pi-web issue852;no alttool/path/child/settingsretryandno deniedplanedit. PriorS1contextonly;don'trunbundle/checkwhichwouldreadplan.37afive-docchecks historical;new4non-deniedcheckpointsJSON/diff/LSPonly"
+  },
+  "lastLogicalCallerExecution": {
     "mode": "owner-direct-no-worker",
     "sourceCommit": "130c395fd8d3ca04db80d1ca827e2dbb755636f0 pushed",
     "sourceSha": "ad75f2a7e469091a9a24cafd6e92875e445b5b808f275369d10a8153d70c5d3a",
@@ -118,8 +136,8 @@
     "此前Owner其余七private7PASS1skip+已验首案=八变体knownGREEN，setup缺wxt.config的TS2307排除、补齐private/producttsc0；不重新泛称余七未知。第十一48产品named+1私有factory probe、两control、19fields/3UUID顺序、scopeproof有效；LSP0error/3inconclusive非clean。",
     "frame仍d871，两个生成fixture modified封存未restore/stage，18d聚合WIP与d871 RED检查点都不是全验收/master/pin/version/release。可疑外部命令未经独立字节证实，不执行或解码。"
   ],
-  "blockedOn": "逻辑Caller已接纳不再等待review；budget-init-read active可独立推进，聚合budget待它及ports。ports actual awaitedmutation/两release需config owner明确共享storage/background/scheduler handoff；f408 broader尚未全闭。不扩大具体共享等待为全项目停止。actions/Cookie/finalspecquality/ERP/T5/browser/发布仍未完成。",
-  "nextStep": "直接继续status-budget-init-read：读批准S1、当前Budget.guard及初始化/negative read边界和现有复用；新TaskStart/真实entered RED后另Source preedit，最小修复/相关named+actualtsc/fresh独立postGREEN。Owner自己写测，无worker；不重跑旧命令、不复用旧gate、不改SDK/profile/全局开关，不动共享热点直到明确handoff。",
+  "blockedOn": "Caller及init-read已局部接纳，不再等review；聚合budget待ports下release-waits(active)与physical(blocked)。仅physical实际共享storage/background/scheduler/clock接线等待config明确handoff，controller两等待独立推进。f408 broader尚未全闭；actions/Cookie/finalspecquality/ERP/T5/browser/发布仍未完成。specificplan/protocopy拒读不绕过，不扩为所有产品代码停工。",
+  "nextStep": "直接继续owned status-budget-release-waits：核maintained refresh lease/throttle/release角色，当前e01新TaskStart/两真实entered RED后另OwnerSource preedit，最小修复/相关named/actualtsc/fresh独立postGREEN；保原tuple/cleanup许可与90秒、不跳cleanup或借窗口、不把外层race说成physical安全。Owner自己做，无worker。勿重读被拒plan/protocopy或跑会读其内容的bundle/check，不动共享热点直到明确handoff。",
   "historicalNextStep": "消费root ae28新architecture/pre-edit请求，OWNER独立核当前源字节/ownership/角色语义/显式RED不丢的方案后只授A；再核A实际RED/type0/精确范围/无自动9或fixture写才另fresh helper pre-edit；GREEN后独立新postGREEN。保原MiniMax及native checked，实际DOMAIN7加原生必需元数据尾块，禁止旁路文件代替、降门禁或换协议。",
   "updatedAt": "2026-10-17"
 }

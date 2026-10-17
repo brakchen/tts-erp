@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：逻辑Caller独立复核接受并完成；转入同operation预算子项
+## 当前：预算读取已独立局部接受；继续两refresh等待子项
+
+预算子项`status-budget-init-read`已按**局部read契约**完成；fresh d2明确accept，OWNER核actual57/type0/同codeSHA/upstream0/0后窄接纳。不是SDKchecked/完整budget或physical验收。OWNER直接新增真实entered三案：首canonical真实data赢race但时钟已过原90秒，旧代码仍发3次bindingread及list/probe；初始化list消耗40秒后真正挂住后续passive list或probe，原90秒main未settle，迟到list还继续新probe。Source前actualtype0/3业务FAIL17skip，非setup/timeout/零选择。随后只改`observeBinding`：原frame在进子初始化前消费、初始化后known-zero拒绝、随后list/probe沿用同existingbudget.guard并区分sentinel/known-zero；新命名rawPromise立即观察、活IOError仍由原Promise传播。原PRE/继承初始化/selfrevoke/canonicalowner不变，不加helper/port/schema/module/flag/依赖/新window，不碰shared热点。
+
+当前产品 **18nonemit chainPASS2skip+39controllerPASS77skip=57去重namedPASS**，新增3GREEN另不重复计数；actual product unpipedtsc0。普通private current/new-window副本仅两guard改成fresh startBudget().guard，双侧actualtsc0、当前3PASS vs另借90秒2业务FAIL1PASS17skip，证明聚合原window而非每read重借。147tracked仅controller/integration两path，Source精确仅observeBinding一函数、原11完整literalit+原6role it.each整call字节精确；冻结2fixture SHA/fullintns/inode/nlink、产品自动cache字节相TaskStart不变（非广义no-runner保证）。active2path LSP0reported errors/48非error辅助，不称allclean。无整四unit手动补跑/full/coverage/build/emit/实网/DB/master/pin/version/发布。
+
+代码commit/pushed **`e01d2399bb227ef1fd1c06df360b67a4e906606f`**，仍仅两冻fixture dirty/stagedempty。controllerSHA`4ddb7c1d16f2c7053f79e289359682496d61b36622f2b83531280f1fbb02a0d2`、integrationSHA`4d1f9b25523e616bd3674094a30580ca9be51c0a639b39cc6107ad685ff3bddb`；证据`/tmp/plugin-status-budget-init-read-owner-01a1406d/`含TaskStart/Ownerpreedit/RED/GREEN/control/AST/完整argv/candidate-commit。Fresh只读独立review **`d2d65742-d006-4225-b9b4-8e60343d0eeb`**，mission`99d9b789-9eea-4eee-93eb-98476a85edb3`，已complete，实际35行报告`/tmp/plugin-status-budget-init-read-postgreen-owner-01a1406d/review.md`全文读核：**budget-init-read local: accept**，无findings。完成transcript审计恰**23read/0其他tool**，无commands/Git/测试/编译/源码编辑/board/网络/nested；reviewer未重算Git/hash/stat，不能把OWNER快照独立重算归给它。OWNER裁决`owner-post-review-acceptance.json`记录当前e01/SHA及upstream0/0。当前无运行中reviewer，不等已完成事件，不poll，也不复用旧acf冒充此门禁。
+
+**权限记录**：本步fresh `ctx_execute_file`处理plan与批准protocol普通副本被工具`/home/schan/pi-web`根/issue852拒绝。未换工具/child/替代路径重读二文件、未改settings；S1来自已在上下文的批准约束，未声称fresh协议hash。此后不编辑被拒plan，也不重跑会读该plan的bundle/check；37a97e3之前五docs已真实bundle/check0及JSONunique/diffcheck0，新四checkpoint只做其授权范围内JSON/diff/LSP检查，不能宣称新bundle已重建。不是扩大为产品代码全部停工。
+
+逻辑Caller130c窄验收依然成立；新预算候选不是完整aggregate90sec、实际canonical/physical写、两releasecleanup或生产clock接线验收。Tower **653/186**完成init-read（真实两path回执），移除monitor-runtime旧Caller blocker及budget旧init-read blocker。budget父仍blocked等ports；ports再拆`status-budget-release-waits` **in_progress/OWNER**（先读现有lease/节流语义，真实两release entered RED后只改owned controller等待）与`status-budget-physical` blocked（需明确config共享storage/background/scheduler handoff，actualcanonical/physical/cleanup CAS/ABA/clock接线）。声明scope只是意向，无共享写授权；不能让该具体handoff卡住独立controller cleanup。后续actions/Cookie/finalspecquality/ERP/T5/browser/release仍开，OWNER直接继续，无worker/无运行reviewer。
+
+## 已验收逻辑Caller：130c及acf独立复核，转入预算前快照
 
 最新产品HEAD/pushed **`130c395fd8d3ca04db80d1ca827e2dbb755636f0`**，`feature/plugin-status-auto-bind`，版本仍0.4.26。Fresh只读独立review **`acfef23b-631a-4970-b778-d2b6facdd4ce`**（mission`cfc584ad-e53b-4ece-ac05-382114631d62`）已complete；实际报告`/tmp/plugin-status-observe-denied-preview-postgreen-owner-01a1406d/review.md`已全文读核：corrected-parent/observe postGREEN **accept**、logical-Caller **ready-for-budget**、无findings。OWNER结合当前实际54named/type0、精确Source范围/独立报告作窄接纳；这是独立advisory加OWNER裁决，**不是SDK checked接受、merge/release或全产品完成**。只读reviewer未执行命令/测试/hash，归属、Git/hash/stat由OWNER核验，不能称reviewer独立重算。
 

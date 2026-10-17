@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：修正后Caller独立accept，转入原操作预算
+## 当前：预算读取子项已独立局部接受，聚合budget仍未完成
+
+`e01d2399bb227ef1fd1c06df360b67a4e906606f`已push。OWNER真实TDD：首read跨原deadline后仍进入child读、init真实消耗40秒后passive list/probe挂过原90秒，actualtype0/3业务RED17skip；只observeBinding增加原frame入口检查、init后known-zero检查、同原Budget.guard两read及sentinel/knownzero处理，新raw立即观察，不静默活IOError。当前18nonemit chain+39controller=**57去重产品PASS/actualtsc0**，private再借90秒双typed control2FAIL1PASSvs当前3PASS，非deny-all/非每阶段新window。原11it+6role table完整call精确、147仅2path、fixture全stat/cache相同；0reportederrors/48nonerrorauxiliary非allclean。
+
+只读fresh **`d2d65742-d006-4225-b9b4-8e60343d0eeb`**（mission99d9b789-9eea-4eee-93eb-98476a85edb3）已complete；实际35行报告`/tmp/plugin-status-budget-init-read-postgreen-owner-01a1406d/review.md`已全文核，**budget-init-read local: accept**/无findings。transcript23read/0其他tool，严格无commands/Git/编辑；OWNER自核currente01/SHA/upstream0/0后据57actualPASS/type0/typedcontrol及独立advisory窄接纳，非SDKchecked/merge/release，hash/stat不归为reviewer独立重算。Tower653/186 init-read completed两path回执；ports再拆owned`status-budget-release-waits` in_progress和需明确config handoff的`status-budget-physical` blocked；聚合budget仍开，不把具体shared等待扩大整个controller停工。先核lease/节流/原cleanup角色再新TDD，不能臆改成功release策略或用boundedawait假称实际CAS安全。当前没有运行reviewer/worker，不poll。证据`/tmp/plugin-status-budget-init-read-owner-01a1406d/`及owner-post-review-acceptance.json。
+
+本步工具fresh读plan/approvedprotocolcopy被ctx_execute_file错根/issue852拒绝；未换工具/路径/child重试或更改settings，沿此前批准S1上下文继续授权产品scope。不改被拒plan，不再以bundle/check间接读取它；此后四checkpoint以JSON/diff/LSP单独验证，之前37a五docs的bundle/check0只属之前快照。不要把生成proofbundle当最新预算候选证据。
+
+## 已验收逻辑Caller：130c/54named及acf局部接受（历史于本预算候选）
 
 **`acfef23b-631a-4970-b778-d2b6facdd4ce`**已complete，实际报告`/tmp/plugin-status-observe-denied-preview-postgreen-owner-01a1406d/review.md`已全文核：corrected-parent/observe postGREEN **accept**、logicalCaller **ready-for-budget**，无findings。OWNER据54named/actualtsc0与该只读独立advisory窄接纳；不称SDKchecked、merge或完整产品接受。代码 **`130c395fd8d3ca04db80d1ca827e2dbb755636f0`**已push，仅controller+integration；两旧fixture冻结未stage、无pin/version/发布。
 
