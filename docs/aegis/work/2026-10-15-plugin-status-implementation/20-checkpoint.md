@@ -1,6 +1,22 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：测试门禁修复387fbe3/22PASS已窄接纳；生产c2不变，继续受共享交接边界约束
+## 当前：Cookie Store null证据1ab3190/36PASS已窄接纳；精确expired边界仍待专案
+
+fresh **5559099e-8c9b-437a-bef8-dedc59e9d799 / child02f4fd13-045c-4b5c-945f-deb1a08ff5ee COMPLETE/localaccept/No correctness issues**，实际41行七字段报告已读parse；真实session **30read+2nativecontact/0其他/0工具错误/0白名单外读**。OWNER同 **1ab31904204f4e7c077d36742f2c9be660dc242e**/两SHA/upstream0-0/空index后只接纳Cookie Store null/unavailable-vs-proven-foreign判断及已证旧fixture修正；receipt `/tmp/plugin-status-cookie-store-proof-owner-01a1406d/owner-post-review-acceptance.json`。36unique相关PASS/actualunpipedtsc0为OWNER执行，reviewer未独立跑命令/Git/hash/批准protocol核验。**明确限制：新12案无wake Store端口BUDGET_EXPIRED精确entered执行证据**，supervisor已确认；Source可读出原spent Budget由bootstrapLive拒绝，不能把静态检查或36PASS外推为该点timeout闭合。后继 `status-cookie-store-expiry` 应专门覆盖此点，不改生产时钟/原预算，不以本接受关闭父Cookie或physical。
+
+当前无running reviewer/worker，不再等已完成555/02f或历史reviewer。两null??empty推断已退休、known值optional授权保留，controller仅localfix无新职责；独立旧phantomreadgate退休，不补生产I/O。初失败日志/startingSource/type0/诊断/最终GREEN全保留，2冻结fixture/frozen9/cache与8otherwatched不变；LSP0error2inconclusive0clean。physical明确branchHEADwritequeue交接仍未到，actions/Cookie aggregate/specqualityERP/T5/browser/build/release/f408等均开，整体未完成不合并发布；所有拒读/no-bundle继续。
+
+## Cookie Store证据候选启动快照（历史；555现已窄接纳，不含exact expiry执行门）
+
+`status-cookie-store-proof`（Tower675，OWNER直接）独立于共享physical写：controller把readCookieStore的null折成空字符串，明确授权时误报foreign、未配置授权时反可把unknown当proven。真实wake missing/empty×明确/未配置授权，及postreload第二次Store读同矩阵，**actualunpipedtsc0→8业务FAIL/4正案PASS/117skip**后OWNER独立preedit，只在原两个判断先区分null；wake走既有unknown重建/原预算拒绝，第二次读null走既有REQUEST_FAILED/discovering/RECOVERING，已证明foreign仍IDENTITY_MISMATCH/conflict。readCookieStore/optional授权已知值能力/原PREGENBudget/runtime-task-window/storagekernel/真实physical全部不改，无新API/helper/依赖/clock/版本/pin。两真实文件Source16行diff、test参数化12案及1旧case修正，commit **1ab31904204f4e7c077d36742f2c9be660dc242e 已push**。
+
+新12GREEN/type0后初related1TIMEOUT+35PASS，保GREEN-related.log/单例失败；独立普通副本starting387Source actualtype0+同旧case也TIMEOUT，证明非此修复新回归。private diagnostic真实entry-vs-main显示login_required→stop→commit→clear后main已settled，原PRE流程没有额外post-stopread。仅修旧测试为原PRE tuple/no重读/canonicallogin事实，不为phantomgate补生产I/O；退休唯一本已失效的test storeRead等待hook，保recorder/其他gates/reset。最终**36unique相关namedPASS/93skip、actualunpipedtsc0**，新12与修正1均包含，不加历史22/122。ASTold115定义仅1旧case替换/其余body相同，新4参数组+替换1；另外8watchedSHA/frozen9/cache同，2副本306普通独占files/仅node_modules link；LSP0error/2inconclusive0clean非all-clean。
+
+证据 `/tmp/plugin-status-cookie-store-proof-owner-01a1406d/` TaskStartSnapshot/plan/owner-preedit/RED-results/final-results/legacy-test-diagnosis/integrity-proof/review-owned.diff。fresh **5559099e-8c9b-437a-bef8-dedc59e9d799** 全新只读status-cookie-store-proof-readonly仅read/nativecontact，report `/tmp/plugin-status-cookie-store-proof-postgreen-owner-01a1406d/review.md`，本段是LAUNCH快照，先实际native/report/audit/OWNER同HEADSHA再裁决，不预称接受或复用旧reviewer。批准协议仍锁fb42/c2fa Git blob已核；工作文档d266不是新批准、不改协议，首次错main路径ENOENT只是setup，未读被拒protocol副本。全部拒读/no-bundle继续。
+
+物理无明确config branchHEAD/writequeue交接依旧blocked；Cookie父项还依actions/整体门，本步不是全部Cookie/timeout/physical/SDKchecked/ERP/T5/browser/build/release接受，不合并发布。当前1ab仅候选，不重等已完成31d/c802/b1等。两历史fixture仍永久冻结dirtyunstaged不碰。
+
+## 测试门禁接纳快照（历史387fbe3/22PASS；不授当前Cookie候选接受）
 
 fresh **31d97a91-b176-450d-b9ed-fc231e91107f / childc802851d-6994-4683-9845-4a76c3cef2db COMPLETE/localaccept/No issues found**，实际七字段JSON报告已全文读/parse；真实session **14read+1nativecontact/0其他/0工具错误/0白名单外读取**。OWNER同 **387fbe3622c60220e8a942a2aac5a18a26491514**/testSHA/upstream0-0/空index核后，仅接纳controller测试gate isolation；receipt `/tmp/plugin-status-gate-isolation-owner-01a1406d/owner-post-review-acceptance.json`。22unique相关namedPASS/actualunpipedtsc0为OWNER实际执行，reviewer未独立跑Git/编译/hash。此修复只退休无关stop reset、保合法one-shot/beforeEach，所有旧case相同、生产Source不改，不是physical或整体接受；LSP仍0error1inconclusive。**当前无running reviewer/worker，不重等已完成31d/c802或任何历史reviewer**。物理/CASABA/fullcleanup/sharedclock/actionsCookie/specqualityERP/T5/browser/build/release/f408仍开，新增拒读/no-bundle边界继续。
 
