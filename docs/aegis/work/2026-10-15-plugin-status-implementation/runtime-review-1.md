@@ -4,7 +4,19 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：1ab3190 Cookie null证据局部接受；36PASS不是exact expired-wake执行证明
+## 当前：d940400 exact wake Cookie Store原窗口/drain回归已局部接受
+
+fresh1e817982/child50bd13a6 workflow+child COMPLETE/localaccept/No blocking findings，实际35行七字段报告已读，20read2nativecontact0其他错误白名单外；OWNER同d940400436e9740a6937edc2221b46bf2948dc85/testSHA/upstream0-0/空index后仅接纳TEST_ONLY_EXACT_WAKE_COOKIE_STORE_ORIGINAL_WINDOW_DRAIN。receipt `/tmp/plugin-status-cookie-store-expiry-owner-01a1406d/owner-post-review-acceptance.json`；40unique相关namedPASS93skip/actualunpipedtsc0，新4包含，2controls各actualtype0/3业务FAIL1livePASS；Source不改、119oldcallbacks同、294普通独占copy，frozen9/cache同，LSP0error1inconclusive0clean。
+
+具体补证20s原PREread→实际wake CookieStore原rawPromise→同window余70s→总90main拒绝/raw仍held→late same/foreign/reject无已断言旧尾→raw/main drain后才successor canonical application/live正案。**ledger未直接snapshot对比；expired案只有binding/queue执行比较，controller路径不写ledger是Source结构结论，完整runtime terminal-ledger门未在此执行。** reviewer未执行Git/compiler/hash，此接受不授真实Chrome取消/physical ownership-admission/待native overlap/clockOSsleep/CASABA/fullcleanup或父Cookie/ERP/SDKchecked。当前无runningreviewer，不resume完成1e817/50bd或历史reviewer；下游仍待physical明确config branchHEADwritequeue交接/actions及整体门，全部拒读/no-bundle/冻结fixture边界维持，未合并发布。
+
+## exact expiry候选启动快照（历史；1e817已局部接受）
+
+OWNER测试ONLY117+/2-，可选typed cookieStoreId端口覆盖且legacy默认body不变，一组4案；Source/其他9watched同、119oldcallbacks同。真实首read/PRE耗20s→实际wake Store entry持原rawPromise→同task/window join/余<=70s→原90s mainSTALE_CONTEXT有限拒绝而raw仍pending；late same/foreign/reject不添mutation/报告/UUID/PRE，显式raw/main drain后successor真实canonical application，live same正案。finally双gate释放+raw/main/successor drain后恢复timer；无生产clock/原Budget/TaskABI改变，也不证明pending native持锁或Chrome取消。
+
+initial4PASS129skip/type0，私有fresh-wake-budget与missing-postproof-liveness各actualtype0+3业务FAIL1livePASS（expired≠settled/stop≠[]），294普通独占files/node_modulesonlylink/逆变异精确，原Source从未改。final40unique namedPASS93skip/actualunpipedtsc0，新4包含；frozen9/cache同、2旧fixture不碰；LSP0error1inconclusive0clean。candidate d940400436e9740a6937edc2221b46bf2948dc85已push；证据 `/tmp/plugin-status-cookie-store-expiry-owner-01a1406d/`。fresh1e817982-07d6-4053-92da-9ee2422a11ae已launch（仅启动快照），report `/tmp/plugin-status-cookie-store-expiry-postgreen-owner-01a1406d/review.md` 待实际native/report/tool审计/OWNER同HEADSHA，不预接受或resume历史reviewer。共享明确handoff/actions父Cookie/specqualityERP-T5browser-build-release/f408等仍开，批准锁fb42/c2fa及拒读/no-bundle继续，未整体完成/不合并发布。
+
+## Cookie null接纳快照（历史1ab3190；exact expiry已后继候选，不授接受）
 
 fresh5559099e/child02f4fd13 workflow和child COMPLETE/localaccept，实际41行七字段报告已读parse；30read+2nativecontact，0其他/错误/白名单外。OWNER同1ab31904204f4e7c077d36742f2c9be660dc242e/两SHA/upstream0-0/空index后，仅接纳null/unavailable-vs-proven-foreign分类和已证旧fixture修正，receipt `/tmp/plugin-status-cookie-store-proof-owner-01a1406d/owner-post-review-acceptance.json`。reviewer明确询问并保留**exact entered expired-wake CookieStore边界暂无执行证据**；OWNER未虚构证据，36相关PASS不外推该点或timeout关闭。Source原spent预算由bootstrapLive拒绝只是静态结论，后继status-cookie-store-expiry应补真实entry/drain证明；不改生产clock/原Budget、无physical/父Cookie/整体接受。当前无runningreviewer/worker，不等555/02f或任何历史reviewer。
 

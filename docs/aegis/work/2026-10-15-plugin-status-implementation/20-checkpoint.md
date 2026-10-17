@@ -1,6 +1,20 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：Cookie Store null证据1ab3190/36PASS已窄接纳；精确expired边界仍待专案
+## 当前：d940400 exact wake Cookie Store过期回归已窄接纳/40PASS；父项仍待physical/actions
+
+fresh **1e817982-07d6-4053-92da-9ee2422a11ae / child50bd13a6-3e0c-4544-afbc-4370ecfb6e1e COMPLETE/localaccept/No blocking findings**，实际35行七字段报告已读parse，真实 **20read+2nativecontact/0其他/错误/白名单外读**；OWNER同 **d940400436e9740a6937edc2221b46bf2948dc85** / testSHA cecc001758994e702a88e3c39d6a3ea42ca2c90ab563533af7e2607f69530528 / upstream0-0 / 空index核后，仅窄接纳TEST_ONLY_EXACT_WAKE_COOKIE_STORE_ORIGINAL_WINDOW_DRAIN，receipt `/tmp/plugin-status-cookie-store-expiry-owner-01a1406d/owner-post-review-acceptance.json`。40unique相关namedPASS/actualunpipedtsc0为OWNER执行，4target含其中，不与历史36累计；reviewer无Git/compiler/hash独立执行。
+
+补上的是mockport真实controller/kernel的20+70原窗口/实际entered/有限main与held raw/late三值拒旧尾/drain后successor/live正案证据；无需改既有生产正确行为，生产/其他9watched SHA同、119oldcallbacks全同，test117+/2-无新生产职责。**expired案直接比binding与report queue，未直接snapshot/compare runtimeledger；no-ledger-mutation仅controller路径结构推理，不能称执行过runtime terminal-ledger门**。此限制来自fresh reviewer的具体询问，OWNER已缩窄候选及最终裁决；不是必须增加生产I/O或冒充完整runtime。剩余真实Chrome/native取消/physical持锁与admission/pending native overlap/生产clock与OSsleep/CASABA/fullcleanup/actions/父Cookie/specqualityERP/T5/browser/build/release/f408均开。已完成1e817/50bd不再等待/resume；目前无running reviewer/worker；明确config branchHEAD/writequeue未交接不碰shared/foreign lane，全部拒读/no-bundle和2历史冻结fixture保持，不合并发布。
+
+## exact Cookie Store过期候选启动快照（历史d940400；1e817现已局部接纳）
+
+OWNER直接，Tower679 `status-cookie-store-expiry`，基线1ab3190，候选 **d940400436e9740a6937edc2221b46bf2948dc85 已push**。唯一test文件117+/2-：一个可选typed cookieStoreId测试端口覆盖（原默认body不变），一组4案，生产Source及9otherwatched SHA全同；原119旧测试callback全同。首真实storage read捕获PRE后hold耗20s，实际wake CookieStore端口进入并返回可独立释放/观察/await的原rawPromise；同task/window join、原window剩余<=70s。原总90s到期时main已STALE_CONTEXT拒绝且raw仍pending，late same/foreign/reject三案均无新stop/clear/bind/probe/报告/UUID/PRE等；释放并drain原raw/main后才做新successor真实canonical application。live same正案完成真实ready/suspended；finally先释放双gate并drain raw/main/successor再恢复timer，无sleep/poll/新Budget或生产clock变更。
+
+这是既有正确行为补证，不为旧证据缺口改生产代码。initial4PASS129skip/actualunpipedtsc0后，两个私有147普通独占copies（共294，node_modules唯一link，反向字节精确）：fresh-wake-budget actualtype0/3业务FAIL1livePASS，expectedsettled/receivedexpired；missing-postproof-liveness actualtype0/3业务FAIL1livePASS，expected[]/received[stop]。最终 **40unique相关namedPASS93skip/actualunpipedtsc0**，新4含其中，不累计历史36/122；LSP0reportederrors1inconclusive0clean非all-clean。frozen9/cache同，2历史fixture仍dirtyunstaged冻结；首board peerkey拼写和非唯一editanchor均拒绝无修改，修正后继续，非业务RED。
+
+证据 `/tmp/plugin-status-cookie-store-expiry-owner-01a1406d/` TaskStartSnapshot/owner-preedit/initial-results/control-results/final-results/integrity-proof/review-owned.diff/candidate。fresh只读 **1e817982-07d6-4053-92da-9ee2422a11ae** / missionc7cfd207-d028-47d4-8ff9-a35c5b70abe6 已launch（快照，不假定仍running），report `/tmp/plugin-status-cookie-store-expiry-postgreen-owner-01a1406d/review.md`；先实际native/report/tool审计再OWNER同HEAD/testSHA/upstream窄裁决，当前候选不预接纳。仅mock浏览器端口真实controller/kernel路径，非Chrome native取消/持锁、pending native overlap、实际生产clock/OSsleep/physical/全Cookie/ERP/SDKchecked接受。共享配置明确branchHEAD/writequeue仍无交接，actions等父门仍blocked；不合并发布、全部拒读/no-bundle保持，不resume历史reviewer。
+
+## Cookie null证据接纳快照（历史1ab3190；exact expiry已进入后继候选，不授候选接受）
 
 fresh **5559099e-8c9b-437a-bef8-dedc59e9d799 / child02f4fd13-045c-4b5c-945f-deb1a08ff5ee COMPLETE/localaccept/No correctness issues**，实际41行七字段报告已读parse；真实session **30read+2nativecontact/0其他/0工具错误/0白名单外读**。OWNER同 **1ab31904204f4e7c077d36742f2c9be660dc242e**/两SHA/upstream0-0/空index后只接纳Cookie Store null/unavailable-vs-proven-foreign判断及已证旧fixture修正；receipt `/tmp/plugin-status-cookie-store-proof-owner-01a1406d/owner-post-review-acceptance.json`。36unique相关PASS/actualunpipedtsc0为OWNER执行，reviewer未独立跑命令/Git/hash/批准protocol核验。**明确限制：新12案无wake Store端口BUDGET_EXPIRED精确entered执行证据**，supervisor已确认；Source可读出原spent Budget由bootstrapLive拒绝，不能把静态检查或36PASS外推为该点timeout闭合。后继 `status-cookie-store-expiry` 应专门覆盖此点，不改生产时钟/原预算，不以本接受关闭父Cookie或physical。
 
