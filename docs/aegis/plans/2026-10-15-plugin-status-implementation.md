@@ -28,7 +28,15 @@ corrected-design root437688b5/child4d7be134因原生`commands-run evidence missi
 
 历史接受基线：当前已接受**十一微切片**，第十一最终gate`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`/root7187c653/child6ee1cecc已原生terminal七字段核读。provisioning单set写已有closed初始化episode、纯构造器迁storage唯一19字段owner/controller传原newId，不改unknown/fence/union；首heartbeat报告同episode。独立48去重产品named+1私有probe PASS、producttsc0、两反事实杀死且tsc0/精确三path证明。LSP0reported errors但3inconclusive；其余七chain仍未知、完整T4未完成。产品聚合16-path检查点18d0887已push且树clean，仅保存原12034行WIP，不是全验收/发布或master/pin变更。原artifact test-before fb11为held中间态，真实微切片基线ef333→91a4已记erratum，不改原稿。证据`/tmp/plugin-status-owner-provision-initial-record-01a1406d/`。
 
-### 当前：terminal-fence RED原子任务运行，643 Caller in_progress
+### 当前：继续最后queue await/不可读分支RED，生产权限另待确认
+
+56/e03原生勘误与fresh7de边界review已terminal；既有terminal owner适合复用helper，但normal/full及unreadable两个写分支都须最后await后检查。当前fa4a8eee-fbf8-4735-adf3-69843ae9ac4a exact-resume e03先NEW preTEST WAIT，仅existing integration加ONE最后queueIO/原fence过期+unreadable case，old10/helper冻结、654type/655named，不给Source。Operator一次automatic4unit例外问题尚未批准，候选storage/runtime/viewmodel/controller静态清单非SDK执行保证；未确认前仅上述integration工作。Caller643 active，Source预算等后继未闭。
+
+### 前一阶段：terminal-fence真实RED已核，命令勘误/最小Source边界审查
+
+653与OWNER同named真实1FAIL9skip（finalready错误），652/OWNER actualtype0；old9/header/snapshot/84仅testdelta/2fixture全stat/cache均核，test4ec，postRED9ac只接受RED，不是GREEN/Source或Caller完成。root389 terminal/native review-required，真实18Bash含13额外管道npx漏报，合规不接受且保原件；不因此否认独立RED或停止全项目。当前root56bc8e0a-a11c-400f-a0ec-6abab1a048c9原writer只读原生命令勘误→fresh只读canonical最小修复边界审查，无产品编辑。旧合法保存runner片段支持edited+neighbour风险，不绕过SDK读取拒绝、不宣称Source-safe。详checkpoint最新/command-scope-errata与post-RED-independent-proof。
+
+### 历史：terminal-fence RED原子任务运行，643 Caller in_progress
 
 Fresh b377及Owner源读确认逻辑terminal consumer遗漏原commit.fence，与future physical风险不同。267/d448设计terminal，唯一实际SHA无dot/noGit，84不变；原报告dot/行号错误保原件另纠正。新root389a890a-6b37-4629-ad6a-608c2004ddb8 exact-resume d448，先fresh supervisor pre-TEST WAIT，后仅existing integration一个真实case+650type/651namedRED，再postRED receipt；绝无production grant。原子顺序：validRED/type0→另fresh source pre-edit及auto-scope证据→canonical storage最小复用既有permission helper→相关GREEN/产品tsc→独立fresh postGREEN。TDD strict来自repo；新测试不碰旧9/header/2fixture，不建authority或runtime双重owner。见最新checkpoint与terminal-fence-RED packet。
 

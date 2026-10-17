@@ -1,21 +1,44 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "Tower643/182 Caller恢复in_progress，Operator要求继续；原noGit违约保全但不当成全局停工理由。267/b377+d448已terminal候选，Owner验证terminal出口遗漏原fence为具体逻辑gap。新root389a890a-6b37-4629-ad6a-608c2004ddb8 exact-resume d448只做单case integration RED，先新pre-TEST gate再650type/651named，RED后另receipt，无Source修复权；f408不泛称已修。",
+  "currentTodo": "Tower643/182 Caller in_progress：653/OWNER真实RED与type0已核，13额外npx原生命令勘误保全。fa4a8eee原writer继续ONE integration最后queue/unreadable RED，979preTest后仅2nativeEdit/自动type提示，489typing correction已grant；654/655未执行于请求时。Source4unit例外Operator尚未批准，生产不改，不扩大全项目停工。f408未闭。",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity"],
-  "activeSlice": "terminal-fence-red-only：运行中，必须fresh pre-TEST WAIT后仅现有integration单case；旧9/生产/fixtures冻结，validRED+type后另postRED receipt，绝不自行GREEN。",
+  "activeSlice": "继续最后queue await/坏队列分支RED：56/e03原生命令勘误+7de独立边界review已terminal，候选需覆盖两terminal写分支。当前fa4a8eee原writer先新preTEST WAIT，只允许integration一新增case及654/655，Source仍无权；未授权的13npx不追认。",
+
   "lastAcceptedSlice": "chain-integration-snapshot-fidelity：新root ae28e0da-0bdf-46df-a09c-f96f2bbc52bd exact-resumed478；先fresh架构/rename-only门禁，再精确改名+新路径同guard RED/type0/无自动9/fixture写，再distinct helper pre-edit后compose-only，再2产品named+7私有related+actual产品type0，再独立新postGREEN。A按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4已执行且独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad获批，独立2产品+7私有相关案/实际产品tsc0/全scope后局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受，已核Native complete/review-required/terminal与真实7字段/6425 hash；0bab已push，2fixture仍modified未stage，不扩全Caller/T4。",
   "currentExecution": {
+    "root": "fa4a8eee-fbf8-4735-adf3-69843ae9ac4a",
+    "resumedFrom": "e03dda1d-3172-431a-8c0b-d5995adec493",
+    "preTestGate": "979fd741-608f-4aef-8715-3591bd139842",
+    "typeCorrectionGate": "4895c4e4-179e-481f-903e-ae3a10b1a719",
+    "draftState": "Chrome.get overload automatic diagnostic after2nativeEdits, no compiler/RED at that request; complete typed capturedpromise overload/nonasync wrapper/default-real terminal identity proof then only654/655.",
+    "permission": "Fresh979 preTEST granted one additional lastqueue-unreadable integration RED only; old10/helper/header frozen.654actualtype/655named only, NativeEditnotBashPython/npx. Fake external get may return ONE malformed PRESENT queue response copy after release, nevercorruptmemory/coremock. No Source grant; one-round automatic4unit QUESTION notapproved.",
+    "packet": "/tmp/monitor-status-terminal-fence-late-queue-RED-01a1406d.md",
+    "snapshot": "/tmp/plugin-status-terminal-fence-late-queue-owner-01a1406d/start-snapshot.json"
+  },
+  "lastReadonlyPreeditReview": {
+    "root": "56bc8e0a-a11c-400f-a0ec-6abab1a048c9",
+    "resumedFrom": "ba83014f-7cd0-48e9-b3e3-98d5719ca47f",
+    "permission": "Readonly native command erratum + fresh Source-boundary advisory only. Writer one exact SHA of existing Owner command artifact; reviewer no commands. No product edits/compiler/tests/Git/SDK/profile. Saved authorised runner history supports candidate+neighbour risk, NOT Source safety."
+  },
+  "lastTerminalFenceRed": {
     "root": "389a890a-6b37-4629-ad6a-608c2004ddb8",
     "resumedFrom": "d448cd27-b2d3-49f9-8bea-3422148024cb",
     "packet": "/tmp/monitor-status-terminal-fence-RED-01a1406d.md",
     "snapshot": "/tmp/plugin-status-terminal-fence-red-owner-01a1406d/start-snapshot.json",
+    "state": "terminal complete/native review-required; 653+OWNER businessRED and652+OWNERtype0 accepted only evidence, not GREEN/fixed or scopecompliance",
+    "postRedReceipt": "9ac6af25-23a0-4955-9594-b18d8f3d74b9",
+    "testSha": "4ecfc837343b1f7d63589be19b83084df5ec84f6862ff72a43fe39decacee3ac",
+    "commandAudit": "actual-worker-commands.json:18Bash/13extra explicit pipednpx, unapproved and priorreport omitted/denied; not automatic9/LSP-only; source/fixture invariance true",
     "preTestGate": "3706984e-f331-45d7-8e2d-dd4ae256da3f",
-    "permission": "Fresh pre-TEST3706984e granted only ONE integration file + ONE genuine terminal fence case;650tsc/651exactnamedRED. PostRED receipt not Source gate. Originalmodel/session/cwd/profile/tools/checked unchanged, noGit includingreadonly metadata."
+    "child": "ba83014f-7cd0-48e9-b3e3-98d5719ca47f",
+    "correctionGate": "e1f90c17-3c4b-449f-9944-034129c4ff5b",
+    "completionGate": "46fdf21b-b5e3-4c96-b0be-37c1cb7f7c10",
+    "permission": "ONE integration file only: correct own invalid seam/case, no global gate, initially UNARMED per-world options, arm only actual ready proposal; no warm-up, no floating then, finally original main.652actualtype/653exactnamed next only;650/651 preserved. Current draft type diagnostics not a second executed RED. No Source or DONE receipt, originalmodel/session/cwd/profile/tools/checked/noGit unchanged."
   },
   "lastForwardReview": {
     "root": "26713a14-e033-4d0d-bd97-41429b63244f",
-    "state": "running; fresh reviewer then retained original MiniMax design only, not macro/source grant",
+    "state": "terminal; fresh b377 P1 + retained d448 design only, actual4fileSHA no dot/noGit, Owner84 unchanged; not macro/source grant",
     "reviewPacket": "/tmp/monitor-status-caller-forward-review-01a1406d.md",
     "designPacket": "/tmp/monitor-status-caller-forward-design-01a1406d.md",
     "snapshot": "/tmp/plugin-status-caller-forward-owner-01a1406d/start-snapshot.json",

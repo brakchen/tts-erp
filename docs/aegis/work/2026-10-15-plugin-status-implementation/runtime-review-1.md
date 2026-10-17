@@ -66,7 +66,15 @@ OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check�
 
 上述corrected-design root437688b5/child4d7be134原生拒绝：`commands-run evidence missing from child report`；其needs_context/空delta/空gate保留但不算验收。快照`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/`已保存、产品逐字冻结未改。仅同协议exact-resume证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`运行，允许一次真实unpipedtsc并如实列Commands run，不换model/CLI、不降checked、不造命令证据、不授源码许可。valid-record→absence误断已撤回，独立missing-identity exploit仍未证；materialization/factory设计未决。fb42是Git commit非SHA256，approved/current文档确有后续修改，但初始化episode锚点在approved中，不能混hash类型推断协议损坏。
 
-### 当前：fresh b377具体逻辑P1已核，下一阶段只做真实集成RED
+### 当前：fresh7de明确两写分支/最后await控制，继续一条安全integration RED
+
+56/e03 erratum与fresh7de均terminal：既有canonical owner/helper候选合适但Source权限blocked，normal/full/unreadable两terminal写分支都须guard，并缺最后storage-await过期反例。新fa4a8eee-fbf8-4735-adf3-69843ae9ac4a exact-resume e03先fresh preTEST，再ONE existing integration case/654type/655named；old10/helper/header/2fixture冻结，假Chrome端口可局部IO失败，canonical core不得mock，原main finally保证。Operator仅一次storageSource自动4unit例外尚待确认；静态fanout库存非实际SDK保证，无Source grant。原13未授权npx原生命令账已勘误，不把独立653RED否定或把整个项目停工。
+
+### 前一阶段：新真实RED已核，canonical Source最小边界未获编辑权
+
+653与OWNER同named1FAIL9skip确证原window过期/tuple不变时terminal仍ready；652/OWNER实际type0、test4ec/旧9精确/2fixture全stat/cache不变。9ac receipt仅RED，后续stale-result断言未到，NOT GREEN/Caller/T4。389native complete/review-required非SDK accepted；actual18Bash/13额外pipednpx违反门禁且终稿漏报，保原件并原native勘误，不计验证、不追认。当前56bc8e0a-a11c-400f-a0ec-6abab1a048c9先原writer只读命令勘误后fresh只读Source边界review，canonical helper复用候选、Sourceauto-scope仍未解决。原合法历史runner证据含edited+neighbours→file-level，非新SDK读取/完整审计，不能给Source-safe授权；无profile/SDK/flag/fallback改变，不扩大项目停止。
+
+### 历史：fresh b377具体逻辑P1已核，下一阶段只做真实集成RED
 
 267/d448终态review-required非SDK accepted，Owner全84不变、actualSHA无dot/noGit；自述dot/runtime行号错误明确纠正但不改原件。storage commitDecisionResult不消费commit.fence，runtime664 postexecutor evidence await可使原窗口过期但tuple不变，终态691–707仍ready/applied；普通observation出口有guard，旧nonce案不能替代同tuple失权反例。新root389a890a-6b37-4629-ad6a-608c2004ddb8 exact-resume d448：NEW pre-TEST WAIT→仅existing integration单case/旧9精确保留→650tsc/651namedRED→NEW postRED receipt；无Source修复权，Sourceedit auto-scope仍待证。Owner最小未来修复归storage canonical终态复用既有helper，不下放runtime预检查或另建authority。严格TDD/独立postGREEN与其他未闭项保持。
 
