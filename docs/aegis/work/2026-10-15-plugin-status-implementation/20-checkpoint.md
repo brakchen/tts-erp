@@ -1,6 +1,20 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：canonical提交等待已独立局部接受，继续owned预算时钟
+## 当前：core默认预算clock已局部accept，继续终态等待架构门
+
+**b86886a0ddee3f0c42e18df2dd669d294563d972 已push/67unique产品PASS/actualtsc0**。fresh **64d14830-4811-4146-801d-71db934016b0 COMPLETE / core-default-budget-clock local: accept / no issues**，实际21行报告已读/20read0其他tools审计，Owner复核同HEAD两SHA/upstream0/0后仅窄接纳；receipt `/tmp/plugin-status-budget-core-clock-owner-01a1406d/owner-post-review-acceptance.json`。不是SDKchecked/所有clock或真实OSsleep/生产sharedclock接线/physical/aggregate/merge/release。**Tower666/189**完成clock真实2path回执，移除旧clock blocker，新status-budget-terminal-wait OWNER in_progress；此前65e/b78观察等待63接受也不再等待。
+
+已读runtime64–85/510–710及storage166/548–639：终态等待缺原wait capability，尤其no-proposal/throw/localdisabled；currentContextReport观察-only不应塞孤立fence，实际serializer必须保持到rawnativeworksettle，未知不能伪造完成或回滚事实。独立owned架构draft `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/architecture-proposal.md` 比较显式upfront task/window envelope vs first-only同步adoption；**尚未设计批准/新Source/tests编辑或执行**，不静默新增API/借新90。fresh严格只读架构review **2f8f66dd-75ad-4da5-8e57-26a83e452519** / mission4579d8db-7d34-4da0-ac10-97d7a6c97ee0 launched，output `/tmp/plugin-status-budget-terminal-wait-architecture-owner-01a1406d/review.md`，等native不poll。它不是postGREEN或完整交付接受；无worker，shared明确handoff/拒读plan-protocopy/no bundle限制保持。下面是此前候选快照，已由本段接受记录更新。
+
+## core默认时钟复核候选快照（b868/64，现已局部接受）
+
+产品 **`b86886a0ddee3f0c42e18df2dd669d294563d972` 已push**，仅controller+integration；SourceSHA`2c5007214701f9f7e81318c7633ed5dbe47351a2deb74081fcdad0652853b5a3`，testSHA`9d26ab13d6254d88ba0ac6f3a0bff2771a2d421f4972a19574a60d5cc4d16fb9`。最终 **28nonemit chain+39controller=67unique产品namedPASS/actualunpipedtsc0**，selected4重叠非额外；latest LSP0errors/两path均inconclusive非clean。fresh **`64d14830-4811-4146-801d-71db934016b0`** / mission`2f933bec-b20c-41a2-8c04-bac293a67d1c` launch，输出`/tmp/plugin-status-budget-core-clock-postgreen-owner-01a1406d/review.md`，**等native不poll；尚无本slice独立接受/Owner裁决**。Source冻结供review，Tower662/188 core-clock仍in_progress/父聚合仍开，无worker。
+
+证据`/tmp/plugin-status-budget-core-clock-owner-01a1406d/`：reuse primary MDN/Vitest与既有runtime165 nativeperformance；serverACK decisionDeadline非本地budget不混用，Github raw README fetch失败不称已读。StageA原TS1477为INVALIDsetup无tests，tests-only realGet→bind修后type0、1真实rollback业务FAIL1wall-gap guardPASS先于Source；partial defaultmono/dualmin65GREEN**不是最终接受**。继而stage-b/type0+2真实业务FAIL2PASS：原timer已经令main超时却真实canonical晚写，真实originalFence已false又因wall恢复变true再真实写。Owner先preedit B再同一Budget缓存remaining数值只减/同原timer先锁0再resolve，非另造flag/clockowner/API/window。最终4role GREEN；5普通private copies/唯一node_modules link/alltypes0，current4PASS、alias-wall2FAIL2PASS、mono-only2FAIL2PASS、no-timer-latch1FAIL3PASS、no-read-highwater1FAIL3PASS，均非额外产品数。
+
+AST仅default nowMs+startBudget，其余Source精确；旧16完整it/it.each=26role逐字精确，新table4role；table之外test仅typed observer第二参透传ORIGINALcommit及callsite，无新await/default结果变化。147only2delta/冻结2 SHA完整ns/inode+nlink/regular+symlink（8属性+path身份=9字段）/cachebytes不变。两旧fixture仍dirty未stage不称clean。真实原main与rawcanonical均drain后恢复get/performance spies和timers；没有回滚真实事实、没有physical cancellation/真实OSsleep/异常自定义clock全验证/共享生产clock接线/全cleanup/CASABA/aggregate/merge/release认证。shared热点仍须config明确branchHEADqueue handoff；拒读plan/protocopy/no alternate/settings/bundle间接读不变。
+
+## 先前观察提交等待验收快照（65e/b78，早于本b868）
 
 产品 **`65e331cb1ab304ebe3cfa17c1eb4681c24c70dfa` 已push**，actual **24nonemit chain+39controller=63去重产品namedPASS/unpipedtsc0**。fresh **`b78e8806-f9d8-44c6-8483-20f7b8cab7ff` COMPLETE / observation-commit-wait local: accept / no issues**，实际24行报告已读，transcript **20read/0其他tools**；Owner另核当前HEAD/两SHA/upstream0/0后窄接纳，非SDKchecked/actualphysical/聚合budget/merge/release。Ownerreceipt=`/tmp/plugin-status-budget-observe-commit-owner-01a1406d/owner-post-review-acceptance.json`；候选/原始log/errata/typedcontrols/AST/冻结proof在同目录。SourceSHA`feeb3184104a86cc3e4f82fdf4cbb12538cc8987f33604734a67a6dc0b5edd87`，testSHA`1464d1a5bf3e0aa252fd31ba86796029b93599778d898424024e32d06e864eac`。
 

@@ -4,7 +4,17 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：canonical提交等待局部accept，继续owned预算时钟
+## 当前：b868默认clock局部accept，终态wait架构2f8审查中
+
+b86886a/67unique产品PASS/actualtsc0已push，fresh64d14830-4811-4146-801d-71db934016b0 COMPLETE localaccept/no issues，实际报告读核20read0其他tools；Owner同HEAD/SHA/upstream0/0复核后仅接纳DEFAULTbudgetclock/已知zero不可复活，receipt `/tmp/plugin-status-budget-core-clock-owner-01a1406d/owner-post-review-acceptance.json`。Tower666/189完成clock真实2path/父仍开，新status-budget-terminal-wait OWNERactive。runtime Outcome/no-proposal/throw无原wait能力，current snapshot-only报告不能破mandatoryunion，rawserializer锁不因caller timeout释放、真实事实不回滚。新private draft `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/architecture-proposal.md`，尚无新Source/tests/实现授权；fresh架构只读 **2f8f66dd-75ad-4da5-8e57-26a83e452519** / mission4579d8db-7d34-4da0-ac10-97d7a6c97ee0 / `/tmp/plugin-status-budget-terminal-wait-architecture-owner-01a1406d/review.md` 等native，不poll已完成64或运行2f8。无worker/不新增窗口owner或API绕门；shared生产clock和actualports仍等明确config handoff。67/架构advisory都非SDKchecked/physical/aggregate/merge/release，latest sourceLSP两path inconclusive，2旧fixture dirty未stage。以下是已被本段更新的候选历史。
+
+## b868/64复核候选快照（现已局部接受）
+
+b86886a0ddee3f0c42e18df2dd669d294563d972已push，仅controller/integration；**最终28nonemit+39controller=67uniquePASS/actualtsc0**，fresh **64d14830-4811-4146-801d-71db934016b0** running atlaunch / mission2f933bec-b20c-41a2-8c04-bac293a67d1c，`/tmp/plugin-status-budget-core-clock-postgreen-owner-01a1406d/review.md` 等native不poll，尚未接受，Source冻结。Tower662 core-clock仍active/父budget及sharedphysical仍开；无worker。证据根`/tmp/plugin-status-budget-core-clock-owner-01a1406d/`，最终以stage-b/GREEN及5controls为准，不把root partial65当最终。
+
+StageA type0/1rollback真实业务RED1wall-gap guardPASS（初TS1477 INVALIDsetup保留），minimum defaultperformance+dualmin后又发现knownzero复活，stage-b type0/2真实RED2PASS先于preedit B；真实timer使main ST后rawowner还写、真实originalFence false→true后rawowner还写，不是仅outer race。最终同一Budget numericremaining只减、同原timer先锁0，4role通过；5private alltype0/current4PASS，alias2FAIL2PASS/mono2FAIL2PASS/no-timer-latch1FAIL3PASS/no-read-highwater1FAIL3PASS。旧16wholecalls26roles精确，test仅own新table及typedoriginalcommit observer第二参/callsite，无default额外await；147only2/frozen9身份/cache同TaskStart。SourceSha2c5007214701f9f7e81318c7633ed5dbe47351a2deb74081fcdad0652853b5a3；testSha9d26ab13d6254d88ba0ac6f3a0bff2771a2d421f4972a19574a60d5cc4d16fb9。latest LSP0errors两path均inconclusive非clean/actualcompiler0另证。只是默认durationclock，不冒充任意错误clock provider、reportObservedAt政策、真实OSsleep、生产sharedclock接线、physical取消/CASABA/全cleanup/aggregate/merge/release；原facts不回滚。shared config明确handoff/拒读plan-protocopy-no bundle限制保留。以下65e/b78等是历史接受，非等待其review。
+
+## 先前观察提交等待验收快照（65e/b78）
 
 产品65e331cb1ab304ebe3cfa17c1eb4681c24c70dfa已push；**63unique相关产品PASS/actualtsc0**，fresh **b78e8806-f9d8-44c6-8483-20f7b8cab7ff COMPLETE/localaccept/no issues**实际报告读核，20read0其他tools；Owner currentSHA/HEAD/upstream0/0确认后窄接纳，不是SDKchecked/physical/aggregate/merge/release。receipt `/tmp/plugin-status-budget-observe-commit-owner-01a1406d/owner-post-review-acceptance.json`。2真实deadline RED/type0后仅observeBinding finalcommit原promise/SAMEBudget.guard/立即observer/sentinelST/返回实际appliedfact不rollback；typedprivate freshwindow2FAIL/current2PASS。初0-witness wrong-storeobserver是INVALID fixture，修到实际async status.reportObservation后才业务RED；snapshot7vs9字段是metadata误比较非frozen变化，原件均保留。
 
