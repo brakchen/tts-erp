@@ -1,7 +1,7 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "Tower643/182 Caller in_progress：653/OWNER真实RED与type0已核，13额外npx原生命令勘误保全。fa4a8eee原writer继续ONE integration最后queue/unreadable RED，979preTest后仅2nativeEdit/自动type提示，489typing correction已grant；654/655未执行于请求时。Source4unit例外Operator尚未批准，生产不改，不扩大全项目停工。f408未闭。",
+  "currentTodo": "Tower643/182 Caller in_progress：653与655两业务RED/OWNER各自复现，type0。fa/f8已native complete/terminal/review-required，DOMAIN7/c55 exact，actual2Bash无新增越权。仅test检查点e152612已push，2frozenfixtures未stage。Source4unit一次例外Operator尚未批准，生产不改；canonical owner已定，不扩大全项目停工。f408未闭。",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity"],
   "activeSlice": "继续最后queue await/坏队列分支RED：56/e03原生命令勘误+7de独立边界review已terminal，候选需覆盖两terminal写分支。当前fa4a8eee原writer先新preTEST WAIT，只允许integration一新增case及654/655，Source仍无权；未授权的13npx不追认。",
 
@@ -11,6 +11,14 @@
     "resumedFrom": "e03dda1d-3172-431a-8c0b-d5995adec493",
     "preTestGate": "979fd741-608f-4aef-8715-3591bd139842",
     "typeCorrectionGate": "4895c4e4-179e-481f-903e-ae3a10b1a719",
+    "state": "native complete/process terminal/review-required NOTSDKaccepted; DOMAIN7/c55 exact.654/OWNERtype0,655/OWNERbusinessRED; actualEXACT2commands audited before receipt. noSource/GREEN/DONE",
+    "checkpoint": "e1526126f5ed4588a17b2d1149d9726974aa43c3 ONLYtest pushed;2frozenfixtures remain modified UNSTAGED",
+    "nativeStateProof": "/tmp/plugin-status-terminal-fence-late-queue-owner-01a1406d/terminal-native-state-proof.json",
+    "fanoutReadLimit": "OWNERinventory JSON ctx_execute_file read blocked outside toolworkspace; no alternatetool/child/path retry. Old80/0counts notfreshverified nor Sourcebound proof. Operator4unit exception pending; installedSDK denial unchanged.",
+    "postRedReceipt": "c55e7ec9-c631-45d7-bc2b-bed140ae2fb9",
+    "testSha": "e455f333612948670beb1d272561ee1f77717e3204dbe4d069891c384f056bd4",
+    "proof": "/tmp/plugin-status-terminal-fence-late-queue-owner-01a1406d/post-RED-independent-proof.json",
+    "ownerDecision": "Canonical storage helper reuse/lastawait/BOTHbranches is decided; not runtime-only alternative. Operator4unit exception stillunapproved.",
     "draftState": "Chrome.get overload automatic diagnostic after2nativeEdits, no compiler/RED at that request; complete typed capturedpromise overload/nonasync wrapper/default-real terminal identity proof then only654/655.",
     "permission": "Fresh979 preTEST granted one additional lastqueue-unreadable integration RED only; old10/helper/header frozen.654actualtype/655named only, NativeEditnotBashPython/npx. Fake external get may return ONE malformed PRESENT queue response copy after release, nevercorruptmemory/coremock. No Source grant; one-round automatic4unit QUESTION notapproved.",
     "packet": "/tmp/monitor-status-terminal-fence-late-queue-RED-01a1406d.md",

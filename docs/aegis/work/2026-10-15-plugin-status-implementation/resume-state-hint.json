@@ -6,14 +6,22 @@
   "currentExecution": {
     "root": "fa4a8eee-fbf8-4735-adf3-69843ae9ac4a",
     "resumedFrom": "e03dda1d-3172-431a-8c0b-d5995adec493",
-    "state": "running; fresh preTEST979fd741 granted ONE additional integration last-queue/unreadable RED, old10/helper frozen; Source permission still absent",
+    "state": "NATIVE COMPLETE/process terminal/review-required NOT SDKaccepted; DOMAIN7 needs_context/c55 exact.654+OWNERtype0,655+OWNER1FAIL10skip at THIS appliedledger. ActualEXACT2Bash audited BEFOREreceipt; old10/wholehelper/84onlytest/2fixturefullstat/cache exact. No Source/GREEN/DONE.",
+    "checkpoint": "e1526126f5ed4588a17b2d1149d9726974aa43c3 pushed feature/plugin-status-auto-bind; ONLY reviewed RED test staged,2frozenfixture deltas remain UNSTAGED; no production repair/master/pin/version/release",
+    "nativeStateProof": "/tmp/plugin-status-terminal-fence-late-queue-owner-01a1406d/terminal-native-state-proof.json",
+    "postRedReceipt": "c55e7ec9-c631-45d7-bc2b-bed140ae2fb9",
+    "testSha": "e455f333612948670beb1d272561ee1f77717e3204dbe4d069891c384f056bd4",
+    "independentProof": "/tmp/plugin-status-terminal-fence-late-queue-owner-01a1406d/post-RED-independent-proof.json",
+    "commandAudit": "/tmp/plugin-status-terminal-fence-late-queue-owner-01a1406d/actual-worker-command-audit.json",
+    "ownerDecision": "Existing canonical commitDecisionResult reuses bindingMutationPermitted afterlastawait beforeBOTHnormal/unreadablewrites; runtime-onlyprecheck NOT openalternative. Source permission still absent.",
     "preTestGate": "979fd741-608f-4aef-8715-3591bd139842",
     "typeCorrectionGate": "4895c4e4-179e-481f-903e-ae3a10b1a719",
     "draftState": "Only2nativeEdits then automated type diagnostic Chrome.get overload; NO654/655 commands at request. Scoped NativeEdit typing correction/use original genericpromise overload + nonasync unmatched delegation/defaultreal terminal identityspy; no compiler evidence yet.",
     "packet": "/tmp/monitor-status-terminal-fence-late-queue-RED-01a1406d.md",
     "snapshot": "/tmp/plugin-status-terminal-fence-late-queue-owner-01a1406d/start-snapshot.json",
     "commands": "After fresh gate ONLY654directproducttsc/655oneexactnamedRED; NativeEditonly, no BashPython/npx/extra compiler; actualcommands audited BEFORE receipt.",
-    "operatorQuestion": "Pending explicit one-round exception for automatic file-level unit fanout on future storage Source edit: storage/runtime/view-model/controller tests. Static dependency candidates only, not SDK runtime guarantee. Until confirmed NO Source edit."
+    "operatorQuestion": "Pending explicit one-round exception for automatic file-level unit fanout on future storage Source edit: storage/runtime/view-model/controller tests. Tentative static candidates only, not SDK runtime guarantee. Until confirmed NO Source edit.",
+    "fanoutReadLimit": "Current ctx_execute_file read of OWNER-saved /tmp/plugin-status-terminal-fence-red-owner-01a1406d/static-source-fanout-candidates.json was BLOCKED outside toolworkspace /home/schan/pi-web (issue852). No alternate tool/child/path retry, no globalconfiguration change. Previous80/0 counts NOT freshverified evidence or Source-safety authority; historical3045 record preserved. This does not invalidate direct654/655/OWNERbusinessproof."
   },
   "lastReadonlyPreeditReview": {
     "root": "56bc8e0a-a11c-400f-a0ec-6abab1a048c9",

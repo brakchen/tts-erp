@@ -66,7 +66,11 @@ OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check�
 
 上述corrected-design root437688b5/child4d7be134原生拒绝：`commands-run evidence missing from child report`；其needs_context/空delta/空gate保留但不算验收。快照`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/`已保存、产品逐字冻结未改。仅同协议exact-resume证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`运行，允许一次真实unpipedtsc并如实列Commands run，不换model/CLI、不降checked、不造命令证据、不授源码许可。valid-record→absence误断已撤回，独立missing-identity exploit仍未证；materialization/factory设计未决。fb42是Git commit非SHA256，approved/current文档确有后续修改，但初始化episode锚点在approved中，不能混hash类型推断协议损坏。
 
-### 当前：fresh7de明确两写分支/最后await控制，继续一条安全integration RED
+### 当前：两真实RED与命令边界均已核，源码边界既定但未获执行权
+
+655与OWNER同named1FAIL10skip、654/OWNER实际type0；真实末次queue读取中原fence失效后，THIS nonemptydecision ledger仍applied。fa/f8 nativecomplete/process terminal/review-required非SDKaccepted；DOMAIN7/c55 exact。receipt前实际原session审计仅654/655两Bash/无extra npx；old10/header/wholehelper字节相同，84仅testdelta/2fixture全stat/cache不变。仅test检查点 **`e1526126f5ed4588a17b2d1149d9726974aa43c3`**已push；不是修复或完成。Owner明确canonical commitDecisionResult/helper末await后两写分支门禁，不采用runtime-onlyprecheck；Operator四unit一次例外仍待答复，Source不改，未到的后续断言不称通过。
+
+### 前一阶段：fresh7de明确两写分支/最后await控制，追加安全integration RED
 
 56/e03 erratum与fresh7de均terminal：既有canonical owner/helper候选合适但Source权限blocked，normal/full/unreadable两terminal写分支都须guard，并缺最后storage-await过期反例。新fa4a8eee-fbf8-4735-adf3-69843ae9ac4a exact-resume e03先fresh preTEST，再ONE existing integration case/654type/655named；old10/helper/header/2fixture冻结，假Chrome端口可局部IO失败，canonical core不得mock，原main finally保证。Operator仅一次storageSource自动4unit例外尚待确认；静态fanout库存非实际SDK保证，无Source grant。原13未授权npx原生命令账已勘误，不把独立653RED否定或把整个项目停工。
 

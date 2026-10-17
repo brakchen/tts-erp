@@ -28,7 +28,11 @@ corrected-design root437688b5/child4d7be134因原生`commands-run evidence missi
 
 历史接受基线：当前已接受**十一微切片**，第十一最终gate`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`/root7187c653/child6ee1cecc已原生terminal七字段核读。provisioning单set写已有closed初始化episode、纯构造器迁storage唯一19字段owner/controller传原newId，不改unknown/fence/union；首heartbeat报告同episode。独立48去重产品named+1私有probe PASS、producttsc0、两反事实杀死且tsc0/精确三path证明。LSP0reported errors但3inconclusive；其余七chain仍未知、完整T4未完成。产品聚合16-path检查点18d0887已push且树clean，仅保存原12034行WIP，不是全验收/发布或master/pin变更。原artifact test-before fb11为held中间态，真实微切片基线ef333→91a4已记erratum，不改原稿。证据`/tmp/plugin-status-owner-provision-initial-record-01a1406d/`。
 
-### 当前：继续最后queue await/不可读分支RED，生产权限另待确认
+### 当前：双业务RED已验证并推送检查点，生产权限另待确认
+
+653与655均OWNER同named独立复现，actualtype0；后者1FAIL10skip在非空本decisionledger已applied。fa/f8 nativecomplete/terminal/review-required（非SDKaccepted）、DOMAIN7/c55精确，命令审计本pass EXACT654/655两Bash，无额外npx。仅test检查点 **`e1526126f5ed4588a17b2d1149d9726974aa43c3`**已push，2旧fixture未stage，生产P1未修。canonical storage/helper/最后await/两写分支边界已定，runtime-onlyprecheck不是等价候选。Operator一次自动四unit例外未确认，Source仍无授权，Caller仍in_progress，非全项目停止。
+
+### 前一阶段：最后queue await/不可读分支RED计划
 
 56/e03原生勘误与fresh7de边界review已terminal；既有terminal owner适合复用helper，但normal/full及unreadable两个写分支都须最后await后检查。当前fa4a8eee-fbf8-4735-adf3-69843ae9ac4a exact-resume e03先NEW preTEST WAIT，仅existing integration加ONE最后queueIO/原fence过期+unreadable case，old10/helper冻结、654type/655named，不给Source。Operator一次automatic4unit例外问题尚未批准，候选storage/runtime/viewmodel/controller静态清单非SDK执行保证；未确认前仅上述integration工作。Caller643 active，Source预算等后继未闭。
 
