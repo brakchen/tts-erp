@@ -1,19 +1,50 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "status-runtime-chain in_progress；status-runtime-callers blocked依赖它（Tower635），整体runtime、ERP质量和T5未通过",
-  "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core"],
-  "activeSlice": "十micro局部接受。第十mandatory-commit-union独立postGREEN f038bef7-2b27-49c3-8592-085445c61658，rootfd998ff2-d905-438c-b126-c2db229734fe/child3afb1272-caf3-4d96-a940-ad6d0f36e232已terminal，实际7字段/四path/完整gate已核。原MiniMax/model/session/cwd/tools/native checked contract不变。OWNER已证首拒绝live:true/expect:null/raw own-key null→unknown与configure新instance原子null写冲突，f-57bdab7b-eab已认领；只证最早机制非完整root。原writer只读rootab494011-10ea-4a26-8e08-088d15b27121续接3afb、validate0，产品/测试冻结；inventory ab494011/c108已terminal BLOCKED实际7字段/空delta/空gate，triage4793 HOLD其一set删除假设。官方StorageArea明确遗漏key不变、remove独立；新corrected-design只读root437688b5-70fc-4d60-a633-82a19cf9791e续接c108、validate0，需现有schema/构造器复用、原子性及old在途absence反重放证明，尚无tests/source repair许可。CURRENT十一微切片局部接受，最终post3c1d5e92-e7e8-4ca7-b4fa-2774999a462c/root7187c653-a34f-462c-a29c-cb995e31ed42/child6ee1cecc-5e82-401d-adf6-9489838837e1原生终态actual7fields/exact3delta/gate已核。provision单set合法closed初始episode/唯一19字段factory storage+controller原newId薄委托/firstheartbeat同episode，unknownfenceunionedge不改。独立48product+1private PASS/producttsc0/两counter杀死且tsc0/84files3delta精确scope。最终7157storage5484controller91a4test；终稿fb11是held中间态，实际起点ef333，erratum保存不改原稿。产品聚合16path检查点18d0887b47d8902f43e58b1b18bade451f97e44f已push树clean，仅保存原12034行WIP非全验收/发布/master/pin。首findingdone、Board636 chaininprogress/callersblocked，其他7chain及全T4未闭。LSP0reported/3inconclusive非clean，setup591600601排除，证据/tmp/plugin-status-owner-provision-initial-record-01a1406d/。历史sourcepreedit05666f7b-cf27-40db-823c-f82202bdf1b8窄授权非DONEgate，actualseedB原样heartbeat/accepted非空ledger与test91a4/603三业务RED五guardPASS39skip/604actualtsc0及源码冻结已核。仅storage共享19字段factory+configpayload/controller已有import薄委托，Owner20字段计数笔误已纠正不可加字段，八storage39controller首chain1actualtsc后独立freshpostGREENWAIT。591600601 setup排除，完整链及其他七案未验收。此前preeditccf57c10-01a3-4505-88b3-67e2cf73dddd仍HOLD非sourcegate，正案B身份改但仍ready/incident:null、ledger start/result未accepted ID且无非空断言；只修新case为actual Bseed原样heartbeat、真实accepted非空ledger并完整保事实，再八named/type/NEWpreedit，无源码许可。591fixturedefect排除，592三业务RED五guardPASS39skip/593type0，不称第二生产漏洞。此前preedit5d113505-4c66-48ff-bc1f-92178e7dbfce HOLD非sourcegate，child6ee1cecc实际testonly/581三业务RED五guardPASS39skip/580582 tsc0；新正案配置B却仍A fixture写断言、同实例ledger空runtime缺证，只准修新测试为actualseedB一致heartbeat保episode/closed、actualoldA PRE、非空ledger/runtime精确保留、no set/remove拒绝断言；再八named/实际tsc/NEWpreedit，源码未准，不称生产第二漏洞。上一进展：补证root6bc5edee/child45a0df7e-8d20-4a6a-8c74-b2df9d6b459f completed七字段needs_context/空delta空gate、真实producttsc0/log570空，仅报告补证。Owner私有validclosedseed单payload反事实首chain1PASS7skip/privateTSC0，traceheartbeat上报canonical同episode；非产品/其余七案/真ERP证明。采用provisioning同set物化已有closed初始化episode、firstheartbeat报告，唯一纯构造器到既有storage/controller传原newId薄委托，无新edge/flag/reader或fence例外，真正absence保instance_started、同实例保事实。新root7187c653-a34f-462c-a29c-cb995e31ed42 validate0 exactresume45a0，目前仅Storage五新+一迁移/八named/实际tsc；有效RED后新sourcepreedit再独立postGREEN，尚无源码许可。Board636实质扩scope，181keys保留且状态deps不变；启动前84src/tests/entrypoints同第十freeze，packet/tmp/monitor-status-provision-initial-record-01a1406d.md，全T4仍未完成。历史corrected-design root437688b5/child4d7be134因native commands-run evidence missing失败，needs_context/空delta/空gate不算验收；WIP快照已保存且产品冻结。仅同协议证据修复root6bc5edee-db7c-48de-864d-451aeb955482运行/validate0，新授一次actualunpipedtsc如实列命令，不降checked/换model/造证据。valid-record重开absence误断已撤回，设计待决。fb42为Gitcommit非SHA256，approved/current确不同但初始化episode锚点在approved，不混hash类型作协议损坏证明。",
+  "currentTodo": "Tower641/182：新增status-chain-snapshot-fidelity窄completed回执；Caller仍in_progress，f-408 broader未来自动超named风险accepted/open，预算等仍blocked，不扩T4或发布。",
+  "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity"],
+  "activeSlice": "callers-closure-inventory只读root420cd1c3-3dfb-4ae8-aca8-add343a12027，盘点MacroCaller vs后继预算/ports/自动跑测风险，不能只据局部门禁推宏DONE。",
+  "lastAcceptedSlice": "chain-integration-snapshot-fidelity：新root ae28e0da-0bdf-46df-a09c-f96f2bbc52bd exact-resumed478；先fresh架构/rename-only门禁，再精确改名+新路径同guard RED/type0/无自动9/fixture写，再distinct helper pre-edit后compose-only，再2产品named+7私有related+actual产品type0，再独立新postGREEN。A按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4已执行且独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad获批，独立2产品+7私有相关案/实际产品tsc0/全scope后局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受，已核Native complete/review-required/terminal与真实7字段/6425 hash；0bab已push，2fixture仍modified未stage，不扩全Caller/T4。",
+  "currentExecution": {
+    "root": "420cd1c3-3dfb-4ae8-aca8-add343a12027",
+    "resumedFrom": "8b417e59-a5a2-446b-be22-eaf16ed4ba96",
+    "state": "同协议只读Caller宏闭合盘点+最小预算design候选+future unit自动超named风险策略，未授权代码或宏DONE。",
+    "packet": "/tmp/monitor-status-callers-closure-inventory-01a1406d.md",
+    "snapshot": "/tmp/plugin-status-callers-closure-inventory-owner-01a1406d/start-snapshot.json",
+    "permission": "仅actual产品unpipedtsc一次到unused649，无app tests/编辑/改名/配置/fixtures/Git/board。基线0bab已push/upstream0/0/staged空/84hash，仍2旧fixture modified。"
+  },
+  "lastImplementation": {
+    "packet": "/tmp/monitor-status-chain-layout-fidelity-01a1406d.md",
+    "root": "ae28e0da-0bdf-46df-a09c-f96f2bbc52bd",
+    "child": "8b417e59-a5a2-446b-be22-eaf16ed4ba96",
+    "stageAPreEdit": "0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4",
+    "stageBPreEdit": "49988cd1-98c9-41bd-9bae-f54efd551bad",
+    "stageAProof": "/tmp/plugin-status-chain-layout-fidelity-owner-01a1406d/stage-a-independent-proof.json + stage-a-auto-window-corrected.json；84映射hash/2fixture全stat/cache不变、644同RED/645type0，实际TaskStart窗口无新runner事件。",
+    "postGreen": "0d800a7e-c9b2-4372-94b3-7ea06d64ca4b",
+    "state": "本微切片独立postGREEN已接受；Native complete/review-required/process terminal/真实7字段/终态6425 scope均已核；0bab仅旧新测试路径commit/push，2fixture未stage，不扩整体Caller/T4。",
+    "taskStartSnapshot": "/tmp/plugin-status-chain-layout-fidelity-owner-01a1406d/start-snapshot.json",
+    "baseline": "HEAD d871b9ee2fc52a333f1e3a5f52d171107e268273已push RED检查点；branch feature/plugin-status-auto-bind/upstream0/0/staged空/无Git操作。84文件与e9前相同，仅两个既有fixture modified。原测试c180，logs644-648未用。",
+    "ownership": "origin/master ACTIVE原真实session的plugin-status*.test.ts匹配新integration名，已维护中minimatch核true。Tower640加新路径并清已解决native阻塞。主checkout旧ACTIVE/foreign WIP未改，不需要新registry例外。",
+    "changeNecessity": "code-change仅测试角色分类与移除适配器错误预写；不变会复发未授权auto9，global开关影响同伴，采用现有classifier而不加开关或权限出口。",
+    "complexityOwnerFit": "已有多模块9-case测试fixture，原位局部减法、无新职责。A整文件字节精确仅basename，B仅snapshot property由预写改compose；没有新helper/文件职责/authority，生产和旧case/header/guard全冻结。ArchitectureReviewRequired=yes；StrictTDD来自仓库明确要求。",
+    "orderingMitigation": "e9担忧rename先藏RED，OWNER选显式强制同guard RED/type0/无auto9/fixture写作为A必需证据，RED不消失也不接受caller。A未验不得B，新postGREEN仍独立；自动9本来未授权。"
+  },
+  "nativeCarrierRepair": {
+    "root": "986d1b1a-c8f5-437d-97ae-6aed9d9282a9",
+    "child": "d478332e-c442-40fe-a445-ed6c5bfd6453",
+    "state": "complete/process terminal，acceptance review-required非rejected、非SDK accepted。OWNER核真实7keys/needs_context/changedFiles[]/空gate、643 actualtsc0空、84文件未变，报告输送已修、不授产品gate。",
+    "cause": "父层旧no-footer/fence禁令阻止原checked必需native acceptance-report。原SDK验证strip元数据后仍交付DOMAIN7；纠正父层而非改SDK/profile/checked。真实bare7复现not-found，synthetic carrier仅parser诊断成功/strip一致。",
+    "failuresPreserved": "38f2/5631实际prose；ef087/e9实际7字段合法仍native not-found。原失败报告/receipt/日志/Git历史不改写。"
+  },
   "evidenceRefs": [
-    "唯一协议docs/plugins/plugin-status-report.md；当前技术方案/完整hash/gates/前九证据见20-checkpoint.md与runtime-review-1.md。微接受不等callers/T4完成，历史日志/native/artifact不改写",
-    "第十/tmp/plugin-status-owner-mandatory-union-01a1406d：owner-review.md、checks.json、scope-proof.json、control-dispositions.json、controller/carrier/runtime/runtime-typed-two/current-tsc logs。OWNER39+4+12+另两typed case=57去重named PASS、actual product-cwd unpipedtsc0。result regex4不等于真正typed测试，不重复计数",
-    "两隔离static controls分别只报TS2578 at966/971；never/deny-all非隔离控制排除保留；carrier Vitest PASS不是type proof/runtime拒绝。type/helper外源码精确，旧38storage body、runtime其余harness/case/全部expect/name与protected含chain保持",
-    "default原seed复制nullable incident/nonce definedness，在module/config setup awaits后、binding初写/snapshot交错前，seed:null observation-only，不制造bootstrap/absence权限。orphan fence原runtime忽略，union静态排除是新硬化；算法不变",
-    "第十最新LSP四文件104项hint/warning/information，无error而非clean。第九当次39named/五source controls/tsc0及LSP2clean、其HOLD468正确hash和三缺口修正仍见原证据；第八历史0diag2inconclusive及invalid nullable probe不改",
-    "whole runtime37/storage42/chain8是未授权范围扩张，保日志不追认。worker报告chain candidate/第九冻结均8/8 STALE_CONTEXT；OWNER首命名案在候选/第九各1FAIL/7skip，trace/raw证明live:true、expect:null、raw own-key null→unknown；仅去snapshot adapter预写仍同一首失败，三variant各actualtsc0。证据/tmp/plugin-status-owner-chain-diagnostic-01a1406d；初始^selector零测试INVALID保留。snapshot预写不是已证首拒绝根因，后续chain/完整root仍未闭。原artifact泛称其余unfenced producers不建立新缺口，helper实际含signature/body/comment",
-    "Fixture firstReadGate误清stopGate另记f-b7b24e8c-ef9，未修/不同时arm；ERP锁populate_existing真实两Session与ACK高revision拒绝已验证不重开，core两端已push，runtime WIP/v0.4.26"
+    "唯一协议docs/plugins/plugin-status-report.md；十一局部接受与历史原件见20-checkpoint/runtime-review及native artifacts。第十一post3c1d5e92-e7e8-4ca7-b4fa-2774999a462c不用于新slice。",
+    "原有效guard c180b4cd0dc859a71bb30ca8b313da6b32938f189a60caff8fdc28a5738d8fd3；640tsc0空、641 1FAIL8skip，实际两个applied/accepted后expected1 got2。私有compose-only单变量GREEN不是产品许可。",
+    "自动来源证据/tmp/plugin-status-chain-adapter-native-failure-01a1406d/：opaque编辑→工具整9→两个emit→fixture写→scopeHOLD，缓存00:51:37.980Z与PID129439/两个mtime匹配。四显式worker命令没有full调用；不追认自动9，不归咎worker私自跑full。",
+    "native-carrier-diagnostic/保真实e9/receipt/partialpatch/parser-proof；实际Root986/d478 native返回报告完整，643真实type0空；OWNER再次独立全84文件未变。SourceTaskStartSnapshot独立留完整Git状态/84hash/2fixturestat/autoCache，未改原件。",
+    "此前Owner其余七private7PASS1skip+已验首案=八变体knownGREEN，setup缺wxt.config的TS2307排除、补齐private/producttsc0；不重新泛称余七未知。第十一48产品named+1私有factory probe、两control、19fields/3UUID顺序、scopeproof有效；LSP0error/3inconclusive非clean。",
+    "frame仍d871，两个生成fixture modified封存未restore/stage，18d聚合WIP与d871 RED检查点都不是全验收/master/pin/version/release。可疑外部命令未经独立字节证实，不执行或解码。"
   ],
-  "blockedOn": "chain因果/真实恢复handoff、单90秒全ports/两release/实际业务写点fence、action-start、Cookie、freshspec→quality、ERP baseline/共享接线/T5/browser；无当前full/coverage/build。fact fence不解决潜在late physical bind。",
-  "nextStep": "先最小命名chain复现并记录actual fence/canonical PRE/liveness、单变量区分fixture/生产owner；不预设删除snapshot预写可修首拒绝。tests-first有效RED→新pre-edit WAIT→既有owner最小修复→明确named/actualtsc→独立新postGREEN。之后budget→actions→Cookie→freshspec/quality→ERP/T5。原writer唯一产品写者，OWNER不代写；scope外缺陷另案，禁止自扩命令、换model/CLI、生产或真实凭证/写操作。",
-  "updatedAt": "2026-10-16"
+  "blockedOn": "当前slice各步新supervisor门禁与独立证据；f-408自动scope防护尚未实际落地，native仅运输已修。后续physical own-awaited mutation/aggregate90s全ports两release、actions、Cookie、freshspec→quality、ERP isolated baseline/明确共享handoff、T5/browser/fullrelease均未接受。",
+  "nextStep": "消费root ae28新architecture/pre-edit请求，OWNER独立核当前源字节/ownership/角色语义/显式RED不丢的方案后只授A；再核A实际RED/type0/精确范围/无自动9或fixture写才另fresh helper pre-edit；GREEN后独立新postGREEN。保原MiniMax及native checked，实际DOMAIN7加原生必需元数据尾块，禁止旁路文件代替、降门禁或换协议。",
+  "updatedAt": "2026-10-17"
 }

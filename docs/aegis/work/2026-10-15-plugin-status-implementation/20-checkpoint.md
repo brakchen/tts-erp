@@ -1,9 +1,56 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
+## 当前：第十二局部门禁及终态已核、代码已push；只读盘点Caller宏边界
+
+rootae28/child8b417已complete/process terminal observed，native acceptance仍**review-required**非SDK accepted。真实DOMAIN7/done/精确old+new两路径/完整post0d800a7e-c9b2-4372-94b3-7ea06d64ca4b/无命令占位符已核；终态6425 hash未变、83其他源码精确。Parent仅显式stage旧新测试路径，cached diff check/有限凭证模式及生成文件名检查通过，无active hooks；commit/push **`0bab24702001dc9be12d4a81d181ee33c53e3554`**，rename99%+2/-5。slice路径Task clean，Repository NOT clean：两原自动生成fixture依旧modified未stage，未master merge/pin/version/release。历史失败原件和A/B/C门禁保留。
+
+Tower**641/182**新增status-chain-snapshot-fidelity completed两路径回执；Caller仍in_progress，不凭十二局部推整体完成。f-408更广future unit自动整文件vsnamed-only风险仍accepted/open。新同协议只读root **`420cd1c3-3dfb-4ae8-aca8-add343a12027`** exact-resume8b417：盘点逻辑Caller与physical预算/actions/Cookie/specquality/T5/handoff边界，提出最小budget design候选及future自动跑测策略；无新代码/改名/宏DONE授权，只准actual产品一次tsc到unused649。Packet`/tmp/monitor-status-callers-closure-inventory-01a1406d.md`，独立snapshot`/tmp/plugin-status-callers-closure-inventory-owner-01a1406d/start-snapshot.json`确认0bab/branch/upstream0/0/staged空/全84hash/只2fixture deltas。待原生通知，不轮询。
+
+## 历史：integration/snapshot局部postGREEN已接受，待原生终态
+
+新独立postGREEN **`0d800a7e-c9b2-4372-94b3-7ea06d64ca4b`**已回复接受仅本测试fidelity微切片。OWNER独立执行产品2named=2PASS7skip、自己全新普通copy相关7=7PASS2skip、实际产品unpipedtsc0空；并逐字证明before.replace(oldSnapshot,newArrow+准确局部注释)===actualAfter，故旧8/guard/header/所有其他body精确。83其他文件hash不变，新文件SHA`64251491ae3d991b3b1a2ff058c16b20db01325e94cd97de6e50aadf0a2bf998`；2fixture SHA/mtime/ctime/inode/nlink全不变，auto cache逐字同旧、真实TaskStart窗口无新runner事件。新文件LSP0reported errors/**1inconclusive**非confirmed clean，真实tsc才是type证据。Owner和worker各自private全部84文件独立inode/nlink1/非symlink（node_modules例外），两emit仅private。证据`owner-execution.json`/三个owner logs/`postgreen-independent-proof.json`均在owner目录。
+
+等待rootae28/child8b417真实final/native终态/7keys/精确old+new paths/新post UUID/终态同6425 hash后才Git stage。不是全Caller/T4或SDK accepted；f-408仅本chain副作用路径已有防护证据，future unit自动整文件超named风险仍open，不泛称工具全修。以下A/B等待记录为历史过程。
+
+A独立核实：新路径整文件c180/旧路径不存在、映射84hash零变化；644真实1FAIL8skip同expected1 got2/645type0空；两fixture SHA/mtimeMs/ctimeMs/inode/nlink全不变；auto cache逐字同旧00:51:37.980Z。日志初核误固定01小时，原proof保留；`stage-a-auto-window-corrected.json`改用实际TaskStart04:28:17.496Z窗口，extension/latency均无该产品新test-runner事件。由此仅确认A保持RED和窄自动副作用防护，非全局安全。
+
+已给distinct helper pre-edit **`49988cd1-98c9-41bd-9bae-f54efd551bad`**：仅新文件snapshot compose-only，产品2named/私有普通scratch7related/actual产品type0，再distinct新postGREEN WAIT。尚无GREEN或postGREEN接受，f-408仍open、整体T4未完成。以下A grant/启动态保留过程。
+
+最新StageA新架构/pre-edit **`0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4`**已给child`8b417e59-a5a2-446b-be22-eaf16ed4ba96`回复：只准内容精确rename及644同guard RED/645实际type0，独立证明无自动9和fixture写；排序担忧由显式RED强制门禁解决。**不批准helper，不是DONE或postGREEN**；A证据未核不能申请B的新门禁。以下启动态描述保留为过程。
+
+报告修复root`986d1b1a-c8f5-437d-97ae-6aed9d9282a9`/child`d478332e-c442-40fe-a445-ed6c5bfd6453`已complete/process terminal，native acceptance为**review-required**非rejected，也不虚称SDK accepted。OWNER独立核真实DOMAIN7、needs_context/空delta/空gate、643 actualtsc0空、84文件未变，故只确认报告输送已修，不授产品gate。下方只读启动/等待措辞为历史过程，当前以本节和JSON为准。
+
+新root`ae28e0da-0bdf-46df-a09c-f96f2bbc52bd` exact-resumed478已启动，首先NEW架构/pre-edit请求并WAIT；packet`/tmp/monitor-status-chain-layout-fidelity-01a1406d.md`。Goal仅测试角色/adapter fidelity；Parent仍原协议/实现计划；Files旧+新chain测试两路径；生产/旧8case/新guard/header/fixtures均冻结。StageA fresh grant后内容精确integration改名，必须新路径显式同guard RED1FAIL8skip（两实际applied/accepted后1≠2）/actualtsc0/无自动9及fixture写；再distinct fresh helper pre-edit，唯一compose-only snapshot property；产品2PASS7skip+自己独占普通scratch七related7PASS2skip+实际产品tsc0；最后distinct独立postGREEN。未有该步新回复不得写，不复用旧十一/272HOLD/15WAIT/carrier IDs。
+
+e9“先改名会隐藏RED”的风险以显式强制RED/GREEN保持，不借未授权自动9当回归信号；A若失去guard发现/同RED/范围/fixture保护即STOP，不能申请B，更不能DONE。复用既有维护中classifier，无新开关/框架/authority。Complexity为现有9-case编排fixture局部减法，无新职责，owner-fit edit-in-place；ArchitectureReviewRequired=yes，strict TDD来自仓库显式要求。不是源事实删除或生产状态变更。
+
+TaskStartSnapshot`/tmp/plugin-status-chain-layout-fidelity-owner-01a1406d/start-snapshot.json`：d871/feature branch/upstream0/0/staged空/无Git操作，全84hash同e9前、两生成fixture仍modified且stat封存，644-648日志未用。origin/master ACTIVE真实UUID行的plugin-status*.test.ts已覆盖integration basename，维护中minimatch核true，无需新registry例外；主checkout旧ACTIVE/foreign WIP未碰。Tower**640** callers改in_progress、清已解决native阻塞、新测试路径显式scope；f-408仍accepted/open不是修完，其他budget/actions/Cookie/specquality/ERP等仍blocked。
+
+## 历史只读续接：纠正父层native报告载体约束
+
+只读root`ef087cc1-3f21-46ca-be71-24d563b2595d`/child`e9cf2364-72d0-4206-bad9-650d9130dfb1`也原生failed `Structured acceptance report not found`；其真实终稿其实是合法七字段JSON，642 actualtsc0/空，84产品文件逐字未变。故此前把native失败仅归于prose/非inline七字段并不充分。已查canonical acceptance.js:506/813/896与background/subagent-runner.js:1100-1113：DOMAIN七字段不是native acceptanceReport；原生checked要求独立`acceptance-report`尾块，验证后strip再交付DOMAIN。OWNER旧“不得footer/fence”的指令误禁原生必需元数据，责任在父层约束，不归咎writer遵从。既有parser对真实bare7复现同错误；附明确synthetic元数据仅作parser诊断则可解析、host strip逐字保原7。此静态诊断不是native acceptance。原件/receipt/partial patch/`parser-proof.json`保全`/tmp/plugin-status-chain-adapter-native-failure-01a1406d/native-carrier-diagnostic/`。
+
+已仅修正新父层packet，未改SDK/profile/tools/checked或任何产品。新同协议报告补证root`986d1b1a-c8f5-437d-97ae-6aed9d9282a9` exact-resumee9已启动，packet`/tmp/monitor-status-native-carrier-repair-01a1406d.md`；只准一次fresh actualtsc到643日志，无app测试/rename/helper/config/fixture权限。真实final须DOMAIN恰七字段，再加原生必需验收尾块；宿主验证strip后workflow仍严格7字段。保持原失败、不借此DONE，等实际native receipt后另架构门禁。
+
+此前e9支持integration分类，但提示rename先于helper会停掉已知RED自动信号；这是未获产品许可的设计意见，需OWNER对照“自动9本来未授权、显式RED/GREEN门禁不可丢”审查次序，不能据失败报告直接改名。两生成fixture仍封存modified；d871红例检查点已push非修复，整体T4未完成。
+
 - Task ID: `2026-10-15-plugin-status-implementation`。
-- Current todo: Tower635新增`status-runtime-chain`为`in_progress`，`status-runtime-callers`明确`blocked`依赖它；不是T4或全功能完成。
-- 最新局部接受：第十`mandatory-commit-union`，独立postGREEN完整gate`f038bef7-2b27-49c3-8592-085445c61658`。root`fd998ff2-d905-438c-b126-c2db229734fe` / child`3afb1272-caf3-4d96-a940-ad6d0f36e232`已terminal，实际七字段/四path/完整gate已读核。预审/triage均不是该DONE gate。
-- Blocked on：chain实际STALE_CONTEXT、aggregate budget/实际业务写点fence、action、Cookie、fresh spec→quality、ERP/T5；无当前full/coverage/build或发布验收。
+- Current todo: Tower639，`status-runtime-chain`已窄完成，`status-runtime-callers` blocked于`f-408d5c17-c51`与原生inline报告修复；不是T4完成。
+- 最新局部接受：第十一provision-initial-record，独立postGREEN gate`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`，不复用于新snapshot adapter微切片。
+- Blocked on：自动跑测策略/原生报告、aggregate budget/实际业务写点fence、action、Cookie、fresh spec→quality、ERP/T5；首STALE表示冲突已局部修复，无full/coverage/build或发布验收。
+
+### 当前STOP：自动runner副作用与原生报告失败
+
+- root`38f2a50b-2850-443e-9392-6aa6b8ec9832`/child`5631b4c9-52bc-4caf-882c-0b53ce88d24a`均failed，真实错误`Acceptance rejected: Structured acceptance report not found.` 侧写七字段JSON不等于native报告：实际终稿2695字符prose，非JSON，不具全部七quoted keys；原件不改。
+- 新guard c180仅27行新增：640 actual产品unpipedtsc0/空，641精确named 1FAIL/8skip，两个真实heartbeat均applied/accepted后count应1实2。helper/生产源码/旧八case未改，272496f9-5e89-4e2c-a107-fd622b36d8d2为HOLD，15c4108c-f86d-4fd8-8aab-970071307e8b为WAIT，无pre-edit/GREEN/新DONE。
+- 实际另外两trace fixture被改写。已证pi-lens opaque编辑后自动runTestFileAsync，PID129439在00:51:36.468Z选产品vitest，缓存00:51:37.980Z为8PASS/1FAIL/0skip，两个emitting旧案写入00:51:37.816/.858；worker四条显式命令没有whole-file调用。自动9案不追认，不能归咎模型私自显式full命令。此前OWNER私有七案产品poststatus空且文件非链接。
+- 原始三文件、binary patch/status、pi-lens缓存与匹配日志、因果/权限说明保全于`/tmp/plugin-status-chain-adapter-native-failure-01a1406d/`；不restore、不续测/改helper、不换model/CLI、不降checked。源码级注入说法未获disk/已查read记录证实，未执行外部命令/解码payload。
+- 已安装pi-lens的`no-tests`/`tests.enabled`是global或CLI设置，不能在项目文件生造局部配置；retained resume拒绝extensionBindings。下一步需受支持的lane独占启动控制/明确配置授权，不能更改共享全局设置或改写旧native contract。之后同协议final必须inline严格七字段，再新pre-edit和distinct postGREEN。finding`f-408d5c17-c51`已accepted，复发策略未修，不宣称整体root闭合。
+- 后续找到无需改profile/global的现有机制候选：自动runner的`TURN_END_EXCLUDED_TEST_GLOBS`本就含`**/*.integration.*`。chain实际整合real runtime/storage/controller并emit trace，拟仅同目录改basename为`plugin-status-chain.integration.test.ts`，不改内容/相对import/fixtureURL。维护中的minimatch静态检查old autoExcluded:false/new:true，vitest include两者true；未运行产品案，不追认为修复。撤回“只能改启动参数”判断。
+- 已启动同协议只读设计root`ef087cc1-3f21-46ca-be71-24d563b2595d` exact-resume5631；packet`/tmp/monitor-status-chain-layout-design-01a1406d.md`，validate0，原model/session/cwd/profile/tools/checked不变。仅评估正当integration分类与native实际inline七字段，允许一次产品actualtsc到642日志，无rename/helper/config/fixture许可。消费报告后才可新架构门禁批准rename-only、复证guardRED/type0/no-auto9/no-fixture-write，再新helper pre-edit/postGREEN。
+- 协调者仅stage红例测试，检查点`d871b9ee2fc52a333f1e3a5f52d171107e268273`已push（+27行，非DONE）；两生成fixture保持modified未restore未提交，产品非clean。retry前84文件hash与两fixture partial patch/status另存`/tmp/plugin-status-chain-adapter-native-failure-01a1406d/layout-design-retry/`，auto-cache仍00:51:37.980Z。
+
+### 历史调试记录（当前许可以上述STOP为准）
 - OWNER现已独立复现首chain命名案：候选/第九各1FAIL/7skip；首次实际check为live:true、expect:null、raw own-key:null→presence:unknown。configure新实例单次set写binding:null，与absence-only bootstrap相冲突，记录并认领`f-57bdab7b-eab`。私有仅移除snapshot adapter预持久化仍同一首拒绝，三诊断variant各tsc0；故不能将预写说成首次根因。只证最早机制，未遍历后续chain/关闭整体root。初始^selector零测试为INVALID，日志保留。
 - 原writer只读诊断/设计root`ab494011-10ea-4a26-8e08-088d15b27121`续接已接受的3afb native；packet`/tmp/monitor-status-chain-provision-inventory-01a1406d.md`、script`/tmp/monitor-status-workflow-chain-inventory-01a1406d.js` validate0。全产品/测试冻结，先联系OWNER审查canonical表示/原子性/最小tests与owner-fit；本workflow不授修复权限，不能用清fixture/null-as-absence掩盖provision问题。
 
@@ -14,7 +61,15 @@
 - 仅同协议证据修复root`6bc5edee-db7c-48de-864d-451aeb955482` exact resume4d7，workflow validate0；原model/session/cwd/profile/tools/checked不变、不降验收，仅新授一次真实product-cwd unpipedtsc写命令证据。不得伪造已执行或称修复业务；架构/测试/源码许可仍HOLD，失败原artifact保留。设计已撤回“valid record重开absence/第二独立defect”误断，PRESENT B会拒绝old-null与old-A tuple。
 - 协议引用纠正：fb42e165是Git commit，不是文件SHA256。实际approved doc SHA256 c2fa1b3a…与current d2667d16…不同；初始化episode锚点逐字在approved中，first-ready业务文本相同而批准状态尾句更新；不比较不同hash类型作“协议损坏”证明，也不称全部字节同。materialization仍待owner设计决策。
 
-### 当前实现：第十一provision-initial-record局部接受，宏观T4未完成
+### 此前阶段：既有chain八案已命名验证，进入snapshot测试适配器
+
+OWNER在18d0887精确私有副本跑其余七个既有suffix案，**7PASS/1skip**；首案已在第十一独立接受，故既有八变体现已均GREEN，不是另跑未选案whole8。两案会写trace fixture，均仅在私有目录生成，产品fixture未动。私有首次tsc缺wxt.config.ts为复制setup错误，原日志排除保留；补齐后私有及实际producttsc0。证据`/tmp/plugin-status-owner-chain-remaining-01a1406d/{start-snapshot.json,seven-original.log,private-tsc.log,private-tsc-corrected.log,product-tsc.log,review.md}`。
+
+另有独立**测试契约RED**：default real spy逐一核实两个heartbeat commit实际applied/accepted，再断言唯一出口，实际1FAIL/8skip（expected1 got2）、tsc0；私有仅移除snapshot adapter预写即1PASS/8skip、tsc0。不是proposal计数、不声称外部重复report，也不追认为首STALE根因。Board**638**已实质记账：chain完成首表示冲突/既有八案范围，callers解除该依赖阻塞并in_progress，预算/actions/Cookie/specquality/T5仍未闭。
+
+原MiniMax同session/profile/checked exact-resume进入root **`38f2a50b-2850-443e-9392-6aa6b8ec9832`**，packet`/tmp/monitor-status-chain-snapshot-adapter-01a1406d.md`。初仅准一chain新guard，所有生产源码/旧八case冻结；新pre-edit WAIT后才可移除fixture snapshot预写，后再独立fresh postGREEN。会生成fixture的相关七案只能worker私有scratch跑，产品只跑不emit的两named+actualtsc。原3c1不能复用，不代表T4完成。validate首次误传globalConcurrencyLimit被预检拒绝，未起child/源clean；保全native-preflight-error.json后仅修validate参数，同协议重验通过，没有fallback。
+
+### 已接受实现：第十一provision-initial-record，非完整T4
 
 - 最终独立post gate **`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`**；root`7187c653-a34f-462c-a29c-cb995e31ed42`/child`6ee1cecc-5e82-401d-adf6-9489838837e1`已complete/terminal observed，实际七字段done/精确三path/该gate逐字核读。
 - 实现：provisioning单set写合法closed初始化episode，已有controller字段literal迁至storage唯一纯构造器（19原字段、三UUID顺序/注入不变），controller薄委托。首heartbeat报告同episode、真absence仍instance_started；同实例保事实，unknown/fence/union算法不改。修复首拒绝，不修adapter/physical fence。
