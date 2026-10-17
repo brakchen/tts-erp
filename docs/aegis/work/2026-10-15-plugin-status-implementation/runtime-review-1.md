@@ -2,9 +2,25 @@
 
 ## 接受边界
 
-整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
+整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：d940400 exact wake Cookie Store原窗口/drain回归已局部接受
+## 当前：真实queue撤销后旧native入场RED已双审/OWNER验证，缺陷未修/Tower683 blocked
+
+新fresh worker449670b7 exact openai-codex/gpt-6.1-sol COMPLETE，worker与OWNER分别actualtype0+1业务FAIL2正案PASS；原queue被real配置write占用时recovery bind已enqueue，public generation与canonicalepoch/nonce失效、clear已enqueue后释放，旧native boundset仍发生，late clear不抹trace。这是已有queue admission无原authority检查的counterexample，不是应另造serializer：live bind及已admitted原native实际settle前不放后继两正案通过。只改私有新test+日志，产品147/copied147原文件全同d940400，未修Source/未装背景接线。
+
+fresh spec90d564a4→quality371fbbb4 COMPLETE/localaccept、七字段实际报告已读，各20read1contact0错误越界；worker21read2contact2write2bash/1预期业务exit1无越界。OWNER复现/全hash/frozen9cache核后仅认可RED准备，receipt `/tmp/plugin-status-physical-queue-red-owner-01a1406d/owner-red-disposition.json`，testSHA1e92dc106ee061c708c38e318af89d0c8b76f0dd0d187ffb74c3da0dfd7d3931。
+
+33e9在worker完成后被inline尾注JSON.parse误包JS语法故障，失败现场与147字节已capture，只把未启动双review经同协议ffc6恢复COMPLETE，无worker重跑/CLI fallback。首audit相对路径未按cwd解析的setup勘误保留，正确normalize后无违约。NONE running，勿poll/resume任何完成节点。Tower683此项blocked/不complete，因为测试依旧RED与Source缺陷未修；真正config branchHEAD/writequeue明确handoff与freshOWNER架构preedit仍需先到，再复用queue/native入场原fence/原tuple cleanup/真实native owner/epoch-mono域设计并Source→GREENtype0→fresh gate。用户本目标下新6.1-sol worker许可持续有效勿重复问，但不改共享边界。原d940/40PASS为旧窄接受，非本步GREEN；父physical/actionsCookie/ledger/CASABA/cleanup/clock/ERP-T5browser-build-release/f408及拒读/frozen/no-bundle全保持，未合并发布。
+
+## physical queue启动快照（历史；双审仅接受RED反例）
+
+本轮用户明确授权新GPT6.1-sol worker，旧NoWorker仅在此fresh私有切片被覆盖，OWNER继续Git/设计/验收、历史worker不恢复。Tower682 status-physical-queue-red active，产品d940400/旧40PASS局部接受不变。147独占普通副本candidate仅node_modules link；新test-file+worker logs外全只读，无产品Source/共享storage/background/clock/旧fixtures写。注册从origin/master e11b5bc已核旧monitor-status-plugin确实覆盖新testglob，不改本地主master foreignWIP。
+
+async33e9ea8b-e090-4fcf-a693-e6dceea16692 / worker449670b7-1123-4ac8-a732-1d09994f3d83，fresh exact openai-codex/gpt-6.1-sol。native具体3案设计已OWNER批准：真实storage queue占用+真实bind enqueue后public generation撤销/canonical invalidation/clear enqueue，再放队列查native stale boundset（预期业务RED且晚clear不能掩盖）；live queued-bind正案；已admitted set hold跨原90s但storage队列仍等真实settle再让successor进（正案，不授全physical lease）。所有gate/Promise finally释放与drain、无新timeout/clock/API/Source；尚未消费本切片实际有效RED/type0。
+
+worker后fresh spec→quality仅只读/nativecontact，输出 `/tmp/plugin-status-physical-queue-red-owner-01a1406d/{worker-result,spec-review,quality-review}.json`；OWNER再实际复现/审计裁决RED准备，不是生产GREEN或接线。context-packet/TaskStartSnapshot/owner-architecture-notes在同目录。ArchitectureReviewRequired BEFORE physical Source，真实config branchHEAD/queuehandoff仍缺，拒读/no-bundle/原frozen9/cache、epoch租约非mono时钟、原tuple cleanup不变。native通知自动续行，不poll历史worker/reviewer。整条actions/Cookie/ERP/T5/browser/build/release/f408仍开，不合并发布。
+
+## d940400 exact Cookie Store过期回归历史接受边界（非physical接受）
 
 fresh1e817982/child50bd13a6 workflow+child COMPLETE/localaccept/No blocking findings，实际35行七字段报告已读，20read2nativecontact0其他错误白名单外；OWNER同d940400436e9740a6937edc2221b46bf2948dc85/testSHA/upstream0-0/空index后仅接纳TEST_ONLY_EXACT_WAKE_COOKIE_STORE_ORIGINAL_WINDOW_DRAIN。receipt `/tmp/plugin-status-cookie-store-expiry-owner-01a1406d/owner-post-review-acceptance.json`；40unique相关namedPASS93skip/actualunpipedtsc0，新4包含，2controls各actualtype0/3业务FAIL1livePASS；Source不改、119oldcallbacks同、294普通独占copy，frozen9/cache同，LSP0error1inconclusive0clean。
 
