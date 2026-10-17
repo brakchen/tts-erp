@@ -66,7 +66,15 @@ OWNER首命名案在候选/第九各1FAIL/7skip；实际最早permission check�
 
 上述corrected-design root437688b5/child4d7be134原生拒绝：`commands-run evidence missing from child report`；其needs_context/空delta/空gate保留但不算验收。快照`/tmp/plugin-status-native-readonly-acceptance-failure-01a1406d/`已保存、产品逐字冻结未改。仅同协议exact-resume证据修复root`6bc5edee-db7c-48de-864d-451aeb955482`运行，允许一次真实unpipedtsc并如实列Commands run，不换model/CLI、不降checked、不造命令证据、不授源码许可。valid-record→absence误断已撤回，独立missing-identity exploit仍未证；materialization/factory设计未决。fb42是Git commit非SHA256，approved/current文档确有后续修改，但初始化episode锚点在approved中，不能混hash类型推断协议损坏。
 
-### 当前门禁：只读420/246终态候选scope HOLD，十二局部不倒推撤回
+### 当前：fresh b377具体逻辑P1已核，下一阶段只做真实集成RED
+
+267/d448终态review-required非SDK accepted，Owner全84不变、actualSHA无dot/noGit；自述dot/runtime行号错误明确纠正但不改原件。storage commitDecisionResult不消费commit.fence，runtime664 postexecutor evidence await可使原窗口过期但tuple不变，终态691–707仍ready/applied；普通observation出口有guard，旧nonce案不能替代同tuple失权反例。新root389a890a-6b37-4629-ad6a-608c2004ddb8 exact-resume d448：NEW pre-TEST WAIT→仅existing integration单case/旧9精确保留→650tsc/651namedRED→NEW postRED receipt；无Source修复权，Sourceedit auto-scope仍待证。Owner最小未来修复归storage canonical终态复用既有helper，不下放runtime预检查或另建authority。严格TDD/独立postGREEN与其他未闭项保持。
+
+### 历史：审查持续推进，未把旧只读Git违约当作全任务停止
+
+643 Caller恢复in_progress；26713a14-e033-4d0d-bd97-41429b63244f为单一async fresh逻辑Caller审查→原MiniMax窄integration RED设计，均只读，不是最终T4 spec/quality、不授源码权。头0bab及84hash/2fixture stat、批准fb42原文c2fa由OWNER冻结；writer不得任何Git（包括rev-parse）、只可一次精确SHA命令，原checked/模型/session/cwd/profile/tools不变。420/246违约原件仍保留，不改写不追认；OWNER撤回全局停工扩大化。当前安装client读取被context工具sandbox拒绝，未经替代工具或child绕过；用已保存证据继续产品审查，Sourceedit自动触发边界保持unknown，实际新测试/源码仍须独立授权与TDD门禁。原生通知自动续行，不等用户再催。
+
+### 历史门禁：只读420/246终态候选scope HOLD，十二局部不倒推撤回
 
 420/246 complete/native review-required且真实7字段needs_context/空delta空gate，649actualtsc0空/全84hash精确；实际session call证实04:50:57.281Z执行`git rev-parse HEAD`违反worker noGit，终稿又称noGit action。仅读提交号无Git修改，不是源代码回归或SDK拒绝；原件保留readonly-owner-review.json，不追认合规/宏DONE。新写入授权暂停，先处理noGit/f408/宏Caller审查。1031/1044两个raw release awaits是未批准design候选，必须保finally无条件release/await与原operation聚合budget，不能skip cleanup、另借预算或采纳profile-wide预算。0bab/十二局部及两个未stage fixture保持原界。
 

@@ -1,6 +1,24 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：十二局部已push；只读盘点终态候选因noGit范围违约HOLD
+## 当前：具体terminal消费者fence gap，原writer进入单case集成RED阶段
+
+267/b377+d448已terminal/native candidate（writer review-required非SDK accepted），Owner再次全84hash零差异并有界核实际命令：唯一4文件SHA，无Git、**没有末尾dot**；d448终稿dot描述及runtime691/735/743行号为错误，保原件并在新packet明确纠正，实际runtime664/691–707以Owner源读为准。原sha输出带Aegis advisory marker，不是产品错误或授权，不改SDK/profile去追标记。新root **389a890a-6b37-4629-ad6a-608c2004ddb8** exact-resume d448：必须NEW supervisor architecture/pre-TEST WAIT，才准只改existing integration test、一个真实terminal-fence case、旧9/header/默认行为精确保留、650实际产品tsc与651新命名RED；validRED后再NEW postRED receipt，不得生产修复。TaskStart`/tmp/plugin-status-terminal-fence-red-owner-01a1406d/start-snapshot.json`复核84hash/2fixture全stat，保存旧6425及autoCache，650/651unused。单一canonical最小未来修复owner是storage终态出口复用既有permission判定，不能复制runtime precheck充当最终guard；目前无Source grant。
+
+Fresh pre-TEST architecture gate **`3706984e-f331-45d7-8e2d-dd4ae256da3f`**已回复grant仅上述tests-only阶段。特别限制：若spy断言terminal.applied false，只针对携带原ready proposal/fence那次；后续既有STALE_CONTEXT ledger/report settlement本身可以applied:true，不得误判成恢复成功。旧frame不可改造，当前canonical合法中间fact保留。后到attention通知对应已回复请求，不重复steer/interrupt。当前仍待validRED及另postRED receipt，不是Source/DONE gate。
+
+TDD Route: strict（仓库明确要求）；ArchitectureReviewRequired=yes。Change Necessity: code-change候选限现有canonical终态出口，非代码方案不能阻止同tuple失权仍applied；当前只授权申请tests-only阶段，不给生产权。Owner-fit是既有canonical owner补漏，不建新module/authority/framework/flag。测试证明真实recover返回live ready proposal后，实际postexecutor evidence gate entered，在同tuple下原clock预算过期；main创建即观察、try/finally无条件release且await原main，最终真实canonical不得ready/applied，STALE_CONTEXT仍可报告。静态P1尚非业务RED；合法中间恢复fact不能被测试误判为必须与整个恢复前全字节相同。Sourceedit自动触发范围仍unknown，不阻止先做已证excluded integration上的窄RED。
+
+## 历史：Operator要求继续，Caller恢复推进；fresh逻辑闭合审查→下一窄RED设计
+
+OWNER纠正此前过度停工：420/246只读Git命令违约继续保全、不可追认，但不是整个任务停工或等待用户再催的理由。Tower**643/182** Caller恢复in_progress/清blockedBy，只在新产品编辑或跑测授权前保留f408/独立门禁，不扩大十二局部接受。NoGit明确包括rev-parse/status/diff/log等全部只读命令；Git状态由OWNER提供，不是writer必须自验的事项。
+
+当前单一async workflow **`26713a14-e033-4d0d-bd97-41429b63244f`**：先fresh `openai-codex/gpt-6.1-sol`独立审查逻辑Caller是否闭合、具体未闭义务是否实属budget/actions/Cookie/T5；再同流程exact-resume246的原MiniMax给出下一最小integration契约RED设计（不执行）。当前双方均read-only、无源码/tests/tsc/Git/配置权限；writer仅一次精确SHA命令作为真实native证据，原model/session/cwd/profile/tools/checked不变。任何Source grant另走有效RED→fresh pre-edit→GREEN/type→独立fresh postGREEN。Root结果候选不自动授宏DONE或源码权。
+
+Fresh reviewer **`b377c86f-8785-44e9-b37d-58580835c16f`**已返回logical verdict blocked：storage `commitDecisionResult`541–620不消费`args.commit.fence`，只验独立args.expect；runtime在executor后await monitorEvidence664，原窗口可在tuple未变时失效，随后691–707仍把ready/applied交终态出口。OWNER已读完整函数/相邻observation permit及runtime链，确认这是具体逻辑消费者缺口，非physical写边界泛化；原39/controller案例只过observation出口、chain旧nonce交错又会被expect拦，未覆盖该同tuple失权路径。仍需真实integration RED，不把静态审查冒充业务失败。Root下一阶段原MiniMax正据此设计最小terminal-fence RED，而非先改release await；该review不是source grant或最终T4 spec。
+
+TaskStart`/tmp/plugin-status-caller-forward-owner-01a1406d/start-snapshot.json`：0bab/branch/upstream0/0/staged空/84hash/2旧fixture完整stat冻结；OWNER从批准**Git commit fb42**导出唯一协议原文到同目录`approved-protocol.md`并核原c2fa完整SHA，避免把当前d266文本冒充批准稿。Packets`/tmp/monitor-status-caller-forward-{review,design}-01a1406d.md`。Context-mode读取安装client被其workspace边界拒绝，未改allow规则或用其他工具/child绕过；当前使用既有证据和产品只读审查继续，production-edit自动触发边界仍unknown，不伪称全修。等待原生完成通知自动续行，不轮询。
+
+## 历史：十二局部已push；只读盘点终态候选因noGit范围违约HOLD
 
 只读root420cd1c3-3dfb-4ae8-aca8-add343a12027/child246a3d19-4d75-438f-bb5d-95b914d0ab09已complete/native review-required、真实7字段needs_context/空delta空gate。649实际tsc0空、Owner全84hash零差异。但有界真实session tail证实2026-10-17T04:50:57.281Z同bash里实际运行`git rev-parse HEAD`，违反worker noGit；终稿remaining又称noGit action，不能追认。该命令只读提交号、没有Git修改/破坏，产品未变；原件及实际call保留`/tmp/plugin-status-callers-closure-inventory-owner-01a1406d/readonly-owner-review.json`。这是命令范围HOLD，**不是SDK rejection、源代码回归或已证安全入侵**。暂停新的代码授权，先审noGit边界/f408/宏Caller；不重写历史、不回滚0bab或十二已接受局部。
 

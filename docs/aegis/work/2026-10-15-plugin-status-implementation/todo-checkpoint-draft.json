@@ -1,11 +1,27 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "currentTodo": "Tower642/182 Caller已blocked：f408、readonly-no-git-command-scope-hold、macro-caller-closure-review。readonly420/246实际Git元数据命令违noGit；其noGit action不能作为无Git命令或合规证明。84hash不变、649tsc0，非源码回归；十二局部回执有效，不扩T4。",
+  "currentTodo": "Tower643/182 Caller恢复in_progress，Operator要求继续；原noGit违约保全但不当成全局停工理由。267/b377+d448已terminal候选，Owner验证terminal出口遗漏原fence为具体逻辑gap。新root389a890a-6b37-4629-ad6a-608c2004ddb8 exact-resume d448只做单case integration RED，先新pre-TEST gate再650type/651named，RED后另receipt，无Source修复权；f408不泛称已修。",
   "completedTodos": ["status-impl-plan", "status-erp-core", "status-monitor-core", "status-runtime-chain", "status-chain-snapshot-fidelity"],
-  "activeSlice": "readonly420/246已terminal候选；OWNER scope HOLD noGit元数据命令违约，暂停新的代码授权，审查宏Caller与自动测试边界。",
+  "activeSlice": "terminal-fence-red-only：运行中，必须fresh pre-TEST WAIT后仅现有integration单case；旧9/生产/fixtures冻结，validRED+type后另postRED receipt，绝不自行GREEN。",
   "lastAcceptedSlice": "chain-integration-snapshot-fidelity：新root ae28e0da-0bdf-46df-a09c-f96f2bbc52bd exact-resumed478；先fresh架构/rename-only门禁，再精确改名+新路径同guard RED/type0/无自动9/fixture写，再distinct helper pre-edit后compose-only，再2产品named+7私有related+actual产品type0，再独立新postGREEN。A按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4已执行且独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad获批，独立2产品+7私有相关案/实际产品tsc0/全scope后局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受，已核Native complete/review-required/terminal与真实7字段/6425 hash；0bab已push，2fixture仍modified未stage，不扩全Caller/T4。",
   "currentExecution": {
+    "root": "389a890a-6b37-4629-ad6a-608c2004ddb8",
+    "resumedFrom": "d448cd27-b2d3-49f9-8bea-3422148024cb",
+    "packet": "/tmp/monitor-status-terminal-fence-RED-01a1406d.md",
+    "snapshot": "/tmp/plugin-status-terminal-fence-red-owner-01a1406d/start-snapshot.json",
+    "preTestGate": "3706984e-f331-45d7-8e2d-dd4ae256da3f",
+    "permission": "Fresh pre-TEST3706984e granted only ONE integration file + ONE genuine terminal fence case;650tsc/651exactnamedRED. PostRED receipt not Source gate. Originalmodel/session/cwd/profile/tools/checked unchanged, noGit includingreadonly metadata."
+  },
+  "lastForwardReview": {
+    "root": "26713a14-e033-4d0d-bd97-41429b63244f",
+    "state": "running; fresh reviewer then retained original MiniMax design only, not macro/source grant",
+    "reviewPacket": "/tmp/monitor-status-caller-forward-review-01a1406d.md",
+    "designPacket": "/tmp/monitor-status-caller-forward-design-01a1406d.md",
+    "snapshot": "/tmp/plugin-status-caller-forward-owner-01a1406d/start-snapshot.json",
+    "baseline": "Owner-provided0bab/upstream0/0/staged空/84hash/2fixture全stat冻结；批准fb42原文导出SHA c2fa核实。原SDK/profile/tools/checked不变。只读Git包括rev-parse等全部禁止；writer仅一次精确SHA命令，无tests/tsc或代码编辑。"
+  },
+  "lastReadonlyInventory": {
     "root": "420cd1c3-3dfb-4ae8-aca8-add343a12027",
     "resumedFrom": "8b417e59-a5a2-446b-be22-eaf16ed4ba96",
     "state": "complete/native review-required且7字段needs_context/空delta空gate，649actualtsc0空/84hash精确；actual Git rev-parse HEAD违noGit（只读无修改），与noGit action声明矛盾，scope HOLD非native拒绝。",

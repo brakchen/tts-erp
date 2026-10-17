@@ -2,8 +2,27 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
   "lastCheckpointRef": "docs/aegis/work/2026-10-15-plugin-status-implementation/todo-checkpoint-draft.json",
-  "resumeInstruction": "只读root420cd1c3-3dfb-4ae8-aca8-add343a12027/child246a3d19-4d75-438f-bb5d-95b914d0ab09已complete/native review-required，Owner scope HOLD：actualGit rev-parse HEAD违反worker noGit（只读、84hash零差异，无破坏性Git）；不追认终稿的noGit action，原件/实际call已保全。先处理此边界及f408/宏Caller审查，再授权写入，不另起writer。此前ae28/8b417微切片终态和7字段/精确post0d800/6425 hash已核，代码0bab24702001dc9be12d4a81d181ee33c53e3554已push。原MiniMax唯一产品writer，OWNER只审查/协调/Git。原model/session/cwd/profile/tools/native checked均不变。当前方案分A内容精确integration改名+显式同guard RED/type0/no自动9/no fixture写，B另fresh helper pre-edit后compose-only测试适配器，2产品named+7私有related+actual产品tsc0，再distinct fresh postGREEN。任何一步无该步新UUID回复不得写；旧272496 HOLD/15c410 WAIT/3c1及carrier986/d478均不是新产品gate。final是DOMAIN恰七字段加原生必需acceptance-report尾块，原SDK验证strip后仍交付七字段；旧父层no-footer/fence禁令已撤回。StageA已按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4执行并独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad批准compose-only，OWNER独立2产品+7私有相关案/实际产品tsc0及精确范围已核，局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受；终态/真实7字段/终态scope已核，0bab仅旧新测试路径已commit/push，2fixture仍modified未stage；不是整体Caller或T4接受。",
+  "resumeInstruction": "Operator明确继续：原只读Git违约保全、不追认，但不能扩大成全任务停工。Tower643 Caller恢复in_progress；267已terminal，fresh b377证明terminal commitDecisionResult遗漏commit.fence、原writer d448给出真实集成RED设计；Owner全84hash未变/实际SHA只有4文件无dot无Git，纠正d448自述dot与runtime行号，不改原件。当前root389a890a-6b37-4629-ad6a-608c2004ddb8 exact-resume d448，必须新supervisor pre-TEST gate后才准一个integration文件/一个case及650type/651namedRED；RED后另post-RED receipt，绝无生产修复授权，原writer唯一；noGit明确包含全部只读Git，HEAD由OWNER提供。等待原生通知自动续行，不等用户再催、不轮询。下文A/B为已完成历史，不复用旧gate。此前ae28/8b417微切片终态和7字段/精确post0d800/6425 hash已核，代码0bab24702001dc9be12d4a81d181ee33c53e3554已push。原MiniMax唯一产品writer，OWNER只审查/协调/Git。原model/session/cwd/profile/tools/native checked均不变。当前方案分A内容精确integration改名+显式同guard RED/type0/no自动9/no fixture写，B另fresh helper pre-edit后compose-only测试适配器，2产品named+7私有related+actual产品tsc0，再distinct fresh postGREEN。任何一步无该步新UUID回复不得写；旧272496 HOLD/15c410 WAIT/3c1及carrier986/d478均不是新产品gate。final是DOMAIN恰七字段加原生必需acceptance-report尾块，原SDK验证strip后仍交付七字段；旧父层no-footer/fence禁令已撤回。StageA已按0ea744b1-53bc-4fc8-b67a-cc4f94c7ddb4执行并独立核实；B仅新pre-edit49988cd1-98c9-41bd-9bae-f54efd551bad批准compose-only，OWNER独立2产品+7私有相关案/实际产品tsc0及精确范围已核，局部postGREEN0d800a7e-c9b2-4372-94b3-7ea06d64ca4b已接受；终态/真实7字段/终态scope已核，0bab仅旧新测试路径已commit/push，2fixture仍modified未stage；不是整体Caller或T4接受。",
   "currentExecution": {
+    "root": "389a890a-6b37-4629-ad6a-608c2004ddb8",
+    "resumedFrom": "d448cd27-b2d3-49f9-8bea-3422148024cb",
+    "slice": "terminal-fence-red-only",
+    "state": "running; fresh pre-TEST3706984e-f331-45d7-8e2d-dd4ae256da3f granted, only integration testcase/650type/651RED; after validRED post-RED WAIT, no Source grant",
+    "preTestGate": "3706984e-f331-45d7-8e2d-dd4ae256da3f",
+    "packet": "/tmp/monitor-status-terminal-fence-RED-01a1406d.md",
+    "snapshot": "/tmp/plugin-status-terminal-fence-red-owner-01a1406d/start-snapshot.json",
+    "scope": "Only tests/plugin-status-chain.integration.test.ts, one genuine real3module terminal-fence case, old9/header/default behavior frozen; after fresh gate only650actualproducttsc and651new namedRED. Two generated fixtures untouched."
+  },
+  "lastForwardReview": {
+    "root": "26713a14-e033-4d0d-bd97-41429b63244f",
+    "state": "running sequential fresh logicalCaller review then retained MiniMax next-RED design; zero source grant, not finalT4 spec review",
+    "reviewPacket": "/tmp/monitor-status-caller-forward-review-01a1406d.md",
+    "designPacket": "/tmp/monitor-status-caller-forward-design-01a1406d.md",
+    "snapshot": "/tmp/plugin-status-caller-forward-owner-01a1406d/start-snapshot.json",
+    "approvedProtocol": "/tmp/plugin-status-caller-forward-owner-01a1406d/approved-protocol.md exact approved c2fa SHA from fb42 COMMIT",
+    "constraints": "No Git including metadata, no tests/tsc/source/config edits. Reviewer fresh gpt6.1-sol; writer exact-resume246 original model/session/cwd/profile/tools/checked. One exact SHA command only for writer native evidence; actual output DOMAIN7 plus mandatory native metadata. f408/source-edit trigger unknown; do not bypass denied installed-client read."
+  },
+  "lastReadonlyInventory": {
     "root": "420cd1c3-3dfb-4ae8-aca8-add343a12027",
     "resumedFrom": "8b417e59-a5a2-446b-be22-eaf16ed4ba96",
     "slice": "callers-closure-inventory",

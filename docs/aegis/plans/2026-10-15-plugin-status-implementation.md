@@ -28,7 +28,15 @@ corrected-design root437688b5/child4d7be134因原生`commands-run evidence missi
 
 历史接受基线：当前已接受**十一微切片**，第十一最终gate`3c1d5e92-e7e8-4ca7-b4fa-2774999a462c`/root7187c653/child6ee1cecc已原生terminal七字段核读。provisioning单set写已有closed初始化episode、纯构造器迁storage唯一19字段owner/controller传原newId，不改unknown/fence/union；首heartbeat报告同episode。独立48去重产品named+1私有probe PASS、producttsc0、两反事实杀死且tsc0/精确三path证明。LSP0reported errors但3inconclusive；其余七chain仍未知、完整T4未完成。产品聚合16-path检查点18d0887已push且树clean，仅保存原12034行WIP，不是全验收/发布或master/pin变更。原artifact test-before fb11为held中间态，真实微切片基线ef333→91a4已记erratum，不改原稿。证据`/tmp/plugin-status-owner-provision-initial-record-01a1406d/`。
 
-### 当前：十二局部push有效；只读盘点因noGit命令范围违约HOLD
+### 当前：terminal-fence RED原子任务运行，643 Caller in_progress
+
+Fresh b377及Owner源读确认逻辑terminal consumer遗漏原commit.fence，与future physical风险不同。267/d448设计terminal，唯一实际SHA无dot/noGit，84不变；原报告dot/行号错误保原件另纠正。新root389a890a-6b37-4629-ad6a-608c2004ddb8 exact-resume d448，先fresh supervisor pre-TEST WAIT，后仅existing integration一个真实case+650type/651namedRED，再postRED receipt；绝无production grant。原子顺序：validRED/type0→另fresh source pre-edit及auto-scope证据→canonical storage最小复用既有permission helper→相关GREEN/产品tsc→独立fresh postGREEN。TDD strict来自repo；新测试不碰旧9/header/2fixture，不建authority或runtime双重owner。见最新checkpoint与terminal-fence-RED packet。
+
+### 历史：继续推进，643 Caller in_progress；fresh逻辑审查→原writer窄RED设计
+
+Operator明确继续，OWNER撤回把只读Git违规扩大为整个任务停工的处理；违规/原件保留不追认，noGit包含全部readonly Git元数据。新单一async root26713a14-e033-4d0d-bd97-41429b63244f先fresh gpt6.1-sol做逻辑Caller闭合审查，再exact-resume246原MiniMax设计下一最小integration RED；当前无编辑/app tests/typecheck权限、无新source grant，不改profile/SDK。84hash/2fixture stat及批准fb42原文c2fa已独立冻结。f408仅本chain已有窄证据，production-edit触发边界未证，不能空泛停工也不能擅自越门禁；结果原生通知后自动续行。见最新checkpoint。
+
+### 历史：十二局部push有效；只读盘点因noGit命令范围违约HOLD
 
 420/246已complete/native review-required/DOMAIN7 needs_context/空delta空gate，649actualtsc0空及全84hash零差异。但Owner实证同bash实际`git rev-parse HEAD`违反worker noGit，与终稿noGit action矛盾；仅只读提交号、没有Git修改或产品变化。原件/actualcall已保全，暂停新的代码授权，先审noGit/f408/宏Caller边界，不改SDK/profile或重写历史。0bab及十二局部接受不受该后续范围违约倒推撤销。两个raw release await只是design候选，不得skip finally cleanup/另借预算；Source305是每operation聚合，不采纳profile-wide预算说法。详细scope HOLD见checkpoint。
 
