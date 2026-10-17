@@ -4,7 +4,21 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，OWNER直接编码和测试。
 
-## 当前：b868默认clock局部accept，终态wait架构2f8审查中
+## 当前：publication准备局部69PASS/type0候选，独立1fe已accept/Owner窄接纳
+
+94 COMPLETE/no issues/**ready-for-currentAPI-RED ONLY**（实际报告读核22read0其他tools），不是Source/API实现接受。Owner实际CurrentAPI有效5业务RED1liveguardPASS30skip/actualunpipedcompiler0后独立pre-edit仅授权publication准备：用native Promise.then把现有single-flight发布置于实际端口前，原generation与唯一Budget仍同步原入口捕获/私有required参传入，公共async Promise接口保持；非最终task/no-window/readonly/wait ABI。Source **fcc6d38181467980a5b7b79b53091fe86fc67fa6 已push**，仅runtime/controller14+12-；startBudget与runRecovery工作body保持字节相同。2pub RED→GREEN，30chain+39controller=69unique相关PASS/真实compiler0。六新role重跑**3FAIL3PASS30skip**：expired/tail/unavailable仍真实业务失败，不能称整体GREEN；selected2与既有数字不重复累计。
+
+fresh只读 **1fe523aa-b527-4537-9de7-d0017fb4d3ec** / missionc5a91352-0b3f-451f-9e10-15dd5f971186 / `/tmp/plugin-status-budget-publication-postgreen-owner-01a1406d/review.md` COMPLETE/localaccept/no issues，实际报告已读21read1nativecontact无其他或拒读路径；Owner同HEAD/7SHA/上游0-0确认，仅窄接纳publication准备，不采纳其merge字样为合并许可。证据 `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/publication-green/` 与owner-preedit-publication.md；receipt `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/owner-post-review-publication-acceptance.json`。现无runningreviewer/worker，不等已完成1fe/94。LSP3path0diagnostics但全inconclusive，实际compiler独立为0。旧30案/默认harness不变、两冻结fixture/cache不变，产品仅两历史fixture dirty不stage/restore。
+
+Tower666/189 terminalactive/父仍blocked状态准确不no-op写板。b86867是已接受DEFAULTclock，不认证本最终终态或resume90；当前只有gen/PRE的resume不借recovery窗口。未做最终task传递/no-window/action-caller/readonlyterminal/rawlease-tail/native事实/queued successor/physical fullcleanup/sharedclock/aggregate/merge/release。实际1fe报告与工具/HEAD/SHA/上游已核，直接补剩余边界RED→独立Ownerpreedit→最小typed→相关GREEN/type0→fresh复核，不等旧review或用户再催。原生澄清保留唯一pure first-PRE read与立即观察，但原GEN/预算失效须在第二read/初始化/页面effect前停，无proposal，不给超时tail/physical扩权。public ABI迁移仍需真实alias-callgraph核查与另Owner边界，不把prepare保持旧Promise当最终兼容路径；共享config热点须明确branch/HEAD/writequeue授权，拒读路径与禁bundle继续。
+
+## V2架构复核启动快照（94现已ready-for-RED，非当前running）
+
+2f8 COMPLETE/**changes-needed**，实际report完整读核+audit23read1nativecontact无其他/拒读；OwnerSource确认生命周期提前释放、snapshot初始化副作用、缺同步task/window三问题。Resume当前无captureBudget，仅gen/PRE局部接受不能称resume90。新细化A `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/architecture-v2.md`：required同步recoverytask原wait vs显式no-window、纯canonical terminalObservation、raw事实/锁owner实际drain后释放、expiry跳cycle尾且无catch写；live终态后尾IO也同原remaining/guard限等待，nestedhelper不重启超时旧尾。真实IOError≠absence/假failed，原canonical内核不race不解锁不rollback。无新模块/optionalwaitfallback/新90。
+
+新fresh READONLY **94c0e85e-4d90-409f-a7cc-43076c46f9de** / mission0509cb2b-88a7-496a-b797-6147e1c4b045 / `/tmp/plugin-status-budget-terminal-wait-architecture-v2-owner-01a1406d/review.md` 等native不poll。V2尚无设计批准/新terminal Source-tests-edit-run或业务RED；TaskStartSnapshot记录147/7SHA/frozen/cache，exact-name locator非alias-callgraph证明。b86867/type0仍DEFAULTclock已接受基线，不是终态GREEN/SDKchecked/physical/aggregate/release。Tower666/189 active，source2frozendirty不stage，sharedconfig明确handoff/拒读plan-protocopy-no-bundle边界继续。
+
+## V1架构审查启动快照（2f8现已changes-needed）
 
 b86886a/67unique产品PASS/actualtsc0已push，fresh64d14830-4811-4146-801d-71db934016b0 COMPLETE localaccept/no issues，实际报告读核20read0其他tools；Owner同HEAD/SHA/upstream0/0复核后仅接纳DEFAULTbudgetclock/已知zero不可复活，receipt `/tmp/plugin-status-budget-core-clock-owner-01a1406d/owner-post-review-acceptance.json`。Tower666/189完成clock真实2path/父仍开，新status-budget-terminal-wait OWNERactive。runtime Outcome/no-proposal/throw无原wait能力，current snapshot-only报告不能破mandatoryunion，rawserializer锁不因caller timeout释放、真实事实不回滚。新private draft `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/architecture-proposal.md`，尚无新Source/tests/实现授权；fresh架构只读 **2f8f66dd-75ad-4da5-8e57-26a83e452519** / mission4579d8db-7d34-4da0-ac10-97d7a6c97ee0 / `/tmp/plugin-status-budget-terminal-wait-architecture-owner-01a1406d/review.md` 等native，不poll已完成64或运行2f8。无worker/不新增窗口owner或API绕门；shared生产clock和actualports仍等明确config handoff。67/架构advisory都非SDKchecked/physical/aggregate/merge/release，latest sourceLSP两path inconclusive，2旧fixture dirty未stage。以下是已被本段更新的候选历史。
 

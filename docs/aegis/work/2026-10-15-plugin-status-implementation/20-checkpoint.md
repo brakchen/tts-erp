@@ -1,6 +1,26 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：core默认预算clock已局部accept，继续终态等待架构门
+## 当前：publication准备切片69相关PASS/type0，fresh1fe已accept/Owner窄接纳；终态仍3业务RED
+
+架构V2 **94c0e85e-4d90-409f-a7cc-43076c46f9de COMPLETE/no issues/ready-for-RED ONLY**，实际报告已读与22read0其他tool审计；不是Source或实现接受。Owner在现有Promise API先真实init40/terminal队列gate、89,999与90,000界限、只读unavailable、真实已applied后tailgate及真实firstport同步重入两案：**actualunpipedtsc0→5业务FAIL1live正案PASS30skip**。无timeout/setup/type/零选择RED，无mock核心outcome或permit。test-only两commit0b1a6c3/4040d22已push，旧30案/默认harness字节不变；两冻结fixture/cache不变。
+
+Owner随后独立pre-edit只授权更小publication准备修复：现有runExclusive/recoverBinding先发布既有single-flight再实际调用端口；generation与唯一Budget仍同步原入口捕获，required私有参传runRecovery；保留现有async Promise API（不是最终同步task API或新兼容别名），原startBudget与runRecovery实际workflow suffix字节不变。**fcc6d38181467980a5b7b79b53091fe86fc67fa6 已push**，Source仅runtime/controller14insert12delete；2pub RED→2GREEN，30chain（28旧+2新）+39controller=**69unique相关PASS/actualunpipedtsc0**，selected2不另累计。六新角色重跑仍**3业务FAIL3PASS30skip**：expired/tail未限caller与overlap额外alarm、unavailable fallback仍初始化/丢debt；其余live及2pub通过。不能称整体GREEN或已完成终态。
+
+fresh严格只读 **1fe523aa-b527-4537-9de7-d0017fb4d3ec** / missionc5a91352-0b3f-451f-9e10-15dd5f971186 / `/tmp/plugin-status-budget-publication-postgreen-owner-01a1406d/review.md` COMPLETE/publication-prep local: accept/no issues，实际23行报告已读、21read1nativecontact无其他或拒读路径；Owner复核同HEAD/7SHA/上游0-0后仅窄接纳publication准备，receipt `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/owner-post-review-publication-acceptance.json`。当前无runningreviewer/worker，不等或poll已完成1fe/94；证据 `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/publication-green/`、owner-preedit-publication.md。Source runtimeSHA4adc3be182a8b754df0fab0f2b40b5025ef4ebd5cc764a05da7fc4f3c345f133/controllerSHA06ed74bea3af348cb258b5503679628f8ec62ba217ac468cc272abb5b121a5b9/testSHA05e6a19ec95c9131fd51b5d8d7c3e1534967d4d0dca5fe5e75da123e97099c6c。LSP3path均inconclusive/0confirmedclean，不能替代真实compiler0。
+
+Tower666/189 terminal仍in_progress、父仍blocked，未新增完成/no-op改板。b86867只DEFAULTclock已接受基线；本prepare也不是SDKchecked/最终taskABI/只读终态provider/原窗口贯穿/rawdrain与tail/physical/aggregate/release接受。剩余先补admittedset/queued-successor/no-proposal/throw/localdisabled/只读IOError与join-controls，public API迁移前核真实aliases/callgraph及新Ownerpreedit；不加optionalwait或新90。resume仍仅gen/PRE无capture90。两旧fixture dirty冻结不stage/restore；共享热点仍等config明确branchHEADqueue交接；拒读plan/protocopy不绕tool/path/child/settings/bundle。chain现1837行强复杂度压力，本准备仅现有owner局部，不批准新框架或把大迁移默认塞入。
+
+Owner原生澄清9f966256已答复并入复核：本prepare保留唯一pure readonly first-scalar PRE read，即使入口后、微任务前GEN失效/预算耗尽，原read创建即观察，且必须在第二read/初始化/页面effect前退出无proposal，不借新GEN/PRE/窗口、不把expired当absence。这不是超时旧tail继续IO/physical执行或全rawdrain已闭的许可。后继直接补剩余RED与独立Owner pre-edit，不等旧review或用户再催。
+
+## V2架构门启动快照（94现已ready-for-RED，非当前running）
+
+实际2f8报告完整读核，**23read/1nativecontact/无其他或拒读路径**；三P1经Owner实际Source核实：caller超时不能清rawcycle/executor所有权；currentContextReport丢binding不等snapshot provider无副作用；recover有原Budget但resume只有gen/PRE、没有capture90预算。**旧resume局部FRAME接受不得升级为resume90或aggregate接受**，不重开已接受clock/Caller局部。
+
+Owner新draft `/tmp/plugin-status-budget-terminal-wait-owner-01a1406d/architecture-v2.md` 选择细化A、拒B：同步required originalwindow recoveryTask vs显式no-window；required纯canonical terminalObservation不初始化/停清/造默认；raw事实pipeline持owner到actualdrain，callerdistinct expiry直接跳尾不写catch。进一步覆盖terminal已live成功后才卡住的cycle尾：same remaining/guard逐步限等待、创建依赖IO前查原剩余，nestedhelpers不能超时后继续旧尾；already-entered canonical/native保锁保真实事实。无新模块/时钟owner/optionalfallback/协议改；共享热点仍需明确handoff。
+
+**尚无新terminal Source/tests编辑或执行/业务RED/设计批准**。`TaskStartSnapshot.json` 记录b868/147fingerprint/7ownedSHA/两冻结8attrs+path/autoCache及exact-name locator（非完整alias graph）。fresh只读设计复核 **94c0e85e-4d90-409f-a7cc-43076c46f9de** / mission0509cb2b-88a7-496a-b797-6147e1c4b045，output `/tmp/plugin-status-budget-terminal-wait-architecture-v2-owner-01a1406d/review.md`，等native不poll，2f8已完成不等。原b86867PASS/type0仅已接受DEFAULTclock基线，不能算终态GREEN/SDKchecked/physical/aggregate/merge/release。Tower666/189该项仍in_progress。
+
+## V1架构门启动快照（2f8现已changes-needed，非当前running）
 
 **b86886a0ddee3f0c42e18df2dd669d294563d972 已push/67unique产品PASS/actualtsc0**。fresh **64d14830-4811-4146-801d-71db934016b0 COMPLETE / core-default-budget-clock local: accept / no issues**，实际21行报告已读/20read0其他tools审计，Owner复核同HEAD两SHA/upstream0/0后仅窄接纳；receipt `/tmp/plugin-status-budget-core-clock-owner-01a1406d/owner-post-review-acceptance.json`。不是SDKchecked/所有clock或真实OSsleep/生产sharedclock接线/physical/aggregate/merge/release。**Tower666/189**完成clock真实2path回执，移除旧clock blocker，新status-budget-terminal-wait OWNER in_progress；此前65e/b78观察等待63接受也不再等待。
 
