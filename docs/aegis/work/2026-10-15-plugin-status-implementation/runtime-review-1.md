@@ -4,15 +4,29 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：ERP微秒精度局部修复窄接受；完整交付仍blocked
+## 当前：phase1部分Source未验收；默认测试模板setup失败，整体未交付
+
+新workflow及两个child均已COMPLETE，实际report已消费；worker新7个缺表/mount/CORS业务RED后仅实现条件phase1，phase2 tests仅author未跑。sole wrapper刷新默认tts_erp_test_template因0070 shop FK阻止commerce.shops PK恢复而exit4，未clone/collection/新tests、template可能部分替换。envsetup --check0只是依赖/库存在，已通知共享会话暂停从默认模板克隆；不以此重试冒充GREEN。
+
+需明确一次同名纯schema测试模板受锁删除重建授权；未擅自directSQL/dropdb/换库runner/改foreign wrapper。ruff check0但formatcheck1；代码WIP私有保存，不作正常成功提交。没有新phase1 GREEN、phase2 Sourcegate或迁移成功；不再poll/resume/重跑完成的66工作流。最新现状见两JSON currentExecution与Tower704。
+
+ACK新增断言之后，isolated status API组件93PASS（含3ACK、14auth，不累加）；fresh局部复核14read2contact0error，独立会话探针实证Engine/READ COMMITTED，首探针setup错误已修正留勘误。组件原5file草稿与ACK测试已精确保存并push，6090行是旧草稿首次落Git，非本轮新实现量；仍不是真实app/schema/全后端通过。
+
+ERP共享文件不再空等：按task自身5天停更的>6h规则先仅接管协调归属，再于clean coord/registry锁下发布master4f39a66，明确将access/、security.py、app.py写队列从config ERP移交status ERP；不是以idle/clean直接推断文件release。真实远端committed configERP基点已核，foreign dirty测试不改/stash/stage/提交。db/base及全局models未移交；插件storage仍另属core writer，本次ERP移交不释放它。
+
+已按原目标复用7个不变维护源码（原0070不可改写）；仅isolated runner刷新测试template到0070，原general/monitor兼容24PASS。新typed用例现在真实3业务RED/4对照PASS/0caseERROR：POST report仍ADMIN、enum仅两purpose、实际CHECK使合法provision503而非200。旧摘要脚本把traceback E当caseERROR的计数已更正留存，非测试setup失败。尚未修plugin_status，不称GREEN。
+
+此前启动fresh6.1-sol workflow `66ba7651-8e64-4015-8739-79cce992a158`：只读架构复核→唯一后端writer，已先native明确条件phase1与phase2tests-only。此启动段为历史快照，现两child完成且setup blocked，当前以首段为准。有界设计 `auth-integration-slice.md`；证据 `/tmp/plugin-status-erp-auth-integration-01a1406d/`。仅原状态/自动绑定业务，不修context-mode/PiWeb或范围外功能；后续还需same-byte GREEN、fresh spec/quality、真实app/schema与fullfast，physical/actions/job/浏览器闭环未交付。
+
+## 时间精度局部接受记录（历史；不授新鉴权接线通过）
 
 已执行用户“继续到实际可交付”要求，新的6.1-sol只读architecture与ERP gapmap完成：实际14read4contact与24read3contact、0越界/执行/错误；OWNER已完整消费并审计。架构方案明确required原authority bind结果、复用现有queue/canonical校验、mutation-only观察replay、cleanup独立原tuple与epoch/mono区分，但只是advisory，不给Source preedit/文件handoff。ERP静态核对发现通知outbox租约无fence、app/job/鉴权purpose/schema缺接线、请求body全缓冲、时间微秒丢失、随机重试边界测试；不可把草稿当运行中实现。
 
 独立修复timestamp：现有wire_timestamp仅2行改动，UTC isoformat保留微秒/整秒拼写不变；8新case先actual7业务RED1整秒PASS，再isolated runner单次相关390PASS（含8新，另为pure contracts/policy），克隆/删除专用临时testDB，无shared/prod/直接runner。fresh71dae5f5 COMPLETE/localaccept、actual12read1contact，ruff0/AST3/LSP3clean；只能窄接受precision repair。transient ORM→真实严格decision wire证明notBefore/expiresAt精度，不是数据库写读/迁移/整个持久化/API/auth/通知通过。
 
-代码已明确局部提交并push **13c255e**，实际3path为repository/model原OWNER未跟踪草稿依赖与新timestamp测试；800行是草稿首次落Git，不冒称全模块验收；原另5untracked未动。证据 `/tmp/plugin-status-delivery-20261018-01a1406d/` 与fresh两个workflow输出，所有本轮3个代理完成勿poll/resume。
+时间精度先前局部提交保存repository/model原OWNER草稿依赖与新测试；800行是草稿首次落Git，不冒称全模块验收。后继ACK组件草稿已独立保存push，见当前段；旧“另5file未跟踪”只属当时快照。证据 `/tmp/plugin-status-delivery-20261018-01a1406d/`，旧已完成代理勿poll/resume。
 
-新边界：host拒读ERP service.py，任何child读前已撤销whitelist，审计actualserviceRead0，未换tool/copy/child/check绕读；需明确新许可后才完整ERP阅读/API与会访问该模块的fullbaseline。另只按>6h stale规则接管了配置rollout**任务协调归属**，独立core writer仍有storage.ts文件保留，registry未移交/现proposal未生效；clean/idle/adoption都不是文件release，不写foreignworktree。下一步须有权的读取和sharedscope/registry交接，再actualcombinedbase ownerpreedit、原authority native admission/实际mutationdrain/conditionalcleanup/actions/API-job-schema及端到端验收。插件旧写入反例仍未修，原协议/拒读/冻结/单预算/actual事实边界和所有父门保留，无ready/合并发布。
+**撤回错误权限阻塞**：context-mode根目录错配曾被错误扩大成ERP全会话禁止；授权原生Read正常访问service.py，后续ACK组件执行已完成，无需重复读取许可，未改工具配置/guard。旧两只读代理当时未读service的事实不变，但不再作为当前blocker。真正明确禁止路径仍保护，不借此绕读它们。ERP共享handoff现按当前段正式生效；插件storage.ts仍另属core writer，无release不写。原native旧写入缺陷、首次PRE/GEN/唯一预算、native实际事实归属和所有未闭父门保留，无ready/合并发布。
 
 ## physical queue反例窄验证（历史；非最新交付状态）
 

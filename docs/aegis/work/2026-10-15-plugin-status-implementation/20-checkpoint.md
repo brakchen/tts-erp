@@ -1,16 +1,30 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：持续交付；ERP时间精度局部修复已验证，完整交付仍受明确权限/文件交接阻塞
+## 当前：phase1部分实现被真实测试模板前置阻断，整体未交付
+
+workflow66ba7651及两个child现已全部COMPLETE，实际两个报告已消费；不再等/poll/resume/重跑它们。worker新增缺表/mount/CORS共7个有效业务RED后，按OWNER条件gate完成phase1部分Source；尝试sole wrapper刷新默认`tts_erp_test_template`时，0070新增shop FK阻断commerce.shops PK schema restore，exit4、未clone/collection/新业务测试。模板可能部分替换；envsetup --check0只证明工具/库存在，不证明schema完好。已通知共享会话暂停从默认模板克隆。
+
+**没有phase1 GREEN**；ruff check0但formatcheck1，phase2 tests仅author未跑，其Source未批准。等待操作者明确一次同名schema-only测试模板受锁保护删除重建权限；不擅自directSQL/dropdb、换template/runner或改foreign wrapper。WIP精确私有保存，未验证Source不正常提交。恢复后仍sole wrapper clone/命名测试/drop；不涉及生产、外部凭证/通知或服务重启。当前以两JSON的currentExecution与liveTower704为准。
+
+ERP必要共享文件已正式接续：先依task自身5天停更的>6h规则只接管协调owner，再于clean coord/registry锁下发布master4f39a66，明确将access/security/app写队列移交status lane；后续16b900d仅新增原协议§8/9所需三个无其他registry writer的ASGI adapter reservation。不是以idle/clean直接推断release，不触foreign dirty测试。db/base/全局models未移交，插件storage仍属独立core writer，不能由ERP接续外推。
+
+已原样复用7个维护源码（原0070不可改），sole isolated runner仅刷新测试template到0070；原general/monitor兼容24PASS。新增typed3业务RED/4对照PASS/0caseERROR：POST report角色ADMIN≠READWRITE、enum缺第三purpose、真实0070 CHECK使合法provision503≠200。摘要把traceback E当caseERROR的计数错误已留勘误，实际无setup/import失败。证据 `/tmp/plugin-status-erp-auth-integration-01a1406d/`。
+
+fresh6.1-sol只读架构已提出§8中间件错误JSON、原token前缀/query日志、ingest当前key刷新等真实缺口（静态发现，非执行反例）；OWNER接受必要设计修订、登记精确scope。workflow `66ba7651-8e64-4015-8739-79cce992a158` 的唯一后端writer须另native申请Source preedit，先新gap的typed RED再最小修复；不把changes_required或范围分配当GREEN。见 `auth-integration-slice.md`。真实app/schema/fullfast、physical/actions/job/浏览器闭环仍待，禁止全项目/SDK/ready/发布宣称。
+
+### 已验证独立小片及纠正（不是新鉴权接线验收）
 
 用户要求继续至实际可交付，不停于反例或静态方案；已允许新的fresh GPT6.1-sol worker，不重复询问这项许可。新architecture与ERP gapmap两代理均完成并完整消费：实际工具分别14read4contact、24read3contact，0执行/错误/越界；报告在 `/home/schan/.pi/agent/sessions/--home-schan-tts-erp--/subagent-artifacts/outputs/0f76b157-80fa-49f7-ad6f-70ea137e13c8/`。前者给出required原fence/结果ABI、现有queue复用、canonical校验后同步末查、mutation-only观察/replay与cleanup/clock边界；只读方案不是Source preedit/实际GREEN。后者明确指出outbox租约无fence、真实app/job/purpose/schema接线缺失、body先全缓冲、微秒丢失及retry随机临界flake。
 
 已独立修复微秒丢失：现有repository.wire_timestamp改用UTC标准ISO序列化，整秒拼写不变。新8案 **7业务RED+1整秒正案PASS → 修复后timestamp/contracts/policy合计390PASS**，唯一测试入口isolated runner，两次各自克隆/删除临时test DB；无direct/shared/prod fallback。覆盖真实transient ORM决策→canonical严格wire serializer的notBefore/expiresAt，不是durable数据库读写或完整后端。fresh timestamp reviewer **71dae5f5 COMPLETE/localaccept**，actual12read1contact，无执行/越界；ruff0/AST3/LSP3clean。实际日志/工具审计/本地核验 `/tmp/plugin-status-delivery-20261018-01a1406d/`。schema/持久化其他函数/租约/鉴权/完整fast baseline未通过，不扩大390PASS或review结论。
 
-ERP分支局部提交 **13c255ef5f525e26813551f1c91462fab8ee5fcf 已push**：精确三个OWNER路径（原未跟踪repository/model依赖＋新timestamp测试），800行是原草稿首次落Git，不是本次重写800行/全持久化验收；提交消息明确PARTIAL草稿与未ready边界。其他5个原untracked API/service/scheduler/notifications/API测试未改/未stage，未迁移/接job/发通知。插件产品源码仍旧基点，原native旧写入反例仍未修。
+timestamp独立草稿先前提交保存原repository/model依赖与新测试；800行是旧草稿首次落Git，不是本次重写或全模块接受。后继ACK组件 **3148e96已push**：原4个业务源码和测试共5file首次落Git6090行，实际本小片只新增ACK新Session后置断言，不冒称新实现6090行。随后本地同步metadata master至6107d5f，canonical依赖准备/新typed RED仍为WIP，不是功能GREEN。未接job/发通知，插件native旧写入反例未修。
 
-新的真实权限边界：OWNER context-mode文件工具拒绝读取ERP `service.py`；当即在任何子代理读取前撤销whitelist，actual读0，未改用其他tool/copy/child/check/settings绕读。需要明确新的读取许可，不能为了完成而强跑会访问该模块的完整baseline/API验证。另按>6h规则只接管了4天停更config rollout**任务协调归属**，不等另外登记的core writer释放storage.ts；master registry未变，handoff proposal未生效，不触foreign worktree。`/tmp/plugin-status-delivery-20261018-01a1406d/shared-handoff-decision.md` 明确事实，clean独立coord工作区仅待有权登记。
+**纠正先前权限误判**：context-mode错误宿主根目录曾被扩大成ERP全会话禁读，这不准确；授权原生Read正常访问service.py，ACK组件执行已证明后续业务可继续，未改工具配置/guard，无需再次读取许可。真正禁止路径不因本纠正解除，不换工具/child绕读它们；只做原项目，不修工具或范围外bug。旧handoff proposal未生效属于当时快照，ERP现已通过当前段明确registry转移，不再误报全局未交接；但插件storage仍未释放，foreign工作树/WIP继续保护。
 
-下一步需要**有权的service读取放行及shared文件scope移交/registry**，再在actual combined base完成owner preedit、native原authority入场/required mutation drain/conditional tuple cleanup/actions/API-schema-job接线和真正端到端/完整基线。父任务仍未交付，timestamp局部验收不清这些门。所有本轮三个代理已完成、不poll/resume；原拒读/冻结/no-bundle、首次PRE/GEN/唯一原预算与actual native事实归属、生产安全约束保持，无合并发布。
+本轮完成原目标的ACK持久化witness：两处既有TestDecisionResults新增独立Session直查outcome/reason/delivery_state/completed_at，late conflicting failure后仍比较原applied时间。isolated该class3PASS，随后整个status API组件**93PASS**，3ACK/14auth均含于93不累计。fresh **c66e84c5**已完整消费、local无阻塞；不是完整持久化/真实app/schema交付。运行探针确认local/handler/fresh reader绑定Engine而非共享outer Connection，实际READ COMMITTED。首探针误把没有session fixture的第三案也纳入而KeyError，属于setup错误非业务RED，修正后同3案0退出；原log与probe-erratum保留。证据 `/tmp/plugin-status-erp-ack-persistence-01a1406d/`。批准协议§9已重核purpose=plugin_status精确report-only，实际config-ERP enum/CHECK仍仅两值，精确共享改动请求已给owner，foreign dirtytest不触碰。
+
+下一步先取得同名默认测试模板恢复权限并恢复前置，再命名验证phase1、修format；随后执行已author的phase2真实RED、另Sourcegate后完成current-key事务刷新/§8错误隐私，再OWNER同字节复现、fresh spec/quality与完整安全fast baseline。插件physical仍须其独立file owner明确交接，之后原authority native入场/真实drain/原tuple cleanup/actions及端到端门。不poll/resume旧完成代理，不因局部PASS停止；原拒读/冻结/no-bundle、首次PRE/GEN/唯一预算与native实际事实和生产安全边界保持，无合并发布。
 
 ## physical queue RED窄验证快照（历史；缺陷未修，不是最新整体交付状态）
 
