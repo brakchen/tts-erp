@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：d584498绑定入场叶窄接受，继续physical实际drain/条件cleanup
+## 当前：7eb48c6实际raw-drain叶窄接受；继续迟到claim的原tuple条件cleanup
+
+Parent已完整消费26d39469的fresh SPEC497dd6c2/QUALITY9b80d7bd，均无blocking，无待答supervisor请求。只接受本raw-drain叶：required readonly `physicalSettled`由原recovery task同步冻结发布，局部observedBudget追实际producer原Promise，runtime经既有trackRaw/CycleLease持owner到实际settle；exported window仍用原unobserved SAME Budget，防自环，不把bounded `.work`结束当物理取消。
+
+真实修复链保留：e505首候选先由worker/Parent各自currentAPI **1业务FAIL4controls**证明原reload仍pending时第二public startup实际入场，再required capability修复；fresh后验发现已启动parallel stop在read拒绝/超时前未登记，Parent **2业务FAIL2controls**→aac即时观察read/stop及bounded等待。下一fresh SPEC指出cached stopWait丢失原提交前预算检查，Parent实际 **1业务FAIL1live对照**，在read赢race但原wall/mono已spent时多启动**1 report/3 native storage reads**；7eb只在同owner原拒绝条件重查SAME budget.remaining，现0/0。初两候选不算接受，不将局部GREEN覆盖后验finding。
+
+最终Parent **drain14PASS、另admission96PASS、guarded45roots0diag/0禁读尝试**，各范围不相加；45roots仅production43+两self-contained named tests，不含旧fixture/caller suites或全项目tsc。Owner同10SHA、原8stat+仅已准atime/当前9observed、HEAD/remote、taskpaths/index核一致；plugin `7eb48c6c2d6be70064227c032c99d33698d9d4f6`已push，2原dirtyfixtures排除，非Repo全clean。两轮4review仅native read/contact17/3、16/1、18/1、14/1，精确scope无工具错误；不是reviewer独立执行。
+
+P3证据限制保留：bare-stop rejection只独立证明abandoned bounded wait，未隔离live awaited stop rejection；新负证据/clockspent案是实际controller+canonical storage，不冒新完整runtime组合。late-granted claim cleanup和成功release策略未改、未有该branch RED；原tuple/expectedClaimUntil/ABA-CAS/30s15s/epochmono/actions/其他mutator/生产桥接/ERP outboxlease-job-startup/browser E2E仍开。bca/316/c9/d48/26d均已COMPLETE、完整报告消费，不恢复或重跑；原91f/a512继续stopped。若同owner再出现相关退化，停止第四本地补丁，重开架构判定。
+
+证据：`/tmp/plugin-status-physical-drain-01a1406d/stop-frontier/{owner-bounded-raw-drain-acceptance,owner-postreview-audit,GREEN-summary,checkpoint}.json`及`RED-native-counts.log`；parallel-stop子目录保前一轮记录。下一步仅原lategrant的条件cleanup设计/currentAPI严格RED→Parent精确preedit→最小owner修补，保持原tuple、原窗口与合法cleanup权限分开。ERP983de42及原fullfast一次exit1/3stable窄修PASS不变；无整体交付/SDK/ready/业务master合并/发布。下文d584后继尚未执行的表述均为历史。
+
+## d584498绑定入场叶接受快照（历史；后继raw-drain已按上段接受）
 
 操作者在精确问题后已明确批准**仅已记录atime差异的单次元数据例外**，内容禁读/禁改/禁copy/hash/import/restore/emit和8原字段保持；不回写时间、不修工具、不推宿主因果，也不再把此已解授权当阻塞。原91f/a512 stopped不恢复；新c1中writerb9实际42业务RED6controls→48GREEN，Parent独立唯一named93PASS/guarded44roots0，0bd2e05push，缺expectedshape+坏raw分类优先级已修。
 

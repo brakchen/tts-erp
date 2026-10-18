@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：绑定入场d584498已窄接受；新后继physical只读设计对话
+## 当前：7eb48c6 raw-drain叶窄接受，不等全部physical
+
+Parent已消费26d两个fresh最终完整报告，无blocking/无待答请求；同源码SHA/metadata/Git及原生scope复核后仅接受required `physicalSettled`及已启动parallel stop实际drain。原task同步冻结发布/既有CycleLease.trackRaw消费，局部observer与exported原Budget窗口分离，保持bounded `.work`与actual raw ownership分域。原reload pending重入先1RED4controls；e505后parallel stop漏登记先2RED2controls→aac即时观察两issued raw/其boundedwait；aac后fulfilledstop误借当前执行许可先1RED1live，对应1report/3nativeget→7eb同原budget.remaining提交前重查后0/0，修复与失败链不抹去。
+
+Parent最终drain14PASS、另admission96PASS、guarded45roots0diag/0保护尝试，不累计；两个named test以外oldimports/全项目tsc/build/browser未跑。10watched SHA、8原stat+单次准atime及9当前observed一致，7eb48c6已push/task-indexclean，2原dirtyfixture保持排除。两轮4review仅read/contact17/3、16/1、18/1、14/1、无错误且精确scope，不当独立执行。P3live-awaited stop rejection未隔离、裸stop案只证abandoned boundedwait；新negativeproof/frontier案非全runtimecomposition，不扩大证据。
+
+原tuple late-grant cleanup/成功release策略尚未改，无其RED；ABA-CAS/expectedClaimUntil/30s15s/epochmono/actions/其余mutation/生产构造及ERPjob/browser等父门继续。旧bca/316/c9/d48/26d全COMPLETE不重启，91/a512 stopped。继续仅原cleanup边界真实RED和原owner Sourcegate；若再相关回归则重开架构，不做第四局部补丁。receipt位于`/tmp/plugin-status-physical-drain-01a1406d/stop-frontier/owner-bounded-raw-drain-acceptance.json`。原ERP983de42与fullfastexit1不改，无整体交付/SDK/ready/业务merge/release。
+
+## d584绑定入场接受快照（历史；bca后继设计与raw-drain已完成本叶）
 
 atime例外已由操作者明确批准，仅已记录1792321144232238663、不扩fixture内容许可；8原字段/内容禁令保持，不再当阻塞。原91f/a512 stopped不恢复。c1新writerb9与spec2707/qualityb48全COMPLETE/报告已读；分类组合先42业务FAIL6controls→48GREEN、Parent独立93PASS/44roots0，0bd2e05push。completezeroexpected+legacyraw仍UNREADABLE，缺/坏shape先STALE再读，旧parser不动。
 
