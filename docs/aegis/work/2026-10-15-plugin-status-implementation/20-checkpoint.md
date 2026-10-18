@@ -1,6 +1,16 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：9fe/a552迟到claim叶已窄接受，2937717仅注释澄清；继续其余入场frontier
+## 当前：5d447b1 controller-launch lazy入场叶窄接受；firstPRE/direct/nested/native仍未闭
+
+75d的SPEC ea38/QUALITY a983均已COMPLETE、完整报告已消费且无blocking/无待答请求；Parent核当前43production+2namedtest共45文件SHA、TS原8stat+仅准atime/9当前observed、HEAD/remote/task-index及精确review scope后，仅接受本private sequencing叶。两review只原生read/contact14/1、22/1，无执行/错误/越界，非其独立测试。
+
+真实API先1业务FAIL2controls：candidate probe赢race但原wall/duration耗90、pageEpoch不变，claim请求与canonical helper入口都错误记录82，latecleanup后的record0不能抹去事实。原21正文15AST statement保持；Owner gate后仅privateguarded必需lazy factory及7调用迁移，捕获SAME预算remaining/同步原frame校验后调用actual work，claim原native调用+已有latechild continuation在factory内，原admitted事实不作postawait否认。最终Parent24drainPASS、独立96admissionPASS、guarded45roots0diag/0保护尝试；focused3已包含于24，不累计。此次所有45文件hash在这组执行前后/commit后同，不借用上轮96或推全项目tsc。5d447b1d1f57cf949b05bf0eb278d9c7cbd24239已push/task-indexclean，repo仍有排除的dirtytraceJSON，不读/复制/hash/restore/stage；protected TS stat对为另组，单次atime不扩组。
+
+覆盖限制：直接时序证据是probe→claim spent/live/gen三案；其他6caller还依shared helper/static检查，未声称各自spent/error都独立实测。8direct budget.guard、firstPRE deferred-start、nested init/fence、深层async/native/queue边界仍需按角色单列；cleanup/terminal不得一律执行liveness gated，既有claim memo/实际child drain/native binding fence保持。下一步从这些未闭角色选择真实反例及精确gate，不新增通用framework/第二serializer或90窗。
+
+并行性能owner已回执lane monitor-fetch-perf/session01a14f54、fix/live-fetch-cost/rootplugins/monitor、base=HEAD51cc；registry9368337在原锁下只改status行并新增perf行，已push并通知继续。live-campaign/background/page-hook及对应tests、package整文件版本用途/README/CHANGELOG后续写队列明确转perf，status停止这些路径写，其他controller/storage/fixtures/wxt/协议保留；非因冻结推release，原WIP不读改不追认历史，未来生产接线须显式回交。foreign自动诊断已转owner，不代修或冒全项目clean；ctx工具wrongroot仅局部能力限制，未改设置/扩大真正禁读范围，已授权registry按原生流程处理。receipt `/tmp/plugin-status-frontier-owner-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,GREEN-summary,checkpoint}.json`。ERP983de42及原fullfast一次exit1/三stable窄修PASS不变；整体未交付/SDK/ready/业务master合并/发布。后文lateclaim尚未接受等为历史。
+
+## 9fe/a552迟到claim接受快照（历史；后继private lazy叶已按上段接受）
 
 Parent完整消费d361的SPEC f8/QUALITY8980，均无blocking；同10watched SHA/原8stat+仅准atime/9当前observed/HEAD-remote-task-index及精确native scope核后，只接受本lateclaim叶。Source a552捕获原tabId并冻结实际grant/claimUntil/reason，claim continuation的lifetime含任何late cleanup child，原memo promise供late/revoked/reload-error共用；原frame单独决定reload许可。denied不释放、live正常成功策略不改，helper30s/15s及epoch值不改。先实际4业务RED2controls，再最终21drainPASS/45roots0；禁memo反例1业务FAIL1对照/45roots0，确实2次native release对1次期望，Source恢复精确a552。9fe仅补强before-callback测试，原14正文11AST statement同。
 

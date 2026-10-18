@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：迟到claim叶9fe/a552窄接受；余下执行入场frontier尚未闭
+## 当前：5d private lazy sequencing叶窄接受，不等全recovery
+
+Parent完整消费75d两fresh报告无blocking后核同45SHA/TS原stat+已准atime/当前9stat/Git/精确scope，接受5d447b1 controller-launch叶。实际1RED2controls→24drain/独立96admission/45roots0，当前43production+2test在执行前后及commit后同；review仅14read1contact、22read1contact，0错误/执行NONE。只privateguarded required factory+7caller/claim创建内移，无optional eager fallback；原frame+SAMEbudget入场，实际raw仍observedBudget/latechild cap，cleanup/native binding fence/terminal角色不变，admitted结果不在await后抹去。
+
+新3案只直接隔离probe→claim时序，其他6点还依sharedhelper/static而非全variants实测；8direct guard/firstPRE/nestedinit/native及旧P3都保留未闭。原21正文同，保护TS stat与dirtytraceJSON两组均不读内容，atime许可不扩组；5dpush/task-indexclean，非repo全clean。perf owner精确base=HEAD51cc/session01a14f54/lane monitor-fetch-perf回执后，registry9368337已明确移交live-campaign/background/page-hook/对应tests/package版本用途整文件/README/CHANGELOG后续写队列；status停止这些路径，未来生产接线回交后才写，原WIP不读改/不追认历史。foreign诊断转owner，无其他功能代修/生产许可；ctx错根未改工具或扩大真正禁读。
+
+receipt `/tmp/plugin-status-frontier-owner-01a1406d/owner-bounded-acceptance.json`。原ERP983de42/fullfast一次exit1保持，下一步角色化验证firstPRE/direct/nested/native，而非把本叶当SDK/ready/整体交付或发布。
+
+## 9fe/a552 lateclaim接受快照（历史；不是当前仍待其实现）
 
 Parent已消费d361两完整fresh报告无blocking并核当前10SHA/stat/Git/工具scope，仅本lategrant原tuplecleanup接受。actual4业务RED2controls→最终21drainPASS/45roots0，memo禁用控制1业务FAIL1对照/45roots0（两个相同tuple native release），Source恢复a552；独立96为test-only21前执行，已核controller/admission/其他watched同，完整43时间血缘依Git+单writer，不当同期43hash清单/重跑96。review仅native23read1contact、22read2contact，执行NONE。
 
