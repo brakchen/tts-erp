@@ -170,10 +170,14 @@ async def _bounded_report_body(request: Request) -> bytes | None:
     Returning ``None`` rather than raising keeps the size gate in the sync
     handler, where the error envelope and ``no-store`` header already live.
     """
-    body = await request.body()
-    if len(body) > MAX_BODY_BYTES:
-        return None
-    return body
+    # Existing Starlette Request.stream() avoids caching the entire request:
+    # https://www.starlette.io/requests/#body
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_BODY_BYTES:
+            return None
+        body.extend(chunk)
+    return bytes(body)
 
 
 @router.post(

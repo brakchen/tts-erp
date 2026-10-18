@@ -162,6 +162,10 @@ must match. A general/admin key does not qualify merely by role rank;
 `monitor_config` remains restricted to its existing shop-bound configuration
 GET. Status-purpose keys gain no authenticated permission on other routes.
 Current key/instance applicability is checked again under the ingest locks.
+The report's existing **32 KiB** body cap is measured on actual streamed bytes,
+not trusted `Content-Length`; the application reader stops consuming later
+chunks once the cap is exceeded and returns the same protocol `413` error.
+This is not a bound on an ASGI server's own chunk allocation or buffering.
 
 Missing, invalid, revoked or rotated credentials return `401`; valid but
 ineligible role/purpose/instance/scope returns `403`; an unavailable auth store
