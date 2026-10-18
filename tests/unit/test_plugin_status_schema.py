@@ -74,6 +74,17 @@ def test_actual_migration_revision(db_engine: Engine) -> None:
         )
 
 
+def test_existing_migrated_outbox_has_pending_default(db_engine: Engine) -> None:
+    """Inspect the clone as received, without replaying or replacing its schema."""
+    columns = inspect(db_engine).get_columns(
+        "status_notification_outbox", schema="plugin"
+    )
+    state = next(column for column in columns if column["name"] == "state")
+    default = state["default"]
+    assert default is not None, "existing migrated outbox lacks the pending default"
+    assert default.split("::", 1)[0] == "'pending'"
+
+
 def test_fresh_status_migration_supplies_pending_default(
     db_engine: Engine,
     monkeypatch: pytest.MonkeyPatch,

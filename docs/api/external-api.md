@@ -121,8 +121,9 @@ role (`ttserp_ro_…` readonly, `ttserp_rw_…` readwrite, `ttserp_admin_…`
 admin). Roles are linearly ordered `readonly < readwrite < admin`; the
 path classification lives in `tts_erp_v2.access` — unmatched paths default
 to **admin** (fail-closed). Handler-level mutation gates consume the same typed
-`AccessGrant`, so `off` and `shadow` semantics remain consistent through the
-handler.
+`AccessGrant`, so ordinary-route `off` and `shadow` semantics remain consistent
+through the handler. The dedicated plugin status report has the mandatory
+credential boundary documented below; it is not an anonymous dev-mode route.
 
 Public (API-key auth-exempt) paths: `/healthz`, `/endpoints`, `/openapi.json`,
 `/docs`, `/redoc`, `/docs/oauth2-redirect`, `/v2/auth/login`,
@@ -140,13 +141,41 @@ route-relative path and therefore also covers `/tts/docs` deployments.
   `/v2/users*` / `/v2/roles*` APIs, which map to `page:users`); API-key
   credentials are not subject to page permission points
 
-The mode is set by env `TTS_ERP_AUTH_MODE=off|shadow|enforce`. In
-`enforce` (production default since 2026-08-20) the service returns the
-error; in `shadow` the would-deny is only logged and never redirected or
-rejected; `off` bypasses middleware and handler role gates entirely
-(development only). Invalid mode values are logged and fail closed as `enforce`.
-Enforced 401/403 requests, including browser 302 attempts, consume the shared
-denied-request rate-limit budget before response presentation is selected.
+The mode is set by env `TTS_ERP_AUTH_MODE=off|shadow|enforce`. For ordinary
+routes, `enforce` (production default since 2026-08-20) returns the error;
+`shadow` only logs the would-deny without redirecting or rejecting; `off`
+bypasses middleware and handler role gates (development only). The dedicated
+report below is an explicit exception in every mode. Invalid mode values are
+logged and fail closed as `enforce`. Enforced 401/403 requests, including browser
+302 attempts, consume the shared denied-request rate-limit budget before
+response presentation is selected.
+
+### Dedicated plugin status report
+
+Exact `POST /v2/plugin/status/report` requires a current, active, unrotated
+`Authorization: Bearer` credential in **all three modes**, including `off` and
+`shadow`. Session cookies and `X-API-Key` are not credential sources for this
+route, even when both accompany the request; there is no anonymous, cookie or
+ordinary-key fallback. The key must have exact `role=readwrite` and
+`purpose=plugin_status`, and its enabled instance, plugin, scope and capabilities
+must match. A general/admin key does not qualify merely by role rank;
+`monitor_config` remains restricted to its existing shop-bound configuration
+GET. Status-purpose keys gain no authenticated permission on other routes.
+Current key/instance applicability is checked again under the ingest locks.
+
+Missing, invalid, revoked or rotated credentials return `401`; valid but
+ineligible role/purpose/instance/scope returns `403`; an unavailable auth store
+returns `503`. Both denial-budget and normal rate-limit `429` paths use the
+same report error contract:
+`{requestId, error:{code, message, retryable}}`, not the ordinary `detail`
+envelope or browser HTML/redirect. The canonical UUID `requestId` is shared
+with `x-request-id`; errors carry `Cache-Control: no-store`, `401` carries
+`WWW-Authenticate: Bearer`, and `429` preserves `Retry-After` and existing
+rate-limit metadata. Messages never echo credentials or report bodies. See the
+approved `docs/plugins/plugin-status-report.md` sections 8–9 for protocol codes.
+These rules do not change ordinary-route modes or browser management CSRF.
+The generic key CLI refuses managed-key rotation rather than losing its
+purpose/instance binding; it is not a managed credential rotation API.
 
 ## Browser session login
 
@@ -161,10 +190,12 @@ user management API/CLI. The old API-key browser login
 [`browser-login-design.md`](../archive/browser-login-design.md)) has been **removed**;
 old-format cookies are treated as unauthenticated (no transition compatibility).
 
-Programmatic access is unaffected: API keys (`Bearer` / `X-API-Key`) keep
-working exactly as before. If a request carries both a session cookie and an
-API key, the **cookie wins**; the API key is the fallback (curl / extension
-scenarios).
+On ordinary routes, programmatic API keys (`Bearer` / `X-API-Key`) keep their
+existing behavior. If a request carries both a session cookie and an API key,
+the **cookie wins** and the API key is the fallback (curl / extension scenarios).
+The [dedicated plugin status report](#dedicated-plugin-status-report) is the
+explicit exception: only its current dedicated Bearer key is considered;
+cookies and `X-API-Key` never substitute for that key in any auth mode.
 
 ### Auth endpoints (`/v2/auth/*`)
 
@@ -977,6 +1008,9 @@ Public. Auto-generated OpenAPI schema + Swagger UI + ReDoc UI. All are in
 Standard FastAPI error responses are JSON: `{"detail": "<message>"}`.
 The analytics_sync sub-API uses its own envelope
 (`{code, message, requestId, retryable}`) — see its protocol doc.
+The [dedicated plugin status report](#dedicated-plugin-status-report) instead
+uses `{requestId, error:{code, message, retryable}}`, including auth and
+rate-limit errors; its transport contract is not the standard `detail` body.
 
 ## Creating / managing API keys
 
