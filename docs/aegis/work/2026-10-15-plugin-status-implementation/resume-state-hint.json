@@ -1,8 +1,25 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-10-15-plugin-status-implementation",
-  "resumeInstruction": "当前plugin7eb48c6 raw-drain叶已Parent窄接受：14drain/另96admission/45roots0、最终26d两fresh无blocking及同10SHA/metadata/工具scope/Git核后裁定；d584 BIND接受保持。原e505/aac后验缺口及真实RED链留存，不重跑已完成节点/全套、不扩SDK/ready/发布。先同步五checkpoint/registry，再推进late-granted claim原tuple条件cleanup的真实currentAPI RED和Parent精确preedit；原成功release策略/ABA-clock/actions/生产构造/ERPjobs/browser门仍开。P3live-awaitedstopreject未单独隔离，负证据案非新全runtime组合。atime/handoff/default/worker均已准勿再问；冻结内容/8原字段保持。ERP983de42/fullfast一次exit1事实不改。",
+  "rawDrainAcceptedResumeInstructionHistory": "当前plugin7eb48c6 raw-drain叶已Parent窄接受：14drain/另96admission/45roots0、最终26d两fresh无blocking及同10SHA/metadata/工具scope/Git核后裁定；d584 BIND接受保持。原e505/aac后验缺口及真实RED链留存，不重跑已完成节点/全套、不扩SDK/ready/发布。先同步五checkpoint/registry，再推进late-granted claim原tuple条件cleanup的真实currentAPI RED和Parent精确preedit；原成功release策略/ABA-clock/actions/生产构造/ERPjobs/browser门仍开。P3live-awaitedstopreject未单独隔离，负证据案非新全runtime组合。atime/handoff/default/worker均已准勿再问；冻结内容/8原字段保持。ERP983de42/fullfast一次exit1事实不改。",
+  "resumeInstruction": "当前lateclaim叶9fe/a552已Parent核验及d361两fresh无blocking后窄接受，2937717仅helper过期tuple注释/token同澄清。21drain/45roots0，旧96不是新增test-only21之后重跑，10watched同/43当前Git同及历史单writer血缘限定已记录。P3 live双错误/generation-only/旧stop未独立覆盖。先核本轮五checkpoint/registry接续回执，再统一preclaim/其他mutator执行frontier owner设计与真实反例；不复活旧代理/不叠小guard/不新窗，整体生产接线/ERPjob/browser仍开。dirty trace JSON与protected TS stat对分开，内容均不读/改，单次atime不扩组；ERP983de42/fullfast一次exit1不改。",
   "currentExecution": {
+    "goal": "原目标未整体交付；d584 BIND、7eb rawdrain、9fe/a552 lateclaim三叶窄接受",
+    "userScope": "原handoff/default/freshworker/仅已记录TS atime例外均已满足，不重复申请；全部内容禁令/8原字段保持，不扩生产或工具修理",
+    "code": "plugin29377176d73743e1a039fb344d0204bb60625d85push，9fe/a552业务leaf+后续仅注释token同；task-indexclean，dirtytraceJSON排除非Repo全clean；ERP983de42叶不变，无业务mastermerge/发布",
+    "ownership": "原runtime本地owner/既有queue-trackRaw；原91/a512 stopped，后c1/3312/bca/316/c9/d48/26d/d774/d361完成不恢复；foreignconfig未发布范围不纳入",
+    "verifiedBaselines": "Parent最新21drainPASS/45roots0diag0禁读尝试；初4业务RED2controls，禁memo控制1业务FAIL1对照实际2release而非1，Source恢复a552。旧96在test-only21前，controller/admission/其他watched同；完整43时间等价靠Git血缘+单writer，不冒同期43hash清单/新96执行。fullfast一次exit1保持",
+    "phase1": "ERPauth/schema/ACK/time/body/default叶已闭，普通clone9PASS，不resetrefresh/扩许可；原三stable窄修PASS不literalbaseline0",
+    "phase2": "lateclaim捕获原tab/冻结实际grantUntil，memo原cleanupPromise/continuation含child真实settle，原frame单独控制reload。own/successor/denied/live/latecleanupreject及双clock边界证据成立，成功策略/helper30s15s不改；late失败settle非清理成功",
+    "blocker": "preclaim/其他mutator执行frontier统一owner与真实反例、全ABA-CAS/跨clock/actions/Cookieaggregate/生产构造/ERPoutboxlease-job-startup/browser仍开；不再挂已解lateclaim/rawdrain/atime",
+    "checks": "同10SHA/stat/Git/scope后本叶接受；当前43production匹配Git，relative7eb只controller业务改；review仅23read1contact/22read2contact无错误/精确whitelist，独立执行NONE。TS protectedstat对与dirtytraceJSON不是同组；guard误认路径在stage前abort，勘误保留，无内容读取或元数据重置",
+    "running": "本轮全部代理COMPLETE，无待答或旧后台可等；Parent仅同步comment/五checkpoint/registry并准备下一frontier设计，不从历史launch推running",
+    "sourceGate": "lateclaim owner-test/source gate经实际4RED2controls履行，最终d361无blocking+Parent核后接受9fe；293注释token同非策略变更。下一frontier须独立统一设计/真实RED/Parentpreedit，当前无新Source授权",
+    "evidence": "/tmp/plugin-status-late-claim-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,DEDUP-FINAL-summary,final-checkpoint,comment-checkpoint,comment-scope-erratum}.json；旧原失败/ERP证据保持",
+    "next": "核本轮接续push回执后，先统一盘点preclaim/其他mutator懒入场与await后执行许可owner，选真实反例，避免把已settle结果当当前许可；不改合法cleanup或借新90",
+    "limits": "P3 live reload-error再release-error、generation-only claimrevocation、旧live-awaitedstop未隔离；syntheticports非真实Chrome/生产桥接。旧fixture/callersuites/fulltsc/build/production/E2E未覆盖；原PRE/firstGEN/唯一SAMEBudget/native事实/epochmono及全部禁读保持，无整体完成"
+  },
+  "rawDrainAcceptedExecutionSnapshot": {
     "goal": "原monitor状态/自动绑定/ERP目标未整体交付；d584 BIND及7eb raw-drain两叶窄接受",
     "userScope": "既有精确handoff/default、fresh6.1worker及仅已记录1792321144232238663单次atime授权保持已满足；8原字段/fixture内容禁令不扩，不重复申请/改工具/时间",
     "code": "plugin7eb48c6c2d6be70064227c032c99d33698d9d4f6push/task-indexclean，2原dirtyfixtures排除非Repo全clean；ERP983de42push/clean，auth/schema/ACK/time/body叶不变；无业务mastermerge/ready/发布",

@@ -1,6 +1,16 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：7eb48c6实际raw-drain叶窄接受；继续迟到claim的原tuple条件cleanup
+## 当前：9fe/a552迟到claim叶已窄接受，2937717仅注释澄清；继续其余入场frontier
+
+Parent完整消费d361的SPEC f8/QUALITY8980，均无blocking；同10watched SHA/原8stat+仅准atime/9当前observed/HEAD-remote-task-index及精确native scope核后，只接受本lateclaim叶。Source a552捕获原tabId并冻结实际grant/claimUntil/reason，claim continuation的lifetime含任何late cleanup child，原memo promise供late/revoked/reload-error共用；原frame单独决定reload许可。denied不释放、live正常成功策略不改，helper30s/15s及epoch值不改。先实际4业务RED2controls，再最终21drainPASS/45roots0；禁memo反例1业务FAIL1对照/45roots0，确实2次native release对1次期望，Source恢复精确a552。9fe仅补强before-callback测试，原14正文11AST statement同。
+
+独立admission96在test-only20→21前执行，controller/admission/其余watched SHA同；目前43production与Git候选同、相对7eb仅controller改变。**完整43的时间等价还依赖Git血缘+单Parent writer，不冒称96执行时捕获了43文件hash清单或21后新执行96**，计数不相加，confidence B。两个review只原生read/contact23/1、22/2，精确whitelist/零工具错误，独立执行NONE。
+
+保留P3：live reload-error后release-error、generation-only claim revocation及旧live-awaitedstop均未独立隔离，不能拿latecleanup-reject/live成功外推。helper旧注释说过期不清，与实际matchingexpired可清矛盾；2937717仅两行JSDoc澄清，非注释token SHA相同，策略不改/不重跑完成suite。comment guard曾误把protected TS对当dirty路径，stage前abort；native status实际dirty为两个trace JSON WIP，已分开记录、排除不归因。两组内容均未读/hash/copy/import/restore/stage；atime单次例外只属原TS stat对，不扩到JSON。
+
+plugin现29377176d73743e1a039fb344d0204bb60625d85已push，ownedpaths/indexclean，repo非全clean；d774/d361全COMPLETE不恢复。receipt `/tmp/plugin-status-late-claim-01a1406d/owner-bounded-acceptance.json`，审计/证据精度/注释勘误见同根`owner-postreview-audit.json`、`comment-{checkpoint,scope-erratum}.json`。下一步先对preclaim及其他mutator的入场/await后执行frontier做统一owner设计与真实反例，不继续零散叠guard；完整ABA-CAS/跨clock/actions/生产构造/ERPoutboxlease-job-startup/browser仍开。原fullfast一次exit1/三stable窄修PASS与ERP983de42叶不变，整体未交付/SDK/ready/业务合并/发布。
+
+## 7eb实际raw-drain叶接受快照（历史；迟到claim已按上段闭合本叶）
 
 Parent已完整消费26d39469的fresh SPEC497dd6c2/QUALITY9b80d7bd，均无blocking，无待答supervisor请求。只接受本raw-drain叶：required readonly `physicalSettled`由原recovery task同步冻结发布，局部observedBudget追实际producer原Promise，runtime经既有trackRaw/CycleLease持owner到实际settle；exported window仍用原unobserved SAME Budget，防自环，不把bounded `.work`结束当物理取消。
 

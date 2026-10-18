@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：7eb48c6 raw-drain叶窄接受，不等全部physical
+## 当前：迟到claim叶9fe/a552窄接受；余下执行入场frontier尚未闭
+
+Parent已消费d361两完整fresh报告无blocking并核当前10SHA/stat/Git/工具scope，仅本lategrant原tuplecleanup接受。actual4业务RED2controls→最终21drainPASS/45roots0，memo禁用控制1业务FAIL1对照/45roots0（两个相同tuple native release），Source恢复a552；独立96为test-only21前执行，已核controller/admission/其他watched同，完整43时间血缘依Git+单writer，不当同期43hash清单/重跑96。review仅native23read1contact、22read2contact，执行NONE。
+
+原tab/冻结实际claimUntil与cleanup memo保持同资源child实际lifetime；reload检查原frame，cleanup不能复活执行；denied/live成功/30s15s不改。P3 live reload失败后cleanup拒绝、generation-only、旧live-stop未隔离。helper注释误导已2937717两行JSDoc/token同纠正，未重跑suite。guard一度误认dirty TS路径，stage前退出；实际两个trace JSON WIP与protected TS stat对已分开，未读/改/复制/hash/restore/stage内容，单次atime不扩组。2937717push/task-indexclean，repo非全clean。
+
+receipt `/tmp/plugin-status-late-claim-01a1406d/owner-bounded-acceptance.json`及同根postreview/comment勘误。下一步统一preclaim/其他mutator执行frontier owner设计→真实反例，原ABA-clock/actions/生产构造/ERPjob/browser等父门保留；不复活已完成d774/d361，不改协议或借新90。无整体交付/SDK/ready/业务mastermerge/release；原ERP983de42/fullfast一次exit1事实保持。
+
+## 7eb raw-drain接受快照（历史；不是下一lateclaim尚未实现的当前状态）
 
 Parent已消费26d两个fresh最终完整报告，无blocking/无待答请求；同源码SHA/metadata/Git及原生scope复核后仅接受required `physicalSettled`及已启动parallel stop实际drain。原task同步冻结发布/既有CycleLease.trackRaw消费，局部observer与exported原Budget窗口分离，保持bounded `.work`与actual raw ownership分域。原reload pending重入先1RED4controls；e505后parallel stop漏登记先2RED2controls→aac即时观察两issued raw/其boundedwait；aac后fulfilledstop误借当前执行许可先1RED1live，对应1report/3nativeget→7eb同原budget.remaining提交前重查后0/0，修复与失败链不抹去。
 
