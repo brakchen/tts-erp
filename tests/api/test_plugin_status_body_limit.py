@@ -27,7 +27,7 @@ def _request_from_chunks(chunks: list[bytes]) -> tuple[Request, list[int]]:
             "more_body": index + 1 < len(chunks),
         }
 
-    # A lying/missing Content-Length must not turn into permission to buffer.
+    # A lying Content-Length must not turn into permission to buffer.
     request = Request(
         {
             "type": "http",
