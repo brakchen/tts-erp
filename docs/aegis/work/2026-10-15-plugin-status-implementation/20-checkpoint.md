@@ -1,6 +1,16 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：批准的文件接续与模板单列修复完成；转入绑定入场实现
+## 当前：ERP body叶已闭；绑定候选因冻结fixture元数据门暂停
+
+原目标的ERP body旧缺口已在现有读取owner落实32KiB stream早停：actual Starlette Request/ASGI多chunk先3业务FAIL5控制PASS，再新8+原API93/auth77=178PASS/drop，ruff/LSP3clean，fresh6bcad8无blocking；Low覆盖注释只改lying Content-Length、AST同值，缺失headercase未执行不冒称。只约束应用累计buffer与后续chunk消费，不约束ASGIserver/middleware自身buffer；无新parser/全局中间件/order/wire变化。ERP983de42已push/clean，auth/schema/ACK/time/body叶完成，outboxlease/job/startup/E2E仍开；原fullfast一次exit1/3stable窄修PASS不改为literal0。
+
+物理writer a512自报最终45PASS/guarded44production+newtest roots0diag，均为worker执行；Parent独立checkpoint在任何自测/编译前，因2冻结fixture stat比较失败而中止。**只变st_atime_ns**，两文件均为1792321144232238663（2026-10-18T10:59:04.232239Z），其余8项inode/size/mtime/ctime/mode/nlink/uid/gid同。变化落在worker启动最初阶段，首显式read持久记录10:59:05.858且message创建更早；这不是已证实宿主因果或worker违规。已审35nativeReads无保护路径、17bash无Git、AST仅src/entrypoints+两批准oldtests；compilerguard通过安全productionfile getSourceFile探针，不能据此声称不存在宿主隐式读取或九字段全同。**Parent没有45PASS/编译验收结果**。
+
+立即冻结并同协议停止workflow91f：interrupt被工具明确告知不支持，随后stop成功；a512 stopped/process terminal observed/acceptance rejected，两postreviews未launch，无待等/恢复节点，不切CLI/前台。候选7paths已保存private files/patch/manifest并显式待验commit `feature/plugin-status-auto-bind@7ee6257` push；只7ownedpaths/indexclean，原2dirtyfixtures未stage/read/copy/hash/restore。它不是正常GREEN、ready或发布。另worker报告missing/undefined expected PRE或nonce与坏raw组合的拒绝分类顺序未修；此组合回归/最小校验顺序仍需恢复权限后另Sourcegate。
+
+需操作者裁定：是否将这次未归因atime差异记为单次元数据例外，仍保持原fixture内容禁读/禁改/禁复制/禁导入，再按其余8字段继续；或者先人工查明宿主读取来源后设新基准。Parent不自行放宽或修工具，不把已解决filehandoff/default再当阻塞。physical所有入场/drain/tuplecleanup/ABA/clock/actions/Cookieaggregate/ledger/browser等仍未验收。当前证据 `/tmp/plugin-status-approved-continuation-01a1406d/{physical-checkpoint-stat-investigation.json,physical-preserved-wip/manifest.json,report-body-final.json}`；两JSON/liveTower当前事实，后文running/待Sourcegate均历史。
+
+## 批准后接续与实现启动快照（历史；后续已因metadata检查停止）
 
 用户对上条精确3项请求回复继续后，已按该范围登记并push registry1531a07：external-api.md移交status ERP，storage.ts写队列移交status插件，原video/core这两路径停止写；其他范围及foreign WIP不动。不是依据idle/clean猜测接管，也不是生产/模板reset/refresh/发布许可。
 

@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：ERP窄前置已闭；物理绑定入场仍待实际实现/验证
+## 当前：ERP body叶完成；物理候选停止，未通过独立验收
+
+ERP现有32KiB body owner已从完整buffer后查改stream早停，真实多chunk3RED5controls→178相关PASS(8new+93API+77auth)，fresh6bcad8无blocking，注释仅lyingheader覆盖/AST同值，983de42push/clean；不扩为transport/middleware全局内存保证。auth/schema/ACK/time/body叶已闭，但ERP outboxlease/job/startup/E2E未闭，原完整fastexit1及原3stable窄修PASS事实保持。
+
+physical writer a512报45PASS/guarded44rootscompiler0；Parent在独立命名执行/编译之前被冻结fixture9字段门中止，**没有Parent45GREEN**。两文件仅atime变同10:59:04.232239Z，其余8字段同；首显式read记录10:59:05.858而message创建更早，只能定位启动时段，不能推因果或判worker违规。已审native35reads无保护path/17bash无Git、限定AST/编译无fixture读取证据；不声称9字段全同或宿主未读。未读取/复制/hash/restore原fixture、不修tool/guard，等待操作者单次atime例外或人工宿主来源裁定。
+
+workflow91f interrupt不支持后按同协议stop，writer stopped/process terminal observed/acceptance rejected，2reviews未启动，不resume/重跑/换CLI。7pathpartial候选已private保存并push7ee6257，ownedpaths/indexclean，原2dirtyfixtures排除；仅待验checkpoint。missingexpected PRE/nonce+坏raw拒绝优先级组合仍未修，恢复后先回归/最小顺序修复，再Owner复验及新fresh后验。真实mutationdrain/tuplecleanup/ABA/refreshclock/actions/Cookieaggregate/ledger/browser/build全父门未关。当前以两JSON/liveTower及physical-checkpoint-stat-investigation/physical-preserved-wip/manifest为准，下文launch/已授Source只是历史。
+
+## ERP前置与新设计启动快照（历史；物理流程后续已停止）
 
 操作者继续已承接上条精确两文件+单列模板授权；1531a07明确external-api/storage写队列转移，foreign/core原树不动。模板新普通clone Inspector先1RED，原锁/guard/literal target仅SETDEFAULT pending，独立连接durable与限定metadata比较成立，clone schema9PASS；不是reset/refresh/完整migrationchain。证据比较仅列type/nullability/default/identity，不穷尽PG列属性；constraints/index/noninternaltrigger/4statuscounts/OID同。首次SETLOCAL引号setup失败在DDL前，未当RED。
 
