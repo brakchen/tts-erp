@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：6.1-sol worker与OWNER已复现真实旧写入入场反例；Tower683 blocked，未修复
+## 当前：持续交付；ERP时间精度局部修复已验证，完整交付仍受明确权限/文件交接阻塞
+
+用户要求继续至实际可交付，不停于反例或静态方案；已允许新的fresh GPT6.1-sol worker，不重复询问这项许可。新architecture与ERP gapmap两代理均完成并完整消费：实际工具分别14read4contact、24read3contact，0执行/错误/越界；报告在 `/home/schan/.pi/agent/sessions/--home-schan-tts-erp--/subagent-artifacts/outputs/0f76b157-80fa-49f7-ad6f-70ea137e13c8/`。前者给出required原fence/结果ABI、现有queue复用、canonical校验后同步末查、mutation-only观察/replay与cleanup/clock边界；只读方案不是Source preedit/实际GREEN。后者明确指出outbox租约无fence、真实app/job/purpose/schema接线缺失、body先全缓冲、微秒丢失及retry随机临界flake。
+
+已独立修复微秒丢失：现有repository.wire_timestamp改用UTC标准ISO序列化，整秒拼写不变。新8案 **7业务RED+1整秒正案PASS → 修复后timestamp/contracts/policy合计390PASS**，唯一测试入口isolated runner，两次各自克隆/删除临时test DB；无direct/shared/prod fallback。覆盖真实transient ORM决策→canonical严格wire serializer的notBefore/expiresAt，不是durable数据库读写或完整后端。fresh timestamp reviewer **71dae5f5 COMPLETE/localaccept**，actual12read1contact，无执行/越界；ruff0/AST3/LSP3clean。实际日志/工具审计/本地核验 `/tmp/plugin-status-delivery-20261018-01a1406d/`。schema/持久化其他函数/租约/鉴权/完整fast baseline未通过，不扩大390PASS或review结论。
+
+ERP分支局部提交 **13c255ef5f525e26813551f1c91462fab8ee5fcf 已push**：精确三个OWNER路径（原未跟踪repository/model依赖＋新timestamp测试），800行是原草稿首次落Git，不是本次重写800行/全持久化验收；提交消息明确PARTIAL草稿与未ready边界。其他5个原untracked API/service/scheduler/notifications/API测试未改/未stage，未迁移/接job/发通知。插件产品源码仍旧基点，原native旧写入反例仍未修。
+
+新的真实权限边界：OWNER context-mode文件工具拒绝读取ERP `service.py`；当即在任何子代理读取前撤销whitelist，actual读0，未改用其他tool/copy/child/check/settings绕读。需要明确新的读取许可，不能为了完成而强跑会访问该模块的完整baseline/API验证。另按>6h规则只接管了4天停更config rollout**任务协调归属**，不等另外登记的core writer释放storage.ts；master registry未变，handoff proposal未生效，不触foreign worktree。`/tmp/plugin-status-delivery-20261018-01a1406d/shared-handoff-decision.md` 明确事实，clean独立coord工作区仅待有权登记。
+
+下一步需要**有权的service读取放行及shared文件scope移交/registry**，再在actual combined base完成owner preedit、native原authority入场/required mutation drain/conditional tuple cleanup/actions/API-schema-job接线和真正端到端/完整基线。父任务仍未交付，timestamp局部验收不清这些门。所有本轮三个代理已完成、不poll/resume；原拒读/冻结/no-bundle、首次PRE/GEN/唯一原预算与actual native事实归属、生产安全约束保持，无合并发布。
+
+## physical queue RED窄验证快照（历史；缺陷未修，不是最新整体交付状态）
 
 当前用户允许此目标下**新的fresh `openai-codex/gpt-6.1-sol` worker**加速，覆盖旧NoWorker，不需重复确认worker许可；仍由OWNER控制Git/Source架构preedit/验收/共享写队列边界，不恢复历史worker或越权写foreign worktree。新worker **449670b7-1123-4ac8-a732-1d09994f3d83 COMPLETE**，已产私有 `candidate/tests/plugin-status-physical-queue.test.ts`。worker和OWNER分别真实执行 **unpipedtsc0 / 1业务FAIL+2正案PASS**：real patchSettings占原queue→real recovery bind enqueue→publicgeneration撤销+canonicalepoch/nonce失效与clearenqueue→放原queue，**旧boundAdTab仍native入场**，之后clear不能抹掉append-only trace。两正案证明live bind可过、已admitted native跨原90s仍实际持队列到settle，不该错修成第二serializer/取消已入场事实。
 

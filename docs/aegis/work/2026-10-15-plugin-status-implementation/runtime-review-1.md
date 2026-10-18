@@ -4,7 +4,17 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：真实queue撤销后旧native入场RED已双审/OWNER验证，缺陷未修/Tower683 blocked
+## 当前：ERP微秒精度局部修复窄接受；完整交付仍blocked
+
+已执行用户“继续到实际可交付”要求，新的6.1-sol只读architecture与ERP gapmap完成：实际14read4contact与24read3contact、0越界/执行/错误；OWNER已完整消费并审计。架构方案明确required原authority bind结果、复用现有queue/canonical校验、mutation-only观察replay、cleanup独立原tuple与epoch/mono区分，但只是advisory，不给Source preedit/文件handoff。ERP静态核对发现通知outbox租约无fence、app/job/鉴权purpose/schema缺接线、请求body全缓冲、时间微秒丢失、随机重试边界测试；不可把草稿当运行中实现。
+
+独立修复timestamp：现有wire_timestamp仅2行改动，UTC isoformat保留微秒/整秒拼写不变；8新case先actual7业务RED1整秒PASS，再isolated runner单次相关390PASS（含8新，另为pure contracts/policy），克隆/删除专用临时testDB，无shared/prod/直接runner。fresh71dae5f5 COMPLETE/localaccept、actual12read1contact，ruff0/AST3/LSP3clean；只能窄接受precision repair。transient ORM→真实严格decision wire证明notBefore/expiresAt精度，不是数据库写读/迁移/整个持久化/API/auth/通知通过。
+
+代码已明确局部提交并push **13c255e**，实际3path为repository/model原OWNER未跟踪草稿依赖与新timestamp测试；800行是草稿首次落Git，不冒称全模块验收；原另5untracked未动。证据 `/tmp/plugin-status-delivery-20261018-01a1406d/` 与fresh两个workflow输出，所有本轮3个代理完成勿poll/resume。
+
+新边界：host拒读ERP service.py，任何child读前已撤销whitelist，审计actualserviceRead0，未换tool/copy/child/check绕读；需明确新许可后才完整ERP阅读/API与会访问该模块的fullbaseline。另只按>6h stale规则接管了配置rollout**任务协调归属**，独立core writer仍有storage.ts文件保留，registry未移交/现proposal未生效；clean/idle/adoption都不是文件release，不写foreignworktree。下一步须有权的读取和sharedscope/registry交接，再actualcombinedbase ownerpreedit、原authority native admission/实际mutationdrain/conditionalcleanup/actions/API-job-schema及端到端验收。插件旧写入反例仍未修，原协议/拒读/冻结/单预算/actual事实边界和所有父门保留，无ready/合并发布。
+
+## physical queue反例窄验证（历史；非最新交付状态）
 
 新fresh worker449670b7 exact openai-codex/gpt-6.1-sol COMPLETE，worker与OWNER分别actualtype0+1业务FAIL2正案PASS；原queue被real配置write占用时recovery bind已enqueue，public generation与canonicalepoch/nonce失效、clear已enqueue后释放，旧native boundset仍发生，late clear不抹trace。这是已有queue admission无原authority检查的counterexample，不是应另造serializer：live bind及已admitted原native实际settle前不放后继两正案通过。只改私有新test+日志，产品147/copied147原文件全同d940400，未修Source/未装背景接线。
 
