@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：115439f 首次PRE controller入口叶窄接受；其余direct/nested/native未闭
+## 当前：7e74783 recovery snapshot入场叶窄接受；非生产HTTP或整体交付
+
+600/dff已完成角色设计与Parent对话，区分原recover步骤5完整close-window请求和合法独立passive preview；direct8语法并非8个bug。实际publicruntime startup在最终Seller rawACK后publichold同步撤GEN、原预算仍90000时，旧代码仍进入注入snapshot port `{tabId:82,deadlineMs:90000}`。纠正后1业务RED/2controls与45roots0，再独立Sourcegate；只把snapshot迁入既有requiredlazy owner为第8caller，传原typed state，保原budget0前检、postawaitGEN、真实Seller事实、错误/incomplete/freshness、cleanup/preview及actual rawdrain。旧27正文17statement与旧7caller表达式同。
+
+分轮证据不能合并：初三案因误期望成功reload即release及误用公开window.remaining而setup失败，3个TS2551不算业务RED，测试改为真实remainingMs、生产成功策略未改。首次runtime target3/full30drain/独立96admission虽PASS，compiler仍因误传phase字符串为fallback而3错误，非cleanGREEN；只将新caller未消费的metadata实参修为完整state，无cast/API扩宽。最终只重验受影响3案PASS/27skip及45roots0，当前45SHA在FINAL执行前后/commit/后验同。早30/96在类型实参修正前，无已存同期45manifest、依Parent单writer/edit/log血缘，不冒最终同字节全GREEN，不重跑suite凑证据。
+
+980两fresh完整报告无blocking，认为unused metadata实参修正+最终目标/类型检查足以支持局部建议；Parent核当前43prod+2test SHA、TS原8+仅准atime/9stat、HEAD/tracked/live分支远端/task-index及精确审查工具后，仅接受此controller→注入port入场叶。两review各28read1contact、0错误/越界/执行；初allowlist parser误把协议路径后的section注释当文件名而误报，按原明确路径比较后0violation，未扩权限。7e747836f46768c5c90a6c9c184f5bb23a5c864c已push/task-indexclean；dirtytraceJSON两项与protectedTS stat对分开禁读，非repo全clean/许可不扩。
+
+新3案未独立隔离合法入场后snapshot pending/reject，保留处理的支持来自源码及已有rawdrain，不冒新端到端证明；oracle不是生产adapter/真实HTTP/installedbrowser。已有direct其余角色为ownedwait/cleanup/passive/fencedbinding，不凭计数造缺陷；转production端口/构造/时钟/ABA/actions/Cookieaggregate、ERPoutboxlease-job-startup/browser等真正未闭门，原P3保持。性能936已交scope不因idle回收，已向owner请求最终master回执与background/page-hook及对应tests未来写队列显式回交，未回执不写；wxt后续停写已ack，peer旧version差异不追认。当前status分支不冒已同步peer master；ERP983de42/fullfast一次exit1及三stable窄修历史不变，本status lane无SDK/ready/业务合并/发布。
+
+证据：`/tmp/plugin-status-snapshot-admission-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,FINAL-summary,checkpoint,setup-erratum,source-type-correction}.json`。以下115/5d等均为历史，不替代本段。
+
+## 历史：115439f 首次PRE controller入口叶窄接受；当时其余direct/nested/native未闭
 
 b46工作流与e75 SPEC/d0f QUALITY均已COMPLETE，完整报告无blocking且无待答请求。Parent核当前43production+2namedtest共45SHA、保护TS原8stat+仅准atime/当前9stat、HEAD/tracked及live远端、task/index和审查白名单后，只接受首次PRE的controller-launch角色。两review原生read/contact为21/1、20/1，0工具错误/越界/执行，非其独立测试。
 

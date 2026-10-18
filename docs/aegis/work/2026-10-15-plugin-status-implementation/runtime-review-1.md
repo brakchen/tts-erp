@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：115439f firstPRE deferred-entry叶窄接受，不等全recovery
+## 当前：7e snapshot第8lazy caller入场叶窄接受
+
+600角色设计/Parent对话保合法passive preview，原recover完整snapshot属步骤5而非独立observer。真实publicruntime finalSeller rawACK后publichold撤GEN、原90000ms尚正，旧实现仍实际进入snapshot注入port；纠正1RED2controls/type0后独立Sourcegate，7e只迁入既有requiredlazy factory第8caller/typed state，原budget0/postawaitGEN/已入场Seller事实/errorincomplete/freshness/cleanup与physicalcap保持，无新owner/窗口/接口。旧27正文/旧7caller同。
+
+证据分轮：初3setupfail/3TS2551不算业务RED；成功reload释放claim假设与公开window方法用法已纠正且不改生产。首次runtime3/30/96PASS但compiler因phase当state实参仍3错，非cleanGREEN；只改未消费fallback metadata为原state。最终仅受影响3案PASS/45roots0，明确final45manifest同；早30/96在类型实参修正前且无已存同期manifest，不冒final同字节全GREEN，不重跑suite。980 SPEC/QUALITY完整无blocking，认为静态unused参数差异足以支持局部证据；两者各28read1contact/0错误/执行NONE。Parent后验核current45SHA/TS8+准atime9stat/HEAD-tracked-live远端/task-index/白名单后仅本controller→port叶接受。7e74783 push/task-indexclean，traceJSON排除非repo全clean、保护TS/JSON分组禁读不扩。
+
+新3未独立测已入场snapshot pending/reject；本地注入port不是生产adapter/HTTP/browser。余direct角色分类不等bug，下一步生产构造/端口/clock-ABA/actions/ERPjobs/E2E等未闭门，旧P3不变。已请求perf回最终master与background/page-hook/tests后续队列，未明确回交不写；936其余scope保留/不因idle释放，wxt既有差异不追认、后续停写已ack。status未同步peer-master/业务merge/SDK/ready/release，ERP983/fullfast一次exit1历史不改。receipt `/tmp/plugin-status-snapshot-admission-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,FINAL-summary,source-type-correction}.json`；以下仅历史。
+
+## 历史：115439f firstPRE deferred-entry叶窄接受，不等全recovery
 
 Parent完整消费b46/e75 SPEC/d0f QUALITY无blocking报告，核当前45SHA/TS原8+准atime9stat/HEAD-tracked-live远端/task-index/精确scope后，只接受首canonical read的controller-launch入口角色。审查仅原生21read1contact、20read1contact，无错误/越界/执行；不重跑completed代理/测试。
 
