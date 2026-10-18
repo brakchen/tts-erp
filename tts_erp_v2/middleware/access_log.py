@@ -56,6 +56,12 @@ import os
 import sys
 import time
 
+from tts_erp_v2.access import (
+    DeploymentPathInput,
+    canonicalize_path,
+    is_plugin_status_report_route,
+)
+
 logger = logging.getLogger("tts_erp_v2.access")
 
 # uvicorn's logging.config.dictConfig only attaches handlers to its
@@ -184,7 +190,19 @@ class AccessLogMiddleware:
         # in; we read them on the way out, after ``await send`` returns.
         method = scope["method"]
         path = scope["path"]
-        raw_qs = scope.get("query_string", b"")
+        canonical = canonicalize_path(
+            DeploymentPathInput(
+                path=path,
+                raw_path=scope.get("raw_path"),
+                root_path=scope.get("root_path", ""),
+            )
+        )
+        # Redact before snapshot: both normal and exception logs use full_path.
+        raw_qs = (
+            b""
+            if is_plugin_status_report_route(method, canonical.route_path)
+            else scope.get("query_string", b"")
+        )
         full_path = path + (("?" + raw_qs.decode("latin-1")) if raw_qs else "")
         client_ip = _client_ip(scope)
         # Preserve the peer port when the request came in directly

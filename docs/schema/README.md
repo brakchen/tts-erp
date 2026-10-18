@@ -7,30 +7,35 @@
 
 | 文件 | 是什么 |
 | --- | --- |
-| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：14 个业务 schema、74 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
+| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：14 个业务 schema、80 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
 | [`schema_storage.sql`](schema_storage.sql) | `procurement.spu_images`（SPU 图片元数据）的补丁式幂等 DDL，不走 ORM；测试在 `tests/api/conftest.py` 会用到它描述的表 |
 
 ## 2. 维护规则（怎么保持"是现在的数据结构"）
 
 1. **每个 alembic migration 合入后必须重新生成快照**，与 migration 同一个提交里更新：
    ```bash
-   # 只读 pg_dump；用跑完全部迁移的库（推荐模板库，先确认它在 alembic head）
-   python3 scripts/regen_schema.py --db-url "postgresql://postgres@localhost/tts_erp_test_template"
+   # 只读 pg_dump；VERIFIED_SCHEMA_DB_URL 必须指向结构内容已核对的生成源
+   python3 scripts/regen_schema.py --db-url "$VERIFIED_SCHEMA_DB_URL"
    ```
    `scripts/regen_schema.py` 只读不写库；它剥掉序列/`\restrict` 等噪音、给
    `CREATE TABLE`/`CREATE FUNCTION` 加 `IF NOT EXISTS`，使快照可重复执行。
-2. **生成源必须在当前 alembic head**（当前 head：`0069_video_publish_confirmation`）：
+2. **当前 alembic head 是必要条件，不是结构内容一致的充分条件**（当前 head：`0071_plugin_status`）：
    ```bash
    docker exec postgres psql -U postgres -tAc "SELECT version_num FROM alembic_version" -d tts_erp_test_template
    ```
    落后于 head 的库（例如旧的 `tts_erp_v3_test`）会把旧结构写进文档，不要用。
+   未发布的 migration 草稿在同一 revision 内修改时，也必须核对默认值、约束和索引等实际结构，不能只查版本号。
+   **本次模板边界**：默认模板是在 `0071` 的 `pending` 默认值修正前建立的，本工作未再次修改它；
+   不能仅凭其 head 标记直接导出当前快照。本快照在独立隔离 clone 中实际回放当前 `0071` 后，
+   由原生成器读取；这既不代表共享模板已修复，也不代表完成了全迁移链空库安装验证。
+   agent 生成须通过隔离 runner 使用已验证 clone；此说明不授权再次重置或刷新默认模板。
    实例级扩展（如 `pg_stat_statements`）属容器配置，不在快照范围内。
 3. **结构变化要同步人读索引**（下表 §3）：新表/新列的业务含义写进对应 schema 段落；
    口径类含义写进 [`docs/business/`](../business/)，枚举值写进 [`docs/reference/enums/`](../reference/enums/)。
 4. 历史漂移教训（2026-08-25）：手维护的 schema.sql 曾漏 7 张表、列名写错，
    healthz/sync/db 三处互相矛盾——**只有"生成 + 同步"这条路是可靠的**。
 
-## 3. 数据结构索引（截至 migration 0069）
+## 3. 数据结构索引（截至 migration 0071）
 
 领域模型与表间关系见 [`docs/architecture/data-model-target-v3.md`](../architecture/data-model-target-v3.md)；
 「业务概念 ↔ 物理表字段」映射见 [`docs/business/spu-profitability.md`](../business/spu-profitability.md) 附录 A；
@@ -61,12 +66,16 @@
 `cases`（售后单：`RETURN_AND_REFUND` / `REFUND_ONLY` / `CANCELLATION` + 状态机）、
 `case_lines`（退货件数 / 退款额；行级金额可能缺失，缺失不造数）。
 
-### plugin —— Chrome 扩展 dump 落库（19 表）
+### plugin —— Chrome 扩展采集事实与受管状态（23 表）
 `raw_log` 理念已退役，业务表即事实：订单域 `orders / order_lines / order_details / order_timeline`，
 物流域 `shipments / tracking_events`，结算域 `settlements / settlement_details`，
 售后域 `after_sales / after_sale_items`，广告域 `ad_daily / ad_today / ad_raw_log / campaign_opt_logs`，
 拦截管理 `intercept_configs / intercept_sessions / intercepted_requests / intercept_sync_cursors`，
-观测 `plugin_logs`。协议契约见 [`docs/api/dumps-data-contract.md`](../api/dumps-data-contract.md)。
+观测 `plugin_logs`。采集协议见 [`docs/api/dumps-data-contract.md`](../api/dumps-data-contract.md)。
+受管插件另有 `status_instances / status_reports / status_decisions / status_notification_outbox`：
+实例绑定专用凭证，报告/决策保留幂等审计，通知经 outbox；这是受管状态事实而非同步镜像，
+保留实例/事件/决策外键。`state` 的数据库默认值为 `pending`。协议见
+[`docs/plugins/plugin-status-report.md`](../plugins/plugin-status-report.md)。
 
 ### miaoshou —— 妙手采购采集（8 表）
 `packages / package_items / package_gift_items`（包裹）、`purchase_prices`（采购价）、
@@ -89,18 +98,20 @@
 `credentials / tiktok_app_credentials / oauth_states`（凭证，只经 `tts_erp_v2.proxy.token_service`）、
 `sync_jobs / sync_cursors / sync_issues`（同步任务/游标/异常）、`raw_records`（原始报文留证）。
 
-### config —— 运行配置（4 表）
+### config —— 运行配置（6 表）
 `enum_map`（枚举翻译）、`runtime_config_items / runtime_config_revisions / runtime_config_secrets`
-（运行配置下发，见 [`docs/ops/runtime-config-management.md`](../ops/runtime-config-management.md)）。
+（运行配置下发，见 [`docs/ops/runtime-config-management.md`](../ops/runtime-config-management.md)）；
+`monitor_shop_state / monitor_config_deliveries` 保存按店铺的受管配置投递状态。Schema 存在不表示对应路由/job已启用。
 
 ### security —— 访问控制（7 表）
 `api_keys`、`users / roles / permissions / role_permissions / user_roles / user_sessions`
 （见 [`docs/design/user-account-authz-design.md`](../design/user-account-authz-design.md)、
 [`docs/design/api-key-auth-design.md`](../design/api-key-auth-design.md)）。
 
-### publishing —— TikTok 视频发布（3 表）
+### publishing —— TikTok 视频发布（4 表）
 `video_publish_tasks` 保存 upload generation/key/PUT-ticket expiry、每轮 execution generation、任务状态、publish/cleanup 双 owner lease、下载副作用前登记的 generation-scoped `spool_path` 与三类资源清理状态；
 `video_publish_attempts` 是 append-only Artemis publish/verify 审计记录，关系/session、Prompt、设备路径/序列号、app package、profile 与 verification level 构成不可变 submission identity；
+`video_publish_confirmations` 保存人工确认的幂等请求与结果；
 `worker_heartbeats` 保存发布 Worker 的受控 readiness 与设备探测状态。契约见
 [`docs/design/tiktok-video-publish.md`](../design/tiktok-video-publish.md)。
 

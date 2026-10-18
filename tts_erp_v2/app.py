@@ -56,6 +56,7 @@ from tts_erp_v2.api.v2 import (
     oauth,
     order_sync,
     pages,
+    plugin_status,
     reporting,
     spu_deterioration_alert,
     spu_images,
@@ -139,6 +140,7 @@ def _build_routes(app: FastAPI) -> None:
     # sync-worker 周期作业同步状态（GET /v2/sync/status, readonly）——
     # dashboard「数据同步状态」卡片数据源，只读 integration.sync_jobs。
     app.include_router(sync_status.router)
+    app.include_router(plugin_status.router)
 
     # Operator-console static assets (vendor/bootstrap.min.css / js/console.js)
     # are public. Business data remains protected at API endpoints; public assets
@@ -300,6 +302,13 @@ def build_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST"],
         allow_headers=DEFAULT_CORS_ALLOW_HEADERS,
+        # Existing non-sensitive response metadata becomes readable by allowed origins.
+        expose_headers=[
+            "X-Request-Id",
+            "Retry-After",
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+        ],
         max_age=600,
     )
     # Outermost: one structured line per request to stdout. The

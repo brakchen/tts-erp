@@ -637,6 +637,16 @@ def status_request_id(
     return str(fallback if fallback is not None else uuid4())
 
 
+def status_error_payload(
+    *, request_id: str, code: str, message: str, retryable: bool = False
+) -> dict[str, Any]:
+    """One pure protocol error shape for routing and transport adapters."""
+    return {
+        "requestId": request_id,
+        "error": {"code": code, "message": message, "retryable": retryable},
+    }
+
+
 def status_response_to_wire(response: StatusResponse) -> dict[str, Any]:
     """Serialise a response with camelCase aliases, keeping explicit nulls."""
     return response.model_dump(mode="json", by_alias=True)

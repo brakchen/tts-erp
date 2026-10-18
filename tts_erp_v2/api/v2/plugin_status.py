@@ -32,6 +32,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session, require_role_at_least
@@ -43,6 +44,7 @@ from tts_erp_v2.plugin.status.contracts import (
     InstanceRegistrationRequest,
     PluginId,
     report_payload_hash,
+    status_error_payload,
     status_report_from_wire,
     status_request_id,
     status_response_to_wire,
@@ -81,15 +83,17 @@ def _error(
     """
     return JSONResponse(
         status_code=status_code,
-        content={
-            "requestId": request_id,
-            "error": {
-                "code": code,
-                "message": message,
-                "retryable": retryable,
-            },
+        content=status_error_payload(
+            request_id=request_id,
+            code=code,
+            message=message,
+            retryable=retryable,
+        ),
+        headers={
+            **_NO_STORE,
+            "X-Request-Id": request_id,
+            **({"WWW-Authenticate": "Bearer"} if status_code == 401 else {}),
         },
-        headers=_NO_STORE,
     )
 
 
@@ -188,7 +192,10 @@ def post_status_report(
     cannot use a malformed body as an oracle, and a role that happens to be
     strong enough for other routes still gets nothing here.
     """
-    request_id = status_request_id(request.headers.get("x-request-id"))
+    request_id = request.scope.get("plugin_status_request_id")
+    if request_id is None:
+        request_id = status_request_id(request.headers.get("x-request-id"))
+        request.scope["plugin_status_request_id"] = request_id
     now = datetime.now(UTC)
 
     if raw_body is None:
@@ -242,7 +249,8 @@ def post_status_report(
     try:
         response = service.ingest_report(
             sess,
-            instance_id=auth.instance.id,
+            authenticated=auth,
+            instance_id=auth.instance_id,
             report=report,
             payload_hash=report_payload_hash(report),
             request_id=request_id,
@@ -252,6 +260,17 @@ def post_status_report(
     except StatusServiceError as exc:
         sess.rollback()
         return _error_from(exc, request_id)
+    except SQLAlchemyError:
+        sess.rollback()
+        # DB exception details can include payload SQL parameters.
+        log.error("[plugin-status] report store unavailable")
+        return _error(
+            status_code=503,
+            code="STORE_UNAVAILABLE",
+            message="the report was not committed; retry the same report",
+            request_id=request_id,
+            retryable=True,
+        )
     except Exception:
         # A write, decision or outbox failure is a 5xx with nothing committed —
         # never a 200 that quietly lost a fact (§8).
@@ -268,7 +287,7 @@ def post_status_report(
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content=status_response_to_wire(response),
-        headers=_NO_STORE,
+        headers={**_NO_STORE, "X-Request-Id": request_id},
     )
 
 

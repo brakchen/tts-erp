@@ -57,12 +57,47 @@ _READONLY_EXACT = {
     "/v2/auth/change-password",
 }
 
+#: 插件读取店铺 monitor 配置的唯一路径（docs/monitor-config-sync.md §6.1）。
+#: 该路由的最低角色是 readonly，但真正的准入条件是 access 层要求的
+#: “绑定到单个 shop_pk 的 monitor_config 专用 key”，而非角色。
+MONITOR_CONFIG_DELIVERY_PATH = "/v2/monitor/config"
+
+#: monitor 管理面（§6.3）：草稿、发布、强制覆盖均为 readwrite。
+#: monitor 专用 key 不能调用它们 —— ``_access`` 的用途层跨路由拒绝已在
+#: §4.2 约束 2/4 生效，这里只声明角色下限。
+MONITOR_ADMIN_PATH_PREFIX = "/v2/monitor/admin"
+
+
+def is_monitor_config_delivery_route(method: str, route_path: str) -> bool:
+    """True only for the shop-scoped monitor config read.
+
+    Phase A owns the classification only; the route handler arrives in Phase B.
+    """
+
+    return (
+        method.upper() == "GET"
+        and route_path.split("?", 1)[0] == MONITOR_CONFIG_DELIVERY_PATH
+    )
+
+
+PLUGIN_STATUS_REPORT_PATH = "/v2/plugin/status/report"
+
+
+def is_plugin_status_report_route(method: str, route_path: str) -> bool:
+    """The dedicated status boundary is one method and one exact route."""
+    return (
+        method.upper() == "POST"
+        and route_path.split("?", 1)[0] == PLUGIN_STATUS_REPORT_PATH
+    )
+
 
 def required_role(method: str, route_path: str) -> Role | None:
     """Return the minimum role for a route-relative path."""
 
     normalized_method = method.upper()
     path = route_path.split("?", 1)[0]
+    if is_plugin_status_report_route(normalized_method, path):
+        return Role.READWRITE
     if path in _EXEMPT_PATHS or path.startswith("/static/"):
         return None
     if path.startswith(("/v2/analytics/sync", "/v2/order-sync")):
@@ -88,6 +123,11 @@ def required_role(method: str, route_path: str) -> Role | None:
     if path == "/v2/video-publish/config" or path.startswith("/v2/video-publish/tasks"):
         return Role.READONLY
     if normalized_method == "POST" and path in _READWRITE_EXACT:
+        return Role.READWRITE
+    if path == MONITOR_CONFIG_DELIVERY_PATH and normalized_method == "GET":
+        # 角色只是下限；用途/店铺绑定在 ``_access`` 层单独收紧。
+        return Role.READONLY
+    if path.startswith(MONITOR_ADMIN_PATH_PREFIX):
         return Role.READWRITE
     if path.startswith(_READWRITE_PREFIXES):
         return Role.READWRITE

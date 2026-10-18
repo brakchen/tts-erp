@@ -478,6 +478,42 @@ CREATE TABLE IF NOT EXISTS config.enum_map (
 
 
 
+-- Name: monitor_config_deliveries; Type: TABLE; Schema: config; Owner: -
+
+CREATE TABLE IF NOT EXISTS config.monitor_config_deliveries (
+    id bigint NOT NULL,
+    shop_pk bigint NOT NULL,
+    version bigint NOT NULL,
+    source_global_version bigint,
+    source_shop_version bigint,
+    schema_version integer NOT NULL,
+    content_hash text NOT NULL,
+    encrypted_payload bytea NOT NULL,
+    is_force boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_by text NOT NULL,
+    request_id uuid,
+    request_digest text
+);
+
+
+
+ALTER TABLE config.monitor_config_deliveries ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME config.monitor_config_deliveries_id_seq
+);
+
+
+-- Name: monitor_shop_state; Type: TABLE; Schema: config; Owner: -
+
+CREATE TABLE IF NOT EXISTS config.monitor_shop_state (
+    shop_pk bigint NOT NULL,
+    current_delivery_version bigint,
+    last_force_version bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: runtime_config_items; Type: TABLE; Schema: config; Owner: -
 
 CREATE TABLE IF NOT EXISTS config.runtime_config_items (
@@ -1587,6 +1623,100 @@ ALTER TABLE plugin.shipments ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 );
 
 
+-- Name: status_decisions; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.status_decisions (
+    id uuid NOT NULL,
+    instance_id uuid NOT NULL,
+    revision bigint NOT NULL,
+    incident_id uuid NOT NULL,
+    expected_binding_epoch uuid NOT NULL,
+    action text NOT NULL,
+    parameters jsonb NOT NULL,
+    issued_at timestamp with time zone NOT NULL,
+    not_before timestamp with time zone NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    policy_version text NOT NULL,
+    source_report_id uuid,
+    source text NOT NULL,
+    admin_request_id text,
+    delivery_state text DEFAULT 'issued'::text NOT NULL,
+    outcome text,
+    outcome_reason_code text,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: status_instances; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.status_instances (
+    id uuid NOT NULL,
+    plugin_id text NOT NULL,
+    shop_pk bigint,
+    scope jsonb NOT NULL,
+    capabilities jsonb NOT NULL,
+    status_api_key_id bigint NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    latest_report_seq bigint,
+    latest_event_id uuid,
+    latest_state jsonb,
+    latest_observed_at timestamp with time zone,
+    latest_received_at timestamp with time zone,
+    last_seen_at timestamp with time zone,
+    stale_since timestamp with time zone,
+    no_candidate_since timestamp with time zone,
+    current_incident_id uuid,
+    current_incident_started_at timestamp with time zone,
+    resolved_incident_id uuid,
+    current_decision_revision bigint DEFAULT 0 NOT NULL,
+    manual_latch_action text,
+    manual_latch_at timestamp with time zone,
+    consecutive_transport_failures integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: status_notification_outbox; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.status_notification_outbox (
+    id uuid NOT NULL,
+    instance_id uuid NOT NULL,
+    incident_key text NOT NULL,
+    notification_kind text NOT NULL,
+    dedupe_key text NOT NULL,
+    payload jsonb NOT NULL,
+    state text DEFAULT 'pending'::text NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone NOT NULL,
+    lease_until timestamp with time zone,
+    last_error_code text,
+    delivered_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: status_reports; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.status_reports (
+    id uuid NOT NULL,
+    instance_id uuid NOT NULL,
+    event_id uuid NOT NULL,
+    report_seq bigint NOT NULL,
+    payload_hash text NOT NULL,
+    observed_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone NOT NULL,
+    event_type text NOT NULL,
+    reason_code text NOT NULL,
+    incident_id uuid,
+    binding_epoch uuid,
+    validated_payload jsonb NOT NULL,
+    receipt jsonb NOT NULL,
+    response_decision jsonb
+);
+
+
 -- Name: tracking_events; Type: TABLE; Schema: plugin; Owner: -
 
 CREATE TABLE IF NOT EXISTS plugin.tracking_events (
@@ -1988,7 +2118,10 @@ CREATE TABLE IF NOT EXISTS security.api_keys (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_used_at timestamp with time zone,
     rotated_to_key_hash text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    purpose text DEFAULT 'general'::text NOT NULL,
+    shop_pk bigint,
+    CONSTRAINT ck_api_keys_purpose_shop_binding CHECK (((purpose = ANY (ARRAY['general'::text, 'monitor_config'::text, 'plugin_status'::text])) AND (((purpose = 'monitor_config'::text) AND (shop_pk IS NOT NULL)) OR ((purpose = ANY (ARRAY['general'::text, 'plugin_status'::text])) AND (shop_pk IS NULL)))))
 );
 
 
@@ -2210,6 +2343,18 @@ ALTER TABLE ONLY config.enum_map
     ADD CONSTRAINT enum_map_pkey PRIMARY KEY (id);
 
 
+-- Name: monitor_config_deliveries monitor_config_deliveries_pkey; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_config_deliveries
+    ADD CONSTRAINT monitor_config_deliveries_pkey PRIMARY KEY (id);
+
+
+-- Name: monitor_shop_state monitor_shop_state_pkey; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_shop_state
+    ADD CONSTRAINT monitor_shop_state_pkey PRIMARY KEY (shop_pk);
+
+
 -- Name: runtime_config_items runtime_config_items_pkey; Type: CONSTRAINT; Schema: config; Owner: -
 
 ALTER TABLE ONLY config.runtime_config_items
@@ -2232,6 +2377,18 @@ ALTER TABLE ONLY config.runtime_config_secrets
 
 ALTER TABLE ONLY config.enum_map
     ADD CONSTRAINT uq_enum_map_type_value UNIQUE (enum_type, enum_value);
+
+
+-- Name: monitor_config_deliveries uq_monitor_config_deliveries_shop_request_id; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_config_deliveries
+    ADD CONSTRAINT uq_monitor_config_deliveries_shop_request_id UNIQUE (shop_pk, request_id);
+
+
+-- Name: monitor_config_deliveries uq_monitor_config_deliveries_shop_version; Type: CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_config_deliveries
+    ADD CONSTRAINT uq_monitor_config_deliveries_shop_version UNIQUE (shop_pk, version);
 
 
 -- Name: runtime_config_revisions uq_runtime_config_revision; Type: CONSTRAINT; Schema: config; Owner: -
@@ -2612,6 +2769,36 @@ ALTER TABLE ONLY plugin.shipments
     ADD CONSTRAINT shipments_pkey PRIMARY KEY (id);
 
 
+-- Name: status_decisions status_decisions_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_decisions
+    ADD CONSTRAINT status_decisions_pkey PRIMARY KEY (id);
+
+
+-- Name: status_instances status_instances_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_instances
+    ADD CONSTRAINT status_instances_pkey PRIMARY KEY (id);
+
+
+-- Name: status_instances status_instances_status_api_key_id_key; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_instances
+    ADD CONSTRAINT status_instances_status_api_key_id_key UNIQUE (status_api_key_id);
+
+
+-- Name: status_notification_outbox status_notification_outbox_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_notification_outbox
+    ADD CONSTRAINT status_notification_outbox_pkey PRIMARY KEY (id);
+
+
+-- Name: status_reports status_reports_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_reports
+    ADD CONSTRAINT status_reports_pkey PRIMARY KEY (id);
+
+
 -- Name: tracking_events tracking_events_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
 
 ALTER TABLE ONLY plugin.tracking_events
@@ -2682,6 +2869,36 @@ ALTER TABLE ONLY plugin.settlements
 
 ALTER TABLE ONLY plugin.shipments
     ADD CONSTRAINT uq_shipments_shop_pkg UNIQUE (shop_id, package_id);
+
+
+-- Name: status_decisions uq_status_decision_admin_req; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_decisions
+    ADD CONSTRAINT uq_status_decision_admin_req UNIQUE (instance_id, admin_request_id);
+
+
+-- Name: status_decisions uq_status_decision_rev; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_decisions
+    ADD CONSTRAINT uq_status_decision_rev UNIQUE (instance_id, revision);
+
+
+-- Name: status_notification_outbox uq_status_outbox_dedupe; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_notification_outbox
+    ADD CONSTRAINT uq_status_outbox_dedupe UNIQUE (dedupe_key);
+
+
+-- Name: status_reports uq_status_report_event; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_reports
+    ADD CONSTRAINT uq_status_report_event UNIQUE (instance_id, event_id);
+
+
+-- Name: status_reports uq_status_report_seq; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_reports
+    ADD CONSTRAINT uq_status_report_seq UNIQUE (instance_id, report_seq);
 
 
 -- Name: tracking_events uq_tracking_events_pkg_key; Type: CONSTRAINT; Schema: plugin; Owner: -
@@ -2995,6 +3212,11 @@ CREATE INDEX IF NOT EXISTS ix_solpo_spu_capture ON commerce.sales_order_line_pri
 -- Name: ix_enum_map_type; Type: INDEX; Schema: config; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_enum_map_type ON config.enum_map USING btree (enum_type);
+
+
+-- Name: ix_monitor_config_deliveries_shop_force; Type: INDEX; Schema: config; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_monitor_config_deliveries_shop_force ON config.monitor_config_deliveries USING btree (shop_pk, is_force);
 
 
 -- Name: ix_runtime_config_items_active; Type: INDEX; Schema: config; Owner: -
@@ -3332,6 +3554,36 @@ CREATE INDEX IF NOT EXISTS ix_settlements_shop ON plugin.settlements USING btree
 CREATE INDEX IF NOT EXISTS ix_shipments_order ON plugin.shipments USING btree (shop_id, order_id);
 
 
+-- Name: ix_status_decisions_incident; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_status_decisions_incident ON plugin.status_decisions USING btree (instance_id, incident_id);
+
+
+-- Name: ix_status_instances_last_seen; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_status_instances_last_seen ON plugin.status_instances USING btree (last_seen_at);
+
+
+-- Name: ix_status_instances_plugin; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_status_instances_plugin ON plugin.status_instances USING btree (plugin_id);
+
+
+-- Name: ix_status_instances_shop; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_status_instances_shop ON plugin.status_instances USING btree (shop_pk);
+
+
+-- Name: ix_status_outbox_state; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_status_outbox_state ON plugin.status_notification_outbox USING btree (state, next_attempt_at);
+
+
+-- Name: ix_status_reports_instance_received; Type: INDEX; Schema: plugin; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_status_reports_instance_received ON plugin.status_reports USING btree (instance_id, received_at);
+
+
 -- Name: ix_manual_costs_channel_product_valid; Type: INDEX; Schema: procurement; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_manual_costs_channel_product_valid ON procurement.manual_product_costs USING btree (spu_pk, valid_from);
@@ -3437,6 +3689,11 @@ CREATE INDEX IF NOT EXISTS ix_shop_fee_rate_est_shop_calc_at ON reporting.shop_f
 CREATE INDEX IF NOT EXISTS ix_api_keys_role ON security.api_keys USING btree (role);
 
 
+-- Name: ix_api_keys_shop_pk; Type: INDEX; Schema: security; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_api_keys_shop_pk ON security.api_keys USING btree (shop_pk);
+
+
 -- Name: ix_user_sessions_active; Type: INDEX; Schema: security; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_user_sessions_active ON security.user_sessions USING btree (user_id, expires_at);
@@ -3490,6 +3747,11 @@ CREATE OR REPLACE TRIGGER trg_commerce_sales_order_lines_touch BEFORE UPDATE ON 
 -- Name: sales_orders trg_commerce_sales_orders_touch; Type: TRIGGER; Schema: commerce; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_commerce_sales_orders_touch BEFORE UPDATE ON commerce.sales_orders FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: monitor_shop_state trg_config_monitor_shop_state_touch; Type: TRIGGER; Schema: config; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_config_monitor_shop_state_touch BEFORE UPDATE ON config.monitor_shop_state FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: enum_map trg_enum_map_updated_at; Type: TRIGGER; Schema: config; Owner: -
@@ -3874,6 +4136,18 @@ ALTER TABLE ONLY commerce.sales_orders
     ADD CONSTRAINT sales_orders_raw_record_id_fkey FOREIGN KEY (raw_record_id) REFERENCES integration.raw_records(id) ON DELETE SET NULL;
 
 
+-- Name: monitor_config_deliveries fk_monitor_config_deliveries_shop_pk; Type: FK CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_config_deliveries
+    ADD CONSTRAINT fk_monitor_config_deliveries_shop_pk FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
+-- Name: monitor_shop_state fk_monitor_shop_state_shop_pk; Type: FK CONSTRAINT; Schema: config; Owner: -
+
+ALTER TABLE ONLY config.monitor_shop_state
+    ADD CONSTRAINT fk_monitor_shop_state_shop_pk FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
 -- Name: runtime_config_revisions runtime_config_revisions_config_key_fkey; Type: FK CONSTRAINT; Schema: config; Owner: -
 
 ALTER TABLE ONLY config.runtime_config_revisions
@@ -4036,6 +4310,42 @@ ALTER TABLE ONLY miaoshou.sync_issues
     ADD CONSTRAINT sync_issues_credential_id_fkey FOREIGN KEY (credential_id) REFERENCES integration.credentials(id) ON DELETE CASCADE;
 
 
+-- Name: status_decisions status_decisions_instance_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_decisions
+    ADD CONSTRAINT status_decisions_instance_id_fkey FOREIGN KEY (instance_id) REFERENCES plugin.status_instances(id) ON DELETE CASCADE;
+
+
+-- Name: status_decisions status_decisions_source_report_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_decisions
+    ADD CONSTRAINT status_decisions_source_report_id_fkey FOREIGN KEY (source_report_id) REFERENCES plugin.status_reports(id) ON DELETE SET NULL;
+
+
+-- Name: status_instances status_instances_shop_pk_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_instances
+    ADD CONSTRAINT status_instances_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
+
+
+-- Name: status_instances status_instances_status_api_key_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_instances
+    ADD CONSTRAINT status_instances_status_api_key_id_fkey FOREIGN KEY (status_api_key_id) REFERENCES security.api_keys(id) ON DELETE RESTRICT;
+
+
+-- Name: status_notification_outbox status_notification_outbox_instance_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_notification_outbox
+    ADD CONSTRAINT status_notification_outbox_instance_id_fkey FOREIGN KEY (instance_id) REFERENCES plugin.status_instances(id) ON DELETE CASCADE;
+
+
+-- Name: status_reports status_reports_instance_id_fkey; Type: FK CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.status_reports
+    ADD CONSTRAINT status_reports_instance_id_fkey FOREIGN KEY (instance_id) REFERENCES plugin.status_instances(id) ON DELETE CASCADE;
+
+
 -- Name: manual_product_costs manual_product_costs_channel_product_id_fkey; Type: FK CONSTRAINT; Schema: procurement; Owner: -
 
 ALTER TABLE ONLY procurement.manual_product_costs
@@ -4124,6 +4434,12 @@ ALTER TABLE ONLY reporting.product_profit_daily
 
 ALTER TABLE ONLY reporting.shop_fee_rate_estimates
     ADD CONSTRAINT shop_fee_rate_estimates_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE CASCADE;
+
+
+-- Name: api_keys fk_api_keys_shop_pk; Type: FK CONSTRAINT; Schema: security; Owner: -
+
+ALTER TABLE ONLY security.api_keys
+    ADD CONSTRAINT fk_api_keys_shop_pk FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE RESTRICT;
 
 
 -- Name: role_permissions role_permissions_permission_code_fkey; Type: FK CONSTRAINT; Schema: security; Owner: -

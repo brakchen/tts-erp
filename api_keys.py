@@ -23,6 +23,7 @@ from pathlib import Path
 import psycopg
 
 from scripts._db_url import normalize_db_url
+from tts_erp_v2.access import ApiKeyPurpose
 
 ROOT = Path(__file__).resolve().parent
 ROLE_PREFIX = {"readonly": "ro", "readwrite": "rw", "admin": "admin"}
@@ -60,6 +61,8 @@ def _insert_key(
     role: str,
     scopes: list[str],  # ignored: V3 dropped the scopes column
     expires_days: int | None,  # ignored: V3 dropped the expires_at column
+    *,
+    commit: bool = True,
 ) -> str:
     key = f"ttserp_{ROLE_PREFIX[role]}_{secrets.token_urlsafe(24)}"
     # .env's TTS_ERP_DB_URL is shared by both SQLAlchemy and raw psycopg.
@@ -78,7 +81,8 @@ def _insert_key(
             "VALUES (%s, %s, %s, %s, 'active')",
             (_sha256(key), key[:16], name, role),
         )
-    conn.commit()
+    if commit:
+        conn.commit()
     return key
 
 
@@ -168,19 +172,37 @@ def cmd_rotate(args) -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT name, role FROM security.api_keys "
-                "WHERE key_prefix = %s AND status = 'active'",
+                "SELECT id, name, role, purpose, shop_pk FROM security.api_keys "
+                "WHERE key_prefix = %s AND status = 'active' FOR UPDATE",
                 (args.prefix,),
             )
-            row = cur.fetchone()
-        if not row:
+            rows = cur.fetchall()
+        if not rows:
             sys.exit(f"NOT FOUND or already revoked: {args.prefix}")
-        name, role = row
+        if len(rows) != 1:
+            sys.exit(
+                "ambiguous active key prefix: no replacement issued or key revoked"
+            )
+        key_id, name, role, purpose, shop_pk = rows[0]
+        if purpose != ApiKeyPurpose.GENERAL.value or shop_pk is not None:
+            sys.exit(
+                "restricted credential rotation refused: generic CLI cannot preserve "
+                "managed shop/instance binding; no replacement issued or key revoked"
+            )
         # V3 dropped the ``scopes`` column. ``--scopes`` is still
         # accepted (no error) but not persisted; same for
         # ``--expires-days``. The new key inherits name + role only.
-        key = _insert_key(conn, name, role, [], None)
-        _revoke(conn, args.prefix)
+        # Keep eligibility locked through both writes in this general-key
+        # transaction. Prefix is display metadata, never revocation identity.
+        key = _insert_key(conn, name, role, [], None, commit=False)
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE security.api_keys SET status = 'disabled' "
+                "WHERE id = %s AND status = 'active'",
+                (key_id,),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("selected rotation key changed; transaction refused")
     print(f"rotated: {args.prefix} -> new key for name={name} role={role}")
     print()
     print(f"API KEY (shown ONCE, store it now):  {key}")

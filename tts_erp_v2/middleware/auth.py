@@ -23,9 +23,11 @@ from tts_erp_v2.access import (
     canonicalize_path,
     clear_credential_cache,
     evaluate_access,
+    is_plugin_status_report_route,
 )
 from tts_erp_v2.access import required_role as _required_role
 from tts_erp_v2.access._context import user_label_var, user_pages_var
+from tts_erp_v2.plugin.status.contracts import status_error_payload, status_request_id
 
 # Compatibility exports for existing handler helpers and test fixtures.
 ROLE_LEVEL = {role.value: role.level for role in Role}
@@ -186,6 +188,19 @@ class AuthMiddleware:
 
         from tts_erp_v2.middleware import rate_limit, session_auth
 
+        status_report = is_plugin_status_report_route(
+            scope["method"], canonical.route_path
+        )
+        if status_report:
+            incoming_id = next(
+                (
+                    value.decode("latin-1")
+                    for name, value in scope.get("headers", [])
+                    if name.lower() == b"x-request-id"
+                ),
+                None,
+            )
+            scope["plugin_status_request_id"] = status_request_id(incoming_id)
         bearer_key, api_key = _extract_keys(scope)
         client = str((scope.get("client") or ("?",))[0])
         decision = await evaluate_access(
@@ -194,9 +209,7 @@ class AuthMiddleware:
                 route_path=canonical.route_path,
                 accepts_html=_accept_text_html(scope),
                 client_ip=client,
-                session_cookie=_extract_cookie(
-                    scope, session_auth.SESSION_COOKIE_NAME
-                ),
+                session_cookie=_extract_cookie(scope, session_auth.SESSION_COOKIE_NAME),
                 bearer_key=bearer_key,
                 api_key=api_key,
             ),
@@ -216,9 +229,7 @@ class AuthMiddleware:
             scope["username"] = grant.user.username
             scope["user_pages"] = grant.user.pages
             user_pages_var.set(grant.user.pages)
-            user_label_var.set(
-                grant.user.display_name or grant.user.username
-            )
+            user_label_var.set(grant.user.display_name or grant.user.username)
         else:
             scope["user_id"] = None
             scope["username"] = None
@@ -245,7 +256,11 @@ class AuthMiddleware:
                 f"retry_after={retry_after}s\n"
             )
             status, headers, body = rate_limit.too_many_response(
-                limit, retry_after
+                limit,
+                retry_after,
+                request_id=scope.get("plugin_status_request_id")
+                if status_report
+                else None,
             )
             await send(
                 {"type": "http.response.start", "status": status, "headers": headers}
@@ -274,11 +289,35 @@ class AuthMiddleware:
         detail = decision.detail or "auth store unavailable"
         sys.stderr.write(
             f"[auth] denied {status} {scope['method']} {scope['path']} "
-            f"from {client} key_prefix={_prefix_of(attempted_key)}\n"
+            f"from {client} key_prefix={'-' if status_report else _prefix_of(attempted_key)}\n"
         )
-        response_status, headers, body = _deny_response(
-            status, detail, accepts_html=_accept_text_html(scope)
-        )
+        if status_report:
+            request_id = scope["plugin_status_request_id"]
+            code = {
+                401: "INVALID_CREDENTIAL",
+                403: "PURPOSE_DENIED",
+                503: "STORE_UNAVAILABLE",
+            }[status]
+            body = json.dumps(
+                status_error_payload(
+                    request_id=request_id,
+                    code=code,
+                    message=detail,
+                    retryable=status == 503,
+                )
+            ).encode()
+            response_status = status
+            headers = [
+                (b"content-type", b"application/json"),
+                (b"cache-control", b"no-store"),
+                (b"x-request-id", request_id.encode()),
+            ]
+            if status == 401:
+                headers.append((b"www-authenticate", b"Bearer"))
+        else:
+            response_status, headers, body = _deny_response(
+                status, detail, accepts_html=_accept_text_html(scope)
+            )
         await send(
             {
                 "type": "http.response.start",

@@ -21,6 +21,7 @@ returns, so a failure anywhere in here is a 5xx and leaves no partial fact
 
 from __future__ import annotations
 
+import hmac
 import secrets
 import uuid
 from dataclasses import dataclass, replace
@@ -28,11 +29,17 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.access import hash_key
+from tts_erp_v2.access import (
+    ApiKeyPurpose,
+    Role,
+    authenticate_hash_uncached,
+    hash_key,
+    key_record_is_usable,
+)
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.plugin_status import (
     StatusDecision,
@@ -120,63 +127,16 @@ STATUS_KEY_PREFIX = "ttserp_st_"
 #: that belongs to the ``access``/``security`` owner.
 STATUS_KEY_ROLE = "readwrite"
 
-#: Canonical ``security.api_keys.purpose`` value for this protocol. The column
-#: itself belongs to the access/security owner (monitor-config lane, migration
-#: 0070) and is *not* in this tree yet, so nothing here creates a purpose store
-#: or registry — this is the one literal the integration agrees on.
-PLUGIN_STATUS_PURPOSE = "plugin_status"
+#: Canonical purpose belongs to the shared access/security owner.
+PLUGIN_STATUS_PURPOSE = ApiKeyPurpose.PLUGIN_STATUS.value
 
 
 def purpose_allows_status(purpose: str | None) -> bool:
     """Whether a key's canonical purpose permits status reporting.
 
-    Takes the raw column value so it is testable without the column. It is
-    **fail-closed**: an absent/unreadable purpose means the canonical contract
-    (access/security owner, migration 0070) is not available, and unavailable is
-    "no" — never "assume general, the instance binding will carry it". A
-    ``general`` or ``monitor_config`` key is refused even when it is bound to an
-    instance, because binding proves *which* instance, never *what the key may
-    be used for* (§9.1).
+    Delegate to the canonical enum; binding never grants another purpose.
     """
-    return str(purpose) == PLUGIN_STATUS_PURPOSE
-
-
-def _read_purpose(session: Session, api_key_id: int) -> str | None:
-    """Read ``security.api_keys.purpose`` for one key, or ``None`` if unreadable.
-
-    Deliberately a direct column read rather than an ORM attribute: the column
-    belongs to the access/security owner and may not exist in this tree yet, and
-    this seam must not add it. A missing column (or an unknown key) yields
-    ``None``, which :func:`purpose_allows_status` refuses, so the boundary is
-    closed until the canonical contract is applied.
-    """
-    try:
-        return session.execute(
-            text("SELECT purpose FROM security.api_keys WHERE id = :key_id"),
-            {"key_id": api_key_id},
-        ).scalar_one_or_none()
-    except SQLAlchemyError:
-        # The transaction is now aborted by the failed statement; the caller
-        # turns this refusal into a rollback, so it is not recovered here.
-        return None
-
-
-def _set_purpose(session: Session, api_key_id: int, purpose: str) -> bool:
-    """Write the canonical purpose. False means the column is unavailable.
-
-    The statement either applies or raises; there is no partial success to
-    inspect, so no rowcount is read. On failure the transaction is already
-    aborted and the caller rolls the whole provisioning back, which is the
-    point: a half-minted unrestricted key must never survive.
-    """
-    try:
-        session.execute(
-            text("UPDATE security.api_keys SET purpose = :purpose WHERE id = :key_id"),
-            {"purpose": purpose, "key_id": api_key_id},
-        )
-    except SQLAlchemyError:
-        return False
-    return True
+    return purpose == ApiKeyPurpose.PLUGIN_STATUS
 
 
 #: §11 notification kinds this domain owns. It is not a general messaging
@@ -243,6 +203,14 @@ class StatusServiceError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class AuthenticatedInstance:
+    """Original authentication scalars survive ORM identity-map refreshes.
+
+    ORM references are read-only conveniences, never transaction authority.
+    """
+
+    instance_id: UUID
+    key_id: int
+    key_hash: str
     instance: StatusInstance
     api_key: ApiKey
 
@@ -253,51 +221,61 @@ class AuthenticatedInstance:
 def authenticate_report(
     session: Session, *, bearer_token: str | None
 ) -> AuthenticatedInstance:
-    """Resolve the status credential to the one instance it was provisioned for.
+    """Compose current canonical credentials with the domain's instance binding.
 
-    **This is not a purpose owner.** It creates no credential store and no
-    purpose registry: it reads the existing ``security.api_keys`` row through the
-    shared ``access.hash_key``, and applies two deny-only gates on top. The
-    canonical ``purpose`` contract stays with the ``access``/``security`` owner
-    (monitor-config lane); nothing here grants what that contract would refuse.
-
-    The two gates are deliberately distinct concepts:
-
-    * *instance binding* — §4.1 ties a status key to exactly one instance, so a
-      credential that is not that instance's key is refused here and nowhere
-      else. This is this module's own fact, not a purpose judgement.
-    * *role floor* — §9.1 requires ``role=readwrite`` for this protocol. This is
-      a floor copied from the approved contract, not a substitute for the
-      canonical purpose label.
-
-    Independent of ``TTS_ERP_AUTH_MODE`` on purpose. The middleware hands out a
-    bypass grant in ``off``/``shadow``, so a boundary that trusted it would hand
-    recovery permission to an anonymous caller exactly when the deployment
-    posture is weakest (§9.2).
+    Uncached lookup (including its independent last-used update) MUST precede
+    any key row lock. Ingest only rechecks locked rows, never this lookup.
     """
     if not bearer_token:
         raise StatusServiceError(401, "INVALID_CREDENTIAL", "missing status credential")
     digest = hash_key(bearer_token)
-    api_key = session.execute(
-        select(ApiKey).where(ApiKey.key_hash == digest)
-    ).scalar_one_or_none()
-    # 401 is only for "there is no usable credential here": unknown hash or a
-    # revoked/disabled one. A valid key that is not this instance's key (or not
-    # at the §9.1 role floor) is a *refusal*, and §8 keeps the two apart so the
-    # plugin stops retrying and asks for re-provisioning instead.
-    if api_key is None or api_key.status != "active":
+    try:
+        credential = authenticate_hash_uncached(digest)
+    except Exception as exc:
+        raise StatusServiceError(
+            503, "STORE_UNAVAILABLE", "auth store unavailable", retryable=True
+        ) from exc
+    if credential is None:
+        raise StatusServiceError(401, "INVALID_CREDENTIAL", "invalid status credential")
+    if (
+        credential.role is not Role.READWRITE
+        or credential.purpose is not ApiKeyPurpose.PLUGIN_STATUS
+        or credential.shop_pk is not None
+    ):
+        raise StatusServiceError(
+            403, "PURPOSE_DENIED", "requires a dedicated status credential"
+        )
+    try:
+        api_key = session.execute(
+            select(ApiKey)
+            .where(ApiKey.key_hash == digest)
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        instance = session.execute(
+            select(StatusInstance)
+            .join(ApiKey, StatusInstance.status_api_key_id == ApiKey.id)
+            .where(ApiKey.key_hash == digest)
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+    except SQLAlchemyError as exc:
+        raise StatusServiceError(
+            503, "STORE_UNAVAILABLE", "status store unavailable", retryable=True
+        ) from exc
+    if (
+        api_key is None
+        or api_key.status != "active"
+        or api_key.rotated_to_key_hash is not None
+    ):
         raise StatusServiceError(
             401,
             "INVALID_CREDENTIAL",
             "invalid, disabled or expired status credential",
         )
-    instance = session.execute(
-        select(StatusInstance).where(StatusInstance.status_api_key_id == api_key.id)
-    ).scalar_one_or_none()
     if (
         instance is None
         or api_key.role != STATUS_KEY_ROLE
-        or not purpose_allows_status(_read_purpose(session, api_key.id))
+        or not purpose_allows_status(api_key.purpose)
+        or api_key.shop_pk is not None
     ):
         raise StatusServiceError(
             403,
@@ -306,7 +284,13 @@ def authenticate_report(
         )
     if not instance.enabled:
         raise StatusServiceError(403, "INSTANCE_DENIED", "instance is disabled")
-    return AuthenticatedInstance(instance=instance, api_key=api_key)
+    return AuthenticatedInstance(
+        instance_id=instance.id,
+        key_id=api_key.id,
+        key_hash=digest,
+        instance=instance,
+        api_key=api_key,
+    )
 
 
 # ── Provisioning and reads (§9.4) ─────────────────────────────────────
@@ -359,16 +343,20 @@ def _mint_status_key(session: Session, *, plugin_id: str) -> tuple[ApiKey, str]:
         name=f"plugin_status:{plugin_id}",
         role=STATUS_KEY_ROLE,
         status="active",
+        purpose=PLUGIN_STATUS_PURPOSE,
+        shop_pk=None,
     )
     session.add(row)
-    session.flush()
-    if not _set_purpose(session, row.id, PLUGIN_STATUS_PURPOSE):
+    try:
+        session.flush()
+    except SQLAlchemyError as exc:
+        session.rollback()
         raise StatusServiceError(
             503,
-            "PURPOSE_UNAVAILABLE",
-            "api key purpose is unavailable; provisioning is refused until it exists",
+            "STORE_UNAVAILABLE",
+            "status credential could not be provisioned",
             retryable=True,
-        )
+        ) from exc
     return row, plaintext
 
 
@@ -1219,6 +1207,7 @@ def _queue_notifications(
 def ingest_report(
     session: Session,
     *,
+    authenticated: AuthenticatedInstance,
     instance_id: UUID,
     report: StatusReportContract,
     payload_hash: str,
@@ -1226,9 +1215,41 @@ def ingest_report(
     now: datetime,
 ) -> StatusResponse:
     """Accept one already-validated report and return its receipt + decision."""
-    instance = repository.lock_instance(session, instance_id)
-    if instance is None:
-        raise StatusServiceError(404, "INSTANCE_NOT_FOUND", "unknown instance")
+    if (
+        instance_id != authenticated.instance_id
+        or report.instance_id != authenticated.instance_id
+    ):
+        raise StatusServiceError(
+            403, "INSTANCE_DENIED", "report does not belong to this credential"
+        )
+    instance = repository.lock_instance(session, authenticated.instance_id)
+    if instance is None or instance.status_api_key_id != authenticated.key_id:
+        raise StatusServiceError(403, "INSTANCE_DENIED", "credential binding changed")
+    api_key = session.execute(
+        select(ApiKey)
+        .where(ApiKey.id == authenticated.key_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if (
+        api_key is None
+        or not hmac.compare_digest(api_key.key_hash, authenticated.key_hash)
+        or not key_record_is_usable(
+            status=api_key.status,
+            rotated_to_key_hash=api_key.rotated_to_key_hash,
+            last_used_at=api_key.last_used_at,
+            require_current=True,
+        )
+    ):
+        raise StatusServiceError(401, "INVALID_CREDENTIAL", "invalid status credential")
+    if (
+        api_key.role != STATUS_KEY_ROLE
+        or not purpose_allows_status(api_key.purpose)
+        or api_key.shop_pk is not None
+    ):
+        raise StatusServiceError(
+            403, "PURPOSE_DENIED", "requires a dedicated status credential"
+        )
     if not instance.enabled:
         raise StatusServiceError(403, "INSTANCE_DENIED", "instance is disabled")
     if report.instance_id != instance.id:

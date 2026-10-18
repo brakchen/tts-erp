@@ -531,8 +531,18 @@ def test_builtin_permission_seed_withholds_video_publish_from_operator(
 def test_0066_is_live_linear_head_with_admin_only_default(
     db_session: Session,
 ) -> None:
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).parents[2]
+    scripts = ScriptDirectory.from_config(Config(str(root / "alembic.ini")))
+    # Publishing's confirmation migration must remain in the single live chain;
+    # legitimate later domains may append migrations without weakening grants.
+    assert "0069_video_publish_confirmation" in {
+        revision.revision for revision in scripts.walk_revisions()
+    }
     assert db_session.scalar(text("SELECT version_num FROM alembic_version")) == (
-        "0069_video_publish_confirmation"
+        scripts.get_current_head()
     )
     grants = set(
         db_session.execute(
@@ -590,5 +600,14 @@ def test_architecture_inventory_is_derived_from_live_schema(
         GROUP BY table_schema
         """)
     ).all()
-    assert len(rows) == 14
-    assert sum(int(row[1]) for row in rows) == 74
+    # Reuse v18's canonical generated-snapshot boundary, not a release's old
+    # table count: new managed domains legitimately append schema objects.
+    snapshot = (
+        Path(__file__).parents[2] / "docs/schema/schema_tts_erp.sql"
+    ).read_text()
+    schema_count = sum(
+        line.startswith("CREATE SCHEMA ") for line in snapshot.splitlines()
+    )
+    table_count = snapshot.count("CREATE TABLE IF NOT EXISTS") - 1
+    assert len(rows) == schema_count
+    assert sum(int(row[1]) for row in rows) == table_count

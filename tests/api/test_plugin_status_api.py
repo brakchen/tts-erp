@@ -15,11 +15,9 @@ an injected failure that simulates "the commit path blew up". The service
 itself, the policy, the row locks and the outbox run for real against the
 isolated test database.
 
-Table bootstrap
+Migrated schema
 ---------------
-The Alembic migration for ``plugin.status_*`` lands in the integration step,
-so this module creates and drops **only its own four tables** against the
-ephemeral clone. It never touches another lane's tables or fixtures.
+The isolated runner supplies the real 0071 schema; no test bootstrap DDL.
 """
 
 from __future__ import annotations
@@ -47,7 +45,12 @@ from tts_erp_v2.plugin.status.contracts import (
     status_report_from_wire,
 )
 from tts_erp_v2.plugin.status.scheduler import run_scheduled
-from tts_erp_v2.plugin.status.service import StatusServiceError, ingest_report
+from tts_erp_v2.plugin.status.service import (
+    AuthenticatedInstance,
+    StatusServiceError,
+    authenticate_report,
+    ingest_report,
+)
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -60,74 +63,9 @@ ADVERTISER = "TEST_ADVERTISER_A"
 #: would, and so a resume may confirm the epoch it was issued against.
 DEFAULT_BINDING_EPOCH = "8f755b12-dbc8-4542-bf54-049f72d230fc"
 
-#: Creation order: parents before the tables that reference them. Teardown
-#: walks the same list backwards so the foreign keys stay satisfied.
-CREATE_ORDER = (
-    "plugin.status_instances",
-    "plugin.status_reports",
-    "plugin.status_decisions",
-    "plugin.status_notification_outbox",
-)
-
 
 def json_text(value: Any) -> str:
     return json.dumps(value, default=str)
-
-
-# ── Table bootstrap (this module's own four tables only) ─────────────
-
-
-def _exists(engine, qualified: str) -> bool:
-    from sqlalchemy import inspect
-
-    schema, table = qualified.split(".", 1)
-    return inspect(engine).has_table(table, schema=schema)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _status_tables():
-    """Create ``plugin.status_*`` for the module and drop it afterwards.
-
-    Migration ownership belongs to the integration step, and the module has
-    to be runnable before it. Only the four new tables are touched.
-    """
-    from sqlalchemy import inspect
-
-    import tts_erp_v2.db.models.plugin_status  # noqa: F401 — registers tables
-    from tts_erp_v2.db.base import Base, get_session_factory
-
-    engine = get_session_factory().kw["bind"]
-    created = [
-        Base.metadata.tables[name] for name in CREATE_ORDER if not _exists(engine, name)
-    ]
-    for table in created:
-        table.create(bind=engine, checkfirst=True)
-
-    # ``security.api_keys.purpose`` belongs to the access/security owner
-    # (canonical migration 0070) and is deliberately NOT applied in this tree.
-    # The ephemeral clone gets the column so this module exercises the real
-    # fail-closed gate instead of a mock; teardown removes it again.
-    existing = {
-        c["name"] for c in inspect(engine).get_columns("api_keys", schema="security")
-    }
-    added_purpose = "purpose" not in existing
-    if added_purpose:
-        with engine.begin() as conn:
-            # pi-lens-ignore: python-sql-injection
-            conn.execute(
-                text(
-                    "ALTER TABLE security.api_keys "
-                    "ADD COLUMN purpose TEXT NOT NULL DEFAULT 'general'"
-                )
-            )
-
-    yield
-    for table in reversed(created):
-        table.drop(bind=engine, checkfirst=True)
-    if added_purpose:
-        with engine.begin() as conn:
-            # pi-lens-ignore: python-sql-injection
-            conn.execute(text("ALTER TABLE security.api_keys DROP COLUMN purpose"))
 
 
 @pytest.fixture(autouse=True)
@@ -873,6 +811,9 @@ class TestReportIdempotency:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=now,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -1554,16 +1495,23 @@ class TestOutboxAndSweep:
             assert row.state == "pending"
             assert row.attempt_count == 1
             # Full-jitter backoff: bounded by the 300 s cap, never immediate.
-            delay = (row.next_attempt_at - sweep_now).total_seconds()
+            retry_at = row.next_attempt_at
+            delay = (retry_at - sweep_now).total_seconds()
             assert 0 < delay <= 300
 
+        # Full jitter can hit the 1-second floor: +1 second is already due.
+        # Check the persisted boundary, not an invented strictly-longer delay.
         with Session(db_engine) as sess:
             result = run_scheduled(
                 sess,
-                now=sweep_now + timedelta(seconds=1),
+                now=retry_at - timedelta(microseconds=1),
                 sender=_retry,
             )
             assert result["attempted"] == 0
+        with Session(db_engine) as sess:
+            due = run_scheduled(sess, now=retry_at, sender=_retry)
+            assert due["attempted"] == 1
+            assert due["retrying"] == 1
 
     def test_configuration_failures_wait_for_a_person(
         self, status_client, admin_key, db_engine
@@ -2308,6 +2256,9 @@ class TestProlongedNoCandidateNotification:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=at,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -2379,6 +2330,9 @@ class TestProlongedNoCandidateNotification:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=at,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -2802,6 +2756,9 @@ class TestUnresolvedFailureFactsAreSticky:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=report.observed_at,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -2861,6 +2818,9 @@ class TestUnresolvedFailureFactsAreSticky:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=report.observed_at,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -2918,6 +2878,9 @@ class TestUnresolvedFailureFactsAreSticky:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=report.observed_at,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -3012,6 +2975,9 @@ class TestStickyReasonsCountOnce:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=report.observed_at,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -3063,6 +3029,9 @@ class TestStickyReasonsCountOnce:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=report.observed_at,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -3239,6 +3208,9 @@ class TestDisabledMonitorGetsNoNoCandidateFault:
                 payload_hash=report_payload_hash(report),
                 request_id=str(uuid.uuid4()),
                 now=report.observed_at,
+                authenticated=authenticate_report(
+                    session, bearer_token=payload["statusApiKey"]["value"]
+                ),
             )
             session.commit()
             session.expire_all()
@@ -3313,7 +3285,7 @@ class TestLocallyDisabledEndsTheNoCandidateCondition:
                 .all()
             )
 
-    def _ingest(self, session, instance_id, body) -> None:
+    def _ingest(self, session, instance_id, body, *, token: str) -> None:
         from tts_erp_v2.plugin.status.contracts import (
             report_payload_hash,
             status_report_from_wire,
@@ -3327,6 +3299,7 @@ class TestLocallyDisabledEndsTheNoCandidateCondition:
             payload_hash=report_payload_hash(report),
             request_id=str(uuid.uuid4()),
             now=report.observed_at,
+            authenticated=authenticate_report(session, bearer_token=token),
         )
         session.commit()
         session.expire_all()
@@ -3348,7 +3321,9 @@ class TestLocallyDisabledEndsTheNoCandidateCondition:
             new_invalidation=True,
             candidate_count=0,
         )
-        self._ingest(session, instance_id, first)
+        self._ingest(
+            session, instance_id, first, token=payload["statusApiKey"]["value"]
+        )
         # Then the user switches monitoring off: reason stays NONE, only the
         # local signals change.
         self._ingest(
@@ -3360,6 +3335,7 @@ class TestLocallyDisabledEndsTheNoCandidateCondition:
                 at=base + timedelta(seconds=60),
                 incident=incident,
             ),
+            token=payload["statusApiKey"]["value"],
         )
         self._ingest(
             session,
@@ -3370,6 +3346,7 @@ class TestLocallyDisabledEndsTheNoCandidateCondition:
                 at=base + timedelta(seconds=120),
                 incident=incident,
             ),
+            token=payload["statusApiKey"]["value"],
         )
 
         rows = self._sweep_notices(db_engine, base + timedelta(seconds=250))
@@ -3396,6 +3373,7 @@ class TestLocallyDisabledEndsTheNoCandidateCondition:
                     incident=incident,
                     reason="NO_CANDIDATE",
                 ),
+                token=payload["statusApiKey"]["value"],
             )
 
         rows = self._sweep_notices(db_engine, base + timedelta(seconds=250))
@@ -3425,6 +3403,7 @@ class TestLocallyDisabledEndsTheNoCandidateCondition:
                     new_invalidation=(seq == 1),
                     candidate_count=0,
                 ),
+                token=payload["statusApiKey"]["value"],
             )
 
         rows = self._sweep_notices(db_engine, base + timedelta(seconds=250))
@@ -3443,7 +3422,7 @@ class TestLockBoundaryIsAuthoritative:
     """
 
     @staticmethod
-    def _ingest(sess, instance_id, body):
+    def _ingest(sess, instance_id, body, *, authenticated: AuthenticatedInstance):
         from tts_erp_v2.plugin.status.contracts import (
             report_payload_hash,
             status_report_from_wire,
@@ -3457,6 +3436,7 @@ class TestLockBoundaryIsAuthoritative:
             payload_hash=report_payload_hash(report),
             request_id=str(uuid.uuid4()),
             now=report.observed_at,
+            authenticated=authenticated,
         )
         sess.commit()
         return response
@@ -3483,6 +3463,7 @@ class TestLockBoundaryIsAuthoritative:
                     observed_at=now,
                     incident_id=incident,
                 ),
+                authenticated=authenticate_report(seed, bearer_token=key),
             ).decision
         assert seed_decision is not None
         assert seed_decision.action.value == "recover_binding"
@@ -3530,6 +3511,7 @@ class TestLockBoundaryIsAuthoritative:
                     snapshot_complete=True,
                     snapshot_at=now + timedelta(seconds=2),
                 ),
+                authenticated=auth,
             )
             assert response.decision is not None
             assert response.decision.action.value == "hold", (
@@ -3573,7 +3555,12 @@ class TestLockBoundaryIsAuthoritative:
 
             # Session B performs the one-time advertiser binding and commits.
             with Session(db_engine) as session_b:
-                self._ingest(session_b, instance_id, ready)
+                self._ingest(
+                    session_b,
+                    instance_id,
+                    ready,
+                    authenticated=authenticate_report(session_b, bearer_token=key),
+                )
 
             # Session A must now see the bound advertiser and refuse a swap,
             # rather than re-running the compare-and-set on stale scope.
@@ -3604,6 +3591,7 @@ class TestLockBoundaryIsAuthoritative:
                     payload_hash=report_payload_hash(report),
                     request_id=str(uuid.uuid4()),
                     now=report.observed_at,
+                    authenticated=auth,
                 )
             session_a.rollback()
             assert refusal.value.code == "SCOPE_DENIED"

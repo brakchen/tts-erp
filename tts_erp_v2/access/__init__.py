@@ -2,18 +2,35 @@
 
 from tts_erp_v2.access._access import evaluate_access as evaluate_access
 from tts_erp_v2.access._credentials import authenticate_hash as authenticate_hash
+from tts_erp_v2.access._credentials import (
+    authenticate_hash_uncached as authenticate_hash_uncached,
+)
 from tts_erp_v2.access._credentials import authenticate_key as authenticate_key
+from tts_erp_v2.access._credentials import (
+    authenticate_monitor_delivery_key as authenticate_monitor_delivery_key,
+)
 from tts_erp_v2.access._credentials import (
     clear_credential_cache as clear_credential_cache,
 )
 from tts_erp_v2.access._credentials import hash_key as hash_key
+from tts_erp_v2.access._credentials import key_record_is_usable as key_record_is_usable
 from tts_erp_v2.access._deployment import canonicalize_path as canonicalize_path
+from tts_erp_v2.access._policy import (
+    MONITOR_CONFIG_DELIVERY_PATH as MONITOR_CONFIG_DELIVERY_PATH,
+)
+from tts_erp_v2.access._policy import (
+    is_monitor_config_delivery_route as is_monitor_config_delivery_route,
+)
+from tts_erp_v2.access._policy import (
+    is_plugin_status_report_route as is_plugin_status_report_route,
+)
 from tts_erp_v2.access._policy import required_role as required_role
 from tts_erp_v2.access._types import (
     AccessDecision,
     AccessEffect,
     AccessGrant,
     AccessRequest,
+    ApiKeyPurpose,
     AuthMode,
     CanonicalPath,
     Credential,
@@ -23,10 +40,12 @@ from tts_erp_v2.access._types import (
 )
 
 __all__ = [
+    "MONITOR_CONFIG_DELIVERY_PATH",
     "AccessDecision",
     "AccessEffect",
     "AccessGrant",
     "AccessRequest",
+    "ApiKeyPurpose",
     "AuthMode",
     "CanonicalPath",
     "Credential",
@@ -34,10 +53,15 @@ __all__ = [
     "Role",
     "UserCredential",
     "authenticate_hash",
+    "authenticate_hash_uncached",
     "authenticate_key",
+    "authenticate_monitor_delivery_key",
     "canonicalize_path",
     "clear_credential_cache",
     "evaluate_access",
     "hash_key",
+    "is_monitor_config_delivery_route",
+    "is_plugin_status_report_route",
+    "key_record_is_usable",
     "required_role",
 ]

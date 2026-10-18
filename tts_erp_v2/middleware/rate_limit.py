@@ -26,8 +26,12 @@ import time
 from collections import deque
 from typing import Any
 
+from tts_erp_v2.plugin.status.contracts import status_error_payload
+
 DEFAULT_LIMIT = 100
-ENV_VAR_NAME = "TTS_ERP_RATE_LIMIT_PER_MIN"  # exported for the admin reset endpoint + diagnostics
+ENV_VAR_NAME = (
+    "TTS_ERP_RATE_LIMIT_PER_MIN"  # exported for the admin reset endpoint + diagnostics
+)
 WINDOW_S = 60
 EVICT_AFTER_S = 5 * WINDOW_S
 EVICT_EVERY_N_CALLS = 256
@@ -188,7 +192,7 @@ def reset_shared(
 
 
 def too_many_response(
-    limit: int, retry_after: int
+    limit: int, retry_after: int, *, request_id: str | None = None
 ) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
     body = json.dumps(
         {
@@ -202,6 +206,18 @@ def too_many_response(
         (b"x-ratelimit-limit", str(limit).encode()),
         (b"x-ratelimit-remaining", b"0"),
     ]
+    if request_id is not None:
+        body = json.dumps(
+            status_error_payload(
+                request_id=request_id,
+                code="RATE_LIMITED",
+                message="too many requests",
+                retryable=True,
+            )
+        ).encode()
+        headers.extend(
+            [(b"cache-control", b"no-store"), (b"x-request-id", request_id.encode())]
+        )
     return 429, headers, body
 
 
@@ -243,7 +259,9 @@ class RateLimitMiddleware:
             f"[rate-limit] 429 key_id={key_id[:16]} path={scope.get('path')} "
             f"limit={counter.limit}/{WINDOW_S}s retry_after={retry_after}s\n"
         )
-        s, hdrs, body = too_many_response(counter.limit, retry_after)
+        s, hdrs, body = too_many_response(
+            counter.limit, retry_after, request_id=scope.get("plugin_status_request_id")
+        )
         await send({"type": "http.response.start", "status": s, "headers": hdrs})
         await send({"type": "http.response.body", "body": body})
 
