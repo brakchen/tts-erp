@@ -4,7 +4,17 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：5d private lazy sequencing叶窄接受，不等全recovery
+## 当前：115439f firstPRE deferred-entry叶窄接受，不等全recovery
+
+Parent完整消费b46/e75 SPEC/d0f QUALITY无blocking报告，核当前45SHA/TS原8+准atime9stat/HEAD-tracked-live远端/task-index/精确scope后，只接受首canonical read的controller-launch入口角色。审查仅原生21read1contact、20read1contact，无错误/越界/执行；不重跑completed代理/测试。
+
+真实publicsnapshot+直接publicTask、同job无await原clock耗尽/publichold撤GEN，两个旧task均额外入场1次read而要求0；hold自有同步合法read另计且实际stop/commit已drain。初live误断canonicalREADY为测试oracle错误而非第三业务RED：controller仅返回applied READY提案及实际business bind settled，runtime才负责canonical commit；先纠正测试，不改生产迎合。实际纠正2RED1livecontrol/45roots0后独立Sourcegate，115仅6行entry predicate使用capturedGEN/原positivebudget，不造尚不存在的PRE/新窗口/新owner。原read观察/真实PRE/postreadframe/physicalcap与合法cleanup-terminal不变。
+
+Parent27drain(含focused3)/独立96admissionPASS/45roots0，当前43production+2test在执行前后/commit后及后验同，旧24正文16statement保持；push/task-indexclean，traceJSON两项排除非repo全clean、protectedTS单次atime不扩组。receipt `/tmp/plugin-status-recovery-pre-entry-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,GREEN-summary,live-control-erratum}.json`。
+
+直接controller entry不是新完整runtime/native接线；已入场read error/window变体未由新3案分别隔离。8direct语法库存仍在，其他direct角色/nestedinit/proof/fence/deepernative/ABA-clock/actions/生产/ERPjobs/E2E仍开，5d六caller静态支持及旧P3不变。性能路径936显式移交保持、暂停不回收scope，未来生产接线需回交；foreign历史page-hook诊断只转owner。peer后报d193/412PASS/未push仅其回执；另报wxt版本变更不在936移交，已要求停该文件后续写，既有差异待协调非追认，不读改/回滚其树。ERP983/fullfast一次exit1/三stable窄修不变，无SDK/ready/业务mastermerge/release。以下5d及当时firstPRE待办仅历史。
+
+## 历史：5d private lazy sequencing叶窄接受，不等全recovery
 
 Parent完整消费75d两fresh报告无blocking后核同45SHA/TS原stat+已准atime/当前9stat/Git/精确scope，接受5d447b1 controller-launch叶。实际1RED2controls→24drain/独立96admission/45roots0，当前43production+2test在执行前后及commit后同；review仅14read1contact、22read1contact，0错误/执行NONE。只privateguarded required factory+7caller/claim创建内移，无optional eager fallback；原frame+SAMEbudget入场，实际raw仍observedBudget/latechild cap，cleanup/native binding fence/terminal角色不变，admitted结果不在await后抹去。
 

@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：5d447b1 controller-launch lazy入场叶窄接受；firstPRE/direct/nested/native仍未闭
+## 当前：115439f 首次PRE controller入口叶窄接受；其余direct/nested/native未闭
+
+b46工作流与e75 SPEC/d0f QUALITY均已COMPLETE，完整报告无blocking且无待答请求。Parent核当前43production+2namedtest共45SHA、保护TS原8stat+仅准atime/当前9stat、HEAD/tracked及live远端、task/index和审查白名单后，只接受首次PRE的controller-launch角色。两review原生read/contact为21/1、20/1，0工具错误/越界/执行，非其独立测试。
+
+直接publiccontroller Task的真实snapshot先建立canonical setup；同步发布task后无await耗原wall/duration或publichold同步撤GEN，旧task都多启动1次首read而要求0，hold自有合法同步read另计且实际stop/commit完成。最初live对照误断controller会直接持久化canonical READY；这是无效测试oracle而非第三业务RED，已在`live-control-erratum.json`说明并先纠正为实际business bind settled+applied READY提案，canonical提交仍归runtime。纠正后实际2业务FAIL/1livecontrol/24skip、45roots0，再独立Parent Sourcegate。
+
+115439f73561e7ef6602e7580f54b64c1f4d7b14只在runRecovery deferred entry首read前要求capturedattemptGEN和原SAME budget正余量，尚无PRE不伪造expect；后续真实read/拒绝观察/真实PRE拷贝/postread frame与physicalSettled不变。仅6行Source、无新owner/helper/window/API；合法cleanup/terminal和已admitted事实不误执行gated。最终27drainPASS(含focused3)、独立96admissionPASS、guarded45roots0；当前全部45SHA在该组执行前后/commit后/后验同，其他42production及admission未改、原24正文16AST statement同。已push/task-indexclean；dirtytraceJSON两项仍排除，非repo全clean；与protected TS stat对分组，内容禁令及atime单次许可不扩。
+
+本3案是直接controller Task的entry资格证据，不是新完整runtime接线；未逐项隔离已入场read rejection/窗口变体，也不保证更深asyncstore/queue/Chrome native入口。direct guard语法库存仍8，首read launch角色已处理，其他direct角色/nested ensureInitialized/isContextProvable/fence、ABA-clock/actions/Cookieaggregate/生产构造/ERPoutboxlease-job-startup/browser仍开；旧P3及5d其他6caller静态支持限制保留。下一步选择剩余角色的真实当前API反例及独立test/Sourcegate，不一律gate合法cleanup、不造PRE或第二90窗。
+
+registry9368337性能热点移交及对方scope保留，不因暂停/idle回收；status不写live-campaign/background/page-hook/对应tests/package版本用途整文件/README/CHANGELOG，未来生产接线须显式回交。foreign历史page-hook诊断只转原owner核当前版本，不在此读改或冒全项目clean。peer随后报d193/412PASS/未push，均仅owner回执未独立验收；其另报wxt manifest.version变更不在936移交内，已要求停止该文件后续写，既有差异待协调而非追认，不代其回滚/读改工作树。ERP983de42/原fullfast一次exit1及三stable窄修PASS不变，无业务mastermerge/SDK/ready/发布。证据：`/tmp/plugin-status-recovery-pre-entry-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,GREEN-summary,checkpoint,live-control-erratum}.json`。以下5d/firstPRE未闭等均为当时历史，不替代本段。
+
+## 历史：5d447b1 controller-launch lazy入场叶窄接受；当时firstPRE/direct/nested/native未闭
 
 75d的SPEC ea38/QUALITY a983均已COMPLETE、完整报告已消费且无blocking/无待答请求；Parent核当前43production+2namedtest共45文件SHA、TS原8stat+仅准atime/9当前observed、HEAD/remote/task-index及精确review scope后，仅接受本private sequencing叶。两review只原生read/contact14/1、22/1，无执行/错误/越界，非其独立测试。
 
