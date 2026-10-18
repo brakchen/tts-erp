@@ -1,6 +1,14 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：ERP body叶已闭；绑定候选因冻结fixture元数据门暂停
+## 当前：d584498绑定入场叶窄接受，继续physical实际drain/条件cleanup
+
+操作者在精确问题后已明确批准**仅已记录atime差异的单次元数据例外**，内容禁读/禁改/禁copy/hash/import/restore/emit和8原字段保持；不回写时间、不修工具、不推宿主因果，也不再把此已解授权当阻塞。原91f/a512 stopped不恢复；新c1中writerb9实际42业务RED6controls→48GREEN，Parent独立唯一named93PASS/guarded44roots0，0bd2e05push，缺expectedshape+坏raw分类优先级已修。
+
+c1两个fresh spec2707/qualityb48已COMPLETE/报告全读。quality发现P2：guardedpause runtime读取await后未检查原stillCurrent，失效后仍可启动新的canonical尾IO；Parent正常接手synthesis（非失败协议fallback），以实际controller原90Budget/publicGEN+真实runtimeget gate复现**2业务FAIL1live对照**，只在原owner加1个await后检查，再完整唯一named**96PASS**、guarded44roots0diag/0保护路径读取尝试，d584498push；96包含原93不累计旧45。spec两处Low也补allstorageReads计数断言。7SourceSHA运行前后同，其他5candidate SHA不动，8原stat同/atime仅准值/9当前observed前后同，2原dirtyfixture排除，非Repo全clean。
+
+新workflow3312c052两fresh postP2 SPEC e65/QUALITY4bb均已COMPLETE，实际7字段报告完整读且均无blocking；Owner同d584/7SHA/8原stat+已准atime/9当前observed核后，**仅本绑定入场叶窄接受**。两轮四review原生read/contact为33/1、31/2、18/1、14/1，无执行/工具错误/保护path读；不是其独立执行。c1/3312全部完成不恢复。现新bca42bd9只读后继owner/falsifier设计对话为launchsnapshot，以native实际为准，先选能推进真实drain/原tuple条件cleanup/时钟及生产接线的下一反例，不授新Source，不停在局部PASS；其余ABA/CAS/actions/Cookieaggregate/ledger/ERPoutboxlease-job-startup/browserE2E等原父门继续。ERP983de42 auth/schema/ACK/time/body叶已窄接受，fullfast原一次exit1/3stable窄修PASS保持，未全套再跑/整体SDK/ready/master业务合并/发布。当前证据 `/tmp/plugin-status-physical-resume-01a1406d/` 及其 `pause-tail/{RED-summary,GREEN-summary,checkpoint}.json`；以下未准atime/尚未Source等均历史。
+
+## 访问时间检查暂停时快照（历史；后续已明确批准单次例外）
 
 原目标的ERP body旧缺口已在现有读取owner落实32KiB stream早停：actual Starlette Request/ASGI多chunk先3业务FAIL5控制PASS，再新8+原API93/auth77=178PASS/drop，ruff/LSP3clean，fresh6bcad8无blocking；Low覆盖注释只改lying Content-Length、AST同值，缺失headercase未执行不冒称。只约束应用累计buffer与后续chunk消费，不约束ASGIserver/middleware自身buffer；无新parser/全局中间件/order/wire变化。ERP983de42已push/clean，auth/schema/ACK/time/body叶完成，outboxlease/job/startup/E2E仍开；原fullfast一次exit1/3stable窄修PASS不改为literal0。
 

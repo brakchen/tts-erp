@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：ERP body叶完成；物理候选停止，未通过独立验收
+## 当前：绑定入场d584498已窄接受；新后继physical只读设计对话
+
+atime例外已由操作者明确批准，仅已记录1792321144232238663、不扩fixture内容许可；8原字段/内容禁令保持，不再当阻塞。原91f/a512 stopped不恢复。c1新writerb9与spec2707/qualityb48全COMPLETE/报告已读；分类组合先42业务FAIL6controls→48GREEN、Parent独立93PASS/44roots0，0bd2e05push。completezeroexpected+legacyraw仍UNREADABLE，缺/坏shape先STALE再读，旧parser不动。
+
+quality的P2不是虚假GREEN：guardedpause awaitruntime后原窗失效却新起canonicalread，Parent以实际controllerBudget90/GEN和runtimeget原nativegate复现2业务FAIL1live对照，再只加原stillCurrent检查。最终唯一named96PASS/guarded44roots0diag/0保护读取尝试，d584498push，7taskpaths/indexclean、2原dirtyfixtures排除；原已admittedruntimeget仍等真实settle，sentinel在invalidator自有后续mutation前测stale零新读/零写、live一次validation/写入，动态finally全drain，specLow allstorageReads断言已补。3312两fresh SPEC e65/QUALITY4bb均COMPLETE/实际报告完整消费无blocking，Owner同d584/7SHA/原8stat+准atime/当前9stat与四review工具scope后，仅窄接受本bind叶。四review仅原生read/contact33/1、31/2、18/1、14/1，0执行/错误/保护path读，非其独立测试。c1/3312完成不恢复；新bca42bd9只读下一owner/falsifier对话为launchsnapshot，选actualdrain/条件cleanup/clock/生产接线下一可执行反例，不授Source或重开已解授权。
+
+未验证旧fixture/callersuites/全项目tsc/fullbuild/livebrowser，原physicalmutator/CycleLease真实drain/conditionaltuplecleanup/ABA/CAS/claimUntil/clock/actions/Cookieaggregate/ledger/job/browserE2E仍开；ERP983de42只闭auth/schema/ACK/time/body叶，原fullfastexit1不改literal0。当前以两JSON/liveTower与新证据physical-resume根/pause-tail为准，下文metadata未准/新修复未做等属历史。
+
+## ERP叶完成及metadata暂停快照（历史；其授权后续已解决）
 
 ERP现有32KiB body owner已从完整buffer后查改stream早停，真实多chunk3RED5controls→178相关PASS(8new+93API+77auth)，fresh6bcad8无blocking，注释仅lyingheader覆盖/AST同值，983de42push/clean；不扩为transport/middleware全局内存保证。auth/schema/ACK/time/body叶已闭，但ERP outboxlease/job/startup/E2E未闭，原完整fastexit1及原3stable窄修PASS事实保持。
 
