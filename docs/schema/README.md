@@ -27,8 +27,9 @@
    未发布的 migration 草稿在同一 revision 内修改时，也必须核对默认值、约束和索引等实际结构，不能只查版本号。
    **本次模板边界**：默认模板早于 `0071` 的 `pending` 默认值修正建立，曾存在同 revision 内容漂移。
    操作者随后明确批准在原锁和 shared guard 下，仅补齐 outbox `state` 的 `pending` 默认值；
-   未删除、重建或刷新模板，未改其他列属性、约束、索引、trigger 或 status 事实。新普通隔离 clone
-   已验证现存默认值，不靠表重建/迁移回放掩盖旧内容。本快照的来源仍是此前独立 clone 的真实 `0071`
+   未删除、重建或刷新模板。逐列比较覆盖类型、nullability、default 和 identity，只有目标默认值不同；
+   约束、索引、非 internal trigger 定义及四张 status 表行数也相同，不宣称穷尽全部 PostgreSQL 列属性。
+   新普通隔离 clone 已验证现存默认值，不靠表重建/迁移回放掩盖旧内容。本快照的来源仍是此前独立 clone 的真实 `0071`
    回放与原生成器读取，不因这次单列修补变成完整迁移链空库安装证明。
    agent 生成须通过隔离 runner 使用已验证 clone；这次单列授权不允许再次重置或刷新默认模板。
    实例级扩展（如 `pg_stat_statements`）属容器配置，不在快照范围内。
