@@ -4,7 +4,17 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：canonical锁后有效性已窄接受；CLI/Schema修补已保存，整体未交付
+## 当前：ERP窄前置已闭；物理绑定入场仍待实际实现/验证
+
+操作者继续已承接上条精确两文件+单列模板授权；1531a07明确external-api/storage写队列转移，foreign/core原树不动。模板新普通clone Inspector先1RED，原锁/guard/literal target仅SETDEFAULT pending，独立连接durable与限定metadata比较成立，clone schema9PASS；不是reset/refresh/完整migrationchain。证据比较仅列type/nullability/default/identity，不穷尽PG列属性；constraints/index/noninternaltrigger/4statuscounts/OID同。首次SETLOCAL引号setup失败在DDL前，未当RED。
+
+report模式/cookie/Bearer/error文档已修，保ordinary语义；当前89PASS(auth77/schema9/原baseline3)、另ACK3+timestamp8=11PASS，分轮不加总。fresh700a无actionablefinding，属性精度已在README/precision记录限定。Source1af7e48push/clean，auth/schema/ACK/time叶窄接受，不代表ERP job/outboxlease/大body/启动/E2E。完整fast仍仅历史一次2836PASS3FAIL14skip1xfail exit1，3stable窄修PASS，不literalbaseline0。
+
+新physical设计a362已完成并实际读报告：required原fence/factualadmitted ABI、共享原queue预先模块安装、末同步liveness/native无额外await；物理canonicalvalidator必须拒绝raw缺失/坏/zeroNonce及legacy写回zero，不能只看parsed字段存在。OWNER选当前runtime372L本地修复，core454f1223仅readonlyforwardport，不越权引入configfeature；sharedchain不能等blockedclearEnqueued才release测试owner。只是方向，不是Source/GREEN/wholephysical。
+
+新writer workflow91f6277d-3d7d-4a65-af66-addd28cb198b为launch快照，初始仅selfcontained当前API测试/私有artifact，当前selfcontained1业务RED2PASS/44production+newtest compiler0及0protected读取已由OWNER读log确认，native86f精确Sourcegate已授，非整体/physical通过。Parent不改plugin产品；后独立spec/quality仍不等SDK/整体验收。所有旧worker/review已完成不恢复；新节点按实际native消息续行不poll/sleep，不能据launch硬说仍running。当前以两JSON/liveTower为准，旧接续/default未修段均历史。真实native admission/drain/conditionalcleanup/actions/Cookieaggregate/ledger/leaseclock/job/browser/build/release仍开，保真正拒读/冻结/no-bundle/首次PRE-GEN/原Budget/实际native事实。
+
+## ERP81ea106后验快照（历史；接续/模板前置已后续解决）
 
 原phase2 worker、1fc/b9/d125审查全COMPLETE且实际报告已读，无running节点。canonical纯liveness owner与锁后current复用，pre-epoch真实双Session1RED1rollback对照→相关208/后215PASS，fresh expiry无额外缺陷，OWNER仅此叶接受。默认值真实0071空clone回放/省stateINSERT由RED→schema8PASS，独立clone原generator生成14schema80table；默认模板未补draftdefault，回放不证明完整chain/模板已修，README已明确内容校验而非仅head。
 

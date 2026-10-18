@@ -1,6 +1,20 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：ERP鉴权修补已保存；共享文件接续与端到端门仍开
+## 当前：批准的文件接续与模板单列修复完成；转入绑定入场实现
+
+用户对上条精确3项请求回复继续后，已按该范围登记并push registry1531a07：external-api.md移交status ERP，storage.ts写队列移交status插件，原video/core这两路径停止写；其他范围及foreign WIP不动。不是依据idle/clean猜测接管，也不是生产/模板reset/refresh/发布许可。
+
+默认测试模板原普通clone新Inspector断言先1业务RED(None)；原锁/sharedguard/exactliteral目标下仅ALTER outbox.state DEFAULT pending，commit后独立连接验证；新普通clone schema9PASS。比较覆盖全部usercolumns的类型/nullability/default/identity，仅目标default不同，约束/索引/非internaltrigger定义、4status表行数及tableOID同，不是穷尽PG全部列属性/数据值。首次shell引号导致SETLOCAL语法错误、DDL前退出，为setup非业务RED，原记录保留并加precision说明；无删除/重建/refresh。
+
+精确report Bearer-only/allmode/error/cookie例外文档已更新，保ordinary语义。当前相关89PASS(auth77/schema9/原baseline3)，另原ACK3/timestamp8=11PASS，分轮不加总；fresh700a无actionablefinding，仅证据属性范围已限定。Source1af7e48已push/ERP clean、同步1531metadata；canonical auth/schema、ACK、timestamp叶已窄接受。原完整fast仅一次2836PASS3FAIL14skip1xfail exit1及3stable窄修PASS事实保留，不literalbaseline0/再整套；ERP job/outboxlease/bigbody/启动与真实端到端仍开。
+
+新post-handoff架构a362已COMPLETE并消费：OWNER选择A，只修d940当前372L运行基线；core454f1223L仅readonlyforwardport参考，不覆盖原树/引入未发布remoteconfig。必需原PRE/nonce/firstGEN/SAMEbudget与factualadmitted结果；canonical owner物理校验还要拒绝缺失/坏nonce被legacyparser合成为zero并写回的伪authority；保其他legacy解析。共享队列用原delegate在background模块求值先安装，校验直接读后末同步guard/native不再await。旧clearEnqueued门在共享链会死锁，需同步generation revocation witness后release/drain；不能把test injection当实际T5接线。
+
+当前launch快照：新唯一plugin writer workflow91f6277d-3d7d-4a65-af66-addd28cb198b（其后两fresh只读复核），初始只准新self-contained测试/私有日志，随后a512已给出selfcontained当前API1业务FAIL2控制PASS、44production+newtest roots compiler0/0protected读取，OWNER已原生读log确认并授native86f精确4source+newtest/2oldfake迁移Sourcegate，非全physical接受。不读/复制/导入冻结fixtures/emitter、不跑whole/bundle，旧节点不resume/重跑。Parent只独立docs/ERP与Git，不与writer抢plugin cwd。此为待实际native结果的launch记录，不假定节点持续running/Green。
+
+证据根 `/tmp/plugin-status-approved-continuation-01a1406d/`：TaskStartSnapshot、approved-handoff-result、template-default-repair-result、template-evidence-precision、template-existing-default-{RED,GREEN}、erp-parity-named/commit/review、ack-timestamp-narrow-refresh、physical-owner-choice/posthandoff-design；新worker/report由同根绑定。原native admission缺陷尚未Source修复，mutation-only replay/drain/原tuplecleanup/ABA/refreshclock/actions/Cookieaggregate/ledger/job/browser/build/E2E均未闭。首次PRE/GEN/唯一原Budget、实际native settle/drain、epoch/mono分域、全部真正拒读/冻结/no-bundle保持；不ready/整体交付/合并发布。两JSON currentExecution与liveTower为当前事实，后文仅历史。
+
+## ERP81ea106代码checkpoint快照（历史；接续/模板阻塞已由本轮解决）
 
 phase2 writer与原1fc/b9/d125审查均已COMPLETE、报告已消费；无后台worker/reviewer可等待，不resume/重跑。OWNER在现有canonical owner修复pre-epoch last_used锁后遗漏；真实双Session先1业务FAIL1rollbackPASS，再相关208及后215PASS（不相加），fresh expiry无额外缺陷，仅此叶接受。0071 outbox pending默认值经guarded空clone真实upgrade/省state INSERT先NotNullViolation再schema8PASS；原generator在独立clone导出14schema80table，未手改SQL。默认模板仍未补齐这次draft default；clone回放不是模板修复或完整迁移链安装，不再次reset/refresh。
 
