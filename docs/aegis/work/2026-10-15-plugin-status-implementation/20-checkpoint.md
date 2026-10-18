@@ -1,6 +1,14 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：phase1部分实现被真实测试模板前置阻断，整体未交付
+## 当前：默认模板已授权恢复；第一阶段14PASS，继续真实鉴权修复
+
+操作者本轮明确允许一次同名默认测试模板恢复。已在原模板锁内以exact literal目标+shared destructive guard删除`tts_erp_test_template`，不force断连；原sole runner随后missing-bootstrap同名模板，真实stamp0069→upgrade0070→0071、seed、clone命名临时库，最小phase1 **14PASS/exit0**并drop clone。生产/其他库/源码脚本未变，先前15WIP SHA不变。当前可普通isolated clone；已有目标表新增FK导致未来再次refresh的缺陷未修，不再次reset/refresh或换库绕测。
+
+随后首次实际执行已author的phase2文件：**30业务FAIL+7对照PASS、0caseERROR**，真实clone/drop；这不是重跑完成代理或将旧log当当前证据。缺口落在allmode/UUID/协议错误和两429、prefix/query日志、auth后committed事务失效。新增fresh workflow `4f4a2111-1629-4081-afcf-df5726a10310` / writerbdc14105处理剩余修复，Owner原生13493905精确Sourcegate已授；必须required immutable原auth身份、fresh锁后current facts、单UUID/单错误wire owner，不新增旁路。缺失guard同语义/文件先typedRED，Source不超界。旧66及d262/8940完成不恢复/重跑；Parent只改独立docs不碰writerCWD源码/Git。
+
+证据 `/tmp/plugin-status-erp-auth-integration-01a1406d/{template-reset-authorization,template-reset-result,template-rebuild-phase1,phase2-RED}.json`，有界计划`owner-phase2-plan.md`。14只是phase1，不当完整鉴权GREEN；仍需命名回归、格式、Parent同byte/freshspecquality/fullfast，以及独立storage/action/job/browser交付门。下段模板失败与待授权是历史，不再作当前blocker。
+
+## 模板刷新失败与待授权快照（历史，已由本轮明确授权恢复）
 
 workflow66ba7651及两个child现已全部COMPLETE，实际两个报告已消费；不再等/poll/resume/重跑它们。worker新增缺表/mount/CORS共7个有效业务RED后，按OWNER条件gate完成phase1部分Source；尝试sole wrapper刷新默认`tts_erp_test_template`时，0070新增shop FK阻断commerce.shops PK schema restore，exit4、未clone/collection/新业务测试。模板可能部分替换；envsetup --check0只证明工具/库存在，不证明schema完好。已通知共享会话暂停从默认模板克隆。
 

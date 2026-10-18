@@ -4,7 +4,13 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：phase1部分Source未验收；默认测试模板setup失败，整体未交付
+## 当前：默认模板已恢复，phase1命名14PASS；phase2真实RED后继续修复
+
+用户本轮授权的一次同名默认template恢复已完成：原锁/sharedguard/exactname/no-force删除0，sole wrapper missing-bootstrap真实0071→clone0147ac64、14PASS/exit0/drop；不动生产/其他库/源码或脚本。默认模板不再阻断，不重复申请、不再reset/refresh；原wrapper将来已有表target-onlyFK刷新缺陷未因此修复，仍属script-owner后继，不扩大本scope。
+
+之后phase2 authored37案首次实跑，30业务FAIL7对照PASS0caseERROR，clone41b7468a已drop。新fresh workflow4f4a2111/workerbdc14105处理剩余allmode/current-auth+required immutable proof/锁刷新/单UUID/错误两429/日志隐私，Owner原生13493905精确Sourcegate已授；新增缺失guards仍先typedRED，old66/d262/8940不重跑/恢复。Parent只独立docs，不改writerCWD。14PASS不授整个鉴权、fullfast、physical/actions/job/browser或交付；当前以两JSON currentExecution与liveTower为准。
+
+## 默认模板失败/待授权快照（历史，当前已明确授权并恢复）
 
 新workflow及两个child均已COMPLETE，实际report已消费；worker新7个缺表/mount/CORS业务RED后仅实现条件phase1，phase2 tests仅author未跑。sole wrapper刷新默认tts_erp_test_template因0070 shop FK阻止commerce.shops PK恢复而exit4，未clone/collection/新tests、template可能部分替换。envsetup --check0只是依赖/库存在，已通知共享会话暂停从默认模板克隆；不以此重试冒充GREEN。
 
