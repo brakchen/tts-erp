@@ -4,7 +4,17 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：默认模板已恢复，phase1命名14PASS；phase2真实RED后继续修复
+## 当前：canonical锁后有效性已窄接受；CLI/Schema修补已保存，整体未交付
+
+原phase2 worker、1fc/b9/d125审查全COMPLETE且实际报告已读，无running节点。canonical纯liveness owner与锁后current复用，pre-epoch真实双Session1RED1rollback对照→相关208/后215PASS，fresh expiry无额外缺陷，OWNER仅此叶接受。默认值真实0071空clone回放/省stateINSERT由RED→schema8PASS，独立clone原generator生成14schema80table；默认模板未补draftdefault，回放不证明完整chain/模板已修，README已明确内容校验而非仅head。
+
+完整fast一次2836PASS3FAIL14skip1xfail exit1，三失败稳定复跑后在正式5b53c11移交scope内修复（保publishing血缘/admin语义），现3selectors PASS，非literalbaseline0、不重跑整套/改baseline。后续CLI非唯一prefix/bulk-revoke被fresh指出并真实验证，新3FAIL3controls+scope-lock1FAIL后唯一activeprefix/selectedPK/GENERAL单事务持锁修复，保helper原默认。fresh b780无具体缺陷/Optional rollback缺口已由OWNER补实：legacycommit对照1FAIL，当前changed-scope18PASS（CLI9+retry6+baseline3），不与此前215快照加总。jitter实际最低1s，旧+1s是在due；解释已纠正，不改策略。23pyruff/format0/LSP23clean，后新test另1path刷新clean。
+
+`feature/plugin-status-erp@81ea106` 已push、仅metadata同步master5b53c11，25SHA同/工作树clean；仅局部checkpoint，不是ready/SDK/生产/合并发布。三fresh后验工具22read2contact、30read3contact、19read1contact，无执行或路径越界；Parent执行不冒称reviewer执行。证据authintegration目录owner-auth-final-frozen/auth-code-commit/rotation-owner-final/followup-native-tool-audit及reports。
+
+external-api模式/cookie说明仍待video owner精确release，插件storage原队列写口仍属core writer；未由任务接管/idle推导文件release。原native stale入场缺陷未修、physical/actions/job/outboxlease/Cookie aggregate/ledger/browser/build/E2E仍开，保首次PRE/GEN/原Budget/实际native settle-drain/tuplecleanup与时钟分域、全部真正拒读/冻结/no-bundle。两JSON currentExecution为当前事实；下文launch/无GREEN/待模板许可均历史，不复跑完成代理或模板reset。
+
+## 默认模板恢复与phase2启动快照（历史；后续实现/审查已完成）
 
 用户本轮授权的一次同名默认template恢复已完成：原锁/sharedguard/exactname/no-force删除0，sole wrapper missing-bootstrap真实0071→clone0147ac64、14PASS/exit0/drop；不动生产/其他库/源码或脚本。默认模板不再阻断，不重复申请、不再reset/refresh；原wrapper将来已有表target-onlyFK刷新缺陷未因此修复，仍属script-owner后继，不扩大本scope。
 

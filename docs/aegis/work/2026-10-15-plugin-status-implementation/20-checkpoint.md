@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：默认模板已授权恢复；第一阶段14PASS，继续真实鉴权修复
+## 当前：ERP鉴权修补已保存；共享文件接续与端到端门仍开
+
+phase2 writer与原1fc/b9/d125审查均已COMPLETE、报告已消费；无后台worker/reviewer可等待，不resume/重跑。OWNER在现有canonical owner修复pre-epoch last_used锁后遗漏；真实双Session先1业务FAIL1rollbackPASS，再相关208及后215PASS（不相加），fresh expiry无额外缺陷，仅此叶接受。0071 outbox pending默认值经guarded空clone真实upgrade/省state INSERT先NotNullViolation再schema8PASS；原generator在独立clone导出14schema80table，未手改SQL。默认模板仍未补齐这次draft default；clone回放不是模板修复或完整迁移链安装，不再次reset/refresh。
+
+完整安全fast只跑一次：**2836PASS/3FAIL/14skip/1xfail、exit1**；3个head/inventory/docs失败最小复跑确认稳定，5b53c11正式转移v16/schema2docs归属后保publishing血缘/admin语义修复，现3selector PASS。不能将目标修复说成literal完整baseline exit0，不重新跑整套或更新baseline。
+
+215PASS是随后4path修补前的冻结快照；fresh CLI审查另发现非唯一prefix/fetchone+bulk revoke。真实新3FAIL3旧控制PASS（managedpair仅分类失败，generalpair实发key及late B碰撞实禁managed），另原scope-lock1FAIL后，改为唯一active prefix、selected PK、原GENERAL单事务持锁；保_insert_key默认commit=True，拒managed，无新受管旋转API。新fresh b780静态未见具体缺陷，唯一Optional rollback测试已补：真实INSERT后异常+独立连接断言，legacycommit变体1业务FAIL、当前最新**18PASS**（CLI9+minimum-jitter6+原baseline3），不与215相加。jitter floor实际1.0s，旧+1s失败是AT due，不是<1s；不改业务重试策略。23pyruff/format0、activeLSP23clean，新增rollback测试1path另刷新clean。
+
+ERP25path已精确提交并push：`feature/plugin-status-erp@81ea106`，同步master5b53c11仅registry变化，Source SHA不变/工作树clean。3057新增行含旧维护依赖/草稿首次跟踪，不作新实现量；这是局部可追溯代码checkpoint，**不是ready/整体交付/合并发布**。证据 `/tmp/plugin-status-erp-auth-integration-01a1406d/{owner-auth-final-frozen,auth-code-commit,rotation-owner-final,rotation-rollback-legacy-control,followup-native-tool-audit}.json` 及实际review reports；审查仅native read/contact，独立执行NONE。
+
+仍需有权接续 `docs/api/external-api.md` 的精确report模式/错误说明及插件 `src/extension/storage.ts` 的原队列写口；未收到release不写、不动foreign WIP。physical原authority admission/drain/原tuple cleanup/actions/Cookie aggregate/runtime ledger/outbox租约/job/browser/build/E2E门仍开，模板内容后继也未完成；现状以两JSON一致currentExecution及liveTower为准。后文launch/running/PENDING断句均为历史，不据此重开代理或再次删模板。
+
+## 默认模板恢复与phase2启动快照（历史，后续worker/审查已完成）
 
 操作者本轮明确允许一次同名默认测试模板恢复。已在原模板锁内以exact literal目标+shared destructive guard删除`tts_erp_test_template`，不force断连；原sole runner随后missing-bootstrap同名模板，真实stamp0069→upgrade0070→0071、seed、clone命名临时库，最小phase1 **14PASS/exit0**并drop clone。生产/其他库/源码脚本未变，先前15WIP SHA不变。当前可普通isolated clone；已有目标表新增FK导致未来再次refresh的缺陷未修，不再次reset/refresh或换库绕测。
 
