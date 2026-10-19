@@ -1,6 +1,23 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：7e74783 recovery snapshot入场叶窄接受；非生产HTTP或整体交付
+## 当前：批准部署根及配置存储叶完成；生产闭环仍未交付（2026-10-19）
+
+用户已批准后续部署根 `https://chen.daqiangplatform.com/tts/`、仅新增 Chrome host `https://chen.daqiangplatform.com/*`，以及显式 Seller／Advertiser 配置和独立 status key。原域名参考被此授权替代，不再询问这两项；不等真实外发、凭证签发、生产重启、发布或全仓 URL 改写许可。唯一协议仍为 `docs/plugins/plugin-status-report.md`，此工作记录不改协议。
+
+- `5930e27` 只新增批准 host，原 permissions、其他 hosts、version 均未改。真实声明缺项 1 RED＋1 endpoint control → 2 PASS／46 roots 零诊断；只证明声明与既有 resolver 对 `/tts/v2/plugin/status/report` 的路径处理，不是打包产物、Chrome 实授或 HTTP 证明。
+- 配置只读设计 `05c/d8` 完整消费，Parent 选 B：valid legacy 可读及无 scope 轮换，但首次赋 scope 需显式 repair、拒绝且 no-write；全五 key 真缺失才可 provision；malformed／orphan 不当 absence，scoped 同实例目标不可换删，异实例不静默丢债。
+- `ddf160f594ad2ea445daf2680a702edf115a01f3` 已 push／upstream 0/0／task-index clean，原两 dirty trace JSON 排除，非 repo 全 clean。旧 type／decoder 迁入 113 行纯配置 owner，wire 只 export 原 scope parser；两公开 writer 首 await／queue 前复制输入、同一 serializer 锁内 fresh RAW 五 key、实际 set await。storage 从 1237 减为 1215 行；没有新 credential／queue／runtime owner。
+- 严格分轮：worker 新 69 案 64 业务 RED／5 controls、47 roots 零诊断 → 最终 69 PASS、48 roots 零诊断及旧 legacy exact1 PASS／29 skip。Parent 独立选 8 案实际 3 RED／5 controls → 8 PASS／61 skip，另 legacy exact1 PASS／29 skip、48 roots 零诊断；49 watched SHA 在逐命令、commit、后验均同，保护 TS 原八字段＋仅准 atime 的九字段稳定。最初 selector 预估 5／3 不符实际，已勘误，不补跑凑数、不冒 Parent 全 69 独立执行。
+- `48f` 分派误把 writer 结果字段当直接 JSON，虽然保存终稿正确却未 launch 两审查；停止并保存 own patch／冻结已 push 后，仅同原生协议 `f88` 补两位从未启动的只读 reviewer，没有恢复 writer、换 CLI 或修改工具。SPEC 22 read／2 contact、QUALITY 23 read／2 contact，完整无 blocking、工具零错／越界／执行。两报告 changedFiles 列的是四个候选路径，不是实际 reviewer 写入，Parent 审计已注明，原件保留。
+- Parent 后验当前 49 SHA／stat9／Git 核同后，仅接受配置存储叶，置信 B。setter reject、复杂 raw capability clone／clone failure、valid config＋damaged debt rotation 三类直接 oracle 未覆盖，只有源码支持，后续单独 test-only 控案；正常 set settlement、正常 capability array mutation 不能冒这些实测。编辑自动 transient missing-export 诊断不是业务 RED，也不证明全项目 LSP clean。
+
+当前所有本轮节点已 COMPLETE，不恢复或重跑。先核五 checkpoint／registry 回执，再补上述 post-change 控制并设计生产 ACTIVE 的 fresh RAW 严格空 caps、批准规范 endpoint、必需 scope 投影和 truthful legacy 观测。generic reader 的过滤后 `caps=[]`、可读 legacy、bound／captured 事实都不授生产权限；`clearStatusInstance` 旧路径未动，不等全销毁安全。背景／page-hook／对应 tests 写队列尚未显式回交，不因 perf master `d193`、completed 或 idle 接管；未读改 foreign WIP。
+
+真实 runtime 挂载、native／clock-ABA／actions／Cookieaggregate、ERP outbox lease／job／startup／browser 均仍开，无 ready／业务 master merge／父仓指针／发布。ERP `983de42`、原 fullfast 只一次 exit1／三稳定失败窄修，以及早 7e 的 30／96 非最终同字节证据限制原样保持。全部禁读、TS 与 JSON 两组分离、no-bundle 不变。
+
+证据：`/tmp/plugin-status-config-scope-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,checkpoint,owner-source-gate,review-dispatch-incident}.json`、其 `parent/GREEN-summary.json`，另 host／production-plan／approved-activation 证据根。两 JSON 的相同 `currentExecution` 与本段为当前事实，下文“当前”均属各自历史快照。
+
+## 历史：7e74783 recovery snapshot入场叶窄接受；非生产HTTP或整体交付
 
 600/dff已完成角色设计与Parent对话，区分原recover步骤5完整close-window请求和合法独立passive preview；direct8语法并非8个bug。实际publicruntime startup在最终Seller rawACK后publichold同步撤GEN、原预算仍90000时，旧代码仍进入注入snapshot port `{tabId:82,deadlineMs:90000}`。纠正后1业务RED/2controls与45roots0，再独立Sourcegate；只把snapshot迁入既有requiredlazy owner为第8caller，传原typed state，保原budget0前检、postawaitGEN、真实Seller事实、错误/incomplete/freshness、cleanup/preview及actual rawdrain。旧27正文17statement与旧7caller表达式同。
 

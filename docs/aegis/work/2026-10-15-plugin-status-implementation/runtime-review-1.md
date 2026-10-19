@@ -4,7 +4,19 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：7e snapshot第8lazy caller入场叶窄接受
+## 当前：ddf 配置存储叶窄接受；生产 ACTIVE／runtime 尚未挂载
+
+用户已准部署根 `https://chen.daqiangplatform.com/tts/`、唯一新增 Chrome host `https://chen.daqiangplatform.com/*` 和显式 Seller／Advertiser＋独立 status key，不重复申请，不从 bound／captured 事实推权限。`5930e27` 仅 host 声明／canonical endpoint 对照：1 RED＋1 control → 2 PASS／46 roots 零诊断，不是 Chrome 或 HTTP 实证。
+
+Parent 完整消费配置契约只读设计并选 B。`ddf160f594ad2ea445daf2680a702edf115a01f3` 已 push／task-index clean（两原 dirty trace JSON 排除，非 repo 全 clean）：旧 decoder／type 迁至 113 行纯 schema owner，wire parser 仅 export；两 writer 共用原 serializer／fresh RAW 五 key，输入首 await 前复制，只有全缺失 configure 才 provision，config-only 不初始化；legacy 首次 scope、换删目标、异实例及 unreadable／orphan 都拒绝而不 reset，token 轮换只写 config／await 实际 set。没有第二 writer／queue／credential／runtime 状态 owner，storage 行数 1237→1215。
+
+worker 实际新 69 案 64 RED／5 controls、type47zero → 69 PASS／type48zero＋legacy exact1 PASS／29 skip；Parent 独立选8实际3 RED／5 controls → 8 PASS／61 skip，另 exact1／29 skip、type48zero。selector 原预估5／3已勘误不凑数；最终49 SHA 逐命令／commit／后验同、保护9 stat 同，不把不同范围相加。`f88` 两 fresh 完整无 blocking：SPEC22read2contact／QUALITY23read2contact，零错／越界／执行；两报告 changedFiles 候选四路径不是自改，已在 Parent 审计澄清。`48f` 原结果绑定误判未启动 review，保存冻结后同 native 仅补两只读；writer 已完成不恢复，非工具修理／CLI fallback。
+
+Parent 只接受配置存储叶，置信 B。三类控案仍缺：实际 setter reject 及拒后队列、复杂 raw caps 克隆／失败、有效配置配损坏 debt 的轮换。当前只能以 await/catch／structuredClone／单 config 写源码支持，不能冒直接测试；新增后续控案应称 post-change regression，不强造 RED。generic reader 保原 caps 过滤／nonarray→[]，这不是 ACTIVE 投影；未来必须 fresh RAW 空 caps＋批准规范 endpoint＋完整 required scope，legacy 可读不等生产授权。旧 clear API 未动、repair/reprovision 尚无门；caller43prod+2body不是动态／外部全图。自动编辑 transient export 诊断非业务 RED／全项目 LSP clean。
+
+本轮所有节点终态／无待答，不恢复或重跑。先核五 checkpoint／registry 接续，再补3类控案并设计 ACTIVE／truthful legacy 观测；背景／page-hook／对应 tests 仍等 perf 明确回交，不能以已发布 master d193／idle 接管。无实际 status runtime/controller 生产挂载，原六 controller 叶保持；native／clock-ABA／actions／Cookieaggregate／ERP lease-job-startup／browser 未交付，早7e30/96非finalbytes、ERP983／fullfast一次exit1及全部禁读／no-bundle保留。证据 `/tmp/plugin-status-config-scope-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,checkpoint,review-dispatch-incident}.json`；当前以两JSON currentExecution和本段为准，下文均历史。
+
+## 历史：7e snapshot第8lazy caller入场叶窄接受
 
 600角色设计/Parent对话保合法passive preview，原recover完整snapshot属步骤5而非独立observer。真实publicruntime finalSeller rawACK后publichold撤GEN、原90000ms尚正，旧实现仍实际进入snapshot注入port；纠正1RED2controls/type0后独立Sourcegate，7e只迁入既有requiredlazy factory第8caller/typed state，原budget0/postawaitGEN/已入场Seller事实/errorincomplete/freshness/cleanup与physicalcap保持，无新owner/窗口/接口。旧27正文/旧7caller同。
 

@@ -1,5 +1,21 @@
 # Original-goal ERP canonical status authorization — bounded design
 
+## 当前接续（2026-10-19）：批准部署根／配置存储叶完成，非生产授权激活
+
+用户已明确批准 `https://chen.daqiangplatform.com/tts/`、只新增 `https://chen.daqiangplatform.com/*` Chrome host、显式 Seller／Advertiser 配置与独立 status key。旧域名仅历史参考，不再问已准两项，不索取 token／Cookie；不扩实际外发、凭证签发、生产迁移／重启／发布或全仓 URL 改写。ERP `983de42` 的 auth/schema/ACK/time/body/default 窄叶与原 fullfast 一次 exit1／三稳定失败窄修事实不变。
+
+插件 `5930e27` 仅 host literal 声明及既有 endpoint resolver 对照，实际 1 RED＋1 control → 2 PASS／46 roots 零诊断，不冒已装 Chrome 权限或 HTTP。配置 B 契约由只读设计和 Parent 确认：legacy 可读／无 scope 轮换但首次 scope 需显式 repair，malformed／orphan 不当 absence，现有 namespace 换 UUID 不静默丢债，config-only 不获得初始化/reset 语义。
+
+`ddf160f594ad2ea445daf2680a702edf115a01f3` 已 push／task-index clean（两 dirty trace JSON 排除非 repo 全 clean），Parent 仅窄接受配置存储叶。旧 decoder/type 迁至纯 schema owner，复用 wire scope parser，两 writer 输入首 await 前捕获、唯一 queue 锁内 fresh RAW 五 key、实际 set await；同实例 scope 不可换删／债务原样保留。worker 新69：64业务RED5controls/type47zero→69PASS/type48zero＋legacy exact1PASS29skip；Parent 独立8选中：实际3RED5controls→8PASS61skip，另 exact1PASS29skip／type48zero；49SHA逐命令/commit/后验同、保护9stat同，不相加／不冒Parent全69。原selector预估5/3已勘误；编辑自动 transient export 诊断不是业务RED或全项目LSP证明。
+
+f88两fresh完整无blocking，SPEC22read2contact／QUALITY23read2contact、零错／越界／执行；两报告changedFiles列的是候选四路径非自改。48f结果绑定误判未启动reviews，冻结已push并保存own patch后仅同native补两只读，无writer恢复/重跑/CLI或工具修改。setter reject、复杂rawcaps clone/失败、validcfg配damageddebt轮换三个直接oracle缺口如实保留，只有源码支持，后续精确post-change控制。
+
+generic reader过滤后的caps=[]／可读legacy／binding事实都不是生产权限；fresh RAW 严格空caps＋批准规范endpoint＋required显式scope的ACTIVE投影、独立key purpose后端校验、truthful legacy观测和真实runtime构造仍需后继门。旧clearStatusInstance未改，不等全销毁授权闭环，legacy repair/reprovision刻意未提供。perf背景/page-hook/对应tests未明确回交不写，不因d193已发布/idle推release；全部禁读、TS/JSON分组和no-bundle保持。本轮所有节点已终态不恢复；先核五checkpoint/registry后，补3类控案／ACTIVE设计，继续原native/clock-ABA/actions/Cookieaggregate/ERPoutboxlease-job-startup/browser，整体未交付／未ready／无业务mastermerge、父仓pin或发布。
+
+证据 `/tmp/plugin-status-config-scope-01a1406d/{owner-bounded-acceptance,owner-postreview-audit,checkpoint,owner-source-gate,review-dispatch-incident}.json`、其parent/GREEN-summary.json及host/production-plan/approved-activation证据根。当前事实以本段与两JSON相同currentExecution为准；以下“当前”均为对应历史快照，不改唯一协议。
+
+## 历史状态说明
+
 Status (historical BIND checkpoint; current raw-drain status is in the next section): canonical auth/schema alignment, ACK, timestamp and existing report body-limit leaves are narrowly accepted; latest ERP source `feature/plugin-status-erp@983de42` pushed/clean. Body stream repair had actual3RED5controls→178relatedPASS and fresh6bcad8 no blocking; no transport-global memory claim. Prior auth alignment was accepted after registry1531a07/fresh700a. The operator-approved external-api handoff and test-template single pending-default catchup are completed, not current blockers. Current related89PASS plus separate ACK/time11PASS are not additive. Original full-fast exit1 history/three narrowly fixed stable failures remain, no full rerun or literal baseline-zero claim. Original physical/job/browser end-to-end delivery remains open. The operator explicitly approved the already-recorded atime-only metadata exception without allowing protected contents; the other8 fields/content bans remain. Original91f/a512 stays stopped, no completed ERP reviewer reopened. Laterc1 newwriter and2freshreviews all completed/consumed; Parent actual93PASS/44roots0 followed by realP2runtime-tail2RED1livecontrol, minimalguard repair and latest96PASS/44roots0. Plugin d584498 is pushed;3312 postP2fresh SPEC/QUALITY both completed with no blocking finding, fullreports consumed and Parent sameSHA/native-scope/metadata gate confirmed. ONLY the BIND admission leaf is accepted, not wholephysical or ERP rollback. Newbca42bd9 is a read-only next-owner/falsifier dialogue launchsnapshot; no nextSource approval. No original-nine-fields-identical/host-cause claim; metadata approval and missingexpected classification are no longer blockers. This is the original project, not tool/Pi Web repair. Baseline/launch entries below are historical; this section and the two JSON currentExecution objects govern current facts.
 
 ## 当前physical接续：7e74783 snapshot controller-entry叶窄接受
