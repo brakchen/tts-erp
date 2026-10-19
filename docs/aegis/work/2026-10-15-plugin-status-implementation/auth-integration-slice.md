@@ -1,6 +1,18 @@
 # Original-goal ERP canonical status authorization — bounded design
 
-## 当前接续（2026-10-19）：批准部署根／配置存储叶完成，非生产授权激活
+## 当前接续（2026-10-19）：6a8 公开启动真实反例，非生产授权激活
+
+用户已准chen/tts根、唯一精确Chrome host、显式Seller/Advertiser独立statuskey，不重复问或索取真实token/Cookie；继续开发不隐含共享热点回交。ERP983与既有auth/schema/ACK/time/body/default叶及fullfast一次exit1保持，outboxlease/job/startup/browser等原Goal未闭。
+
+配置3类控制已由真实新16案覆盖：2f35阶段18选中PASS67skip/type48；fresh d3f readonly16read1contact无blocking/工具零错越界执行，LOW子集匹配一行strengthen后2352560当前受影响6PASS79skip/type48。18为strict断言前字节，不冒当前all18/all85，44Source仍ddf。
+
+新自有startup测试唯一文件已保存push为6a8eeb04e5abaf1eca9b7d2615dfb17cd0431266。worker和Parent独立各5案=1真实业务RED(expected1report actual0)4controls/type49zero；50SHA逐命令/commit同、旧49inclWXT/保护9stat同，Source44/旧4tests均未改。真实canonical配置/同queue/disabled-unbound/实际tab0/canonicalIDs，单publiconStartup void后的两个已发行读取完成、barrier/quiet2与finally全drain已证，非setup/type/import/timeout。正向HTTP请求/receipt/ACK均未到达；仅test-onlyRED checkpoint，feature仍FAIL/taskblocked，不能标功能接受/ready/业务merge/pointer/release，原traceJSON排除非repo全clean。
+
+0169完整只读设计35read8contact/43results零错越界执行：RAW ACTIVE严格空caps/必需scope/批准resolver与runtime可选freshreader每send原lease；真实legacy纯wire观测only不改managedstate，unknown current不造状态，合法history原caps/facts可在当前授权下补报、旧响应无当前命令权，ACTIVE无效禁后继HTTP。原候选先写Source再证RED顺序已Parent否决，必须测试先行。591/04ab终态/full结果已读不恢复；背景/pagehook/既有tests写队列未明确回交仍不写，继续独立自有模块门控反例，不因外部scope阻塞全项目。
+
+证据 `/tmp/plugin-status-observability-startup-red-01a1406d/{checkpoint,worker-result,owner-test-gate}.json`及parent/RED-summary.json；controls/owner-bounded-acceptance.json、STRICT-verification.json；active-design/owner-design-decision.json。当前以本段与两JSON相同currentExecution/liveTower为准，以下均历史，唯一协议不改。
+
+## 历史接续（2026-10-19）：批准部署根／配置存储叶完成，非生产授权激活
 
 用户已明确批准 `https://chen.daqiangplatform.com/tts/`、只新增 `https://chen.daqiangplatform.com/*` Chrome host、显式 Seller／Advertiser 配置与独立 status key。旧域名仅历史参考，不再问已准两项，不索取 token／Cookie；不扩实际外发、凭证签发、生产迁移／重启／发布或全仓 URL 改写。ERP `983de42` 的 auth/schema/ACK/time/body/default 窄叶与原 fullfast 一次 exit1／三稳定失败窄修事实不变。
 

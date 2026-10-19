@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：批准部署根及配置存储叶完成；生产闭环仍未交付（2026-10-19）
+## 当前：公开启动已证真实 RED，继续自有门控；非功能完成（2026-10-19）
+
+`6a8eeb04e5abaf1eca9b7d2615dfb17cd0431266` 仅新增自有 `tests/plugin-status-observability-startup.test.ts`，已 push／upstream0/0／task-index clean，原两 trace JSON WIP 排除，非 repo 全 clean。worker 与 Parent 各自执行同五案：**1 业务 RED（应发1份、实际0份）／4 controls PASS／49 roots 零诊断**；50 watched SHA 逐命令／commit 同、旧49（含 WXT）及保护 stat9 同，44 production 和旧四测试未改。真实同 module queue/config、actual disabled/stopped/unbound、当前空 tabs、canonical episode/epoch 已核；单 `onStartup` 返回 void，实际2个 startup读取均完成、queue barrier／quiet2／pending0 后才报计数 RED。finally各案29/29、39/39、37/37×3全完成／零失败。不是 setup、import、类型或 timeout；正向请求／receipt／durable ACK 分支**未到达**，不能称已验证。
+
+配置三个覆盖缺口已补成16个直接控制案：`2f35fff` 当轮18选中 PASS／67 skip；fresh d3f只读16read1contact无阻断，LOW子集匹配建议由Parent仅改一行strict-equality，`2352560` 当前受影响6案PASS／79skip／type48zero。18是前一断言字节，未冒当前18或全85 GREEN；Source44始终同ddf。旧69生成回调正文保持，假Chrome拒绝/undefined不是浏览器原子性/序列化证明。
+
+0169静态设计完整消费，35read8contact／43results，零错／越界／执行：私有RAW ACTIVE投影与每send原lease/frame重新核，真实legacy观测用既有纯composer提取并走observation-only，不制造完整State。managed初态不等实际legacy；URL等值不verified／enabled不等actualrunning。未知current不造快照，但获当前授权的immutable历史仍可原样补报（含当时caps），旧响应无命令权；ACTIVE无效则禁后继新HTTP。原候选先实现Source再测RED的顺序已Parent明确否决，必须测试先行。
+
+591/04ab已COMPLETE／完整结果消费，无旧后台可等或恢复。启动功能仍FAIL；原perf背景/page-hook/对应tests未来队列尚未明确回交，实际RED或用户“继续开发”不扩大回交、真实HTTP、凭证、生产、发布权限。不得全项目停工：核本轮断点后继续不占热点的自有配置/运行时门控当前API反例；后续Source仍需独立精确gate。域名/scope/旧atime等已准不重问，六controller叶/ERP983/原fullfast一次exit1/早7e30-96非finalbytes/全部禁读与no-bundle保持。
+
+证据：`/tmp/plugin-status-observability-startup-red-01a1406d/{checkpoint,worker-result,owner-test-gate}.json`、其`parent/RED-summary.json`；`/tmp/plugin-status-config-controls-01a1406d/{owner-bounded-acceptance,STRICT-verification,STRICT-checkpoint}.json`；`/tmp/plugin-status-observability-active-design-01a1406d/owner-design-decision.json`。当前以两JSON相同currentExecution、本段与liveTower为准，以下均对应历史快照。
+
+## 历史：批准部署根及配置存储叶完成；生产闭环仍未交付（2026-10-19）
 
 用户已批准后续部署根 `https://chen.daqiangplatform.com/tts/`、仅新增 Chrome host `https://chen.daqiangplatform.com/*`，以及显式 Seller／Advertiser 配置和独立 status key。原域名参考被此授权替代，不再询问这两项；不等真实外发、凭证签发、生产重启、发布或全仓 URL 改写许可。唯一协议仍为 `docs/plugins/plugin-status-report.md`，此工作记录不改协议。
 

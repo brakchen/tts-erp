@@ -4,7 +4,15 @@
 
 整体仍 **未交付**；局部复核不能扩成全项目停工。纯核、历史十二微切片及terminal窄补丁独立accept，不等全部callers/T4、预算/physical/ERP接线/发布通过。唯一协议：`docs/plugins/plugin-status-report.md`，批准fb42/c2fa原文，不以work改协议。旧full/coverage/build、预审/HOLD/nativecomplete不替代当前验收。最新逻辑Caller已窄接受，预算/physical等仍由后继交付；旧worker段仅历史，当前写入方式按最新用户授权，OWNER保留Git/Source设计与验收。
 
-## 当前：ddf 配置存储叶窄接受；生产 ACTIVE／runtime 尚未挂载
+## 当前：6a8 公开启动真实 RED 已保存，未授生产接线
+
+新自有startup测试经worker与Parent独立各5案：1业务RED（实际publiconStartup已完成后expected1 report／actual0）、4controls PASS、49root0diag/0forbidden；50SHA逐命令／commit同、保护9stat同。真实setup／同queuegraph／disabled-unbound事实与canonicalIDs／voidlistener实际发行2读取完成／barrier和quiet2／finally全drain已核。`6a8eeb04e5abaf1eca9b7d2615dfb17cd0431266`只存test-only checkpoint已push，Source44/旧4tests/WXT未变，task-indexclean非repo全clean。正向请求、receipt和ACK未到达，不冒验证或功能完成。
+
+旧3控案缺口已补，2f35当轮18PASS67skip/type48；d3f完整readonly无blocking、16read1contact零错越界执行，仅LOW子集matcher由Parent一行改strict。2352560当前6PASS79skip/type48，18不是当前完整执行，未跑全85；Source仍ddf。0169完整静态35read8contact零错执行后，Parent仅选RAW ACTIVE/optionalruntime reader每send原lease、真实wire observation与managedstate分离及历史补报策略，不授Source；managed初态/URL/配置不能替代实际事实。unknown current不发新snapshot但授权history不变，oldcap/history不授当前命令；ACTIVE失效禁后继HTTP不抹已入场事实。原报告先Source后RED顺序已否决。
+
+591/04ab已终态/结果已读，不恢复重跑。背景/pagehook/对应tests仍需原owner显式回交，不因继续开发/真实RED/masterd193/idle接管；优先推进不占热点的自有配置-runtime门控反例。原Goal未交付，无ready/业务mastermerge/pin/发布。证据startup-red/{checkpoint,worker-result}.json和parent/RED-summary.json、config-controls/{owner-bounded-acceptance,STRICT-verification}.json、active-design/owner-design-decision.json（均在原/tmp/plugin-status-前缀各目录）；两JSON当前currentExecution与本段/liveTower优先，以下仅历史。
+
+## 历史：ddf 配置存储叶窄接受；生产 ACTIVE／runtime 尚未挂载
 
 用户已准部署根 `https://chen.daqiangplatform.com/tts/`、唯一新增 Chrome host `https://chen.daqiangplatform.com/*` 和显式 Seller／Advertiser＋独立 status key，不重复申请，不从 bound／captured 事实推权限。`5930e27` 仅 host 声明／canonical endpoint 对照：1 RED＋1 control → 2 PASS／46 roots 零诊断，不是 Chrome 或 HTTP 实证。
 
