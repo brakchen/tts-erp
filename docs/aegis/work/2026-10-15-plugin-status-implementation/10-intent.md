@@ -2,14 +2,15 @@
 
 ## TaskIntentDraft
 
-- Requested outcome: MiniMax M3.1 Flash Preview分组件实现已批准协议，owner审查一致性并持续推进至完整交付
-- Goal: MiniMax M3.1 Flash Preview分组件实现已批准协议，owner审查一致性并持续推进至完整交付
+- Requested outcome（2026-10-22更新）: 连续完成当前owner的十五个open rows，包括状态/单目标恢复与两端配置同步；Parent直接实现、验证、Git，不逐原子段等待继续确认。
+- Goal: 原已批准状态/绑定协议与配置同步目标完整可验证交付；只读独立reviewer提供advisory，不恢复旧writer代理，不将局部通过当整体完成。
 - Success evidence:
 - S01-S14映射+isolated目标与baseline+插件完整测试覆盖tsc/build+owner spec/quality review
 - Stop condition: 全部代码与可运行验收通过才交付；外部授权或真实环境证据缺失如实标记blocked/needs-verification
 - Non-goals:
 - 多店并行、通用远程执行平台、跨插件后台依赖
-- Scope: ERP plugin/status及独立monitor插件；不触主仓外来WIP
+- Scope: ERP plugin/status及独立monitor插件，用户已扩展包含两端monitor-config rollout；共享core仍需明确未来写队列协调，旧工作树和foreign WIP不改不暂存。
+- Verification boundary: 两个受保护TS fixture仍禁止内容读取/导入/复制；较早旧runtime相关选择的间接import已披露并停止。后续完整插件验证若需加载它们，必须先取得精确例外，不能从连续推进推断解除。
 - Change kinds:
 - feature
 - Risk hints:
@@ -30,7 +31,7 @@
 - Current readback (2026-10-16 batch4): 完整重读当前方案§1–17、原计划、checkpoint/resume hint、插件AGENTS及当前canonical registry；历史before-plan字段初建未填，不追写成当时已有确认
 - Missing current refs:
 - none
-- Advisory decision: continue within approved T4 repair scope; original safety/ownership/test gates unchanged
+- Advisory decision: continue within current fifteen-row scope; original safety/ownership/test gates unchanged. 当前readback/evidence见20-checkpoint和resume-state-hint.currentExecution；原MINIMAX分工/未回交等段落仅历史，不覆盖Parent直接执行与已完成显式handoff。
 
 ## ImpactStatementDraft
 

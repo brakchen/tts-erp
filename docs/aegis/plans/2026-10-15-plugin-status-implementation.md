@@ -1,6 +1,16 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照（2026-10-17）
+## 当前执行快照（2026-10-22）
+
+用户已明确要求连续推进当前 owner 的十五个 open rows（含配置同步两端）；Parent 仍是唯一产品/Git writer，仅允许既定只读独立 reviewer，不逐小片索取继续授权。既有依赖型验收行在实现与证据闭合后合并记账，不机械重复实现。禁止内容、foreign WIP、原单目标/原预算/授权边界、d193 性能语义与 0.4.27 保持；不得扩为真实外发、生产迁移/重启、业务 master merge、父指针或发布。
+
+当前插件 `ff03e2c`（observation-only）：持久 generation/namespace/clearing、commit/send/replay/ACK proof 与真实配置投影后继已提交；25 startup 控制与自包含20相关620 PASS、guarded63零诊断。canonical login/conflict/RECOVERING 的直接控制已有，不需要为本来正确的投影加分支；native 生命周期构造/action ports/完整90秒/Cookie aggregate仍开。较早旧 runtime test 间接导入 protected fixture 的选择已停止并披露，不能用 compiler 守卫替该命令背书。旧默认自动 reprovision 测试合同未因此修复或删除。
+
+ERP `eba0b77`：不可变 notification claim、条件 lease settlement、逐条发送时领租约、真实 60秒 system job/audit 与 retained Session reclaim 刷新已提交；当前156个 isolated相关 PASS。一次完整 baseline 2873PASS/1FAIL/14skip/1xfail exit1，唯一自身时钟混用案最小隔离PASS、修后155PASS；不冒最终同字节全GREEN、不重跑整套。fresh local SPEC对两叶无实现阻断；QUALITY提出 retained ORM identity-map reclaim后已实际1RED、一行修复及156PASS，fresh05f532后审无findings。Parent已完成观测三行与ERP本地runtime一行，原15行余11；仍不进入跨端ready。
+
+后继顺序：观测/startup三行及ERP局部runtime已完成 → native物理90秒/actions/Cookie → 两配置rollout（仅已提交依赖，待共享core未来写队列回交）→ cross-domain spec/quality/integration。真实浏览器/生产证据缺失如实标明，不用合成状态冒最终产品完成。唯一当前断点与证据以 `20-checkpoint.md` 和 `resume-state-hint.json.currentExecution` 为准；下文为历史。
+
+## 历史执行快照（2026-10-17）
 
 用户要求继续完整产品，OWNER继续直接实现/测试/Git，**不再launch/resume任何worker**；只读独立reviewer仅承担既定复核，不写产品或跑命令。Terminal补丁`809631f`已由fresh只读reviewer **`6010e42d-f772-4bed-8e2a-8e084cf92304`**局部accept，OWNER据既有26named/type0及该报告接纳这一窄补丁；不是SDK checked接受、合并权或全Caller完成。同审查发现独立既存P1：旧snapshot/observe在首次read等待期间被新HOLD撤权，子ensureInitialized却借新generation先重建事实，外层随后拒绝已经太晚。
 

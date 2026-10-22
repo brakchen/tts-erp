@@ -1,6 +1,19 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：公开启动已证真实 RED，继续自有门控；非功能完成（2026-10-19）
+## 当前：连续交付推进；观测补强与 ERP 租约/worker 候选已推送，非整体完成（2026-10-22）
+
+用户明确要求连续处理本 owner 的 15 个 open rows，不再逐小片等确认；包括原先 scope 外的两行 monitor-config rollout。旧工作树及 foreign WIP 不动，原独立 status key、批准 HTTPS root、性能 d193 与版本 0.4.27 保持。生产迁移/重启、真实凭证/外发、业务 master merge、父仓指针和发布未授权；只读 reviewer 仍仅 advisory，Parent 直接开发/Git。
+
+- 插件 `ff03e2c60a529c70d8e96a67fd90cdb7608c8e06` 已 push/upstream0/0；仅自有测试改动，production source 保持 `fb8d71c`。durable eligibility/source-write coupling、namespace/clearing、current commit、replay/send、ACK/receipt proof、production observation-only producer 的后继代码已在原分支。25 个 public startup 控制直接覆盖 running 五 guard、invalidation 四负面、完整/非默认 close snapshot、login/conflict、Cookie Store 未知、两种 canonical writer race。移除 marker 的变体真实 2 业务 RED；移除 null guards 的变体真实 2 业务 RED（证明不是吞异常后假零 HTTP）。变体均恢复，最后自包含 20 suites **620 PASS/no skip**、guarded **63 roots/0 diagnostics/0 forbidden attempts**。snapshot 测试已改相对时刻，并断言不可用周期仍注册 30 秒 Alarm。它们证明 canonical 投影与门控，不证明实际 Chrome 已构造这些状态。
+- **合规勘误**：较早 related21/656+1skip 命令选择了旧 runtime test，间接导入受保护 TS fixture；不能把 compiler 零禁读外推为该测试命令守住禁读约束。已停止该选择，不恢复/改写 fixture 或时间元数据；今后仅 exact 自包含测试和上述守卫编译。旧 log 的 `actualDisabled:true` 也曾是硬编码诊断字段，最终 witness 已改为实际开关；旧日志不冒当前同字节执行。
+- ERP `eba0b777cfe52179dfa140e43ab3c177e6cac269` 已 push，remote HEAD 独立相符，worktree clean。immutable notification claim 捕获原 lease，三种 outcome 以 `(id,state,lease_until,unexpired)` 条件 UPDATE；逐条 JIT claim/事务外 send/失权不计成功，按实际时刻检查，至少一次而非恰好一次。真实 worker 注册 `plugin.status.lifecycle` 60 秒 system job，复用 `run_job` 持久执行历史；真实 system entrypoint 在 isolated clone 内以未配置 sender 安全落 `pending_manual`。
+- ERP 严格分轮：初三种 stale settlement 3 业务 RED/3 live controls；批量提前领租约与失权计数另 4 业务 RED；实际 job 缺失另 1 业务 RED。当前新 lease16+API93+worker coverage47＝**156 PASS**，5 个改动 Python LSP0；ruff 四文件0，shared worker 原有 BLE001 从 baseline652→candidate659，仅新增7行导致偏移，无新 rule/message。完整 baseline 只跑一次：**2873 PASS/1 FAIL/14 skip/1 xfail，exit1**。唯一新 positive-manual 案混用了 collection-time NOW 与实时时钟，最小隔离复跑 PASS；已统一传原注入时刻并补 wall-clock+1天控制，最终155 PASS。不能称改后同字节 full GREEN；不重跑整套凑证据。
+- Fresh `ff7011ac-25b1-4f1c-b1b9-14596b3eaf58` 两位 local SPEC/QUALITY 均已完成并全读，adapter 均无局部阻断。QUALITY ERP-Q1 指出 reclaim SELECT 缺 `populate_existing=True`，retained ORM identity map 可能报告回收成功但实际上没回收；Parent 用真实双 Session 保留强引用先 1 业务 RED，再仅在原锁内加一行刷新。当前156相关 PASS；实际 worker/audit sender入口也直接断言事务外发送。后继 fresh `05f5320d-c003-4ef5-b495-30b086db5a3b` 已完成，Q1无 findings/局部closed advisory，Parent综合原base叶接受ERP服务/API/worker/outbox本地实现，不等生产通知/跨端ready。
+- registry metadata `4094660` 仅登记 worker coverage test 归属及已获明确回交的 background/page-hook/tests，不含业务 merge；原 perf 行保留。配置 core 的未来写队列已通过 tower 广播请求回交，不凭 idle 接管。原 `/tmp` 旧 coordination worktree已不存在，新增 clean `status-continuous-registry-01a1406d` 用于协调。
+
+证据根：`/tmp/plugin-status-truthful-observation-adapter-01a1406d/`（`controls-guarded-related20.log`、`controls-guarded-type63.json`、`null-guard-mutation-RED.log`、`erp-outbox-final-related.log`、`erp-outbox-baseline-result.log`、`erp-baseline-failure-isolation.log`、两 source gate、continuous local reviews）。Tower1052已完成adapter、publicstartup、observation-only activation和ERP runtime四行，原15行余11；native physical任务当前推进production port库存，native actions/90秒/Cookie aggregate、配置两端、cross-domain spec/quality/integration与真实浏览器验收仍开，不关闭这些聚合门。
+
+## 历史：公开启动已证真实 RED，继续自有门控；非功能完成（2026-10-19）
 
 `6a8eeb04e5abaf1eca9b7d2615dfb17cd0431266` 仅新增自有 `tests/plugin-status-observability-startup.test.ts`，已 push／upstream0/0／task-index clean，原两 trace JSON WIP 排除，非 repo 全 clean。worker 与 Parent 各自执行同五案：**1 业务 RED（应发1份、实际0份）／4 controls PASS／49 roots 零诊断**；50 watched SHA 逐命令／commit 同、旧49（含 WXT）及保护 stat9 同，44 production 和旧四测试未改。真实同 module queue/config、actual disabled/stopped/unbound、当前空 tabs、canonical episode/epoch 已核；单 `onStartup` 返回 void，实际2个 startup读取均完成、queue barrier／quiet2／pending0 后才报计数 RED。finally各案29/29、39/39、37/37×3全完成／零失败。不是 setup、import、类型或 timeout；正向请求／receipt／durable ACK 分支**未到达**，不能称已验证。
 

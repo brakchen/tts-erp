@@ -280,7 +280,7 @@ expiresAt 限制该次动作的接收/开始，不是健康运行的周期续租
 | `plugin.status_instances` | UUID PK，plugin_id、shop_pk nullable、scope JSONB（受严格 schema 约束）、status_api_key_id FK、enabled、capabilities、last_seen_at、latest_report_seq bigint、latest_event_id、latest_state JSONB、latest_observed_at、latest_received_at、current_decision_revision、current_incident_id。全是实例配置/状态投影，不是第二份业务配置。 |
 | `plugin.status_reports` | UUID PK、instance_id FK、event_id、report_seq、payload_hash、observed_at/received_at、event_type、reason_code、incident_id、binding_epoch nullable、validated_payload JSONB、receipt JSONB、response_decision JSONB。唯一(instance_id,event_id)、唯一(instance_id,report_seq)，索引(instance_id,received_at)；shop_pk 经 instance 关联，不额外复制归属。 |
 | `plugin.status_decisions` | UUID PK、instance_id FK、revision、incident_id、expected_binding_epoch、action、parameters、issued_at/not_before/expires_at、policy_version、source_report_id nullable FK、source admin/automatic、delivery_state、result/outcome、completed_at。唯一(instance_id,revision)，记录创建而非实际执行；episode 恢复次数依据这里的已发指令计数。 |
-| `plugin.status_notification_outbox` | UUID PK、instance_id、incident_key、notification_kind、dedupe_key unique、state、attempt_count、next_attempt_at、last_error_code、delivered_at。只存非敏感模板参数与受控目标引用，不复制 webhook 密钥；首期仅该领域使用，不建全局消息平台。 |
+| `plugin.status_notification_outbox` | UUID PK、instance_id、incident_key、notification_kind、dedupe_key unique、state、attempt_count、next_attempt_at、lease_until、last_error_code、delivered_at。只存非敏感模板参数与受控目标引用，不复制 webhook 密钥；首期仅该领域使用，不建全局消息平台。 |
 
 `status_reports`、`status_decisions` 是审计事实，默认不做自动删除；长期保留/归档另走明确授权方案。outbox 投递状态可更新，不能重写事件历史。
 
@@ -317,6 +317,8 @@ sync-worker 每 60 秒巡检超时和待投递通知，使用现有调度进程�
 
 通知幂等键由 `(instanceId, incidentId 或首次超时episode, notificationKind)` 生成；失联 episode 从 online→stale 建立，到新鲜报告恢复时结束，不能每次巡检换 ID。outbox 与状态转换同事务；网络发送在事务外，采用短领取 lease、重试和已投递标记。若现有发布/通知基础设施没有可用 sender，则实现本领域窄 sender，不依赖未合入的广告通知方案。通知密钥继续走现有 token_service/secret owner，不直读解密 integration.credentials。
 
+投递逐条在即将发送时领取，不为尚在等待的整批通知提前消耗 lease。领取返回不可变的 `(id, lease_until)` 快照，结果更新必须同时匹配当前 `claimed` 状态、同一 lease 与未过期时间；旧 worker 不得通过 ORM 重新加载借到新 worker 的所有权。失权结果不计入本次成功/重试/人工计数。`plugin.status.lifecycle` 通过既有 system-job 注册与执行历史运行，不增加进程；发送期间不持数据库事务。
+
 通知网络响应丢失存在重复可能，只承诺至少一次及本地幂等，不承诺飞书恰好一次。对网络/429/5xx 有界退避，对配置/签名错误标记待人工，不记录目标密钥。插件继续负责既有广告业务通知；本领域 ERP 只发实例/绑定生命周期通知，避免两侧重复发送同一“页面失效”提醒。接入时将该类旧本地提醒切到 ERP 单一 owner，未纳管旧版本不变。
 
 ## 12. 插件模块与并发所有权
@@ -329,7 +331,8 @@ sync-worker 每 60 秒巡检超时和待投递通知，使用现有调度进程�
 | 新 `src/extension/tab-binding-controller.ts` | 绑定生命周期唯一写入者；手动切换、自动发现、服务端恢复均走同一 owner。 |
 | 新 `src/core/plugin-status-contract.ts` | 请求/响应和决策的纯严格校验；不拥有 HTTP、调度或广告决策。 |
 | 新 `src/extension/plugin-status-client.ts` | 唯一 ERP HTTP 边界，超时、鉴权、状态码；不直接修改 binding 或运行开关。 |
-| `src/extension/storage.ts` | 原子更新 binding/模板/epoch、分配 seq、报告队列及决策执行账本；复用现有写入串行机制。 |
+| `src/extension/storage.ts` | 既有业务配置、binding/模板写入及共享配置串行队列；相关变更与观测资格同一次本地提交。 |
+| `src/extension/plugin-status-storage.ts` | 状态队列/seq、canonical binding、决策账本、观测资格与 ACK 短事务；委托同一共享队列，不新增并行 serializer。 |
 | `entrypoints/background.ts` | 注册事件与 Alarm、把观察/决策交 controller；复用 generation 和现有关停队列，不再内嵌新的绑定状态机。 |
 | popup | 当前店铺、绑定状态、已上报/待上报、服务端等待/人工原因、最后确认时间；提供重新检测/停止/明确切换入口。 |
 
@@ -340,6 +343,17 @@ sync-worker 每 60 秒巡检超时和待投递通知，使用现有调度进程�
 共享刷新协议继续使用 `__ttsSellerCenterCoordinationV1`、2 分钟请求 lease、30 秒 refresh claim、15 秒 quiet window。monitor 的身份请求/列表请求/关闭执行进入该协议，自己的刷新与关停还需内部互斥；localStorage 跨 tab 读改写不是严格分布锁，不应宣传绝对消除所有竞争。协调不可用则拒绝刷新。
 
 有界本地队列上限 1000 条且总计 2 MiB；心跳仅在入队前合并，已经分配 eventId/seq 的报告不可改写。失效/决策结果优先发送；允许当前 snapshot 先于历史发送，后端按 seq 防倒退。历史补报完成后发新鲜 snapshot。队列满时不静默丢生命周期/结果，持久化 REPORT_QUEUE_FULL 和最新本地状态、暂停恢复、提示人工；故障期间无法保存的历史缺口必须显式展示，不能声称完整审计。
+
+### 12.1 MV3 持久观测资格与回执证明
+
+此处是本地实现约束，不扩展 HTTP wire：
+
+- `pluginStatusObservationEligibility` 保存 `{schemaVersion:1,generation}`；相关 source 写入与 generation 变更在同一共享队列、同一次 `storage.local.set` 内提交。不以 Worker 内存序号或 mutation depth 作为恢复后的授权。
+- 本地 envelope 的 `localEligibility` 带 generation、localId 与 namespaceId，均不进入请求正文。current commit、最终发送准入和 ACK/decision 接收重新核验持久资格；过期 exact carrier 可以退休，但不回退 seq、不重用 eventId、不改历史事实。
+- `pluginStatusObservationNamespace` 为独立 UUID，防 clear/reprovision ABA；清理先持久轮换 namespace 与 `pluginStatusClearing=true`，再移除业务键，最后解除 clearing。中断残留按原清理流程恢复，未完成前所有相关读写/发送 fail-closed。
+- 当前 ACK 与 decision acceptance 同一短提交，在 ledger 持有 receipt proof 和完整 decision fingerprint；历史 replay ACK 没有命令权，重投不得用相同 decisionId 偷换命令。任何网络或浏览器长副作用都不在 serializer 内执行。
+
+当前只读生产接线保留 `capabilities=[]`、空 executor；canonical running/失效/login/conflict 的投影控制不等于已验证真实浏览器生命周期生成这些状态。native action、90 秒窗口、Cookie Store 全链和端到端验收闭合后，才能另行开启能力，不以本节记录宣布已发布。
 
 ## 13. 关键异常场景
 
