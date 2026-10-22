@@ -454,6 +454,7 @@ def reclaim_expired_leases(session: Session, *, now: datetime) -> int:
                 StatusNotificationOutbox.lease_until <= now,
             )
             .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
         )
         .scalars()
         .all()

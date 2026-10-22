@@ -162,6 +162,44 @@ def test_nonpositive_lease_cannot_break_claim_identity(
         assert row.lease_until is None
 
 
+def test_reclaim_refreshes_a_retained_pending_identity(db_engine, outbox_row):
+    later = NOW + timedelta(seconds=61)
+    with (
+        Session(db_engine, expire_on_commit=False) as watcher,
+        Session(db_engine) as worker,
+    ):
+        cached = watcher.get(StatusNotificationOutbox, outbox_row)
+        assert cached is not None
+        assert cached.state == "pending" and cached.lease_until is None
+        assert (
+            len(
+                repository.claim_due_notifications(
+                    worker, now=NOW, limit=1, lease_seconds=60
+                )
+            )
+            == 1
+        )
+        worker.commit()
+        # Keep a strong reference to the stale identity-map object while the
+        # database row is claimed. The locking query must refresh authority.
+        assert cached.state == "pending" and cached.lease_until is None
+        assert repository.reclaim_expired_leases(watcher, now=later) == 1
+        watcher.commit()
+        with Session(db_engine) as independent:
+            persisted = independent.get(StatusNotificationOutbox, outbox_row)
+            assert persisted is not None
+            assert persisted.state == "pending", (
+                "reclaim reported a write it never made"
+            )
+            assert persisted.lease_until is None
+        successor = repository.claim_due_notifications(
+            watcher, now=later, limit=1, lease_seconds=60
+        )
+        assert len(successor) == 1
+        assert successor[0].lease_until == later + timedelta(seconds=60)
+        watcher.commit()
+
+
 def test_sweep_claims_only_the_message_it_is_about_to_send(db_engine, outbox_row):
     second_id = uuid.uuid4()
     with Session(db_engine) as session:
@@ -287,6 +325,19 @@ def test_worker_registry_and_real_system_tick_deliver_the_domain_job(
     monkeypatch.setattr(
         scheduler.notifications, "resolve_webhook_url", lambda session: None
     )
+    transaction_states = []
+    resolve_sender = scheduler._resolve_sender
+
+    def observe_sender_boundary(session, sender):
+        deliver = resolve_sender(session, sender)
+
+        def deliver_observed(message):
+            transaction_states.append(session.in_transaction())
+            return deliver(message)
+
+        return deliver_observed
+
+    monkeypatch.setattr(scheduler, "_resolve_sender", observe_sender_boundary)
     with Session(db_engine) as session:
         before = set(
             session.scalars(
@@ -295,6 +346,9 @@ def test_worker_registry_and_real_system_tick_deliver_the_domain_job(
         )
     try:
         worker.run_scheduled_job_once(scheduler.JOB_NAME)
+        assert transaction_states == [False], (
+            "audit wrapper held a transaction across send"
+        )
         with Session(db_engine) as check:
             jobs = list(
                 check.scalars(
