@@ -11,6 +11,8 @@
 - Fresh `ff7011ac-25b1-4f1c-b1b9-14596b3eaf58` 两位 local SPEC/QUALITY 均已完成并全读，adapter 均无局部阻断。QUALITY ERP-Q1 指出 reclaim SELECT 缺 `populate_existing=True`，retained ORM identity map 可能报告回收成功但实际上没回收；Parent 用真实双 Session 保留强引用先 1 业务 RED，再仅在原锁内加一行刷新。当前156相关 PASS；实际 worker/audit sender入口也直接断言事务外发送。后继 fresh `05f5320d-c003-4ef5-b495-30b086db5a3b` 已完成，Q1无 findings/局部closed advisory，Parent综合原base叶接受ERP服务/API/worker/outbox本地实现，不等生产通知/跨端ready。
 - registry metadata `4094660` 仅登记 worker coverage test 归属及已获明确回交的 background/page-hook/tests，不含业务 merge；原 perf 行保留。配置 core 的未来写队列已通过 tower 广播请求回交，不凭 idle 接管。原 `/tmp` 旧 coordination worktree已不存在，新增 clean `status-continuous-registry-01a1406d` 用于协调。
 
+**当前精确权限断点（Tower1055）**：native port库存已确认 production background 尚无 controller composition；不在只有注入端口证据时关掉90秒/actions/Cookie聚合门。下一阶段完整可执行回归与既有 protected fixture 禁读/导入/复制规则冲突，需操作者明确是否允许**仅从已提交版本复制两个TS fixture到隔离测试目录并加载**，原件内容/元数据及两份 foreign trace JSON仍不得读取、修改或覆盖；这不是再次申请普通继续开发，也不扩大真实外发/生产权限。配置core后继写队列广播尚无答复，不以idle接管。独立的ERP/status/docs工作已验证并提交，原十五行完成四行、余十一行保持明确阻塞/依赖，未冒全部完成。
+
 证据根：`/tmp/plugin-status-truthful-observation-adapter-01a1406d/`（`controls-guarded-related20.log`、`controls-guarded-type63.json`、`null-guard-mutation-RED.log`、`erp-outbox-final-related.log`、`erp-outbox-baseline-result.log`、`erp-baseline-failure-isolation.log`、两 source gate、continuous local reviews）。Tower1052已完成adapter、publicstartup、observation-only activation和ERP runtime四行，原15行余11；native physical任务当前推进production port库存，native actions/90秒/Cookie aggregate、配置两端、cross-domain spec/quality/integration与真实浏览器验收仍开，不关闭这些聚合门。
 
 ## 历史：公开启动已证真实 RED，继续自有门控；非功能完成（2026-10-19）
