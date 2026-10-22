@@ -10,7 +10,7 @@
 - Non-goals:
 - 多店并行、通用远程执行平台、跨插件后台依赖
 - Scope: ERP plugin/status及独立monitor插件，用户已扩展包含两端monitor-config rollout；共享core仍需明确未来写队列协调，旧工作树和foreign WIP不改不暂存。
-- Verification boundary: 两个受保护TS fixture仍禁止内容读取/导入/复制；较早旧runtime相关选择的间接import已披露并停止。后续完整插件验证若需加载它们，必须先取得精确例外，不能从连续推进推断解除。
+- Verification boundary: 用户已明确批准仅从已提交版本复制两个 TS fixture 至隔离目录加载；原件/元数据与两份 foreign JSON 仍不读改。较早间接 import 不被追认。当前验证/开发移至独立 sparse worktree，trace 导出写 OS temp 或显式 evidence 目录，不默认覆盖 Git fixture。
 - Change kinds:
 - feature
 - Risk hints:
@@ -31,7 +31,7 @@
 - Current readback (2026-10-16 batch4): 完整重读当前方案§1–17、原计划、checkpoint/resume hint、插件AGENTS及当前canonical registry；历史before-plan字段初建未填，不追写成当时已有确认
 - Missing current refs:
 - none
-- Advisory decision: continue within current fifteen-row scope; original safety/ownership/test gates unchanged. 当前readback/evidence见20-checkpoint和resume-state-hint.currentExecution；原MINIMAX分工/未回交等段落仅历史，不覆盖Parent直接执行与已完成显式handoff。
+- Advisory decision: continue within current fifteen-row scope;原15行仍4完成/11open。上游已到ff4b17f/0.4.28，当前后继预算候选f8a5f47仍0.4.27、尚未同步；单预算唤醒81相关PASS不等完整physical/配置/产品完成。原 safety/ownership/test gates unchanged. 当前readback/evidence见20-checkpoint和resume-state-hint.currentExecution；原MINIMAX分工/未回交等段落仅历史，不覆盖Parent直接执行与已完成显式handoff。
 
 ## ImpactStatementDraft
 

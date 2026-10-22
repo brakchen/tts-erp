@@ -1,6 +1,19 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：连续交付推进；观测补强与 ERP 租约/worker 候选已推送，非整体完成（2026-10-22）
+## 当前：隔离后继预算候选已推送，物理授权协议仍在实现（2026-10-22）
+
+- 用户已批准仅从已提交版本复制两份 TS fixture 到隔离目录加载；不是解除原件/元数据、两份 foreign JSON 的保护。当前 writer 为 `/home/schan/pi-workspace/monitor-status-runtime-01a1406d`，分支 `feature/plugin-status-runtime-closure`；原 dirty worktree 不写。registry-only `26132b4` 已登记后继工作树与测试归属。
+- 插件候选 `f8a5f47a16f2d8259e4396eadb4227dc8a2d03f2` 已推送：同一原预算的耗尽通知唤醒已等待 guard；原 frame 即使已撤销也先采样原时钟，避免 short-circuit 漏掉 wall expiry。无第二窗口/权限 registry，不取消已 dispatch 的 raw work。4 个 release-budget 控制 PASS；当前 chain51 + physical-drain30 = **81 PASS/no skip**，完整 `tsc --noEmit` exit0。原控制返回与事实落盘分离；两迟到终态案保持原 STALE_CONTEXT oracle，增加真实 canonical writer 的委托观察，不把控制完成当 raw 已完成。
+- 一次实验性 runtime 全面执行预算门控导致 14 timeout/2 后续 clock 断言，已精确撤回，`plugin-status-runtime.ts` 无 Source delta；不是通过的修复。`clock-terminal-related-GREEN.log` 的文件名误导，其实际是 281PASS/16FAIL，保留原日志。事实/cleanup 不得一律套执行 liveness。后续 81 PASS 是撤回后的真实轮次，不合并统计。
+- integration 案曾在**隔离工作树**新生成两份 trace；未 stage，已不读内容地清理并恢复 sparse 排除。导出默认改 OS temp/PID 目录，可用 `MONITOR_PLUGIN_STATUS_TRACE_DIR` 指定 evidence 目录，不再默认覆盖 Git fixture；原工作树两份 foreign JSON 未访问/覆盖。
+- 另六个自有测试文件仍有未提交合同/harness 修正。旧完整插件隔离轮次为 **1244 PASS/26 FAIL + 1 suite setup fail**；当前不是完整 GREEN。controller 的迟到 clear 擦掉新 business binding 仍为真实失败，未 skip 或放宽预期。
+- 完整消费已完成的 physical architecture advisory，未恢复/重跑子任务。下一实现必须统一 native bind/clear 的 generation+namespace proof，和原 receipt/fingerprint 下由 ledger owner 同 serializer/同 set 推进的 continuation leaf；不允许 caller token 或 await 后读 latest 补签。当前只做设计/RED准备，未冒实现或验收。
+- 上游已漂移至 `ff4b17f32af8c995fb07eb84ee9f97479dad8e2a` / **0.4.28**；不是本候选祖先，当前候选仍 0.4.27，尚未整合。保持上游 same-shop scan/诊断存储性能语义，不擅改 peer 版本或宣称已同步。配置 core 后继写队列仍待明确回交。
+- 原 15 行仍 **4 完成/11 open**；physical in_progress，ports/budget/actions/Cookie/spec/quality/integration/配置两端未关闭。ERP `eba0b777` 与一次 baseline exit1/156相关 PASS 的证据边界保持。无真实外发/生产迁移重启/业务 master merge/父指针/发布。
+
+本轮证据：`/tmp/plugin-status-continuous-01a1406d/{clock-owner-checkpoint.json,physical-source-proof-design.json,clock-factual-drain-final.log,clock-factual-drain-final-type.log}`。两文件主动 LSP 有 56 项 warning/hint、无 error，不能称全 clean。仅上述预算候选已提交，其余合同测试与真实物理缺口继续推进。
+
+## 上一阶段：观测补强与 ERP 租约/worker 候选已推送，非整体完成（2026-10-22）
 
 用户明确要求连续处理本 owner 的 15 个 open rows，不再逐小片等确认；包括原先 scope 外的两行 monitor-config rollout。旧工作树及 foreign WIP 不动，原独立 status key、批准 HTTPS root、性能 d193 与版本 0.4.27 保持。生产迁移/重启、真实凭证/外发、业务 master merge、父仓指针和发布未授权；只读 reviewer 仍仅 advisory，Parent 直接开发/Git。
 
@@ -11,7 +24,7 @@
 - Fresh `ff7011ac-25b1-4f1c-b1b9-14596b3eaf58` 两位 local SPEC/QUALITY 均已完成并全读，adapter 均无局部阻断。QUALITY ERP-Q1 指出 reclaim SELECT 缺 `populate_existing=True`，retained ORM identity map 可能报告回收成功但实际上没回收；Parent 用真实双 Session 保留强引用先 1 业务 RED，再仅在原锁内加一行刷新。当前156相关 PASS；实际 worker/audit sender入口也直接断言事务外发送。后继 fresh `05f5320d-c003-4ef5-b495-30b086db5a3b` 已完成，Q1无 findings/局部closed advisory，Parent综合原base叶接受ERP服务/API/worker/outbox本地实现，不等生产通知/跨端ready。
 - registry metadata `4094660` 仅登记 worker coverage test 归属及已获明确回交的 background/page-hook/tests，不含业务 merge；原 perf 行保留。配置 core 的未来写队列已通过 tower 广播请求回交，不凭 idle 接管。原 `/tmp` 旧 coordination worktree已不存在，新增 clean `status-continuous-registry-01a1406d` 用于协调。
 
-**当前精确权限断点（Tower1055）**：native port库存已确认 production background 尚无 controller composition；不在只有注入端口证据时关掉90秒/actions/Cookie聚合门。下一阶段完整可执行回归与既有 protected fixture 禁读/导入/复制规则冲突，需操作者明确是否允许**仅从已提交版本复制两个TS fixture到隔离测试目录并加载**，原件内容/元数据及两份 foreign trace JSON仍不得读取、修改或覆盖；这不是再次申请普通继续开发，也不扩大真实外发/生产权限。配置core后继写队列广播尚无答复，不以idle接管。独立的ERP/status/docs工作已验证并提交，原十五行完成四行、余十一行保持明确阻塞/依赖，未冒全部完成。
+**历史权限断点（Tower1055，已获精确 TS 副本例外解除）**：native port库存已确认 production background 尚无 controller composition；不在只有注入端口证据时关掉90秒/actions/Cookie聚合门。下一阶段完整可执行回归与既有 protected fixture 禁读/导入/复制规则冲突，需操作者明确是否允许**仅从已提交版本复制两个TS fixture到隔离测试目录并加载**，原件内容/元数据及两份 foreign trace JSON仍不得读取、修改或覆盖；这不是再次申请普通继续开发，也不扩大真实外发/生产权限。配置core后继写队列广播尚无答复，不以idle接管。独立的ERP/status/docs工作已验证并提交，原十五行完成四行、余十一行保持明确阻塞/依赖，未冒全部完成。
 
 证据根：`/tmp/plugin-status-truthful-observation-adapter-01a1406d/`（`controls-guarded-related20.log`、`controls-guarded-type63.json`、`null-guard-mutation-RED.log`、`erp-outbox-final-related.log`、`erp-outbox-baseline-result.log`、`erp-baseline-failure-isolation.log`、两 source gate、continuous local reviews）。Tower1052已完成adapter、publicstartup、observation-only activation和ERP runtime四行，原15行余11；native physical任务当前推进production port库存，native actions/90秒/Cookie aggregate、配置两端、cross-domain spec/quality/integration与真实浏览器验收仍开，不关闭这些聚合门。
 
