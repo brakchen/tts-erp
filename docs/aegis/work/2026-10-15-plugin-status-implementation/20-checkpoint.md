@@ -1,6 +1,22 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：native与terminal owner依赖已提交，323相关通过；真实transport仍未接线（2026-10-22）
+## 当前：managed 正负链和迟到 own-write metadata 已贯通；真实 clear 新 RED 已保存（2026-10-22）
+
+- 当前HEAD **`e35c4e324cd17cbe3d4c1d2d588c915c2a3a7536`** 已push，Source **`6086f3bec1fa29c8c2cb320cb50d403501549bdd`**；e35只是后继clear真实RED检查点，候选不ready。自有tracked/indexclean，node_modules symlink不stage，原dirty树/TS fixture原件/元数据/foreignJSON未新触碰。
+- **0c6f/d386** 完整86行advisory_findings F1–F4已消费。实际26业务RED/43controls/fulltype0后 **`1c2b3fd`** 修：preenqueue拥有plain payload及原fn；不为其他instance/episode/native target/report补签；每个markedwrite分支末次await后严格复核root/leaf/source，失败事实不套执行时钟。原报告不改成accepted、不恢复完成child，Parent修补不是独立postfix接受。
+- **`9d116ee`** Runtime转发真实start.executionAuthority；**`7e3f5f7`** 观察并消费exact own raw-result `settlementAuthority` Promise，仅expected metadata，保持原root/FP/receipt，missing/reject/wrongroot不fallback、不读latest；factual pipeline可等实际metadata但不续window、不等待所有reload/claim。相应1实际RED与3实际RED/type0后验证，注入caps/executor/window的unit语义不冒production。
+- **`b17a212`** canonical own preparation也在原owner同set推进canonical+GEN+startedleaf+queue并返回own post Actor；7真实业务RED/1control/type0后修复，早期不存在的recovering binding phase/非法reason fixture整轮排除。相关发现legacy unknown pause与accessor marker读取一次两项真回归，已在Owner修复，最后exact11相关362PASS/type0，不冒前一失败轮GREEN。
+- **`6086f3b`** Controller同步接Runtime context、first read核原tuple、native frame携metadata；正常READY携本次post marker与同orig fn；预算过期而native仍pending时返回failed/noREADY和exact raw metadata Promise，physical/queue仍持至真settle。两个实际typed业务RED后修，早期`/ads`非法候选URL导致的NO_CANDIDATE/timeout不算，改`/ads-creation`并加实际bind-entry witness后才门控Source。后补真实failed/conflict分类1RED后给失败proposal带incoming owned marker，不再被误写stale fallback。
+- 真正 local composed positive **Runtime→Controller→real native business writer→READY terminal** 与otherAdvertiser失败/冲突已验证，rawcaps仍[]、支持能力及page边界明确注入，非actual production/Chrome/firstprotectedclock证据。Source6086当前 **12相关suites 498PASS／1个既有late-clear FAIL／完整tsc0**，native文件86全部PASS；唯一旧clear仍77→null，未skip/放宽。旧actual-native95/drain30还未合法profile迁移、不在这个选择；不累计323/349/350/354/362等不同轮。
+- **e35新真实clear RED**：genuine scoped ACTIVE/NS/GEN及canonical store，Controller先记录invalid事实，再实际进入有延迟的clear端口；等待期间real legacy setBoundAdTab把binding改77且GEN前进、canonical tuple不变；释放旧clear调用真实storage setter擦成null。`observation-clear-source-valid-RED.log` **1业务RED／86unselected／type0**，早期optionalparam implicit-any轮排除。不是只操作fakevar，也不声称能取消已dispatch native。clear Source尚未改，未授gate。
+- 新readonly design **workflow `423c9420-600b-40ee-a84a-8687f2902161`／child `54ae5767-646c-4e1f-8162-b9bd1c14aa5b`** 只审这个新的actorless clear/preSource/ownpost/native序列，非重跑完成咨询；Source/test冻结e35，Parent只改docs。初始scope、fact-only分类及legacy用例精确行范围supervisor已答；等原生事件，不poll/bg_wait。
+- Parent已裁定：same durable NS/configscope/原canonical target tuple且invalid事实仍真时，valid GEN漂移可由原owner仅记**fact-only/no-clear**，不凭GEN推business原因、不向old operation补签。NS/config目标/tuple/GEN未知不属此lane。actorless PRE须原owner strict classified snapshot；self-revoking recovery rebuild不advance旧执行leaf；knowninvalid fact先durable，clear原生失败保事实并传播，不能制造serverroot/新90窗/第二owner。
+- 原15仍 **4完成／11open**，physical继续in_progress：managed clear、originalPRE→OWNpost、clear/ACK/resume/currentcarrier、capture/protected-first clocks/真实supported composition与原95/30 profile迁移未闭，background caps=[]/executors={}。config futurequeue回交待答、ff4b/0.4.28未整合/current0.4.27，ERPeba156相关/一次baselineexit1不变，无真实外发/生产/业务merge/父指针/发布。
+- 新import-durable peer01a16419明确不碰storage/background/status，已报告分支3abed5c/v0.4.29（未独立核实master、更未整合），我已回执保留其UI/版本/前驱且不动foreign WIP。这不授本lane release或pointer权限。
+
+续作 `/tmp/plugin-status-continuous-01a1406d/observation-clear-frontier-checkpoint.json`；先消费423c完整输出/答supervisor，再Parent precise Sourcegate推进clear。其余已完成children不恢复。
+
+## 历史51193阶段：owner依赖323相关通过，后续窄审四缺口由1c修正（2026-10-22）
 
 - 已完整消费 **10ea724c/bb8657f8** 的283行设计咨询；它保持advisory，不是验收，不恢复完成child。Parent随后按实际current API typed RED执行Source，最新HEAD **`51193fe549fb9c313692770f6c82f8b58e0658bd`** 已push，自有tracked/indexclean，node_modules symlink不stage。原dirty工作树/fixture原件/metadata/foreignJSON无新触碰；不称整个repo clean。
 - **`2de62ce`**：native actor/完整root+FP+incoming leaf在enqueue前复制；canonical owner沿原serializer从单raw snapshot严格校验source/clearing/namespace/ledger/canonical/ACTIVE scope/开关，准备patch不写。business writer把binding+GEN+ownedleaf并入同一次native set，持实际queue至settle，再返回冻结ownpostmetadata，不读latest。noop也校验且保native持有，但不改GEN。旧无proof/config concrete-native许可退休，非managed legacy setter保留。

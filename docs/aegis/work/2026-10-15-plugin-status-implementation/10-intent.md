@@ -31,7 +31,7 @@
 - Current readback (2026-10-16 batch4): 完整重读当前方案§1–17、原计划、checkpoint/resume hint、插件AGENTS及当前canonical registry；历史before-plan字段初建未填，不追写成当时已有确认
 - Missing current refs:
 - none
-- Advisory decision: continue within current fifteen-row scope;原15行仍4完成/11open。上游已到ff4b17f/0.4.28，当前候选51193fe仍0.4.27、尚未同步。2de native-source同set与51193 terminal-ownedleaf依赖已按typed RED修正，最终11相关323PASS/type0，含43native与7合法profile控案，但排除尚未迁移/接线的旧actualnative95/30。新窄审0c6f针对新Source，不重跑完成设计；真实Runtime/Controller transport/lateownmetadata Promise/clear/ACK/composition仍未闭，不等完整physical/配置/产品完成。原 safety/ownership/test gates unchanged. 当前readback/evidence见20-checkpoint和resume-state-hint.currentExecution；原MINIMAX分工/未回交等段落仅历史，不覆盖Parent直接执行与已完成显式handoff。
+- Advisory decision: continue within current fifteen-row scope;原15行仍4完成/11open。上游已到ff4b17f/0.4.28，当前候选e35c4e3仍0.4.27、未整合ff4b/0.4.28及peer报告的3abed5c/v0.4.29 UI分支。0c6f四finding实际typed复现后1c修，9d/7e/b17/6086已将本地Runtime/Controller/native/terminal owned metadata及迟到Promise接通；明确注入caps/pages，12相关498PASS/1旧lateclearFAIL/type0。e35新增realstorage clear1业务RED/type0，非ready；新423c/54ae只设计actorless PRE→OWNpost→actualclear。旧95/30迁移、clear/ACK/capture/firstprotected/actualcomposition等仍开，不能外推完整physical/配置/产品完成。原 safety/ownership/test gates unchanged. 当前readback/evidence见20-checkpoint和resume-state-hint.currentExecution；原MINIMAX分工/未回交等段落仅历史，不覆盖Parent直接执行与已完成显式handoff。
 
 ## ImpactStatementDraft
 

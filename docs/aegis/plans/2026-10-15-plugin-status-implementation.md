@@ -4,9 +4,11 @@
 
 用户已明确要求连续推进当前 owner 的十五个 open rows（含配置同步两端）；Parent 仍是唯一产品/Git writer，仅允许既定只读独立 reviewer，不逐小片索取继续授权。既有依赖型验收行在实现与证据闭合后合并记账，不机械重复实现。原件/foreign WIP、原单目标/原预算/授权边界保持。用户已准仅从 committed 两 TS fixture 复制到隔离目录加载；不是解除原件/元数据/foreign JSON 保护。上游 ff4b17f/0.4.28 尚未整合，候选仍 0.4.27，保性能语义且不擅改 peer 版本；不得扩为真实外发、生产迁移/重启、业务 master merge、父指针或发布。
 
-当前隔离后继分支 `feature/plugin-status-runtime-closure` 已推送 **`51193fe`**。完成10ea只读设计咨询后Parent以26typed业务RED/4controls实现2de62ce：native在原serializer校验完整source/root/FP/owned leaf/scope/开关，ONE实际set同写binding+GEN+ledgerleaf并返回冻结ownpostproof；既有7实际native控案迁移real scoped ACK/start不换fake。继而以8typed业务RED/32controls实现51193fe：terminal消费精确owner leaf不因自身GEN推进撤权，READY/canonical+GEN+terminalleaf+queue同set，failed no-binding仍需current leaf但不套execution clocks。最终11相关323PASS/fulltsc0，含43native+7迁移控案；明确排除旧actual-native admission95/drain30尚未迁移/transport接线，非wholeGREEN。
+当前隔离分支 `feature/plugin-status-runtime-closure` 已push **`e35c4e3`**（test-only真实clear RED），Source **`6086f3b`**。10ea设计与0c6f四项实现findings均完整消费，不恢复完成child：Parent先实际26typedRED修1c alias/目标/末次源复核；9d Runtime startmetadata、7e exact raw metadata Promise、b17 canonical own prep leaf同set、6086 Controller context/postmarker/late-source handoff与failed marker都按窄typedRED提交。realRuntime→Controller→actualnative→READY及失败/conflict在明确注入caps/pages的组合下已验证，非实际production/browser/firstprotectedclock证据。
 
-当前新只读实现窄审0c6f0878/d38623e5针对这两个新Source提交，Source/test冻结51193；Parent只写协调docs，所有gate/验收/Git仍Parent。两次metadata旧changes_requested与10ea设计报告均已消费，不恢复完成child。Runtime/Controller exactauthority与迟到ownwrite Promise、firstprotected/page/capture/composition、clear/ACK/currentcarrier等尚未统一，lateclear仍真实失败；parent收到窄审后继续actualRED与精确gate，不把stored owner helpers绿称native闭环。
+Source6086当前12相关498PASS/1KNOWNoldlateclearFAIL/fulltsc0；新e35在realstorage/controller/NS/GEN下实际复现old clear擦掉新tab77，1业务RED/type0，候选不ready。旧actual-native95/drain30尚未完整迁移，不在选择；362/354/350/349/323等各轮不累计。Background caps=[]/executors={}仍缺actualsupported composition，clear/ACK/resume/currentcarrier/capture/firstprotected/Cookie等未闭。新readonly423c/54ae只设计这个新的actorless PRE-source→OWNpostproof→nativeclear边界，Source/test冻结e35、Parent仅docs，先答supervisor/消费完整输出再精确Sourcegate，不把outerguard或latest补签当修复。
+
+新importdurable peer已明确不碰status/storage/background，报告3abed5c分支/v0.4.29仅UI与版本；status候选0.4.27仍未整合此前ff4b/0.4.28或该peer分支，不冒master已同步/不覆盖peer版本。
 
 原全面runtime时钟门控实验已精确撤回，不把控制完成当raw事实落盘；trace只导出OS temp/evidence。原完整插件1244PASS/26FAIL+1setup不是最终GREEN；当前323与此前310/398/373等是不同轮次/选择，不累计。当前自有tracked/indexclean，依赖symlink不stage，原dirty树/foreignJSON不动。
 
