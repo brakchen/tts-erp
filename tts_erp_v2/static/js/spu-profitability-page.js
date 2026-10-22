@@ -17,6 +17,8 @@
   var DEFAULT_SORT = "roi_real";
   var DEFAULT_ORDER = "asc";
   var DATE_VALUE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  // 原生 type=date 的年份格可敲出 20252；用 min/max 把可选范围锁在四位年。
+  var DATE_INPUT_MIN = "2000-01-01";
   var PAGE_LIMITS = new Set([50, 100, 200]);
   // commerce.shops.region 是 ISO 3166-1 国家码；仅映射确定的单时区市场。
   // 多时区或未知地区必须暂停，不能猜测默认时区。
@@ -2792,10 +2794,44 @@
     return `截止日包含当天；快捷范围均截止 T-1${shopContext}，“不限”只取消起始日；手动清空日期表示不限制该端。销售、退款与广告按同一范围统计。`;
   }
 
+  function dateInputMax() {
+    return reportingEndDate(new Date()) || reportingDateValue(new Date()) || "";
+  }
+
+  function applyDateInputBounds() {
+    var max = dateInputMax();
+    ["#filter-w-start", "#filter-w-end"].forEach((sel) => {
+      var node = $(sel);
+      if (!node) return;
+      node.min = DATE_INPUT_MIN;
+      if (max) node.max = max;
+      else node.removeAttribute("max");
+    });
+  }
+
+  function restoreDateField(which, input) {
+    if (!input) return;
+    input.value = which === "start" ? state.wStart : state.wEnd;
+  }
+
+  function dateInputIsImplausible(input, value) {
+    if (input && input.validity) {
+      if (input.validity.badInput || input.validity.rangeOverflow || input.validity.rangeUnderflow) {
+        return true;
+      }
+    }
+    if (!value) return false;
+    if (!DATE_VALUE_RE.test(value)) return true;
+    if (value < DATE_INPUT_MIN) return true;
+    var max = dateInputMax();
+    return Boolean(max && value > max);
+  }
+
   function syncDateInputsFromState() {
     var start = $("#filter-w-start");
     var end = $("#filter-w-end");
     var help = $("#date-range-help");
+    applyDateInputBounds();
     // 正在改年/日的格子不要回写，否则 Chrome 中途空值会被 state 盖掉。
     if (start && document.activeElement !== start) start.value = state.wStart;
     if (end && document.activeElement !== end) end.value = state.wEnd;
@@ -3115,8 +3151,15 @@
     // 起始 > 截止：保留刚输入的值并提示，不把输入框清空。type=date 先改日再改年时
     // Chrome 会在仍聚焦时抛空 change，空值等到失焦再提交为「不限」。
     function _dateFieldChanged(which, e) {
-      var v = e.target.value || "";
-      if (v === "" && e.type !== "blur" && document.activeElement === e.target) {
+      var input = e.target;
+      var v = input.value || "";
+      if (dateInputIsImplausible(input, v)) {
+        cancelCurrentLoad();
+        renderError("日期无效：请输入 2000 年至昨天之间的四位年份日期");
+        restoreDateField(which, input);
+        return;
+      }
+      if (v === "" && e.type !== "blur" && document.activeElement === input) {
         return;
       }
       var nextStart = which === "start" ? v : state.wStart;

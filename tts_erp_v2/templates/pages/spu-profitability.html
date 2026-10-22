@@ -219,11 +219,11 @@
       <div class="op-tool-row op-tool-row--window">
         <div data-tip="日期范围（销售/退款/广告同口径裁剪；空 = 全历史）">
           <label class="visually-hidden" for="filter-w-start">起始日</label>
-          <input id="filter-w-start" type="date" class="form-control form-control-sm" aria-label="销售/退款起始日期（空 = 不限）">
+          <input id="filter-w-start" type="date" class="form-control form-control-sm" min="2000-01-01" aria-label="销售/退款起始日期（空 = 不限）">
         </div>
         <div data-tip="销售/退款日期范围（空 = 全历史；含当日）">
           <label class="visually-hidden" for="filter-w-end">截止日</label>
-          <input id="filter-w-end" type="date" class="form-control form-control-sm" aria-label="销售/退款截止日期（空 = 不限）">
+          <input id="filter-w-end" type="date" class="form-control form-control-sm" min="2000-01-01" aria-label="销售/退款截止日期（空 = 不限）">
         </div>
         <label class="op-projection-control mb-0" for="filter-projection-lookback-days">
           <span>预测样本</span>
