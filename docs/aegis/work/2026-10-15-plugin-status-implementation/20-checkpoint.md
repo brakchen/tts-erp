@@ -1,6 +1,39 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：隔离后继预算候选已推送，物理授权协议仍在实现（2026-10-22）
+## 当前：Source398相关通过；具体native API已有8个typed业务RED，仍在统一接线（2026-10-22）
+
+- HEAD **`de20a0bac4f0c37ba920024a70a7bbdad1395ca7`** 已 push；Source为 **`9cc01fa8659be89f5667cd3b8f7e09dc6bd0bfce`**，de20仅新native测试RED检查点。自有tracked/index clean，依赖node_modules symlink不stage；不冒原dirty工作树全clean。原15行仍4完成/11open，physical in_progress。
+- 两次局部readonly报告均已完整消费且保留 **changes_requested**：bfee的Q1/Q2已由d7的真实8RED/6controls修正；25cb静态收口Q1/Q2但指出`clearing=false`放行。Parent确认现有sentinel只认undefined/true，false也malformed；先真实2RED/14controls/type0，再在9cc提取原marker decoder供既有async reader与namespaced raw snapshot共用，不新增局部false guard或改变全局合同。
+- 修正后 exact Source **11 suites 398 PASS/fulltsc0**，包括16 source-presence+27 starter/schema，不能累加373/358等历史轮次。主动LSP两path0error、1confirmedclean/1inconclusive，非全clean。Parent已给每个finding实际反例与最小修补，未伪造独立9cc后验accepted；最终spec/quality门仍未到达。
+- 新 `tests/plugin-status-native-source-fence.test.ts` 用real scoped configure、business writes、observation/allocate/ACK/start建立owner leaf，只以Chrome memory替边界。对existing `setRecoveryBoundAdTab`实际 **8业务RED/1original-liveness control PASS，完整tsc0**：live bind使leaf失权、同tuple foreign generation/ABA仍写、caller伪造latest leaf仍写、无proof/config仍写、noop/queued args缺owner successor。结构typed扩展变量、无缺export/cast/stub；不是旧blind fake clear证据。该新文件刻意RED，未授权native Source修复，候选不ready。
+- 新readonly consultation只收口这批新concrete反例的最小canonical helper/one-set/DTO handoff与旧真实native profile迁移，**不是重跑旧general architecture**。workflow **`10ea724c-3c88-47a3-9cd7-6eea36c2b0b0`**，child **`bb8657f8-e508-4111-8276-407c6cc50c75`**；read/contact-only，初始supervisor已回复。等待原生请求/完成，不poll/bg_wait，不恢复完成child。Source/test de20冻结，Parent只写协调docs；咨询不授Source/验收。
+- native bind/clear的expected owner-leaf CAS、同set source+generation+leaf推进、controller/runtime/READY/ACK handoff仍开；不能恢复无proof native分支或把旧actual-native控案悄换fake来凑GREEN。current-carrier ACK/acquire/projection旧迁移仍需一致性审计。迟到clear、actual composition/caps、原90秒/actions/Cookie、配置core回交、upstream ff4b17f/0.4.28整合和最终spec/quality/integration未闭。ERP156相关/一次baseline exit1与全部真实外发/生产/merge/pointer/release边界不变。
+
+当前续作见 `/tmp/plugin-status-continuous-01a1406d/native-bind-frontier-checkpoint.json` 与新consultation task/output binding；先答supervisor/消费完整设计，再Parent精确Sourcegate，不需再次询问普通继续授权。
+
+## 历史d7阶段：严格持久源校验修正已推送，后继窄审后来指出false哨兵错误（2026-10-22）
+
+- 最新候选 **`d7f157ba7eec7a3ad5d1c494e70ae96a21cbfa8e`** 已 push；自有 tracked/index delta0，node_modules依赖symlink明确不stage，原dirty工作树/原fixture/foreign JSON不动。原15行仍 **4完成/11open**，physical仍in_progress。
+- 已完整消费原 metadata readonly review `07257274` / child `bfee25d7`，实际 **changes_requested**，不是accepted：Q1缺 durable generation 时被 legacy floor1补成continuation；Q2拒绝验证时 namespace reader会补建NS。Parent接受两finding，原报告保留，不恢复/重跑完成child。startedAt输入校验为既存弱点，未顺手改。
+- 新自包含14案通过真实 **scoped configure→queue→allocate→ACK 的 generation1** root后才故障注入。配置schema必须是 `authorisedScope:{kind:"shop",sellerId,advertiserId}`；先前误用desiredScope/漏kind的setup/type轮次排除。真实typed轮次 **8业务RED/6controls PASS、完整tsc0**，覆盖缺/坏GEN、缺/坏/替换NS、clearing及既有leaf。只在既有 stored-receipt/leaf currentness owner读取raw三key，namespaced路径不调用legacy默认值或迁移reader；显式namespace-less历史只保无新authority的兼容。
+- 最终 **10相关suites 373 PASS、完整tsc0**（包含14presence+27starter/schema，不另累加），当前exact bytes已提交。主动LSP两path0error、1confirmedclean/1inconclusive，非全clean。current-carrier ACK/acquire/projection旧迁移路径未改，不能说全协议已一致；native门收口时仍须审计。
+- fresh successor只审修正后的d7：workflow **`0a423562-b639-48a0-b5c5-ad02c847cf7b`**，child **`25cbafd2-dd57-4150-9385-f0668891d4b9`**。精确read/contact allowlist、无命令/Git/fixture/写，初始supervisor已回复；旧attention不授resume或重派。Source d7窄范围冻结，等待原生请求/完成，不poll/bg_wait。输出绑定 `strict-source-presence-followup-review.json`，尚未冒已读通过。
+- 下一步仍是 concrete native bind/clear 的原source proof、owner incoming-leaf CAS、同set source+generation+leaf推进及controller/runtime/READY/ACK handoff。**当前native仍未消费这些metadata，迟到clear真实缺口仍开**，caps=[]/executors={}；不以373相关PASS关physical/actions/Cookie/spec/quality/integration。配置core回交、ff4b17f/0.4.28整合仍开，ERP/once baseline边界不变。无真实外发/生产/业务mastermerge/父指针/发布。
+
+当前续作：`/tmp/plugin-status-continuous-01a1406d/strict-source-presence-checkpoint.json`；原review、typedRED与`strict-source-presence-final-{related,type}.log`均保留。后继只读结果到达后直接续作，不需再次询问普通继续授权。
+
+## 历史 metadata 阶段：两个依赖已推送，原局部只读复核后来要求修正（2026-10-22）
+
+- writer/branch 不变，最新 **`b010ea52fa05df36ac1712b5f21f8b00ce214977`** 已 push。`e553d0b` 保存六个既有持久合同/harness 修正；`d37c5c8` 返回 canonical commit 本次实际 dispatch 的 frozen post-generation/namespace/四元组；`b010ea5` 在 current namespaced receipt accepted→started 同一 ledger set 初始化 continuation，返回 frozen 原 receipt/fingerprint/leaf 预期，并严格解析 phase/keys/root/namespace/generation。它们只是依赖节点，**不是单靠 caller token 的执行许可**。
+- post-proof 首次有效 typed 轮次实际 **3 业务 RED + 1 无效 null-incident fixture + 28 PASS/type0**；原 gate 写 4 genuine 的错误已在 erratum 明确纠正。只改 fixture 为 disabled/USER_DISABLED，不放宽 wire；该阶段6相关175PASS/type0。starter 原3业务RED/7PASS/type0；其后9相关358PASS/type0。随后只有等价 ternary→if 与一项 interruption/no-wire 控制，最终当前27 starter/schema/migration 控制PASS、完整tsc0；不冒最终同字节358，也不跨轮累加。主动LSP三path零error、1confirmedclean/2inconclusive，非全clean。
+- starter 覆盖错误 incident/epoch 拒 claim、foreign source撤权、namespace-less/已started无leaf不补签、11种损坏schema、4种合法形状但错误canonical tuple、原root不变、interruption保leaf且 wire结果只出原5字段。**native bind/clear、同set source+generation+leaf推进、controller/runtime handoff、READY/ACK自变更继续权仍未实现**；background caps=[]/executors={}。
+- 原预算通知使三个Cookie Store测试的“window.wait赢race即task已settled”假设失效；仅改观察方式，明确原 waiter expired 且真实task在原90秒内已settled、native raw仍pending，保全部durable/no-sideeffect/successor oracle。4控制PASS/type0；没有改成允许晚clear。最新 tracked/index 自有delta0，仅 node_modules依赖symlink不stage；原dirty工作树不动。
+- fresh readonly workflow **`07257274-2b0e-454c-b49a-50f3eab7d7f8`** 已 launch，child **`bfee25d7-0111-495b-8675-03930740dab5`**；只读/联系Parent、无命令/Git/fixture/写。初始supervisor已回复，随后pending为空；不因旧attention恢复/重派。Source b010局部冻结，等原生请求/完成事件；输出绑定 `metadata-dependencies-review.json` 尚非已读结论。advisory不授整体验收。
+- 原15行仍4完成/11open，physical in_progress；迟到clear缺口、完整native/actions/Cookie、配置回交、最终spec/quality/integration仍开。上游ff4b17f/0.4.28未整合、候选仍0.4.27。ERP eba0b77/156相关与一次baseline exit1边界不变，无生产/真实外发/业务merge/父指针/发布。
+
+当前证据与续作：`/tmp/plugin-status-continuous-01a1406d/metadata-dependencies-checkpoint.json`、`physical-post-proof-RED-erratum.json`、`continuation-start-{RED,final-related,final-controls,final-controls-type}.log`。先消费新的局部只读结果，再以 concrete native APIs 写 live/stale/ABA 与 owner-leaf CAS 反例，不能恢复已完成的 architecture 咨询或借 latest 补签。
+
+## 历史预算阶段：隔离后继预算候选已推送，物理授权协议仍在实现（2026-10-22）
 
 - 用户已批准仅从已提交版本复制两份 TS fixture 到隔离目录加载；不是解除原件/元数据、两份 foreign JSON 的保护。当前 writer 为 `/home/schan/pi-workspace/monitor-status-runtime-01a1406d`，分支 `feature/plugin-status-runtime-closure`；原 dirty worktree 不写。registry-only `26132b4` 已登记后继工作树与测试归属。
 - 插件候选 `f8a5f47a16f2d8259e4396eadb4227dc8a2d03f2` 已推送：同一原预算的耗尽通知唤醒已等待 guard；原 frame 即使已撤销也先采样原时钟，避免 short-circuit 漏掉 wall expiry。无第二窗口/权限 registry，不取消已 dispatch 的 raw work。4 个 release-budget 控制 PASS；当前 chain51 + physical-drain30 = **81 PASS/no skip**，完整 `tsc --noEmit` exit0。原控制返回与事实落盘分离；两迟到终态案保持原 STALE_CONTEXT oracle，增加真实 canonical writer 的委托观察，不把控制完成当 raw 已完成。

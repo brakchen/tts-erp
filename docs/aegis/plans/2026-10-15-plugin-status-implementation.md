@@ -4,9 +4,11 @@
 
 用户已明确要求连续推进当前 owner 的十五个 open rows（含配置同步两端）；Parent 仍是唯一产品/Git writer，仅允许既定只读独立 reviewer，不逐小片索取继续授权。既有依赖型验收行在实现与证据闭合后合并记账，不机械重复实现。原件/foreign WIP、原单目标/原预算/授权边界保持。用户已准仅从 committed 两 TS fixture 复制到隔离目录加载；不是解除原件/元数据/foreign JSON 保护。上游 ff4b17f/0.4.28 尚未整合，候选仍 0.4.27，保性能语义且不擅改 peer 版本；不得扩为真实外发、生产迁移/重启、业务 master merge、父指针或发布。
 
-当前隔离后继分支 `feature/plugin-status-runtime-closure` 已推送 `f8a5f47`：只修原预算耗尽唤醒/time-first 采样及 chain harness，当前 chain51+physical-drain30＝81 PASS、完整 tsc0。六个合同/harness tests 仍 dirty；迟到 clear 仍真实失败。全面 runtime 时钟门控实验已精确撤回，不把控制完成当 raw 事实落盘；trace 导出改 OS temp/evidence，不再默认覆盖 Git fixture。统一 bind/clear source proof 与 ledger-owned continuation 仍待业务 RED/Sourcegate/实现。原完整插件轮次1244PASS/26FAIL+1setup不是最终 GREEN。
+当前隔离后继分支 `feature/plugin-status-runtime-closure` 已推送 `de20a0b`，Source为`9cc01fa`：原预算唤醒、canonical postproof、owner continuation启动、严格durable source/统一clearing哨兵parser及六合同tests已提交。两次readonly报告实际changes_requested已消费；对应真实8RED/6controls与2RED/14controls后最小修复，Source最终11相关398PASS/完整tsc0，非独立postfix/全产品接受。de20仅新增concrete native API的9案，实际8业务RED/1原liveness控制PASS/type0；source变化/ABA/caller伪造leaf/缺proof或config仍写等缺口未修，不ready。新readonly咨询只收口这批新证据对应的exact helper/one-set/DTO与旧actual-native合法profile迁移，Parent消费后再精确Sourcegate，不恢复完成child。迟到clear仍真实失败，actual native composition/authority transport/READY/ACK未闭。
 
-此前插件 `ff03e2c`（observation-only）：持久 generation/namespace/clearing、commit/send/replay/ACK proof 与真实配置投影后继已提交；25 startup 控制与自包含20相关620 PASS、guarded63零诊断。canonical login/conflict/RECOVERING 的直接控制已有，不需要为本来正确的投影加分支；native 生命周期构造/action ports/完整90秒/Cookie aggregate仍开。较早旧 runtime test 间接导入 protected fixture 的选择已停止并披露，不能用 compiler 守卫替该命令背书。旧默认自动 reprovision 等合同现已在隔离树修正，尚未提交；不以测试修正冒新功能 RED。
+原全面runtime时钟门控实验已精确撤回，不把控制完成当raw事实落盘；trace只导出OS temp/evidence。原完整插件1244PASS/26FAIL+1setup不是最终GREEN；398不含刻意RED的新native9案、不累计旧373/358等。当前自有tracked/indexclean，依赖symlink不stage，原dirty树/foreignJSON不动。
+
+此前插件 `ff03e2c`（observation-only）：持久 generation/namespace/clearing、commit/send/replay/ACK proof 与真实配置投影后继已提交；25 startup 控制与自包含20相关620 PASS、guarded63零诊断。canonical login/conflict/RECOVERING 的直接控制已有，不需要为本来正确的投影加分支；native 生命周期构造/action ports/完整90秒/Cookie aggregate仍开。较早旧 runtime test 间接导入 protected fixture 的选择已停止并披露，不能用 compiler 守卫替该命令背书。旧默认自动 reprovision 等合同已在e553d0b提交；不以正确既有行为的测试修正冒新功能 RED。
 
 ERP `eba0b77`：不可变 notification claim、条件 lease settlement、逐条发送时领租约、真实 60秒 system job/audit 与 retained Session reclaim 刷新已提交；当前156个 isolated相关 PASS。一次完整 baseline 2873PASS/1FAIL/14skip/1xfail exit1，唯一自身时钟混用案最小隔离PASS、修后155PASS；不冒最终同字节全GREEN、不重跑整套。fresh local SPEC对两叶无实现阻断；QUALITY提出 retained ORM identity-map reclaim后已实际1RED、一行修复及156PASS，fresh05f532后审无findings。Parent已完成观测三行与ERP本地runtime一行，原15行余11；仍不进入跨端ready。
 
