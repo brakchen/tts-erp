@@ -253,6 +253,13 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="run_scheduled",
     ),
+    "plugin.status.lifecycle": JobSpec(
+        job_name="plugin.status.lifecycle",
+        module_path="tts_erp_v2.plugin.status.scheduler",
+        interval_seconds=60,
+        is_tiktok=False,
+        entrypoint="run_worker_job",
+    ),
     "analytics.spu_profit_deterioration_alert": JobSpec(
         job_name="analytics.spu_profit_deterioration_alert",
         module_path="tts_erp_v2.jobs.spu_deterioration_alert",

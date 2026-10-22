@@ -13,12 +13,13 @@ of "the" current decision.
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from pydantic import TypeAdapter
-from sqlalchemy import and_, false, select
+from sqlalchemy import and_, false, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -381,13 +382,25 @@ def enqueue_notification(
     return True
 
 
+@dataclass(frozen=True, slots=True)
+class NotificationClaim:
+    """Owned lease snapshot, immune to ORM expiry and another worker's refresh."""
+
+    id: UUID
+    instance_id: UUID
+    notification_kind: str
+    payload: dict[str, Any]
+    attempt_count: int
+    lease_until: datetime
+
+
 def claim_due_notifications(
     session: Session,
     *,
     now: datetime,
     limit: int,
     lease_seconds: int,
-) -> list[StatusNotificationOutbox]:
+) -> list[NotificationClaim]:
     """Take a short lease on deliverable notifications.
 
     A row is claimable when it is ``pending`` and due, or when a previous
@@ -395,6 +408,8 @@ def claim_due_notifications(
     a crashed sender's work retryable without a sweeper of its own.
     """
 
+    if lease_seconds <= 0:
+        raise ValueError("notification lease must be positive")
     lease_until = now + timedelta(seconds=lease_seconds)
     rows = (
         session.execute(
@@ -406,6 +421,7 @@ def claim_due_notifications(
             .order_by(StatusNotificationOutbox.next_attempt_at)
             .limit(limit)
             .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
         )
         .scalars()
         .all()
@@ -414,7 +430,17 @@ def claim_due_notifications(
         row.state = "claimed"
         row.lease_until = lease_until
     session.flush()
-    return list(rows)
+    return [
+        NotificationClaim(
+            id=row.id,
+            instance_id=row.instance_id,
+            notification_kind=row.notification_kind,
+            payload=dict(row.payload),
+            attempt_count=row.attempt_count,
+            lease_until=lease_until,
+        )
+        for row in rows
+    ]
 
 
 def reclaim_expired_leases(session: Session, *, now: datetime) -> int:
@@ -439,37 +465,72 @@ def reclaim_expired_leases(session: Session, *, now: datetime) -> int:
     return len(rows)
 
 
-def mark_delivered(
-    session: Session, row: StatusNotificationOutbox, *, now: datetime
-) -> None:
-    row.state = "delivered"
-    row.delivered_at = now
-    row.lease_until = None
-    row.last_error_code = None
-    session.flush()
+def _settle_notification(
+    session: Session,
+    claim: NotificationClaim,
+    *,
+    now: datetime,
+    values: dict[str, Any],
+) -> bool:
+    # SQLAlchemy 2 conditional UPDATE/RETURNING owns the CAS; no ORM row can
+    # refresh itself into a successor's lease. Reclaim requires now >= old lease,
+    # so positive lease intervals make the successor's lease strictly greater.
+    result = session.execute(
+        update(StatusNotificationOutbox)
+        .where(
+            StatusNotificationOutbox.id == claim.id,
+            StatusNotificationOutbox.state == "claimed",
+            StatusNotificationOutbox.lease_until == claim.lease_until,
+            StatusNotificationOutbox.lease_until > now,
+        )
+        .values(**values, lease_until=None)
+        .returning(StatusNotificationOutbox.id)
+        .execution_options(synchronize_session=False)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def mark_delivered(session: Session, row: NotificationClaim, *, now: datetime) -> bool:
+    return _settle_notification(
+        session,
+        row,
+        now=now,
+        values={"state": "delivered", "delivered_at": now, "last_error_code": None},
+    )
 
 
 def mark_retry(
     session: Session,
-    row: StatusNotificationOutbox,
+    row: NotificationClaim,
     *,
     now: datetime,
     next_attempt_at: datetime,
     error_code: str,
-) -> None:
-    row.state = "pending"
-    row.attempt_count += 1
-    row.next_attempt_at = next_attempt_at
-    row.lease_until = None
-    row.last_error_code = error_code
-    session.flush()
+) -> bool:
+    return _settle_notification(
+        session,
+        row,
+        now=now,
+        values={
+            "state": "pending",
+            "attempt_count": StatusNotificationOutbox.attempt_count + 1,
+            "next_attempt_at": next_attempt_at,
+            "last_error_code": error_code,
+        },
+    )
 
 
 def mark_pending_manual(
-    session: Session, row: StatusNotificationOutbox, *, error_code: str
-) -> None:
+    session: Session,
+    row: NotificationClaim,
+    *,
+    error_code: str,
+    now: datetime | None = None,
+) -> bool:
     """A configuration/signing failure is not retryable by waiting."""
-    row.state = "pending_manual"
-    row.lease_until = None
-    row.last_error_code = error_code
-    session.flush()
+    return _settle_notification(
+        session,
+        row,
+        now=now if now is not None else datetime.now(UTC),
+        values={"state": "pending_manual", "last_error_code": error_code},
+    )

@@ -74,14 +74,14 @@ EXPECTED_JOB_INTERVALS = {
     "fx.sync": 3600,
     "analytics.shop_fee_rate": 86400,
     "analytics.spu_profit_deterioration_alert": 86400,
+    "plugin.status.lifecycle": 60,
 }
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """19 jobs total — keeps us honest if a new one slips in unannounced."""
-    # 6 TikTok + 13 system jobs, including the source-owned purchase-price
-    # cleaner and excluding the retired EWM purchase-order sync.
-    assert len(JOBS) == 20
+    """21 jobs total, including the managed plugin lifecycle/outbox sweep."""
+    # 6 TikTok + 15 system jobs; no per-shop fan-out for lifecycle delivery.
+    assert len(JOBS) == 21
 
 
 @pytest.mark.parametrize(

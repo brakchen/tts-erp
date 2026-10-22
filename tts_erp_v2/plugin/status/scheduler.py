@@ -22,6 +22,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.jobs.runner import run_job
 from tts_erp_v2.plugin.status import notifications, repository, service
 
 log = logging.getLogger("tts_erp_v2.plugin.status.scheduler")
@@ -31,6 +32,7 @@ __all__ = [
     "JOB_MODULE_PATH",
     "JOB_NAME",
     "run_scheduled",
+    "run_worker_job",
     "sweep_no_candidate",
     "sweep_stale_instances",
 ]
@@ -90,6 +92,17 @@ def sweep_stale_instances(session: Session, *, now: datetime) -> int:
     return newly_stale
 
 
+def run_worker_job(session: Session) -> dict[str, Any]:
+    """Shared worker entrypoint, including its existing durable tick history."""
+    with run_job(session, job_name=JOB_NAME) as job:
+        result = run_scheduled(session)
+        job.rows_total = result["attempted"]
+        job.rows_updated = result["delivered"]
+        job.rows_failed = result["retrying"] + result["pendingManual"]
+        job.extra = result
+    return result
+
+
 def _resolve_sender(
     session: Session, sender: notifications.Sender | None
 ) -> notifications.Sender:
@@ -123,37 +136,32 @@ def run_scheduled(
     no_candidate = sweep_no_candidate(session, now=tick_now)
     session.commit()
 
-    claimed = repository.claim_due_notifications(
-        session, now=tick_now, limit=limit, lease_seconds=lease_seconds
-    )
-    session.commit()
-    if not claimed:
-        return {
-            "reclaimedLeases": reclaimed,
-            "staleInstances": newly_stale,
-            "noCandidateNotices": no_candidate,
-            "attempted": 0,
-            "delivered": 0,
-            "retrying": 0,
-            "pendingManual": 0,
-        }
+    deliver = sender
+    attempted = delivered = retrying = pending_manual = 0
 
-    deliver = _resolve_sender(session, sender)
-    # Materialise every message before the first send, so building them cannot
-    # hold a transaction open either; the rows are already leased and committed.
-    messages = [
-        notifications.render_message(
+    for _ in range(limit):
+        # Lease just this network turn. Slow earlier sends must not spend the
+        # leases of a batch that has not reached its delivery boundary yet.
+        claim_now = tick_now if now is not None else datetime.now(UTC)
+        claimed = repository.claim_due_notifications(
+            session, now=claim_now, limit=1, lease_seconds=lease_seconds
+        )
+        session.commit()
+        if not claimed:
+            break
+        row = claimed[0]
+        message = notifications.render_message(
             kind=row.notification_kind,
             instance_id=str(row.instance_id),
             payload=dict(row.payload),
-            attempt=int(row.attempt_count) + 1,
+            attempt=row.attempt_count + 1,
         )
-        for row in claimed
-    ]
-    session.rollback()
-    delivered = retrying = pending_manual = 0
-
-    for row, message in zip(claimed, messages, strict=True):
+        if deliver is None:
+            deliver = _resolve_sender(session, None)
+        send_now = tick_now if now is not None else datetime.now(UTC)
+        if row.lease_until <= send_now:
+            continue
+        attempted += 1
         try:
             outcome = deliver(message)
         except Exception:
@@ -163,30 +171,33 @@ def run_scheduled(
             )
             outcome = notifications.RETRY
 
+        settled_at = tick_now if now is not None else datetime.now(UTC)
         if outcome == notifications.DELIVERED:
-            repository.mark_delivered(session, row, now=tick_now)
-            delivered += 1
+            applied = repository.mark_delivered(session, row, now=settled_at)
+            delivered += 1 if applied else 0
         elif outcome == notifications.PENDING_MANUAL:
-            repository.mark_pending_manual(session, row, error_code=outcome)
-            pending_manual += 1
+            applied = repository.mark_pending_manual(
+                session, row, error_code=outcome, now=settled_at
+            )
+            pending_manual += 1 if applied else 0
         else:
-            delay = notifications.retry_delay_seconds(int(row.attempt_count) + 1)
-            repository.mark_retry(
+            delay = notifications.retry_delay_seconds(row.attempt_count + 1)
+            applied = repository.mark_retry(
                 session,
                 row,
-                now=tick_now,
-                next_attempt_at=tick_now + timedelta(seconds=delay),
+                now=settled_at,
+                next_attempt_at=settled_at + timedelta(seconds=delay),
                 error_code=outcome,
             )
-            retrying += 1
-        # One commit per message: the outcome is durable before the next
-        # network call, so a crash cannot replay a notification already sent.
+            retrying += 1 if applied else 0
+        # Only this claim may commit its outcome. Delivery remains at-least-once:
+        # a crash after HTTP but before commit can still require redelivery.
         session.commit()
 
     log.info(
         "[plugin-status] tick stale=%d attempted=%d delivered=%d retry=%d manual=%d",
         newly_stale,
-        len(claimed),
+        attempted,
         delivered,
         retrying,
         pending_manual,
@@ -195,7 +206,7 @@ def run_scheduled(
         "reclaimedLeases": reclaimed,
         "staleInstances": newly_stale,
         "noCandidateNotices": no_candidate,
-        "attempted": len(claimed),
+        "attempted": attempted,
         "delivered": delivered,
         "retrying": retrying,
         "pendingManual": pending_manual,
