@@ -1106,6 +1106,9 @@
       // 行内下钻直接往行 DOM 后插 div，禁用虚拟滚动防止行被重排回收。
       renderVertical: "basic",
       maxHeight: "min(72vh, 880px)",
+      // 排序真相源是服务端。local 模式下 load() 的 clearData→setSort 会在空表上
+      // 把数字列缓存成 string sorter，replaceData 后「总单量 ↓」变成 9,8,63。
+      sortMode: "remote",
       initialSort: initialDef
         ? [{ column: initialDef.field, dir: state.order }]
         : [],
@@ -1128,7 +1131,7 @@
       if (e) handledDrillEvents.add(e);
       openDrillPanel(row.getElement(), it);
     });
-    // 表头点击只改状态并触发服务端重取（本地排序对同字段幂等）。
+    // 表头点击只改状态并触发服务端重取（sortMode=remote，不在本地重排）。
     state.table.on("dataSorting", (sorters) => {
       if (_applyingServerSort) return;
       var s = sorters && sorters[0];
