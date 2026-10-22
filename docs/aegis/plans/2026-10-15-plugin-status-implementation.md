@@ -4,9 +4,11 @@
 
 用户已明确要求连续推进当前 owner 的十五个 open rows（含配置同步两端）；Parent 仍是唯一产品/Git writer，仅允许既定只读独立 reviewer，不逐小片索取继续授权。既有依赖型验收行在实现与证据闭合后合并记账，不机械重复实现。原件/foreign WIP、原单目标/原预算/授权边界保持。用户已准仅从 committed 两 TS fixture 复制到隔离目录加载；不是解除原件/元数据/foreign JSON 保护。上游 ff4b17f/0.4.28 尚未整合，候选仍 0.4.27，保性能语义且不擅改 peer 版本；不得扩为真实外发、生产迁移/重启、业务 master merge、父指针或发布。
 
-当前隔离后继分支 `feature/plugin-status-runtime-closure` 已推送 `de20a0b`，Source为`9cc01fa`：原预算唤醒、canonical postproof、owner continuation启动、严格durable source/统一clearing哨兵parser及六合同tests已提交。两次readonly报告实际changes_requested已消费；对应真实8RED/6controls与2RED/14controls后最小修复，Source最终11相关398PASS/完整tsc0，非独立postfix/全产品接受。de20仅新增concrete native API的9案，实际8业务RED/1原liveness控制PASS/type0；source变化/ABA/caller伪造leaf/缺proof或config仍写等缺口未修，不ready。新readonly咨询只收口这批新证据对应的exact helper/one-set/DTO与旧actual-native合法profile迁移，Parent消费后再精确Sourcegate，不恢复完成child。迟到clear仍真实失败，actual native composition/authority transport/READY/ACK未闭。
+当前隔离后继分支 `feature/plugin-status-runtime-closure` 已推送 **`51193fe`**。完成10ea只读设计咨询后Parent以26typed业务RED/4controls实现2de62ce：native在原serializer校验完整source/root/FP/owned leaf/scope/开关，ONE实际set同写binding+GEN+ledgerleaf并返回冻结ownpostproof；既有7实际native控案迁移real scoped ACK/start不换fake。继而以8typed业务RED/32controls实现51193fe：terminal消费精确owner leaf不因自身GEN推进撤权，READY/canonical+GEN+terminalleaf+queue同set，failed no-binding仍需current leaf但不套execution clocks。最终11相关323PASS/fulltsc0，含43native+7迁移控案；明确排除旧actual-native admission95/drain30尚未迁移/transport接线，非wholeGREEN。
 
-原全面runtime时钟门控实验已精确撤回，不把控制完成当raw事实落盘；trace只导出OS temp/evidence。原完整插件1244PASS/26FAIL+1setup不是最终GREEN；398不含刻意RED的新native9案、不累计旧373/358等。当前自有tracked/indexclean，依赖symlink不stage，原dirty树/foreignJSON不动。
+当前新只读实现窄审0c6f0878/d38623e5针对这两个新Source提交，Source/test冻结51193；Parent只写协调docs，所有gate/验收/Git仍Parent。两次metadata旧changes_requested与10ea设计报告均已消费，不恢复完成child。Runtime/Controller exactauthority与迟到ownwrite Promise、firstprotected/page/capture/composition、clear/ACK/currentcarrier等尚未统一，lateclear仍真实失败；parent收到窄审后继续actualRED与精确gate，不把stored owner helpers绿称native闭环。
+
+原全面runtime时钟门控实验已精确撤回，不把控制完成当raw事实落盘；trace只导出OS temp/evidence。原完整插件1244PASS/26FAIL+1setup不是最终GREEN；当前323与此前310/398/373等是不同轮次/选择，不累计。当前自有tracked/indexclean，依赖symlink不stage，原dirty树/foreignJSON不动。
 
 此前插件 `ff03e2c`（observation-only）：持久 generation/namespace/clearing、commit/send/replay/ACK proof 与真实配置投影后继已提交；25 startup 控制与自包含20相关620 PASS、guarded63零诊断。canonical login/conflict/RECOVERING 的直接控制已有，不需要为本来正确的投影加分支；native 生命周期构造/action ports/完整90秒/Cookie aggregate仍开。较早旧 runtime test 间接导入 protected fixture 的选择已停止并披露，不能用 compiler 守卫替该命令背书。旧默认自动 reprovision 等合同已在e553d0b提交；不以正确既有行为的测试修正冒新功能 RED。
 

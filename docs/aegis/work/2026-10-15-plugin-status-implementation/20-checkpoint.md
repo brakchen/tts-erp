@@ -1,6 +1,18 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：Source398相关通过；具体native API已有8个typed业务RED，仍在统一接线（2026-10-22）
+## 当前：native与terminal owner依赖已提交，323相关通过；真实transport仍未接线（2026-10-22）
+
+- 已完整消费 **10ea724c/bb8657f8** 的283行设计咨询；它保持advisory，不是验收，不恢复完成child。Parent随后按实际current API typed RED执行Source，最新HEAD **`51193fe549fb9c313692770f6c82f8b58e0658bd`** 已push，自有tracked/indexclean，node_modules symlink不stage。原dirty工作树/fixture原件/metadata/foreignJSON无新触碰；不称整个repo clean。
+- **`2de62ce`**：native actor/完整root+FP+incoming leaf在enqueue前复制；canonical owner沿原serializer从单raw snapshot严格校验source/clearing/namespace/ledger/canonical/ACTIVE scope/开关，准备patch不写。business writer把binding+GEN+ownedleaf并入同一次native set，持实际queue至settle，再返回冻结ownpostmetadata，不读latest。noop也校验且保native持有，但不改GEN。旧无proof/config concrete-native许可退休，非managed legacy setter保留。
+- 对应 **26业务RED/4controls/type0 →30native PASS**；旧eligibility-recovery-binding七案因无配置/无proof fixture全部实际失败后，迁移成real configure/observation/allocate/ACK/start profile，保真实native及同set/拒绝/排队/unknown/耗尽断言，7PASS；不是伪造positive ledger或改成fake port。Source1轮11相关310PASS/type0。
+- **`51193fe`**：terminal显式消费caller expected owned authority，与stored root/FP/started leaf/current raw source逐一核对，不以immutable original GEN否认合法own advance；missing/malformed marked expectation不走legacy fallback。marked applied需binding，binding需exact namespaced marker；READY/canonical+GEN+terminal leaf+queue/runtime同set推进。无binding失败事实可在执行过期后按仍current leaf落盘，不改source；foreign撤权同时拒绝proposal/fallback留started。queue读中丢namespace/坏clearing不迁移修复。
+- 对应 **8业务RED/32controls/fulltype0** 后40案通过，另3queue-read fault controls使native文件43案；最终 exact **11 suites 323 PASS／完整tsc0**。前期2个excess-property fixture类型错已先修并有效重跑，不算业务RED。323明确不含旧actual-native admission95/drain30，后两者尚未profile/transport迁移，不能累计310/398或称全GREEN。最后LSPcanonical+test0error/1clean1inconclusive；businessstorage两old bare-object identity参数ASTfinding经base对比未改，不称allclean。
+- 新只读实现窄审 **workflow `0c6f0878-4e9a-4ea9-a6f3-535219a30f55`／child `d38623e5-25ec-4873-aa32-8f0b5b1f4529`**，仅task精确列出12文件/artifacts及read/contact；Source/test冻结51193，Parent只写docs。初始scope supervisor已答。后续policy询问指出marked successor可能沿用arbitrary caller binding/alias；Parent已裁定instance/episode及READY/running native target correspondence是owner义务，合法epoch rotation可保，plainpayload须preenqueue捕获，不可交给caller信任。待完整finding后actual typed RED/gate修，当前未改Source、未判接受。等待原生请求/完成，不poll/bg_wait，不恢复完成代理。它审的是两个新Source提交，不是重跑旧设计。无独立实现接受结论。
+- 原15行仍 **4完成／11open**，physical仍in_progress：Runtime丢弃executionAuthority、Controller真实frame无完整metadata，late own-write settlementAuthority Promise未做，旧native95/30待迁移；clear、terminal/ACK confirmation/current-carrier旧迁移未统一；原90秒/firstprotected-start/page/capture/supported composition、Cookie、两config回交、spec/quality/integration及browser都未闭。background caps=[]/executors={}不变。upstream ff4b/0.4.28尚未整合、candidate0.4.27；ERP156相关及一次baselineexit1、生产/外发/merge/pointer/release边界保持。
+
+续作指针 `/tmp/plugin-status-continuous-01a1406d/native-owned-source-checkpoint.json`，先答supervisor/完整消费实现窄审，再Parent复现findings或current-API RED并精确Sourcegate接线；不能把stored owner helpers绿当完整native闭环。
+
+## 历史de20阶段：Source398相关通过，具体native API八个typed业务RED后来由2de修正（2026-10-22）
 
 - HEAD **`de20a0bac4f0c37ba920024a70a7bbdad1395ca7`** 已 push；Source为 **`9cc01fa8659be89f5667cd3b8f7e09dc6bd0bfce`**，de20仅新native测试RED检查点。自有tracked/index clean，依赖node_modules symlink不stage；不冒原dirty工作树全clean。原15行仍4完成/11open，physical in_progress。
 - 两次局部readonly报告均已完整消费且保留 **changes_requested**：bfee的Q1/Q2已由d7的真实8RED/6controls修正；25cb静态收口Q1/Q2但指出`clearing=false`放行。Parent确认现有sentinel只认undefined/true，false也malformed；先真实2RED/14controls/type0，再在9cc提取原marker decoder供既有async reader与namespaced raw snapshot共用，不新增局部false guard或改变全局合同。

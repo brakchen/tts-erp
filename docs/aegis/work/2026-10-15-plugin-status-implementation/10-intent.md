@@ -31,7 +31,7 @@
 - Current readback (2026-10-16 batch4): 完整重读当前方案§1–17、原计划、checkpoint/resume hint、插件AGENTS及当前canonical registry；历史before-plan字段初建未填，不追写成当时已有确认
 - Missing current refs:
 - none
-- Advisory decision: continue within current fifteen-row scope;原15行仍4完成/11open。上游已到ff4b17f/0.4.28，当前候选de20a0b仍0.4.27、尚未同步。Source9cc01fa的metadata依赖/strictdurable/共同哨兵parser有398相关PASS/type0，但新concreteNative9案刻意8业务RED/1ctrl/type0，原生CAS/同set推进/真实transport未闭；不等完整physical/配置/产品完成。原 safety/ownership/test gates unchanged. 当前readback/evidence见20-checkpoint和resume-state-hint.currentExecution；原MINIMAX分工/未回交等段落仅历史，不覆盖Parent直接执行与已完成显式handoff。
+- Advisory decision: continue within current fifteen-row scope;原15行仍4完成/11open。上游已到ff4b17f/0.4.28，当前候选51193fe仍0.4.27、尚未同步。2de native-source同set与51193 terminal-ownedleaf依赖已按typed RED修正，最终11相关323PASS/type0，含43native与7合法profile控案，但排除尚未迁移/接线的旧actualnative95/30。新窄审0c6f针对新Source，不重跑完成设计；真实Runtime/Controller transport/lateownmetadata Promise/clear/ACK/composition仍未闭，不等完整physical/配置/产品完成。原 safety/ownership/test gates unchanged. 当前readback/evidence见20-checkpoint和resume-state-hint.currentExecution；原MINIMAX分工/未回交等段落仅历史，不覆盖Parent直接执行与已完成显式handoff。
 
 ## ImpactStatementDraft
 
