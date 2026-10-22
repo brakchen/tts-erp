@@ -2796,8 +2796,9 @@
     var start = $("#filter-w-start");
     var end = $("#filter-w-end");
     var help = $("#date-range-help");
-    if (start) start.value = state.wStart;
-    if (end) end.value = state.wEnd;
+    // 正在改年/日的格子不要回写，否则 Chrome 中途空值会被 state 盖掉。
+    if (start && document.activeElement !== start) start.value = state.wStart;
+    if (end && document.activeElement !== end) end.value = state.wEnd;
     if (help) help.textContent = dateRangeHelpText();
     updateDatePresetUi();
   }
@@ -3111,41 +3112,53 @@
     // 店铺切换:已由 loadShops() 内部绑定(#shop-switcher change → selectShop)
 
     // 日期范围:空 = 不限;yyyy-mm-dd 直接作 w_start/w_end(含 w_end 当日)
-    // 校验: w_start 不能晚于 w_end(否则报错并重置为当前输入的字段)
+    // 起始 > 截止：保留刚输入的值并提示，不把输入框清空。type=date 先改日再改年时
+    // Chrome 会在仍聚焦时抛空 change，空值等到失焦再提交为「不限」。
     function _dateFieldChanged(which, e) {
       var v = e.target.value || "";
-      if (which === "start") state.wStart = v;
-      else state.wEnd = v;
-      state.datesTouched = true;
-      // 起始 > 截止 → 拒绝这次查询、重置该输入、提示错误
-      if (state.wStart && state.wEnd && state.wStart > state.wEnd) {
-        // 先废弃在途请求，避免旧响应随后 render() 覆盖本次校验错误。
+      if (v === "" && e.type !== "blur" && document.activeElement === e.target) {
+        return;
+      }
+      var nextStart = which === "start" ? v : state.wStart;
+      var nextEnd = which === "end" ? v : state.wEnd;
+      if (nextStart && nextEnd && nextStart > nextEnd) {
         cancelCurrentLoad();
+        if (which === "start") state.wStart = v;
+        else state.wEnd = v;
+        state.datesTouched = true;
         renderError(
           "起始日期不能晚于截止日期（当前：" +
-            state.wStart +
+            nextStart +
             " ~ " +
-            state.wEnd +
+            nextEnd +
             "）",
         );
-        e.target.value = "";
-        if (which === "start") state.wStart = "";
-        else state.wEnd = "";
         persistPagePreferences();
         updateDatePresetUi();
         return;
       }
+      if (which === "start" && state.wStart === v && state.wEnd === nextEnd) {
+        return;
+      }
+      if (which === "end" && state.wEnd === v && state.wStart === nextStart) {
+        return;
+      }
+      if (which === "start") state.wStart = v;
+      else state.wEnd = v;
+      state.datesTouched = true;
       state.offset = 0;
       persistPagePreferences();
       updateDatePresetUi();
       load();
     }
-    $("#filter-w-start").addEventListener("change", (e) =>
-      _dateFieldChanged("start", e),
-    );
-    $("#filter-w-end").addEventListener("change", (e) =>
-      _dateFieldChanged("end", e),
-    );
+    ["change", "blur"].forEach((type) => {
+      $("#filter-w-start").addEventListener(type, (e) =>
+        _dateFieldChanged("start", e),
+      );
+      $("#filter-w-end").addEventListener(type, (e) =>
+        _dateFieldChanged("end", e),
+      );
+    });
     var projectionInput = $("#filter-projection-lookback-days");
     if (projectionInput) {
       projectionInput.addEventListener("change", (e) => {
