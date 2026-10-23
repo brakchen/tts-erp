@@ -689,7 +689,8 @@ def test_active_testing_guidance_uses_only_isolated_runner() -> None:
 def test_v24_design_runbook_and_registry_describe_all_new_fences() -> None:
     design = Path("docs/design/tiktok-video-publish.md").read_text()
     runbook = Path("docs/ops/video-publish-runbook.md").read_text()
-    registry = Path("docs/handoff/ACTIVE.md").read_text()
+    notice = Path("docs/handoff/ACTIVE.md").read_text()
+    workflow = Path("docs/guides/agent-git-workflow.md").read_text()
     external_api = Path("docs/api/external-api.md").read_text()
 
     assert "0066_publish_execution_fences" in design
@@ -701,7 +702,10 @@ def test_v24_design_runbook_and_registry_describe_all_new_fences() -> None:
     assert "7 天 + 15 分钟 hold" in runbook
     assert "PUBLISH_BACKGROUND_CLEANUP_BATCH_SIZE" in runbook
     assert "TTS_ERP_VIDEO_PUBLISH_ALLOW_READWRITE_API_KEYS=1" in runbook
-    assert "006[0-6]" in registry
+    assert "Static relocation notice" in notice
+    assert "../guides/agent-git-workflow.md" in notice
+    assert "`lane-registry`" in workflow
+    assert "There is no ACTIVE cleanup commit." in workflow
     assert "PUBLISH_WORKER_UNAVAILABLE" in external_api
     assert "admin-tier API key by default" in external_api
 

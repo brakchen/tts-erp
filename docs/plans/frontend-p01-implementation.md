@@ -136,3 +136,11 @@ host-managed patch checkout，不是绕过 ready 前驱规则创建独立发布 
 - 其余12项指向共享模板含当前source不存在的0071_plugin_status以及schema清单不匹配；3项publishing测试仍要求旧ACTIVE登记内容。未将它们擅记为允许的稳定基线。已通知登记迁移owner及保留test_final_v16文件的plugin-status-erp owner，不修改其文件或重建ACTIVE旧表。
 - envsetup --check通过后，按唯一标准入口执行--refresh-template并只选上述DB相关失败；模板schema-only恢复又被security.api_keys.fk_api_keys_shop_pk依赖commerce.shops主键阻塞，exit4，未进入后续测试（`/tmp/frontend-p01-template-classification.log`）。工具警告测试模板可能部分替换；已停止DB测试、全板通知owner修复并重建canonical模板，未另选共享库/直接runner/生产写入。
 - 当前lane因标准测试环境与三条登记迁移断言阻塞，**不是ready/已合入/生产上线**；代码保留并推送分支，模板修复及精确失败分类完成前不得把baseline或交付任务关闭。后续继续P0/P1交付，P2–P6仍未实施。
+
+## 9. 继续交付：登记断言的最小修复片
+
+- TaskStartSnapshot：用户要求继续；起点1febb27，已同步master64acba9，工作树clean。标准测试模板仍可能部分替换，未获健康回执；不运行DB验证或另选库。`scripts/test_isolated.sh`从本lane未修改scope释放（consent m-be6fbfc0-be8）；plugin-status-erp保留v16文件，父不触碰。
+- Change Necessity：code-change（仅两条测试契约）。上游64acba9已批准ACTIVE退化为静态指引，旧测试仍要求其中有活跃文件归属/迁移行；恢复旧行或让CI依赖私有board都是错误的第二权威。退役旧live-row断言，改验证静态指引、canonical入口及单writer/无ACTIVE cleanup规则，同时保留原发布、栅栏、权限、运维与源路径存在性要求。
+- Owner/complexity：只改无其他active保留的v14/v24两个测试函数，无生产代码/新helper/新依赖/业务规则；明确排除v16和模板脚本。ArchitectureReviewRequired=no（复用已批准的registry迁移）。已在lane m-bcc97a41-b0a登记精确新增scope。
+- TDD Route：沿用strict记录；原baseline两项实际失败为RED，不把静态读取或lint冒充GREEN。标准模板修复后仅复跑这两个原node ID，再结合v16 owner交接和剩余DB失败分类；当前不得关闭测试/交付任务。
+- Plan：1）核上游规则与所有权并登记（完成）；2）将两条消费断言重新绑定canonical文档，保留其余原要求；3）模板恢复后通过唯一隔离入口定点验证、独立审查最终delta并续交付。GREEN和环境健康仍待证据。
