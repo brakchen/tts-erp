@@ -152,19 +152,21 @@ host-managed patch checkout，不是绕过 ready 前驱规则创建独立发布 
 - TaskStartSnapshot：6e3e5c1已push/clean；master64acba9。owner通过m-94762b4e-074/m-5022c8f6-a13移交基础设施与v16，release record m-41c7f7e3-3a9；父完整认领记录m-2e0d994e-e67。保留生产/app/access/plugins/schema模型及migration排除，只有测试模板生命周期变化。
 - 证据：真实刷新在既有security.api_keys额外FK处阻塞source PK DROP；`pg_dump --clean`仅清理dump内对象（PostgreSQL18官方 https://www.postgresql.org/docs/18/app-pgdump.html），旧wrapper只清target-only表，因此同表新约束/其他target-only对象可复发。近因已证实，跨branch模板复用是上游生成条件；不声称一个FK名字就是全部根因。
 - Change Necessity=code-change：恢复“用完整source schema重建受guard测试目标”的标准入口，不在frontend旁路、不硬删单个FK。CanonicalOwner=importer的schema replacement；wrapper只负责串行refresh/clone及stamp/upgrade/seed。
-- Minimality=充分的owner修复：复用已安装PostgreSQL18 dropdb/createdb -T template0及psycopg.conninfo解析，不实现DDL差异扫描、不引入新依赖/暂存数据库。原schema-only/full-import行为保留；只有标准wrapper显式选择新recreate模式。禁止pg_restore/pg_dump --create，避免archive源库名决定目标。
-- Complexity/Owner-fit：500行importer既有职责就是target schema替换；新增显式test-only重建模式属于local-fix-without-new-responsibility。删除wrapper的target-only表cleanup，统一目标清理由模式负责，防止dump/preflight前已删对象。ArchitectureReviewRequired=yes（共享测试/破坏性test DB生命周期），独立方案源审查后再行为实现。
+- Minimality=充分的owner修复：复用已安装PostgreSQL18 dropdb/createdb -T template0、psycopg.conninfo及SQLAlchemy URL构造，不实现DDL差异扫描、不引入新依赖/暂存数据库。原schema-only/full-import行为保留；只有标准wrapper显式选择新recreate模式。禁止pg_restore/pg_dump --create，避免archive源库名决定目标。
+- Complexity/Owner-fit：importer仍拥有schema replacement；新增` scripts/_test_db_connections.py`（实施前登记scope）只负责连接身份解析/派生/guard与受支持transport校验，两个shell边界共用此单一authority，复用`scripts/_db_url.py`的driver规范化，不将测试策略塞进通用normalizer。wrapper删除旧target-only表cleanup；保锁与生命周期顺序。ArchitectureReviewRequired=yes，独立方案源审查后再行为实现。
 
 ### 边界与行为
 
-1. 新模式`--recreate-test-db`必须同时`--schema-only --yes`；target必须是明确test命名且与source不同，使用psycopg的有效连接参数解析，拒绝query覆盖后的prod/缺失/无效名字，不依赖URI表面路径。共享`is_prod_shaped_db`及`require_destructive_script_guard`绑定有效target名字，生产拒绝不能由override变量绕过；不设置任何生产override。
-2. 客户端/server/source检查和完整schema dump成功后才可能重建target；guard/命令可用性检查也在target变更前。维护连接由有效target参数派生，dbname只改为postgres；用官方dropdb/createdb指定验证后的test名字，template0，**不force终止连接**。所有routing/credential参数只在进程内捕获，不打印、不提交。控制字符不能跨两行内部IPC，明确fail closed。
-3. 标准wrapper在已有模板和缺失模板两条路径均调用该模式；不在importer前单独DROP表或提前创建空模板。refresh/clone仍持原锁、完成后stamp本branch可识别source revision、upgrade到本branch head并seed权限；ephemeral clone/cleanup流程不变。业务DB验证只在真实刷新成功后解冻。
-4. dump失败/安全拒绝不得清理现有target；drop/create/restore失败必须非零并保持“不健康”回执，不能继续clone/宣称成功。不增加新数据库fallback，不承诺无损/原子切换；该目标原本就是可重建测试模板。
-5. v16移交后保留admin-only和发布确认祖先，head跟随本branch实际Alembic单head；结构断言绑定已提交生成清单而非写死0071/80或私有board。只改过时owner/head/inventory消费断言，不改业务默认值。
+1. 新模式`--recreate-test-db`必须同时`--schema-only --yes`；target明确test命名且与有效source不同。共享helper以psycopg解析**有效**参数为authority，SQLAlchemy URL.create/render_as_string构造host测试URI与plain维护URI，复用项目driver normalization。共享is_prod_shaped_db/require_destructive_script_guard绑定有效target名字，独立硬拒prod、无效/缺失名字，不设置生产override。parser异常只报固定脱敏错误。
+2. 修正plan finding template-plan-1：wrapper不得只换URI path而保留dbname query覆盖。以同一参数authority移除原dbname后分别写入**显式**TEMPLATE_DB、RUN_DB、维护postgres，round-trip断言有效名字严格相等且其余连接参数一致；effective base DB也须test-shaped。query覆盖到另一测试库时可规范化为正确指定模板/clone，绝不drop/restore/测试连接到该旁库；覆盖到prod须在任何生命周期动作前拒绝。reset独立调用另校验DST有效dbname等于显式URI路径意图，拒绝歧义目标。
+3. 存在检查、模板recreate/restore、clone、stamp/upgrade/seed、测试连接和cleanup全部使用上述同一server/user/port authority派生的DSN，不再默认-U postgres/-d postgres另走一路。拒绝service/hostaddr/multi-host等未支持routing。host模式可用单一显式TCP endpoint；Docker模式先验证目标（及reset的source）是127.0.0.1:5432且所选container的5432/tcp确实发布到host loopback5432，否则fail closed，不猜网络namespace。当前.env/.env.test已只打印非secret routing确认两者127.0.0.1:5432，docker port证实0.0.0.0/[::]:5432；未改环境。
+4. 客户端/server/source检查、guard/工具可用性检查和完整schema dump成功后才重建target。维护dbname只改为postgres；官方dropdb/createdb显式指定校验后的test名字与template0，**不force**。连接参数只在进程内捕获，不日志/落盘；拒绝控制字符破坏内部IPC。wrapper已有/缺失模板均委托新模式，不提前删表/创建空库；持原锁，之后按原规则stamp/upgrade/seed/clone。
+5. dump失败/安全拒绝不得清理现有target；drop/create/restore失败必须非零并保持“不健康”回执，不能继续clone/宣称成功。不增加新数据库fallback，不承诺无损/原子切换；该目标原本就是可重建测试模板。业务schema验证只在真实刷新成功后解冻。
+6. v16移交后保留admin-only、0066执行栅栏/0069确认祖先；head跟随本branch实际Alembic单head；结构断言绑定已提交生成DDL的表清单而非写死0071/80或私有board。只改过时owner/head/inventory消费断言。
 
 ### TDD 与执行顺序
 
 - TDD Mode=auto / Route=strict（承接既有strict，新增共享/安全/持久化生命周期风险）。mock前置基线7例已通过标准ephemeral clone：`/tmp/frontend-p01-template-mock-baseline.log`；没有改fixture/guard或使用直接runner。此7例不证明业务schema健康。
-- 1）独立审查本方案；2）在现有command doubles表达“source/target同表、target额外约束导致旧restore失败”，观察RED；另测完整dump失败不重建、安全/确认拒绝、host/container选择和missing-template路径；3）最小实现并跑同一mock集GREEN，保stamp/upgrade/seed顺序；4）独立安全审查固定实现；5）唯一入口真实refresh+最窄原失败（10 order-price+2 schema/head+3 registry），确认clone cleanup；6）只对新失败定点分类，不重跑整套来捕获baseline，最后按master prospective commit要求验证与合入。
+- a9fdee6方案审查因template-plan-1明确fail，未实施破坏性代码；本修订先补生命周期名字与网络namespace一致性，再重审。
+- 1）独立重审；2）command doubles观察同表target-only约束RED，另覆盖dbname query到旁测试库/生产、unsupported routing/host模式一致性、不得wrong-target drop/restore/clone/test、完整dump失败不重建、确认/guard、已有/缺失模板及drop/create/restore失败；3）最小实现mock GREEN，保stamp/upgrade/seed顺序；4）固定实现独立安全审查；5）唯一入口真实refresh+最窄原失败（10 order-price+2 schema/head+3 registry），确认clone cleanup；6）只定点分类，最终prospective master按要求验证合入。
 - 所有业务测试/基线/交付任务在真实模板健康和失败分类完成前保持blocked。不得把mock、lint或source review作为生产/全套GREEN。
