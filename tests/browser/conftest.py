@@ -502,7 +502,8 @@ def site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> 
 @pytest.fixture(scope="session")
 def frontend_site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> Iterator[str]:
     rendered = tmp_path_factory.mktemp("frontend-pilot-pages")
-    _render_pages(rendered, migrated=frozenset({"dashboard", "intercept-requests"}))
+    # Exercise the runtime's sole activation set; keep legacy collector wrappers compatible.
+    _render_pages(rendered)
     with _serve_pages(rendered) as url:
         yield url
 
@@ -512,7 +513,7 @@ def frontend_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     @contextmanager
     def serve(origin: str) -> Iterator[str]:
         monkeypatch.setenv("TTS_ERP_FRONTEND_DEV_ORIGIN", origin)
-        _render_pages(tmp_path, migrated=frozenset({"dashboard", "intercept-requests"}))
+        _render_pages(tmp_path)
         with _serve_pages(tmp_path) as url:
             yield url
     return serve
