@@ -106,7 +106,7 @@ The purpose of this boundary is not “the frontend may never calculate”. It i
 
 ### Frontend engineering and component reuse
 
-Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md) before frontend work. It records the user-approved standard: free/open-source HeroUI first; one shared navigation/Header/Footer/application shell; page-specific content may be customized; minimal styling instead of deep component overrides. The proposed React/TypeScript/Vite rollout is in [`docs/plans/frontend-progressive-migration.md`](docs/plans/frontend-progressive-migration.md); its direction is user-approved, but implementation, P0 technical verification, and shared-file handoff remain pending. Merging these documents does not authorize runtime changes.
+Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md) before frontend work. It records the user-approved standard: free/open-source HeroUI first; one shared navigation/Header/Footer/application shell; page-specific content may be customized; minimal styling instead of deep component overrides. The React/TypeScript/Vite rollout is in [`docs/plans/frontend-progressive-migration.md`](docs/plans/frontend-progressive-migration.md); P0 foundations and the P1 `dashboard` / `intercept-requests` pilots are implemented, verified, and merged. P2–P6 and production deployment remain outside that completed slice. Merging these documents does not authorize runtime changes.
 
 ## 5. Canonical commands
 
