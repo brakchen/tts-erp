@@ -31,7 +31,6 @@ from tts_erp_v2.api.v2.pages import (
     _SIDEBAR_CSS,
     _SIDEBAR_TOGGLE_JS,
     _sidebar_html,
-    dashboard_page,
     enum_map_page,
     runtime_configs_page,
     sync_jobs_page,
@@ -93,7 +92,7 @@ def test_sidebar_css_is_injected_after_page_styles():
     has to come after every ``<link rel="stylesheet">``. A page-level
     ``margin`` must not override the sidebar offset.
     """
-    body = bytes(dashboard_page().body).decode()
+    body = bytes(enum_map_page().body).decode()
     sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
 
     stylesheet_links = [m.start() for m in re.finditer(r'<link rel="stylesheet"', body)]
@@ -109,7 +108,6 @@ def test_pages_share_the_design_token_stylesheet():
     component layer; both must load before any page-specific stylesheet.
     """
     for rendered in (
-        dashboard_page(),
         enum_map_page(),
         runtime_configs_page(),
         sync_jobs_page(),
@@ -156,25 +154,29 @@ def test_dashboard_consumes_backend_owned_summary_fields():
     """Dashboard cards must not count list rows in browser JavaScript."""
     src = (
         Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "dashboard.js"
+        / "frontend"
+        / "src"
+        / "pages"
+        / "dashboard"
+        / "index.tsx"
     ).read_text(encoding="utf-8")
 
     assert "/v2/reporting/coverage" in src
     assert "/v2/reporting/missing-cost-products" not in src
-    assert "data.missing_cost_spus" in src
-    assert "data.total_spus" in src
+    assert "value.missing_cost_spus" in src
+    assert "value.total_spus" in src
     assert "X-Total-Count" in src
-    assert "value: shopTotal" in src
+    assert "value: total" in src
 
 
-def test_dashboard_links_to_runtime_config_console():
-    body = bytes(dashboard_page().body).decode()
-
-    assert 'href="../../v2/pages/runtime-configs"' in body
-    assert "版本化默认配置下发与凭证管理（通用灰度已退役）" in body
+def test_dashboard_links_to_runtime_config_console(api_client, readonly_key):
+    response = api_client.get("/v2/pages/dashboard", headers={"X-API-Key": readonly_key})
+    assert response.status_code == 200
+    body = response.text
+    assert '"href":"/v2/pages/runtime-configs"' in body
+    assert "运行配置" in body
+    assert "frontend-bootstrap" in body
+    assert "bootstrap.min.css" not in body
     assert "即将上线" not in body
 
 

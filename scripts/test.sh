@@ -50,12 +50,23 @@ fi
 # suite re-applies one-shot scripts against the PROD DB and hangs full runs
 # on lock waits. CLI -m overrides addopts, so the run_all/run_coverage
 # tautology below is what makes `all` / `coverage` truly include them.
-run_unit() { "$PYTEST" -q -m "layer_unit and not slow" "$@"; }
-run_fast() { "$PYTEST" -q -m "not slow and not requires_service" "$@"; }
+prepare_frontend() {
+  # Tests must exercise the current branch's complete build, not stale assets.
+  if [[ -f frontend/package.json ]]; then
+    [[ -x frontend/node_modules/.bin/vite ]] || {
+      echo "[tests] missing frontend toolchain: npm ci --include=dev --prefix frontend" >&2
+      return 1
+    }
+    bash scripts/build_frontend.sh
+  fi
+}
+run_unit() { prepare_frontend; "$PYTEST" -q -m "layer_unit and not slow" "$@"; }
+run_fast() { prepare_frontend; "$PYTEST" -q -m "not slow and not requires_service" "$@"; }
 run_all() { "$PYTEST" -q -m "domain_migration or not domain_migration" "$@"; }
 run_coverage() { "$PYTEST" -q -m "domain_migration or not domain_migration" --cov=tts_erp_v2 --cov=miaoshou --cov-report=term-missing "$@"; }
 run_domain() {
   local name="${1#domain_}"
+  prepare_frontend
   "$PYTEST" -q -m "domain_${name} and not slow" "${@:2}"
 }
 

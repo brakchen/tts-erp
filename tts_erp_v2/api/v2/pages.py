@@ -52,7 +52,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -62,8 +62,12 @@ from markupsafe import escape
 from tts_erp_v2.access._context import user_label_var, user_pages_var
 from tts_erp_v2.accounts.pages import PAGES
 from tts_erp_v2.api.deps import require_role_at_least
+from tts_erp_v2.api.v2 import frontend_pages
 
 router = APIRouter(prefix="/v2/pages", tags=["pages"])
+
+# FastAPI requires a Request annotation, while legacy tests call renderers directly.
+_DIRECT_RENDER_REQUEST = cast(Request, None)
 
 
 def _require_readwrite(request: Request) -> None:
@@ -622,7 +626,7 @@ def _render_spu_profitability_page(
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard_page() -> HTMLResponse:
+def dashboard_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """主页仪表板 — 快速导航 + 店铺概览 + 数据摘要。
 
   用途：运营入口页，提供：
@@ -634,6 +638,10 @@ def dashboard_page() -> HTMLResponse:
   设计风格：延续工业操作台视觉语言（暖纸/等宽/细线），
   但更轻量 — 卡片式布局，适合快速扫描和点击。
   """
+  if "dashboard" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "dashboard")
   return _render_page("dashboard.html", current_page="dashboard")
 
 
@@ -651,12 +659,16 @@ def intercept_configs_page() -> HTMLResponse:
 
 
 @router.get("/intercept-requests", response_class=HTMLResponse)
-def intercept_requests_page() -> HTMLResponse:
+def intercept_requests_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """拦截记录查询页面。
 
   功能：记录列表、详情弹窗、筛选（域名/路径/状态码/白名单/时间）、分页。
   行为在 static/js/intercept-requests.js。
   """
+  if "intercept-requests" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "intercept-requests")
   return _render_page("intercept-requests.html", current_page="intercept-requests")
 
 
