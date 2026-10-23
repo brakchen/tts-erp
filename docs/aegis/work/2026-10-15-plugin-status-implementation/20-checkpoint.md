@@ -1,6 +1,19 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：managed 正负链和迟到 own-write metadata 已贯通；真实 clear 新 RED 已保存（2026-10-22）
+## 当前：actorless clear 双入口候选542相关通过；实现窄审三项阻断待TDD修复（2026-10-23）
+
+- writer仍 `/home/schan/pi-workspace/monitor-status-runtime-01a1406d`／`feature/plugin-status-runtime-closure`，最新 **`ac766b161ab6aa86dcecb951ffd0d4115b04f3a9`** 已commit/push，自有tracked/indexclean，node_modules不stage；原dirty树、TS原件/元数据、foreign JSON不触碰。候选0.4.27，非ready/merge/pointer/release。
+- 原423c9420／54ae5767 clear设计**已完成并完整消费294行**，不恢复/重跑。Parent依实际typedRED精确gate：`d54d31f` strict classified PRE与canonical exact/fact-only；`64e263f` 同queue真实managed native clear，单set null+GEN、noop/错误/rawsettle；`fbcacf5` Controller原observer/parent PRE→own canonical POST→两clear点；`ac766b1` 同步拥有getter-backed原callback与原source-bound角色。设计与Parent实现均不授整体接受。
+- 分轮证据：canonical9业务RED/type0→9PASS+7strictread controls；native12业务RED/type0→12PASS+4controls；Controller7业务RED/1control/type0→8PASS。原e35真实77擦除RED保留，现同counterexample迁到实际managed端口且仍实际用setter推进GEN；旧opaque77案也改真实scoped/native profile、保77/已落盘fact断言，不凭clock虚构standalone预算。15旧fixture实际失败后，显式配置coherent profile，generic镜像不冒真实native删除；13partial setup拒绝及4-vs-6 tuple断言失败均保日志、修前不称绿。
+- fbc候选12相关540PASS之后，额外2真实typed业务RED证明callback getter可换掉已撤权原fn、source-bound缺PRE可由role getter改名fresh；ac7在pure capture/Controller入口各自一次拥有原值，最终 **12 suites542PASS/no skip，完整tsc0**：`clear-original-capture-final-related.log`／`...final-type.log`。最新3changed path LSP0diagnostics但全inconclusive，不称clean。542不累计540/530/514/498等，不是全插件、actualproduction或firstprotected-clock验证。
+- 新**实现**窄审 workflow **`6bc7c52b-2333-4204-885e-216cd726366d`**／child **`4e54ae43-48d3-4488-bb1d-2fa725f7849a`** 已完成，只read/contact、精确21文件allowlist、无独立执行。报告 `observation-clear-implementation-review.md` **124行已全读**，结论advisory_findings，三项Important，Parent接纳并转真实typedRED/gate，不判accepted。候选审查冻结已结束，不等待、poll/bg_wait或恢复已完成child。
+- **三个policy/evidence询问已答，候选仍有待修风险**：①公开fresh invalidator没有证明first snapshot target invalid，不允许角色字符串/caller reason替代独立证明；内部ensure的真实verification不自动覆盖这个公开入口。②managed canonical required字段不可通过legacy readBindingState补false/null授权；“legacy可缺identity”仅指business BoundAdTab optional字段。③Runtime.reportObservation在withSettledResults/statusResultsForNextReport await前没有copy输入，caller可替换原callback/pre；没有immutable-caller豁免，属于既存transport弱点影响新clear lane，当前storage直连正例不覆盖。三项已在完整终稿列为F1/F2/F3，Parent逐项真实currentAPI typedRED→精确gate修，不以542绿或新trusted-caller合同消除缺口。
+- 既定边界：actorless不造server root/不advance撤销leaf；原PRE未匹配时仅sameNS/validconfigscope/fullcanonical仍同且fact独立真之validGEN漂移可记fact-only/no-clear；unsafe business identity与config不同时仍允许有原链的合法safetyclear；knownfact先durable，原生失败保事实并传播，已dispatch持queue到settle不声称取消。单原预算/原callback不换，standalone不造90秒。
+- 原15仍 **4完成／11open**。native95/drain30旧profile、capture/ACK/resume/currentcarrier、firstprotected clocks、实际supported composition/actions/Cookie/两config/spec/quality/integration/browser未闭，background caps=[]/executors={}。ERPeba/156相关与一次baselineexit1不变。peer报告upstream5f07fda/v0.4.30已合入导入UI，Parentack但未核实/整合；后继保d193性能与peerUI/版本。新SPUdate peer称不占config路径，仅协调证据，原configcore registry/未来写队列仍需核，非自动接管。
+
+续作 `/tmp/plugin-status-continuous-01a1406d/observation-clear-frontier-checkpoint.json`；新实现审查及所有policy/findings已完整消费，Parent立即按原严格TDD修，再推进剩余物理/端口/时钟依赖，不逐helper停等用户确认。
+
+## 历史e35：managed 正负链和迟到 own-write metadata 已贯通；真实 clear 新 RED 已保存（2026-10-22）
 
 - 当前HEAD **`e35c4e324cd17cbe3d4c1d2d588c915c2a3a7536`** 已push，Source **`6086f3bec1fa29c8c2cb320cb50d403501549bdd`**；e35只是后继clear真实RED检查点，候选不ready。自有tracked/indexclean，node_modules symlink不stage，原dirty树/TS fixture原件/元数据/foreignJSON未新触碰。
 - **0c6f/d386** 完整86行advisory_findings F1–F4已消费。实际26业务RED/43controls/fulltype0后 **`1c2b3fd`** 修：preenqueue拥有plain payload及原fn；不为其他instance/episode/native target/report补签；每个markedwrite分支末次await后严格复核root/leaf/source，失败事实不套执行时钟。原报告不改成accepted、不恢复完成child，Parent修补不是独立postfix接受。

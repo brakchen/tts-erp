@@ -1,6 +1,18 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照（2026-10-22）
+## 当前执行快照（2026-10-23）
+
+Parent继续原十五行，仍 **4完成／11open**，不逐片等待用户确认。隔离writer `feature/plugin-status-runtime-closure` 当前 **`ac766b161ab6aa86dcecb951ffd0d4115b04f3a9`** 已push，自有tracked/indexclean，候选0.4.27；无生产、真实外发、业务merge、父指针或发布授权。
+
+已完整消费423c/54ae的294行actorless clear设计，不恢复或重跑。`d54d31f` 区分原PRE连续性与valid GEN漂移的fact-only；`64e263f` 在既有queue新增实际managed native clear，单set null+GEN、完整校验后noop、不推进撤销的ledger；`fbcacf5` 把原observer/parent PRE及canonical本次POST接入Controller两实际clear点；`ac766b1` 经两真实typed RED修复原callback与source-bound角色getter替换。最终 **12相关542 PASS／完整tsc0**，不是全插件/真实浏览器/首protected action时钟证明。原77失败及15旧fixture失败保留；旧77案已迁到真实native scoped profile、real setter推进GEN，不再靠fake变量或独立90秒假预算。generic controller镜像不冒native删除证据。
+
+新只读**实现**窄审 workflow **`6bc7c52b-2333-4204-885e-216cd726366d`**／child **`4e54ae43-48d3-4488-bb1d-2fa725f7849a`** 已完成，124行完整读，结论advisory_findings；不恢复/重跑。三项Important已Parent接纳：公开`fresh`没有独立invalidity验证；strict canonical缺required字段被legacy补false/null；Runtime在ledger await前未拥有输入及原callback（既存transport弱点影响新lane，非新改runtime算法）。542绿不覆盖这些反例，Parent未判接受；继续真实typed RED与精确gate修，不另造trusted-caller/immutable-input豁免。
+
+旧native95/drain30、first protected clocks、capture/ACK/resume/currentcarrier、actual supported composition、actions/Cookie与最终跨端验收仍开，background caps=[]/executors={}。ERP eba/156相关与一次baseline exit1保持。peer报告master5f07fda/v0.4.30已合入导入UI，Parent已ack但未独立核实/整合；后续保d193性能与peer UI/版本。新peer称当前SPU日期lane不占remote-config路径；这是协调证据，配置原registry/未来写队列仍待核，不凭idle或非冲突声称全已回交。
+
+当前续作以 `20-checkpoint.md`、`resume-state-hint.json.currentExecution` 及 `/tmp/plugin-status-continuous-01a1406d/observation-clear-frontier-checkpoint.json` 为准。实现窄审已终态，不等待或恢复完成child；Parent依新finding直接续作，不poll/bg_wait。
+
+## 历史执行快照（2026-10-22，clear RED阶段）
 
 用户已明确要求连续推进当前 owner 的十五个 open rows（含配置同步两端）；Parent 仍是唯一产品/Git writer，仅允许既定只读独立 reviewer，不逐小片索取继续授权。既有依赖型验收行在实现与证据闭合后合并记账，不机械重复实现。原件/foreign WIP、原单目标/原预算/授权边界保持。用户已准仅从 committed 两 TS fixture 复制到隔离目录加载；不是解除原件/元数据/foreign JSON 保护。上游 ff4b17f/0.4.28 尚未整合，候选仍 0.4.27，保性能语义且不擅改 peer 版本；不得扩为真实外发、生产迁移/重启、业务 master merge、父指针或发布。
 
