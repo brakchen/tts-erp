@@ -98,6 +98,10 @@ ERP sync-worker：超时巡检、决策超时及通知 outbox 投递
 
 已有有效绑定优先，激活其他页面不会抢占。无既定 advertiser 时，候选身份必须明确且唯一；多个未核验候选不能按 tab 排序假定是同店铺。固定页优先是候选顺序，不是绕过身份约束的许可。
 
+**Cookie Store 首次锁定与人工换绑（2026-10-23 操作者明确批准）**：首次仅在 Seller、Advertiser 与 Chrome 原生 tab→CookieStore 关联均已完整核验，且符合授权目标的组合无歧义时，建立持久的本地 Store 锁定。同一组合可以有多个页面，不因 tab 数多而误报多目标；不同可用 Store 组合不可凭固定页/激活顺序任选。尚有可能竞争目标的候选未核验完整时，不先绑定或默认一个 Store。后续 Worker 唤醒、页面关闭、自动失效/恢复与普通凭证轮换均不能解除该锁定，不回退默认 Store；换 tab 仍须同一目标 Store。
+
+跨 Store 必须有明确的人工重新绑定意图，并完整核验新目标组合后直接以新锁定替换旧锁定，不开放“先清锁再自动任选”的权限空窗。原 Seller/Advertiser 授权范围不因此改变，Store 仅为本地固定执行上下文，不加入 ERP wire scope、不传 Cookie。人工换绑须停止/撤销旧执行、保持新上下文 suspended 并保留 outbox、ledger、未决事实及原 receipt root；不得借 `clearStatusInstance` 清债、复用旧命令叶或重开旧 90 秒窗口。此处批准行为政策，不表示人工 UI、迁移修复或真实浏览器链已实现。
+
 ### 5.2 失效与服务端决策
 
 1. 本地确认失效，立即使现有 `runtimeGeneration` 失效、标记快照不可执行，阻止未发出的关停/扫描任务，创建或更新 episode 并持久报告。

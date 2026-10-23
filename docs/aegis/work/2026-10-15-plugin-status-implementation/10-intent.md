@@ -1,9 +1,16 @@
 # 通用插件状态与单目标恢复实施 - Intent
 
-## 当前续作（2026-10-23）
+## 当前续作：已批Store政策与1e配置组件（2026-10-23）
+
+- 操作者已批首次唯一完整核验目标组合pin、后续跨Store人工重绑，不再询问；同组合多页不是多目标。新debb两Owner设计5c/96已全读；只配置保存不足，实际nativeSET原归属+GEN/叶、positive terminal/start/resume和重新建controller消费者仍必须闭合。
+- CONFIG-only **1e540ef已push**：既有config显式unbound/pinned，fresh scoped空namespace才建unbound；普通轮换raw保留且不caller pin/unpin/repair；事实投影与strict raw执行分类分开，原kind/StoreID单次捕获。初21业务RED/type0，新getter2RED/type0后，最终9相关545PASS/fulltsc0；4处exact fixture期待加unbound，未弱化业务oracle。26辅助warnings/1inconclusive不冒全clean。
+- 新fresh配置后验7f1a6673/74c26234已全读35行、无CONFIG局部阻断，Owner仅窄接受并保2LOW覆盖缺口，不是全策略接受。接续private native反例6dc/a669真实child01a16898，首次a2因ownlink拒绝无child、同协议修复后Parentlink已恢复；m-547f77cb精确登记/依赖+sparse/fulltsc baseline0及设计确认后仅释放新test写测，未授Source。worker13行及180行test/handoff已消费，Parent独立复核隔离 **3真实native业务RED/3controls/fulltsc0**，source未改；host bundle依赖link已由Parentunstage，仅备份test-only patch/hash不整体应用。负面反例不能以全禁恢复替代正向pin/CAS与producer-consumer闭合；原生pin/tupleproof/terminal及nextcommand/start/resume仍待新精确门。ISOLATED/vendor-session与独立capture事实到最终同SET的producer/consumer仍未证；不把nativeScript dispatch说成HTTP已于deadline前发出，不补90秒。
+- 主线64acba9的board唯一lane规则已读并采用，A/B reservation已显式释放，旧host checkouts保留；不再写ACTIVE。原15仍4done11open、caps=[]/executors={}、candidate0.4.27；无live/部署/业务merge/发布/父指针。
+
+### 历史：544窄接受与政策请求（现政策已批，以以上1e段为准）
 
 - 最新54429d5已push、组件clock/R1仅窄接受：真实2RED22controls/type0后原probe producer/初始化显式传实际角色；7相关549PASS+最终focused25/fulltsc0不累计，fresh a88终稿47行已读无局部阻断，3非阻断覆盖缺口保留。无actual browser/production/整项接受，原15仍4完成11open。
-- 上游只读核d193是task544/master5f07共同祖先（128/4分歧），ff4b性能/logs与peer导入UI/0.4.30需保留但尚未整合/改版。真实ports咨询bc38d899/bf已完成122行全读，方案尚未批准；Parent官方原文/committed ads Seller getter复用证据已补，不冒live/登录/选定Store fetch证明。待操作者确认首次唯一核验Store建立并锁定、后续变更人工重绑的政策；exact capture与bridge/source合同另待技术spec，Source写许可仍未发，无外发/部署/业务merge/父指针。
+- 上游只读核d193是task544/master5f07共同祖先（128/4分歧），ff4b性能/logs与peer导入UI/0.4.30需保留但尚未整合/改版。真实ports咨询bc38d899/bf已完成122行全读，方案尚未批准；Parent官方原文/committed ads Seller getter复用证据已补，不冒live/登录/选定Store fetch证明。该时点的CookieStore政策请求现已批准、CONFIG Source已按新门推进；实际capture/原生消费的剩余边界以以上1e段为准，无外发/部署/业务merge/父指针。
 
 ### 历史断点（当前以以上544段为准）
 

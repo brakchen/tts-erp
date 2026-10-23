@@ -1,12 +1,26 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照（2026-10-23）
+## 当前执行快照：1e540ef 配置组件已实现，实际pin与消费链未闭（2026-10-23）
+
+**最新 `1e540ef4b3bd946acfa66bb6fad9c6bf39d94ce2` 已push。** 操作者已明确批准首次从无歧义、完整核验的Seller/Advertiser/CookieStore组合建立持久锁定，跨Store只可人工重绑；同组合多页去重，不能凭tab偏好选目标，不再重复询问该政策。当前代码只落在既有CONFIG归属：显式 `cookieStoreBinding` unbound/pinned；fresh scoped空namespace由Owner建unbound；普通轮换保留raw pin/absence/malformed，caller firstpin/unpin/change/repair拒绝；事实scope投影不与执行权限混用，输入kind/StoreID各捕获一次。没有新key/owner/queue/token/registry/window。
+
+严格TDD：原21业务RED/2controls/fulltsc0，后新2个getter后采样补签RED/fulltsc0，修既有raw classifier；最终 **9相关suites545PASS/no skip/fulltsc0**（`cookie-pin-config-final-related.log`）。首轮497PASS46旧fixture期待FAIL、随后156PASS1同类期待FAIL均保留独立记录；只将4处exact config期待补上新unbound字段，未改旧业务oracle。诊断0errors但26辅助warnings/1inconclusive，不报全clean或全插件/真实浏览器。
+
+新CONFIG-only fresh后验workflow **7f1a6673/child74c26234** 已终态，35行全读、无demonstrated局部阻断，Parent限定接受配置组件；LOW pin专用queued CAS/输入替换及更全own-shape覆盖仍留待实链验证，不冒已测。不是恢复已完成设计agent。此前debb763a的5c/96两窄设计已完整读/Owner对话：初pin须业务nativeSET同写config+business+GEN+ownedleaf，terminal/next-command/start/resume须读取真实持久pin，不能配置层绿了就宣称阻止跨Store已完成；人工直接A→B需新完整proof且不清outbox/ledger，不实现UI/legacyrepair于本段。
+
+原生页面方案仍条件性：第一动作是所有adapter await后、原source/leaf/clock JIT下的真实one-read `executeScript` dispatch；不冒HTTP在deadline前发生。oneRead第一await前发唯一fetch，后续页各回SW原域JIT；无callback跨world/90秒补窗。ISOLATED避免MAIN hook只是条件候选，vendor/session/CORS未证；staged capture是可信sender-document独立事实，不伪称reload造成或以marker获权，最终template+binding+GEN+leaf还需接线。官方Chrome documentIds/InjectionResult/MessageSender.documentId均106+文档已实际取，不能据此冒环境支持/live证明。
+
+下一private native当前API RED helper首次a2未分配child，原因是Parent唯一自有node_modules link被clean admission拒绝；已核无源码WIP/新patch，仅移开own link后同协议6dc重试，allocator后精确恢复link，不碰target/SDK/CLI。真实child01a16898/a669位于独立same-lane patchcheckout，Parent完整lane m-547f77cb已登记精确新test reservation并readback，依赖/sparse/完整tsc baseline0后才显式释放3预期RED+3controls测试设计；终稿13行/实际180行测试/host handoff已全读，Parent在隔离checkout独立复核 **3真实业务RED/3controls/fulltsc0**：每个RED实际SET1、tab90→91、GEN3→4并推进旧ledger，缺Store证据/缺失或坏policy仍未被native拒绝。host capture含own依赖symlink的整bundle不接受，Parent仅unstage ownlink并取test-only patch/hash；不碰target、不把预期RED称完成。需正向首次pin/CAS数据carrier与现有消费者完整门，不能只禁全部恢复来绿；尚无native Source修补/集成。
+
+协调规则已按主线64acba9改为canonical board唯一lane登记；已读新AGENTS/工作流，迁移记录保留父lane且释放A/B旧reservation，旧host checkout/partial只保留，不冒已清理。无ACTIVE维护/registry-only提交。原15仍4完成11open；caps=[]/executors={}、candidate0.4.27，上游ff4b/UI未整合，无外发/生产/部署/业务merge/发布/父指针。
+
+### 历史：544组件窄接受与ports库存（当前以以上1e段为准）
 
 **最新54429d5e7a075ecc125c9ed9aad14c6e99ab54e4已push，clock/R1组件已Parent窄接受。** 两个瞬态顺序clock真实RED/type0后，原private probe producer保存该次实际admit/deny角色；candidate/init/final-probe消费显式角色，不用latest权限补签或重试，public ensure state API与原budget拒绝保留。fresh a88终稿47行全读，advisory_no_local_blocker；保3非阻断覆盖缺口（成功后denial、混合候选、最终reprobe），不冒独立执行/全项目接受。7相关549PASS/fulltsc0后仅加1candidate控制，最终focused25PASS/fulltsc0；不报未执行550/739全套，不累计旧736/547。
 
 已实际只读核上游：task544与master5f07的共同祖先是d193，d193已在双方；分歧128/4。ff4b还新增same-business-scope扫描保留、bounded日志/getState默认不读logs，background/storage与status热点需合并保留；导入UI/0.4.30未整合，当前candidate仍0.4.27，无自动merge/改版/父指针。复用矩阵及16个committed Source隔离快照已备，没读原dirty/foreign fixture。
 
-真实端口咨询bc38d899/bf1ec311已终态，122行完整读，不是已批准Source方案。实际source/leaf输入及unobserved返回、GEN/auto-close之前exact operation/document capture分流、跨bridge后fetch原clock/source合同、CookieStore授权来源及严格分页证据尚需spec。Parent已取核官方Chrome原文及MDN sleep/clock警告，另从committed ads8d找到Seller GET/strict正向parser；不冒live/login/选定Store fetch证明。当前向操作者确认CookieStore政策：建议首次仅从唯一已核验目标页建立并锁定，后续Store变化须人工重新绑定，不默认fallback；技术capture/bridge规格继续Owner闭合，未授Source写。caps=[]/executors={}，原15仍4完成11open；perf core未来写队列已发显式回交请求但未当已获授权。
+真实端口咨询bc38d899/bf1ec311已终态，122行完整读，不是已批准Source方案。实际source/leaf输入及unobserved返回、GEN/auto-close之前exact operation/document capture分流、跨bridge后fetch原clock/source合同、CookieStore授权来源及严格分页证据尚需spec。Parent已取核官方Chrome原文及MDN sleep/clock警告，另从committed ads8d找到Seller GET/strict正向parser；不冒live/login/选定Store fetch证明。当时向操作者请求CookieStore政策，现已在以上1e段批准并推进配置组件；这段历史不再表示待批。实际capture/bridge/原生pin消费仍按以上新边界推进，不默认fallback。caps=[]/executors={}，原15仍4完成11open；perf core未来写队列已发显式回交请求但未当已获授权。
 
 ### 历史：5e7后验及此前局部断点（当前以以上544段为准）
 
