@@ -10,6 +10,8 @@
 
 > 2026-10-23 生命周期增量：生产分支 `9604918`（后续 `8c724db`仅补测试）已让 suspended READY/运行态正向复用读取严格持久pin并重证实际上下文；策略不可读本身不制造失效事实，已实际观测的无tab/login仍正常上报与清理。resume在Scheduler API调用前二次核对Store与原generation/fence，新READY→resume命令协议路径、轮换/新Controller持久性均有合格注入测试。该轮14相关755/type0，补隔离竞态后native文件210/type0，不累计为761/不声称全插件或浏览器；实际Scheduler适配器await后的原生JIT、原resume deadline及PageFactory仍需另行证明，能力未激活。
 
+> 2026-10-23 原resume时钟增量：任务分支生产 `1f9bd7c`／测试补强 `19b8b11` 已接通原请求 clock callback/domain/deadline、不可变命令 root/source 与 Scheduler expectation 数据；适配器须在自身 await 后紧邻实际动作消费一次 admit，端口调用本身不算启动，迟到事实不能成为重复启动权限。managed resume 终态标记取原 continuation，真实注入 Runtime 的 live／到期拒绝／已启动迟到终态均有测试。生产一次14文件778PASS/type0，追加控制后仅 native 文件230PASS/type0，不累计。独立27行窄审无确认引入缺陷，覆盖缺口由Parent补证；**真实 Scheduler Factory 在 await 后校验实际存储 root/source/leaf/pin 并调用原生动作仍未实现**，数据比较不是授权证明。contextless 仅旧泛型兼容，实际生产适配器必须拒绝缺 expectation；能力继续关闭，不部署／发布。
+
 ## 1. 现状、基线与方案归属
 
 ### 1.1 已核验现状

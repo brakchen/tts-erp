@@ -1,6 +1,15 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：启动/新resume持久Store消费者已push并窄复核，实际调度器JIT/Factory仍开（2026-10-23）
+## 当前：1f9原resume clock/context与标记终态运输、19b8覆盖补证；实际Scheduler存储JIT/Factory仍开（2026-10-23）
+
+- **Source最新19b8b11acd0b0e613ccee97d5715fe62360b5d15已push**；生产算法1f9bd7cddf0e27e15bd6fcc1690103e2d17c1e03，19b8仅测试且Controller blob精确相同。resume接既有Runtime ctx，首await前捕获原clock callback/domain/deadline/root/source，核action/id/JSON fingerprint/episode/epoch/nonce。existing Scheduler optional expectation=原PhysicalBindingFence数据+单次admit；consumer自身await后核原clock/gen才实际入场，调用/resolve不算消费；已入场迟到结果保事实，不给第二次动作权限。recover纯clock predicate提取保持原wall-before-mono/首准入语义，无新窗口/owner/key/queue/token。
+- **Producer闭环**：真实Runtime→Controller→注入Scheduler有效native1却ledgerRejected，定位managed resume结果缺localEligibility；仅producer取原captured continuation namespace/GEN+fresh localId，原Root/receipt/fingerprint/leaf不变，不从latest读权限或给Runtime fallback造marker。实际终态仍由canonical owner验证。
+- **严格TDD与排除**：6 current-API business RED/type0（合法structural双参callback／旧单参API，不是missing API）；2完整身份RED/6controls/type0；重复admit真实1RED/type0；真实Runtime正例终态缺marker1RED/type0后修。初Runtime fixture把optional decision传null导致type2/TypeError，仅测试改undefined后再取得有效业务反例，原日志保留、不冒RED。
+- **独立窄审与补证**：workflow2b855409/childcabc0566终态，resume-dispatch-review.md27行完整读，read/contact-only frozen1f9，无确认引入的普通输入代码缺陷。Medium实际Scheduler SOT/native边界仍OPEN；Medium实际Runtime迟到终态与Low忽略expectation/post-admit撤权覆盖由Parent追加3controls：原deadline过后真实terminal Applied；未消费端口Rejected/noCommit/noStop；已消费后HOLD保actualStart1、原安全stop2、新canonical HOLD不变。新增控制非reviewer独立执行或新Source算法修复，不恢复完成review。
+- **精确验证**：生产1f9一次 **14文件778PASS/no skip/fulltsc0**；19b8测试补强后仅native完整 **230PASS/fulltsc0**，不累计781／全插件／coverage/build/browser。2paths LSP0reported errors/2inconclusive，不称clean。Source两自有文件显式stage/commit/push，node_modules ownlink唯一untracked且target不动；Git fetch原协议attempt1成功，quota available week27%。
+- **继续边界**：运输/时钟consumer见证≠实际存储准入。真实Scheduler Factory必须拒绝缺ctx/expectation，所有自身await后JIT核真实started root/source/leaf/raw pin，再紧邻真实native action消费原clock；已启动后其他新Scheduler重叠/条件stop尚无真实证明。nextrecover完整持久矩阵、PageFactory/capture/document/分页/manualUI/legacyrepair/两config/ERP/E2E仍开；原15仍4done11open/caps[]executors{}/candidate0.4.27，无ready/业务merge/生产/发布/父指针。ERP模板/v16只peer01a16719写，Parent不跑不健康DB。证据根/tmp/plugin-status-continuous-01a1406d/，以resume-dispatch-owner-acceptance.json/current-owner-checkpoint及durable resumeDispatchDelivery为准。
+
+### 历史：9604/8c启动及新resume Store消费者
 
 - **Source最新 `8c724dbe1d8ff26d7044ba6726de1db3eba4eb38` 已push**；生产实现960491821516c16a1d8faaff8932003789ec99bc，8c只补6个隔离回归、Source字节未变。READY即便suspended也不再自证：独立合格tab/business/实际Store/Seller事实后才用严格raw pin决定positive reuse；无/坏/unbound policy仅unobserved、不凭缺失制造stop/clear，实际noTab/login事实仍原owner处理。resume在Scheduler API调用前二次证明并检查原generation/fence；实际适配器await后的JIT及原resume request-clock运输尚未证明，不能冒该边界完成。
 - **真实协议TDD**：real configure→native pin→READY terminal→READY报告allocate/markedACK→全新resume start root/新Controller；修测试正例缺local marker后有效 **5业务RED/1control/fulltsc0**，不可将最初marker缺失作业务RED。早期pin gate遮蔽真实noTab/login又单独2业务RED/type0，移到positive branch后8focusedGREEN。sameStore实际running terminal/普通credential rotation omission/freshController actualB/原receipt与pin保留均已执行。

@@ -1,6 +1,12 @@
 # 通用插件状态与单目标恢复实施 - Intent
 
-## 当前续作：9604/8c启动与新resume Store消费者已验证，继续实际适配器（2026-10-23）
+## 当前续作：1f9原resume时钟/上下文/标记终态运输与19b8补证已push（2026-10-23）
+
+Source19b8b11acd0b0e613ccee97d5715fe62360b5d15／生产1f9bd7c：原clock callback/domain/deadline+genuine root/source首await前捕获，完整命令身份核验，Scheduler数据expectation由consumer在自身await后单次admit；未消费不applied，迟到已启动事实保留但不借其重复启动。producer本地marker取原continuation，不读latest补签。6业务RED/type0、2身份RED/6controls、1重复许可RED及真实Runtime正向终态RED驱动，生产一次14文件778PASS/type0。
+
+fresh2b8554/cabc27行静态窄审全读，无确认引入缺陷，非独立执行；迟到Runtime终态/忽略expectation/post-admit HOLD的3覆盖控制已Parent执行，最后native230/type0，非781合跑。实际Scheduler存储SOT after-await JIT/native Factory仍未实现，必须拒绝缺expectation；通用legacy与DTO不当授权证明。下一步真实owner校验、nextrecover/Factory/跨端，不再把原clock运输本身列未实现；原15仍4done11open，能力关闭/不ready/不生产发布或业务merge。ERP模板/v16仅peer01a16719写，临时fetch失败原协议留证重试。
+
+### 历史：9604/8c启动与新resume Store消费者
 
 最新8c724dbe1d8ff26d7044ba6726de1db3eba4eb38已push（生产9604）。真实READY→新resume ACK/start/freshController下actualStore/严格pin不符不Start，sameStore跑通running/普通轮换/新ControllerB且pin/root保留；5业务RED1control/type0另2负面事实RED/type0后实现。14相关755/type0，fresh生命周期窄审33行无确认代码缺陷、Medium覆盖缺口用6隔离controls和5负例mutation-kill/1正例/type0补证；原Source确切SHA恢复后native完整210/type0，非761或全插件。暂时reader扩域实验已撤回，泛型单测仅明确配置数据、不充native权限。实际Scheduler after-await JIT/原resume时钟、nextrecover/真实Factory及跨端仍开，原15仍4done11open/能力关闭。临时quota fetch查询原API重试恢复，不换协议/模型/SDK。
 

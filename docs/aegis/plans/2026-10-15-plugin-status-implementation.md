@@ -1,6 +1,14 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照：9604启动/resume消费者与8c二次核验回归已push，实际适配器/Factory仍开（2026-10-23）
+## 当前执行快照：1f9原resume clock/context与终态运输、19b8补证已push，实际Scheduler SOT/Factory仍开（2026-10-23）
+
+Source最新 **19b8b11acd0b0e613ccee97d5715fe62360b5d15**（生产算法 **1f9bd7cddf0e27e15bd6fcc1690103e2d17c1e03**）。原request clock callback/domain/deadline与root/source在首await前拥有，managed resume匹配完整命令身份；Scheduler expectation只是原数据与一次消费准入，不是新grant。consumer在自身await后消费原clock/gen，未消费不得applied，已启动迟到事实仍可结算而不能重复启动。managed结果marker来自原continuation，修复真实Runtime有效启动却被终态记stale的producer缺口，不在Runtime造latest marker。恢复原clock纯predicate提取保持旧语义，无新90秒窗口。
+
+严格TDD：6当前API业务RED/type0、2身份RED/6controls/type0、1重复admit RED/type0，真实Runtime正例暴露缺marker后producer修；最初null参数/type2仅fixture错误已排除。生产一次 **14文件778PASS/no skip/fulltsc0**；独立2b8554/cabc窄审27行全读，无确认引入代码缺陷；Medium迟到Runtime终态、Low未消费端口/post-admit撤权覆盖由Parent另3controls补证，最后仅native整文件 **230PASS/type0**，不是781合跑／全插件／独立执行。实际已启动HOLD保native1/旧安全stop2及新事实，不冒新旧Scheduler重叠条件清理。
+
+**下一步仍是实际Scheduler Factory在自身await后验证真实存储started root/source/leaf/raw pin并消费原clock紧邻native调用**。目前只有运输与合格注入consumer时钟见证；DTO不是授权、contextless legacy不是managed证明，实际Factory须拒绝缺expectation。再做完整nextrecover矩阵、PageFactory/capture/document/分页/manualUI/repair/两config/ERP/E2E。原15仍4完成11open/caps[]executors{}/0.4.27，无业务merge、生产或发布；ERP模板/v16只peer01a16719写。fetch失败保存断点并原接口有界重试，不切协议/模型/SDK。本轮Git fetch首次成功、quota available week27%。
+
+### 历史：9604启动/resume消费者与8c二次核验回归
 
 Source最新 **8c724dbe1d8ff26d7044ba6726de1db3eba4eb38**：生产9604不再直接复用suspended READY，严格pin只限制positive reuse、不抹去已观测noTab/login；新resume在Scheduler API调用前二次证明实际Store/原fence。genuine READY→newresumeACK/start的5RED1control/type0，另2独立事实RED/type0驱动修补；14相关755/type0。fresh7e8/e119窄审33行无确认代码缺陷、指出Medium隔离覆盖缺口，后加6controls，控变禁用拒绝return杀5负例/1正例/type0后原Source SHA恢复，最终native整文件210/type0；8c仅测试，无761/全插件合跑声称。旧泛型oracle保留并明确配置端口数据，越界reader扩域实验已撤回，不用泛型mock充native授权。
 
