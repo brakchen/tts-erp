@@ -171,7 +171,7 @@ host-managed patch checkout，不是绕过 ready 前驱规则创建独立发布 
 - 1）独立重审；2）command doubles观察同表target-only约束RED，另覆盖dbname query到旁测试库/生产、unsupported routing/host模式一致性、不得wrong-target drop/restore/clone/test、完整dump失败不重建、确认/guard、已有/缺失模板及drop/create/restore失败；3）最小实现mock GREEN，保stamp/upgrade/seed顺序；4）固定实现独立安全审查；5）唯一入口真实refresh+最窄原失败（10 order-price+2 schema/head+3 registry），确认clone cleanup；6）只定点分类，最终prospective master按要求验证合入。
 - 所有业务测试/基线/交付任务在真实模板健康和失败分类完成前保持blocked。不得把mock、lint或source review作为生产/全套GREEN。
 
-### 实现检查点（真实refresh仍未执行）
+### 实现检查点（顺序记录，以下历史门禁不代表最新状态）
 
 - 0041ae0修订方案已由retained安全审查明确PASS（`/tmp/frontend-p01-template-plan-correction-review.md`），helper精确scope已登记m-0ca65203-52a。复用已安装psycopg3.3.6/LGPL-3.0-only及SQLAlchemy2.1.2/MIT，无新增依赖；新helper统一有效参数、literal lifecycle名字、round-trip、维护DSN、SST guard及受支持路由。Docker先核active本地context/发布端口，随后所有命令pin本地socket；拒绝ambient libpq routing/role变量及缺失显式user。
 - `scripts/test_isolated.sh`删除target-only表猜测cleanup与先建空模板路径，委托importer显式recreate；存在/clone/cleanup/stamp/seed/test共用派生身份。保留help无venv可用；自身run clone清理失败不再报绿色。原importer的非recreate模式保留。
@@ -181,4 +181,10 @@ host-managed patch checkout，不是绕过 ready 前驱规则创建独立发布 
 - 1ebe7d4实现审查明确FAIL两项：host-only libpq环境检查漏掉container环境，且recreate在安全parser前沿legacy路径打印缺失dbname的URI。未越过真实refresh门。`/tmp/frontend-p01-template-review-findings-red.log`实测10项失败；另有legacy refusal credential反例RED，未把原45例绿当这两项已覆盖。
 - 修正在common helper内读取所选container的immutable ID，port/environment probe及后续所有lifecycle exec绑定同一ID；仅用/bin/sh内建test检查已知routing/role变量是否为空，不输出其值或读取其他credential字段。recreate先完成确认/安全解析，再允许legacy分支名称逻辑；所有屏显标签只显示安全名称或redacted，legacy拒绝不反射URI，非recreate操作决策未改。
 - `/tmp/frontend-p01-template-review-findings-green.log`现57PASSED/0fail/0skip（新增container PGHOSTADDR/service/role、immutable ID、source/target missing/malformed URI和legacy redaction）。这是修正后的mock/static证据；仍须固定新候选复审，真实模板/12个DB失败/基线/交付均未通过。只读环境诊断已确认当前container这些变量全空，仅报告名称未输出值。
-- 88e5e53复审确认container和原missing-path修正，但FAIL残余同类泄密：stdlib urlparse的NFKC netloc ValueError含原始凭据。改变错误边界而非再补单个字符/parser：CLI对所有ValueError只输出固定诊断，内部有效dbname/显式path意图比较不变。`/tmp/frontend-p01-parser-boundary-red.log`四个literal全角字符及外部异常payload共5项实测失败；统一出口修复后`/tmp/frontend-p01-parser-boundary-green.log`62PASSED/0fail/0skip（59helper/CLI+3静态registry）。原57例保留回归；没有真实refresh。negative unit guard-refusal spy不放宽guard；所有运行仍经标准clone，未通过全局fixture/guard bypass制造绿色。
+- 88e5e53复审确认container和原missing-path修正，但FAIL残余同类泄密：stdlib urlparse的NFKC netloc ValueError含原始凭据。改变错误边界而非再补单个字符/parser：CLI对所有ValueError只输出固定诊断，内部有效dbname/显式path意图比较不变。`/tmp/frontend-p01-parser-boundary-red.log`四个literal全角字符及外部异常payload共5项实测失败；统一出口修复后`/tmp/frontend-p01-parser-boundary-green.log`62PASSED/0fail/0skip（59helper/CLI+3静态registry）。原57例保留回归；该时点没有真实refresh。negative unit guard-refusal spy不放宽guard；所有运行仍经标准clone，未通过全局fixture/guard bypass制造绿色。
+
+### 最新验证检查点：真实模板健康已恢复，完整基线待验
+
+- 34c9d69固定实现独立审查PASS（`/tmp/frontend-p01-parser-boundary-review.md`），仅解除已批准的test-template验证门禁。`envsetup --check`退出0，唯一入口`--refresh-template fast`真实完成完整schema dump、guarded template重建、stamp源0069、upgrade本branch head、内置权限seed、独立clone及cleanup；无warning。没有prod写入、迁移、restart、直接删FK或强断template连接。
+- `/tmp/frontend-p01-template-real-refresh.log`退出0，24PASSED/0failed/0error/0skip：原order-price失败模块及邻域19例、v16 head/admin-only与生成DDL inventory/public.fn存在2例、3条原静态registry断言。此前partial-template警报已解除；这不等于完整fast或交付通过。
+- template-rebuild、registry-tests和env-blocker任务已有changedFiles/证据回执并完成；接下来同步master、固定最终候选，按canonical workflow运行baseline，再做独立prospective-master精确提交验证。P2–P6及生产部署仍不在本slice。
