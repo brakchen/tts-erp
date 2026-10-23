@@ -457,6 +457,30 @@ def test_recreation_parser_error_does_not_echo_secret(tmp_path: Path) -> None:
     assert not _mutations(_trace(tmp_path))
 
 
+@pytest.mark.parametrize("character", ["／", "：", "＠", "＃"])
+def test_unicode_netloc_parser_error_cannot_disclose_credentials(tmp_path: Path, character: str) -> None:
+    secret = "TEST_private_uri_password"
+    target = f"postgresql://postgres:{secret}{character}@127.0.0.1:5432/tts_erp_test_template"
+    result = _run_import(tmp_path, args=("--schema-only", "--yes", "--recreate-test-db"), settings={"TTS_ERP_DB_URL_TEST": target, "PG_DOCKER": ""})
+    assert result.returncode != 0
+    assert secret not in result.stdout + result.stderr
+    trace = _trace(tmp_path)
+    assert not _mutations(trace) and " pg_dump " not in trace and " psql " not in trace
+
+
+def test_cli_value_error_diagnostic_is_not_untrusted_exception_text(monkeypatch, capsys) -> None:
+    from scripts import _test_db_connections as connections
+
+    secret = "TEST_private_external_exception_payload"
+    def external_error(*_):
+        raise ValueError(secret)
+    monkeypatch.setattr(connections, "derive", external_error)
+    monkeypatch.setattr(connections.sys, "argv", ["test-db", "derive", "--template-db", "tts_erp_test_template", "--run-db", "tts_erp_test_run"])
+    assert connections.main() == 3
+    captured = capsys.readouterr()
+    assert secret not in captured.out + captured.err
+
+
 def test_recreation_refuses_effectively_identical_source_and_target(tmp_path: Path) -> None:
     result = _run_import(tmp_path, args=("--schema-only", "--yes", "--recreate-test-db"), settings={"TTS_ERP_DB_URL": SOURCE_URL + "?dbname=tts_erp_test_template"})
     assert result.returncode != 0 and not _mutations(_trace(tmp_path))

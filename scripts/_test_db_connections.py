@@ -191,8 +191,10 @@ def main() -> int:
     except TypeError:
         print("[test-db] unsupported PostgreSQL parameter type", file=sys.stderr)
         return 3
-    except ValueError as error:
-        print(f"[test-db] {error}", file=sys.stderr)
+    except ValueError:
+        # External parsers can embed credential-bearing input in their errors.
+        # Never relay ValueError text, even for a currently trusted code path.
+        print("[test-db] invalid or unsupported PostgreSQL configuration", file=sys.stderr)
         return 3
     return 0
 
