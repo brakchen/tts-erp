@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Input, Label, ListBox, Modal, Select, Table, TextField } from '@heroui/react';
-import { ApiError, requestJson } from '../../shared/api/client';
+import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import type { PageProps } from '../../shared/contracts';
 
 // These read endpoints return database-named fields, including a string request_id.
@@ -52,7 +52,7 @@ export default function InterceptRequests({ bootstrap }: PageProps) {
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
-    let cooldownTimer: ReturnType<typeof setTimeout> | undefined;
+    let cooldownTimer: (() => void) | undefined;
     setList({ loading: true });
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value);
@@ -67,16 +67,16 @@ export default function InterceptRequests({ bootstrap }: PageProps) {
         if (!current) return;
         const delay = error instanceof ApiError ? (error.retryAfter ?? 0) * 1000 : 0;
         setList({ loading: false, error: errorMessage(error), retryBlocked: delay > 0 });
-        if (delay > 0) cooldownTimer = setTimeout(() => { if (current) setList((state) => ({ ...state, retryBlocked: false })); }, delay);
+        if (delay > 0) cooldownTimer = scheduleReadDelay(() => { if (current) setList((state) => ({ ...state, retryBlocked: false })); }, delay);
       });
-    return () => { current = false; controller.abort(); clearTimeout(cooldownTimer); };
+    return () => { current = false; controller.abort(); cooldownTimer?.(); };
   }, [bootstrap.rootPath, filters, offset, refresh]);
 
   useEffect(() => {
     if (selected === null) return;
     const controller = new AbortController();
     let current = true;
-    let cooldownTimer: ReturnType<typeof setTimeout> | undefined;
+    let cooldownTimer: (() => void) | undefined;
     setDetail({ loading: true });
     requestJson<{ request: InterceptRequest }>(bootstrap.rootPath, `/v2/intercept/requests/${encodeURIComponent(selected)}`, { signal: controller.signal })
       .then(({ data }) => {
@@ -87,9 +87,9 @@ export default function InterceptRequests({ bootstrap }: PageProps) {
         if (!current) return;
         const delay = error instanceof ApiError ? (error.retryAfter ?? 0) * 1000 : 0;
         setDetail({ loading: false, error: errorMessage(error), retryBlocked: delay > 0 });
-        if (delay > 0) cooldownTimer = setTimeout(() => { if (current) setDetail((state) => ({ ...state, retryBlocked: false })); }, delay);
+        if (delay > 0) cooldownTimer = scheduleReadDelay(() => { if (current) setDetail((state) => ({ ...state, retryBlocked: false })); }, delay);
       });
-    return () => { current = false; controller.abort(); clearTimeout(cooldownTimer); };
+    return () => { current = false; controller.abort(); cooldownTimer?.(); };
   }, [bootstrap.rootPath, selected, detailRefresh]);
 
   const total = list.data?.total;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Link, Table } from '@heroui/react';
-import { ApiError, requestJson } from '../../shared/api/client';
+import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { pathFor } from '../../shared/api/paths';
 import type { NavigationItem, PageProps } from '../../shared/contracts';
 
@@ -47,8 +47,8 @@ function useDashboardRead<T>(rootPath: string, path: string, decode: Decoder<T>,
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
-    let cooldownTimer: ReturnType<typeof setTimeout> | undefined;
-    let refreshTimer = refreshInterval ? setTimeout(() => setAttempt((value) => value + 1), refreshInterval) : undefined;
+    let cooldownTimer: (() => void) | undefined;
+    let refreshTimer = refreshInterval ? scheduleReadDelay(() => setAttempt((value) => value + 1), refreshInterval) : undefined;
     setState({ loading: true });
     requestJson<unknown>(rootPath, path, { signal: controller.signal })
       .then(({ data, headers }) => {
@@ -63,14 +63,14 @@ function useDashboardRead<T>(rootPath: string, path: string, decode: Decoder<T>,
         const delay = error instanceof ApiError ? (error.retryAfter ?? 0) * 1000 : 0;
         setState({ loading: false, error: message, retryBlocked: delay > 0 });
         if (delay > 0) {
-          cooldownTimer = setTimeout(() => { if (current) setState((value) => ({ ...value, retryBlocked: false })); }, delay);
+          cooldownTimer = scheduleReadDelay(() => { if (current) setState((value) => ({ ...value, retryBlocked: false })); }, delay);
           if (refreshInterval) {
-            clearTimeout(refreshTimer);
-            refreshTimer = setTimeout(() => setAttempt((value) => value + 1), Math.max(refreshInterval, delay));
+            refreshTimer?.();
+            refreshTimer = scheduleReadDelay(() => setAttempt((value) => value + 1), Math.max(refreshInterval, delay));
           }
         }
       });
-    return () => { current = false; controller.abort(); clearTimeout(cooldownTimer); clearTimeout(refreshTimer); };
+    return () => { current = false; controller.abort(); cooldownTimer?.(); refreshTimer?.(); };
   }, [rootPath, path, decode, attempt, refreshInterval]);
   return { ...state, retry: () => { if (!state.retryBlocked) setAttempt((value) => value + 1); } };
 }

@@ -20,12 +20,46 @@ async function filesIn(directory, prefix = '') {
   return files.sort();
 }
 
+function validateManifest(manifest, files) {
+  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!isRecord(manifest) || !isRecord(manifest['src/main.tsx']) || manifest['src/main.tsx'].isEntry !== true) {
+    throw new Error('Missing Vite main entry');
+  }
+  const available = new Set(files);
+  function asset(name, suffixes) {
+    if (typeof name !== 'string' || !name || /[\\%?#:\x00-\x20]/.test(name)
+        || name.split('/').some((part) => ['', '.', '..'].includes(part)) || !available.has(name)) {
+      throw new Error('Missing or escaping frontend asset');
+    }
+    if (suffixes && !suffixes.some((suffix) => name.endsWith(suffix))) throw new Error('Invalid frontend asset type');
+  }
+  function list(record, key) {
+    const value = Object.hasOwn(record, key) ? record[key] : [];
+    if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new Error('Invalid manifest list');
+    return value;
+  }
+  // Mirror the serving edge: validate eager AND lazy closure before selecting it.
+  // Inventory membership confines all paths to regular, non-symlink input files.
+  const visited = new Set();
+  const pending = ['src/main.tsx'];
+  while (pending.length) {
+    const key = pending.pop();
+    if (visited.has(key)) continue;
+    const record = manifest[key];
+    if (!isRecord(record)) throw new Error('Missing manifest chunk');
+    asset(record.file, ['.js', '.mjs']);
+    for (const name of list(record, 'css')) asset(name, ['.css']);
+    for (const name of list(record, 'assets')) asset(name);
+    visited.add(key);
+    pending.push(...list(record, 'imports'), ...list(record, 'dynamicImports'));
+  }
+}
+
 try {
   if (target === source || target.startsWith(source + path.sep)) throw new Error('Output cannot be inside input');
   const files = await filesIn(source);
   const manifest = JSON.parse(await readFile(path.join(source, '.vite/manifest.json'), 'utf8'));
-  const entry = manifest['src/main.tsx'];
-  if (!entry || entry.isEntry !== true || !files.includes(entry.file)) throw new Error('Missing Vite main entry');
+  validateManifest(manifest, files);
   const hash = createHash('sha256');
   for (const name of files) {
     const bytes = await readFile(path.join(source, name));

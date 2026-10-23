@@ -223,7 +223,11 @@ window.__vite_plugin_react_preamble_installed__ = true;
 {"\n".join(links)}
 </head>
 <body>
-<div id="frontend-root"></div>
+<div id="frontend-root"><section id="frontend-startup" role="status" aria-live="polite">
+<h1>正在加载页面</h1>
+<p>若持续显示此提示，前端资源可能加载失败。请刷新页面；如仍失败，请联系管理员。</p>
+<a href="">刷新页面</a>
+</section></div>
 <script id="frontend-bootstrap" type="application/json">{_safe_json(bootstrap)}</script>
 {development}
 <script type="module" src="{escape(assets.entry, quote=True)}"></script>

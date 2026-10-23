@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, requestJson } from './client';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('requestJson', () => {
   it('uses the prefixed path and same-origin cookies and preserves headers', async () => {
@@ -26,7 +26,31 @@ describe('requestJson', () => {
     expect(headers.get('X-Requested-With')).toBe('tts-erp');
     expect(headers.has('Content-Type')).toBe(false);
   });
-  it('reports status, bounded retry delay and request id without auto retry', async () => {
+  it.each(['600', 'Fri, 23 Oct 2026 10:10:00 GMT'])('preserves the server minimum beyond five minutes: %s', async (header) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-23T10:00:00Z'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"detail":"limited"}', { status: 429, headers: { 'Retry-After': header } })));
+    await expect(requestJson('', '/v2/items')).rejects.toMatchObject({ status: 429, retryAfter: 600 });
+  });
+  it('keeps local long waits cancellable without signed-32-bit timer overflow', async () => {
+    vi.useFakeTimers();
+    const api = await import('./client') as unknown as { scheduleReadDelay: (callback: () => void, milliseconds: number) => () => void };
+    expect(api.scheduleReadDelay).toBeTypeOf('function');
+    const callback = vi.fn();
+    const cancel = api.scheduleReadDelay(callback, 2_147_483_647 + 1000);
+    await vi.advanceTimersByTimeAsync(2_147_483_647);
+    expect(callback).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(callback).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(callback).toHaveBeenCalledTimes(1);
+    cancel();
+    const cancelled = vi.fn();
+    api.scheduleReadDelay(cancelled, 1000)();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(cancelled).not.toHaveBeenCalled();
+  });
+  it('reports status, retry delay and request id without auto retry', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response('{"detail":"too many"}', { status: 429, headers: { 'Retry-After': '7', 'x-request-id': 'TEST-request' } }));
     vi.stubGlobal('fetch', fetcher);
     await expect(requestJson('', '/v2/items')).rejects.toMatchObject({ status: 429, retryAfter: 7, requestId: 'TEST-request' });

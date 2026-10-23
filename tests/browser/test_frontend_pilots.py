@@ -17,13 +17,14 @@ pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, width, slug, title):
     page = frontend_browser_renderer.open(f"{prefix}/v2/pages/{slug}", width=width)
     page.get_by_role("heading", level=1, name=title, exact=True).wait_for(timeout=10_000)
+    assert page.locator("#frontend-startup").count() == 0
     if width < 1024:
         trigger = page.get_by_role("button", name="打开主导航")
         trigger.click()
         page.get_by_role("navigation", name="主导航").wait_for()
         page.keyboard.press("Escape")
         page.get_by_role("dialog").wait_for(state="hidden")
-        assert trigger.evaluate("el => document.activeElement === el")
+        page.wait_for_function("el => document.activeElement === el", arg=trigger.element_handle(), timeout=5_000)
     else:
         navigation = page.get_by_role("navigation", name="主导航")
         assert navigation.count() == 1
@@ -69,6 +70,25 @@ def test_dashboard_and_new_old_navigation(frontend_browser_renderer):
     page.wait_for_url("**/tts/v2/pages/shops")
     assert page.locator("#frontend-root").count() == 0
     assert page.locator('link[href*="bootstrap.min.css"]').count() == 1
+
+
+@pytest.mark.parametrize("prefix", ["", "/tts"])
+@pytest.mark.parametrize("failed", ["entry", "eager"])
+def test_initial_module_failure_keeps_accessible_fallback(frontend_browser_renderer, prefix, failed):
+    page = frontend_browser_renderer.open(f"{prefix}/v2/pages/dashboard")
+    page.get_by_role("heading", level=1, name="控制台", exact=True).wait_for()
+    assets = Path(__file__).resolve().parents[2] / "tts_erp_v2/static/frontend"
+    release = json.loads((assets / "release.json").read_text())["releaseId"]
+    manifest = json.loads((assets / release / ".vite/manifest.json").read_text())
+    entry = manifest["src/main.tsx"]
+    chunk = entry["file"] if failed == "entry" else manifest[entry["imports"][0]]["file"]
+    page.route("**/" + chunk, lambda route: route.abort())
+    page.reload(wait_until="networkidle")
+    fallback = page.locator("#frontend-startup")
+    assert fallback.is_visible()
+    assert "资源可能加载失败" in fallback.inner_text()
+    assert fallback.get_by_role("link", name="刷新页面").get_attribute("href") == ""
+    assert page.get_by_role("heading", level=1, name="控制台", exact=True).count() == 0
 
 
 def test_lazy_chunk_failure_is_visible(frontend_browser_renderer):

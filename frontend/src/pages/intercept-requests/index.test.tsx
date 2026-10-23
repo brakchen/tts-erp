@@ -33,9 +33,9 @@ describe('intercept-requests page', () => {
     await user.keyboard('{Escape}');
     await waitFor(() => expect(button).toHaveFocus());
   });
-  it('respects Retry-After independently for list queries and detail retries without automatic replay', async () => {
+  it.each([2, 600, 3_000_000])('respects Retry-After %s independently for list/detail without automatic replay', async (seconds) => {
     vi.useFakeTimers();
-    const limited = () => new Response(JSON.stringify({ detail: 'TEST rate limited' }), { status: 429, headers: { 'Retry-After': '2' } });
+    const limited = () => new Response(JSON.stringify({ detail: 'TEST rate limited' }), { status: 429, headers: { 'Retry-After': String(seconds) } });
     const fetchMock = vi.fn().mockResolvedValueOnce(limited())
       .mockResolvedValueOnce(json({ requests: [row], total: 1, limit: 100, offset: 0 }))
       .mockResolvedValueOnce(limited()).mockResolvedValueOnce(json({ request: row }));
@@ -44,13 +44,17 @@ describe('intercept-requests page', () => {
     await act(async () => {});
     expect(screen.getByRole('button', { name: '重试列表' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '查询' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(seconds * 1000 - 1); });
+    expect(screen.getByRole('button', { name: '查询' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: '查询' })).toBeEnabled();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '重试列表' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查看详情' })); });
     expect(screen.getByRole('button', { name: '重试详情' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(seconds * 1000 - 1); });
+    expect(screen.getByRole('button', { name: '重试详情' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '重试详情' })); });
     expect(within(screen.getByRole('dialog')).getByText(requestId)).toBeVisible();

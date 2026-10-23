@@ -24,7 +24,25 @@ export function setUnauthorizedHandler(handler: () => void): () => void {
 function retryDelay(value: string | null): number | undefined {
   if (!value) return undefined;
   const seconds = /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000);
-  return Number.isFinite(seconds) ? Math.min(300, Math.max(0, seconds)) : undefined;
+  // Never shorten the server's minimum; unrepresentably long numeric waits stay blocked.
+  return Number.isNaN(seconds) ? undefined : Math.max(0, seconds);
+}
+
+/** One lifecycle-owned delay, split to avoid browser signed-32-bit timer overflow.
+ * Uses elapsed monotonic time; it never retries requests or owns global scheduling.
+ */
+export function scheduleReadDelay(callback: () => void, milliseconds: number): () => void {
+  const deadline = Math.ceil(performance.now() + milliseconds);
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tick = () => {
+    if (cancelled) return;
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) callback();
+    else timer = setTimeout(tick, Math.min(2_147_483_647, remaining));
+  };
+  tick();
+  return () => { cancelled = true; clearTimeout(timer); };
 }
 
 /** Fetch one response. Cancellation propagates; mutations are never replayed. */

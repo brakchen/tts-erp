@@ -129,4 +129,6 @@ host-managed patch checkout，不是绕过 ready 前驱规则创建独立发布 
 - 两页在真实 Chromium 中覆盖375/1440、空前缀与/tts、表单/详情/分页/导航、失败提示；Vite dev origin、React刷新preamble及一次实际模块HMR更新通过。组合窄选择119个pytest item通过，日志 `/tmp/frontend-p01-activation-narrow.log`。未运行生产服务。
 - 已在唯一迁移集合启用 dashboard/intercept-requests。旧模板/脚本暂仅供离线probe及未迁移消费者，已迁移实际HTTP文档不加载旧皮肤；P6迁移这些工具的最后消费者后移除，不声称旧资源已全退役。
 - 主线64acba9已将lane登记迁入主仓board；本lane当前完整记录为m-5a128171-185，保留真实child归属及app/access排除。后续不再维护ACTIVE或另起worktree分板。
-- 当前准备固定review候选：独立spec/质量审查、一次baseline与Git交付尚未完成。依赖类型/构建与npm audit通过，bundle许可证采用Vite原生build.license随产物输出，不新增许可证生成框架。
+- 原固定候选8f04534的spec独立审查提出三项阻断：选版前完整manifest闭包、初始entry/eager模块失败不可空白、Retry-After不可缩短。已先观察真实RED（`/tmp/frontend-p01-review-findings-red.log`），补齐闭包/路径/列表含null检查、纯HTML可访问startup提示（React成功挂载移除）、保留长限流等待及本生命周期可取消的单调时钟分段timer；不新增全局重试调度器。
+- 修复组合131项先通过（`/tmp/frontend-p01-review-findings-green.log`）；补充null-list反例取得RED后修复。最新132项组合的业务/产物/63组件测试均通过，只有两条手机focus断言因原测试在原生异步恢复前立即取快照失败；改为等待同一activeElement严格相等条件，最窄两例通过（`/tmp/frontend-p01-focus-restore-green.log`）。这是测试时序修复，未手动focus或放宽断言。主入口/eager失败覆盖两个prefix，闭包坏包不改旧metadata，600秒/HTTP-date/超32位timer及取消均有回归。
+- 独立spec重审/质量审查、一次baseline与最终Git交付尚未完成。依赖类型/构建与npm audit通过；主动LSP无编译错误，两处跨函数异常传播误报已说明调用者catch并记录false-positive；保留原生组件弃用hint等非阻断建议，不声称全部诊断为零。bundle许可证采用Vite原生build.license随产物输出，不新增许可证生成框架。

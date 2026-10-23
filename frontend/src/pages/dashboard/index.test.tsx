@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
@@ -26,21 +26,21 @@ function responses(url: string) {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('dashboard page', () => {
-  it('blocks throttled manual retries and delays sync polling until Retry-After expires', async () => {
+  it.each([120, 600, 3_000_000])('blocks retries and sync polling for the full Retry-After of %s seconds', async (seconds) => {
     vi.useFakeTimers();
     let polls = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (!url.endsWith('/sync/status')) return responses(url);
-      if (++polls === 1) return json({ detail: 'TEST throttled' }, 429, { 'Retry-After': '120' });
+      if (++polls === 1) return json({ detail: 'TEST throttled' }, 429, { 'Retry-After': String(seconds) });
       return responses(url);
     }));
     const view = render(<Dashboard {...props} />);
     await act(async () => {});
     expect(screen.getByRole('button', { name: '重试同步状态' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(seconds * 500); });
     expect(polls).toBe(1);
     expect(screen.getByRole('button', { name: '重试同步状态' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(seconds * 500); });
     expect(polls).toBe(2);
     expect(screen.getByText('TEST_job')).toBeVisible();
     view.unmount();
