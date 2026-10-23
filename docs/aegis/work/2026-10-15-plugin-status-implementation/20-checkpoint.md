@@ -1,6 +1,15 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：原生pin、唯一组合选择与终态比较已push，启动/resume与真实Factory仍开（2026-10-23）
+## 当前：启动/新resume持久Store消费者已push并窄复核，实际调度器JIT/Factory仍开（2026-10-23）
+
+- **Source最新 `8c724dbe1d8ff26d7044ba6726de1db3eba4eb38` 已push**；生产实现960491821516c16a1d8faaff8932003789ec99bc，8c只补6个隔离回归、Source字节未变。READY即便suspended也不再自证：独立合格tab/business/实际Store/Seller事实后才用严格raw pin决定positive reuse；无/坏/unbound policy仅unobserved、不凭缺失制造stop/clear，实际noTab/login事实仍原owner处理。resume在Scheduler API调用前二次证明并检查原generation/fence；实际适配器await后的JIT及原resume request-clock运输尚未证明，不能冒该边界完成。
+- **真实协议TDD**：real configure→native pin→READY terminal→READY报告allocate/markedACK→全新resume start root/新Controller；修测试正例缺local marker后有效 **5业务RED/1control/fulltsc0**，不可将最初marker缺失作业务RED。早期pin gate遮蔽真实noTab/login又单独2业务RED/type0，移到positive branch后8focusedGREEN。sameStore实际running terminal/普通credential rotation omission/freshController actualB/原receipt与pin保留均已执行。
+- **兼容性**：neighbors初155PASS3FAIL，恢复显式options已证明外Store的原IDENTITY_MISMATCH优先；保留旧container9/READY正例oracle但fixture明确configuredStore9数据（不是从page推pin/人类换绑实现），resume精确顺序改probe/probe/start、zero-commit断言原样。试将managed recovery按reader存在扩域导致11失败，已完整撤回到4dad executionAuthority角色边界；不弱化旧postreload读次数/facts/clock oracle。
+- **最新独立窄审**：7e8c40f0/e119787a已终态，`cookie-lifecycle-review.md`33行全读：无确认引入的代码缺陷，Medium为二次核验未独立隔离的覆盖缺口（非运行缺陷）。Parent补6controls：成功初始化后Store/missing/malformed变化、第二probe/policy await时HOLD撤权、新lifecycle method-reader receiver。先6PASS/type0；只临时禁用二次拒绝return、保留实际读取/边界，5负例真实失败/1正例PASS/type0；EXIT trap仅还原确切ownSource到9604并SHA复核，marker已grep清零；最后整个native文件 **210PASS/fulltsc0**。不恢复/重跑完成review，不冒其独立执行/追加测试接受。
+- **验证口径**：生产9604在追加6controls前一次 **14 files755PASS/no skip/fulltsc0**，最后测试文件扩充后仅其210PASS/type0，不冒761合跑/全插件/coverage/build/browser。LSP3paths0reported errors但3inconclusive，不报allclean。git fetch原协议attempt1成功；quota查询临时requestfailed/unknown后same API force重试available24%，无CLI/model/SDK fallback，不冒额度耗尽。
+- **继续边界**：physical scheduler point-of-use JIT/原resume deadline context、下一recover矩阵、真实PageFactory/capture/document/strictpagination/manualUI/legacyrepair/两config/ERP/live仍开；原15仍4done11open，candidate0.4.27/caps[]executors{}。无生产/业务mastermerge/发布/父指针，ERP模板/v16仅01a16719独立writer，本会话不跑不健康DB。
+
+### 历史：4dad原生锁定、组合选择与终态比较
 
 - **当前Source `4dad71cb78a734f276aff303cf88b7025e3d1374` 已push**，前驱1158c951实际实现原生业务SET同写pin+GEN+owned continuation（含identical business），expected-policy/Store只作CAS数据，不是新grant。1e配置段保留；原root/fingerprint/90秒/raw settlement/cleanup均保原归属。managed Controller读严格raw策略、两/三次Store一致、先排除未知竞争者并证明Seller/Advertiser/Store唯一组合再按tab偏好选页；等价页去重。canonical positive READY须raw pinned与boundCookieStoreId一致；legacy/malformed/unbound拒绝正向，但精确failed facts可结算。
 - **本轮严格TDD**：typed carrier前3真实RED3controls/type0；类型门后9真实RED3controls/type0→原生12GREEN；projection3真实RED/type0；真实Controller6RED/type0→3相关202PASS；bootstrap3RED2controls/type0（differentStore/unresolved/otherAdvertiser）；terminal4RED3failed-fact controls/type0。所有生产改动各有精确门，未用全禁恢复绕过正例。

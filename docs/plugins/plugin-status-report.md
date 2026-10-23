@@ -8,6 +8,8 @@
 
 > 2026-10-23 实施增量（仅任务分支）：monitor `4dad71c` 已在既有原生业务写中原子持久化首次 Store pin、GEN 与原命令 continuation；输入 expected-policy/Store 是 CAS 数据，不增加授权 owner/token。managed 恢复按完整 Seller/Advertiser/Store 唯一组合选页，未知竞争者不许 bootstrap，同 tuple 多页可按偏好选页；重读 Store 必须一致。canonical READY 还核 raw pinned Store 相等，精确失败事实不受全局 pin gate 阻挡。最新12相关692PASS/完整tsc0，startup/resume/nextcommand、真实页面Factory/配置rollout/跨端/live仍待闭合；这不是已激活、部署或发布证明。
 
+> 2026-10-23 生命周期增量：生产分支 `9604918`（后续 `8c724db`仅补测试）已让 suspended READY/运行态正向复用读取严格持久pin并重证实际上下文；策略不可读本身不制造失效事实，已实际观测的无tab/login仍正常上报与清理。resume在Scheduler API调用前二次核对Store与原generation/fence，新READY→resume命令协议路径、轮换/新Controller持久性均有合格注入测试。该轮14相关755/type0，补隔离竞态后native文件210/type0，不累计为761/不声称全插件或浏览器；实际Scheduler适配器await后的原生JIT、原resume deadline及PageFactory仍需另行证明，能力未激活。
+
 ## 1. 现状、基线与方案归属
 
 ### 1.1 已核验现状

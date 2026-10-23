@@ -1,6 +1,12 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照：4dad71c 原生锁定与组合/终态边界已实现，startup/resume/Factory未闭（2026-10-23）
+## 当前执行快照：9604启动/resume消费者与8c二次核验回归已push，实际适配器/Factory仍开（2026-10-23）
+
+Source最新 **8c724dbe1d8ff26d7044ba6726de1db3eba4eb38**：生产9604不再直接复用suspended READY，严格pin只限制positive reuse、不抹去已观测noTab/login；新resume在Scheduler API调用前二次证明实际Store/原fence。genuine READY→newresumeACK/start的5RED1control/type0，另2独立事实RED/type0驱动修补；14相关755/type0。fresh7e8/e119窄审33行无确认代码缺陷、指出Medium隔离覆盖缺口，后加6controls，控变禁用拒绝return杀5负例/1正例/type0后原Source SHA恢复，最终native整文件210/type0；8c仅测试，无761/全插件合跑声称。旧泛型oracle保留并明确配置端口数据，越界reader扩域实验已撤回，不用泛型mock充native授权。
+
+下一步保留实际scheduler adapter after-await JIT/原resume clock运输、nextrecover持久矩阵与PageFactory/capture/两config/ERP/E2E；只证明API调用前校验，不称真实Scheduler原生动作已受保护。原15仍4完成11open/能力关闭/版本未改/无发布、业务merge或父指针。fetch/quota临时失败按原接口留证重试、不断片改协议。
+
+### 历史：4dad原生锁定与组合/终态边界
 
 当前Source **4dad71cb78a734f276aff303cf88b7025e3d1374** 已push：原生pin+业务+GEN+own leaf单SET，显式CAS数据非grant；managed完整唯一Seller/Advertiser/Store组合先于tab偏好、未知竞争者拒绝bootstrap、Store重读一致；positive terminal严格pin相等，negative fact settlement不被全局pin gate绑住。冻结1158 fresh review39行已全读，两P2经2业务RED/type0修receiver与getter-callback顺序；bootstrap3RED2controls和terminal4RED3controls各独立type0后修。最后 **12相关692PASS/fulltsc0**，并非全插件/整体验收。扩展profile超时/3个direct旧profile失败均留痕，仅合法reader/真native预pin fixture迁移，旧oracle不弱化；LSP有2未改行辅助error/3inconclusive，不冒allclean。
 
