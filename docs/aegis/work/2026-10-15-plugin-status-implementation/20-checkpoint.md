@@ -1,6 +1,16 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：actorless clear 双入口候选542相关通过；实现窄审三项阻断待TDD修复（2026-10-23）
+## 当前：实现窄审三项缺口已Parent TDD修补589相关通过；待新后验复核（2026-10-23）
+
+- **最新HEAD `20d94875c438abba85ba3c1a2a04ea00a58134ae` 已commit/push**，最后tracked/indexclean，node_modules不stage。以下ac766/542与未修措辞为被审基点，当前以本段覆盖。原15仍4完成11open，未关闭physical。
+- 完整4e54报告F1/F2/F3已接纳并真实复现：最终 **26业务RED/38controls/112unselected/fulltsc0**（regex含原F1terminal控制，不冒64全是新案）；首轮25fail但union.fence unknown类型错误不算，修fixture后valid25/type0及追加getter后的26/type0均保日志。
+- 修F1：公开fresh assertion不再获取first-snapshot PRE/clear，仅保既有事实路径；既有source-bound原PRE与内部ensure独立verification的freshclear仍通过。原不具证明的fresh-positive oracle明确退役并以healthy-target不清理反例替代，不skip/假称其原先合法。
+- 修F2：canonical type旁compile-time exhaustive19字段keyset与私有strictmanageddecoder要求own/nonundefined，再复用既有值规则；strictPRE/canonical准备/nativeclear共用，legacy事实reader的默认语义保留。覆盖每字段PRE/POST遗漏、undefinedsticky及legacy兼容。
+- 修F3：Runtime入口任何await前复用export的canonical pure capture，先固定原fn再clone plain observation/pre；覆盖实际ledger-read barrier的callback替换、binding/observation/pre变更及accessor观测替换原fn。无新owner/queue/token/window/blanket liveness。
+- 当前 **12 suites589PASS/no skip、完整tsc0**：`clear-review-findings-related.log`／`...related-type.log`；native文件176、Controller133，含实际Controller→Runtime→canonical→native的ledgerless正向组合，HTTP明确禁用，仅transport证据非生产CAP。最新4path LSP0diagnostics/all4inconclusive，非clean。589不累计542。
+- 原review仍advisory_findings，Parent mitigation不造独立accepted。新后验只读task `observation-clear-findings-followup-task.md`／patch已备，范围ac766→20d新修补，不恢复已完成4e54。完整native95/drain30/首protected/capture/ACKresume/currentcarrier/actualcomposition/actions/Cookie及两config和跨端仍开，无生产/外发/merge/pointer/release。
+
+### 被审基点ac766/542及原finding上下文
 
 - writer仍 `/home/schan/pi-workspace/monitor-status-runtime-01a1406d`／`feature/plugin-status-runtime-closure`，最新 **`ac766b161ab6aa86dcecb951ffd0d4115b04f3a9`** 已commit/push，自有tracked/indexclean，node_modules不stage；原dirty树、TS原件/元数据、foreign JSON不触碰。候选0.4.27，非ready/merge/pointer/release。
 - 原423c9420／54ae5767 clear设计**已完成并完整消费294行**，不恢复/重跑。Parent依实际typedRED精确gate：`d54d31f` strict classified PRE与canonical exact/fact-only；`64e263f` 同queue真实managed native clear，单set null+GEN、noop/错误/rawsettle；`fbcacf5` Controller原observer/parent PRE→own canonical POST→两clear点；`ac766b1` 同步拥有getter-backed原callback与原source-bound角色。设计与Parent实现均不授整体接受。

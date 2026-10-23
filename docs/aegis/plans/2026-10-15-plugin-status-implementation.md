@@ -2,6 +2,8 @@
 
 ## 当前执行快照（2026-10-23）
 
+**最新Parent修补：`20d94875c438abba85ba3c1a2a04ea00a58134ae` 已push。** 三项finding先实际26业务RED/38controls/fulltsc0后修：公开fresh仅事实、无clear；managed canonical以19字段own-presence/nonundefined+原值语义拒绝缺损，不改legacy事实decoder；Runtime在任何await及plain getter之前固定原fn并复用canonical pure capture。最终12相关 **589PASS/fulltsc0**，含真实Controller→Runtime→canonical→native ledgerless正案（明确禁HTTP，不冒supported production）。首次25fail但带union.fence类型错误的轮次排除，有效25/type0及最终26/type0均保留。旧报告仍advisory_findings，Parent修补不等独立后验接受；准备新的仅修补范围只读复核，不恢复旧child。下述ac766/542为被审基点，不再是最新HEAD。
+
 Parent继续原十五行，仍 **4完成／11open**，不逐片等待用户确认。隔离writer `feature/plugin-status-runtime-closure` 当前 **`ac766b161ab6aa86dcecb951ffd0d4115b04f3a9`** 已push，自有tracked/indexclean，候选0.4.27；无生产、真实外发、业务merge、父指针或发布授权。
 
 已完整消费423c/54ae的294行actorless clear设计，不恢复或重跑。`d54d31f` 区分原PRE连续性与valid GEN漂移的fact-only；`64e263f` 在既有queue新增实际managed native clear，单set null+GEN、完整校验后noop、不推进撤销的ledger；`fbcacf5` 把原observer/parent PRE及canonical本次POST接入Controller两实际clear点；`ac766b1` 经两真实typed RED修复原callback与source-bound角色getter替换。最终 **12相关542 PASS／完整tsc0**，不是全插件/真实浏览器/首protected action时钟证明。原77失败及15旧fixture失败保留；旧77案已迁到真实native scoped profile、real setter推进GEN，不再靠fake变量或独立90秒假预算。generic controller镜像不冒native删除证据。

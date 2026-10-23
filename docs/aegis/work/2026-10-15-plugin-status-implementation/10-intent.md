@@ -2,6 +2,8 @@
 
 ## 当前续作（2026-10-23）
 
+- 最新Parent修补20d94875已push，三finding以26真实业务RED/38controls/type0门控后修；12相关589PASS/fulltsc0，含实际Runtime运输正例。公开fresh无clear、strict canonical19字段不缺省授权、Runtime先拥有原fn/plain输入；legacy事实与内部独立验证fresh不误伤。原ac766/542及3finding报告是历史被审基点，Parent修补还不是独立后验接受，后继只读复核仅新修补范围、不恢复完成child。
+
 - Parent继续原15行，仍4完成11open。插件ac766b1已push；actorless原PRE→own canonical POST→实际native clear双入口已接，12相关542PASS/fulltsc0，不等全插件、production composition、原首action时钟或整体完成。
 - 423c/54ae设计294行已完整消费并完成，不恢复。新实现只读窄审6bc7c52b／4e54ae43已完成，124行完整读，advisory_findings三项Important；Parent按新精确typedRED/gate修，不恢复完成child。
 - 三项finding已接纳：公开fresh缺独立invalidity验证；strict managed canonical不可把required缺失字段默认false/null授权；Runtime需在ledger await前同步拥有输入/pre/原fn，不能借immutable-caller豁免。542绿不是这些反例的闭合证据，不判accepted。
