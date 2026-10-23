@@ -2,6 +2,14 @@
 
 ## 当前执行快照（2026-10-23）
 
+**最新54429d5e7a075ecc125c9ed9aad14c6e99ab54e4已push，clock/R1组件已Parent窄接受。** 两个瞬态顺序clock真实RED/type0后，原private probe producer保存该次实际admit/deny角色；candidate/init/final-probe消费显式角色，不用latest权限补签或重试，public ensure state API与原budget拒绝保留。fresh a88终稿47行全读，advisory_no_local_blocker；保3非阻断覆盖缺口（成功后denial、混合候选、最终reprobe），不冒独立执行/全项目接受。7相关549PASS/fulltsc0后仅加1candidate控制，最终focused25PASS/fulltsc0；不报未执行550/739全套，不累计旧736/547。
+
+已实际只读核上游：task544与master5f07的共同祖先是d193，d193已在双方；分歧128/4。ff4b还新增same-business-scope扫描保留、bounded日志/getState默认不读logs，background/storage与status热点需合并保留；导入UI/0.4.30未整合，当前candidate仍0.4.27，无自动merge/改版/父指针。复用矩阵及16个committed Source隔离快照已备，没读原dirty/foreign fixture。
+
+真实端口咨询bc38d899/bf1ec311已终态，122行完整读，不是已批准Source方案。实际source/leaf输入及unobserved返回、GEN/auto-close之前exact operation/document capture分流、跨bridge后fetch原clock/source合同、CookieStore授权来源及严格分页证据尚需spec。Parent已取核官方Chrome原文及MDN sleep/clock警告，另从committed ads8d找到Seller GET/strict正向parser；不冒live/login/选定Store fetch证明。当前向操作者确认CookieStore政策：建议首次仅从唯一已核验目标页建立并锁定，后续Store变化须人工重新绑定，不默认fallback；技术capture/bridge规格继续Owner闭合，未授Source写。caps=[]/executors={}，原15仍4完成11open；perf core未来写队列已发显式回交请求但未当已获授权。
+
+### 历史：5e7后验及此前局部断点（当前以以上544段为准）
+
 **后验更新：ef13152c终稿46行已完整读，advisory_findings，R1仍未闭合。** 瞬态NaN/rollback拒绝后clock恢复，5e7仍可能重采样latest canDispatch而把该次未发出的probe补签为observed。Parent确认同样禁止；后验已完成不恢复，Source读冻结已结束。下一步在原private probe-result producer保留实际admit/deny角色并向初始化/恢复消费者显式传递，先两个顺序clock current-API typed RED，不再叠加latest-clock guard；旧547不是新瞬态反例证据。
 
 **最新修补已push `5e7a847cbe418cb28b90c2a463f0dfcab73f0cf0`。** c838独立窄审034终稿41行全读，advisory_findings的R1已以2真实业务RED/20对照/fulltsc0复现：healthy running上下文在helper-entry或adapter-point clock denial时发生实际stop/clear，虽无probe dispatch。修既有私有context-proof角色为observed/unobserved；拒绝未观测不得造事实，也不当healthy proof；实际missing-tab/已dispatch不可用仍保原语义，过期原budget/bootstrap仍按原STALE_CONTEXT拒绝。

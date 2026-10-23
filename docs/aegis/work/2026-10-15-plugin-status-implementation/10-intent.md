@@ -2,6 +2,11 @@
 
 ## 当前续作（2026-10-23）
 
+- 最新54429d5已push、组件clock/R1仅窄接受：真实2RED22controls/type0后原probe producer/初始化显式传实际角色；7相关549PASS+最终focused25/fulltsc0不累计，fresh a88终稿47行已读无局部阻断，3非阻断覆盖缺口保留。无actual browser/production/整项接受，原15仍4完成11open。
+- 上游只读核d193是task544/master5f07共同祖先（128/4分歧），ff4b性能/logs与peer导入UI/0.4.30需保留但尚未整合/改版。真实ports咨询bc38d899/bf已完成122行全读，方案尚未批准；Parent官方原文/committed ads Seller getter复用证据已补，不冒live/登录/选定Store fetch证明。待操作者确认首次唯一核验Store建立并锁定、后续变更人工重绑的政策；exact capture与bridge/source合同另待技术spec，Source写许可仍未发，无外发/部署/业务merge/父指针。
+
+### 历史断点（当前以以上544段为准）
+
 - ef13152c后验已完成并完整读46行advisory_findings：5e7对瞬态deny→clock恢复仍用latest权限推断过去观测，R1未闭。Parent已确认禁止，不恢复完成child；下一步以顺序clock真实typedRED驱动原private probe producer/初始化结果显式角色，不以旧547冒反例闭合，不再叠current-clock小guard。
 
 - 最新5e7a847已push：c838独立review034的Important R1经2真实typed RED/20对照复现后，私有context-proof明确observed/unobserved；clock-denied无观测不伪造stop/clear/unknown事实，真实missing-tab/actual-unavailable保留，原bootstrap expiry仍拒绝。初次15related735PASS4FAIL修后最窄受影响7suites547PASS/fulltsc0；未冒最终739全绿。
