@@ -183,8 +183,15 @@ host-managed patch checkout，不是绕过 ready 前驱规则创建独立发布 
 - `/tmp/frontend-p01-template-review-findings-green.log`现57PASSED/0fail/0skip（新增container PGHOSTADDR/service/role、immutable ID、source/target missing/malformed URI和legacy redaction）。这是修正后的mock/static证据；仍须固定新候选复审，真实模板/12个DB失败/基线/交付均未通过。只读环境诊断已确认当前container这些变量全空，仅报告名称未输出值。
 - 88e5e53复审确认container和原missing-path修正，但FAIL残余同类泄密：stdlib urlparse的NFKC netloc ValueError含原始凭据。改变错误边界而非再补单个字符/parser：CLI对所有ValueError只输出固定诊断，内部有效dbname/显式path意图比较不变。`/tmp/frontend-p01-parser-boundary-red.log`四个literal全角字符及外部异常payload共5项实测失败；统一出口修复后`/tmp/frontend-p01-parser-boundary-green.log`62PASSED/0fail/0skip（59helper/CLI+3静态registry）。原57例保留回归；该时点没有真实refresh。negative unit guard-refusal spy不放宽guard；所有运行仍经标准clone，未通过全局fixture/guard bypass制造绿色。
 
-### 最新验证检查点：真实模板健康已恢复，完整基线待验
+### 模板恢复检查点（完整基线前）
 
 - 34c9d69固定实现独立审查PASS（`/tmp/frontend-p01-parser-boundary-review.md`），仅解除已批准的test-template验证门禁。`envsetup --check`退出0，唯一入口`--refresh-template fast`真实完成完整schema dump、guarded template重建、stamp源0069、upgrade本branch head、内置权限seed、独立clone及cleanup；无warning。没有prod写入、迁移、restart、直接删FK或强断template连接。
 - `/tmp/frontend-p01-template-real-refresh.log`退出0，24PASSED/0failed/0error/0skip：原order-price失败模块及邻域19例、v16 head/admin-only与生成DDL inventory/public.fn存在2例、3条原静态registry断言。此前partial-template警报已解除；这不等于完整fast或交付通过。
-- template-rebuild、registry-tests和env-blocker任务已有changedFiles/证据回执并完成；接下来同步master、固定最终候选，按canonical workflow运行baseline，再做独立prospective-master精确提交验证。P2–P6及生产部署仍不在本slice。
+- 该时点 template-rebuild、registry-tests 和 env-blocker 已验证完成，完整基线及 Git 交付随后按下列回执完成。
+
+### 最终交付回执：P0/P1 已合入，未生产部署
+
+- 固定分支 `e8bd7635b140032ac62b1b7b051f600e5450fc36` 同步 `64acba99` 后，`bash scripts/test_baseline.sh`：suite exit 0、baseline 0、本次失败 0、新增稳定失败 0。证据 `/tmp/frontend-p01-restored-baseline-verdict.log`。
+- 按 ready 队列和 master 锁，在干净临时工作树建立 `--no-ff` 集成提交 `8f1b75274ec34c4fb2c6ca0200ee4fac3912b9af`；该精确提交完整 fast 基线同样 exit 0 / 新增稳定失败 0，树与已验分支一致。证据 `/tmp/frontend-p01-prospective-master-baseline.log`。非 force 推送和 `ls-remote` 核验成功，主工作树已快进；原 `plugins/monitor` 与未跟踪 `node_modules/` 保留。
+- 全部 51 个实际变更路径、scope/移交、已验 HEAD/master 与合并证明已写 canonical lane 回执 `m-cc4ad04f-170`。原 child 工作树保留为不可变审计材料；本任务 source/integration 工作树在确认完全合并后清理。截图及含许可证的生产构建归档保留于 `/tmp/tts-erp-frontend-p01-delivery-8f1b752/`。
+- 本次完成共享 AppShell、会话/错误处理、同源路径与构建打包、真实浏览器/热更新验证，以及两个试点页面；其余页面继续旧实现。P2–P6 仍待后续任务；没有生产资产发布、迁移或服务重启。此状态文档回执不改变已验业务代码，也不授权下一迁移阶段或生产部署。
