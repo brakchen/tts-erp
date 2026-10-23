@@ -1,6 +1,12 @@
 # 通用插件状态与单目标恢复实施 - Intent
 
-## 当前续作：1f9原resume时钟/上下文/标记终态运输与19b8补证已push（2026-10-23）
+## 当前续作：f39 ONE scan实际存储准入/原生调用及展示事实修复已push（2026-10-24）
+
+Source f39e6a753b30cf987a0895934202ebf722216cab（69d实际入口）：原队列读真实started root/source/leaf/pin后消费原clock并同步native create；原生等待不占短队列。nextScanAt为条件展示事实，原source和原value/presence CAS防旧尾覆盖，展示I/O失败不抹去已创建事实。3业务RED/type0、SOT10负例mutation-kill/2对照及真实Runtime组合证明入场；fresh51f/06f48行静态审查两个P2均另2业务RED/type0在原事实出口修复。修前15文件980/type0、修后两文件431/type0严格分轮，非982合跑/全插件/浏览器。
+
+只窄接受ONE scan入口/展示事实；完整Scheduler Factory、通知/tick、原生pending资源顺序与多managed重叠、nextrecover/PageFactory/Store/document/capture/分页/两config/ERP/E2E仍开。原15仍4done11open/caps[]executors{}/0.4.27，无ready/生产/业务merge或发布。保持单owner/原root-clock预算，不重开完成的51f/06f或1f9旧review；临时fetch失败原接口留证重试，ERP模板/v16由peer单writer。
+
+### 历史：1f9/19b8时钟与标记终态
 
 Source19b8b11acd0b0e613ccee97d5715fe62360b5d15／生产1f9bd7c：原clock callback/domain/deadline+genuine root/source首await前捕获，完整命令身份核验，Scheduler数据expectation由consumer在自身await后单次admit；未消费不applied，迟到已启动事实保留但不借其重复启动。producer本地marker取原continuation，不读latest补签。6业务RED/type0、2身份RED/6controls、1重复许可RED及真实Runtime正向终态RED驱动，生产一次14文件778PASS/type0。
 

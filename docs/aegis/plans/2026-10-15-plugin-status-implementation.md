@@ -1,6 +1,14 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照：1f9原resume clock/context与终态运输、19b8补证已push，实际Scheduler SOT/Factory仍开（2026-10-23）
+## 当前执行快照：f39扫描Alarm实际SOT/native入场与事实修复已push，完整Factory仍开（2026-10-24）
+
+Source **f39e6a753b30cf987a0895934202ebf722216cab**（原生入口69d6169）：显式BG managed scan通过薄适配器，在原业务队列内复核真实started root/receipt/FP/leaf/NS/GEN/clearing、canonical绑定/config范围/business tab/monitorEnabled/严格pin，最后消费原clock/single-admit并同步调用真实chrome.alarms.create。原生Promise立即观察、嵌套返回，队列不占其原始等待；创建完成后的nextScanAt仅是原source＋原字段value/presence CAS条件展示事实，无新权限/owner/key/queue/token/window。
+
+3个现有API业务RED/type0驱动实际入口，12个SOT矩阵、原生等待中队列可用/迟到保护、真实Runtime→BG→native→终态均验证。临时只删SOT拒绝return、保真实读取/clock，10负例FAIL/2对照PASS/type0，精确备份SHA还原。fresh51f/06f静态窄审48行全读，两个P2经真实2RED/type0修：展示SET失败不能让已创建native事实变RECOVERY_FAILED；旧创建迟到不得覆盖不转GEN的新legacy时间。修前一次15文件980PASS/type0；修后最窄两文件431PASS/type0，不累计982/全插件，不冒独立执行或f39再次独立接受。
+
+**剩余**：完整managed Scheduler Factory（缺ctx/expectation拒绝）、通知/tick gate、pending原生资源顺序/多managed重叠/Worker终止、实际CookieStore/document/PageFactory/capture/分页/manualUI/repair/两config/ERP/E2E；值CAS不是完整native排序或新grant。原15仍4完成11open/caps[]executors{}/0.4.27，无ready/业务merge/生产/发布/父指针；ERP模板/v16只peer01a16719写。网络临时失败留证并原接口有界重试，fetch首次成功/quota week30%。
+
+### 历史：1f9/19b8原resume时钟与终态运输
 
 Source最新 **19b8b11acd0b0e613ccee97d5715fe62360b5d15**（生产算法 **1f9bd7cddf0e27e15bd6fcc1690103e2d17c1e03**）。原request clock callback/domain/deadline与root/source在首await前拥有，managed resume匹配完整命令身份；Scheduler expectation只是原数据与一次消费准入，不是新grant。consumer在自身await后消费原clock/gen，未消费不得applied，已启动迟到事实仍可结算而不能重复启动。managed结果marker来自原continuation，修复真实Runtime有效启动却被终态记stale的producer缺口，不在Runtime造latest marker。恢复原clock纯predicate提取保持旧语义，无新90秒窗口。
 

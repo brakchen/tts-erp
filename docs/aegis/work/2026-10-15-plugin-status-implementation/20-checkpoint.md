@@ -1,6 +1,15 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：1f9原resume clock/context与标记终态运输、19b8覆盖补证；实际Scheduler存储JIT/Factory仍开（2026-10-23）
+## 当前：f39扫描Alarm真实SOT/native入口与展示事实两P2已修，完整Factory仍开（2026-10-24）
+
+- **Source最新f39e6a753b30cf987a0895934202ebf722216cab已push**；69d6169引入显式managed scan路径，新薄适配器、既有canonical pure prep、BG仅可选expectation转接/常量move-out，旧legacy body不改。原业务队列读started root/receipt/FP/exactleaf/NS/GEN/clearing＋ready verified/closecomplete/config-shop/business-tab/monitorEnabled/严格pin；最后原clock/admit紧邻同步chrome.alarms.create。无新owner/queue/key/token/window，caps[]executors{}未启用。
+- **原生/事实归属**：绑定native原method receiver，原admit先于输入getter捕获；native Promise立即观察、作为nested值返回，原队列在其settle前释放而外层仍等待原raw。创建成功后仅在相同queue复核原source及原display字段value/presence CAS写nextScanAt，不读latest补权限、不盲clear/重试；非权威展示I/O失败不得否定已创建事实。
+- **实际TDD/因果**：现有单参scheduleNextCampaignScan合法structural可选双参测试，三业务RED/type0验证actual adapter entry后source轮换/原clock过期及live；初clock hook停在较早proof只算旧对照，改TESTONLY inScheduler后重跑有效3RED。12SOT矩阵含完整genuine正例和实际root完成，负面corruption仅port入场后；native pending fulfilled/rejected两案证明队列真实writer可先完成/迟到不改新settings/队列仍可用；真实Runtime→Controller→BG→native→marked terminal Applied。控制变更只删SOT拒绝return保读取/clock，10负例FAIL2对照PASS/type0，EXIT精确ownworking备份/SHA恢复/marker清零，未reset新文件至HEAD。
+- **独立审查两P2**：51fbaa4a/06f6c00d已完成，native-scheduler-review.md48行全读/read-contact-only frozen69d；指出成功native后的display SET异常被Runtime记failed/RECOVERY_FAILED，以及旧native迟到覆写不转GEN的新nextScanAt。Q795d22b9已答；Parent两真实业务RED/type0复现（旧10:00:30覆新10:00:35，真实Runtime Native1却ledgerfailed），只在新adapter事实出口用原value/presence CAS及post-success I/O隔离修复。未恢复/重跑完成review，非其独立执行或f39再次独立接受。
+- **精确验证**：69d修前一次15文件980PASS/no skip/fulltsc0；f39修后最窄native＋旧BG两文件431PASS/no skip/fulltsc0。不累计982/全插件/coverage/build/browser；4paths LSP0reported errors/4inconclusive不称clean。TS2554 Chrome .call重载错仅bind原receiver修，test readonly TS2540仅Reflect.set修，均不当业务RED。Git fetch首次成功/quota available30%，两Source提交push；仅own node_modules untracked、不碰target/fixtures。
+- **剩余与下一步**：ONE scan入口及条件展示事实窄B，整体C/原15仍4done11open。值CAS不证明完整native resource排序、多managed重叠或Worker终止；完整Scheduler Factory须拒绝缺expectation并完成通知/tick gate/原生raw资源归属，随后nextrecover持久pin/新Root矩阵、实际PageFactory/CookieStore/document/staged capture/strict分页/manualAtoB/repair/两config/ERP/E2E。候选0.4.27/caps[]executors{}；无ready/生产/业务merge/发布/父指针。ERP模板/v16只peer01a16719写，未获健康回执前不跑DB。证据根/tmp/plugin-status-continuous-01a1406d/，以native-scheduler-owner-acceptance.json及durable nativeScanDelivery/currenthead为准。
+
+### 历史：1f9/19b8原resume时钟与终态运输
 
 - **Source最新19b8b11acd0b0e613ccee97d5715fe62360b5d15已push**；生产算法1f9bd7cddf0e27e15bd6fcc1690103e2d17c1e03，19b8仅测试且Controller blob精确相同。resume接既有Runtime ctx，首await前捕获原clock callback/domain/deadline/root/source，核action/id/JSON fingerprint/episode/epoch/nonce。existing Scheduler optional expectation=原PhysicalBindingFence数据+单次admit；consumer自身await后核原clock/gen才实际入场，调用/resolve不算消费；已入场迟到结果保事实，不给第二次动作权限。recover纯clock predicate提取保持原wall-before-mono/首准入语义，无新窗口/owner/key/queue/token。
 - **Producer闭环**：真实Runtime→Controller→注入Scheduler有效native1却ledgerRejected，定位managed resume结果缺localEligibility；仅producer取原captured continuation namespace/GEN+fresh localId，原Root/receipt/fingerprint/leaf不变，不从latest读权限或给Runtime fallback造marker。实际终态仍由canonical owner验证。
