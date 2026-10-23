@@ -18,7 +18,9 @@
   var DEFAULT_ORDER = "asc";
   var DATE_VALUE_RE = /^\d{4}-\d{2}-\d{2}$/;
   // 原生 type=date 的年份格可敲出 20252；用 min/max 把可选范围锁在四位年。
+  // max 不锁昨天，只封死五位年；2099 仍允许选今天和近未来。
   var DATE_INPUT_MIN = "2000-01-01";
+  var DATE_INPUT_MAX = "2099-12-31";
   var PAGE_LIMITS = new Set([50, 100, 200]);
   // commerce.shops.region 是 ISO 3166-1 国家码；仅映射确定的单时区市场。
   // 多时区或未知地区必须暂停，不能猜测默认时区。
@@ -2795,7 +2797,7 @@
   }
 
   function dateInputMax() {
-    return reportingEndDate(new Date()) || reportingDateValue(new Date()) || "";
+    return DATE_INPUT_MAX;
   }
 
   function applyDateInputBounds() {
@@ -3155,7 +3157,7 @@
       var v = input.value || "";
       if (dateInputIsImplausible(input, v)) {
         cancelCurrentLoad();
-        renderError("日期无效：请输入 2000 年至昨天之间的四位年份日期");
+        renderError("日期无效：请输入 2000 年至 2099 年之间的四位年份日期");
         restoreDateField(which, input);
         return;
       }

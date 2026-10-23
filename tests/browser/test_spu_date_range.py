@@ -119,9 +119,8 @@ def test_date_inputs_expose_min_max_bounds(
     assert end.get_attribute("min") == "2000-01-01"
     start_max = start.get_attribute("max") or ""
     end_max = end.get_attribute("max") or ""
-    assert start_max == end_max
-    assert len(start_max) == 10 and start_max[4] == "-"
-    assert start_max <= "2100-12-31"
+    assert start_max == "2099-12-31"
+    assert end_max == "2099-12-31"
 
 
 def test_out_of_range_year_restores_previous_date(
@@ -139,7 +138,7 @@ def test_out_of_range_year_restores_previous_date(
     page.evaluate(
         """() => {
           const end = document.querySelector('#filter-w-end');
-          end.value = '2099-11-18';
+          end.value = '2100-01-01';
           end.dispatchEvent(new Event('change', {bubbles: true}));
         }"""
     )
