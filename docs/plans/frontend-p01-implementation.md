@@ -170,3 +170,11 @@ host-managed patch checkout，不是绕过 ready 前驱规则创建独立发布 
 - a9fdee6方案审查因template-plan-1明确fail，未实施破坏性代码；本修订先补生命周期名字与网络namespace一致性，再重审。
 - 1）独立重审；2）command doubles观察同表target-only约束RED，另覆盖dbname query到旁测试库/生产、unsupported routing/host模式一致性、不得wrong-target drop/restore/clone/test、完整dump失败不重建、确认/guard、已有/缺失模板及drop/create/restore失败；3）最小实现mock GREEN，保stamp/upgrade/seed顺序；4）固定实现独立安全审查；5）唯一入口真实refresh+最窄原失败（10 order-price+2 schema/head+3 registry），确认clone cleanup；6）只定点分类，最终prospective master按要求验证合入。
 - 所有业务测试/基线/交付任务在真实模板健康和失败分类完成前保持blocked。不得把mock、lint或source review作为生产/全套GREEN。
+
+### 实现检查点（真实refresh仍未执行）
+
+- 0041ae0修订方案已由retained安全审查明确PASS（`/tmp/frontend-p01-template-plan-correction-review.md`），helper精确scope已登记m-0ca65203-52a。复用已安装psycopg3.3.6/LGPL-3.0-only及SQLAlchemy2.1.2/MIT，无新增依赖；新helper统一有效参数、literal lifecycle名字、round-trip、维护DSN、SST guard及受支持路由。Docker先核active本地context/发布端口，随后所有命令pin本地socket；拒绝ambient libpq routing/role变量及缺失显式user。
+- `scripts/test_isolated.sh`删除target-only表猜测cleanup与先建空模板路径，委托importer显式recreate；存在/clone/cleanup/stamp/seed/test共用派生身份。保留help无venv可用；自身run clone清理失败不再报绿色。原importer的非recreate模式保留。
+- 真实RED来自`/tmp/frontend-p01-template-rebuild-red.log`（12项失败，包含同表额外约束、旁测试库/生产query覆盖及路由），并补cleanup/redaction/parameter-types/help/ambient-route的定点RED。修复后`/tmp/frontend-p01-infra-static-green.log`通过45项（42 CLI/helper替身+3原静态registry node IDs），0失败/0跳过；均经标准ephemeral clone，未覆盖fixture/guard、未直接跑pytest，业务DB验证没有解冻。
+- v16已在移交scope内改为本branch单head和0066/0069祖先、保留admin-only精确grant；inventory对照生成DDL的固定表前缀提取清单并验证public.fn_touch_updated_at存在。两条DB consumer尚未执行，不宣称GREEN。
+- ruff、bash语法、diff-check与三Python路径主动LSP编译检查通过（后续最终pin前再确认）。下一步只读固定实现安全审查；通过后才允许唯一入口真实refresh和12条DB失败及触发器函数验证，之后续基线/交付。当前没有重建真实模板或生产写入。

@@ -28,6 +28,9 @@
 #   scripts/import_prod_to_test.sh --tables commerce.shops,commerce.products_spu
 #   scripts/import_prod_to_test.sh --row-limit 1000   # cap per-table rows
 #   scripts/import_prod_to_test.sh --schema-only   # drop+recreate, no data
+#   --schema-only --recreate-test-db --yes         # guarded clean test DB rebuild
+# Recreate mode requires project Python, an explicit test destination, and a
+# verified transport; the complete dump precedes target database replacement.
 #   scripts/import_prod_to_test.sh --preflight-only # validate tools/source; no target changes
 #   scripts/import_prod_to_test.sh --dry-run       # print plan, do nothing
 #
@@ -55,6 +58,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TABLES_FILTER=""
 ROW_LIMIT=""
 SCHEMA_ONLY=0
+RECREATE_TEST_DB=0
 PREFLIGHT_ONLY=0
 DRY_RUN=0
 ASSUME_YES=0
@@ -70,6 +74,7 @@ while [[ $# -gt 0 ]]; do
     --tables) TABLES_FILTER="${2:-}"; shift 2 ;;
     --row-limit) ROW_LIMIT="${2:-}"; shift 2 ;;
     --schema-only) SCHEMA_ONLY=1; shift ;;
+    --recreate-test-db) RECREATE_TEST_DB=1; shift ;;
     --preflight-only) PREFLIGHT_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
@@ -139,8 +144,11 @@ if [[ -n "$PG_DOCKER_VALUE" ]]; then
     echo "[import] preflight failed: PG_DOCKER=$PG_DOCKER_VALUE requires docker" >&2
     exit 1
   }
-  pg_dump() { docker exec "$PG_DOCKER_VALUE" pg_dump "$@"; }
-  psql()   { docker exec -i "$PG_DOCKER_VALUE" psql "$@"; }
+  PG_COMMAND=(docker)
+  pg_dump() { "${PG_COMMAND[@]}" exec "$PG_DOCKER_VALUE" pg_dump "$@"; }
+  psql() { "${PG_COMMAND[@]}" exec -i "$PG_DOCKER_VALUE" psql "$@"; }
+  dropdb() { "${PG_COMMAND[@]}" exec "$PG_DOCKER_VALUE" dropdb "$@"; }
+  createdb() { "${PG_COMMAND[@]}" exec "$PG_DOCKER_VALUE" createdb "$@"; }
 else
   command -v pg_dump >/dev/null 2>&1 || {
     echo "[import] preflight failed: PG_DOCKER='' requires host pg_dump" >&2
@@ -151,8 +159,9 @@ else
     exit 1
   }
   pg_dump() { command pg_dump "$@"; }
-  psql()   { command psql "$@"; }
-
+  psql() { command psql "$@"; }
+  dropdb() { command dropdb "$@"; }
+  createdb() { command createdb "$@"; }
 fi
 
 # ── Safety: target must look like a test DB ──────────────────
@@ -173,6 +182,27 @@ if [[ "$DST_DB" != *test* && "$DST_DB" != *_v3* ]]; then
   echo "[import] REFUSING: target dbname \"$DST_DB\" does not contain 'test' or '_v3'." >&2
   echo "         Refusing to bulk-load into a non-test DB to avoid prod corruption." >&2
   exit 3
+fi
+
+# Explicit test-only replacement: one authority binds the guard, destination,
+# maintenance connection and supported transport. Never use archive --create.
+if [[ "$RECREATE_TEST_DB" -eq 1 ]]; then
+  [[ "$SCHEMA_ONLY" -eq 1 && "$ASSUME_YES" -eq 1 ]] || {
+    echo '[import] recreate-test-db requires --schema-only --yes' >&2
+    exit 3
+  }
+  PYTHON="$REPO_ROOT/.venv/bin/python"
+  [[ -x "$PYTHON" ]] || { echo '[import] missing project Python for test guard' >&2; exit 1; }
+  reset_connections="$(cd "$REPO_ROOT" && TTS_ERP_DB_URL="$SRC_URL" TTS_ERP_DB_URL_TEST="$DST_URL" \
+    PG_DOCKER="$PG_DOCKER_VALUE" "$PYTHON" -m scripts._test_db_connections recreation)" || exit 3
+  mapfile -t reset_fields <<< "$reset_connections"
+  [[ "${#reset_fields[@]}" -eq 5 ]] || { echo '[import] invalid connection authority output' >&2; exit 3; }
+  DST_DB="${reset_fields[0]}"
+  RESET_MAINTENANCE="${reset_fields[1]}"
+  if [[ -n "$PG_DOCKER_VALUE" ]]; then PG_COMMAND=(docker --host "${reset_fields[2]}"); fi
+  src_plain="${reset_fields[3]}"
+  dst_plain="${reset_fields[4]}"
+  SRC_DB="$(extract_dbname "$src_plain")"
 fi
 
 # ── Client/server compatibility preflight ───────────────────
@@ -210,6 +240,13 @@ if [[ "$dump_major" != "$server_major" || "$psql_major" != "$server_major" ]]; t
   preflight_fail "PostgreSQL major mismatch: pg_dump=$dump_major, psql=$psql_major, server=$server_major"
 fi
 echo "[import] preflight: PostgreSQL client/server major $server_major"
+if [[ "$RECREATE_TEST_DB" -eq 1 ]]; then
+  for tool in dropdb createdb; do
+    tool_version="$("$tool" --version 2>&1)" || preflight_fail "$tool is unavailable"
+    tool_major="$(version_major "$tool_version")" || preflight_fail "cannot determine $tool major"
+    [[ "$tool_major" == "$server_major" ]] || preflight_fail "$tool/server major mismatch"
+  done
+fi
 
 # ── Table list & sensitive handling ────────────────────────
 # Sensitive tables that hold production secrets. The user almost
@@ -397,7 +434,14 @@ echo "[import] (1/2) dropping + recreating schema in target from prod..."
 # pg_dump --clean from dropping production tables. The source has no Miaoshou
 # schema until the corresponding production migration is applied, so drop this
 # target-only schema before restoring the authoritative source snapshot.
-if [[ -z "${SOURCE_TABLES[miaoshou.packages]:-}" ]]; then
+if [[ "$RECREATE_TEST_DB" -eq 1 ]]; then
+  # Full dump already exists and the target-bound shared guard has passed.
+  # No forced termination: active connections/permissions fail without cloning.
+  # A fresh template0 removes all target-only schema differences, not one FK.
+  echo "[import] recreating guarded test database: $DST_DB"
+  dropdb --maintenance-db "$RESET_MAINTENANCE" --if-exists "$DST_DB"
+  createdb --maintenance-db "$RESET_MAINTENANCE" -T template0 "$DST_DB"
+elif [[ -z "${SOURCE_TABLES[miaoshou.packages]:-}" ]]; then
   psql --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
     --command "DROP SCHEMA IF EXISTS miaoshou CASCADE" "$dst_plain"
 else

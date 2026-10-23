@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,8 @@ from typing import Any, cast
 from uuid import uuid4
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi import HTTPException, Request
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -531,9 +534,15 @@ def test_builtin_permission_seed_withholds_video_publish_from_operator(
 def test_0066_is_live_linear_head_with_admin_only_default(
     db_session: Session,
 ) -> None:
-    assert db_session.scalar(text("SELECT version_num FROM alembic_version")) == (
-        "0069_video_publish_confirmation"
-    )
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    scripts = ScriptDirectory.from_config(config)
+    head = scripts.get_current_head()  # Raises on multiple live heads.
+    assert head is not None
+    lineage = {revision.revision for revision in scripts.walk_revisions()}
+    assert {"0066_publish_execution_fences", "0069_video_publish_confirmation"} <= lineage
+    assert db_session.scalar(text("SELECT version_num FROM alembic_version")) == head
     grants = set(
         db_session.execute(
             select(RolePermission.role_code, RolePermission.permission_code).where(
@@ -546,11 +555,15 @@ def test_0066_is_live_linear_head_with_admin_only_default(
 
 def test_v16_registry_rollout_and_operations_docs_are_precise() -> None:
     root = Path(__file__).parents[2]
-    registry = (root / "docs/handoff/ACTIVE.md").read_text()
+    notice = (root / "docs/handoff/ACTIVE.md").read_text()
+    workflow = (root / "docs/guides/agent-git-workflow.md").read_text()
     runbook = (root / "docs/ops/video-publish-runbook.md").read_text()
     external_api = (root / "docs/api/external-api.md").read_text()
     design = (root / "docs/design/tiktok-video-publish.md").read_text()
-    assert "006[0-6]" in registry and "scripts/test_isolated.sh" in registry
+    assert "Static relocation notice" in notice
+    assert "../guides/agent-git-workflow.md" in notice
+    assert "`lane-registry`" in workflow
+    assert "scripts/test_isolated.sh" in workflow
     assert (
         "bash scripts/test_isolated.sh --refresh-template fast tests/publishing"
         in runbook
@@ -580,15 +593,27 @@ def test_upload_selection_and_artemis_copy_controls_are_explicit() -> None:
 def test_architecture_inventory_is_derived_from_live_schema(
     db_session: Session,
 ) -> None:
+    root = Path(__file__).resolve().parents[2]
+    snapshot = (root / "docs/schema/schema_tts_erp.sql").read_text()
+    # regen_schema.py emits this fixed prefix; this is not a general SQL parser.
+    expected = {
+        (schema, table)
+        for schema, table in re.findall(
+            r"^CREATE TABLE IF NOT EXISTS ([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\s*\(",
+            snapshot,
+            re.MULTILINE,
+        )
+        if schema != "public"
+    }
+    assert expected, "generated schema inventory must not be empty"
     rows = db_session.execute(
         text("""
-        SELECT table_schema, count(*)
+        SELECT table_schema, table_name
         FROM information_schema.tables
         WHERE table_type = 'BASE TABLE'
           AND table_schema NOT IN ('public', 'information_schema')
           AND table_schema NOT LIKE 'pg_%'
-        GROUP BY table_schema
         """)
     ).all()
-    assert len(rows) == 14
-    assert sum(int(row[1]) for row in rows) == 74
+    assert {(str(row[0]), str(row[1])) for row in rows} == expected
+    assert db_session.scalar(text("SELECT to_regprocedure('public.fn_touch_updated_at()')")) is not None
