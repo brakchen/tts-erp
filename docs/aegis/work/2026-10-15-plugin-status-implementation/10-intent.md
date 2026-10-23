@@ -2,6 +2,21 @@
 
 ## 当前续作（2026-10-23）
 
+- ef13152c后验已完成并完整读46行advisory_findings：5e7对瞬态deny→clock恢复仍用latest权限推断过去观测，R1未闭。Parent已确认禁止，不恢复完成child；下一步以顺序clock真实typedRED驱动原private probe producer/初始化结果显式角色，不以旧547冒反例闭合，不再叠current-clock小guard。
+
+- 最新5e7a847已push：c838独立review034的Important R1经2真实typed RED/20对照复现后，私有context-proof明确observed/unobserved；clock-denied无观测不伪造stop/clear/unknown事实，真实missing-tab/actual-unavailable保留，原bootstrap expiry仍拒绝。初次15related735PASS4FAIL修后最窄受影响7suites547PASS/fulltsc0；未冒最终739全绿。
+- 新R1修补后验workflow8603a5aa已启动，fresh read/contact精确16文件，Source5e7冻结，未给独立结论。旧034终稿41行已全读advisory_findings，不恢复；736是旧c838字节证据。原15仍4完成11open，无生产/业务merge/发布/父指针授权。
+
+### c838整合历史（当前以以上5e7段为准）
+
+- 最新已集成并push **c838275ad98ab083553f5c2f09c1818eaa18493a**：Parent完整核两writer报告/实际diff/5hash，迁2原clock fixture；新1真实RED/type0后分开Controller事实生命期与protected start clock。最终15相关736PASS/no skip/fulltsc0，protected19/native176/admission98/drain30；不累计历史数字、不冒全插件/实际production。
+- 20d新后验82239dd5终稿已全读，advisory_no_local_blocker，保专用compat断言/独立type证据限制，已完成不恢复。新的c838独立read/contact-only窄审workflow dde4f5e7已启动/尚无结论，Source冻结。B迁移任务完成、A待独立窄审，原15仍4完成11open；无ready/业务merge/发布/父指针。
+
+### 并行启动与20d修补历史（当前以以上c838段为准）
+
+- 最新用户已授权两个独立writer并行开发；Parent保留Git/精确Source gate/集成/最终接受，readonly reviewer仍仅advisory。dc7f28e仅登记其真实session/checkout/文件写域，不是业务merge。native workflow7a4b66fc已恢复A时钟与B两测试迁移；首轮fetch失败、第二轮Parent lane-key参数拒绝均无实现交付，保留receipt，不CLI/模型fallback。
+- A已7业务RED/3controls，Parent独立fulltsc0且核Source未改后仅释放runtime/controller及新测试；真正consumer的point-of-use admit才锁定first-start，缺原clock的managed context拒绝、不fresh补窗。B worker暂报128PASS仍待最终类型/组合核验；nullable legacy分类不冒managed native成功。20d后验复核排在开发barrier后，尚无结论。Parent20d候选冻结，未合patch；原15仍4完成11open。
+
 - 最新Parent修补20d94875已push，三finding以26真实业务RED/38controls/type0门控后修；12相关589PASS/fulltsc0，含实际Runtime运输正例。公开fresh无clear、strict canonical19字段不缺省授权、Runtime先拥有原fn/plain输入；legacy事实与内部独立验证fresh不误伤。原ac766/542及3finding报告是历史被审基点，Parent修补还不是独立后验接受，后继只读复核仅新修补范围、不恢复完成child。
 
 - Parent继续原15行，仍4完成11open。插件ac766b1已push；actorless原PRE→own canonical POST→实际native clear双入口已接，12相关542PASS/fulltsc0，不等全插件、production composition、原首action时钟或整体完成。
@@ -12,8 +27,8 @@
 
 ## TaskIntentDraft
 
-- Requested outcome（2026-10-22更新）: 连续完成当前owner的十五个open rows，包括状态/单目标恢复与两端配置同步；Parent直接实现、验证、Git，不逐原子段等待继续确认。
-- Goal: 原已批准状态/绑定协议与配置同步目标完整可验证交付；只读独立reviewer提供advisory，不恢复旧writer代理，不将局部通过当整体完成。
+- Requested outcome（2026-10-23更新）: 连续完成原十五行，包括状态/单目标恢复与两端配置同步；用户已明确批准两个独立writer并行，Parent负责Git、gate、验证与集成，不逐原子段等待用户继续确认。
+- Goal: 原已批准状态/绑定协议与配置同步目标完整可验证交付；只读独立reviewer提供advisory，不重跑已完成工作；未实现failed/BLOCKED child仅按原native协议恢复，不将局部通过当整体完成。
 - Success evidence:
 - S01-S14映射+isolated目标与baseline+插件完整测试覆盖tsc/build+owner spec/quality review
 - Stop condition: 全部代码与可运行验收通过才交付；外部授权或真实环境证据缺失如实标记blocked/needs-verification

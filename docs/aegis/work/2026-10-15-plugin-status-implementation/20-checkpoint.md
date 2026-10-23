@@ -1,6 +1,41 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：实现窄审三项缺口已Parent TDD修补589相关通过；待新后验复核（2026-10-23）
+## 当前：5e7后验指出瞬态拒绝仍被latest补签；R1未闭，转实际probe结果角色（2026-10-23）
+
+- **最新后验已终态并全读46行**：workflow8603a5aa／child ef13152c，`clock-unobserved-r1-postfix-review.md` advisory_findings。稳定到期2反例已修但R1仅部分闭合；原callback在helper-entry/admit返回NaN一次，随后恢复finite，或UTCrollback后恢复，post-probe latest canDispatch可再次true，使该次未实际发出probe的synthetic unavailable仍被当observed→unknown→stop/clear。Parent已reply b82b9a80确认瞬态同样不许可，没有永久到期豁免。报告纯静态非其执行；547不是新瞬态反例证据。
+- 当前Source仍5e7已push，review冻结结束，Parent原写域内接续。下一步先两个当前API顺序clock真实typed RED/fulltsc0；在既有private probe producer保留该次实际准入/拒绝结果，并把unobserved角色显式传给初始化与恢复消费者，而非latest重采样/假positive/新owner。初始化public state API与原budget STALE_CONTEXT拒绝需保留，真正missing-tab/actual-unavailable对照不退化。不恢复已完成ef/034/822/4e54，原15仍4完成11open。
+
+### 5e7稳定拒绝修补与验证历史（不是瞬态新finding闭合）
+
+- 最新 **`5e7a847cbe418cb28b90c2a463f0dfcab73f0cf0`** 已push，仅Controller和protected-start测试2路径；tracked/indexclean，依赖链接不stage。c838的独立review034终稿41行完整读，advisory_findings，Important R1不是原missing-tab回归的重复：healthy running/tab/business/store未变，clock-denied未probe却被混成unavailable→unknown→stop/nativeclear；Parent确认非预期，未用“安全清理”豁免。
+- `clock-unobserved-r1-RED.log` **2业务FAIL/20PASS/fulltsc0**，同时helper-entry/list await与adapter-point denial都有实际['stop','clear']和零page dispatch；fixture允许真实nativeclear而非SETUP异常。新断言保canonical/business/receipt-root与ownedcontinuation、无stop/clear；真正已dispatch unavailable与独立missing-tab为对照。Source gate `clock-unobserved-r1-source-gate.json` 后只修既有private context-prover角色：observed/unobserved，不返回伪healthy proof、不造unknown事实；独立缺失/身份/store证据在probe permission之前仍有效；后续recover拒绝无权限执行/失败binding proposal。
+- 首次R1相关15suites **735PASS/4FAIL**（`clock-unobserved-r1-related.log`），暴露原cookie/init budget到期从STALE_CONTEXT rejection退化为fulfilled failed。原4oracle全部保留，修unobserved处理仍要求bootstrapLive，否则按原异常拒绝。保raw IO/drain与不补窗；不是改测试来绿。之后仅跑最窄受影响7suites **547PASS/no skip、完整tsc0/diffcheckPASS**：`clock-unobserved-r1-final-related.log`／`...-type.log`；22protected/133controller/176native/37runtime/51chain/98admission/30drain。最终15未重跑，不声称739PASS；c838736为旧字节单轮证据。
+- 最新2path activeLSP0diagnostics，1clean/1inconclusive，不能称全clean；旧6path56auxwarnings记录保留。SourceRoot只改既有owner/private proof carrier，无新registry/queue/window/授权owner/外部依赖。
+- 新后验 **workflow `8603a5aa-fd73-4d4c-9981-afc940910639`** 已launch，fresh严格read/contact-only、精确16文件、只审c838→5e7新R1修补与budget兼容，绑定 `clock-unobserved-r1-postfix-review.md`，尚无结论。Source5e7冻结供读，原034/822/4e54已完成，不恢复或重跑。R1任务blocked于新review，A blocked于R1；B与20d review子任务已交付，原15仍4完成11open。
+- 接续：先答pending，完整读新后验；若有finding只对新反例typedRED/owner gate修，不把Parent修补标独立accepted。否则窄处置后继续原physical/ports/actions/Cookie/config等依赖。无实际production composition，rawcaps=[]/executors={}，候选0.4.27/upstreamUI/d193及父指针不变。ERP156相关/一次baselineexit1不变。工作树保护/外发/生产/业务merge/release边界均保持。
+
+### c838整合与独立review前快照（当前以以上5e7段为准）
+
+- **已push HEAD `c838275ad98ab083553f5c2f09c1818eaa18493a`**，Parent Source worktree tracked/indexclean，唯一自有untracked node_modules链接不stage。两writer终稿已完整读（A86行/B含精确分类/原时钟说明），实际patch已完整读且5文件hash匹配，各只改注册域并移除自身依赖链接；无新resumed handoff.json，原host handoff是20d空patch快照，Parent另保存实际 `parent-{A,B}-recovery-2.patch`，不冒host新交付。原retained checkout保留、未盲删。
+- A原18focusedPASS/fulltsc0、related413PASS/2FAIL并未全绿；Parent在真实native fixture helper的原请求/ACK前捕获clock、复用既有pure decisionDeadlineMs修2profile缺口，最窄2目标PASS/fulltsc0，不称这些fixture失败业务RED。B两文件128PASS已在新组合复验，其中admission98（含8明确legacy分类/真实拒绝案）+drain30，不冒98全是native成功。
+- **Parent新增真实业务反例**：running原绑定标签独立被列表证实消失，原首动作clock在list await期间过期，但原90秒/source/gen仍有效；A把canDispatch当共享stillCurrent，事实与安全clear被误挡，实际仍bound91/gateopen。`parent-fact-before-start-RED.log` 1业务FAIL/type0（18 selection-excluded，非timeout/setup）。精确gate后只改Controller既有owner：lifetimeCurrent保原budget/gen供事实frame；受保护page helper/reload/nativebind准入另核canDispatch，native queued admission带原clock但其raw事实settlement保持原lifetime。不补新窗/registry/owner，独立actorlessclear不造serverroot。19focused全过/type0。
+- **最终同字节组合15 suites736PASS/no skip、完整tsc0、diff-check PASS**：`parent-parallel-combined-related.log`／`...-type.log`。含原12相关589覆盖+new19+两profile128；不是把不同轮相加成证据，不是全插件/生产/浏览器。完整测试清单在实际日志。6path active LSP：4clean/2findings，56aux style warnings（extensionless imports/nested ternary/no-return-await等），不称globallyclean，也未证明全是baseline。
+- **旧20d后验已终态**：`82239dd5-ebe2-4ec0-9442-72217269147c`，`observation-clear-followup-recovery-2.md`终稿完整读，advisory_no_local_blocker；F1/F2/F3仅局部addressed。专用marker/getter/terminal/observation-only断言未独立inspect、空type log仅owner exit0证据的限制保留，非wholecompat接受。C子任务完成；不恢复/重跑该child或旧4e54。
+- **新c838 delta独立窄审** workflow `dde4f5e7-bdd1-464d-a739-61643af1da30` 已launch，fresh native read/contact-only、精确20文件allowlist，绑定 `c838275-original-start-review.md`，尚无已读结论；不冒Source独立接受。Source c838冻结供读，Parent可更新docs/coord。quota查询available/week5%，不是故障根因证据。B子任务已完成；A blocked于新review。原15仍4完成11open，physical原聚合未完成。
+- 新Source commit已显式仅stage6路径并push独立ads-monitor任务分支；无版本/能力/上游UI/性能/父指针变化。ERP eba/156isolated及一次baseline exit1不变；原foreignWIP/fixture原件及metadata/JSON仍不读改，无真实外发/生产/业务merge/发布。后续先答pending、完整消费新review，若finding按typedRED/owner gate修；再原依赖物理/ports/actions/Cookie/config接线，不能以736绿关整项。
+
+### 两writer调度与门禁历史（当前以以上c838段为准）
+
+- **最新用户授权覆盖旧Parent-only Source/test限制**：两独立writer的精确文件写域可并行；Parent仍独占Git、Source gate、集成/最终接受。`dc7f28e58881b8fe2d5480ac1c2329f45e466042` 已在registry锁下纯登记并push，记录实际session/branch/retained checkout；不是业务master merge。Parent候选仍冻结20d，不与child并发写其文件。
+- 首轮 workflow `631085d5-0ce2-4d6d-91b6-cab86c306cde`：A `286d0b6c`/C `222c4688` fetch failed无required输出；B `73908102`仅BLOCKED/零实现报告。两writer handoff均空patch/0files，retained checkout均fresh核clean20d，partial cleanup未盲删。Parent node_modules原symlink已完整移回、target不动/不stage。
+- 恢复 `5ceefe4b-ee47-45a4-8014-f3ed7f94349e`：Parent未给新workflow key显式重绑定旧lane metadata，两个request在模型/child启动前被拒，run unavailable/0patch；不归因provider、不隐去该调度错误。读native参数实现确认允许request lane覆盖后，只改OS workflow参数，不改SDK/Source、不转CLI/模型。
+- 当前同协议 workflow **`7a4b66fc-f7e4-4272-9317-ca92ee64ce8f`**，两开发并行、review随后。A retained→**`b9c9a17b-8fcd-493a-896e-34cced48c3fe`**：仅runtime/controller/新protected-start test。Parent完整读10测试与7业务RED/3controls，核两Source无delta且独立fulltsc0，发唯一 `parallel-start-clock/source-gate.json`；追加missing/null及原callback/bounds反例后在两Source内继续。没有代码交付/组合GREEN或最终接受。
+- 首dispatch合同：Runtime运输原request-derived `startClock:{decisionDeadlineMs:number|null,monotonicNowMs:()=>number}`；Controller入口只检查不latch；仅消费`dispatch.admit()`的adapter在自身await后紧邻实际dispatch且无中间await才锁定first-start。原performance域不混比；context有而clock缺/坏则failclosed，context-less generic仅兼容、不制造admitted/生产CAP。已admitted后原90秒/source/generation继续，facts/rawsettle/exact-claim cleanup不可blanket start-clock gate。
+- B retained→**`dfe58ec2-ef74-4fbf-84c4-ce70cfeaf18b`**：仅旧admission/drain两测试。worker暂报128PASS、最终fulltsc/clock-forward/组合结果待取，未Parent接受。旧nullable/zero tuple oracle显式移到真实export分类器，另有真实native failclosed无IO；不把分类admitted冒managed native权限，不伪造null incident server root。所有managed成功走genuine ACK/start/native。Runtime案原样运输incoming context；direct helper仅用原请求起点/原serverTime及既有 `decisionDeadlineMs` 纯helper，不能ACK后fresh90秒。
+- C新20d三修补后验仍仅read/contact/原16文件allowlist，排在两writer barrier后，**未产出结论**；不是恢复已完成4e54。原15仍4完成11open，tower子任务A/B in_progress、C blocked(developer-barrier-7a4b66fc)。旧native fixtures无clock的相关失败须保留并由Parent协调合法迁移，不能skip/假称全部GREEN。
+- 证据：`/tmp/plugin-status-continuous-01a1406d/{parallel-infrastructure-recovery.json,parallel-development-checkpoint.json,parallel-recovery-workflow-v2.js,parallel-start-clock/}`；新3路输出由runs绑定。Parent只收到启动/门禁/暂报不等patch交付，须消费实际handoff/output再集成、组合验证、显式路径提交/push。无外发/生产/业务merge/父指针/发布。
+
+### 已push集成基点：20d三项clear修补589相关通过，仍待独立后验
 
 - **最新HEAD `20d94875c438abba85ba3c1a2a04ea00a58134ae` 已commit/push**，最后tracked/indexclean，node_modules不stage。以下ac766/542与未修措辞为被审基点，当前以本段覆盖。原15仍4完成11open，未关闭physical。
 - 完整4e54报告F1/F2/F3已接纳并真实复现：最终 **26业务RED/38controls/112unselected/fulltsc0**（regex含原F1terminal控制，不冒64全是新案）；首轮25fail但union.fence unknown类型错误不算，修fixture后valid25/type0及追加getter后的26/type0均保日志。

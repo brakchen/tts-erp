@@ -2,9 +2,29 @@
 
 ## 当前执行快照（2026-10-23）
 
+**后验更新：ef13152c终稿46行已完整读，advisory_findings，R1仍未闭合。** 瞬态NaN/rollback拒绝后clock恢复，5e7仍可能重采样latest canDispatch而把该次未发出的probe补签为observed。Parent确认同样禁止；后验已完成不恢复，Source读冻结已结束。下一步在原private probe-result producer保留实际admit/deny角色并向初始化/恢复消费者显式传递，先两个顺序clock current-API typed RED，不再叠加latest-clock guard；旧547不是新瞬态反例证据。
+
+**最新修补已push `5e7a847cbe418cb28b90c2a463f0dfcab73f0cf0`。** c838独立窄审034终稿41行全读，advisory_findings的R1已以2真实业务RED/20对照/fulltsc0复现：healthy running上下文在helper-entry或adapter-point clock denial时发生实际stop/clear，虽无probe dispatch。修既有私有context-proof角色为observed/unobserved；拒绝未观测不得造事实，也不当healthy proof；实际missing-tab/已dispatch不可用仍保原语义，过期原budget/bootstrap仍按原STALE_CONTEXT拒绝。
+
+首次R1整合15suites为735PASS/4旧拒绝语义FAIL，日志保留，修后仅复核受影响 **7 suites547PASS/no skip/fulltsc0**（含protected22/controller133/native176/admission98/drain30/runtime37/chain51）。未重跑最终15、不冒739全绿，也不把旧736累计。新R1后验 workflow `8603a5aa-fd73-4d4c-9981-afc940910639` 已启动，fresh read/contact-only精确16文件，Source5e7冻结，尚无结论；原034及更早C已完成不恢复。原15仍4完成11open，无整体/生产/发布接受。
+
+### c838整合与窄审历史（最新以以上5e7段为准）
+
+**最新已集成并push：`c838275ad98ab083553f5c2f09c1818eaa18493a`。** 两writer终稿/实际diff/5hash已Parent读核后整合；Parent迁移2个缺原clock的native fixture，另以1真实typed RED修正Controller把first-start clock混进事实生命期的问题。事实frame保原90秒/代次，受保护page/native-bind准入单独核clock；已dispatch的raw事实不被追溯取消。最终 **15 suites736PASS/no skip/fulltsc0**（含protected19/native176/admission98/drain30），不累计旧589或两worker数字，不是全插件/生产composition证明。
+
+20d修补后验 `82239dd5` 终稿已全读，advisory_no_local_blocker，F1/F2/F3仅局部处置；专用compat断言未读及type exit仅owner证据的限制保留。该review已完成，不恢复。新c838 delta独立窄审 workflow `dde4f5e7-bdd1-464d-a739-61643af1da30` 已启动，read/contact-only精确20文件，尚无结论。B迁移子任务已完成，A待新审查；原15仍4完成11open。c838候选冻结，未ready/业务merge/发布/父指针。
+
+新审查child `034092d6-5237-4cc7-b31c-82ddcb1b6785` 已提出候选R1：原tab/business/store仍匹配，若probe仅因clock-denied未发出，不能把synthetic unavailable当独立失效事实来stop/rebuild/clear。Parent已确认该语义、待完整终稿后真实typed RED修；此时Source仍冻结，736通过不等新finding闭合。真实missing-tab事实仍须保留，不能再用blanket gate掩盖二者区别。
+
+### 并行开发门禁与20d修补历史（下述启动状态已由上段覆盖）
+
+**最新授权与并行状态**：用户已批准两个独立工作树 writer 并行开发，覆盖此前 Parent-only Source/test 限制；Parent 独占 Git、Source gate、集成及最终接受。纯登记提交 `dc7f28e58881b8fe2d5480ac1c2329f45e466042` 已push，精确写域不交叉。当前 native workflow `7a4b66fc-f7e4-4272-9317-ca92ee64ce8f` 中，A `b9c9a17b-8fcd-493a-896e-34cced48c3fe` 已有7真实业务RED/3controls，Parent独立fulltsc0后仅释放2Source+新测试；B `dfe58ec2-ef74-4fbf-84c4-ce70cfeaf18b` 迁移2旧测试，worker暂报128PASS，最终类型/组合证据尚待收取。没有patch集成或新增完成行。20d后验只读复核排在两writer barrier之后，未给结论。
+
+首轮 `631085d5` A/C `fetch failed`、B仅BLOCKED/零实现；恢复 `5ceefe4b` 因Parent未显式重绑定lane key在启动前拒绝，无child/patch。两次失败均保留，核空patch/干净retained树后，仅修调度参数同协议恢复，未切换CLI/模型。Parent依赖symlink已原样恢复。新策略：只有adapter在自身await后紧邻真实dispatch消费原admit才锁定first-start，port invocation不算；原请求clock/原90秒/source及facts/cleanup分离保持。缺原clock的managed context不得fresh补窗；旧nullable/zero tuple分类与实际managed native权限明确分开，不能把helper通过冒充native成功。详见20-checkpoint及证据目录。
+
 **最新Parent修补：`20d94875c438abba85ba3c1a2a04ea00a58134ae` 已push。** 三项finding先实际26业务RED/38controls/fulltsc0后修：公开fresh仅事实、无clear；managed canonical以19字段own-presence/nonundefined+原值语义拒绝缺损，不改legacy事实decoder；Runtime在任何await及plain getter之前固定原fn并复用canonical pure capture。最终12相关 **589PASS/fulltsc0**，含真实Controller→Runtime→canonical→native ledgerless正案（明确禁HTTP，不冒supported production）。首次25fail但带union.fence类型错误的轮次排除，有效25/type0及最终26/type0均保留。旧报告仍advisory_findings，Parent修补不等独立后验接受；准备新的仅修补范围只读复核，不恢复旧child。下述ac766/542为被审基点，不再是最新HEAD。
 
-Parent继续原十五行，仍 **4完成／11open**，不逐片等待用户确认。隔离writer `feature/plugin-status-runtime-closure` 当前 **`ac766b161ab6aa86dcecb951ffd0d4115b04f3a9`** 已push，自有tracked/indexclean，候选0.4.27；无生产、真实外发、业务merge、父指针或发布授权。
+Parent继续原十五行，仍 **4完成／11open**，不逐片等待用户确认。下述ac766为此前actorless实现快照，当前已push集成基点以20d为准。隔离writer `feature/plugin-status-runtime-closure` 当前 **`ac766b161ab6aa86dcecb951ffd0d4115b04f3a9`** 已push，自有tracked/indexclean，候选0.4.27；无生产、真实外发、业务merge、父指针或发布授权。
 
 已完整消费423c/54ae的294行actorless clear设计，不恢复或重跑。`d54d31f` 区分原PRE连续性与valid GEN漂移的fact-only；`64e263f` 在既有queue新增实际managed native clear，单set null+GEN、完整校验后noop、不推进撤销的ledger；`fbcacf5` 把原observer/parent PRE及canonical本次POST接入Controller两实际clear点；`ac766b1` 经两真实typed RED修复原callback与source-bound角色getter替换。最终 **12相关542 PASS／完整tsc0**，不是全插件/真实浏览器/首protected action时钟证明。原77失败及15旧fixture失败保留；旧77案已迁到真实native scoped profile、real setter推进GEN，不再靠fake变量或独立90秒假预算。generic controller镜像不冒native删除证据。
 
