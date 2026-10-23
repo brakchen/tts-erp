@@ -141,7 +141,7 @@ PG_DOCKER_DEFAULT="postgres"
 PG_DOCKER_VALUE="${PG_DOCKER-$PG_DOCKER_DEFAULT}"
 if [[ -n "$PG_DOCKER_VALUE" ]]; then
   command -v docker >/dev/null 2>&1 || {
-    echo "[import] preflight failed: PG_DOCKER=$PG_DOCKER_VALUE requires docker" >&2
+    echo '[import] preflight failed: configured container transport requires docker' >&2
     exit 1
   }
   PG_COMMAND=(docker)
@@ -169,21 +169,6 @@ extract_dbname() {
   printf '%s' "$1" | sed -E 's|^postgresql://[^/]*/||; s|/$||; s|\?.*$||'
 }
 
-SRC_DB="$(extract_dbname "$src_plain")"
-DST_DB="$(extract_dbname "$dst_plain")"
-
-if [[ "$SRC_DB" == "$DST_DB" ]]; then
-  echo "[import] REFUSING: source and target resolve to the same DB (\"$SRC_DB\")." >&2
-  echo "         Set TTS_ERP_DB_URL (source) and TTS_ERP_DB_URL_TEST (target) to different databases." >&2
-  exit 3
-fi
-
-if [[ "$DST_DB" != *test* && "$DST_DB" != *_v3* ]]; then
-  echo "[import] REFUSING: target dbname \"$DST_DB\" does not contain 'test' or '_v3'." >&2
-  echo "         Refusing to bulk-load into a non-test DB to avoid prod corruption." >&2
-  exit 3
-fi
-
 # Explicit test-only replacement: one authority binds the guard, destination,
 # maintenance connection and supported transport. Never use archive --create.
 if [[ "$RECREATE_TEST_DB" -eq 1 ]]; then
@@ -196,14 +181,35 @@ if [[ "$RECREATE_TEST_DB" -eq 1 ]]; then
   reset_connections="$(cd "$REPO_ROOT" && TTS_ERP_DB_URL="$SRC_URL" TTS_ERP_DB_URL_TEST="$DST_URL" \
     PG_DOCKER="$PG_DOCKER_VALUE" "$PYTHON" -m scripts._test_db_connections recreation)" || exit 3
   mapfile -t reset_fields <<< "$reset_connections"
-  [[ "${#reset_fields[@]}" -eq 5 ]] || { echo '[import] invalid connection authority output' >&2; exit 3; }
+  [[ "${#reset_fields[@]}" -eq 6 ]] || { echo '[import] invalid connection authority output' >&2; exit 3; }
   DST_DB="${reset_fields[0]}"
   RESET_MAINTENANCE="${reset_fields[1]}"
-  if [[ -n "$PG_DOCKER_VALUE" ]]; then PG_COMMAND=(docker --host "${reset_fields[2]}"); fi
+  if [[ -n "$PG_DOCKER_VALUE" ]]; then
+    PG_COMMAND=(docker --host "${reset_fields[2]}")
+    PG_DOCKER_VALUE="${reset_fields[5]}"
+  fi
   src_plain="${reset_fields[3]}"
   dst_plain="${reset_fields[4]}"
   SRC_DB="$(extract_dbname "$src_plain")"
+else
+  # Preserve legacy mode decisions, but never reflect an unparsed URI in errors.
+  SRC_DB="$(extract_dbname "$src_plain")"
+  DST_DB="$(extract_dbname "$dst_plain")"
+  if [[ "$SRC_DB" == "$DST_DB" ]]; then
+    echo '[import] REFUSING: source and target resolve to the same database.' >&2
+    exit 3
+  fi
+  if [[ "$DST_DB" != *test* && "$DST_DB" != *_v3* ]]; then
+    echo '[import] REFUSING: target must be a test database.' >&2
+    exit 3
+  fi
 fi
+safe_db_label() {
+  if [[ "$1" =~ ^[A-Za-z0-9_]{1,63}$ ]]; then printf '%s' "$1"; else printf '<redacted>'; fi
+}
+# Presentation-only labels cannot determine the actual operation destination.
+SRC_LABEL="$(safe_db_label "$SRC_DB")"
+DST_LABEL="$(safe_db_label "$DST_DB")"
 
 # ── Client/server compatibility preflight ───────────────────
 # This runs before any target-side DROP or restore. A host PostgreSQL client
@@ -368,8 +374,8 @@ if [[ $PREFLIGHT_ONLY -eq 1 ]]; then
 fi
 
 # ── Plan & confirm ──────────────────────────────────────────
-echo "[import] source: $SRC_DB"
-echo "[import] target: $DST_DB"
+echo "[import] source: $SRC_LABEL"
+echo "[import] target: $DST_LABEL"
 echo "[import] mode:   $([[ $SCHEMA_ONLY -eq 1 ]] && echo "schema-only" || echo "schema + data")"
 echo "[import] tables: ${#ALL_TABLES[@]}"
 [[ -n "$ROW_LIMIT" ]] && echo "[import] row-limit per table: $ROW_LIMIT"
@@ -383,7 +389,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
   echo "[import] --dry-run set; nothing will be executed."
   echo
   echo "Plan:"
-  echo "  1. pg_dump --schema-only from \"$SRC_DB\" → drop+create schema in \"$DST_DB\""
+  echo "  1. pg_dump --schema-only from \"$SRC_LABEL\" → drop+create schema in \"$DST_LABEL\""
   [[ $SCHEMA_ONLY -eq 0 ]] && for t in "${ALL_TABLES[@]}"; do
     echo "  2. copy data: $t"
   done
@@ -392,8 +398,8 @@ fi
 
 if [[ $ASSUME_YES -eq 0 ]]; then
   echo "About to:"
-  echo "  1. DROP+RECREATE schema in \"$DST_DB\" from prod's schema"
-  [[ $SCHEMA_ONLY -eq 0 ]] && echo "  2. Copy ${#ALL_TABLES[@]} tables' data from \"$SRC_DB\" → \"$DST_DB\""
+  echo "  1. DROP+RECREATE schema in \"$DST_LABEL\" from prod's schema"
+  [[ $SCHEMA_ONLY -eq 0 ]] && echo "  2. Copy ${#ALL_TABLES[@]} tables' data from \"$SRC_LABEL\" → \"$DST_LABEL\""
   echo
   read -r -p "Proceed? [y/N] " reply
   if [[ "$reply" != "y" && "$reply" != "Y" ]]; then
@@ -525,7 +531,7 @@ done
 
 # ── Summary ─────────────────────────────────────────────────
 echo
-echo "[import] done. Row counts in target DB ($DST_DB):"
+echo "[import] done. Row counts in target DB ($DST_LABEL):"
 for t in "${ALL_TABLES[@]}"; do
   printf "  %-40s %s rows\n" "$t" "${row_counts[$t]:-0}"
 done

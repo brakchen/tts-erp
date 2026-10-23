@@ -107,9 +107,9 @@ def _test_name(name: str, *, confirmation: bool = False) -> None:
             os.environ["TTS_ERP_DB_URL"] = original
 
 
-def _transport(parameters: list[dict[str, str]], docker: str) -> str:
+def _transport(parameters: list[dict[str, str]], docker: str) -> tuple[str, str]:
     if not docker:
-        return "-"
+        return "-", "-"
     if os.environ.get("DOCKER_HOST") or os.environ.get("DOCKER_CONTEXT"):
         raise ValueError("ambient Docker routing overrides are unsupported")
     if any(p["host"] != "127.0.0.1" or p["port"] != "5432" for p in parameters):
@@ -121,15 +121,28 @@ def _transport(parameters: list[dict[str, str]], docker: str) -> str:
         ).stdout.strip()
         if endpoint != DOCKER_SOCKET:
             raise ValueError("non-local Docker context is unsupported")
+        identity = subprocess.run(
+            ["docker", "--host", DOCKER_SOCKET, "container", "inspect", "--format", "{{.Id}}", docker],
+            capture_output=True, text=True, check=True, timeout=10,
+        ).stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", identity):
+            raise ValueError("cannot verify immutable PostgreSQL container identity")
         publication = subprocess.run(
-            ["docker", "--host", DOCKER_SOCKET, "port", docker, "5432/tcp"],
+            ["docker", "--host", DOCKER_SOCKET, "port", identity, "5432/tcp"],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout.splitlines()
+        # Inspect only the routing/role fields used by libpq. No environment
+        # values (including unrelated container credentials) leave the container.
+        probe = 'test -z "' + "".join("${" + key + "-}" for key in sorted(_AMBIENT_ROUTING)) + '"'
+        subprocess.run(
+            ["docker", "--host", DOCKER_SOCKET, "exec", identity, "/bin/sh", "-c", probe],
+            capture_output=True, text=True, check=True, timeout=10,
+        )
     except (OSError, subprocess.SubprocessError):
         raise ValueError("cannot verify the selected PostgreSQL container route") from None
     if not {"0.0.0.0:5432", "127.0.0.1:5432"}.intersection(publication):
         raise ValueError("PostgreSQL container does not publish the required local port")
-    return DOCKER_SOCKET
+    return DOCKER_SOCKET, identity
 
 
 def derive(base: str, template: str, run: str, docker: str) -> tuple[str, ...]:
@@ -138,10 +151,10 @@ def derive(base: str, template: str, run: str, docker: str) -> tuple[str, ...]:
         _test_name(name)
     if run in {template, parameters["dbname"]}:
         raise ValueError("ephemeral database must be distinct")
-    pin = _transport([parameters], docker)
+    pin, identity = _transport([parameters], docker)
     return (
         parameters["dbname"], _uri(parameters, template, sqlalchemy=True),
-        _uri(parameters, run, sqlalchemy=True), _uri(parameters, "postgres"), pin,
+        _uri(parameters, run, sqlalchemy=True), _uri(parameters, "postgres"), pin, identity,
     )
 
 
@@ -152,10 +165,10 @@ def recreation(source: str, target: str, docker: str) -> tuple[str, ...]:
     _test_name(dst["dbname"], confirmation=True)
     if src["dbname"] == dst["dbname"]:
         raise ValueError("source and target database names must differ")
-    pin = _transport([src, dst], docker)
+    pin, identity = _transport([src, dst], docker)
     return (
         dst["dbname"], _uri(dst, "postgres"), pin,
-        _uri(src, src["dbname"]), _uri(dst, dst["dbname"]),
+        _uri(src, src["dbname"]), _uri(dst, dst["dbname"]), identity,
     )
 
 

@@ -57,6 +57,10 @@ if name == "docker":
     if args[:1] == ["context"]:
         print(os.environ.get("FAKE_DOCKER_ENDPOINT", "unix:///var/run/docker.sock"))
         sys.exit(0)
+    if args[:2] == ["container", "inspect"]:
+        target = args[-1]
+        print(target if len(target) == 64 and all(c in "0123456789abcdef" for c in target) else os.environ.get("FAKE_CONTAINER_ID", "c" * 64))
+        sys.exit(0)
     if args[:1] == ["port"]:
         print("0.0.0.0:" + os.environ.get("FAKE_DOCKER_PORT", "5432"))
         sys.exit(0)
@@ -67,6 +71,11 @@ if name == "docker":
         args = args[1:]
     args = args[1:]  # one quoted container identity
     name, args = args[0], args[1:]
+    if name in {"sh", "/bin/sh"}:
+        keys = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS", "PGTARGETSESSIONATTRS", "PGLOADBALANCEHOSTS")
+        if any(os.environ.get("FAKE_CONTAINER_" + key) and key in args[-1] for key in keys):
+            sys.exit(1)
+        sys.exit(0)
 if args[:1] == ["--version"]:
     print(f"{name} (PostgreSQL) {major}.6")
     sys.exit(0)
@@ -334,6 +343,45 @@ def test_lifecycle_requires_explicit_user_identity(tmp_path: Path) -> None:
     result = _run_refresh(tmp_path, target="postgresql://127.0.0.1:5432/tts_erp_test_base")
     assert result.returncode != 0
     assert not _mutations(_trace(tmp_path))
+
+
+@pytest.mark.parametrize("key", ["PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGUSER", "PGOPTIONS"])
+def test_container_libpq_environment_cannot_reach_pg_clients(tmp_path: Path, key: str) -> None:
+    result = _run_refresh(tmp_path, settings={"FAKE_CONTAINER_" + key: "TEST_remote"})
+    assert result.returncode != 0
+    trace = _trace(tmp_path)
+    assert not _mutations(trace) and "TEST_RUN_URL" not in trace
+    assert " pg_dump " not in trace and " psql " not in trace
+
+
+def test_container_is_pinned_to_inspected_immutable_identity(tmp_path: Path) -> None:
+    identity = "d" * 64
+    result = _run_refresh(tmp_path, settings={"FAKE_CONTAINER_ID": identity})
+    assert result.returncode == 0, result.stderr
+    for line in _mutations(_trace(tmp_path)):
+        assert f" exec {identity} " in line
+
+
+@pytest.mark.parametrize("source,target", [
+    (SOURCE_URL, "postgresql://postgres:TEST_REVIEW_SECRET@127.0.0.1:5432"),
+    (SOURCE_URL, "postgresql+psycopg://postgres:TEST_REVIEW_SECRET@127.0.0.1:5432"),
+    ("postgresql://postgres:TEST_REVIEW_SECRET@127.0.0.1:5432", TARGET_URL),
+    ("postgresql://postgres:TEST_REVIEW_SECRET@127.0.0.1:5432", "postgresql://postgres:TEST_REVIEW_SECRET@127.0.0.1:5432"),
+    (SOURCE_URL, "postgresql://postgres:TEST_REVIEW_SECRET@[broken"),
+])
+def test_recreation_missing_or_malformed_uri_never_echoes_credentials(tmp_path: Path, source, target) -> None:
+    result = _run_import(tmp_path, args=("--schema-only", "--yes", "--recreate-test-db"), settings={"TTS_ERP_DB_URL": source, "TTS_ERP_DB_URL_TEST": target})
+    assert result.returncode != 0
+    assert "TEST_REVIEW_SECRET" not in result.stdout + result.stderr
+    trace = _trace(tmp_path)
+    assert not _mutations(trace) and "restored stdin" not in trace
+    assert " pg_dump " not in trace and " psql " not in trace
+
+
+def test_legacy_refusal_does_not_echo_uri_credentials(tmp_path: Path) -> None:
+    result = _run_import(tmp_path, settings={"TTS_ERP_DB_URL_TEST": "postgresql://postgres:TEST_REVIEW_SECRET@127.0.0.1:5432"})
+    assert result.returncode != 0
+    assert "TEST_REVIEW_SECRET" not in result.stdout + result.stderr
 
 
 def test_host_lifecycle_uses_same_nondefault_routing_as_test_uri(tmp_path: Path) -> None:

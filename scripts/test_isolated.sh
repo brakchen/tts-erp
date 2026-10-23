@@ -56,11 +56,13 @@ connections="$(TTS_ERP_DB_URL_TEST="$BASE_TEST_URL" PG_DOCKER="$PG_DOCKER_VALUE"
   "$PYTHON" -m scripts._test_db_connections derive --template-db "$TEMPLATE_DB" --run-db "$RUN_DB")" || \
   fail 'test connection identity/routing validation failed'
 mapfile -t connection_fields <<< "$connections"
-[[ "${#connection_fields[@]}" -eq 5 ]] || fail 'invalid connection authority output'
+[[ "${#connection_fields[@]}" -eq 6 ]] || fail 'invalid connection authority output'
 TEMPLATE_URL="${connection_fields[1]}"
 RUN_URL="${connection_fields[2]}"
 MAINTENANCE_URL="${connection_fields[3]}"
 PG_DOCKER_PIN="${connection_fields[4]}"
+# Bind the environment probe and every lifecycle exec to the same immutable ID.
+if [[ -n "$PG_DOCKER_VALUE" ]]; then PG_DOCKER_VALUE="${connection_fields[5]}"; fi
 
 pg_exec() {
   if [[ -n "$PG_DOCKER_VALUE" ]]; then
