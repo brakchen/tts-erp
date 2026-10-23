@@ -6,6 +6,8 @@
 >
 > 关键调整：此前“页面失效后插件自行重绑并恢复运行”改为“立即安全暂停并上报，服务端授权恢复；重新就绪后再由服务端放行”。识别异常、停止不安全执行不等待网络。
 
+> 2026-10-23 实施增量（仅任务分支）：monitor `4dad71c` 已在既有原生业务写中原子持久化首次 Store pin、GEN 与原命令 continuation；输入 expected-policy/Store 是 CAS 数据，不增加授权 owner/token。managed 恢复按完整 Seller/Advertiser/Store 唯一组合选页，未知竞争者不许 bootstrap，同 tuple 多页可按偏好选页；重读 Store 必须一致。canonical READY 还核 raw pinned Store 相等，精确失败事实不受全局 pin gate 阻挡。最新12相关692PASS/完整tsc0，startup/resume/nextcommand、真实页面Factory/配置rollout/跨端/live仍待闭合；这不是已激活、部署或发布证明。
+
 ## 1. 现状、基线与方案归属
 
 ### 1.1 已核验现状

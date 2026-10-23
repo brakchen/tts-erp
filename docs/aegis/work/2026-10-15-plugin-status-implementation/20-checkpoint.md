@@ -1,6 +1,15 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：已批Store政策，1e配置组件已push；实际pin与消费者未闭（2026-10-23）
+## 当前：原生pin、唯一组合选择与终态比较已push，启动/resume与真实Factory仍开（2026-10-23）
+
+- **当前Source `4dad71cb78a734f276aff303cf88b7025e3d1374` 已push**，前驱1158c951实际实现原生业务SET同写pin+GEN+owned continuation（含identical business），expected-policy/Store只作CAS数据，不是新grant。1e配置段保留；原root/fingerprint/90秒/raw settlement/cleanup均保原归属。managed Controller读严格raw策略、两/三次Store一致、先排除未知竞争者并证明Seller/Advertiser/Store唯一组合再按tab偏好选页；等价页去重。canonical positive READY须raw pinned与boundCookieStoreId一致；legacy/malformed/unbound拒绝正向，但精确failed facts可结算。
+- **本轮严格TDD**：typed carrier前3真实RED3controls/type0；类型门后9真实RED3controls/type0→原生12GREEN；projection3真实RED/type0；真实Controller6RED/type0→3相关202PASS；bootstrap3RED2controls/type0（differentStore/unresolved/otherAdvertiser）；terminal4RED3failed-fact controls/type0。所有生产改动各有精确门，未用全禁恢复绕过正例。
+- **独立窄审已消费**：workflow78535ef6/childdf41d409终态，`native-1158-review.md`39行全读，P2 introduced丢reader receiver、P2 preexisting先clone业务getter可换原callback。Parent分别2真实业务RED/type0后修：原reader.call(originalStore)，先拥有fence再clone business。2GREEN，不恢复/重跑完成review；新bootstrap/terminal不是该冻结1158审查的接受范围，不能冒新整链独立接受。
+- **最新一次完整selection**：`native-component-final-related.log` **12 files692PASS/no skip/fulltsc0**；不是全插件，不累计旧545/564/209。扩展14selection首次被120s工具截止，中途旧physical/clock fixture未提供新reader导致barrier5s超时，保留998行日志且核无残留进程，不当业务RED；只补3fixture原raw data→既有classifier reader，direct identical/no-churn profile通过真native预pin/own successor建立，不seed grant/放宽旧oracle。3个剩余direct fence失败只定点复核3PASS，最后上述692通过。`physical-drain/protected-start`原受影响selection两文件通过，整个当次3files仍曾150PASS3FAIL，不能叫153全绿。
+- **诊断边界**：8paths activeLSP，4clean/3inconclusive；storage438–439两条bare-object辅助error为既有未改行，已以diff核未涉及，留待原owner清理，不报全clean。完整tsc0。无生产HTTP/真实Chrome/TikTok/Feishu、部署/业务master merge/发布/父指针；candidate0.4.27/caps[]executors{}。
+- **协同与下一步**：原15仍4完成11未闭。source旧child reservation已m-a7释放，保partial host checkout；ERP v16精确未来写队列在m-41c7f7e3完整记录/锁/readback后交01a16719；他独立接手guarded模板修复，不另起writer，本会话仅插件TS，不使用不健康DB模板。继续genuine READY→new command→actualStore drift的startup/resume/nextcommand正反例，再原owner修补；真实PageFactory/capture/strictpagination/两config与ERP跨端仍开，不再询问已批政策。
+
+### 历史：1e配置组件与首次native RED准备（已由以上4dad段推进）
 
 - **Source `1e540ef4b3bd946acfa66bb6fad9c6bf39d94ce2` 已push** `feature/plugin-status-runtime-closure`，6个精确自有code/test文件，tracked/indexclean，仅own node_modules link未stage；不碰library target/原dirty/两foreign trace及metadata。完整证据 `cookie-pin-config-checkpoint.json`。
 - 操作者最新“嗯执行吧”已批准首次从唯一完整核验的Seller/Advertiser/Store组合pin、后续跨Store只人工重绑；同组合可多tab。不再以政策待批为阻塞，不再逐小片问继续。5c/96新咨询终稿100行/完整native稿均已全读，debb两任务仅readonly设计交付，不冒实现。Owner择既有config字段unbound/pinned，缺失legacy/repair、坏值managed unreadable；初pin在原business nativeSET同写config+GEN+ownedleaf，即使later READY失败也保pin；人工必须完整新proof直接A→B并保queue/ledger/root，不开unbound空窗，UI/repair未实现。

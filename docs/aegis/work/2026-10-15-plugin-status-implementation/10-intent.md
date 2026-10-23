@@ -1,6 +1,10 @@
 # 通用插件状态与单目标恢复实施 - Intent
 
-## 当前续作：已批Store政策与1e配置组件（2026-10-23）
+## 当前续作：4dad原生锁定/组合选择/终态边界已交付分支，继续执行消费者（2026-10-23）
+
+Source4dad71cb78a734f276aff303cf88b7025e3d1374已push，原生SET同写pin/业务/GEN/owned leaf；managed按完整tuple唯一性而非tab优先定目标、拒绝未知竞争者与Store漂移，canonical READY核真实raw pin，保failed facts。原生正反/队列捕获、bootstrap/terminal均先业务RED/type0；1158 fresh独立窄审39行两P2已用2RED修。最新一次12文件692PASS/fulltsc0，不累计旧轮；扩展profile超时/旧fixture迁移与辅助诊断诚实留痕。整体仍未完：startup/resume/nextcommand/actualFactory/configrollout/跨端/live待闭合，原15仍4done11open，能力关闭/无发布或业务merge。无需再批首次pin/人工A→B政策。协同ERP模板/v16已交01a16719独立slot，不另开writer。
+
+### 历史：1e配置组件与native反例准备
 
 - 操作者已批首次唯一完整核验目标组合pin、后续跨Store人工重绑，不再询问；同组合多页不是多目标。新debb两Owner设计5c/96已全读；只配置保存不足，实际nativeSET原归属+GEN/叶、positive terminal/start/resume和重新建controller消费者仍必须闭合。
 - CONFIG-only **1e540ef已push**：既有config显式unbound/pinned，fresh scoped空namespace才建unbound；普通轮换raw保留且不caller pin/unpin/repair；事实投影与strict raw执行分类分开，原kind/StoreID单次捕获。初21业务RED/type0，新getter2RED/type0后，最终9相关545PASS/fulltsc0；4处exact fixture期待加unbound，未弱化业务oracle。26辅助warnings/1inconclusive不冒全clean。

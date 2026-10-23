@@ -1,6 +1,12 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照：1e540ef 配置组件已实现，实际pin与消费链未闭（2026-10-23）
+## 当前执行快照：4dad71c 原生锁定与组合/终态边界已实现，startup/resume/Factory未闭（2026-10-23）
+
+当前Source **4dad71cb78a734f276aff303cf88b7025e3d1374** 已push：原生pin+业务+GEN+own leaf单SET，显式CAS数据非grant；managed完整唯一Seller/Advertiser/Store组合先于tab偏好、未知竞争者拒绝bootstrap、Store重读一致；positive terminal严格pin相等，negative fact settlement不被全局pin gate绑住。冻结1158 fresh review39行已全读，两P2经2业务RED/type0修receiver与getter-callback顺序；bootstrap3RED2controls和terminal4RED3controls各独立type0后修。最后 **12相关692PASS/fulltsc0**，并非全插件/整体验收。扩展profile超时/3个direct旧profile失败均留痕，仅合法reader/真native预pin fixture迁移，旧oracle不弱化；LSP有2未改行辅助error/3inconclusive，不冒allclean。
+
+下一步：genuine READY/新命令下startup positive reuse、resume实际Store/pin一致以及next-command持久性；然后actualPageFactory/capture/provenance/strictpagination和两config/ERP/live闭环。原15仍4完成11open，caps[]/executors{}，不改版本/发布/业务merge/父指针。ERP v16文件已明确回交01a16719，guarded模板修复由同一peer独立接手；本会话不跑DB或建立第二修复writer。
+
+### 历史：1e配置组件与private native反例准备
 
 **最新 `1e540ef4b3bd946acfa66bb6fad9c6bf39d94ce2` 已push。** 操作者已明确批准首次从无歧义、完整核验的Seller/Advertiser/CookieStore组合建立持久锁定，跨Store只可人工重绑；同组合多页去重，不能凭tab偏好选目标，不再重复询问该政策。当前代码只落在既有CONFIG归属：显式 `cookieStoreBinding` unbound/pinned；fresh scoped空namespace由Owner建unbound；普通轮换保留raw pin/absence/malformed，caller firstpin/unpin/change/repair拒绝；事实scope投影不与执行权限混用，输入kind/StoreID各捕获一次。没有新key/owner/queue/token/registry/window。
 
