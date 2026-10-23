@@ -104,6 +104,10 @@ Complex or business-significant calculations belong on the backend, including RO
 
 The purpose of this boundary is not “the frontend may never calculate”. It is to keep one authoritative backend calculation exit while allowing inexpensive UI derivations. If a calculation affects a business result, is reused by multiple consumers, requires exact precision, or is hard to classify, implement and test it on the backend and let the frontend render the result.
 
+### Frontend engineering and component reuse
+
+Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md) before frontend work. It records the user-approved standard: free/open-source HeroUI first; one shared navigation/Header/Footer/application shell; page-specific content may be customized; minimal styling instead of deep component overrides. The proposed React/TypeScript/Vite rollout is in [`docs/plans/frontend-progressive-migration.md`](docs/plans/frontend-progressive-migration.md); its design is pending review and does not authorize implementation or change the current runtime.
+
 ## 5. Canonical commands
 
 | Task | Command |
@@ -260,6 +264,7 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/gui
 | Dumps endpoints and HTTP envelopes | `docs/api/dumps-data-contract.md` |
 | TikTok signing | `docs/reference/tiktok-hmac-signing.md` |
 | External endpoints, roles, pagination, schemas | `docs/api/external-api.md` |
+| ERP frontend components, navigation/layout, styling, or migration (not `plugins/`) | `docs/guides/frontend-development.md`; migration design: `docs/plans/frontend-progressive-migration.md` (pending review) |
 | SPU profit-deterioration product, design, implementation, or tests | `docs/spu-profit-deterioration/01-product-proposal.md`, then the matching numbered document in that directory |
 | Process/service architecture | `docs/architecture/process-architecture.md` |
 | Miaoshou integration | `docs/reference/miaoshou-platform.md` |
