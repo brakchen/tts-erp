@@ -1,228 +1,218 @@
 # Agent Git and worktree workflow
 
-This is the canonical lifecycle for parallel agent-owned repository changes.
+The canonical lifecycle for agent-owned repository changes. **Branches and commits carry work; sessions do not.** The tower-do board is the only live task and lane registry. `docs/handoff/ACTIVE.md` is a static relocation notice, not a second registry.
 
-The core rule is: **branches and commits carry work; sessions do not**. A finished lane may be validated, integrated, and cleaned up by any session.
+## 1. One canonical board
 
-## 1. Lane states
+Coordinate from a Pi session rooted at `/home/schan/tts-erp`. Run source/Git commands with explicit worktree paths (`git -C <worktree> ...`); creating a checkout does not require moving the coordination session into it.
 
-`docs/handoff/ACTIVE.md` contains only live lanes.
+The installed tower-do resolves the nearest checkout path, **not Git's common directory**. Another worktree, a plugin repository, or another machine does not automatically share this board. Before writes, call `tower_do_status` and confirm its board path matches the canonical root session:
 
-| State | Meaning | File ownership |
-| --- | --- | --- |
-| `draft` | Registered but implementation has not started | Declared files reserved |
-| `active` | Implementation is in progress | Declared files reserved |
-| `blocked` | Cannot proceed without a named dependency or external action | Declared files remain reserved unless the row explicitly releases them |
-| `ready` | Committed, synchronized with a recorded master commit, validated, and pushed | Branch is immutable; no session-specific ownership |
-| merged/abandoned | Terminal state | Delete the row; history remains in Git |
-
-Rules:
-
-- `owner(session)` is the actual Pi session UUID, never `本 session`.
-- `updated/ready_at (UTC)` is the FIFO timestamp when a lane enters `ready`.
-- A ready row records immutable `head_commit` and `synced_master` values.
-- `docs/handoff/ACTIVE.md` is coordination metadata. Never list it in a lane's owned files.
-- A ready lane may be integrated by its author or any other session.
-- A later lane may build on a ready lane only by explicitly recording the predecessor commit and creating the successor branch from that commit. Otherwise wait for the short integration step so the successor starts from `origin/master`.
-
-## 2. Register before editing
-
-Use the main master worktree when it is clean. If it contains foreign WIP, create a clean temporary coordination worktree from `origin/master` instead; never disturb the foreign changes.
-
-```bash
-git fetch origin
-git status --short --branch
-git worktree list
+```text
+/home/schan/.pi/tower-do/home-schan-tts-erp-a0cde689/board.jsonl
 ```
 
-Then:
+A session attached to another board must arrange a canonical-root coordinator/parent to register and relay updates, or resume coordination from the canonical root before writing. Read access to the canonical file is not write authority. If this board is unavailable, stop coordinated writes; do not fall back to ACTIVE or create an independent registry. Include this host-local board in host backups; Git branches preserve work, not future live board records.
 
-1. Read `docs/handoff/ACTIVE.md` and confirm that no `draft`, `active`, or `blocked` lane owns the files you need.
-2. Compare local master with `origin/master`; never assume local commits or files are yours.
-3. If foreign WIP exists, do not modify, stash, restore, or delete it.
-4. Under the short registry lock `/tmp/tts-erp-active-md.lock`, add one row with the real session UUID, exact branch/worktree, explicit file list, state `draft`, and UTC timestamp.
-5. Commit and push only the registry update so the new worktree starts from a visible registration.
+## 2. Lane records using supported tools
 
-Registry lock scope is only fetch/check/edit/commit/push. Do not hold it while developing or testing. If the lock is busy, retry shortly; it is not a reason to wait for another lane to finish.
+The installed tools support task `key`, `subject`, `description`, `status`, `owner`, `dependsOn`, and `blockedBy`. They do **not** expose task `scope`, `changedFiles`, lane phases, or a project override. Do not send invented tool arguments.
 
-## 3. Create the worktree from current remote master
+One permanent task, `lane-registry`, is the discoverable index. It is owned by `tower`, remains `in_progress` while the registry is in use, and consumes one of the 50 open-task slots. It is not a deliverable to mark completed. Each lane is a message in this task's thread, not an extra task slot:
 
-Use a kebab-case topic and one of `fix/`, `feature/`, `redesign/`, or `chore/`:
+```json
+{
+  "action": "send",
+  "to": "tower",
+  "taskKey": "lane-registry",
+  "subject": "lane:example-fix",
+  "body": "<JSON-encoded complete lane record>"
+}
+```
+
+Example record (placeholders must be replaced before sending):
+
+```json
+{
+  "schema": 1,
+  "laneId": "example-fix",
+  "previous": null,
+  "ownerSession": "<real Pi session UUID>",
+  "boardIdentity": "<identity reported by tower_do_status>",
+  "checkout": "fix/example-fix / /absolute/worktree/path",
+  "scope": "explicit owned files/directories; include exclusions and handoffs",
+  "state": "draft",
+  "stateAt": "<aware UTC timestamp>",
+  "headCommit": null,
+  "syncedMaster": "<full origin/master SHA at creation>",
+  "readyAt": null,
+  "validation": "not-run",
+  "reservations": []
+}
+```
+
+- Records are complete replacements, not patches. Use `previous: <current message id>` for every update, including closure. The first record has `previous: null` and a previously unused lane ID. Keep terminal records as receipts; do not reuse IDs.
+- `checkout` identifies both branch and absolute worktree; identify the separate repository for plugin lanes. `scope` is the actual file ownership contract, not a task title. `ownerSession` is the real UUID, not `本 session`; `boardIdentity` explicitly captures a configured/session-name alias.
+- `reservations` holds child UUID, identity, branch/worktree, exact files, restrictions and release conditions. Those paths are reserved to the child, not concurrent parent writers. Keep any protected foreign WIP and release prohibitions explicit.
+- Only the current owner identity may change ownership, scope, checkout or reservations. A handoff records old/new owner, exact files and release conditions, with the prior owner's consent message referenced. Do not use `as` to impersonate a peer. Imported legacy identity labels require confirmation before a handoff; migration is not consent or takeover.
+- An integrator may revalidate an imported legacy-ready branch (`blocked` → `ready`), or close a verified ready lane (`ready` → `merged`), without its original session returning. Such a record must retain owner, scope, checkout and reservations, include `integratorSession`, `integratorIdentity` and `integrationEvidence`, and satisfy §6–7. Other non-owner changes are rejected; a merge receipt preserves the tested `headCommit` and `syncedMaster`.
+- Task ownership's six-hour takeover exception does **not** automatically release a lane's files or foreign WIP. Request a handoff; unresolved ownership blocks dependent edits. A ready lane remains integrable by anyone under §7.
+- Message records are a workflow contract, **not an extension-enforced schema or ownership lock**. Serialize the short read/check/send/read-back step with `/tmp/tts-erp-lane-registry.lock` across canonical-host coordinators. If two records cite the same predecessor, fail closed and reconcile with the owner; never silently choose the last message. Re-read the accepted record before dependent edits.
+- Use `tower_do_talk` for all writes. Never append/edit/truncate `board.jsonl` directly. The registry lock covers only reading and sending records, not implementation or tests.
+
+### Read current records, not the default inbox window
+
+`tower_do_status(taskKey="lane-registry")` locates the index, but does not return its full message history. The default message view retires old messages after 14 days; inbox access also depends on the recipient. The append-only file retains them. Project **only this thread**, deduplicate message IDs (read acknowledgements may repeat them), and follow predecessor chains. Example read-only projection:
+
+```bash
+python3 - /home/schan/.pi/tower-do/home-schan-tts-erp-a0cde689/board.jsonl <<'PY'
+import json
+import sys
+
+lanes, seen = {}, set()
+with open(sys.argv[1], encoding="utf-8") as stream:
+    for line in stream:
+        event = json.loads(line)  # malformed log: fail closed
+        message = event.get("message", {})
+        if event.get("kind") != "message" or message.get("taskKey") != "lane-registry":
+            continue
+        subject = message.get("subject", "")
+        if not subject.startswith("lane:") or message["id"] in seen:
+            continue
+        seen.add(message["id"])
+        record = json.loads(message["body"])
+        lane = record["laneId"]
+        assert record["schema"] == 1 and subject == "lane:" + lane
+        prior = lanes.get(lane)
+        assert record["previous"] == (prior["messageId"] if prior else None), lane
+        if prior and message["from"] != prior["boardIdentity"]:
+            assert record["integratorIdentity"] == message["from"], lane
+            assert record["integratorSession"] and record["integrationEvidence"], lane
+            for field in ("ownerSession", "boardIdentity", "checkout", "scope", "reservations"):
+                assert record[field] == prior[field], (lane, field)
+            closing = prior["state"] == "ready" and record["state"] == "merged"
+            revalidating = (prior["state"] == "blocked" and record["state"] == "ready"
+                            and prior.get("legacy", {}).get("state") == "ready")
+            assert closing or revalidating, lane
+            if closing:
+                assert record["headCommit"] == prior["headCommit"], lane
+                assert record["syncedMaster"] == prior["syncedMaster"], lane
+        elif not prior and record.get("legacySource"):
+            assert message["from"] == "01a16851-2ab0-7605-a9b1-1e390a2830c5", lane
+        elif not prior:
+            assert message["from"] == record["boardIdentity"], lane
+        lanes[lane] = dict(record, messageId=message["id"])
+for lane, record in sorted(lanes.items()):
+    if record["state"] not in {"merged", "abandoned"}:
+        print(json.dumps(record, ensure_ascii=False))
+PY
+```
+
+This is an inspection example, not a security/authentication service. Do not run Python with optimization (`-O`); the example uses assertions as fail-closed consistency checks. Check handoff evidence and scope conflicts before action. For one lane, filter the final output by its ID; avoid dumping unrelated board history. Generated views are disposable/read-only and must not be committed as another live registry.
+
+## 3. States and registration before editing
+
+| Lane state | Meaning | File ownership |
+| --- | --- | --- |
+| `draft` | Registered, implementation not started | Declared files reserved |
+| `active` | Implementation in progress | Declared files reserved |
+| `blocked` | Named dependency or external action | Files remain reserved unless explicitly released |
+| `ready` | Committed, synchronized, validated, pushed | Branch immutable; any session may integrate |
+| `merged` / `abandoned` | Terminal receipt | Ownership released; preserve record and evidence |
+
+The task status `completed` does not mean a lane is `ready` or merged. `stateAt` is the lane's last state change, not message delivery time. `readyAt` is its FIFO timestamp; ready records require full immutable `headCommit`, `syncedMaster`, successful validation evidence, and a pushed branch. Later fixes move the lane to active, clear ready fields, and repeat validation.
+
+Before the first task edit:
+
+1. Read the canonical board, current lane records and child reservations. Confirm no draft/active/blocked owner reserves the required paths. For overlapping historical claims, obtain explicit owner reconciliation rather than assuming the import released them.
+2. `git fetch origin`, inspect `git status --short --branch` and `git worktree list`. Do not modify, stash, stage, restore, or remove foreign WIP.
+3. Under the short lane registry lock, send a draft record with real owner, intended branch/worktree, precise scope, UTC time, and source master SHA. Read it back and confirm no competing registration. No registry-only Git commit or push is required.
+4. Create a dedicated worktree/branch from current `origin/master` (or an explicitly recorded ready predecessor commit). Do not implement in the main master worktree. Use `fix/`, `feature/`, `redesign/`, `chore/`, or `docs/` plus a kebab-case topic.
+5. Record active status before starting. If creation fails, retain an honest blocked/abandoned record instead of leaving a phantom active checkout.
 
 ```bash
 git fetch origin
 git worktree add .worktrees/<slug> -b <prefix>/<slug> origin/master
-cd .worktrees/<slug>
-ln -s ../../.venv .venv
-ln -s ../../.env.test .env.test
 ```
 
-Because the branch is created from current `origin/master`, no additional merge is needed at creation time.
+Use worktree-specific environment setup from the testing guide. Never share a writable production-shaped `.env`, edit the main `.env` through a symlink, or commit credentials. Do not initialize plugin submodules unless needed for the task.
 
-Do not share a writable production-shaped `.env` between worktrees. If non-test commands require additional local settings:
+## 4. Ownership and task coordination
 
-```bash
-cp ../../.env .env
-chmod u-w .env
-```
+One writer owns each writable checkout. File ownership, not session presence, is the conflict boundary. Keep a single writer for hotspots such as scheduler, models, fixtures, schema generators, and deployment scripts.
 
-- Never edit the main repository's `.env` through a symlink.
-- Never commit `.env`, `.env.test`, or secrets.
-- Use the worktree path explicitly in tool calls.
-- Run the narrowest safe smoke check. Tests must follow `docs/guides/agent-testing.md`.
+Do independent work first. For a hotspot, exchange a focused patch/request with its owner, explicitly hand off the file, or create a successor lane from the predecessor's recorded ready commit. Do not wait for a session when a committed ready branch can be integrated. Child reservations belong in the parent's full lane record before child writes; give children the canonical board path and have the parent relay updates when their session has a different board.
 
-## 4. Ownership and parallel work
+Use ordinary board tasks for decomposition, dependencies and progress. `tower_do` is an **upsert**: read status, pass its `baseRevision`, and list only changed rows. Omitted keys/fields are preserved; removal is explicit. On stale rejection re-read and retry. Native owner guards apply to every task field; the documented idle-task adoption is owner-only first, then content changes separately. Do not confuse task adoption with permission to edit another worktree.
 
-- One writer owns each writable worktree.
-- File ownership, not session identity, is the conflict boundary.
-- Avoid concurrent writers for shared hotspots such as:
-  - `tts_erp_v2/sync_worker/scheduler.py`
-  - `tests/conftest.py`
-  - `tts_erp_v2/db/models/`
-  - schema SQL and schema generators
-  - `restart.sh`
-- If a small hotspot edit is needed, do not leave the entire lane waiting for the original session:
-  1. complete and commit all independent work;
-  2. give the hotspot owner a focused patch or exact change request; or
-  3. after the current hotspot lane is ready, create an explicit successor lane from its commit.
-- A lane must not claim `ready` until all required behavior is present, whether implemented directly or through an integrated dependency.
-- Tests using the shared database remain serialized according to `docs/guides/agent-testing.md`.
+Completion evidence and actual `changedFiles` are JSON/text in a threaded message to the work task, not unsupported tool fields. Complete only verified tasks; leave blockers explicit. Scope and file transfers remain in lane records, not transient task descriptions alone.
 
-## 5. Commit and push policy
+## 5. Commit and synchronize before ready
 
-Commit atomic, reviewable units. Commit messages use a supported type plus concise Chinese text:
-
-```text
-feat: ...
-fix: ...
-chore: ...
-docs: ...
-style: ...
-merge: ...
-```
-
-Before pausing for user input, interruption, review, or handoff:
-
-1. Commit all task-owned changes.
-2. Push the lane branch to `origin`.
-3. Report the branch and commit.
-
-If the network is unavailable, commit locally and report the exact unpushed commit. Never leave uncommitted WIP as the only copy and never force-push a shared branch.
-
-## 6. Synchronize before entering ready
-
-Finishing implementation is not enough. The lane must be validated against the master revision it intends to integrate.
+Use atomic commits with `feat/fix/chore/docs/style/merge` and concise Chinese text. Stage explicit task-owned paths only: never `git add -A`, `git add .`, or broad equivalents. Before pausing or handoff, commit and push the task branch; if the network is unavailable, report the exact locally committed but unpushed HEAD.
 
 In the lane worktree:
 
 ```bash
-git status --short --branch
 git fetch origin
 git merge --no-edit origin/master
 ```
 
-If the merge conflicts:
+Resolve both sides' intent, never blanket `--ours`, `--theirs`, or `-X theirs`. Abort and ask if intent is unclear. Then:
 
-1. Preserve both sides' intended behavior.
-2. Never use blanket `--ours`, `--theirs`, or `-X theirs` resolution.
-3. If intent is unclear, abort and ask rather than guessing.
-4. Commit the conflict resolution.
+1. Run diagnostics/link/path checks and the narrowest relevant safe tests.
+2. For code/test changes, run `bash scripts/test_baseline.sh`; all tests use `scripts/test_isolated.sh` as required by the testing guide. Zero new stable failures are required.
+3. Review `git diff --check`, branch diff and staged file list; exclude secrets and foreign WIP.
+4. Push the synchronized lane branch. Record full HEAD and `origin/master` SHA, exact validation evidence and a fresh UTC `readyAt` in its full ready record.
 
-Then:
+Documentation/config-only lanes that change no code/tests validate their own links, syntax, paths and commands; no application suite is needed. After ready, the branch is immutable. New fixes must clear its old ready fields and resynchronize.
 
-1. Run diagnostics or link/path checks appropriate to the changed files.
-2. Run narrow relevant tests.
-3. For code/test changes, run the fast suite under the shared test lock.
-4. Confirm zero new stable failures according to `docs/guides/agent-testing.md`.
-5. Review `git diff --check` and the final branch diff.
-6. Record the current `origin/master` commit as `synced_master`.
-7. Push the synchronized branch and record its HEAD as `head_commit`.
-8. Under the short registry lock, update the row to `ready` with both commits; the update timestamp becomes `ready_at`.
+## 6. Ready queue and legacy import
 
-The ready registry commit itself advances master only in `docs/handoff/ACTIVE.md`; it does not invalidate the lane. After `ready`, the branch is immutable. New fixes require moving it back to `active`, clearing the recorded commits and old ready timestamp, and repeating synchronization and validation.
+Integrate ready lanes in ascending `readyAt` order by default. A queue jump needs an explicit reason in the lane record (for example an urgent production fix or a registry-authority cutover, not a hidden ordering change). Any session may integrate a verified ready lane from its recorded commit; uncommitted files and session logs are not integration inputs.
 
-Documentation/config-only lanes do not need application tests when they change no code or tests, but must validate their own links, paths, syntax, and commands.
+Migration records carry `legacySource` naming the exact source commit and ACTIVE row. All legacy scope exclusions, handoffs, foreign-WIP protections and child release conditions remain binding until explicitly superseded. Long historical notes remain in that immutable Git source, not as a second maintained registry. An imported ready claim is **not fresh verification**: it is conservatively blocked with `legacyState: ready`, old timestamp/commit claims preserved, and no current `readyAt`. Revalidate before returning it to the ready queue. Never fabricate a missing UUID or upgrade a short/stale commit claim to verified evidence.
 
-## 7. Ready queue and takeover
+The old registry lock `/tmp/tts-erp-active-md.lock` is used once at cutover to capture the final remote snapshot and any concurrent old-rule registrations. It is retired after cutover. Old sessions must read the relocation notice and board before their next write; they must not restore old ACTIVE rows during a merge.
 
-Ready lanes integrate in ascending `ready_at` order by default. Urgent production fixes may jump the queue only when the row records the reason.
+## 7. Final integration into master
 
-The session that finishes first should normally continue directly into integration. However:
+Serialize prospective-master creation, post-merge validation, push, and board closure with `/tmp/tts-erp-master-merge.lock`. The lane registry lock is separate; never hold it for testing or conflict resolution.
 
-- no lane waits for its original session to return;
-- any session may take the next ready lane;
-- takeover starts from the recorded branch and commit, not from uncommitted files or session logs;
-- the integrator rechecks the branch, validation evidence, and current `origin/master`.
+Before integration, re-read the accepted ready record and queue, fetch origin, and require:
 
-## 8. Final integration into master
+- branch HEAD equals the full recorded `headCommit`;
+- **no master commit advanced beyond `syncedMaster`** (compare commit IDs); board updates no longer create Git commits and need no registry-only exception;
+- validation evidence applies to that exact branch/commit and the integration path is unused.
 
-Only final integration is serialized. Acquire `/tmp/tts-erp-master-merge.lock` and hold it through prospective-master creation, post-merge validation, registry cleanup, and push.
+If master advanced, release the integration lock, move the lane back to active, merge the new master, resolve conflicts, rerun required checks, push and publish fresh ready fields. Do not hold the master lock during lane preflight or conflict resolution.
 
-Use a clean temporary integration worktree so foreign WIP in the main worktree cannot affect the merge:
+Build a prospective master in a clean detached worktree:
 
 ```bash
-git fetch origin
-git diff --name-only <synced_master>..origin/master -- . ':(exclude)docs/handoff/ACTIVE.md'
 git worktree add --detach .worktrees/.integrate-<slug> origin/master
-cd .worktrees/.integrate-<slug>
-git merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"
+git -C .worktrees/.integrate-<slug> merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"
 ```
 
-Before merging, require that:
+Validate that exact prospective commit. Documentation-only integration confirms no application/test changes and repeats documentation checks. Code/test integration runs the required isolated fast-suite baseline; if lanes overlap in a module, textual conflict freedom does not waive that check.
 
-- the branch HEAD equals the row's `head_commit`;
-- no path other than `docs/handoff/ACTIVE.md` changed between `synced_master` and current `origin/master`;
-- the temporary integration path does not already exist.
-
-Registry-only commits after `synced_master` are expected and do not invalidate validation. If any non-registry path changed, release the integration lock, return the lane to `active`, merge the new `origin/master` into it, rerun required checks, push, and assign new commit fields and `ready_at`. Do not hold the master lock while resolving lane conflicts or running lane preflight tests.
-
-Validate the exact detached commit that would become master:
-
-- Documentation/config-only lane: confirm the merge contains no changes under `tts_erp_v2/**` or `tests/**`, then rerun documentation validation.
-- Code/test lane: rerun the required fast-suite baseline.
-- If two lanes changed the same module, run the full fast suite even when Git reported no textual conflict.
-
-After validation, delete the merged lane row from `docs/handoff/ACTIVE.md` in the integration worktree and commit that registry cleanup. Then push the exact tested commit:
+Push only the validated commit, without force:
 
 ```bash
-git push origin HEAD:master
+git -C .worktrees/.integrate-<slug> push origin HEAD:master
 ```
 
-Never force-push. Do not push when validation introduces a new stable failure. Because the prospective merge lives in a detached integration worktree, a failed integration does not alter the shared local master branch; retain the worktree for diagnosis or remove it only after confirming it has no uncommitted evidence that must be preserved.
+After successful push, append the full merged lane record with integrated master SHA, verification evidence and actual changed paths; close delivered work tasks. **There is no ACTIVE cleanup commit.** A failed push leaves the lane unmerged: resynchronize and repeat normally. A failed validation does not alter the shared master checkout. If push succeeded but board closure failed, keep the checkout/branch, report the gap, and reconcile the exact remote commit before any retry or cleanup; do not merge again blindly.
 
-A remote push rejection means another writer advanced master despite the local lock or from another machine. Remove or retain the failed integration worktree as appropriate, resynchronize the lane with the new `origin/master`, rerun validation, and retry normally.
+## 8. Cleanup and safe Git operations
 
-## 9. Cleanup
-
-Only after merge validation, registry cleanup, and successful push:
+After remote merge, verification and board reconciliation:
 
 ```bash
 git fetch origin
 git log --oneline origin/master..<branch>
-git worktree remove .worktrees/.integrate-<slug>
-git worktree remove .worktrees/<slug>
-git branch -D <branch>
-git worktree prune
-git worktree list
 ```
 
-`git log --oneline origin/master..<branch>` must be empty before deleting the branch. If it is not empty, stop because the branch still contains unmerged commits.
+The log must be empty before removing the task's own clean worktrees/branch. Inspect their status first; never remove foreign WIP. Then remove the task/integration worktrees, delete the fully merged task branch, prune, and inspect `git worktree list`. Preserve foreign changes in main; report task-clean separately from repository-clean instead of pretending a shared dirty checkout is clean.
 
-## 10. Safe Git operations
-
-Allowed alternatives to destructive repository-wide resets:
-
-- Revert a public commit: `git revert <commit>`.
-- Unstage a file without changing bytes: `git restore --staged <file>`.
-- Restore one owned file from a known commit: `git restore --source=<commit> -- <file>`.
-- Discard an owned file's local change only after confirming ownership: `git checkout -- <file>`.
-- Stash only your own lane's work, never a shared or foreign worktree.
-
-Forbidden:
-
-- `git reset --hard`
-- `git checkout -- .`
-- `git clean -f`
-- blanket `--ours`, `--theirs`, or `-X theirs`
-- `git add -A && git commit` as a substitute for a real merge
-- deleting a worktree or branch before proving all commits are merged
+Allowed scoped operations include `git revert <commit>`, `git restore --staged <owned-file>`, and restoring one owned file from a known commit after confirming ownership. Forbidden: repository-wide destructive reset/checkout/clean, blanket conflict winners, force-pushing master, staging all files, or deleting branches before proving their commits merged.

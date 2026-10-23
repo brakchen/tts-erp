@@ -19,8 +19,8 @@
 - Tests: `tests/`.
 - Operational scripts: `scripts/`.
 - Architecture and active contracts: `docs/`.
-- Work ownership registry: `docs/handoff/ACTIVE.md`.
-- Live multi-agent coordination board: tower-do (`tower_do`, `tower_do_talk`, `tower_do_status`; see §8).
+- Sole live task/lane registry: tower-do (`tower_do`, `tower_do_talk`, `tower_do_status`; see §8).
+- Stable lane lifecycle and board record format: `docs/guides/agent-git-workflow.md`. `docs/handoff/ACTIVE.md` is only a relocation notice; do not maintain live rows there.
 
 ## 3. Non-negotiable safety boundaries
 
@@ -162,11 +162,11 @@ Do not reimplement functionality that a suitable maintained dependency already p
 ## 7. Worktree, review, and completion rules
 
 - Every task starts in a dedicated branch/worktree created from current `origin/master`. Do not develop task code in the main master worktree; use it only for short registry updates, or use a clean temporary coordination worktree when foreign WIP is present.
-- Before the first task edit, register the lane in `docs/handoff/ACTIVE.md` with the real Pi session UUID and explicit file ownership. `docs/handoff/ACTIVE.md` is coordination metadata and must not be listed as a lane-owned file.
-- Track task decomposition, ownership, dependencies, and cross-session progress on tower-do (§8). The board complements but never replaces the lane registry.
-- `draft`/`active` lanes own their declared files. A `ready` lane is immutable and may be integrated by any session; session identity never blocks merge or cleanup.
-- Ready lanes merge in `ready_at` order by default. Before entering `ready`, merge current `origin/master` into the lane, resolve conflicts, rerun required checks, commit, and push; record both lane HEAD and the synchronized master commit. If master later gains non-registry changes, repeat synchronization and validation. Commits changing only `docs/handoff/ACTIVE.md` do not invalidate the lane.
-- Serialize the final master merge, post-merge validation, registry cleanup, and push with `/tmp/tts-erp-master-merge.lock`. Build the prospective master commit in a clean temporary integration worktree, merge with `--no-ff`, validate that exact commit, then push it to master without force.
+- Before the first task edit, register a lane record in the canonical board's `lane-registry` thread with the real Pi session UUID, board identity, branch/worktree and explicit file ownership. Read back the record and check all current lanes and child reservations; no ACTIVE edit or registry-only Git commit is required.
+- Track task decomposition, dependencies and progress on ordinary board tasks. Lane phases and file ownership live in the board lane records, not a second Markdown registry.
+- `draft`/`active`/`blocked` lanes reserve their declared files unless explicitly released. A `ready` branch is immutable and may be integrated by any session; session identity never blocks merge or cleanup.
+- Ready lanes merge in `readyAt` order by default. Before entering `ready`, merge current `origin/master`, resolve conflicts, validate, commit and push; record full lane HEAD, synchronized master SHA and evidence. If master advances at all, repeat synchronization and validation. Imported legacy ready claims require revalidation; task `completed` is not lane `ready`.
+- Serialize final master merge, post-merge validation, push and board closure with `/tmp/tts-erp-master-merge.lock`. Build the prospective master commit in a clean temporary integration worktree, merge with `--no-ff`, validate that exact commit, then push without force. Close the lane on the board after successful push; no registry cleanup commit.
 - Do not modify or stash another lane's work. For shared hotspots, keep one writer and exchange a patch or create an explicit successor lane instead of waiting for the original session to return.
 - Keep each writable worktree owned by one writer unless separate worktrees are used.
 - Commit and push the task branch before merge or before pausing for user input. If the network is unavailable, commit locally and report that push remains pending.
@@ -208,32 +208,29 @@ Definition of done:
 4. Update contracts and operational documentation affected by the change.
 5. Confirm no secrets, production data, unrelated WIP, or staged foreign files are included.
 6. Confirm the lane was synchronized with the master revision it integrated, then confirm the worktree and master are clean and the required branch/master pushes succeeded.
-7. Reconcile tower-do: complete delivered tasks with `changedFiles`, leave honest blocker state, and reply to relevant messages/findings.
+7. Reconcile tower-do: post evidence and actual `changedFiles` in a task-thread message, complete verified work tasks, close the integrated lane record, leave honest blockers, and reply to relevant messages. `changedFiles` is not a native tool argument.
 
 Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/guides/agent-git-workflow.md`.
 
 ## 8. 多会话 / 多 agent 协调（tower-do）
 
-本仓库已安装 Pi 扩展 `tower-do`。它是所有 Pi 会话与子 agent 共享的实时协调板，记录任务、归属、依赖、留言和 findings。复杂开发任务默认优先在板上拆解；只要涉及多会话或多 agent 并行，就必须用板协调，避免撞文件、重复劳动和交接丢失。
+本仓库已安装 Pi 扩展 `tower-do`。主仓协调会话共享同一实时板，其他 worktree 会话和子 agent 通过主仓 coordinator/parent 协调，记录任务、归属、依赖、留言和 findings。复杂开发任务默认优先在板上拆解；只要涉及多会话或多 agent 并行，就必须用板协调，避免撞文件、重复劳动和交接丢失。
 
-`tower-do` 与 Git lane 各管一层，两者都要维护：
+**board 是唯一实时状态源，不再维护 `ACTIVE.md` 登记表。** 普通任务负责拆解与进度，常驻 `lane-registry` 任务的消息线程负责文件归属、branch/worktree 和 ready 队列。记录格式与完整生命周期见 `docs/guides/agent-git-workflow.md`。
 
-| 层 | 工具 / 文件 | 职责 |
-| --- | --- | --- |
-| 实时任务协调 | `tower_do` / `tower_do_talk` / `tower_do_status` | 任务拆解、认领、依赖、留言、findings、完成回执 |
-| Git lane 登记 | `docs/handoff/ACTIVE.md` | branch/worktree、文件归属、ready 队列、合并顺序（§7） |
+当前扩展按 checkout 路径分板，不会自动合并 worktree/插件仓的 board。协调会话必须从 `/home/schan/tts-erp` 使用主仓 board，代码/Git 命令显式指定各 worktree 路径。开工先核对 `tower_do_status` 的 board 路径；不同 board 的会话须由主仓 coordinator/parent 登记和转达，不能自行另起归属。board 不可用时停止依赖协调的写入，不回退到 Markdown。
 
 ### 8.1 三个工具
 
-- `tower_do_status`：只读查看任务、owner、依赖、留言、findings、在场会话、scope 冲突、板文件路径和当前 `revision`。开工前、交接前、结束前都要读。
-- `tower_do`：原子更新整个任务板；用于创建、认领（`owner` + `in_progress`）、阻塞（`blocked` + `blockedBy`）和完成（`completed` + `changedFiles`）。
-- `tower_do_talk`：给任务 owner、`tower` 或 `all` 发留言；用 `finding` 记录范围外的 `bug` / `improve` / `vuln` / `idea`。`inbox` 会确认已读；只想查看而不确认时用 `tower_do_status`。
+- `tower_do_status`：查看任务、owner、依赖、留言、board 路径和当前 revision；开工、交接、结束前都要读。`taskKey=lane-registry` 定位登记索引，完整 lane 消息须按工作流从日志只读投影，不能依赖默认消息窗口。
+- `tower_do`：按 key upsert，只列新增或变化的任务；认领用 `owner` + `in_progress`，阻塞用 `blocked` + `blockedBy`，验证后才 `completed`。每次带最新 `baseRevision`；不支持 `scope`、`changedFiles` 或 lane 状态字段。
+- `tower_do_talk`：发送任务证据、范围外 findings 和 lane 完整 JSON 记录；lane 记录使用 `taskKey=lane-registry`、`subject=lane:<laneId>`、前驱消息 ID。`inbox` 会确认已读，纯查看优先用 status。当前工具无独立 finding API，发现用普通任务/消息跟踪。
 
 ### 8.2 开工前先拆解
 
 - 三步以上的开发任务应先上板拆解，再改文件。一个任务应对应一次可独立提交、验证或交接的结果；不要把整个大特性塞进一个模糊任务。
 - `key` 使用稳定、简短的小写标识；`subject` 写祈使句；`description` 只写耐久任务陈述，临时日志和证据放留言或 finding。
-- 用 `scope` 声明可能修改的文件或 glob。并行任务的 scope 要尽量不相交；同一文件同一时刻只允许一个 writer。scope 冲突只是提示，不是锁；看到冲突后立即用 `tower_do_talk` 与 owner 协商。
+- 在 lane JSON 的 `scope` 和 `reservations` 中声明文件/glob、排除项、child 实际 UUID 与释放条件；这不是原生 task 参数。并行写域尽量不相交，同一文件同一时刻只允许一个 writer；发现冲突先联系 owner，扩展不会替你自动锁文件。
 - 有顺序关系的任务用 `dependsOn`；依赖未完成时不得把后继任务置为 `in_progress` 或 `completed`。等待外部动作或非任务标识时，用 `blocked` + `blockedBy` 明确写出等待对象。
 - 大特性优先拆成可并行的设计、后端、前端、测试、文档等子任务。用户允许委派且 scope 独立时，尽量交给不同 agent / 会话并行执行；需要串行的部分用 `dependsOn`，不要靠口头约定。
 
@@ -241,17 +238,17 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/gui
 
 - 开始工作前先读 `tower_do_status`，然后把 `owner` 与 `status: in_progress` 在同一次写入中设置；不要修改其他 owner 的任务，应用 `tower_do_talk` 联系对方。
 - 每次 `tower_do` 写入都要携带最近一次读取或写入返回的 `baseRevision`。遇到 stale 拒绝时重新读板、合并同伴更新后再提交。
-- `tower_do` 是任务级全量替换：`tasks` 数组必须复述所有要保留的 key；现有任务的未改字段可省略。写前先看完整 board，不能因默认视图折叠而漏掉同伴任务或历史完成回执。
+- `tower_do` 是 upsert，不是整板替换：只列变化的 key，省略的任务和字段保持原值；删除须显式 `remove`。先读 board，stale 时重读再合并提交，不得重放整板覆盖同伴。lane 消息则是带前驱 ID 的完整记录，短 read/check/send/read-back 用 `/tmp/tts-erp-lane-registry.lock` 串行；分叉先停下协调，不能简单取最后一条。
 - owner 保护适用于任务所有字段。owner 自身在该任务上连续 6 小时无活动时，才可按工具契约接管未完成任务：第一次写入只改 `owner`，第二次再更新内容或状态。
-- 任务只有在实现和验证都完成后才能标记 `completed`，且同一次写入必须附实际改动的仓库相对路径 `changedFiles`；失败、未验证或部分完成时保持 `in_progress` 或诚实标记 `blocked`。
+- 任务只有在实现和验证都完成后才能标记 `completed`；先在线程消息附证据和实际改动的仓库相对路径 `changedFiles`，再更新状态。失败、未验证或部分完成保持 `in_progress` 或诚实 `blocked`。
 - 离开、暂停或最终回复前再次读板并对账：自己的任务都有明确状态，相关留言已回复，认领的 finding 已完成、拒绝或附原因延期。
 
 ### 8.4 多 agent 并行与交接
 
-- 每个可写 worktree 只安排一个 writer；tower-do 的 task `scope` 应与 `docs/handoff/ACTIVE.md` 的 lane 文件归属一致。板负责实时协作，§7 的 worktree、测试、提交、推送和合并规则仍是最终约束。
+- 每个可写 worktree 只安排一个 writer；写域以主仓 board 的 lane 记录为准。child 写入前将其 reservation 登记到 parent lane；其他 board 的 child 由 parent relay。任务闲置接管不等于 lane 文件/WIP 自动释放。§7 的测试、提交、推送和合并护栏不变。
 - 把 `tower_do_status` 返回的 board 文件路径交给参与任务的子 agent，作为共享的 file-as-state；替子 agent 记账时使用其真实 id 作为 `as`。
-- agent 完成子任务后必须回写状态与 `changedFiles`，父会话再汇总依赖、运行整体验证并收尾。不要只在聊天里说“完成”而让板保持过期状态。
-- 发现不属于当前 scope 的问题时，优先创建 finding 并通知 owner；不要顺手修改别人的 lane。认领 finding 后要走 `accepted` → `done` / `rejected` / `snoozed` 生命周期，并在关闭或延期时写明原因。
+- agent 完成子任务后回写证据消息（含 `changedFiles`）和验证后的任务状态，父会话再汇总依赖、运行整体验证并释放 reservation。不要只在聊天里说完成。
+- 发现范围外问题时建普通任务或消息通知 owner，不顺手改他人的 lane；关闭或延期写明原因，不调用并不存在的 finding 生命周期 API。
 
 ## 9. Required context by task
 
