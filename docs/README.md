@@ -37,7 +37,7 @@
 ## 3. 前端开发入口
 
 - **已确认开发标准**：[`guides/frontend-development.md`](guides/frontend-development.md)——免费 HeroUI 优先；导航、Header、Footer 和应用骨架统一复用；页面专用内容可定制，避免大量样式覆盖。
-- **待评审技术方案**：[`plans/frontend-progressive-migration.md`](plans/frontend-progressive-migration.md)——React/TypeScript/Vite 的页面级渐进迁移、权限与路径兼容、构建交付、分批验收及旧实现退役。方案不是已实施声明。
+- **待实施技术方案（方向已认可）**：[`plans/frontend-progressive-migration.md`](plans/frontend-progressive-migration.md)——React/TypeScript/Vite 的页面级渐进迁移、权限与路径兼容、构建交付、分批验收及旧实现退役；P0 技术验证和共享文件交接仍待完成，文档合并不是开工或上线批准。
 - **现有验证能力**：[`guides/browser-ui-layout-audit.md`](guides/browser-ui-layout-audit.md)、[`guides/agent-testing.md`](guides/agent-testing.md)。
 
 ## 4. 旧目录 → 新目录映射（2026-10-03 迁移）
