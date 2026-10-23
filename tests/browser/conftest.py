@@ -17,11 +17,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 from collections.abc import Iterator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import parse_qs
 
 import pytest
 from render_support import Renderer
@@ -268,7 +271,20 @@ def _alert_payload() -> dict[str, Any]:
 def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     """/v2/** 的 canned 只读载荷；没列到的接口给空集合，页面照常渲染外壳。"""
     if path.endswith("/v2/auth/me"):
-        return {"authenticated": True, "role": "admin"}
+        return {"authenticated": True, "role": "admin", "displayName": "TEST 运营"}
+    if path == "/healthz":
+        return {"status": "ok", "service": "tts_erp", "auth_mode": "enforce"}
+    if path == "/v2/intercept/requests":
+        params = parse_qs(query)
+        rows = [_intercept_record(f"TEST_request_{i}") for i in range(101)]
+        host = params.get("endpoint_host", [""])[0]
+        if host:
+            rows = [row for row in rows if host in row["endpoint_host"]]
+        offset = int(params.get("offset", ["0"])[0])
+        limit = int(params.get("limit", ["100"])[0])
+        return {"requests": rows[offset:offset + limit], "total": len(rows), "offset": offset, "limit": limit}
+    if path.startswith("/v2/intercept/requests/") and not path.endswith("/stats"):
+        return {"request": _intercept_record(path.rsplit("/", 1)[1])}
     if path.endswith("/v2/analytics/spu-profit-deterioration"):
         return _alert_payload()
     if path.endswith("/v2/commerce/channel-accounts"):
@@ -354,8 +370,22 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     return {"items": [], "total": 0, "options": [], "configs": [], "jobs": []}
 
 
-def _render_pages(out: Path) -> None:
-    """用仓库自己的 Jinja 渲染全部页面（与线上同一套模板与资源版本戳）。"""
+def _intercept_record(request_id: str) -> dict[str, Any]:
+    return {
+        "request_id": request_id, "method": "GET", "endpoint_host": "api.example.test",
+        "endpoint_path": "/TEST/" + request_id, "captured_at": _NOW,
+        "response_status": 200, "duration_ms": 12, "is_whitelisted": True,
+        "url": "https://api.example.test/TEST/" + request_id, "matched_config_id": 7,
+        "request_headers": {"X-Test": "TEST_header"}, "request_body": None,
+        "response_headers": {}, "response_body": {"message": "TEST_detail"},
+    }
+
+
+def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
+    """Render current owners; explicit pilot override is test-only, not a runtime flag."""
+    from starlette.requests import Request
+
+    from tts_erp_v2.api.v2 import frontend_pages
     from tts_erp_v2.api.v2.ad_daily import ad_daily_page
     from tts_erp_v2.api.v2.pages import (
         _render_page,
@@ -363,9 +393,17 @@ def _render_pages(out: Path) -> None:
         _SpuProfitabilityPageConfig,
     )
 
+    effective = frontend_pages.MIGRATED_PAGE_IDS if migrated is None else migrated
     for slug, tpl in _PLAIN.items():
-        resp = _render_page(tpl, current_page=slug)
-        (out / f"{slug}.html").write_bytes(resp.body)
+        if slug in effective:
+            for prefix in ("", "/tts"):
+                request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}"})
+                resp = frontend_pages.render_frontend_page(request, slug)
+                name = ("tts-" if prefix else "") + slug
+                (out / f"{name}.html").write_bytes(resp.body)
+        else:
+            resp = _render_page(tpl, current_page=slug)
+            (out / f"{slug}.html").write_bytes(resp.body)
     for slug, profile_id, entry, title in _SPU_PAGES:
         resp = _render_spu_profitability_page(
             _SpuProfitabilityPageConfig(
@@ -395,9 +433,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
+        prefixed = path.startswith("/tts/")
+        if prefixed:
+            path = path[len("/tts"):]
         if path.startswith("/v2/pages/") and not path.endswith((".css", ".js")):
             name = path[len("/v2/pages/"):].strip("/") or "index"
-            target = self.rendered_dir / f"{name}.html"
+            target = self.rendered_dir / f"{'tts-' if prefixed else ''}{name}.html"
+            if prefixed and not target.is_file():
+                # Legacy fixtures use relative assets and the same document under either mount.
+                target = self.rendered_dir / f"{name}.html"
             if target.is_file():
                 return self._send(target.read_bytes(), _MIME[".html"])
         if path.startswith("/static/"):
@@ -405,16 +449,20 @@ class _Handler(BaseHTTPRequestHandler):
             if target.is_file() and _STATIC_ROOT in target.resolve().parents:
                 return self._send(target.read_bytes(),
                                   _MIME.get(target.suffix, "application/octet-stream"))
-        if path.startswith("/v2/"):
+        if path.startswith("/v2/") or path == "/healthz":
             query = self.path.split("?", 1)[1] if "?" in self.path else ""
-            body = json.dumps(_mock_payload(path, query)).encode("utf-8")
-            return self._send(body, _MIME[".json"])
+            payload = _mock_payload(path, query)
+            body = json.dumps(payload).encode("utf-8")
+            headers = {"X-Total-Count": str(len(payload))} if path.endswith("/channel-accounts") and isinstance(payload, list) else {}
+            return self._send(body, _MIME[".json"], headers)
         self.send_error(404)
 
-    def _send(self, body: bytes, content_type: str) -> None:
+    def _send(self, body: bytes, content_type: str, headers: dict[str, str] | None = None) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -423,11 +471,14 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture(scope="session")
-def site_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """渲染本分支页面 → 本地随机端口提供，测试结束后关掉。"""
-    rendered = tmp_path_factory.mktemp("rendered-pages")
-    _render_pages(rendered)
+def frontend_build() -> None:
+    """Current source must build; never skip React coverage for missing artifacts."""
+    result = subprocess.run(["bash", "scripts/build_frontend.sh"], cwd=REPO_ROOT, capture_output=True, text=True, timeout=180, check=False)
+    assert result.returncode == 0, (result.stdout + result.stderr)[-18000:]
 
+
+@contextmanager
+def _serve_pages(rendered: Path) -> Iterator[str]:
     handler = type("BoundHandler", (_Handler,), {"rendered_dir": rendered})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -440,8 +491,45 @@ def site_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         thread.join(timeout=5)
 
 
+@pytest.fixture(scope="session")
+def site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> Iterator[str]:
+    rendered = tmp_path_factory.mktemp("rendered-pages")
+    _render_pages(rendered)
+    with _serve_pages(rendered) as url:
+        yield url
+
+
+@pytest.fixture(scope="session")
+def frontend_site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> Iterator[str]:
+    rendered = tmp_path_factory.mktemp("frontend-pilot-pages")
+    # Exercise the runtime's sole activation set; keep legacy collector wrappers compatible.
+    _render_pages(rendered)
+    with _serve_pages(rendered) as url:
+        yield url
+
+
+@pytest.fixture()
+def frontend_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    @contextmanager
+    def serve(origin: str) -> Iterator[str]:
+        monkeypatch.setenv("TTS_ERP_FRONTEND_DEV_ORIGIN", origin)
+        _render_pages(tmp_path)
+        with _serve_pages(tmp_path) as url:
+            yield url
+    return serve
+
+
 @pytest.fixture()
 def browser_renderer(site_url: str) -> Any:
+    yield from _browser_renderer(site_url)
+
+
+@pytest.fixture()
+def frontend_browser_renderer(frontend_site_url: str) -> Any:
+    yield from _browser_renderer(frontend_site_url)
+
+
+def _browser_renderer(site_url: str) -> Any:
     """本层的 headless chromium 渲染器；缺 playwright/chromium 时 skip。
 
     作用域是 **function**（不是 session）：Playwright 存活期间会在主线程里占着

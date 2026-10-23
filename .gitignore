@@ -71,3 +71,10 @@ tiktok-data-sync-runtime-*.json
 # plugins/ 是 git submodule（chrome-plugins）；其内容由各插件仓自己的
 # .gitignore 管理。下列规则只针对 superproject 层可能出现的本地产物。
 plugins/*/node_modules/
+
+# ERP frontend dependencies and generated build/test assets
+/frontend/node_modules
+/frontend/.cache/
+/frontend/.hmr-probe/
+/frontend/coverage/
+/tts_erp_v2/static/frontend/

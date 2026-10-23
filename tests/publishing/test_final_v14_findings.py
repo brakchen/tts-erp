@@ -937,7 +937,12 @@ def test_frontend_resets_dialogs_handles_escape_and_cleans_drawer_on_close() -> 
 
 
 def test_registry_and_docs_cover_v14_contracts() -> None:
-    registry = (ROOT / "docs/handoff/ACTIVE.md").read_text()
+    notice = (ROOT / "docs/handoff/ACTIVE.md").read_text()
+    workflow = (ROOT / "docs/guides/agent-git-workflow.md").read_text()
+    assert "Static relocation notice" in notice
+    assert "../guides/agent-git-workflow.md" in notice
+    assert "`lane-registry`" in workflow
+    assert "One writer owns each writable checkout" in workflow
     design = (ROOT / "docs/design/tiktok-video-publish.md").read_text()
     runbook = (ROOT / "docs/ops/video-publish-runbook.md").read_text()
     architecture = (ROOT / "docs/architecture/architecture-overview.md").read_text()
@@ -951,7 +956,8 @@ def test_registry_and_docs_cover_v14_contracts() -> None:
         "tts_erp_v2/db/base.py",
         "tts_erp_v2/db/models/",
     ):
-        assert path in registry
+        # Live ownership is host-local tower-do state, not a portable CI input.
+        assert (ROOT / path).exists(), path
     assert "created_by_user_id" in design and "非 FK" in design
     assert "created_by_key_hash" in design
     assert "publish_budget_used" in design

@@ -57,6 +57,7 @@ markers = [
     "domain_after_sales: 退货/取消 (after_sales_job + migrate_after_sales)",
     "domain_reporting: 报表 (profit / coverage / cost)",
     "domain_api: FastAPI 路由 / auth / middleware",
+    "domain_frontend: React/HeroUI component tests through the isolated runner",
     "domain_proxy: 出站代理层 (signing, token_service)",
     "domain_migration: v1→v2 数据迁移 —— 一次性脚本测试，直接读写生产库，默认从 addopts 排除；显式 `pytest -m domain_migration` 才跑（CLI -m 覆盖 addopts）。回滚观察期结束（~2026-09-26）后连同 scripts/migrate_v1_to_v2/ 一起删除",
     "domain_middleware: 中间件 (access_log 等)",
