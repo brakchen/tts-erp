@@ -14,6 +14,19 @@
 - Edit registry state only in a clean master/coordination/integration worktree under `/tmp/tts-erp-active-md.lock`; lane worktrees do not carry registry-only edits.
 - Shared hotspot ownership does not require waiting for the original session: exchange a focused patch, hand off ownership explicitly, or create a successor lane from the predecessor's ready commit.
 
+## monitor-status-plugin 同 lane 临时并行写队列（2026-10-23）
+
+用户已明确授权拆分后并行开发。以下是现有 `monitor-status-plugin` lane 内、已提交候选 `20d94875c438abba85ba3c1a2a04ea00a58134ae` 的 host-managed 临时 patch checkout，不是从未 ready 前驱另开的发布/集成 lane。Parent `01a1406d-2041-7452-8338-3d7de574337f` 保留 Git、集成、其余路径及原 lane 责任；下列精确路径暂时仅由对应 child 写，Parent 不在候选 checkout 并发改这些文件。child 不操作 Git，不改 registry；恢复时如实际 Pi UUID/cwd/branch 改变，须先重新登记。没有业务 master merge、发布、版本或父指针授权。
+
+| 子任务 | 实际 owner(session) | branch/worktree | 独占写域（插件仓相对路径） | 状态与释放条件 |
+| --- | --- | --- | --- | --- |
+| start-clock | 01a1673f-985f-7303-9a68-686a9c0f698a | `pi-subagents/start-clock-286d0b6-0424-s0-t0` / `/home/schan/pi-workspace/worktrees/monitor-status-runtime-01a1406d/pi-worktree-286d0b6c-7bce-4323-969d-35ed542cadc5-s0-0` | `src/extension/plugin-status-runtime.ts`, `src/extension/tab-binding-controller.ts`, `tests/plugin-status-protected-start.test.ts` | reserved；首次 provider fetch failed 后已核空 patch/clean，等待同协议恢复。登记后仅先准自包含测试/typed RED；生产 Source 仍须 Parent 新精确 gate。 |
+| native-profiles | 01a1673f-9860-7107-b193-17749da7cd13 | `pi-subagents/native-profiles-7390810-b08c-s0-t0` / `/home/schan/pi-workspace/worktrees/monitor-status-runtime-01a1406d/pi-worktree-73908102-da00-494c-a1d7-d35f3860403d-s0-0` | `tests/plugin-status-physical-admission.test.ts`, `tests/plugin-status-physical-drain.test.ts` | reserved；首次只读 bootstrap 后 BLOCKED、空 patch/clean，未实现完成。登记后 Parent 明确释放即可迁移两测试，不授任何 Source 修改。 |
+
+两写域无交集；只读 reviewer 始终仅读 Parent 固定 20d 候选，不读 child WIP。临时 dependency symlink/OS evidence 仅按任务 packet 使用，不提交；原 dirty worktree、TS fixture 原件/元数据与 foreign JSON 保护不变。收尾由 Parent 检查 host handoff/patch、组合验证/提交后撤销本表临时 reservation，原 lane 未因此 ready。
+
+## Live lanes
+
 | lane_id | Topic | owner(session) | branch/worktree | Owned files/directories | State | head_commit | synced_master | updated/ready_at (UTC) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | frontend-migration-docs | 前端开发复用规范与 React/TS/Vite/HeroUI 渐进迁移技术方案；仅文档，不启动实施 | 01a16719-eedc-7605-a9b1-1e16d356e488 | `chore/frontend-migration-docs` / `/home/schan/tts-erp/.worktrees/frontend-migration-docs` | `AGENTS.md`, `docs/README.md`, `docs/guides/frontend-development.md`, `docs/plans/frontend-progressive-migration.md` | active | — | — | 2026-10-23T05:24:11Z |
