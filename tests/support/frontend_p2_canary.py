@@ -43,6 +43,7 @@ class VerifiedDataProbe:
 
 
 def _require_child(child: VerifiedChild) -> tuple[str, RunBinding]:
+    child.require_live()
     value, binding = current_binding()
     parent, start = _process_state(child.pid)
     if (child.binding != binding or parent != os.getpid() or start != child.start
@@ -64,7 +65,9 @@ def _bound_json(child: VerifiedChild, path: str, headers: dict[str, str] | None 
                            http_nonce=response.getheader(NONCE_HEADER))
         if response.status != 200 or len(body) > 1_048_576:
             raise ValueError(REFUSAL)
-        return json.loads(body)
+        payload = json.loads(body)
+        _require_child(child)
+        return payload
     finally:
         connection.close()
 
@@ -96,6 +99,7 @@ def seed_and_check_canary(child: VerifiedChild, *, prefix: str = "") -> Verified
 
             factory = sessionmaker(bind=engine, expire_on_commit=False)
             with checked_session(binding, engine, factory) as session:
+                _require_child(child)
                 # This is the SAME session whose actual bind and DB were checked.
                 marker = "TEST_P2_" + secrets.token_hex(16)
                 readonly_key = "ttserp_readonly_TEST_P2_" + secrets.token_hex(24)
@@ -106,6 +110,7 @@ def seed_and_check_canary(child: VerifiedChild, *, prefix: str = "") -> Verified
                 session.flush()
                 expected: dict[str, str | int] = {"id": row.id, "enum_type": marker,
                                                 "enum_value": marker, "label_zh": marker, "sort_order": 0}
+                _require_child(child)
                 session.commit()
         finally:
             engine.dispose()
@@ -114,6 +119,7 @@ def seed_and_check_canary(child: VerifiedChild, *, prefix: str = "") -> Verified
         payload = _bound_json(child, prefix + "/v2/config/enum-map/list",
                               {"Authorization": "Bearer " + readonly_key})
         verify_probe_payload(expected, payload)
+        _require_child(child)
         return VerifiedDataProbe(child=child, prefix=prefix, enum_pk=int(expected["id"]),
                                  enum_type=marker, enum_value=marker, label_zh=marker,
                                  key_name=marker, readonly_key=readonly_key)

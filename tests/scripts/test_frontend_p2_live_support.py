@@ -244,7 +244,9 @@ def test_ambient_pg_routing_is_refused_not_silently_sanitized(tmp_path, current,
 def test_invalid_readiness_is_a_fixed_refusal_not_a_body_or_parser_error(receipt, monkeypatch, body):
     live = importlib.import_module(LIVE)
     _support, binding, path, _ = receipt
-    child = live.VerifiedChild(base="http://127.0.0.1:12345", port=12345, pid=FAKE_PID, start=FAKE_START, nonce=NONCE, attestation=path, binding=binding)
+    proc = MagicMock(pid=FAKE_PID)
+    proc.poll.return_value = None
+    child = live.VerifiedChild(base="http://127.0.0.1:12345", port=12345, pid=FAKE_PID, start=FAKE_START, nonce=NONCE, attestation=path, binding=binding, process=proc)
     response = MagicMock()
     response.status = 200
     response.read.return_value = body
@@ -252,17 +254,17 @@ def test_invalid_readiness_is_a_fixed_refusal_not_a_body_or_parser_error(receipt
     connection = MagicMock()
     connection.getresponse.return_value = response
     monkeypatch.setattr(live.http.client, "HTTPConnection", lambda *args, **kwargs: connection)
-    proc = MagicMock()
-    proc.poll.return_value = None
     with pytest.raises(ValueError, match="^P2 isolated child identity refused$"):
-        live._wait_ready(child, proc, timeout=0.1)
+        live._wait_ready(child, timeout=0.1)
     connection.close.assert_called_once()
 
 
 def test_decoder_recursion_exception_is_normalized_at_the_owner(receipt, monkeypatch):
     live = importlib.import_module(LIVE)
     _support, binding, path, _ = receipt
-    child = live.VerifiedChild(base="http://127.0.0.1:12345", port=12345, pid=FAKE_PID, start=FAKE_START, nonce=NONCE, attestation=path, binding=binding)
+    proc = MagicMock(pid=FAKE_PID)
+    proc.poll.return_value = None
+    child = live.VerifiedChild(base="http://127.0.0.1:12345", port=12345, pid=FAKE_PID, start=FAKE_START, nonce=NONCE, attestation=path, binding=binding, process=proc)
     response = MagicMock()
     response.status = 200
     response.read.return_value = b"[]"
@@ -272,17 +274,16 @@ def test_decoder_recursion_exception_is_normalized_at_the_owner(receipt, monkeyp
     decoder = MagicMock()
     decoder.loads.side_effect = RecursionError("TEST_decoder_depth")
     monkeypatch.setattr(live, "json", decoder)
-    proc = MagicMock()
-    proc.poll.return_value = None
     with pytest.raises(ValueError, match="^P2 isolated child identity refused$"):
-        live._wait_ready(child, proc, timeout=0.1)
+        live._wait_ready(child, timeout=0.1)
     connection.close.assert_called_once()
 
 
 def test_child_exit_during_readiness_response_is_not_a_live_yield(receipt, monkeypatch):
     live = importlib.import_module(LIVE)
     _support, binding, path, _ = receipt
-    child = live.VerifiedChild(base="http://127.0.0.1:12345", port=12345, pid=FAKE_PID, start=FAKE_START, nonce=NONCE, attestation=path, binding=binding)
+    proc = MagicMock(pid=FAKE_PID)
+    child = live.VerifiedChild(base="http://127.0.0.1:12345", port=12345, pid=FAKE_PID, start=FAKE_START, nonce=NONCE, attestation=path, binding=binding, process=proc)
     response = MagicMock()
     response.status = 200
     response.read.return_value = b'{"auth_mode":"enforce"}'
@@ -290,10 +291,9 @@ def test_child_exit_during_readiness_response_is_not_a_live_yield(receipt, monke
     connection = MagicMock()
     connection.getresponse.return_value = response
     monkeypatch.setattr(live.http.client, "HTTPConnection", lambda *args, **kwargs: connection)
-    proc = MagicMock()
     proc.poll.side_effect = [None, 17]
     with pytest.raises(ValueError, match="^P2 isolated child identity refused$"):
-        live._wait_ready(child, proc, timeout=0.1)
+        live._wait_ready(child, timeout=0.1)
     connection.close.assert_called_once()
 
 

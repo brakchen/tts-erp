@@ -17,7 +17,7 @@ import tempfile
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -131,13 +131,18 @@ class VerifiedChild:
     nonce: str
     attestation: Path
     binding: RunBinding
+    process: subprocess.Popen[bytes] = field(repr=False, compare=False)
+
+    def require_live(self) -> None:
+        """Read exit status through the launch owner's retained Popen handle."""
+        if self.process.pid != self.pid or self.process.poll() is not None:
+            raise ValueError(REFUSAL)
 
 
-def _wait_ready(child: VerifiedChild, proc: subprocess.Popen[bytes], *, timeout: float = 30) -> None:
+def _wait_ready(child: VerifiedChild, *, timeout: float = 30) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            raise ValueError(REFUSAL)
+        child.require_live()
         connection = http.client.HTTPConnection("127.0.0.1", child.port, timeout=1)
         try:
             connection.request("GET", "/healthz")
@@ -153,8 +158,7 @@ def _wait_ready(child: VerifiedChild, proc: subprocess.Popen[bytes], *, timeout:
                 verify_attestation(child.attestation, child.binding, nonce=child.nonce,
                                    child_pid=child.pid, child_start=child.start,
                                    http_nonce=response.getheader(NONCE_HEADER))
-                if proc.poll() is not None:
-                    raise ValueError(REFUSAL)
+                child.require_live()
                 return
         except (OSError, http.client.HTTPException):
             pass  # Bounded cold-start readiness only, never a command retry.
@@ -186,8 +190,8 @@ def live_api_server(value: str) -> Iterator[VerifiedChild]:
             if parent != os.getpid():
                 raise ValueError(REFUSAL)
             child = VerifiedChild(base=f"http://127.0.0.1:{port}", port=port, pid=proc.pid,
-                                  start=start, nonce=nonce, attestation=path, binding=binding)
-            _wait_ready(child, proc)
+                                  start=start, nonce=nonce, attestation=path, binding=binding, process=proc)
+            _wait_ready(child)
             yield child
         finally:
             _stop_process_group(proc)
