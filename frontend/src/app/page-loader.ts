@@ -13,6 +13,7 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   'runtime-configs': () => import('../pages/runtime-configs'),
   'intercept-configs': () => import('../pages/intercept-configs'),
   'spu-profit-deterioration': () => import('../pages/spu-profit-deterioration'),
+  'manual-costs': () => import('../pages/manual-costs'),
   login: () => import('../pages/login'),
 };
 

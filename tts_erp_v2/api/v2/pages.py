@@ -574,23 +574,12 @@ def spu_profit_deterioration_page(request: Request = _DIRECT_RENDER_REQUEST) -> 
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
-def manual_costs_page() -> HTMLResponse:
-  """Manual cost entry workbench (main-image mirror display).
-
-  The HTML shell is a small stub:
-  - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
-  - inline ``<style>`` block for the industrial-console personality
-  - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
-    envelope unwrap for backend pagination, signature-counter population,
-    lightbox preview of the SPU's mirrored main image)
-  - the JS handles its own /v2/auth/me probe and redirects unauthenticated
-    callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
-
-  2026-09-05 page-rework lane: the supplier-reference-photo upload flow
-  was removed. The 图片 column now shows the TikTok main image mirrored
-  into local MinIO (``image_url`` from the backend, fallback icon when the
-  mirror hasn't finished); cost currency is fixed to CNY.
-  """
+def manual_costs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
+  """Manual cost workbench; existing APIs own identities, currency and persistence."""
+  if "manual-costs" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "manual-costs")
   return _render_page("manual-costs.html", current_page="manual-costs")
 
 

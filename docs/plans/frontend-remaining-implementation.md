@@ -100,6 +100,14 @@
 - 无正数有效等待栅栏时，404/409/422 的原结构化 detail 路径保留，2xx 解码/持久化语义不变。带栅栏时优先提供安全 HTTP status/requestId/完整等待时间，而不是读取不可信 body 字段。此处只扩展唯一 SDK 的既有头边界，不增加 page-local metadata map、解析器、重试/会话引擎或第二套计时策略。
 - 14 个真实 SDK body-stall RED 后 shared wrapper GREEN；manual 原 35 项加 2 个实际 UI RED 在 SDK-only cherry-pick 后 37 GREEN。仍需独立复核和整体验收。
 
+## 后续验收接点与未完成事项
+
+- manual 内容 a94fced 的 37 个组件用例和独立 SPEC/QUALITY 已闭环，显式释放后合入父候选。新增 loader/route/registry 的 4 个真实 RED 后接入唯一入口（候选现为 13 个；video 仍待最终质量修复），相关路由与组件通过。`tests/api/test_manual_costs_page_v2.py` 尚有 15 个旧 SSR DOM/资产断言需逐项映射到保留的 legacy artifact 与实际 React 控件，不把这些已识别失败当作全套 GREEN；完整 baseline 未运行。
+- 先前登录/其他页面的 9 个旧 SSR 兼容失败已按新文档协议适配，两个文件 33 项通过；其余 4 个 SPU 函数和 4 个非展示 auth 函数与 a452 基线逐函数 byte-exact。没有以旧告警规则或旧 CSS 恢复新产品行为。
+- manual 旧契约逐项只读映射另发现已知总数的最后一整页仍可点“下一页”（P2）；需优先用精确 server total 判断耗尽，无 total 的候选保留行数 fallback。status/has-orders/排序/实际翻页/lightbox 等还需补直接组件行为覆盖，不能仅把 15 个失败替换为重复 bootstrap 检查。此修复和 legacy-artifact 标注尚未完成。
+- 当前 P2 live launcher 硬编码原 factory，没有 child 内协作者接点。`sync trigger` 会运行真实 background job，视频 store/device 路径可访问真实外部系统；浏览器拦截伪 200 不能证明真实 API 持久化或 cookie wire。完整安全 native 验收需要经批准的受限 consumer factory/setup 扩展，保留原数据库绑定/proof/nonce/runner/conftest；在批准前不绕过冻结护栏、不执行这些副作用。此为验收接点决定，不是重新请求已授权的页面实施批准。
+- 已在 board 将真实 clone/API、native、三宽度双前缀视觉拆为独立任务；native 显式记录接点批准阻塞。源代码/构建/API-unit、真实 clone、native、截图、精确 master 与运行激活仍分别记账，不能相互替代。
+
 ## 视频诊断的公开边界
 
 - 诊断仍是显式授权读取，默认任务读取不附带 prompt/Artemis 输出。`promptSnapshot` 保持可空文本 wire 字段，生产者 `_attempt` 复用既有 `publishing.diagnostics.sanitize_text`：沿用凭证赋值/认证头/URL query 的脱敏规则和最多 2000 字符边界，不增加客户端 redactor 或另一解析引擎。
