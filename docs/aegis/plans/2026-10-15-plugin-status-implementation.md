@@ -3,7 +3,7 @@
 ## 当前执行：4a4f360显式cleanup原生归属已push；五个旧正向链路仍未闭（2026-10-24）
 
 - Source **`4a4f360dd6350e03861c65a012d9f7bbec7f0deb`**。已全文消费e44/6ea4完成审查的45行HIGH：53b72使真实NoWindow HOLD的bare-stop丢Runtime归属，不能用新测试port自己adopt或620绿豁免。完成审查不恢复、不重跑；这是静态意见，非独立执行。
-- 拒绝“事实后finally等待stop”方案：13角色/type0绿但旧有限等待回归失败，已精确撤回该原型。现在Controller要求`ownCleanup(factory)`在IO前运输到**同一既有Runtime**；14个已知构造点迁移，纯Controller测试用真实canonical Runtime，真实组合不建第二owner。事实/控制可先结束，raw依既有pending/inFlight排空；原recovery observedBudget.guard仍登记，不补窗口、不造native grant。缺required callback的非类型调用仅事实、不直接裸调stop。
+- 拒绝“事实后finally等待stop”方案：13角色/type0绿但旧有限等待回归失败，已精确撤回该原型。现在Controller要求`ownCleanup(factory)`在IO前运输到**同一既有Runtime**；13个实际调用点迁移（原14条搜索命中含函数定义，已校正），纯Controller测试用真实canonical Runtime，真实组合不建第二owner。事实/控制可先结束，raw依既有pending/inFlight排空；原recovery observedBudget.guard仍登记，不补窗口、不造native grant。缺required callback的非类型调用仅事实、不直接裸调stop。
 - 7当前API业务RED/9对照/fulltsc0后精确Parent gate；**最终精确16角色PASS/完整tsc0**。另一次9相关668PASS/7FAIL/type0，7同案已在完整committed53冻结快照原样复现且type0；修正两项把held HOLD stop错当事实屏障的旧测试后，最小9案4PASS/5FAIL/type0。五个旧正向chain消费者仍用legacy业务fake，未完成持久pin/当前resume运输闭包；不改running/ACK/late-HOLD断言来充绿。不能将各轮合计、把known53失败当master允许基线或声明全插件GREEN。LSP4paths零reported，2clean/2inconclusive。
 - 原15仍4done11open，整体未验收/未ready；caps[]executors{}/0.4.27不变。后继先闭这五项，再source-owned PRE/own-post stop/noPRE事实、ACK tick/ALL legacy资源顺序/Worker、PageFactory/config/ERP/E2E。ERP无新DB/merge；config/perf未来写域未释放。证据`/tmp/plugin-status-continuous-01a1406d/scheduler-cleanup-owner-*`及`scheduler-chain-*`。
 

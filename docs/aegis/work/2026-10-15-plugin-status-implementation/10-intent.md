@@ -2,7 +2,7 @@
 
 ## 当前续作：4a4f360强制cleanup归属已push，五个旧正向消费者尚未闭（2026-10-24）
 
-Source **4a4f360dd6350e03861c65a012d9f7bbec7f0deb**。e44/6ea4已完成45行静态审查全文消费：53b72在真实NoWindow HOLD的bare-stop上丢raw归属，620绿不能豁免；完成作业不恢复。事实后等待stop的原型破坏有限等待，已撤回。改为mandatory ownCleanup factory运输到同一既有Runtime，14构造点迁移，IO前登记；事实/控制可先结束、原recovery pending与真实raw保持，不新建owner/queue/window/grant。
+Source **4a4f360dd6350e03861c65a012d9f7bbec7f0deb**。e44/6ea4已完成45行静态审查全文消费：53b72在真实NoWindow HOLD的bare-stop上丢raw归属，620绿不能豁免；完成作业不恢复。事实后等待stop的原型破坏有限等待，已撤回。改为mandatory ownCleanup factory运输到同一既有Runtime，13个实际构造调用迁移，IO前登记；事实/控制可先结束、原recovery pending与真实raw保持，不新建owner/queue/window/grant。
 
 7 currentAPI业务RED/9对照/type0后精确Parent gate；最终16角色PASS/fulltsc0。9相关668PASS/7FAIL/type0；完整committed53快照同7失败/type0证明非本cleanup修补新引入，不是master允许失败基线。修两HOLD旧时序后最小9案4PASS/5FAIL/type0；五项legacy正向消费者的持久pin/当前resume合同仍需闭合，保running/ACK/late-HOLD断言，不冒整体完成。原15仍4done11open，caps[]executors{}/0.4.27，未ready/生产/发布/业务merge/gitlink。下一先闭五项，再PRE/own-post stop/ACK tick/ALL资源顺序/Factory/config/ERP；不再等已完成review或旧模板故障。
 

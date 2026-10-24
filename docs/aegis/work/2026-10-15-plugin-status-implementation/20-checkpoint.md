@@ -4,7 +4,7 @@
 
 - **Source** `4a4f360dd6350e03861c65a012d9f7bbec7f0deb` 已push；9自有文件，tracked/index clean，仅原node_modules link未跟踪。ERP eba/版本/caps[]executors{}未动，原15仍4done11open。
 - **已消费审查**：6ea4/e44 completed45行全读。HIGH真实NoWindow HOLD bare-stop raw无owner，不能以53b72的620绿或port自adopt测试免责。审查不恢复/重跑，无新独立执行或正向验收结论。
-- **修复**：撤回破坏有限等待的post-fact finally-await原型；Controller required ownCleanup(factory)运输到本组合原Runtime，首IO前登记，14构造点迁移。真实组合用同一Runtime，纯Controller世界用已有canonical Runtime，不新增owner类/队列/窗口。facts/control与真实raw寿命分离；原observedBudget.guard仍保pending/physicalSettled。stale resume cleanup走同一owner，不裸调；所有native许可仍须原source/clock，非owner函数授予。
+- **修复**：撤回破坏有限等待的post-fact finally-await原型；Controller required ownCleanup(factory)运输到本组合原Runtime，首IO前登记，13个实际构造调用迁移（此前14条命中含定义）。真实组合用同一Runtime，纯Controller世界用已有canonical Runtime，不新增owner类/队列/窗口。facts/control与真实raw寿命分离；原observedBudget.guard仍保pending/physicalSettled。stale resume cleanup走同一owner，不裸调；所有native许可仍须原source/clock，非owner函数授予。
 - **精确证据**：currentAPI7业务RED/9对照/type0后Source gate；最终16角色PASS/fulltsc0（包括真实HOLD、三类事实存储失败及raw后恢复）。一次9相关668PASS/7FAIL/type0；完整53 git archive同7FAIL/2对照/fulltsc0，临时副本已退休保Git/logs。两旧测试改为HOLD事实已提交后的完整state+queue不被旧recover覆盖，原70秒tuple/时钟/错误断言保留；最小9案4PASS/5FAIL/type0。五个旧正向chain仍是legacy fake业务pin/过时resume组合，未闭合、未弱化running/ACK/late-HOLD断言，不允许把53任务分支失败当master获准基线或累计为全插件通过。LSP4path0reported/2clean/2inconclusive。
 - **下一步/门禁**：先闭五个旧正向消费者的真实持久pin及当前协议；再source-owned PRE/own-post stop/noPRE事实、ACK tick/实际raw/ALL legacy资源顺序/Worker、PageFactory/config/ERP/E2E。config/perf未来写域仍未交回，不碰旧WIP；ERP currentmaster matched依赖/0071与协调isolated门尚未闭，本轮无DB/merge。证据根`/tmp/plugin-status-continuous-01a1406d/`，当前以`scheduler-cleanup-owner-checkpoint.json`和durable schedulerFactsRawOwnershipDelivery为准，不恢复完成审查。
 
