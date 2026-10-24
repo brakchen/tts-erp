@@ -12,7 +12,9 @@
 
 > 2026-10-23 原resume时钟增量：任务分支生产 `1f9bd7c`／测试补强 `19b8b11` 已接通原请求 clock callback/domain/deadline、不可变命令 root/source 与 Scheduler expectation 数据；适配器须在自身 await 后紧邻实际动作消费一次 admit，端口调用本身不算启动，迟到事实不能成为重复启动权限。managed resume 终态标记取原 continuation，真实注入 Runtime 的 live／到期拒绝／已启动迟到终态均有测试。生产一次14文件778PASS/type0，追加控制后仅 native 文件230PASS/type0，不累计。独立27行窄审无确认引入缺陷，覆盖缺口由Parent补证；**真实 Scheduler Factory 在 await 后校验实际存储 root/source/leaf/pin 并调用原生动作仍未实现**，数据比较不是授权证明。contextless 仅旧泛型兼容，实际生产适配器必须拒绝缺 expectation；能力继续关闭，不部署／发布。
 
-> 2026-10-24 扫描 Alarm 增量：任务分支 `69d6169`→`f39e6a7` 已把显式 managed scan 路径接到实际 `chrome.alarms.create` 调用：原业务队列内核真实 started root/source/leaf/pin，最后消费原 clock/admit 后同步调用；原生 Promise 在队列外等待。迟到展示时间还需原值/presence CAS，展示 I/O 失败不否定已创建事实。69d 静态窄审48行指出的两P2均由2业务RED/type0复现并在该事实出口修复；修前一次15文件980/type0，修后最窄native＋旧background两文件431/type0，不累计。这里只证明 ONE scan 原生入场及条件展示事实，**完整 Scheduler Factory、通知/tick gate、原生资源重叠和浏览器验收仍开**；实际执行器/capabilities 未激活，未部署／发布。
+> **当前增量（2026-10-24）**：任务分支 `0bff866`→`87718fa` 已复用原Runtime CycleLease登记显式任务、控制完成后保持实际raw全排空；managed启动以原stored root/source/leaf/pin和原clock一次admit，无await创建SCAN＋NOTIFICATION两Alarm，各自cadence，逐一观察并allSettled保partial事实。原display字段各自value/presence CAS，展示I/O不否定native事实。BG显式ctx绝不调用human enable/bind/reload；仅复用既有高层settingsSaveQueue序列化组与legacy公开create，原回调/fence/native receiver在高层await前捕获，不加owner/queue/token/window。当前精确5相关文件533PASS/完整tsc0，包含真实Runtime→Controller→双native→applied/failed终态；不是全插件/浏览器/独立执行证据。**完整source-owned stop、独立negative/HOLD事实、ACK-capable tick、raw接线、全部legacy资源顺序/Worker终止、真实PageFactory及两端配置/ERP/E2E仍未验收**；原15仍4done11open，capabilities/executors关闭、0.4.27不变，无部署/发布/业务merge。以下日期增量是相应时点历史，不用旧“尚未实现”或旧writer判断当前状态。
+
+> 2026-10-24 历史扫描 Alarm 增量：任务分支 `69d6169`→`f39e6a7` 已把显式 managed scan 路径接到实际 `chrome.alarms.create` 调用：原业务队列内核真实 started root/source/leaf/pin，最后消费原 clock/admit 后同步调用；原生 Promise 在队列外等待。迟到展示时间还需原值/presence CAS，展示 I/O 失败不否定已创建事实。69d 静态窄审48行指出的两P2均由2业务RED/type0复现并在该事实出口修复；修前一次15文件980/type0，修后最窄native＋旧background两文件431/type0，不累计。这里只证明 ONE scan 原生入场及条件展示事实，**完整 Scheduler Factory、通知/tick gate、原生资源重叠和浏览器验收仍开**；实际执行器/capabilities 未激活，未部署／发布。
 
 ## 1. 现状、基线与方案归属
 

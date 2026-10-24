@@ -1,6 +1,14 @@
 # 通用插件状态与单目标恢复实施 - Intent
 
-## 当前续作：f39 ONE scan实际存储准入/原生调用及展示事实修复已push（2026-10-24）
+## 当前续作：877双Alarm启动组与0bff原Runtime raw归属已push，stop/tick等仍开（2026-10-24）
+
+Source **87718fa57520777b9b5297d5b166111effdf28ba**，前置 **0bff86641dd0949342331cebd727da3d5624d405**。原CycleLease同步登记后启动任务、保持control/actual physical全排空；精确双native组各自cadence、原stored owner＋原clock一次admit、无await两调用、allSettled保护partial事实；展示字段原source/value/presence独立CAS。既有高层queue串行双组与legacy公开create，原short业务queue不占raw等待；managed绝不重开用户开关/绑tab/reload。原callback/fence/native receiver在高层queue之前捕获，替换callback真实反例已修。
+
+严格TDD：adoption 2＋3RED/type0，group6RED/type0，queued capture1RED/type0，fail-fast控变4FAIL/type0且exact恢复；最终5相关 **533PASS/no skip/fulltsc0**（非累计335＋533、非全插件/独立执行/live）。真实Runtime→Controller→双native→applied/failed及展示错误均覆盖。1943 genuine新recover五矩阵/255已完成；70b9同协议失败作业恢复完成，92/86行咨询全读，不能当877独立审查或Source授权。
+
+整体仍C/原15仍4done11open：original PRE/own-post stop及独立事实、ACK-capable tick、raw adoption实际接线、全部legacy clear/单scan兼容seam排序、Worker终止、PageFactory/Store/document/stagedcapture/分页/manualAtoB/repair/两config/ERP/E2E未闭。caps[]executors{}/0.4.27不变，无ready/生产/发布/业务merge/gitlink。ERP模板健康警报及peer infra/v16 writer已解除，但eba0071 matched runner/guard/schema/auth/实际同步与协调isolated验证仍需新gate；config/perf core未有未来写域释放，已向用户明确询问，不动旧WIP。
+
+### 历史：f39单扫描入场与展示事实修复（以下旧断点已被当前小节覆盖）
 
 Source f39e6a753b30cf987a0895934202ebf722216cab（69d实际入口）：原队列读真实started root/source/leaf/pin后消费原clock并同步native create；原生等待不占短队列。nextScanAt为条件展示事实，原source和原value/presence CAS防旧尾覆盖，展示I/O失败不抹去已创建事实。3业务RED/type0、SOT10负例mutation-kill/2对照及真实Runtime组合证明入场；fresh51f/06f48行静态审查两个P2均另2业务RED/type0在原事实出口修复。修前15文件980/type0、修后两文件431/type0严格分轮，非982合跑/全插件/浏览器。
 

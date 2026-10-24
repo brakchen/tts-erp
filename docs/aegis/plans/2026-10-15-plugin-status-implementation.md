@@ -1,12 +1,36 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照：f39扫描Alarm实际SOT/native入场与事实修复已push，完整Factory仍开（2026-10-24）
+## 当前执行快照：877双Alarm启动组、0bff原Runtime raw归属已push；完整生命周期仍开（2026-10-24）
+
+- **Source `87718fa57520777b9b5297d5b166111effdf28ba`**（前置 `0bff86641dd0949342331cebd727da3d5624d405`）。原Runtime可同步登记任务再启动，控制结束不早释已知raw，复用同一CycleLease/pending/inFlight而非新owner。managed启动固定SCAN＋NOTIFICATION各自cadence，实际stored root/source/leaf/pin＋原clock下单次admit紧邻无await双native调用；逐一观察、allSettled排空，partial失败不报fully running，展示字段各自原source/value/presence CAS。
+- BG显式ctx不再走human enable/bind/reload；复用原高层settingsSaveQueue串行managed组与legacy公开create，私有queued-save避免自锁，short业务queue不等待native。原callback/fence/native receiver必须在高层queue handoff前拥有：额外1业务RED/type0证实迟捕获会借替换callback，已在同薄adapter修；传既有orchestration callback不是新队列或授权令牌。
+- **验证**：原adoption 2＋3业务RED/type0→4相关335/type0；双组6业务RED/type0、partial四排列/两字段CAS/展示错误/实际Runtime applied或failed终态、late-callback1RED；fail-fast控变杀4例/type0，精确own working SHA还原。最终精确候选5相关文件 **533PASS/no skip/fulltsc0**，不是335＋533或全插件/live验收。LSP零reported但3inconclusive。`1943dfe` genuine clear→NEW recover/新Controller五矩阵与native255/type0亦已交付，不再列尚未执行。
+- **真实剩余**：source-owned PRE/own-post stop/noPRE fact-only，独立negative/HOLD事实不等stop；ACK-capable canonical running/applied-resume tick，stop/tick实际raw-adoption接线；所有legacy clear/disable/bind/retry与单scan兼容seam的资源顺序/Worker终止；PageFactory/Store/document/one-read script/staged capture/strict分页/manualAtoB/repair/两config/ERP/E2E。这里只窄B，整体C/原15仍4done11open，caps[]executors{}/0.4.27不变，不ready/业务merge/生产/发布/父指针。
+- **协调恢复**：原c397进程丢失及a567 key校验失败留证，同协议精确失败run恢复70b9已completed，d726 Scheduler92行＋3186 ERP86行全读及实际receipt核；咨询非Source/独立执行批准，完成作业不再恢复。ERP审计task完成、Scheduler实施仍in_progress，两infra blocker已解除。peer模板0069/24点与infra/v16释放已收，不再等旧writer；eba0071实际merge/scope/runner-helper-guard/schema/auth和协调isolated刷新仍是Parent pre-DB gate。旧config/perf core未来写域未回交，已明确询问用户，不擅改旧WIP。
+
+### 历史：f39单扫描Alarm入场与展示事实修复（以下为当时断点，不是当前归属/未实现判断）
 
 Source **f39e6a753b30cf987a0895934202ebf722216cab**（原生入口69d6169）：显式BG managed scan通过薄适配器，在原业务队列内复核真实started root/receipt/FP/leaf/NS/GEN/clearing、canonical绑定/config范围/business tab/monitorEnabled/严格pin，最后消费原clock/single-admit并同步调用真实chrome.alarms.create。原生Promise立即观察、嵌套返回，队列不占其原始等待；创建完成后的nextScanAt仅是原source＋原字段value/presence CAS条件展示事实，无新权限/owner/key/queue/token/window。
 
 3个现有API业务RED/type0驱动实际入口，12个SOT矩阵、原生等待中队列可用/迟到保护、真实Runtime→BG→native→终态均验证。临时只删SOT拒绝return、保真实读取/clock，10负例FAIL/2对照PASS/type0，精确备份SHA还原。fresh51f/06f静态窄审48行全读，两个P2经真实2RED/type0修：展示SET失败不能让已创建native事实变RECOVERY_FAILED；旧创建迟到不得覆盖不转GEN的新legacy时间。修前一次15文件980PASS/type0；修后最窄两文件431PASS/type0，不累计982/全插件，不冒独立执行或f39再次独立接受。
 
 **剩余**：完整managed Scheduler Factory（缺ctx/expectation拒绝）、通知/tick gate、pending原生资源顺序/多managed重叠/Worker终止、实际CookieStore/document/PageFactory/capture/分页/manualUI/repair/两config/ERP/E2E；值CAS不是完整native排序或新grant。原15仍4完成11open/caps[]executors{}/0.4.27，无ready/业务merge/生产/发布/父指针；ERP模板/v16只peer01a16719写。网络临时失败留证并原接口有界重试，fetch首次成功/quota week30%。
+
+### 当前后继执行约束：复用Runtime raw lease承接Scheduler任务
+
+- 用户要求持续完成原monitor/status/两config计划，非全共享板。Scheduler完整契约咨询92行与ERP前置审计已由同协议精确失败run恢复后交付；只是设计/前置证据，不是代码验收。Parent保持Source/Git/最终gate唯一owner。
+- **Change Necessity / code-change**：现有runReportCycle把重叠报告丢弃，无法在tick/清理启动前登记其实际raw生命期；不应给Scheduler新建资源owner/队列/token。扩展原Runtime入口承接显式同步task factory，共用原CycleLease.pending/inFlight；不授予任何SOT/clock权限。
+- **契约**：保留无task参数的report overlap行为。显式task factory在任何任务I/O前由原lease登记观察过的control代理；实际work和必需physicalSettled都登记，控制提前结束/reject不早释raw。已有report lease只加入raw归属，不借其过期wait能力；tick-only使用同一类型lease并在控制结束后等待全部raw才释放。任务本身仍必须在实际副作用前验证原source/root/clock，raw adoption不是grant。
+- **严格TDD**：Mode auto / Decision strict / authority插件AGENTS。先以当前单参runReportCycle合法结构化可选第二参复现task factory被忽略的业务RED/type0（不导入缺失API、不用类型/超时作RED），再允许接口/owner局部实现；补同步登记/加入既有lease/失败兄弟raw未决/控制先结束/后继报告可恢复等反例。新独立tests/plugin-status-runtime-adoption.test.ts不导入保护fixture。
+- **Owner-fit / pressure**：Runtime本来就是raw cycle owner，局部扩入口/提取相同lease初始值，不加竞争owner；当前约1200行，新增约60行处于at-risk，限现有生命周期职责，不塞业务准入或Scheduler策略。新测试独立文件，background/Controller此步不改。
+- **验证与边界**：named adoption + full tsc，再原Runtime/terminal/drain相关；无production/caps激活、tick原生权限、完整Factory或全部任务完成声称。后继共享Alarm的legacy顺序、单admit精确双create组/all-settled、original PRE/own-post stop与独立事实、canonical running/applied-resume tick仍须各自真实反例。ERP实际merge/runner/schema/auth readback及isolated验证另按前置gate执行。
+
+### 当前后继：精确双Alarm组与现有高层队列的创建顺序
+
+- 原生边界已有6个current-API业务RED/type0：合法调用现有setMonitorEnabled额外原expectation，live未消费准入、旧human分支在storedGEN变化/原clock过期/用户已关闭时仍创建两alarm甚至重开用户开关；第一native raw未决时第二调用未发出；legacy同名create越过未决managed create。最初findLast超出ES lib的type2已仅修测试，不充RED。
+- code-change：在原薄scheduler adapter统一精确plan，单scan历史入口保留；新monitoring组固定SCAN+NOTIFICATION各用原cadence、单admit后无await调用两次、逐一立即观察sync throw/async raw Promise、allSettled全排空后才返回完整成功，partial native事实不伪装fully running。每字段仍original source/value/presence CAS，展示I/O不否定native事实。
+- BG只显式expectation走managed组，绝不复用human开关/绑定/reload逻辑。managed组与legacy公开创建入口复用已有settingsSaveQueue，不建资源队列；short canonical storage queue只覆盖SOT/JIT/native invocation，不持有raw等待。现有已在高层队列内的settings-save私有body用未包队列的scheduling operation避免自锁；公开saveSettings统一从同一高层入口进入。导入仍由原高层owner串行，原业务serializer不改。
+- 验证：6指定用例+full tsc，再partial原生各throw/reject/held sibling、两字段展示CAS、原background/Runtime/native/drain回归；任何生产Source前需Parent精确gate。当前完整Factory仍C：既有单scan兼容seam、legacy clear/disable/bind路径的全资源顺序、original-PRE/own-post stop/独立事实、ACK-capable tick、raw adoption实接线尚需单独gates，不把一条create顺序例宣称全coexistence闭合。capabilities/executors继续关闭。
 
 ### 历史：1f9/19b8原resume时钟与终态运输
 
