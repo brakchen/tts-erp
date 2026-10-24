@@ -191,6 +191,24 @@ def test_invalid_url_keeps_raw_scope_and_blocks_query(site: ComparisonSite, quer
     expect(page.locator("#total-spus")).to_have_text("—")
 
 
+@pytest.mark.parametrize("unknown", ["spu_id=1001", "token=TEST-sensitive-value"])
+def test_unknown_query_preserves_raw_and_blocks_scope_and_credential_forwarding(site: ComparisonSite, unknown: str) -> None:
+    forwarded: list[str] = []
+    site.page.on("request", lambda request: forwarded.append(request.url) if "/v2/analytics/" in request.url or "/v2/commerce/" in request.url else None)
+    query = f"?shop_pk=7&{unknown}"
+    page = site.open(query)
+    expect(page.locator("#alert-status")).to_have_attribute("data-kind", "error")
+    expect(page.locator("#alert-status")).to_contain_text("不支持的查询参数")
+    expect(page.locator("#alert-status")).not_to_contain_text("TEST-sensitive-value")
+    assert page.url.endswith(query)
+    assert not site.requests and not forwarded
+    page.locator("#btn-refresh").click()
+    expect(page.locator("#alert-status")).to_have_attribute("data-kind", "error")
+    assert page.url.endswith(query)
+    assert not site.requests and not forwarded
+    expect(page.locator("#total-spus")).to_have_text("—")
+
+
 def test_invalid_edited_spu_kept_and_exact_investigation_bypasses_activity(site: ComparisonSite) -> None:
     page = site.open()
     site.ready()
@@ -252,6 +270,29 @@ def test_original_roi_display_only_changes_and_independent_profit(site: Comparis
     if previous is None:
         expect(row).to_contain_text("上期广告费为零")
     expect(row).to_contain_text("未结算平台费估算")
+
+
+@pytest.mark.parametrize("previous,current", [
+    ("9007199254740992.01", "9007199254740992.02"),
+    ("90071992547409.91", "90071992547409.92"),
+    ("-9007199254740992.02", "-9007199254740992.01"),
+])
+def test_unsafe_display_precision_keeps_raw_values_without_false_flat_change(site: ComparisonSite, previous: str, current: str) -> None:
+    site.items = [_item(previousRoi=previous, currentRoi=current, previousNetProfitCny=previous, currentNetProfitCny=current)]
+    page = site.open()
+    site.ready()
+    row = page.locator("#alert-rows tr")
+    for previous_key, current_key, display_key in [
+        ("previousRoi", "currentRoi", "roi"),
+        ("previousNetProfitCny", "currentNetProfitCny", "profit"),
+    ]:
+        expect(row.locator(f'[data-value="{previous_key}"]')).to_have_text(previous)
+        expect(row.locator(f'[data-value="{current_key}"]')).to_have_text(current)
+        expect(row.locator(f'[data-display="{display_key}-difference"]')).to_have_text("—")
+        expect(row.locator(f'[data-display="{display_key}-percent"]')).to_have_text("—")
+    expect(row).to_contain_text("展示精度不足")
+    expect(row).not_to_contain_text("持平")
+    expect(page.locator("#total-spus")).to_have_text("12")
 
 
 def test_period_facts_are_backend_owned_zero_negative_and_null_distinct(site: ComparisonSite) -> None:

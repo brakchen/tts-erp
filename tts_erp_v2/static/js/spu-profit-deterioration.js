@@ -7,6 +7,7 @@
   const rootPrefix = markerAt >= 0 ? location.pathname.slice(0, markerAt) : '';
   const API = `${rootPrefix}/v2`;
   const DATA_PATH = '/analytics/spu-profit-deterioration';
+  const QUERY_KEYS = ['shop_pk', 'spu_ids', 'window_days', 'activity', 'anchor_date', 'limit', 'offset'];
   const $ = (id) => document.getElementById(id);
   const state = {
     params: new URLSearchParams(location.search), shops: null, version: 0,
@@ -101,11 +102,14 @@
 
   function validationError() {
     const params = state.params;
-    for (const key of ['shop_pk', 'window_days', 'activity', 'anchor_date', 'limit', 'offset']) {
+    for (const key of QUERY_KEYS.filter((key) => key !== 'spu_ids')) {
       if (params.getAll(key).length > 1) return `${key} 只能指定一次，请修正链接。`;
     }
     const retired = ['layer', 'sample', 'severity', 'state'].filter((key) => params.has(key));
     if (retired.length) return `不支持旧告警筛选 ${retired.join(', ')}，请从链接移除。`;
+    if ([...params.keys()].some((key) => !QUERY_KEYS.includes(key))) {
+      return '不支持的查询参数，请修正原链接；未扩大范围或转发未知参数。';
+    }
     if (params.has('shop_pk') && !/^[1-9]\d*$/.test(raw('shop_pk'))) return '店铺必须是正整数，请修正链接。';
     if (!['3', '7'].includes(raw('window_days', '7'))) return `比较窗口 ${raw('window_days')} 无效，仅支持 7 / 3 天，请重新选择。`;
     if (!['recent', 'all'].includes(raw('activity', 'recent'))) return `活动范围 ${raw('activity')} 无效，请重新选择。`;
@@ -143,7 +147,7 @@
 
   function queryString() {
     const query = new URLSearchParams();
-    for (const key of ['shop_pk', 'window_days', 'activity', 'anchor_date', 'limit', 'offset']) {
+    for (const key of QUERY_KEYS.filter((key) => key !== 'spu_ids')) {
       if (state.params.has(key)) query.set(key, raw(key));
     }
     query.set('window_days', raw('window_days', '7'));
@@ -225,6 +229,11 @@
     const before = Number(previous), after = Number(current);
     if (!Number.isFinite(before) || !Number.isFinite(after)) return { difference: '—', percent: '—', direction: '不可比较' };
     const delta = after - before;
+    // Reserve four fractional display digits; do not claim precise changes for unsafe magnitudes.
+    const displayMagnitudeLimit = Number.MAX_SAFE_INTEGER / 10_000;
+    if ([before, after, delta].some((value) => Math.abs(value) > displayMagnitudeLimit)) {
+      return { difference: '—', percent: '—', direction: '不可比较', reason: '数值过大，展示精度不足；请查看两期原值。' };
+    }
     const signed = (value) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${displayNumber(Math.abs(value))}`;
     return {
       difference: `${signed(delta)}${unit ? ` ${unit}` : ''}`,
@@ -242,7 +251,7 @@
     if (displayKey) {
       const change = displayChange(item[previousKey], item[currentKey], unit);
       html += `<div class="display-change">${change.direction} · 展示差额 <span data-display="${displayKey}-difference">${change.difference}</span>
-        <br>展示变化率 <span data-display="${displayKey}-percent">${change.percent}</span><small>仅上期大于 0 时计算变化率</small></div>`;
+        <br>展示变化率 <span data-display="${displayKey}-percent">${change.percent}</span><small>${change.reason ? esc(change.reason) : '仅上期大于 0 时计算变化率'}</small></div>`;
     }
     return `${html}</div>`;
   }
