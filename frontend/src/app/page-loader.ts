@@ -9,6 +9,11 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   'enum-map': () => import('../pages/enum-map'),
   'ad-daily': () => import('../pages/ad-daily'),
   'sync-jobs': () => import('../pages/sync-jobs'),
+  users: () => import('../pages/users'),
+  'runtime-configs': () => import('../pages/runtime-configs'),
+  'intercept-configs': () => import('../pages/intercept-configs'),
+  'spu-profit-deterioration': () => import('../pages/spu-profit-deterioration'),
+  login: () => import('../pages/login'),
 };
 
 /** Code mapping only: page metadata and permissions remain backend-owned. */

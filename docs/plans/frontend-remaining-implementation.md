@@ -91,7 +91,14 @@
 
 - 公共登录文档复用唯一 renderer；即便当前请求携带 admin grant，也只下发空导航、两个 false 业务能力提示和服务端规范化的 `loginNextPath`。缺失目标返回 no-store 503，不输出不可用 bootstrap，也不回退旧登录表单。
 - 既有 `_valid_next` 仍是服务端目的地出口，保留合法 next/query，补齐与共享 `pathFor` 一致的控制字符、编码斜杠/反斜杠、dot segment、非法百分号和非法 UTF-8 拒绝；拒绝时沿用既有默认目标，不增加前端重定向策略。
-- 无导航时复用同一 AppShell/Header/main，但不显示空侧栏、折叠开关或空抽屉。10 个真实 API 行为 RED 和 3 个 Shell 行为 RED 后，相关 wrapper 76 项（含 Shell 11 个 Node cases）、Ruff/typecheck/build 通过；这仍不证明尚未接线的匿名主入口/单一 401 owner、真实 cookie 或 native/视觉验收完成。
+- 无导航时复用同一 AppShell/Header/main，但不显示空侧栏、折叠开关或空抽屉。10 个真实 API 行为 RED 和 3 个 Shell 行为 RED 后，相关 wrapper 76 项（含 Shell 11 个 Node cases）、Ruff/typecheck/build 通过。
+- 后续匿名主入口的真实加载失败 RED 后，唯一 main 对 login 使用公共标题、禁用 SessionActions/初始会话探测，既有唯一 401 owner 在公共登录页不跳转，私有页保留原重认证路径。5 个 loader RED 和 12 个实际路由/registry RED 后，users/runtime-configs/intercept-configs/盈利变化/login 已接同一候选 renderer/loader，93 项相关 wrapper GREEN；此时 registry 为 12 个候选（manual/video 仍待审），不是生产激活或最终页面验收。真实 cookie、native、视觉、全 baseline 与精确 master/runtime 仍未完成。
+
+## 错误响应等待栅栏
+
+- 已接收的非 2xx **正数有效 Retry-After** 与 403/429 一样优先作为现有 ApiError 返回；不再等待可能挂起的错误 body，也不等待取消 unread body。这样本地 UI deadline 不会丢失服务器最小等待时间；500/503 仍是未知写入，不据此推断回滚或自动重放。
+- 无正数有效等待栅栏时，404/409/422 的原结构化 detail 路径保留，2xx 解码/持久化语义不变。带栅栏时优先提供安全 HTTP status/requestId/完整等待时间，而不是读取不可信 body 字段。此处只扩展唯一 SDK 的既有头边界，不增加 page-local metadata map、解析器、重试/会话引擎或第二套计时策略。
+- 14 个真实 SDK body-stall RED 后 shared wrapper GREEN；manual 原 35 项加 2 个实际 UI RED 在 SDK-only cherry-pick 后 37 GREEN。仍需独立复核和整体验收。
 
 ## 视频诊断的公开边界
 

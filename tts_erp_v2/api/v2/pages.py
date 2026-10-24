@@ -562,15 +562,12 @@ def focused_spus_page() -> HTMLResponse:
 
 
 @router.get("/spu-profit-deterioration", response_class=HTMLResponse)
-def spu_profit_deterioration_page() -> HTMLResponse:
-  """SPU 利润劣化告警页（只读展示）：路线/权限/侧边栏同 SPU ROI 页。
-
-  HTML shell 只做骨架:标题/告警横幅/筛选/表格与卡片列表/分页/阈值设置抽屉;
-  数据与业务判断全部消费 GET /v2/analytics/spu-profit-deterioration(只读)。
-  服务端只发布已物化快照与 effective config,浏览器不计算 ROI/净利润/阈值。
-  行为在 static/js/spu-profit-deterioration.js,样式在
-  static/css/spu-profit-deterioration.css。
-  """
+def spu_profit_deterioration_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
+  """SPU 盈利变化的只读 7/3 日对比；日期、事实与可用性由既有 API 决定。"""
+  if "spu-profit-deterioration" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "spu-profit-deterioration")
   return _render_page(
     "spu-profit-deterioration.html", current_page="spu-profit-deterioration"
   )
@@ -653,12 +650,16 @@ def dashboard_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
 
 
 @router.get("/intercept-configs", response_class=HTMLResponse)
-def intercept_configs_page() -> HTMLResponse:
+def intercept_configs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """拦截配置管理页面。
 
   功能：配置列表、新增/编辑弹窗、批量操作、导入导出、筛选分页。
   行为在 static/js/intercept-configs.js。
   """
+  if "intercept-configs" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "intercept-configs")
   return _render_page("intercept-configs.html", current_page="intercept-configs")
 
 
@@ -714,8 +715,12 @@ def enum_map_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
 
 
 @router.get("/runtime-configs", response_class=HTMLResponse)
-def runtime_configs_page() -> HTMLResponse:
+def runtime_configs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Versioned runtime configuration and encrypted secret-reference console."""
+  if "runtime-configs" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "runtime-configs")
   return _render_page("runtime-configs.html", current_page="runtime-configs")
 
 
@@ -738,12 +743,16 @@ def video_publish_page() -> HTMLResponse:
 
 
 @router.get("/users", response_class=HTMLResponse)
-def users_page() -> HTMLResponse:
+def users_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """用户管理（设计 §9）：用户 + 角色权限两页签。
 
   入口受 ``page:users`` 权限点控制（access 层按路由判定）；页面行为在
   static/js/users.js，数据 API 为 /v2/users* 与 /v2/roles*。
   """
+  if "users" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "users")
   return _render_page("users.html", current_page="users")
 
 

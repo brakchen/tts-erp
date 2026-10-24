@@ -13,7 +13,7 @@ describe('page module mapping (not activation or authorization)', () => {
   it('loads enum content without activating or authorizing its backend route', async () => {
     const module = await pageLoader('enum-map')(); expect(typeof module.default).toBe('function');
   });
-  it.each(['ad-daily', 'sync-jobs'])('loads the reviewed %s content through the existing loader', async (id) => {
+  it.each(['ad-daily', 'sync-jobs', 'users', 'runtime-configs', 'intercept-configs', 'spu-profit-deterioration', 'login'])('loads the reviewed %s content through the existing loader', async (id) => {
     const module = await pageLoader(id)();
     expect(typeof module.default).toBe('function');
   });

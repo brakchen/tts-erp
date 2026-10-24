@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from tts_erp_v2.accounts import service
 from tts_erp_v2.accounts.passwords import PasswordPolicyError
+from tts_erp_v2.api.v2 import frontend_pages
 from tts_erp_v2.middleware import session_auth
 from tts_erp_v2.middleware.access_log import _key_prefix
 
@@ -116,7 +117,7 @@ def login_page(request: Request) -> HTMLResponse:
   raw_next = _valid_next(request.query_params.get("next"))
   # root_path (set once from TTS_ERP_EXTERNAL_PREFIX in app.py) is the
   # single source of truth for the external mount prefix.
-  prefix = request.scope.get("root_path", "")
+  prefix = request.scope.get("root_path", "").rstrip("/")
   # Middleware redirects keep ``next`` route-relative, but page JS from older
   # deployments may already include root_path (for example /tts/v2/pages/...).
   # Prefix idempotently so either caller lands on exactly one external prefix;
@@ -126,6 +127,8 @@ def login_page(request: Request) -> HTMLResponse:
     raw_next == prefix or raw_next.startswith(f"{prefix}/")
   )
   next_url = raw_next if already_prefixed else f"{prefix}{raw_next}"
+  if "login" in frontend_pages.MIGRATED_PAGE_IDS:
+    return frontend_pages.render_frontend_page(request, "login", login_next_path=next_url)
   return HTMLResponse(_LOGIN_HTML.replace("__NEXT__", _html.escape(next_url)))
 
 

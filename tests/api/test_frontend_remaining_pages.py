@@ -36,7 +36,17 @@ def _bootstrap(text):
     return json.loads(match[1])
 
 
-@pytest.mark.parametrize("page_id", ["ad-daily", "sync-jobs"])
+@pytest.mark.parametrize(
+    "page_id",
+    [
+        "ad-daily",
+        "sync-jobs",
+        "users",
+        "runtime-configs",
+        "intercept-configs",
+        "spu-profit-deterioration",
+    ],
+)
 def test_actual_reviewed_page_routes_use_one_document(
     api_client, admin_key, assets, page_id
 ):
@@ -53,7 +63,17 @@ def test_actual_reviewed_page_routes_use_one_document(
     assert admin_key not in response.text
 
 
-@pytest.mark.parametrize("page_id", ["ad-daily", "sync-jobs"])
+@pytest.mark.parametrize(
+    "page_id",
+    [
+        "ad-daily",
+        "sync-jobs",
+        "users",
+        "runtime-configs",
+        "intercept-configs",
+        "spu-profit-deterioration",
+    ],
+)
 def test_missing_candidate_assets_are_not_a_legacy_fallback(
     api_client, admin_key, assets, monkeypatch, page_id
 ):
@@ -100,5 +120,41 @@ def test_ad_page_stays_readonly_and_requires_auth(api_client, readonly_key, asse
 
 
 def test_only_the_authoritative_registry_activates_reviewed_pages():
-    assert {"ad-daily", "sync-jobs"} <= frontend_pages.MIGRATED_PAGE_IDS
+    assert {
+        "ad-daily",
+        "sync-jobs",
+        "users",
+        "runtime-configs",
+        "intercept-configs",
+        "spu-profit-deterioration",
+        "login",
+    } <= frontend_pages.MIGRATED_PAGE_IDS
     assert not {"spu-roi", "focused-spus"} & frontend_pages.MIGRATED_PAGE_IDS
+
+
+def test_anonymous_login_uses_the_public_route_without_business_hints(
+    api_client, assets
+):
+    response = api_client.get("/v2/auth/login", params={"next": "/v2/pages/users"})
+    assert response.status_code == 200
+    data = _bootstrap(response.text)
+    assert data["pageId"] == "login"
+    assert data["navigation"] == []
+    assert data["roleCapabilities"] == {"readwrite": False, "admin": False}
+    assert data["loginNextPath"] == "/v2/pages/users"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert "<form" not in response.text
+
+
+def test_login_missing_assets_fail_closed_without_old_form(
+    api_client, assets, monkeypatch
+):
+    def unavailable(_prefix):
+        raise FileNotFoundError("TEST_private_login_asset")
+
+    monkeypatch.setattr(frontend_pages, "_production_assets", unavailable)
+    response = api_client.get("/v2/auth/login")
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "private, no-store"
+    assert "TEST_private_login_asset" not in response.text
+    assert "<form" not in response.text

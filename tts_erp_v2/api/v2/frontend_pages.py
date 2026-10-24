@@ -27,7 +27,8 @@ from tts_erp_v2.api.deps import require_role_at_least
 # Candidate/native acceptance and same-version publication remain separate.
 MIGRATED_PAGE_IDS: frozenset[str] = frozenset({
     "dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map",
-    "ad-daily", "sync-jobs",
+    "ad-daily", "sync-jobs", "users", "runtime-configs", "intercept-configs",
+    "spu-profit-deterioration", "login",
 })
 _FRONTEND_DIR = Path(__file__).resolve().parents[2] / "static" / "frontend"
 _ENTRY = "src/main.tsx"
