@@ -46,8 +46,11 @@ export function scheduleReadDelay(callback: () => void, milliseconds: number): (
   return () => { cancelled = true; clearTimeout(timer); };
 }
 
-/** Fetch one response. Cancellation propagates; mutations are never replayed. */
-export async function requestJson<T>(rootPath: string, path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
+/** Fetch once; an optional success decoder can preserve numeric identity before rounding.
+ * Error parsing, cancellation, authorization and mutation non-replay keep one owner.
+ */
+export async function requestJson<T>(rootPath: string, path: string, init: RequestInit = {},
+  parseResponse?: (raw: string) => unknown): Promise<ApiResponse<T>> {
   const method = (init.method ?? 'GET').toUpperCase();
   const headers = new Headers(init.headers);
   if (!headers.has('Accept')) headers.set('Accept', 'application/json');
@@ -60,7 +63,7 @@ export async function requestJson<T>(rootPath: string, path: string, init: Reque
   const raw = await response.text();
   let data: unknown;
   try {
-    data = JSON.parse(raw);
+    data = response.ok && parseResponse ? parseResponse(raw) : JSON.parse(raw);
   } catch {
     throw new ApiError(response.ok ? '服务器返回了无法解析的数据' : `HTTP ${response.status}`, response.status,
       retryDelay(response.headers.get('Retry-After')), requestId);
