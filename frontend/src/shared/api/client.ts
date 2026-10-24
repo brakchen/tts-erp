@@ -59,6 +59,14 @@ export async function requestJson<T>(rootPath: string, path: string, init: Reque
   const response = await fetch(pathFor(rootPath, path), { ...init, method, headers, credentials: 'same-origin' });
   const requestId = response.headers.get('x-request-id') ?? undefined;
   if (response.status === 401) unauthorizedHandler?.();
+  // Denial and throttling are authoritative in headers, not their untrusted
+  // bodies. Never let a stalled body hide a known permission/cooldown result.
+  // Structured validation/conflict/not-found bodies keep their existing path.
+  if (response.status === 403 || response.status === 429) {
+    void response.body?.cancel().catch(() => {});
+    throw new ApiError(`HTTP ${response.status}`, response.status,
+      retryDelay(response.headers.get('Retry-After')), requestId);
+  }
   if (response.status === 204) return { data: undefined as T, status: 204, headers: response.headers };
   const raw = await response.text();
   let data: unknown;
