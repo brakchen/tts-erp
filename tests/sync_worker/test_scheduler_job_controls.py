@@ -56,15 +56,15 @@ def test_make_executor_skips_disabled_tiktok_job(monkeypatch: pytest.MonkeyPatch
     )
     factory = MagicMock()
     monkeypatch.setattr(scheduler, "_is_job_enabled_in_factory", lambda _sf, _j: False)
-    run_calls: list[str] = []
+    spawned: list[str] = []
     monkeypatch.setattr(
         scheduler,
-        "_run_tiktok_job",
-        lambda _spec, _sf: run_calls.append(_spec.job_name),
+        "_run_scheduled_job_child",
+        lambda name: spawned.append(name),
     )
 
     _make_executor(spec, factory)()
-    assert run_calls == []
+    assert spawned == []
 
 
 def test_make_executor_skips_disabled_system_job(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,15 +77,15 @@ def test_make_executor_skips_disabled_system_job(monkeypatch: pytest.MonkeyPatch
     )
     factory = MagicMock()
     monkeypatch.setattr(scheduler, "_is_job_enabled_in_factory", lambda _sf, _j: False)
-    run_calls: list[str] = []
+    spawned: list[str] = []
     monkeypatch.setattr(
         scheduler,
-        "_run_system_job",
-        lambda _spec, _sf: run_calls.append(_spec.job_name),
+        "_run_scheduled_job_child",
+        lambda name: spawned.append(name),
     )
 
     _make_executor(spec, factory)()
-    assert run_calls == []
+    assert spawned == []
 
 
 def test_manual_run_ignores_disabled_control(monkeypatch: pytest.MonkeyPatch) -> None:

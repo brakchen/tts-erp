@@ -23,11 +23,11 @@ without one calling the other — which the design explicitly forbids.
 
 from __future__ import annotations
 
-import ctypes
-import gc
 import importlib
 import logging
 import random
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -478,7 +478,6 @@ def _run_tiktok_job_for_shop(
                 )
         finally:
             session.close()
-            release_tick_memory()
 
 
 def _run_system_job(
@@ -533,22 +532,6 @@ def _run_system_job(
         log.exception("[%s] tick failed", spec.job_name)
     finally:
         session.close()
-        release_tick_memory()
-
-
-def release_tick_memory() -> None:
-    """Return freed heap pages after a tick.
-
-    Jobs materialize order JSON and page lists, then drop them when the
-    session closes. CPython and glibc keep that high-water mark in the
-    long-lived worker unless malloc_trim is asked to release empty arenas.
-    Missing malloc_trim (non-glibc) is ignored.
-    """
-    gc.collect()
-    try:
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except (OSError, AttributeError):
-        return
 
 
 def _enumerate_tiktok_shops_in_factory(
@@ -600,28 +583,39 @@ def _record_failed_tick(
         session.close()
 
 
+def _scheduled_child_command(job_name: str) -> list[str]:
+    """One-shot CLI that exits when the tick finishes.
+
+    The daemon must not run the job in-process. A finished tick is a dead
+    process, so the kernel reclaims its heap. The parent only schedules.
+    """
+    return [sys.executable, "-m", "tts_erp_v2.sync_worker.main", "run", job_name]
+
+
+def _run_scheduled_job_child(job_name: str) -> None:
+    """Run one tick in a short-lived child and wait for it to exit."""
+    completed = subprocess.run(_scheduled_child_command(job_name), check=False)
+    if completed.returncode != 0:
+        log.error("[%s] one-shot child exited %s", job_name, completed.returncode)
+
+
 def _make_executor(
     spec: JobSpec,
     session_factory: sessionmaker[Session],
 ) -> Callable[[], None]:
-    """Wrap a job's run logic into a no-arg callable APScheduler can fire."""
-    if spec.is_tiktok:
+    """Wrap a job into a no-arg callable APScheduler can fire.
 
-        def run_tiktok() -> None:
-            if not _is_job_enabled_in_factory(session_factory, spec.job_name):
-                log.info("[%s] disabled by operator — skipping tick", spec.job_name)
-                return
-            _run_tiktok_job(spec, session_factory)
+    The callable only checks the operator switch, then starts a child
+    process. Job work does not stay in the scheduler process.
+    """
 
-        return run_tiktok
-
-    def run_system() -> None:
+    def run() -> None:
         if not _is_job_enabled_in_factory(session_factory, spec.job_name):
             log.info("[%s] disabled by operator — skipping tick", spec.job_name)
             return
-        _run_system_job(spec, session_factory)
+        _run_scheduled_job_child(spec.job_name)
 
-    return run_system
+    return run
 
 
 # ─── Scheduler factory ──────────────────────────────────────────
