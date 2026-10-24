@@ -82,6 +82,26 @@ def verify_probe_payload(expected: dict[str, str | int], payload: object) -> Non
     raise ValueError(REFUSAL)
 
 
+def require_data_probe(probe: VerifiedDataProbe) -> tuple[str, RunBinding]:
+    """Revalidate actual authenticated facts before a planned next consumer.
+
+    The earlier returned record alone is never a standing seed/write grant.
+    """
+    try:
+        if not isinstance(probe, VerifiedDataProbe) or probe.prefix not in ("", "/tts"):
+            raise ValueError(REFUSAL)
+        _require_child(probe.child)
+        expected = {"id": probe.enum_pk, "enum_type": probe.enum_type, "enum_value": probe.enum_value,
+                    "label_zh": probe.label_zh, "sort_order": 0}
+        payload = _bound_json(probe.child, probe.prefix + "/v2/config/enum-map/list",
+                              {"Authorization": "Bearer " + probe.readonly_key})
+        verify_probe_payload(expected, payload)
+        return _require_child(probe.child)
+    except (ValueError, TypeError, KeyError, AttributeError, OSError, RecursionError,
+            http.client.HTTPException, SQLAlchemyError):
+        raise ValueError(REFUSAL) from None
+
+
 def seed_and_check_canary(child: VerifiedChild, *, prefix: str = "") -> VerifiedDataProbe:
     """Readback only. Identity/readiness alone must not bypass any step here."""
     try:
