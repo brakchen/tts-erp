@@ -61,6 +61,7 @@ credential kinds:
 | Intercept request statistics | `GET /v2/intercept/requests/stats` | readonly |
 | Analytics cursor has-data / dump ingest (Chrome ext) | `GET /v2/analytics/sync/cursor`, `POST /v2/analytics/sync/dumps` | readwrite + scope |
 | Order / logistics reconcile and dump ingest (Chrome ext) | `POST /v2/order-sync/{reconcile,has-data,dumps}` | readwrite + scope |
+| Monitor plugin heartbeat / business progress | `POST /v2/plugin/monitor/health` | readwrite + Seller Center scope — see below |
 | Start TikTok seller authorization | `GET /v2/oauth/tiktok/authorize` | **readwrite** or above (handler-enforced) |
 | TikTok OAuth redirect target (new-shop onboarding) | `GET /v2/oauth/tiktok/callback?code&state` | **public** — see [`docs/api/tiktok-shop-oauth.md`](tiktok-shop-oauth.md) |
 
@@ -93,6 +94,53 @@ curl -sS -H "X-API-Key: $KEY" \
 curl -sS -H "X-API-Key: $KEY" \
   "http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=314&limit=2"
 ```
+
+## Monitor plugin health
+
+`POST /v2/plugin/monitor/health` accepts **exactly four JSON fields**, with a
+maximum body size of **4096 bytes**. Use `Content-Type: application/json` and
+`X-API-Key`; the key must have `readwrite` or higher access.
+
+```json
+{"shopId":"TEST_seller","shopName":"Display name","step":"heartbeat","status":"running"}
+```
+
+- `shopId`: nonblank string, at most 128 characters. This is the Seller Center
+  `oec_seller_id` / `seller_id` used by the monitor tab binding, **not** an
+  advertiser ID, ERP `shop_pk`, or an asserted OpenAPI `shop_id` equivalent.
+- `shopName`: string, at most 200 characters; manually configured display only,
+  never an identity or authorization key.
+- `step` / `status` must match this complete matrix:
+
+| step | accepted status |
+| --- | --- |
+| `heartbeat` | `running`, `stopped` |
+| `scan`, `close` | `started`, `progress`, `completed`, `failed` |
+| `evaluate` | `started`, `completed`, `failed` — **no `progress`** |
+
+Extra fields, client timestamps, instance IDs, coercion and invalid combinations
+are rejected. The server owns receipt time. If the resolved credential has
+nonempty scopes without `*`, it must include the exact `seller:<shopId>` scope;
+advertiser-only or unknown namespaces are rejected. This does not add persisted
+scope support to existing database API keys. Cookie-authenticated callers also
+need the existing `X-Requested-With: tts-erp` CSRF header.
+
+**Success is `204` with no body, only after persistence commits.** There are no
+`rowsWritten` / `logId` / nested status success channels. Errors include `401`
+(missing/invalid credentials), `403` (role/scope/CSRF), `413` (body too large),
+`422` (invalid JSON, fields or matrix) and `503` (persistence failure).
+
+Independent heartbeats continue after explicit monitoring stop; only business
+stage alerts are suppressed. Heartbeats and repeated `started` do not renew
+business progress. The server retains one current-state row per shop, not an
+event history. Fault/recovery notifications use the server-only published
+`plugin.monitor_health.v1` configuration; see
+[`../ops/runtime-config-management.md`](../ops/runtime-config-management.md).
+The exact timing/progress contract and remaining plugin runtime/live-validation
+boundaries are in [`../plugins/monitor/04-health-reporting-requirements.md`](../plugins/monitor/04-health-reporting-requirements.md)
+and [`../plugins/monitor/05-health-implementation-plan.md`](../plugins/monitor/05-health-implementation-plan.md).
+Implementation: `tts_erp_v2/api/v2/monitor_health.py`; isolated contract/wiring tests:
+`tests/api/test_monitor_health.py`, `tests/api/test_monitor_health_wiring.py`.
 
 ## Authentication
 

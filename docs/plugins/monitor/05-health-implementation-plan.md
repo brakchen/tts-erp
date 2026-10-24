@@ -89,7 +89,7 @@ Webhook 只能由服务端经 token_service 解密，普通 snapshot 仅 secret 
 2. ERP 只编辑 `tts_erp_v2/{app.py,db/models/__init__.py,access/_policy.py,sync_worker/scheduler.py}`：挂新 router/model、精确 POST readwrite、注册 `plugin.monitor_health` 独立 15 秒 system job。既有 JobSpec 增加可选 jitter 覆盖值，仅本 job 取 0，其他 job 仍沿用原全局 jitter。不得改 middleware 顺序。新增专属 wiring tests；仅在隔离工作树更新既有 scheduler registry 测试的新增 job/count/jitter 契约，主仓 foreign WIP 不移植、不修改。
 3. 插件共享入口由 perf/ROI/auto-bind owner 明确交接后再写。把埋点接入真实 scan/evaluate/close 分支、主动停止和 Alarm；加入必要 server URL/key 设置与 host permissions。交接前该部分诚实 blocked，不把独立组件宣称完整功能。
 4. 仅获交接后同步插件版本元数据/README/CHANGELOG，执行 focused→全 suite→coverage→tsc→build；需要 ZIP 时验证 manifest/hash，不把 mock 当真实 Chrome/飞书验收。
-5. 更新本组文档、运行配置使用说明；`docs/api/external-api.md` 由其当前 SPU owner 接收专属段落补丁或明确移交后再追加，不越权写。
+5. 更新本组文档、运行配置使用说明、`docs/api/external-api.md` 探活专属段落，以及 migration 对应的 `docs/schema/README.md` / `schema_tts_erp.sql`；SQL 快照仅由现有 `scripts/regen_schema.py` 从已到 head 的独占测试模板只读生成，不手改。共享文档写域须先在 board 确认交接，不越权写。
 6. ERP narrow isolated tests 与一次 `TTS_ERP_TEST_TEMPLATE_DB=tts_erp_test_monitor_health_template bash scripts/test_baseline.sh`；所有本 lane 的 0070 验证只使用该私有模板。主动停监控→业务免告警→关浏览器失联、正常心跳但 scan 卡住、无候选 close 等用户路径必须有跨端契约/集成证据。生产迁移/配置/安装/重启由人操作，明确未验证边界。
 7. 明确 paths staging、提交推送；满足 current-master 同步、锁内 prospective merge/验证/push 与 board reconciliation 后才能声明 integrated。插件指针仅在有意推进时修改，不把插件源代码暂存父仓。
 
