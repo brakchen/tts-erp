@@ -79,3 +79,10 @@
 - 旧 external-only 调用在唯一匹配时仍可用；零匹配返回 404，多店铺匹配返回 409，均不得先关闭或新增任何成本事实。外部 SPU ID 的实际唯一键包含店铺，不能把它当作全局唯一键。
 - 身份核对后仍复用原每 SPU 锁及单事务 close-old + insert，保留历史，不改金额精度、财务公式或写权限。这里只扩展 Pydantic 请求 DTO，不修改数据库 schema。
 - 未传 `valid_from` 时使用 aware UTC 的实际当前时刻；不能把宿主机的 naive 本地墙钟作为 UTC 存储，导致成本在未来数小时才生效。显式传入时间的既有契约保持不变。
+
+## 匿名登录展示契约
+
+- 仍只有一份 frontend bootstrap、AppShell 与 HTTP client。匿名文档以 `pageId=login` 标识，导航为空、业务写权限提示均为 false；不加入用户页面权限目录，不发起独立会话探测引擎。
+- `loginNextPath` 仅用于匿名登录，由既有服务端 `_valid_next` 和 root_path 幂等前缀逻辑给出。共享 parser 复用 `pathFor` 核验同源、无穿越且前缀已存在；缺失/非法目标或匿名文档包含导航/高权限提示时拒绝初始化，不信任浏览器查询串另造 redirect 政策。
+- 用户名/密码 JSON、认证、cookie 和会话归属不变。既有限流 body `retry_after_s` 保留，并补同值标准 `Retry-After` 响应头，使唯一 client 的 header-first 429 处理能保留完整等待时间。
+- `shared/api/request-lifetime.ts` 是从已验证用户页提取的原生 AbortController/Promise.race 小原语，只限定 30 秒本地 UI 等待并清理计时器，不决定服务端执行、认证状态、自动重放或 Retry-After。未知登录结果仍需显式查询当前会话、明确决定，不凭 GET 断言原密码/提交事实。
