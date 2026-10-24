@@ -10,7 +10,11 @@ export const record = (value: unknown): value is Record<string, unknown> => valu
 const fail = (): never => { throw new Error('运行配置响应格式不正确'); };
 const text = (v: unknown): string => typeof v === 'string' ? v : fail();
 const nullableText = (v: unknown): string | null => v === null ? null : text(v);
-export const version = (v: unknown): number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : fail();
+export const version = (v: unknown): number => {
+  // Versions are bounded UI metadata; payload numbers never pass this conversion.
+  if (typeof v === 'bigint' && v >= 0n && v <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(v);
+  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : fail();
+};
 const object = (v: unknown): Record<string, unknown> => record(v) ? v : fail();
 export function decodeItem(v: unknown): Item {
   const o = object(v); if (typeof o.hasDraft !== 'boolean') fail();
@@ -43,7 +47,7 @@ export function acknowledge(v: unknown, kind: string, key: string, target?: numb
     else if (o.status !== (kind.endsWith('retire') ? 'retired' : 'active')) fail();
   } else {
     if (o.configKey !== key) fail();
-    if (kind === 'publish' || kind === 'rollback') { version(o.publishedVersion); if (kind === 'rollback' && o.rolledBackFrom !== target) fail(); }
+    if (kind === 'publish' || kind === 'rollback') { version(o.publishedVersion); if (kind === 'rollback' && version(o.rolledBackFrom) !== target) fail(); }
     else if (o.status !== (kind === 'retire' ? 'retired' : 'active')) fail();
   }
 }
