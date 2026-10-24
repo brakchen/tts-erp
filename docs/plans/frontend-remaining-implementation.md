@@ -51,7 +51,7 @@
 
 1. 维护现有 page-loader、bootstrap/共享传输及唯一 `MIGRATED_PAGE_IDS`，不增加第二激活表或 missing-asset fallback；每页保持原 handler/页面授权。
 2. 各内容 writer 只写自己的新目录。parent 在其内容 handoff 冻结/释放后消费提交，不并发修改 child 文件。
-3. 审计实际命令入口的 cookie CSRF、原服务端权限和必要破坏 guard；最小修补，权限不扩大。不得改 middleware 顺序、schema/migration、金融计算或并行 owner 路径。
+3. 审计实际命令入口的 cookie CSRF、原服务端权限和必要破坏 guard；最小修补，权限不扩大。不得改 middleware 顺序、数据库 schema/migration、金融计算或并行 owner 路径。
 4. 新 native/support 测试使用独立文件，复用 P2 当前 wrapper proof、实际 Engine/Session、owned Popen liveness、nonce/attestation、canary、TEST 账户与 request fence；不重写 DSN/provenance/lifecycle owner。
 5. sync/视频等外部动作以隔离可证 no-op/受控替身验证入口，禁止借浏览器测试执行真实上游任务。
 6. 用户/运行配置等契约缺口先核 canonical API/legacy behavior；普通可逆实现细节由 owner 决定，不反复请求已满足的授权。新财务/权限政策或未获生产操作授权才上报。
@@ -72,3 +72,10 @@
 - 同步启停仍要求 admin，手动触发仍要求 readwrite。解析后的 cookie 身份必须通过既有 `require_cookie_csrf`，然后才校验任务/店铺、访问数据库或加入后台任务；同时携带 Bearer 不豁免 cookie。既有 API-key 调用方式不变。
 - `/v2/sync/status` 的 `last_error` 保持可空字符串字段，但非空时仅公开固定错误存在提示，不再返回 scheduler 保存的异常正文。上游正文可能含凭证、签名 URL 或业务载荷，不适合作为浏览器/只读 API 的错误详情。
 - 此变更不修改存储的 `error_message` 审计事实，也不改变 `last_status`、时间、周期和 severity 的原有业务判定。页面不得把错误存在提示解释为新的调度决策。
+
+## 人工成本目标与生效时间契约
+
+- `POST /v2/reporting/manual-costs` 保留既有 `spu_id` / Decimal 成本 / 币种 / note 等字段，新增可选正 bigint `spu_pk`。新页面提交所选行的内部主键和同一行的外部 ID，后端必须同时匹配，不能在主键无效或不匹配时回退到外部 ID 的第一行。
+- 旧 external-only 调用在唯一匹配时仍可用；零匹配返回 404，多店铺匹配返回 409，均不得先关闭或新增任何成本事实。外部 SPU ID 的实际唯一键包含店铺，不能把它当作全局唯一键。
+- 身份核对后仍复用原每 SPU 锁及单事务 close-old + insert，保留历史，不改金额精度、财务公式或写权限。这里只扩展 Pydantic 请求 DTO，不修改数据库 schema。
+- 未传 `valid_from` 时使用 aware UTC 的实际当前时刻；不能把宿主机的 naive 本地墙钟作为 UTC 存储，导致成本在未来数小时才生效。显式传入时间的既有契约保持不变。

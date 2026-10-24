@@ -8,7 +8,7 @@ Auth classification (in ``auth.required_role``):
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -92,7 +92,9 @@ SQL_COVERAGE_REPORT = (
     "FROM reporting.product_cost_snapshots) AS calculation_version"
 )
 SQL_RESOLVE_CHANNEL_PRODUCT = (
-    "SELECT id FROM commerce.products_spu WHERE spu_id = :ext_id LIMIT 1"
+    "SELECT id FROM commerce.products_spu WHERE spu_id = :ext_id "
+    "AND (CAST(:spu_pk AS bigint) IS NULL OR id = CAST(:spu_pk AS bigint)) "
+    "LIMIT 2"
 )
 SQL_INSERT_MANUAL_COST = (
     "INSERT INTO procurement.manual_product_costs ("
@@ -460,9 +462,10 @@ def submit_manual_cost(
 ) -> ManualCostOut:
     """Operator-entered unit cost for one SPU. Requires readwrite.
 
-    Resolves the channel product by ``spu_id``, closes
-    any existing effective manual_cost row for the same SPU (history
-    preserved via ``valid_to``), and inserts a fresh row.
+    Resolves the matching ``spu_pk`` / ``spu_id`` pair, or an unambiguous
+    legacy external-only identity. Never chooses an arbitrary shop's first
+    matching row. Existing effective rows are closed and a new history row
+    appended only after this identity check and the shared per-SPU lock.
 
     CSRF guard: session-cookie auth is auto-attached by the browser, so
     every cookie-authed mutating request must carry the
@@ -480,20 +483,25 @@ def submit_manual_cost(
             status.HTTP_403_FORBIDDEN,
             "cookie-authed POST must set header X-Requested-With: tts-erp (CSRF guard)",
         )
-    cp_row = sess.execute(
+    matches = sess.execute(
         _STMT_RESOLVE_CHANNEL_PRODUCT,
-        {"ext_id": body.spu_id},
-    ).first()
-    if cp_row is None:
+        {"ext_id": body.spu_id, "spu_pk": body.spu_pk},
+    ).all()
+    if not matches:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"channel product not found: {body.spu_id}",
         )
-    cp_id = cp_row.id
+    if len(matches) > 1:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "spu_id is ambiguous; provide spu_pk",
+        )
+    cp_id = matches[0].id
     lock_manual_cost_spu(sess, spu_pk=cp_id)
     role = request.scope.get("api_key_role") or "unknown"
     created_by = f"api_key:{role}"
-    valid_from = body.valid_from or datetime.now()
+    valid_from = body.valid_from or datetime.now(UTC)
 
     # 2026-09-01: close-old + insert in ONE transaction (audit P1-6).
     # The previous two-commit pattern (insert+commit, then
