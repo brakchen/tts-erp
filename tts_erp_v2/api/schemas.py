@@ -108,14 +108,15 @@ class SalesOrderLineOut(BaseModel):
 class ManualCostIn(BaseModel):
     """Body for POST /v2/reporting/manual-costs.
 
-    Caller passes the channel product's external id (the
-    ``spu_id`` column on ``commerce.products_spu``).
-    The handler resolves it to ``spu_pk`` and inserts into
-    ``procurement.manual_product_costs``. New submissions auto-close the
-    previous effective row for the same SPU by setting its ``valid_to``.
+    New callers provide the internal ``spu_pk`` and matching external
+    ``spu_id`` from the selected row. Legacy external-only callers remain
+    supported only when the external identity resolves to a single product;
+    the same external ID can legitimately exist in different shops.
+    New submissions preserve history by closing the prior effective row.
     """
 
     spu_id: str = Field(min_length=1, max_length=128)
+    spu_pk: int | None = Field(default=None, gt=0, le=9223372036854775807)
     unit_cost: Decimal = Field(gt=Decimal(0))
     currency: str = Field(min_length=3, max_length=3, pattern="^[A-Z]{3}$")
     valid_from: datetime | None = None

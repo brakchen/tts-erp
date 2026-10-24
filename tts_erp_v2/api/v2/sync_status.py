@@ -194,7 +194,13 @@ def _build_status(
         last_run_at=last_run_at,
         last_finished_at=last_finished_at,
         last_status=last.status if last is not None else None,
-        last_error=last.error_message if last is not None else None,
+        # Scheduler exceptions can contain upstream bodies and credentials.
+        # Keep the audit fact in storage; publish presence, never its raw text.
+        last_error=(
+            "最近一次运行存在错误；详细信息不公开"
+            if last is not None and last.error_message
+            else None
+        ),
         next_expected_at=next_expected_at,
         lag_seconds=lag_seconds,
         cycles_late=cycles_late,
