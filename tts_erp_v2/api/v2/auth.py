@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import html as _html
 import logging
+import re
 import sys
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -79,9 +81,21 @@ def _valid_next(raw: str | None) -> str:
   """Open-redirect guard: only same-origin absolute paths are allowed."""
   if not raw:
     return DEFAULT_NEXT
-  if raw.startswith("/") and not raw.startswith("//") and "\\" not in raw:
-    return raw
-  return DEFAULT_NEXT
+  if not raw.startswith("/") or raw.startswith("//") or "\\" in raw:
+    return DEFAULT_NEXT
+  # Match the existing shared pathFor boundary; do not normalize destinations.
+  path = raw.split("?", 1)[0].split("#", 1)[0]
+  if re.search(r"%(?![0-9a-fA-F]{2})", path):
+    return DEFAULT_NEXT
+  try:
+    decoded = unquote(path, errors="strict")
+  except UnicodeError:
+    return DEFAULT_NEXT
+  if (decoded.startswith("//") or "\\" in decoded
+      or re.search(r"[\x00-\x1f\x7f]", decoded)
+      or any(segment in {".", ".."} for segment in decoded.split("/"))):
+    return DEFAULT_NEXT
+  return raw
 
 
 def _client_bucket(request: Request) -> str:

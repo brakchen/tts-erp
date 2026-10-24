@@ -48,6 +48,7 @@ function Navigation({ bootstrap, onNavigate }: { bootstrap: FrontendBootstrap; o
 
 /** Shared MPA layout; the server owns menu visibility and all navigation destinations. */
 export default function AppShell({ bootstrap, title, description, actions, children }: AppShellProps) {
+  const hasNavigation = bootstrap.navigation.length > 0;
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(desktopQuery).matches);
   const [collapsed, setCollapsed] = useState(readCollapsedPreference);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -77,14 +78,14 @@ export default function AppShell({ bootstrap, title, description, actions, child
 
   return (
     <div className="flex min-h-dvh min-w-0">
-      {isDesktop && !collapsed && (
+      {hasNavigation && isDesktop && !collapsed && (
         <aside id={navigationId} className="sticky top-0 max-h-dvh w-64 shrink-0 overflow-y-auto border-r border-separator p-4">
           <Navigation bootstrap={bootstrap} />
         </aside>
       )}
       <div className="min-w-0 flex-1">
         <header className="flex min-w-0 flex-wrap items-start gap-4 border-b border-separator p-4 lg:p-6">
-          {isDesktop ? (
+          {hasNavigation && (isDesktop ? (
             <Button variant="secondary" aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'} aria-expanded={!collapsed} aria-controls={collapsed ? undefined : navigationId} onPress={toggleCollapsed}>
               {collapsed ? '展开侧边栏' : '折叠侧边栏'}
             </Button>
@@ -105,7 +106,7 @@ export default function AppShell({ bootstrap, title, description, actions, child
                 </Drawer.Content>
               </Drawer.Backdrop>
             </Drawer.Root>
-          )}
+          ))}
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-semibold break-words">{title}</h1>
             {description && <p className="text-muted break-words">{description}</p>}

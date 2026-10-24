@@ -87,6 +87,12 @@
 - 用户名/密码 JSON、认证、cookie 和会话归属不变。既有限流 body `retry_after_s` 保留，并补同值标准 `Retry-After` 响应头，使唯一 client 的 header-first 429 处理能保留完整等待时间。
 - `shared/api/request-lifetime.ts` 是从已验证用户页提取的原生 AbortController/Promise.race 小原语，只限定 30 秒本地 UI 等待并清理计时器，不决定服务端执行、认证状态、自动重放或 Retry-After。未知登录结果仍需显式查询当前会话、明确决定，不凭 GET 断言原密码/提交事实。
 
+## 匿名文档与共享 Shell 边界
+
+- 公共登录文档复用唯一 renderer；即便当前请求携带 admin grant，也只下发空导航、两个 false 业务能力提示和服务端规范化的 `loginNextPath`。缺失目标返回 no-store 503，不输出不可用 bootstrap，也不回退旧登录表单。
+- 既有 `_valid_next` 仍是服务端目的地出口，保留合法 next/query，补齐与共享 `pathFor` 一致的控制字符、编码斜杠/反斜杠、dot segment、非法百分号和非法 UTF-8 拒绝；拒绝时沿用既有默认目标，不增加前端重定向策略。
+- 无导航时复用同一 AppShell/Header/main，但不显示空侧栏、折叠开关或空抽屉。10 个真实 API 行为 RED 和 3 个 Shell 行为 RED 后，相关 wrapper 76 项（含 Shell 11 个 Node cases）、Ruff/typecheck/build 通过；这仍不证明尚未接线的匿名主入口/单一 401 owner、真实 cookie 或 native/视觉验收完成。
+
 ## 视频诊断的公开边界
 
 - 诊断仍是显式授权读取，默认任务读取不附带 prompt/Artemis 输出。`promptSnapshot` 保持可空文本 wire 字段，生产者 `_attempt` 复用既有 `publishing.diagnostics.sanitize_text`：沿用凭证赋值/认证头/URL query 的脱敏规则和最多 2000 字符边界，不增加客户端 redactor 或另一解析引擎。

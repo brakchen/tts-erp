@@ -180,8 +180,17 @@ def _role_capabilities(request: Request) -> dict[str, bool]:
     return capabilities
 
 
-def render_frontend_page(request: Request, page_id: str) -> HTMLResponse:
+def render_frontend_page(
+    request: Request, page_id: str, *, login_next_path: str | None = None
+) -> HTMLResponse:
     """Render after the existing route's authentication and permission gates."""
+    public_login = page_id == "login"
+    if public_login and not login_next_path:
+        raise HTTPException(
+            status_code=503,
+            detail="Frontend initialization unavailable",
+            headers=_CACHE_CONTROL,
+        )
     root_path = request.scope.get("root_path", "").rstrip("/")
     dev_origin = os.getenv("TTS_ERP_FRONTEND_DEV_ORIGIN")
     try:
@@ -202,7 +211,7 @@ def render_frontend_page(request: Request, page_id: str) -> HTMLResponse:
     bootstrap = {
         "rootPath": root_path,
         "pageId": page_id,
-        "navigation": [
+        "navigation": [] if public_login else [
             {
                 "id": page.page_id,
                 "label": page.label,
@@ -213,8 +222,13 @@ def render_frontend_page(request: Request, page_id: str) -> HTMLResponse:
             if allowed is None or page.permission_code in allowed
         ],
         "releaseId": assets.release_id,
-        "roleCapabilities": _role_capabilities(request),
+        "roleCapabilities": (
+            {"readwrite": False, "admin": False}
+            if public_login else _role_capabilities(request)
+        ),
     }
+    if public_login:
+        bootstrap["loginNextPath"] = login_next_path
     links = [
         f'<link rel="stylesheet" href="{escape(href, quote=True)}">'
         for href in assets.css
