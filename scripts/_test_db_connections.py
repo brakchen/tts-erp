@@ -337,7 +337,7 @@ def load_run_binding(
         )
         binding.validate_url(value)
         return binding
-    except (ValueError, TypeError, OSError):
+    except (ValueError, TypeError, OSError, RecursionError):
         # Library/file errors may contain configuration values. Do not relay them.
         raise ValueError("current isolated run proof is missing or inconsistent") from None
 
