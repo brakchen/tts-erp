@@ -5,6 +5,7 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   dashboard: () => import('../pages/dashboard'),
   'intercept-requests': () => import('../pages/intercept-requests'),
   'intercept-stats': () => import('../pages/intercept-stats'),
+  shops: () => import('../pages/shops'),
 };
 
 /** Code mapping only: page metadata and permissions remain backend-owned. */
