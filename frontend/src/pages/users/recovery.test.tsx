@@ -89,5 +89,63 @@ it('keeps unknown session target immutable even after explicitly permitting manu
   await user.click(within(dialog).getByRole('button', { name: '查询公开状态' })); await within(dialog).findByText(/公开状态已读取/); await user.click(within(dialog).getByRole('button', { name: '我已核对，允许手动重试' }));
   expect(within(dialog).getByRole('button', { name: '吊销全部会话' })).toBeDisabled();
   expect(within(dialog).getByRole('button', { name: '吊销此会话' })).toBeDisabled();
+  const callsBeforeCheck = fetcher.mock.calls.length;
+  await user.click(within(dialog).getByRole('button', { name: '查询公开状态' }));
+  await within(dialog).findByText(/公开状态已读取/);
+  expect(fetcher.mock.calls.slice(callsBeforeCheck).map(([url, init]) => [url, init.method])).toEqual([
+    ['/tts/v2/users/9007199254740993', 'GET'],
+    ['/tts/v2/users/9007199254740993/sessions', 'GET'],
+  ]);
+  expect(within(dialog).getByRole('button', { name: '吊销全部会话' })).toBeDisabled();
+  expect(within(dialog).getByRole('button', { name: '吊销此会话' })).toBeDisabled();
+  expect(within(dialog).getByRole('button', { name: '确认操作' })).toBeDisabled();
+  expect(within(dialog).getByRole('button', { name: '我已核对，允许手动重试' })).toBeEnabled();
+  expect(within(dialog).getByText('确认吊销会话 99？该会话将失效。')).toBeVisible();
   expect(fetcher.mock.calls.filter(([, init]) => init.method !== 'GET')).toHaveLength(1);
 });
+it('queries again after password retry authorization and requires a renewed explicit retry decision', async () => {
+  let detailReads = 0;
+  let resolveCheck!: (response: Response) => void;
+  const user = userEvent.setup({ delay: null });
+  const fetcher = setup(async () => { throw new TypeError('TEST transport failure'); }, async (url) => {
+    if (url.endsWith('/roles')) return json({ roles: [], allPermissions: [] });
+    if (url.endsWith('/users')) return json({ users: [person] });
+    detailReads++;
+    return detailReads === 2 ? new Promise<Response>((resolve) => { resolveCheck = resolve; }) : json(detail);
+  });
+  const row = (await screen.findByText('test_user')).closest('tr')!;
+  await user.click(within(row).getByRole('button', { name: '重置密码' }));
+  const dialog = screen.getByRole('dialog');
+  const password = within(dialog).getByLabelText('新密码');
+  fireEvent.change(password, { target: { value: 'TESTPass123' } });
+  await user.click(within(dialog).getByRole('button', { name: '重置密码并吊销会话' }));
+  await within(dialog).findByText(/提交结果未确认/);
+  await user.click(within(dialog).getByRole('button', { name: '查询公开状态' }));
+  await within(dialog).findByText(/公开状态已读取/);
+  await user.click(within(dialog).getByRole('button', { name: '我已核对，允许手动重试' }));
+  expect(within(dialog).getByRole('button', { name: '明确再次提交' })).toBeEnabled();
+  const callsBeforeCheck = fetcher.mock.calls.length;
+  const query = within(dialog).getByRole('button', { name: '查询公开状态' });
+  expect(query).toBeEnabled();
+  await user.click(query);
+  expect(fetcher.mock.calls.slice(callsBeforeCheck).map(([url, init]) => [url, init.method])).toEqual([
+    ['/tts/v2/users/9007199254740993', 'GET'],
+  ]);
+  expect(within(dialog).getByRole('button', { name: '重置密码并吊销会话' })).toBeDisabled();
+  fireEvent.submit(within(dialog).getByRole('form'));
+  expect(fetcher.mock.calls.filter(([, init]) => init.method !== 'GET')).toHaveLength(1);
+  await act(async () => { resolveCheck(json(detail)); });
+  await within(dialog).findByText(/公开状态已读取/);
+  expect(password).toHaveValue('TESTPass123');
+  expect(within(dialog).getByText(/不能验证密码/)).toBeVisible();
+  expect(within(dialog).getByRole('button', { name: '重置密码并吊销会话' })).toBeDisabled();
+  fireEvent.submit(within(dialog).getByRole('form'));
+  expect(fetcher.mock.calls.filter(([, init]) => init.method !== 'GET')).toHaveLength(1);
+  await user.click(within(dialog).getByRole('button', { name: '我已核对，允许手动重试' }));
+  expect(fetcher.mock.calls.filter(([, init]) => init.method !== 'GET')).toHaveLength(1);
+  await user.click(within(dialog).getByRole('button', { name: '明确再次提交' }));
+  expect(fetcher.mock.calls.filter(([, init]) => init.method !== 'GET').map(([url, init]) => [url, init.method])).toEqual([
+    ['/tts/v2/users/9007199254740993/password', 'POST'],
+    ['/tts/v2/users/9007199254740993/password', 'POST'],
+  ]);
+}, 15000);

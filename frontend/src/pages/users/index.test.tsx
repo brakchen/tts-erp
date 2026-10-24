@@ -14,7 +14,7 @@ const person = { id: '9007199254740993', username: 'test_user', displayName: 'TE
 const operator = { code: 'operator', name: 'TEST Operator', description: null, apiTier: 'readwrite', isBuiltin: true, permissions: ['page:dashboard'], userCount: 1 };
 const custom = { ...operator, code: 'test_custom', name: 'TEST Custom', isBuiltin: false, userCount: 0 };
 const catalog = { roles: [{ ...operator, code: 'admin', name: 'TEST Admin', apiTier: 'admin' }, operator, custom], allPermissions: [{ code: 'page:dashboard', label: 'TEST Dashboard', group: 'TEST Group' }] };
-const detail = { ...person, pages: ['dashboard'], apiTier: 'readwrite' };
+const detail = { ...person, pages: ['page:dashboard'], apiTier: 'readwrite' };
 const session = { id: '9007199254740995', createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-02-01T00:00:00Z', lastSeenAt: null, revokedAt: null, ip: null, userAgent: 'TEST Agent', active: true };
 const json = (data: unknown, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
 function api(command: (url: string, init: RequestInit) => Promise<Response> = async () => json({ ok: true })) {
@@ -39,7 +39,7 @@ it('renders complete user columns and authoritative detail without inventing gra
   api(); const user = userEvent.setup({ delay: null }); await mount();
   expect(await screen.findByRole('grid', { name: '用户列表' })).toHaveTextContent('0');
   const dialog = await openUser(user, '详情');
-  expect(within(dialog).getByText('readwrite')).toBeVisible(); expect(within(dialog).getByText('dashboard')).toBeVisible();
+  expect(within(dialog).getByText('readwrite')).toBeVisible(); expect(within(dialog).getByText('page:dashboard')).toBeVisible();
 });
 it('creates once using actual camelCase aliases, CSRF header and server identity response', async () => {
   let resolve!: (response: Response) => void;

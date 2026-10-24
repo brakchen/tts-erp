@@ -50,7 +50,7 @@ export function useCommands(root: string, canManage: boolean) {
     } finally { lock.current = false; if (alive.current) setPending(false); }
   }
   async function verify(load: () => Promise<unknown>) {
-    if (!readyRead() || lock.current || !['unverified', 'failed', 'checked'].includes(recovery.current)) return;
+    if (!readyRead() || lock.current || !['unverified', 'failed', 'checked', 'allowed'].includes(recovery.current)) return;
     recovery.current = 'checking'; setPhase('checking');
     try { await load(); if (alive.current) { recovery.current = 'checked'; setPhase('checked'); } }
     catch { if (alive.current) { recovery.current = 'failed'; setPhase('failed'); } }
