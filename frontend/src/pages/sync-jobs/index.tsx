@@ -40,10 +40,18 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     stopDelay.current?.(); setCooldown(true);
     stopDelay.current = scheduleReadDelay(() => { if (mounted.current) setCooldown(false); }, notBefore.current - performance.now());
   }
+  function invalidateVerification() {
+    const previous = gate.current;
+    if (previous?.phase !== 'checked' && previous?.phase !== 'checking') return;
+    verification.current?.abort();
+    const waiting: Recovery = { ...previous, phase: 'waiting' };
+    gate.current = waiting; setRecovery(waiting);
+  }
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; stopDelay.current?.(); verification.current?.abort(); }; }, []);
   useEffect(() => {
     if (!canRead || performance.now() < notBefore.current) return;
     const controller = new AbortController(); let current = true;
+    invalidateVerification();
     reading.current = true; setLoading(true); setReadError('');
     requestJson<unknown>(bootstrap.rootPath, listPath, { signal: controller.signal }).then(({ data: value }) => {
       const decoded = decodeJobs(value);
@@ -57,13 +65,18 @@ export default function SyncJobs({ bootstrap }: PageProps) {
   }, [bootstrap.rootPath, canRead, refresh]);
 
   const blocked = !canRead || pending || loading || cooldown || denied || recovery !== undefined;
-  function maySubmit(attempt: Attempt) {
+  function maySubmit(attempt: Attempt, checkedRecovery?: Recovery) {
+    const gateAllows = checkedRecovery === undefined ? gate.current === undefined
+      : gate.current === checkedRecovery && checkedRecovery.phase === 'checked' && checkedRecovery.attempt === attempt;
     return authorized.current.canRead && (attempt.kind !== 'enabled' || authorized.current.canAdmin)
-      && !busy.current && !reading.current && !denied && performance.now() >= notBefore.current && !gate.current;
+      && !busy.current && !reading.current && !denied && performance.now() >= notBefore.current && gateAllows;
   }
-  async function submit(attempt: Attempt) {
-    if (!maySubmit(attempt)) return;
-    busy.current = true; setPending(true); setFailure(undefined); setNotice('');
+  async function submit(attempt: Attempt, checkedRecovery?: Recovery) {
+    if (!maySubmit(attempt, checkedRecovery)) return;
+    busy.current = true;
+    // Consume the captured recovery only after this submission owns the flight guard.
+    if (checkedRecovery) { gate.current = undefined; setRecovery(undefined); }
+    setPending(true); setFailure(undefined); setNotice('');
     try {
       const body = attempt.kind === 'enabled' ? { enabled: attempt.enabled } : attempt.shop_id === null ? {} : { shop_id: attempt.shop_id };
       const { data: value } = await requestJson<unknown>(bootstrap.rootPath, `/v2/admin/sync-jobs/${encodeURIComponent(attempt.job_name)}/${attempt.kind}`, {
@@ -98,6 +111,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     const controller = new AbortController(); verification.current = controller;
     try {
       const { data: value } = await requestJson<unknown>(bootstrap.rootPath, listPath, { signal: controller.signal });
+      if (!mounted.current || controller.signal.aborted || gate.current !== next) return;
       const decoded = decodeJobs(value);
       const attempt = previous.attempt;
       const job = decoded.jobs.find((j) => j.job_name === attempt.job_name);
@@ -112,14 +126,19 @@ export default function SyncJobs({ bootstrap }: PageProps) {
   }
   function retry() {
     const previous = gate.current;
-    if (previous?.phase !== 'checked' || performance.now() < notBefore.current || denied) return;
-    gate.current = undefined; setRecovery(undefined);
-    void submit(previous.attempt);
+    if (previous?.phase !== 'checked') return;
+    void submit(previous.attempt, previous);
+  }
+  function refreshJobs() {
+    if (!canRead || reading.current || busy.current || gate.current?.phase === 'checking' || performance.now() < notBefore.current) return;
+    // Reserve the read synchronously so a same-turn retry cannot consume recovery.
+    reading.current = true; setLoading(true); invalidateVerification();
+    setRefresh((n) => n + 1);
   }
 
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">任务清单</h2>
-      <Button variant="secondary" isDisabled={!canRead || loading || pending || cooldown || recovery?.phase === 'checking'} onPress={() => { if (!reading.current && !busy.current && performance.now() >= notBefore.current) setRefresh((n) => n + 1); }}>刷新任务</Button></div>
+      <Button variant="secondary" isDisabled={!canRead || loading || pending || cooldown || recovery?.phase === 'checking'} onPress={refreshJobs}>刷新任务</Button></div>
     <p>立即执行权限：readwrite / admin；启停周期调度需要 admin。停用周期调度不影响立即执行，权限以服务端判定为准。</p>
     {!canRead && <p role="alert">需要 readwrite 或 admin 才能读取任务管理数据。</p>}
     {loading && <p role="status">加载任务中…</p>}{readError && <p role="alert">{readError}</p>}
@@ -131,7 +150,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
       <Button isDisabled={cooldown || loading || recovery.phase === 'checking' || !canRead} onPress={() => { void verify(); }}>查询核对</Button>
       {recovery.phase === 'checking' && <p role="status">核对中…</p>}
       {recovery.phase === 'failed' && <p role="status">核对未完成，请明确重试查询。</p>}
-      {recovery.phase === 'checked' && <><p role="status">已读取当前公开任务状态；不能证明原命令是否生效。重新执行可能重复上游同步，请明确决定。</p><Button isDisabled={cooldown || denied || !canRead || (recovery.attempt.kind === 'enabled' && !canAdmin)} onPress={retry}>核对后明确重试原操作</Button></>}
+      {recovery.phase === 'checked' && <><p role="status">已读取当前公开任务状态；不能证明原命令是否生效。重新执行可能重复上游同步，请明确决定。</p><Button isDisabled={loading || pending || cooldown || denied || !canRead || (recovery.attempt.kind === 'enabled' && !canAdmin)} onPress={retry}>核对后明确重试原操作</Button></>}
     </section>}
     {canRead && data && <><p>服务端时间：{displayTime(data.server_time)}。健康级别与落后周期均沿用服务端结果；列表保持服务端顺序。</p>
       <Table><Table.ScrollContainer role="region" aria-label="任务表格"><Table.Content aria-label="定时任务" className="min-w-[75rem]"><Table.Header>
@@ -139,7 +158,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
       </Table.Header><Table.Body renderEmptyState={() => '暂无注册任务'}>{data.jobs.map((job) => <Table.Row key={job.job_name} id={job.job_name}>
         <Table.Cell><div className="w-52 break-all"><p className="font-semibold">{job.job_name}</p><p>{job.module_path} · {job.entrypoint}</p></div></Table.Cell>
         <Table.Cell>{job.interval_seconds} 秒</Table.Cell><Table.Cell><p>{job.is_tiktok ? 'TikTok 店铺' : '系统级'}</p><p>{job.scope_type}</p></Table.Cell>
-        <Table.Cell><p>{job.last_status.severity}</p><p>{job.last_status.last_status ?? '从未运行'}</p><p>落后周期：{job.last_status.cycles_late ?? '—'}</p><p>间隔秒数：{job.last_status.lag_seconds ?? '—'}</p>{job.last_status.last_error !== null && <p className="w-48 break-words">错误：{job.last_status.last_error}</p>}</Table.Cell>
+        <Table.Cell><p>{job.last_status.severity}</p><p>{job.last_status.last_status ?? '从未运行'}</p><p>落后周期：{job.last_status.cycles_late ?? '—'}</p><p>间隔秒数：{job.last_status.lag_seconds ?? '—'}</p>{job.last_status.last_error !== null && <p>存在运行错误；详情暂不公开</p>}</Table.Cell>
         <Table.Cell><p>开始：{displayTime(job.last_status.last_run_at)}</p><p>结束：{displayTime(job.last_status.last_finished_at)}</p><p>下次预计：{displayTime(job.last_status.next_expected_at)}</p></Table.Cell>
         <Table.Cell focusMode="child"><p>{job.enabled ? '已启用' : '已停用'}</p><Button size="sm" isDisabled={blocked || !canAdmin} aria-label={`${job.enabled ? '停用' : '启用'} ${job.job_name} 周期调度`} onPress={() => { void submit({ kind: 'enabled', job_name: job.job_name, enabled: !job.enabled }); }}>{job.enabled ? '停用' : '启用'}</Button></Table.Cell>
         <Table.Cell focusMode="child"><div className="w-64 space-y-2">{job.is_tiktok && <Select aria-label={`执行店铺 ${job.job_name}`} value={selection[job.job_name] || 'all'} isDisabled={blocked} onChange={(key) => {

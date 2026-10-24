@@ -106,13 +106,55 @@ describe('sync-jobs content', () => {
       expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();
     } finally { unset(); }
   });
-  it('preserves null and zero status values and server error evidence in the task table', async () => {
+  it('preserves null and zero status values and server error-existence evidence in the task table', async () => {
     mockApi(undefined, async () => json({ ...data, jobs: [{ ...job(), last_status: { ...job().last_status, last_run_at: null, lag_seconds: 0, cycles_late: null, last_error: 'TEST_job_failure_evidence' } }] }));
     await mount(); const first = await row();
     expect(within(first).getByText('落后周期：—')).toBeVisible();
     expect(within(first).getByText('间隔秒数：0')).toBeVisible();
     expect(within(first).getByText('开始：—')).toBeVisible();
-    expect(within(first).getByText('错误：TEST_job_failure_evidence')).toBeVisible();
+    expect(within(first).queryByText('存在运行错误；详情暂不公开')).toBeVisible();
+  });
+  it('never renders sensitive persisted upstream error text, while preserving the error-existence fact', async () => {
+    const sensitiveError = 'TEST_upstream_body_preview session=TEST_session_secret token=TEST_token_secret';
+    mockApi(undefined, async () => json({ ...data, jobs: [{ ...job(), last_status: { ...job().last_status, last_status: 'failed', last_error: sensitiveError } }] }));
+    await mount(); const first = await row();
+    expect(within(first).getByText('failed')).toBeVisible();
+    expect(first.textContent).not.toContain(sensitiveError);
+    expect(document.body.textContent).not.toContain('TEST_session_secret');
+    expect(document.body.textContent).not.toContain('TEST_token_secret');
+    expect(within(first).getByText('存在运行错误；详情暂不公开')).toBeVisible();
+  });
+  it('keeps the captured unknown command gated when a deferred refresh supersedes verification', async () => {
+    let reads = 0; let release!: (value: Response) => void;
+    const fetcher = mockApi(async () => json({}, 500), async () => {
+      reads += 1;
+      return reads === 3 ? new Promise<Response>((resolve) => { release = resolve; }) : json(data);
+    });
+    const user = userEvent.setup(); await mount();
+    await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' }));
+    await screen.findByText(/提交结果未确认/);
+    await user.click(screen.getByRole('button', { name: '查询核对' }));
+    await screen.findByText(/不能证明原命令是否生效/);
+    await user.click(screen.getByRole('button', { name: '刷新任务' }));
+    expect(reads).toBe(3);
+    // An old enabled retry must not consume recovery if the refresh owns the read guard.
+    const staleRetry = screen.queryByRole('button', { name: '核对后明确重试原操作' });
+    if (staleRetry) fireEvent.click(staleRetry);
+    expect(writes(fetcher)).toHaveLength(1);
+    expect(screen.queryByRole('region', { name: '命令核对' })).not.toBeNull();
+    expect(screen.getByRole('region', { name: '命令核对' })).toHaveTextContent('TEST_system');
+    expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();
+    await act(async () => { release(json(data)); });
+    expect(screen.queryByRole('button', { name: '核对后明确重试原操作' })).toBeNull();
+    expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();
+    expect(writes(fetcher)).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: '查询核对' }));
+    await screen.findByText(/不能证明原命令是否生效/);
+    expect(writes(fetcher)).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: '核对后明确重试原操作' }));
+    expect(writes(fetcher)).toHaveLength(2);
+    expect(writes(fetcher)[1][0]).toBe('/tts/v2/admin/sync-jobs/TEST_system/trigger');
+    expect(JSON.parse(String(writes(fetcher)[1][1].body))).toEqual({});
   });
   it('preserves full Retry-After across refresh; expiry only permits explicit action', async () => {
     const fetcher = mockApi(async () => json({}, 429, { 'Retry-After': '600' })); const user = userEvent.setup(); const view = await mount(); const first = await row('TEST_system'); vi.useFakeTimers();
