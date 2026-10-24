@@ -28,7 +28,17 @@ describe('intercept-configs content', () => {
   it.each([undefined, { readwrite: false, admin: false }, { readwrite: false, admin: true }])('fails closed on missing/readonly role hints %#', async (roleCapabilities) => {
     const fetcher = api(async () => { throw new Error('TEST no writes'); }); render(<InterceptConfigs bootstrap={{ ...props.bootstrap, roleCapabilities }} />); await screen.findByText(row.domain);
     for (const name of ['新增配置', '导入配置', '删除配置', '禁用配置']) expect(screen.getByRole('button', { name })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '查看详情' })).toBeEnabled(); expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('配置列表、详情、导出及变更均需 readwrite 权限和服务端授权；当前权限提示不允许变更。')).toBeVisible();
+    expect(screen.queryByText(/当前仅浏览/)).toBeNull();
+    expect(screen.getByRole('button', { name: '查询详情（需 readwrite 授权）' })).toBeEnabled(); expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('explains the readwrite requirement on a denied config read without promising browse-only access', async () => {
+    const fetcher = vi.fn(async () => json({ detail: 'TEST_UNTRUSTED_DENIAL' }, 403)); vi.stubGlobal('fetch', fetcher);
+    render(<InterceptConfigs bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} />);
+    expect(await screen.findByText('读取失败（HTTP 403）：权限不足或安全检查未通过')).toBeVisible();
+    expect(screen.getByText('配置列表、详情、导出及变更均需 readwrite 权限和服务端授权；当前权限提示不允许变更。')).toBeVisible();
+    expect(screen.queryByText(/当前仅浏览/)).toBeNull(); expect(document.body.textContent).not.toContain('TEST_UNTRUSTED_DENIAL');
+    expect(screen.getByRole('button', { name: '新增配置' })).toBeDisabled(); expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it('preserves exact filters/search wire, server total, page size and paging order', async () => {
     const fetcher = api(async () => json({})); const user = userEvent.setup(); render(<InterceptConfigs {...props} />); await screen.findByText(row.domain);
