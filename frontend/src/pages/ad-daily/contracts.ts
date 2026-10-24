@@ -1,5 +1,5 @@
 export interface AdRow {
-  id: number; seller_id: string; shop_pk: number | null; shop_name: string | null; advertiser_id: string; campaign_id: string; product_id: string;
+  id: number | string; seller_id: string; shop_pk: number | string | null; shop_name: string | null; advertiser_id: string; campaign_id: string; product_id: string;
   product_title: string | null; endpoint: string; day: string | null; mixed_real_cost: string | null; onsite_roi2_shopping_sku: number | null;
   onsite_roi2_shopping_value: string | null; onsite_mixed_real_roi2_shopping: string | null;
   metrics_extra: Record<string, unknown>; created_at: string | null; updated_at: string | null;
@@ -20,13 +20,17 @@ function string(value: unknown): string { return typeof value === 'string' ? val
 function nullableString(value: unknown): string | null { return value === null ? null : string(value); }
 function signedInteger(value: unknown): number { return typeof value === 'number' && Number.isSafeInteger(value) ? value : invalid(); }
 function integer(value: unknown): number { const parsed = signedInteger(value); return parsed >= 0 ? parsed : invalid(); }
-function nullableInteger(value: unknown): number | null { return value === null ? null : integer(value); }
+/** Oversized integer tokens arrive as exact strings from the shared raw decoder. */
+function identity(value: unknown): number | string {
+  if (typeof value === 'string') return /^[1-9]\d*$/.test(value) ? value : invalid();
+  return integer(value);
+}
 function decimal(value: unknown): string | null { return value === null ? null : typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value) ? value : invalid(); }
 function array<T>(value: unknown, decode: (item: unknown) => T): T[] { return Array.isArray(value) ? value.map(decode) : invalid(); }
 function decodeRow(value: unknown): AdRow {
   const r = object(value);
   return {
-    id: integer(r.id), seller_id: string(r.seller_id), shop_pk: nullableInteger(r.shop_pk), shop_name: nullableString(r.shop_name),
+    id: identity(r.id), seller_id: string(r.seller_id), shop_pk: r.shop_pk === null ? null : identity(r.shop_pk), shop_name: nullableString(r.shop_name),
     advertiser_id: string(r.advertiser_id), campaign_id: string(r.campaign_id), product_id: string(r.product_id), product_title: nullableString(r.product_title),
     endpoint: string(r.endpoint), day: nullableString(r.day), mixed_real_cost: decimal(r.mixed_real_cost), onsite_roi2_shopping_sku: r.onsite_roi2_shopping_sku === null ? null : signedInteger(r.onsite_roi2_shopping_sku),
     onsite_roi2_shopping_value: decimal(r.onsite_roi2_shopping_value), onsite_mixed_real_roi2_shopping: decimal(r.onsite_mixed_real_roi2_shopping),

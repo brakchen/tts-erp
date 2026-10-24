@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
+import { parseIdentityJson } from '../../shared/api/identity-json';
 import { decodeList, decodeOptions, type AdList, type Options } from './contracts';
 import { displayDecimal, naturalOrder, queryParams, readQuery, type Query, type Sort } from './query';
 import AdTable, { displayRoi } from './AdTable';
@@ -57,7 +58,7 @@ export default function AdDaily({ bootstrap }: PageProps) {
     setLoading(true); setError('');
     const params = queryParams(query);
     history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`);
-    requestJson<unknown>(bootstrap.rootPath, `/v2/reporting/ad-daily?${params}`, { signal: controller.signal })
+    requestJson<unknown>(bootstrap.rootPath, `/v2/reporting/ad-daily?${params}`, { signal: controller.signal }, parseIdentityJson)
       .then(({ data }) => {
         const decoded = decodeList(data);
         if (!current) return;

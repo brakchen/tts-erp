@@ -173,3 +173,26 @@ it('toggles sort direction remotely and supports keyboard detail activation', as
   expect(trigger).toHaveAttribute('aria-expanded', 'true'); expect(screen.getByRole('region', { name: '记录详情 TEST_CAMPAIGN' })).toBeVisible();
   await user.keyboard('{Enter}'); expect(screen.queryByRole('region', { name: '记录详情 TEST_CAMPAIGN' })).toBeNull(); expect(trigger).toHaveFocus();
 });
+it.each([
+  ['9007199254740993', '9223372036854775807'],
+  ['7', '9223372036854775807'],
+])('renders backend BIGINT row %s with exact internal shop PK from raw JSON', async (id, shopPk) => {
+  // These are raw integer tokens, never JSON.stringify of an already-rounded Number.
+  const raw = `{
+    "items": [{"id":${id},"seller_id":"900719925474099312345","shop_pk":${shopPk},"shop_name":null,
+      "advertiser_id":"TEST_ADV","campaign_id":"TEST_BIGINT","product_id":"TEST_PRODUCT","product_title":null,
+      "endpoint":"/TEST/ad","day":"2026-09-03","mixed_real_cost":"9999999999999999.9999",
+      "onsite_roi2_shopping_sku":0,"onsite_roi2_shopping_value":"0.0000","onsite_mixed_real_roi2_shopping":null,
+      "metrics_extra":{"clicks":0},"created_at":null,"updated_at":null}],
+    "total":1,"limit":50,"offset":0,
+    "summary":{"row_count":1,"spend":"9999999999999999.9999","attributed_orders":0,"attributed_gmv":"0.0000","weighted_roi":null,"currency":"USD"}
+  }`;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/options') ? json(options) : new Response(raw, { headers: { 'Content-Type': 'application/json' } })));
+  await mount(); expect(await screen.findByText('TEST_BIGINT')).toBeVisible();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getAllByText('9,999,999,999,999,999.9999')).toHaveLength(2);
+  await userEvent.click(screen.getByRole('button', { name: '更多详情 TEST_BIGINT' }));
+  const detail = screen.getByRole('region', { name: '记录详情 TEST_BIGINT' });
+  expect(within(detail).getByText(id, { exact: true })).toBeVisible();
+  expect(detail).toHaveAttribute('id', `ad-detail-${id}`);
+});
