@@ -1,6 +1,14 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行：4a4f360显式cleanup原生归属已push；五个旧正向链路仍未闭（2026-10-24）
+## 当前：772fefa修复五项正向链路及三个真实实现缺口（2026-10-24）
+
+- **Source `772fefa8b147d4f598e5512daf725e25b5939fc9` 已push**。五项原断言全部保留并通过：恢复→READY→服务端放行运行→确认清异常、真实上报结果、执行后HOLD拒绝旧running落盘、重启后确认、新HOLD同响应不误清异常。不是仅修改测试：真实pin/GEN/continuation与原Runtime context接通后，暴露并修复下列实现缺口。
+- Controller快照复用既有一致性读取，原binding+原source一起拥有；带原namespace/generation标记，不在page await后读latest补签。ACK复用既有完成continuation验证，不能要求已被自己终态推进的旧receipt仍为当前执行许可；原receipt/FP保留。Runtime把当前快照资格逐carrier绑定，不能由同轮旧running结果借用并提前清异常、转GEN后吞掉新HOLD。均在既有owner局部修复，无新owner/queue/key/window/API或生产cap变更。
+- 测试正向profile复用实际storage事务首次pin，不手写pin/ledger；旧Fake业务返回admitted与丢context只保留在明确的非原生控制/时钟单元profile。新profile配置/source一致读取，标明测试注入能力，重建Worker用真实UUID避免复用历史事件；不证明实际page/scheduler原生Factory。晚HOLD测试已改为真实Runtime ACK/start根→实际producer applied→HOLD→实际canonical拒绝，不再靠缺根的手工proposal默认拒绝充绿。
+- **验证分轮**：原五当前5FAIL/type0；snapshot原source两业务RED/type0；应用后ACK一业务RED/六有效负对照/type0；同轮旧carrier误借确认一业务RED/type0。最终一次13相关文件 **780PASS/no skip/fulltsc0**，另两生命周期文件 **37PASS/type0**；两个控变各杀4个ACK负例、1个新HOLD反例，type0且精确working字节恢复，最后14定向PASS/type0。分轮不累计、不冒全插件/live或独立审查。LSP五path零reported、1clean/4inconclusive。
+- 仅五项链路修补窄闭合；原15仍4done11open。下一是original PRE/own-post/noPRE stop、ACK-capable tick、ALL legacy资源顺序/Worker、PageFactory/Store/document/pagination/manual repair/两config/ERP/E2E。0.4.27/caps[]executors{}未启用，无生产/部署/业务mastermerge/gitlink。证据根`/tmp/plugin-status-continuous-01a1406d/chain-five-*`，以chain-five-closure-checkpoint.json为当前断点。已完成的e44等审查不恢复，本轮没有新独立审查结论。
+
+### 历史：4a4f360显式cleanup归属与当时五项未闭状态
 
 - Source **`4a4f360dd6350e03861c65a012d9f7bbec7f0deb`**。已全文消费e44/6ea4完成审查的45行HIGH：53b72使真实NoWindow HOLD的bare-stop丢Runtime归属，不能用新测试port自己adopt或620绿豁免。完成审查不恢复、不重跑；这是静态意见，非独立执行。
 - 拒绝“事实后finally等待stop”方案：13角色/type0绿但旧有限等待回归失败，已精确撤回该原型。现在Controller要求`ownCleanup(factory)`在IO前运输到**同一既有Runtime**；13个实际调用点迁移（原14条搜索命中含函数定义，已校正），纯Controller测试用真实canonical Runtime，真实组合不建第二owner。事实/控制可先结束，raw依既有pending/inFlight排空；原recovery observedBudget.guard仍登记，不补窗口、不造native grant。缺required callback的非类型调用仅事实、不直接裸调stop。

@@ -1,6 +1,12 @@
 # 通用插件状态与单目标恢复实施 - Intent
 
-## 当前续作：4a4f360强制cleanup归属已push，五个旧正向消费者尚未闭（2026-10-24）
+## 当前续作：772fefa五项正向链路修补已push（2026-10-24）
+
+Source **772fefa8b147d4f598e5512daf725e25b5939fc9**。实际storage首次pin/GEN/leaf、原Runtime context与跨Worker唯一UUID profile替代五项旧fake正向证明；其余控制/时钟generic profile不冒原生权限。暴露的真实缺口也已在owner修：snapshot拥有同一原state/source；ACK用完成continuation而非过时receipt许可；当前快照权限定于本carrier，旧结果不能先清异常使新HOLD失效。晚HOLD是实际ACK/start/applied producer后撤权，非缺根默认拒绝。没有新增owner/queue/window/生产授权。
+
+原五FAIL/type0→三组真实Source RED/type0后修；一次13相关780PASS/type0，另2生命周期37PASS；ACK控变杀4负例、当前carrier控变杀1例，type0且精确原working字节恢复，最终14定向PASS/type0。各轮独立，不累计或称全插件/live/新独立审查。五项子任务可以窄闭合，原15仍4done11open：PRE/own-post stop/ACK tick/ALL资源顺序/Worker、PageFactory/config/ERP/E2E继续，caps[]executors{}/0.4.27不变，无ready/生产/发布/业务mastermerge/gitlink。不得再把五项失败或完成review作为等待对象。
+
+### 历史：4a4f360 cleanup归属与当时五项未闭
 
 Source **4a4f360dd6350e03861c65a012d9f7bbec7f0deb**。e44/6ea4已完成45行静态审查全文消费：53b72在真实NoWindow HOLD的bare-stop上丢raw归属，620绿不能豁免；完成作业不恢复。事实后等待stop的原型破坏有限等待，已撤回。改为mandatory ownCleanup factory运输到同一既有Runtime，13个实际构造调用迁移，IO前登记；事实/控制可先结束、原recovery pending与真实raw保持，不新建owner/queue/window/grant。
 

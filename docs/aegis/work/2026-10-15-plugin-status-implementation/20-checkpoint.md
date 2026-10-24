@@ -1,6 +1,14 @@
 # 通用插件状态与单目标恢复 — 当前技术断点
 
-## 当前：4a4f360强制cleanup raw归属已push；五项旧正向chain仍未闭（2026-10-24）
+## 当前：772fefa已修复五项正向链路，三个实际owner缺口收口（2026-10-24）
+
+- **Source** `772fefa8b147d4f598e5512daf725e25b5939fc9` 已push，3应用owner+chain测试+native profile fixture共5文件。真实storage首次pin/GEN/continuation、原Runtime ctx及唯一UUID跨Worker；不手写pin/ledger或新窗口。五项原业务断言保留/加强，trace仅OS目录，不改foreign JSON。
+- **实际修复**：Controller createSnapshotCommit复用coherent PRE+state并携原namespace/generation，不在await后补latest；storage ACK复用ledgerEntryEligibilityCurrent确认完成的resume continuation，不要求自己已推进source后的旧receipt仍是执行grant；Runtime对本carrier而非同轮所有current-source收据赋予currentSnapshot资格，旧running结果不能先清异常/转GEN吞掉新HOLD。Source原clock/receipt/FP/ledger债不重建，无新owner/queue/key/window/API。
+- **证据**：原五当轮5FAIL/type0；snapshot2业务RED/type0（首轮type2仅临时debug字段错误已排除）；ACK正确7案1业务RED6负对照/type0（首轮错rawkey/规范化reader断言已纠正，不充证据）；currentcarrier1业务RED/type0。一次13文件780PASS/no skip/fulltsc0；另两生命周期37PASS。控变只绕过ACK continuation验证杀4负例、恢复旧carrier作用域杀1反例，均type0并cmp精确working字节还原，最后14定向PASS/type0。不是780+37+14合跑、全插件、浏览器或新独立审查；LSP5path0reported/1clean4inconclusive。
+- **边界/后继**：五项子任务窄闭合，原15仍4done11open，Scheduler完整Factory仍未验收。下一original PRE/own-post/noPRE stop与ACK-capable tick、ALL legacy资源顺序/单scan兼容/Worker终止；PageFactory/CookieStore/document/stagedcapture/strict分页/manual跨Store与repair/两config/ERP/E2E。ERP eba未改、无DB/merge；旧模板健康与peer v16释放已知，不再等待旧blocker；config/perf未释放写域仍不接管。caps[]executors{}/0.4.27，无生产/部署/发布/业务merge/gitlink。
+- **当前断点**：`/tmp/plugin-status-continuous-01a1406d/chain-five-closure-checkpoint.json` 与durable currentFrontier.chainFiveClosureDelivery；e44/6ea4完成审查历史保留不恢复，本轮Parent直接实现/验证，无新child或独立review结论。
+
+### 历史：4a4f360 cleanup归属与当时五项未闭
 
 - **Source** `4a4f360dd6350e03861c65a012d9f7bbec7f0deb` 已push；9自有文件，tracked/index clean，仅原node_modules link未跟踪。ERP eba/版本/caps[]executors{}未动，原15仍4done11open。
 - **已消费审查**：6ea4/e44 completed45行全读。HIGH真实NoWindow HOLD bare-stop raw无owner，不能以53b72的620绿或port自adopt测试免责。审查不恢复/重跑，无新独立执行或正向验收结论。
