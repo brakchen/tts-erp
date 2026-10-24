@@ -29,6 +29,9 @@ function retryDelay(value: string | null): number | undefined {
   return Number.isNaN(seconds) ? undefined : Math.max(0, seconds);
 }
 
+// Native binary uploads reuse the same header policy, without JSON/auth replay.
+export { retryDelay as retryAfterSeconds };
+
 /** One lifecycle-owned delay, split to avoid browser signed-32-bit timer overflow.
  * Uses elapsed monotonic time; it never retries requests or owns global scheduling.
  */
