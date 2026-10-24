@@ -1,794 +1,1492 @@
+"""PRD v3 comparison acceptance: real canonical SQL and availability evidence."""
+
 from __future__ import annotations
 
-import importlib.util
-import json
-from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
-from hashlib import sha256
-from pathlib import Path
+from datetime import UTC, datetime, time, timedelta
+from decimal import ROUND_HALF_UP, Decimal
+from urllib.parse import parse_qs, urlsplit
+from zoneinfo import ZoneInfo
 
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
-from sqlalchemy import delete, inspect, select, text, update
+from sqlalchemy import delete, event, select, text
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.analytics.spu_deterioration_alert.config import (
-    ALERT_CONFIG_KEY,
-    SEED_FALLBACK_CONFIG,
-    config_to_payload,
-)
-from tts_erp_v2.analytics.spu_deterioration_alert.policy import AlertState
+from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
 from tts_erp_v2.db.models import (
+    AdDaily,
+    AdRawLog,
+    Case,
+    CaseLine,
     ChannelAccount,
     ChannelProduct,
-    RuntimeConfigItem,
-    RuntimeConfigRevision,
-    SpuDeteriorationAlert,
+    SalesOrder,
+    SalesOrderLine,
+    SettlementComponent,
+    SettlementStatement,
+    SettlementTransaction,
+    SyncIssue,
+    SyncJob,
 )
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
-
-
-def _ensure_alert_migration(db_engine) -> None:
-    migration_path = (
-        Path(__file__).parents[2] / "alembic/versions/0068_spu_deterioration_alert.py"
-    )
-    required = {
-        "commerce.shops",
-        "commerce.products_spu",
-        "commerce.sales_orders",
-        "commerce.sales_order_lines",
-        "after_sales.cases",
-        "after_sales.case_lines",
-        "plugin.ad_daily",
-        "finance.settlement_statements",
-        "finance.settlement_transactions",
-        "finance.settlement_components",
-        "config.runtime_config_items",
-        "config.runtime_config_revisions",
-        "security.api_keys",
-    }
-    with db_engine.connect() as connection:
-        # pi-lens-ignore: python-sql-injection
-        database = connection.execute(text("SELECT current_database()")).scalar_one()
-        assert database.startswith("tts_erp_test_")
-        assert database != "tts_erp_test_template"
-        inspector = inspect(connection)
-        missing = sorted(
-            schema_table
-            for schema_table in required
-            if not inspector.has_table(*schema_table.split(".", 1)[::-1])
-        )
-        if missing:
-            pytest.skip(f"prerequisite schema unavailable: {missing}")
-        if inspector.has_table("spu_deterioration_alerts", schema="analytics"):
-            return
-    with db_engine.begin() as connection:
-        # pi-lens-ignore: python-sql-injection
-        connection.execute(text("CREATE SCHEMA IF NOT EXISTS analytics"))
-        spec = importlib.util.spec_from_file_location(
-            "alert_migration_0053_test", migration_path
-        )
-        assert spec is not None and spec.loader is not None
-        migration = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(migration)
-        migration.__dict__["op"] = Operations(MigrationContext.configure(connection))
-        migration.upgrade()
+ENDPOINT = "/oec_ads/shopping/v1/oec/stat/post_product_list"
+URL = "/v2/analytics/spu-profit-deterioration"
+TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 @pytest.fixture()
-def materialized_alert_scope(db_engine) -> Iterator[tuple[int, int]]:
-    _ensure_alert_migration(db_engine)
-    payload = config_to_payload(SEED_FALLBACK_CONFIG)
-    config_hash = sha256(
-        json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
-    calculated_at = datetime.now(UTC)
-    anchor_date = calculated_at.date() - timedelta(days=1)
+def comparison_scope(db_engine):
+    """Three sustained SPUs share orders; fourth has spend and no lifetime orders."""
+    anchor = datetime.now(TZ).date() - timedelta(days=4)
+    started = datetime.combine(anchor + timedelta(days=1), time(0, 5), TZ)
     with Session(db_engine) as session:
-        # The 0053 migration seeds a strict draft; this fixture intentionally
-        # replaces it with the published fixture required by API-contract tests.
-        session.execute(
-            delete(RuntimeConfigRevision).where(
-                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY
-            )
-        )
-        session.execute(
-            delete(RuntimeConfigItem).where(
-                RuntimeConfigItem.config_key == ALERT_CONFIG_KEY
-            )
-        )
-        session.add(
-            RuntimeConfigItem(
-                config_key=ALERT_CONFIG_KEY,
-                display_name="TEST published alert",
-                json_schema={"type": "object", "additionalProperties": True},
-                draft_payload=payload,
-                draft_rollout=[],
-                draft_version=1,
-                published_version=3,
-            )
-        )
-        session.add(
-            RuntimeConfigRevision(
-                config_key=ALERT_CONFIG_KEY,
-                version=3,
-                payload=payload,
-                rollout=[],
-                created_by="TEST_published_alert",
-            )
-        )
         shop = ChannelAccount(
-            platform="tiktok", shop_id="TEST_alert_shop", status="active"
+            platform="tiktok", shop_id="TEST_COMPARE_SHOP", region="VN"
         )
         session.add(shop)
         session.flush()
-        spu = ChannelProduct(shop_pk=shop.id, spu_id="TEST_alert_spu", status="active")
-        session.add(spu)
-        session.flush()
-        session.add(
-            SpuDeteriorationAlert(
-                shop_pk=shop.id,
-                spu_pk=spu.id,
-                anchor_date=anchor_date,
-                window_days=1,
-                layer="fast",
-                severity="warning",
-                state="roi_deterioration",
-                sample_status="sufficient",
-                prior_roi=Decimal(1),
-                current_roi=Decimal(".7"),
-                roi_decline=Decimal(".3"),
-                prior_net_profit_cny=Decimal(100),
-                current_net_profit_cny=Decimal(70),
-                net_profit_decline=Decimal(".3"),
-                previous_spend_cny=Decimal(100),
-                current_spend_cny=Decimal(100),
-                previous_order_count=5,
-                current_order_count=5,
-                previous_ad_orders=1,
-                current_ad_orders=1,
-                effective_config_source="runtime_config",
-                effective_config_version=3,
-                config_payload_hash=config_hash,
-                basis_calculated_at=calculated_at,
+        products = [
+            ChannelProduct(
+                shop_pk=shop.id, spu_id=f"TEST_COMPARE_{n}", status="ACTIVATE"
             )
-        )
-        session.add(
-            SpuDeteriorationAlert(
-                shop_pk=shop.id,
-                spu_pk=spu.id,
-                anchor_date=anchor_date,
-                window_days=3,
-                layer="confirmation",
-                severity="critical",
-                state="unavailable",
-                sample_status="unavailable",
-                effective_config_source="runtime_config",
-                effective_config_version=3,
-                config_payload_hash=config_hash,
-                basis_calculated_at=calculated_at,
-            )
-        )
-        session.commit()
-        ids = (shop.id, spu.id)
-    yield ids
-    with Session(db_engine) as session:
-        session.execute(
-            delete(SpuDeteriorationAlert).where(SpuDeteriorationAlert.shop_pk == ids[0])
-        )
-        session.execute(
-            delete(RuntimeConfigRevision).where(
-                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY
-            )
-        )
-        session.execute(
-            delete(RuntimeConfigItem).where(
-                RuntimeConfigItem.config_key == ALERT_CONFIG_KEY
-            )
-        )
-        session.execute(delete(ChannelProduct).where(ChannelProduct.id == ids[1]))
-        session.execute(delete(ChannelAccount).where(ChannelAccount.id == ids[0]))
-        session.commit()
-
-
-def test_published_alert_rollout_fails_closed_for_runtime_read(
-    api_client, db_engine, readonly_key, materialized_alert_scope
-) -> None:
-    shop_pk, _spu_pk = materialized_alert_scope
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    with Session(db_engine) as session:
-        revision = session.scalar(
-            select(RuntimeConfigRevision).where(
-                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY,
-                RuntimeConfigRevision.version == 3,
-            )
-        )
-        assert revision is not None
-        revision.rollout = [
-            {
-                "name": "canary",
-                "basisPoints": 10000,
-                "payload": config_to_payload(SEED_FALLBACK_CONFIG),
-            }
+            for n in range(5)
         ]
-        session.commit()
-    try:
-        response = api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
-            headers=headers,
-        )
-        assert response.status_code == 503
-        with Session(db_engine) as session:
-            revision = session.scalar(
-                select(RuntimeConfigRevision).where(
-                    RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY,
-                    RuntimeConfigRevision.version == 3,
-                )
-            )
-            assert revision is not None
-            revision.rollout = {}  # type: ignore[assignment]
-            session.commit()
-        malformed = api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
-            headers=headers,
-        )
-        assert malformed.status_code == 503
-    finally:
-        with Session(db_engine) as session:
-            revision = session.scalar(
-                select(RuntimeConfigRevision).where(
-                    RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY,
-                    RuntimeConfigRevision.version == 3,
-                )
-            )
-            assert revision is not None
-            revision.rollout = []
-            session.commit()
-
-
-def test_authenticated_get_requires_shop_and_returns_complete_scope(
-    api_client, readonly_key, materialized_alert_scope
-) -> None:
-    shop_pk, spu_pk = materialized_alert_scope
-    headers = {
-        "Authorization": f"Bearer {readonly_key}",
-        "X-Request-Id": "TEST_REQ_ALERT",
-    }
-    assert api_client.get("/v2/analytics/spu-profit-deterioration").status_code == 401
-    assert (
-        api_client.get(
-            "/v2/analytics/spu-profit-deterioration", headers=headers
-        ).status_code
-        == 422
-    )
-    response = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&limit=1",
-        headers=headers,
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["total"] == 2
-    assert len(body["items"]) == 1
-    assert body["items"][0]["spuPk"] == spu_pk
-    # SPU 列展示业务 spu_id（owner 2026-10-07）：API 必须带出 products_spu.spu_id。
-    assert body["items"][0]["spuId"] == "TEST_alert_spu"
-    assert body["items"][0]["configSource"] == "runtime_config"
-    assert body["items"][0]["configVersion"] == 3
-    assert body["totals"]["shopSpuCount"] == 1
-    item = body["items"][0]
-    assert isinstance(item["previousRoi"], str)
-    assert item["drilldown"]["profitabilityUrl"].startswith("/v2/analytics/spu-roi?")
-    # B-03：目标端点 /v2/analytics/spu-roi 只收 spu_ids（逗号串），不接受 spu_pk。
-    # 参数名写错会被静默忽略，CTA 就落到全量列表而不是该 SPU。
-    _drill_url = item["drilldown"]["profitabilityUrl"]
-    assert "spu_ids=" in _drill_url, _drill_url
-    assert "spu_pk=" not in _drill_url, _drill_url
-    assert body["meta"]["requestId"] == "TEST_REQ_ALERT"
-    assert "rollout" not in body["meta"]["effectiveConfig"]
-    assert "draftPayload" not in body["meta"]["effectiveConfig"]
-    assert "secrets" not in body["meta"]["effectiveConfig"]
-    assert body["meta"]["effectiveConfig"]["source"] == "runtime_config"
-    assert body["meta"]["effectiveConfig"]["version"] == 3
-    expected_hash = sha256(
-        json.dumps(
-            config_to_payload(SEED_FALLBACK_CONFIG),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-    assert body["meta"]["effectiveConfig"]["payloadHash"] == expected_hash
-
-
-def test_totals_count_distinct_shop_spu_across_windows_filters_and_pages(
-    api_client, db_engine, readonly_key, materialized_alert_scope
-) -> None:
-    shop_pk, spu_pk = materialized_alert_scope
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    with Session(db_engine) as session:
-        existing = session.scalars(
-            select(SpuDeteriorationAlert).where(
-                SpuDeteriorationAlert.shop_pk == shop_pk
-            )
-        ).all()
-        assert len(existing) == 2
-        template = existing[0]
-        second = ChannelProduct(
-            shop_pk=shop_pk, spu_id="TEST_alert_second_spu", status="active"
-        )
-        session.add(second)
+        session.add_all(products)
         session.flush()
-        existing_keys = {(row.spu_pk, row.window_days, row.layer) for row in existing}
-        for target_pk in (spu_pk, second.id):
-            for window_days in (1, 3, 7):
-                for layer in ("fast", "confirmation"):
-                    if (target_pk, window_days, layer) in existing_keys:
-                        continue
-                    session.add(
-                        SpuDeteriorationAlert(
-                            shop_pk=shop_pk,
-                            spu_pk=target_pk,
-                            anchor_date=template.anchor_date,
-                            window_days=window_days,
-                            layer=layer,
-                            severity="none",
-                            state="stable",
-                            sample_status="unavailable",
-                            effective_config_source=template.effective_config_source,
-                            effective_config_version=template.effective_config_version,
-                            config_payload_hash=template.config_payload_hash,
-                            basis_calculated_at=template.basis_calculated_at,
-                        )
+        for n, day in enumerate(
+            (anchor - timedelta(days=20), anchor - timedelta(days=8), anchor)
+        ):
+            order = SalesOrder(
+                shop_pk=shop.id,
+                order_id=f"TEST_COMPARE_ORDER_{n}",
+                status="DELIVERED",
+                currency="VND",
+                order_time=datetime.combine(day, time(0, 15), TZ),
+                paid_at=datetime.combine(day, time(0, 15), TZ),
+            )
+            session.add(order)
+            session.flush()
+            for product in products[:3]:
+                session.add(
+                    SalesOrderLine(
+                        order_pk=order.id,
+                        spu_pk=product.id,
+                        external_line_id=f"TEST_LINE_{product.id}",
+                        quantity=1,
+                        unit_price=100000,
+                        currency="VND",
                     )
-        session.commit()
-    try:
-        all_rows = api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&limit=1",
-            headers=headers,
-        )
-        assert all_rows.status_code == 200, all_rows.text
-        assert all_rows.json()["total"] == 12
-        assert all_rows.json()["totals"]["scopeTotal"] == 12
-        assert all_rows.json()["totals"]["shopSpuCount"] == 2
-        filtered = api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}"
-            "&window_days=1&layer=fast&limit=1",
-            headers=headers,
-        )
-        assert filtered.status_code == 200, filtered.text
-        # B-02：带筛选时 total 是匹配筛选的行数（2 SPU × 1 窗口 × fast 层 = 2），
-        # 不是未过滤全量 12。scope-wide 的 12 改由 totals.scopeTotal 承载。
-        assert filtered.json()["total"] == 2
-        assert filtered.json()["totals"]["scopeTotal"] == 12
-        assert filtered.json()["totals"]["shopSpuCount"] == 2
-        scoped = api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}"
-            f"&spu_ids={spu_pk}&limit=1",
-            headers=headers,
-        )
-        assert scoped.status_code == 200, scoped.text
-        # 1 SPU × 3 窗口 × 2 层 = 6 行；total 反映 spu_ids 筛选，scopeTotal 仍是 12。
-        assert scoped.json()["total"] == 6
-        assert scoped.json()["totals"]["scopeTotal"] == 12
-        assert scoped.json()["totals"]["shopSpuCount"] == 2
-    finally:
-        with Session(db_engine) as session:
-            session.execute(
-                delete(SpuDeteriorationAlert).where(
-                    SpuDeteriorationAlert.shop_pk == shop_pk
                 )
-            )
-            session.execute(
-                delete(ChannelProduct).where(
-                    ChannelProduct.shop_pk == shop_pk,
-                    ChannelProduct.spu_id == "TEST_alert_second_spu",
-                )
-            )
-            session.commit()
-
-
-def test_filtered_total_is_matching_rows_and_not_unfiltered_scope(
-    api_client, readonly_key, materialized_alert_scope
-) -> None:
-    """B-02：带筛选请求时 total == 匹配筛选的行数，且 ≠ 未筛选全量。
-
-    修复前 read.py 把 total 接成 `len(basis_rows)`（未过滤全量），前端
-    renderPager 拿它算页数 → 销灵分页 + 假空态。此断言锁死新语义：
-    ``total`` 反映 presentation filters，scope-wide 数字走 ``totals.scopeTotal``。
-    """
-    shop_pk, _ = materialized_alert_scope
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    unfiltered = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}", headers=headers
-    )
-    assert unfiltered.status_code == 200, unfiltered.text
-    assert unfiltered.json()["total"] == 2
-    assert unfiltered.json()["totals"]["scopeTotal"] == 2
-
-    filtered = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}"
-        "&state=roi_deterioration",
-        headers=headers,
-    )
-    assert filtered.status_code == 200, filtered.text
-    body = filtered.json()
-    assert len(body["items"]) == 1
-    assert body["total"] == 1
-    assert body["total"] != body["totals"]["scopeTotal"]
-    assert body["totals"]["scopeTotal"] == 2
-
-
-def test_repeatable_filters_bounds_and_explicit_latest_anchor(
-    api_client, readonly_key, materialized_alert_scope
-) -> None:
-    shop_pk, spu_pk = materialized_alert_scope
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    filtered = api_client.get(
-        "/v2/analytics/spu-profit-deterioration",
-        params=[
-            ("shop_pk", shop_pk),
-            ("window_days", 3),
-            ("window_days", 1),
-            ("state", "unavailable"),
-            ("sample", "unavailable"),
-            ("anchor_date", (datetime.now(UTC).date() - timedelta(days=1)).isoformat()),
-        ],
-        headers=headers,
-    )
-    assert filtered.status_code == 200, filtered.text
-    # 带筛选时 total 是匹配筛选的行数（仅 3d/confirmation/unavailable 一行），
-    # scope-wide 仍是 2。
-    assert filtered.json()["total"] == 1
-    assert filtered.json()["totals"]["scopeTotal"] == 2
-    assert all(
-        item["sampleStatus"] == "unavailable" for item in filtered.json()["items"]
-    )
-    assert all(item["previousRoi"] is None for item in filtered.json()["items"])
-    assert (
-        api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&severity=bad",
-            headers=headers,
-        ).status_code
-        == 422
-    )
-    assert (
-        api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&window_days=2",
-            headers=headers,
-        ).status_code
-        == 422
-    )
-    assert (
-        api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&limit=0",
-            headers=headers,
-        ).status_code
-        == 422
-    )
-    repeated = "&".join(f"spu_ids={spu_pk}" for _ in range(101))
-    assert (
-        api_client.get(
-            f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&{repeated}",
-            headers=headers,
-        ).status_code
-        == 422
-    )
-
-
-def test_missing_stale_and_mismatched_snapshots_fail_closed(
-    api_client, readonly_key, db_engine, materialized_alert_scope
-) -> None:
-    shop_pk, _ = materialized_alert_scope
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    missing = api_client.get(
-        "/v2/analytics/spu-profit-deterioration?shop_pk=999999999",
-        headers=headers,
-    )
-    assert missing.status_code == 503
-    with Session(db_engine) as session:
-        item = session.get(RuntimeConfigItem, ALERT_CONFIG_KEY)
-        assert item is not None
-        draft_payload = config_to_payload(SEED_FALLBACK_CONFIG)
-        draft_payload["enabled"] = False
-        item.draft_payload = draft_payload
-        session.commit()
-    draft_only = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
-        headers=headers,
-    )
-    assert draft_only.status_code == 200
-    assert draft_only.json()["meta"]["enabled"] is True
-    with Session(db_engine) as session:
-        item = session.get(RuntimeConfigItem, ALERT_CONFIG_KEY)
-        assert item is not None
+        # A lifetime-small, recently ordered SPU must not enter regular recent scope.
+        small = SalesOrder(
+            shop_pk=shop.id,
+            order_id="TEST_COMPARE_SMALL",
+            status="DELIVERED",
+            currency="VND",
+            order_time=datetime.combine(anchor, time(12), TZ),
+        )
+        session.add(small)
+        session.flush()
         session.add(
-            RuntimeConfigRevision(
-                config_key=ALERT_CONFIG_KEY,
-                version=4,
-                payload=config_to_payload(SEED_FALLBACK_CONFIG),
-                rollout=[],
-                created_by="TEST_new_publication",
+            SalesOrderLine(
+                order_pk=small.id,
+                spu_pk=products[4].id,
+                external_line_id="TEST_SMALL",
+                quantity=1,
+                unit_price=100000,
+                currency="VND",
             )
         )
-        item.published_version = 4
-        session.commit()
-    newer_publication = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&severity=none",
-        headers=headers,
-    )
-    assert newer_publication.status_code == 503
-    with Session(db_engine) as session:
-        session.execute(
-            update(SpuDeteriorationAlert)
-            .where(SpuDeteriorationAlert.shop_pk == shop_pk)
-            .values(config_payload_hash="0" * 64)
-        )
-        session.commit()
-    mismatch = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
-        headers=headers,
-    )
-    assert mismatch.status_code == 503
-
-
-def test_page_wired_filters_reject_invalid_enums_and_over_cap_spu_ids(
-    api_client, readonly_key, materialized_alert_scope
-) -> None:
-    """页面新接线的两个筛选（SPU scope / state）在服务端必须是硬 422。
-
-    ``spu_ids`` 超过 100 个或含非正整数时必须被拒，而不是静默放宽为全 SPU；
-    ``state`` 必须是文档枚举内的一个可重复值。这两条正是前端
-    “不静默放宽 / 422 可读”行为的服务端下半。
-    """
-    shop_pk, spu_pk = materialized_alert_scope
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    base = "/v2/analytics/spu-profit-deterioration"
-    over_cap = "&".join(f"spu_ids={spu_pk}" for _ in range(101))
-
-    for query, reason in (
-        ("&state=not_a_state", "state 枚举外的值"),
-        ("&state=STABLE", "state 大小写必须原样"),
-        ("&sample=not_a_sample", "sample 枚举外的值"),
-        ("&layer=not_a_layer", "layer 枚举外的值"),
-        ("&severity=not_a_severity", "severity 枚举外的值"),
-        (f"&{over_cap}", "spu_ids 超过 100 个上限"),
-        ("&spu_ids=0", "spu_ids 含非正整数"),
-        ("&spu_ids=-1", "spu_ids 含负数"),
-        ("&spu_ids=abc", "spu_ids 含非整数"),
-    ):
-        response = api_client.get(f"{base}?shop_pk={shop_pk}{query}", headers=headers)
-        assert response.status_code == 422, (reason, response.status_code, response.text)
-
-    # 合法边界：恰好 100 个 id 与枚举内的 state 都必须被接受。
-    at_cap = "&".join(f"spu_ids={spu_pk}" for _ in range(100))
-    accepted = api_client.get(
-        f"{base}?shop_pk={shop_pk}&{at_cap}&state=roi_deterioration", headers=headers
-    )
-    assert accepted.status_code == 200, accepted.text
-    # B-02：100×spu_ids=spu_pk 与 state=roi_deterioration 都匹配时只剩 1 行
-    # （fixture 的 confirmation/unavailable 行 state 不是 roi_deterioration）。
-    # total 反映筛选，scope-wide 的 2 由 totals.scopeTotal 承载。
-    assert accepted.json()["total"] == 1
-    assert accepted.json()["totals"]["scopeTotal"] == 2
-
-
-def test_dead_recovery_states_are_rejected_with_422_not_empty_results(
-    api_client, readonly_key, materialized_alert_scope
-) -> None:
-    """B-04：``roi_recovery`` / ``recovery`` 在 _state() 中永不可达，查询必须 422。
-
-    修复前这两个值在 allow-list 里：请求返回 200 + 空列表，运维按页面/文档给出的
-    值筛选会得到一个静默的 “没有数据” 而无法区分 “真的没有” 与 “状态不存在”。
-    删除枚举后，页面下拉与服务端 allow-list 一致，非法值走和其它枚举外值同一条
-    422 分支。
-    """
-    shop_pk, _ = materialized_alert_scope
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    base = "/v2/analytics/spu-profit-deterioration"
-
-    for dead in ("roi_recovery", "recovery"):
-        response = api_client.get(
-            base, params=[("shop_pk", shop_pk), ("state", dead)], headers=headers
-        )
-        assert response.status_code == 422, (dead, response.status_code, response.text)
-        assert response.json()["detail"] == "invalid state", dead
-
-    # 对照组：仍然存活的 8 个业务状态必须全部被接受（200），否则 422 就成了
-    # “把所有 state 都拒了” 的假绿。
-    for alive in (state.value for state in AlertState):
-        response = api_client.get(
-            base, params=[("shop_pk", shop_pk), ("state", alive)], headers=headers
-        )
-        assert response.status_code == 200, (alive, response.status_code, response.text)
-
-    assert "roi_recovery" not in {state.value for state in AlertState}
-    assert "recovery" not in {state.value for state in AlertState}
-
-
-def test_state_filter_is_repeatable_and_narrows_items(
-    api_client, readonly_key, materialized_alert_scope
-) -> None:
-    shop_pk, _ = materialized_alert_scope
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    only = api_client.get(
-        "/v2/analytics/spu-profit-deterioration",
-        params=[("shop_pk", shop_pk), ("state", "roi_deterioration")],
-        headers=headers,
-    )
-    assert only.status_code == 200, only.text
-    assert only.json()["items"]
-    assert all(item["state"] == "roi_deterioration" for item in only.json()["items"])
-
-    # 可重复：多个 state 是 OR 语义，totals 仍按完整 scope。
-    both = api_client.get(
-        "/v2/analytics/spu-profit-deterioration",
-        params=[
-            ("shop_pk", shop_pk),
-            ("state", "roi_deterioration"),
-            ("state", "unavailable"),
-        ],
-        headers=headers,
-    )
-    assert both.status_code == 200, both.text
-    assert {item["state"] for item in both.json()["items"]} == {
-        "roi_deterioration",
-        "unavailable",
-    }
-    assert both.json()["totals"]["shopSpuCount"] == 1
-
-
-def test_effective_config_drawer_projection_is_the_only_threshold_source(
-    api_client, readonly_key, materialized_alert_scope
-) -> None:
-    """抽屉只读 meta.effectiveConfig：顶层 enabled/maturityDays 与 thresholds 同源。
-
-    抽屉 JS 读的是顶层 ``enabled`` / ``maturityDays``，所以这两个字段必须与
-    ``thresholds``（完整 published payload）里的同名字段一致；投影不得携带
-    draft / rollout / 明文 secret。
-    """
-    shop_pk, _ = materialized_alert_scope
-    response = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert response.status_code == 200, response.text
-    effective = response.json()["meta"]["effectiveConfig"]
-    assert effective["enabled"] is True
-    assert effective["maturityDays"] == 7
-    thresholds = effective["thresholds"]
-    assert thresholds["enabled"] == effective["enabled"]
-    assert thresholds["maturityDays"] == effective["maturityDays"]
-    assert set(thresholds) >= {"enabled", "maturityDays", "fast", "confirmation"}
-    assert effective["drawer"] == {
-        "mode": "published_effective_readonly_safe",
-        "canEdit": False,
-        "draftIncluded": False,
-        "rolloutIncluded": False,
-        "secretsIncluded": False,
-    }
-    for forbidden in ("draft", "draftPayload", "rollout", "secrets", "secret"):
-        assert forbidden not in effective, forbidden
-
-
-def test_disabled_published_config_returns_safe_empty_scope(
-    api_client, readonly_key, db_engine, materialized_alert_scope
-) -> None:
-    shop_pk, _ = materialized_alert_scope
-    with Session(db_engine) as session:
-        revision = session.execute(
-            select(RuntimeConfigRevision).where(
-                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY,
-                RuntimeConfigRevision.version == 3,
+        for name in ("tiktok.orders", "tiktok.after_sales", "tiktok.finance"):
+            session.add(
+                SyncJob(
+                    job_name=name,
+                    started_at=started,
+                    finished_at=started + timedelta(hours=2),
+                    status="succeeded",
+                    rows_failed=0,
+                    extra={"shop_id": shop.shop_id},
+                )
+            )
+        for ago in range(14):
+            day = anchor - timedelta(days=ago)
+            for product in products[:4]:
+                session.add(
+                    AdDaily(
+                        seller_id=shop.shop_id,
+                        advertiser_id="TEST_ADV",
+                        campaign_id="TEST_CAMPAIGN",
+                        endpoint=ENDPOINT,
+                        day=day,
+                        product_id=product.spu_id,
+                        mixed_real_cost=1,
+                        onsite_roi2_shopping_sku=0,
+                        onsite_roi2_shopping_value=0,
+                    )
+                )
+        sid = session.execute(
+            text(
+                "INSERT INTO fx.exchange_rate_snapshots (base_code, upstream_last_update, next_update_at, fetched_at, rates_count) VALUES ('USD', '2098-01-01', '2098-01-02', now(), 3) RETURNING id"
             )
         ).scalar_one()
-        assert revision is not None
-        disabled = config_to_payload(SEED_FALLBACK_CONFIG)
-        disabled["enabled"] = False
-        revision.payload = disabled
+        for code, rate in [("USD", 1), ("CNY", 7), ("VND", 25000)]:
+            session.execute(
+                text(
+                    "INSERT INTO fx.exchange_rates (snapshot_id, base_code, target_code, rate) VALUES (:sid, 'USD', :code, :rate)"
+                ),
+                {"sid": sid, "code": code, "rate": rate},
+            )
         session.commit()
-    response = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
-        headers={"Authorization": f"Bearer {readonly_key}"},
+        scope = {
+            "shop": shop.id,
+            "products": [p.id for p in products],
+            "anchor": anchor,
+            "started": started,
+            "fx": sid,
+        }
+    yield scope
+    with Session(db_engine) as session:
+        order_ids = select(SalesOrder.id).where(SalesOrder.shop_pk == scope["shop"])
+        statement_ids = list(
+            session.scalars(
+                select(SettlementTransaction.settlement_statement_id).where(
+                    SettlementTransaction.order_pk.in_(order_ids)
+                )
+            )
+        )
+        session.execute(
+            delete(SettlementTransaction).where(
+                SettlementTransaction.order_pk.in_(order_ids)
+            )
+        )
+        session.execute(
+            delete(SettlementStatement).where(SettlementStatement.id.in_(statement_ids))
+        )
+        session.execute(delete(Case).where(Case.shop_pk == scope["shop"]))
+        session.execute(
+            delete(SalesOrderLine).where(SalesOrderLine.order_pk.in_(order_ids))
+        )
+        session.execute(delete(SalesOrder).where(SalesOrder.shop_pk == scope["shop"]))
+        session.execute(delete(AdDaily).where(AdDaily.seller_id == "TEST_COMPARE_SHOP"))
+        session.execute(
+            delete(AdRawLog).where(AdRawLog.seller_id == "TEST_COMPARE_SHOP")
+        )
+        session.execute(
+            delete(SyncJob).where(
+                SyncJob.extra["shop_id"].astext == "TEST_COMPARE_SHOP"
+            )
+        )
+        session.execute(
+            delete(SyncIssue).where(SyncIssue.external_id.like("TEST_COMPARE%"))
+        )
+        session.execute(
+            text("DELETE FROM fx.exchange_rate_snapshots WHERE id = :sid"), {"sid": sid}
+        )
+        session.execute(
+            delete(ChannelProduct).where(ChannelProduct.shop_pk == scope["shop"])
+        )
+        session.execute(
+            delete(ChannelAccount).where(ChannelAccount.id == scope["shop"])
+        )
+        session.commit()
+
+
+def get(api_client, readonly_key, scope, **params):
+    return api_client.get(
+        URL,
+        params={"shop_pk": scope["shop"], **params},
+        headers={
+            "Authorization": f"Bearer {readonly_key}",
+            "x-request-id": "TEST_COMPARE_REQ",
+        },
     )
-    assert response.status_code == 200
-    assert response.json()["items"] == []
-    assert response.json()["meta"]["enabled"] is False
 
 
-def test_missing_published_config_uses_visible_seed_fallback(
-    api_client, readonly_key, db_engine, materialized_alert_scope
-) -> None:
-    shop_pk, _ = materialized_alert_scope
-    payload = config_to_payload(SEED_FALLBACK_CONFIG)
-    config_hash = sha256(
-        json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
+def test_v3_canonical_values_scope_distinct_totals_and_drilldown(
+    api_client, readonly_key, comparison_scope
+):
+    scope = comparison_scope
+    response = get(api_client, readonly_key, scope, limit=1)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 4
+    assert body["totals"] == {
+        "analysisSpuCount": 4,
+        "previousOrderCount": 1,
+        "currentOrderCount": 1,
+        "unavailableReason": None,
+    }
+    assert len(body["items"]) == 1
+    assert body["meta"]["windowDays"] == 7
+    assert body["meta"]["anchorDate"] == scope["anchor"].isoformat()
+    assert body["meta"]["latestAvailableDate"] == scope["anchor"].isoformat()
+    assert body["meta"]["stale"] is True
+    assert body["meta"]["coverage"]["status"] == "limited"
+    assert body["meta"]["requestId"] == "TEST_COMPARE_REQ"
+    assert "effectiveConfig" not in body["meta"]
+    last = get(api_client, readonly_key, scope, offset=3).json()
+    assert last["totals"] == body["totals"]
+    item = last["items"][0]
+    assert item["spuPk"] == scope["products"][3]
+    assert item["currentOrderCount"] == 0
+    assert item["currentNoOrderAdSpend"] is True
+    assert item["previousNoOrderAdSpend"] is True
+    assert Decimal(item["currentSpendCny"]) == 49
+    assert Decimal(item["currentNetProfitCny"]) == -49
+    # Canonical ROI is net revenue after full-loss cost / spend, not profit/spend.
+    assert Decimal(item["currentRoi"]) == 0
+    assert item["currentRoiUnavailableReason"] is None
+    assert item["basisCalculatedAt"] == last["meta"]["calculatedAt"]
+    retired_keys = {
+        "severity",
+        "state",
+        "sampleStatus",
+        "layer",
+        "warningCode",
+        "warningText",
+        "roiDecline",
+        "netProfitDecline",
+        "configVersion",
+    }
+
+    def wire_keys(value):
+        if isinstance(value, dict):
+            return set(value).union(*(wire_keys(child) for child in value.values()))
+        if isinstance(value, list):
+            return set().union(*(wire_keys(child) for child in value))
+        return set()
+
+    assert not retired_keys & wire_keys(last)
+    query = parse_qs(urlsplit(item["drilldown"]["pageUrl"]).query)
+    assert query["shop_pk"] == [str(scope["shop"])]
+    assert query["spu_ids"] == ["TEST_COMPARE_3"]
+    assert query["w_start"] == [(scope["anchor"] - timedelta(days=6)).isoformat()]
+    assert query["w_end"] == [scope["anchor"].isoformat()]
+    short = get(api_client, readonly_key, scope, window_days=3).json()
+    assert short["total"] == 4
+    assert short["meta"]["latestAvailableDate"] == body["meta"]["latestAvailableDate"]
+    assert short["totals"]["previousOrderCount"] == 0
+    assert short["totals"]["currentOrderCount"] == 1
+
+
+def test_exact_ids_bypass_small_sample_without_widening(
+    api_client, readonly_key, comparison_scope
+):
+    scope = comparison_scope
+    exact = get(api_client, readonly_key, scope, spu_ids=scope["products"][4]).json()
+    assert exact["total"] == 1
+    assert exact["items"][0]["spuPk"] == scope["products"][4]
+    assert exact["meta"]["activityBypassed"] is True
+    assert exact["items"][0]["currentSpendCny"] == "0"
+    assert exact["items"][0]["currentRoi"] is None
+    assert exact["items"][0]["currentRoiUnavailableReason"]
+    assert get(api_client, readonly_key, scope, spu_ids=999999999).status_code == 422
+    assert get(api_client, readonly_key, scope, activity="all").json()["total"] == 5
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"window_days": 1},
+        {"window_days": [3, 7]},
+        {"window_days": "all"},
+        {"severity": "all"},
+        {"layer": "all"},
+        {"sample": "all"},
+        {"state": "stable"},
+        {"spu_ids": ""},
+        {"spu_ids": 0},
+        {"spu_ids": [1] * 101},
+        {"activity": "bad"},
+    ],
+)
+def test_deprecated_and_invalid_inputs_rejected(
+    api_client, readonly_key, comparison_scope, query
+):
+    response = get(api_client, readonly_key, comparison_scope, **query)
+    assert response.status_code == 422, response.text
+
+
+def test_date_cap_historical_reads_and_auth(api_client, readonly_key, comparison_scope):
+    scope = comparison_scope
+    assert api_client.get(URL, params={"shop_pk": scope["shop"]}).status_code == 401
+    later = get(
+        api_client,
+        readonly_key,
+        scope,
+        anchor_date=(scope["anchor"] + timedelta(days=1)).isoformat(),
+    )
+    assert later.status_code == 422
+    assert later.json()["detail"]["latestAvailableDate"] == scope["anchor"].isoformat()
+    assert later.json()["detail"]["requestId"] == "TEST_COMPARE_REQ"
+    older = get(
+        api_client,
+        readonly_key,
+        scope,
+        anchor_date=(scope["anchor"] - timedelta(days=1)).isoformat(),
+        activity="all",
+    )
+    assert older.status_code == 200, older.text
+    assert (
+        older.json()["meta"]["anchorDate"]
+        == (scope["anchor"] - timedelta(days=1)).isoformat()
+    )
+
+
+@pytest.mark.parametrize("anchor", ["0001-01-01", "0001-01-06"])
+@pytest.mark.parametrize("window_days", [3, 7])
+def test_calendar_date_without_supported_comparison_span_is_422(
+    api_client, readonly_key, comparison_scope, anchor, window_days
+):
+    response = get(
+        api_client,
+        readonly_key,
+        comparison_scope,
+        anchor_date=anchor,
+        window_days=window_days,
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["requestId"] == "TEST_COMPARE_REQ"
+
+
+def test_availability_history_reads_are_bounded_and_do_not_load_raw_payloads(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        for n in range(30):
+            for name in ("tiktok.orders", "tiktok.after_sales", "tiktok.finance"):
+                session.add(
+                    SyncJob(
+                        job_name=name,
+                        started_at=scope["started"] - timedelta(days=n + 2),
+                        finished_at=scope["started"]
+                        - timedelta(days=n + 2)
+                        + timedelta(hours=1),
+                        status="succeeded",
+                        rows_failed=0,
+                        extra={"shop_id": "TEST_COMPARE_SHOP"},
+                    )
+                )
+            session.add(
+                AdRawLog(
+                    seller_id="TEST_COMPARE_SHOP",
+                    advertiser_id="TEST_ADV",
+                    campaign_id="TEST_CAMPAIGN",
+                    endpoint=ENDPOINT,
+                    kind="daily",
+                    day=scope["anchor"] - timedelta(days=n),
+                    request_url="https://example.invalid",
+                    request_method="POST",
+                    response_status=500,
+                    response_body={"body": {"code": 4, "payload": "TEST_" * 1000}},
+                )
+            )
+        session.commit()
+    loaded = []
+    statements = []
+
+    def record_load(session, instance):
+        if isinstance(instance, (SyncJob, AdRawLog)):
+            loaded.append(instance)
+
+    def record_query(conn, cursor, statement, parameters, context, executemany):
+        statements.append((statement, context.execution_options))
+
+    event.listen(Session, "loaded_as_persistent", record_load)
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    try:
+        response = get(api_client, readonly_key, scope, limit=1)
+    finally:
+        event.remove(Session, "loaded_as_persistent", record_load)
+        event.remove(db_engine, "before_cursor_execute", record_query)
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["latestAvailableDate"] == scope["anchor"].isoformat()
+    assert len([row for row in loaded if isinstance(row, SyncJob)]) <= 3
+    assert not any(isinstance(row, AdRawLog) for row in loaded)
+    source_reads = [sql for sql, _ in statements if "FROM integration.sync_jobs" in sql]
+    assert len(source_reads) == 6
+    assert all("LIMIT" in sql for sql in source_reads)
+    raw_reads = [
+        (sql, options) for sql, options in statements if "FROM plugin.ad_raw_log" in sql
+    ]
+    assert len(raw_reads) == 1
+    sql, options = raw_reads[0]
+    assert "response_body" not in sql.split("FROM", 1)[0]
+    assert "response_status" in sql.split("WHERE", 1)[1]
+    assert options.get("yield_per") == 500
+
+
+def test_missing_source_is_unavailable_not_success_empty(
+    api_client, readonly_key, comparison_scope, db_engine
+):
     with Session(db_engine) as session:
         session.execute(
-            delete(RuntimeConfigRevision).where(
-                RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY
-            )
-        )
-        session.execute(
-            delete(RuntimeConfigItem).where(
-                RuntimeConfigItem.config_key == ALERT_CONFIG_KEY
-            )
-        )
-        session.execute(
-            update(SpuDeteriorationAlert)
-            .where(SpuDeteriorationAlert.shop_pk == shop_pk)
-            .values(
-                effective_config_source="seed_fallback",
-                effective_config_version=None,
-                config_payload_hash=config_hash,
+            delete(SyncJob).where(
+                SyncJob.job_name == "tiktok.finance",
+                SyncJob.extra["shop_id"].astext == "TEST_COMPARE_SHOP",
             )
         )
         session.commit()
-    response = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert response.status_code == 200
-    assert response.json()["meta"]["config"]["source"] == "seed_fallback"
-    assert response.json()["meta"]["effectiveConfig"]["provisionalLabel"] == "回测暂定"
-
-
-def test_stale_snapshot_fails_closed(
-    api_client, readonly_key, db_engine, materialized_alert_scope
-) -> None:
-    shop_pk, _ = materialized_alert_scope
-    with Session(db_engine) as session:
-        session.execute(
-            update(SpuDeteriorationAlert)
-            .where(SpuDeteriorationAlert.shop_pk == shop_pk)
-            .values(anchor_date=datetime.now(UTC).date() - timedelta(days=4))
-        )
-        session.commit()
-    response = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
+    response = get(api_client, readonly_key, comparison_scope)
     assert response.status_code == 503
+    assert response.json()["detail"]["requestId"] == "TEST_COMPARE_REQ"
 
 
-def test_valid_empty_filter_zeroes_total_but_keeps_scope_totals(
-    api_client, readonly_key, materialized_alert_scope
-) -> None:
-    """B-02：severity=none 命中 0 行 → total=0（分页用），scope-wide 的
-    scopeTotal / totals.* 仍按完整 scope 保留（有意行为，不能一并清零）。
+def test_late_failure_retains_old_date_with_warning(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        session.add(
+            SyncJob(
+                job_name="tiktok.orders",
+                started_at=scope["started"] + timedelta(days=1),
+                finished_at=scope["started"] + timedelta(days=1, hours=1),
+                status="failed",
+                rows_failed=1,
+                extra={"shop_id": "TEST_COMPARE_SHOP"},
+            )
+        )
+        session.commit()
+    response = get(api_client, readonly_key, scope)
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["latestAvailableDate"] == scope["anchor"].isoformat()
+    assert any("tiktok.orders" in w for w in response.json()["meta"]["warnings"])
 
-    旧名 ``..._preserves_snapshot_totals`` 把 “total＝全量” 写进了名字，
-    会把 total 的新语义误导回去。
-    """
-    shop_pk, _ = materialized_alert_scope
-    response = api_client.get(
-        f"/v2/analytics/spu-profit-deterioration?shop_pk={shop_pk}&severity=none",
-        headers={"Authorization": f"Bearer {readonly_key}"},
+
+def test_known_missing_lines_do_not_become_zero_or_fact_flag(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        session.add(
+            SalesOrder(
+                shop_pk=scope["shop"],
+                order_id="TEST_COMPARE_MISSING_LINES",
+                status="DELIVERED",
+                order_time=datetime.combine(scope["anchor"], time(12), TZ),
+            )
+        )
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][3])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentOrderCount"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["currentRoi"] is None
+    assert item["currentNetProfitCny"] is None
+    assert Decimal(item["currentSpendCny"]) == 49
+    assert response.json()["totals"]["currentOrderCount"] is None
+    assert get(api_client, readonly_key, scope).status_code == 503
+
+
+def test_ad_coverage_holes_are_unknown_not_zero(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        session.execute(
+            delete(AdDaily).where(
+                AdDaily.seller_id == "TEST_COMPARE_SHOP",
+                AdDaily.day == scope["anchor"] - timedelta(days=1),
+            )
+        )
+        session.commit()
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    item = next(
+        i for i in response.json()["items"] if i["spuPk"] == scope["products"][3]
     )
-    assert response.status_code == 200
-    assert response.json()["items"] == []
-    assert response.json()["total"] == 0
-    assert response.json()["totals"]["scopeTotal"] == 2
-    assert response.json()["totals"]["shopSpuCount"] == 1
+    assert item["currentSpendCny"] is None
+    assert item["currentRoi"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["previousSpendCny"] is not None
 
 
-def test_decimal_wire_serializes_zero_without_scientific_notation() -> None:
-    """高精度零（如 Decimal("0E-12")）wire 上必须是 "0"，不能是科学计数法。
+@pytest.mark.parametrize("days_old", [0, 3650])
+def test_successful_empty_ads_and_local_start_cutoff(
+    api_client, readonly_key, comparison_scope, db_engine, days_old
+):
+    scope = {
+        **comparison_scope,
+        "anchor": comparison_scope["anchor"] - timedelta(days=days_old),
+    }
+    with Session(db_engine) as session:
+        session.execute(delete(AdDaily).where(AdDaily.seller_id == "TEST_COMPARE_SHOP"))
+        for ago in range(14):
+            session.add(
+                AdRawLog(
+                    seller_id="TEST_COMPARE_SHOP",
+                    advertiser_id="TEST_ADV",
+                    campaign_id="TEST_CAMPAIGN",
+                    endpoint=ENDPOINT,
+                    kind="daily",
+                    day=scope["anchor"] - timedelta(days=ago),
+                    request_url="https://example.invalid",
+                    request_method="POST",
+                    response_status=200,
+                    response_body={
+                        "status": 200,
+                        "body": {"code": 0, "data": {"table": []}},
+                    },
+                )
+            )
+        session.commit()
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["latestAvailableDate"] == scope["anchor"].isoformat()
+    assert all(i["currentSpendCny"] == "0" for i in response.json()["items"])
+    assert all(i["currentNoOrderAdSpend"] is False for i in response.json()["items"])
+    # Start is 00:05 shop time, previous UTC calendar day: do not use UTC date or finish date.
+    assert scope["started"].astimezone(UTC).date() == comparison_scope["anchor"]
+    assert (
+        response.json()["meta"]["coverage"]["sources"]["tiktok.orders"][
+            "operationalCutoff"
+        ]
+        == comparison_scope["anchor"].isoformat()
+    )
 
-    页面曾显示「上期 ROI 0E-12」：公式保留 12 位精度痕迹的零被 str() 直接
-    转成科学计数法。非零值（含负值）依 wire 契约舍入到两位小数。
-    """
-    from tts_erp_v2.api.v2.spu_deterioration_alert import _decimal
 
-    assert _decimal(None) is None
-    assert _decimal(Decimal("0E-12")) == "0"
-    assert _decimal(Decimal("0")) == "0"
-    assert _decimal(Decimal("210.803081902496")) == "210.80"
-    assert _decimal(Decimal("-1.409499")) == "-1.41"
+def test_negative_canonical_roi_is_not_hidden(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        line = session.scalar(
+            select(SalesOrderLine).where(
+                SalesOrderLine.order_pk == order.id,
+                SalesOrderLine.spu_pk == scope["products"][0],
+            )
+        )
+        assert line is not None
+        case = Case(
+            shop_pk=scope["shop"],
+            order_pk=order.id,
+            external_case_id="TEST_COMPARE_REFUND",
+            case_type="RETURN_AND_REFUND",
+            status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+        )
+        session.add(case)
+        session.flush()
+        session.add(
+            CaseLine(
+                case_id=case.id,
+                sales_order_line_id=line.id,
+                external_case_line_id="TEST_COMPARE_REFUND_LINE",
+                quantity=1,
+                refund_amount=100000,
+                currency="VND",
+                should_replenish_stock=False,
+            )
+        )
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert Decimal(item["currentRoi"]) < 0
+    assert item["currentRoiUnavailableReason"] is None
+    assert item["currentNoOrderAdSpend"] is False
+
+
+def test_null_ad_cost_is_unknown_not_zero(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        row = session.scalar(
+            select(AdDaily).where(
+                AdDaily.product_id == "TEST_COMPARE_3", AdDaily.day == scope["anchor"]
+            )
+        )
+        assert row is not None
+        row.mixed_real_cost = None
+        session.commit()
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    item = next(
+        i for i in response.json()["items"] if i["spuPk"] == scope["products"][3]
+    )
+    assert item["currentSpendCny"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["currentNetProfitCny"] is None
+    # Missing cost affects this product, not another SPU with known ad facts.
+    known = next(
+        i for i in response.json()["items"] if i["spuPk"] == scope["products"][0]
+    )
+    assert Decimal(known["currentSpendCny"]) == 49
+    assert get(api_client, readonly_key, scope).status_code == 503
+
+
+@pytest.mark.parametrize(
+    "name", ["tiktok.orders", "tiktok.after_sales", "tiktok.finance"]
+)
+def test_unresolved_parse_failures_do_not_masquerade_as_complete_financial_facts(
+    api_client, readonly_key, comparison_scope, db_engine, name
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        session.add(
+            SyncIssue(
+                job_name=name,
+                issue_type="PARSE_ERROR",
+                external_id="TEST_COMPARE_ISSUE",
+                details={"shop_id": "TEST_COMPARE_SHOP"},
+            )
+        )
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][3])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentRoi"] is None
+    assert item["currentNetProfitCny"] is None
+    assert item["currentRoiUnavailableReason"]
+    assert Decimal(item["currentSpendCny"]) == 49
+    if name == "tiktok.orders":
+        assert item["currentOrderCount"] is None
+        assert item["currentNoOrderAdSpend"] is None
+    else:
+        assert item["currentOrderCount"] == 0
+        assert item["currentNoOrderAdSpend"] is True
+
+
+@pytest.mark.parametrize(
+    "missing_fact", ["date", "status", "spu_pk", "quantity", "unit_price"]
+)
+def test_missing_header_or_line_facts_remain_unknown_with_exists_checks(
+    api_client, readonly_key, comparison_scope, db_engine, missing_fact
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        if missing_fact == "date":
+            order.order_time = None
+            order.paid_at = None
+        elif missing_fact == "status":
+            order.status = None
+        else:
+            line = session.scalar(
+                select(SalesOrderLine)
+                .where(SalesOrderLine.order_pk == order.id)
+                .limit(1)
+            )
+            assert line is not None
+            setattr(line, missing_fact, None)
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][3])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentOrderCount"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["currentRoi"] is None
+    assert get(api_client, readonly_key, scope).status_code == 503
+
+
+@pytest.mark.parametrize("details", [{}, None, ["TEST_BAD"], "TEST_BAD"])
+def test_unattributed_or_malformed_issue_details_are_unknown_not_server_error(
+    api_client, readonly_key, comparison_scope, db_engine, details
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        session.add(
+            SyncIssue(
+                job_name="tiktok.orders",
+                issue_type="PARSE_ERROR",
+                external_id="TEST_COMPARE_BAD_DETAILS",
+                details=details,
+            )
+        )
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][3])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentOrderCount"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["warnings"]
+
+
+def test_global_warnings_are_not_repeated_in_every_row(
+    api_client, readonly_key, comparison_scope
+):
+    body = get(api_client, readonly_key, comparison_scope).json()
+    assert body["meta"]["warnings"]
+    assert all(item["warnings"] == [] for item in body["items"])
+
+
+def test_order_and_issue_checks_do_not_scale_queries_or_load_lifetime_entities(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    queries = []
+    loaded = []
+
+    def record_query(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
+            queries.append(statement)
+
+    def record_load(session, instance):
+        if isinstance(instance, (SalesOrder, SalesOrderLine, SyncIssue)):
+            loaded.append(instance)
+
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    try:
+        baseline = get(api_client, readonly_key, scope, limit=1)
+        assert baseline.status_code == 200, baseline.text
+        baseline_count = len(queries)
+    finally:
+        event.remove(db_engine, "before_cursor_execute", record_query)
+    with Session(db_engine) as session:
+        for n in range(30):
+            order = SalesOrder(
+                shop_pk=scope["shop"],
+                order_id=f"TEST_COMPARE_HISTORY_{n}",
+                status="DELIVERED",
+                order_time=datetime.combine(
+                    scope["anchor"] - timedelta(days=60 + n), time(12), TZ
+                ),
+            )
+            session.add(order)
+            session.flush()
+            session.add(
+                SalesOrderLine(
+                    order_pk=order.id,
+                    spu_pk=scope["products"][0],
+                    external_line_id=f"TEST_COMPARE_HISTORY_LINE_{n}",
+                    quantity=1,
+                    unit_price=100000,
+                    currency="VND",
+                )
+            )
+            session.add(
+                SyncIssue(
+                    job_name="tiktok.orders",
+                    issue_type="PARSE_ERROR",
+                    external_id=f"TEST_COMPARE_OTHER_ISSUE_{n}",
+                    details={"shop_id": "TEST_OTHER_SHOP", "payload": "TEST_" * 1000},
+                )
+            )
+        session.add(
+            SyncIssue(
+                job_name="tiktok.orders",
+                issue_type="STALE_OBSERVATION_SKIPPED",
+                external_id="TEST_COMPARE_STALE_ISSUE",
+                details={"shop_id": "TEST_COMPARE_SHOP"},
+            )
+        )
+        session.add(
+            SyncIssue(
+                job_name="tiktok.orders",
+                issue_type="PARSE_ERROR",
+                external_id="TEST_COMPARE_RESOLVED_ISSUE",
+                details={"shop_id": "TEST_COMPARE_SHOP"},
+                resolved_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    queries.clear()
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    event.listen(Session, "loaded_as_persistent", record_load)
+    try:
+        response = get(api_client, readonly_key, scope, limit=1)
+    finally:
+        event.remove(db_engine, "before_cursor_execute", record_query)
+        event.remove(Session, "loaded_as_persistent", record_load)
+    assert response.status_code == 200, response.text
+    assert response.json()["totals"] == baseline.json()["totals"]
+    assert len(queries) <= baseline_count + 2
+    assert loaded == []
+    issue_reads = [sql for sql in queries if "FROM integration.sync_issues" in sql]
+    assert issue_reads and all("LIMIT" in sql for sql in issue_reads)
+    assert all("details" not in sql.split("FROM", 1)[0] for sql in issue_reads)
+
+
+def test_distinct_order_total_across_canonical_batches(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    queries = []
+
+    def record_query(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
+            queries.append(statement)
+
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    try:
+        baseline = get(api_client, readonly_key, scope, activity="all", limit=1)
+        assert baseline.status_code == 200, baseline.text
+        baseline_count = len(queries)
+    finally:
+        event.remove(db_engine, "before_cursor_execute", record_query)
+    with Session(db_engine) as session:
+        shared = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert shared is not None
+        for n in range(101):
+            product = ChannelProduct(
+                shop_pk=scope["shop"],
+                spu_id=f"TEST_COMPARE_BATCH_{n}",
+                status="DEACTIVATE",
+            )
+            session.add(product)
+            session.flush()
+            session.add(
+                SalesOrderLine(
+                    order_pk=shared.id,
+                    spu_pk=product.id,
+                    external_line_id=f"TEST_COMPARE_BATCH_LINE_{n}",
+                    quantity=1,
+                    unit_price=100000,
+                    currency="VND",
+                )
+            )
+        session.commit()
+    queries.clear()
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    try:
+        response = get(
+            api_client, readonly_key, scope, activity="all", offset=100, limit=1
+        )
+    finally:
+        event.remove(db_engine, "before_cursor_execute", record_query)
+    assert response.status_code == 200, response.text
+    # Full-scope SQL counts remain independent; expensive canonical reads only
+    # calculate this one requested page, not every 100-SPU batch in the shop.
+    assert len(queries) <= baseline_count + 2
+    body = response.json()
+    assert body["total"] == 106
+    assert body["totals"]["analysisSpuCount"] == 106
+    assert body["totals"]["currentOrderCount"] == 2  # shared + small
+    assert body["totals"]["previousOrderCount"] == 1
+    assert len(body["items"]) == 1
+
+
+def test_all_reads_share_readonly_snapshot_and_calculation_time(
+    comparison_scope, db_engine
+):
+    from tts_erp_v2.analytics.spu_deterioration_alert.availability import (
+        resolve_availability,
+    )
+    from tts_erp_v2.analytics.spu_deterioration_alert.comparison import read_comparison
+
+    observed = []
+
+    def resolver(session, **kwargs):
+        assert (
+            session.execute(text("SHOW transaction_isolation")).scalar_one()
+            == "repeatable read"
+        )
+        assert session.execute(text("SHOW transaction_read_only")).scalar_one() == "on"
+        observed.append(kwargs["now"].isoformat())
+        return resolve_availability(session, **kwargs)
+
+    with Session(db_engine) as session:
+        body = read_comparison(
+            session, shop_pk=comparison_scope["shop"], availability_resolver=resolver
+        )
+    assert observed == [body["meta"]["calculatedAt"].isoformat()]
+    assert all(
+        item["basisCalculatedAt"] == body["meta"]["calculatedAt"]
+        for item in body["items"]
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        None,
+        {},
+        {"status": 200, "body": {"code": 0, "data": {}}},
+        {"status": 200, "body": {"code": 4, "data": {"table": []}}},
+    ],
+)
+def test_malformed_or_failed_empty_ads_are_not_availability_evidence(
+    api_client, readonly_key, comparison_scope, db_engine, body
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        session.execute(delete(AdDaily).where(AdDaily.seller_id == "TEST_COMPARE_SHOP"))
+        session.add(
+            AdRawLog(
+                seller_id="TEST_COMPARE_SHOP",
+                advertiser_id="TEST_ADV",
+                campaign_id="TEST_CAMPAIGN",
+                endpoint=ENDPOINT,
+                kind="daily",
+                day=scope["anchor"],
+                request_url="https://example.invalid",
+                request_method="POST",
+                response_status=200,
+                response_body=body,
+            )
+        )
+        session.commit()
+    assert get(api_client, readonly_key, scope, activity="all").status_code == 503
+
+
+@pytest.mark.parametrize("status", [None, "", " ", "TEST_UNKNOWN"])
+def test_unknown_order_status_is_not_zero_or_default_activity(
+    api_client, readonly_key, comparison_scope, db_engine, status
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        order.status = status
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = body["items"][0]
+    assert item["currentOrderCount"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["currentRoi"] is None
+    assert item["currentNetProfitCny"] is None
+    assert item["currentRoiUnavailableReason"]
+    assert Decimal(item["currentSpendCny"]) == 49
+    assert body["totals"]["currentOrderCount"] is None
+    assert item["previousOrderCount"] == 1
+    assert item["previousRoi"] is not None
+    assert body["totals"]["previousOrderCount"] == 1
+    assert get(api_client, readonly_key, scope).status_code == 503
+
+
+@pytest.mark.parametrize("status", ["UNPAID", "ON_HOLD", "CANCELLED"])
+@pytest.mark.parametrize("missing_lines", [False, True])
+def test_known_excluded_status_keeps_its_existing_missing_line_semantics(
+    api_client, readonly_key, comparison_scope, db_engine, status, missing_lines
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        order.status = status
+        if missing_lines:
+            session.execute(
+                delete(SalesOrderLine).where(SalesOrderLine.order_pk == order.id)
+            )
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    unknown = status == "CANCELLED" and missing_lines
+    assert item["currentOrderCount"] == (None if unknown else 0)
+    assert item["currentNoOrderAdSpend"] is (None if unknown else True)
+    assert (item["currentRoi"] is None) is unknown
+    assert (item["currentNetProfitCny"] is None) is unknown
+    assert get(api_client, readonly_key, scope).status_code == (503 if unknown else 200)
+
+
+def _add_comparison_refund(
+    db_engine,
+    scope,
+    *,
+    order_id="TEST_COMPARE_ORDER_2",
+    amount=None,
+    status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+    case_type="RETURN_AND_REFUND",
+):
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == order_id)
+        )
+        assert order is not None
+        line = session.scalar(
+            select(SalesOrderLine).where(
+                SalesOrderLine.order_pk == order.id,
+                SalesOrderLine.spu_pk == scope["products"][0],
+            )
+        )
+        assert line is not None
+        case = Case(
+            shop_pk=scope["shop"],
+            order_pk=order.id,
+            external_case_id=f"TEST_COMPARE_MISSING_REFUND_{order_id}",
+            case_type=case_type,
+            status=status,
+            # A case's update day must not move it out of its original order window.
+            updated_at_source=datetime.combine(
+                scope["anchor"] + timedelta(days=2), time(12), TZ
+            ),
+        )
+        session.add(case)
+        session.flush()
+        session.add(
+            CaseLine(
+                case_id=case.id,
+                sales_order_line_id=line.id,
+                external_case_line_id="TEST_COMPARE_MISSING_REFUND_LINE",
+                quantity=1,
+                refund_amount=amount,
+                currency="VND",
+                should_replenish_stock=False,
+            )
+        )
+        session.commit()
+
+
+@pytest.mark.parametrize("period", ["current", "previous"])
+@pytest.mark.parametrize("case_type", ["REFUND_ONLY", "RETURN_AND_REFUND"])
+@pytest.mark.parametrize(
+    "status", ["RETURN_OR_REFUND_REQUEST_COMPLETE", "CANCELLATION_REQUEST_COMPLETE"]
+)
+def test_missing_completed_refund_amount_masks_only_affected_profitability(
+    api_client, readonly_key, comparison_scope, db_engine, period, case_type, status
+):
+    scope = comparison_scope
+    _add_comparison_refund(
+        db_engine,
+        scope,
+        order_id="TEST_COMPARE_ORDER_2"
+        if period == "current"
+        else "TEST_COMPARE_ORDER_1",
+        status=status,
+        case_type=case_type,
+    )
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = next(i for i in body["items"] if i["spuPk"] == scope["products"][0])
+    assert item[period + "Roi"] is None
+    assert item[period + "NetProfitCny"] is None
+    assert "退款金额缺失" in item[period + "RoiUnavailableReason"]
+    assert item[period + "OrderCount"] == 1
+    assert item[period + "NoOrderAdSpend"] is False
+    assert Decimal(item[period + "SpendCny"]) == 49
+    assert body["totals"][period + "OrderCount"] == (2 if period == "current" else 1)
+    other = "previous" if period == "current" else "current"
+    assert item[other + "Roi"] is not None
+    assert item[other + "NetProfitCny"] is not None
+    for known in body["items"]:
+        if known["spuPk"] in scope["products"][1:4]:
+            assert known[period + "Roi"] is not None
+            assert known[period + "NetProfitCny"] is not None
+    assert any("退款金额缺失" in w for w in body["meta"]["warnings"])
+    assert get(api_client, readonly_key, scope).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("amount", "status", "case_type", "order_status"),
+    [
+        (0, "RETURN_OR_REFUND_REQUEST_COMPLETE", "RETURN_AND_REFUND", "DELIVERED"),
+        (None, "RETURN_OR_REFUND_REQUEST_PENDING", "RETURN_AND_REFUND", "DELIVERED"),
+        (None, "CANCELLATION_REQUEST_COMPLETE", "CANCELLATION", "CANCELLED"),
+        (None, "RETURN_OR_REFUND_REQUEST_COMPLETE", "REFUND_ONLY", "UNPAID"),
+        (None, "RETURN_OR_REFUND_REQUEST_COMPLETE", "REFUND_ONLY", "ON_HOLD"),
+    ],
+)
+def test_non_contributing_or_known_zero_refund_amount_does_not_mask_profitability(
+    api_client,
+    readonly_key,
+    comparison_scope,
+    db_engine,
+    amount,
+    status,
+    case_type,
+    order_status,
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        order.status = order_status
+        session.commit()
+    _add_comparison_refund(
+        db_engine, scope, amount=amount, status=status, case_type=case_type
+    )
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentRoi"] is not None
+    assert item["currentNetProfitCny"] is not None
+    assert item["currentRoiUnavailableReason"] is None
+    assert not any("退款金额缺失" in w for w in response.json()["meta"]["warnings"])
+
+
+@pytest.mark.parametrize("status", sorted(PAID_SALES_ORDER_STATUSES))
+def test_known_paid_order_status_still_has_known_comparison_facts(
+    api_client, readonly_key, comparison_scope, db_engine, status
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        order.status = status
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentOrderCount"] == 1
+    assert item["currentNoOrderAdSpend"] is False
+    assert item["currentRoi"] is not None
+    assert item["currentNetProfitCny"] is not None
+    assert get(api_client, readonly_key, scope).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("day_offset", "clock", "paid_fallback", "expected_period"),
+    [
+        (-6, time.min, False, "current"),
+        (-7, time(23, 59, 59), False, "previous"),
+        (1, time.min, False, None),
+        (-14, time(23, 59, 59), False, None),
+        (-6, time.min, True, "current"),
+    ],
+)
+def test_canonical_refund_completeness_uses_original_order_local_window(
+    api_client,
+    readonly_key,
+    comparison_scope,
+    db_engine,
+    day_offset,
+    clock,
+    paid_fallback,
+    expected_period,
+):
+    from tts_erp_v2.analytics.spu_profitability import (
+        consistent_read_snapshot,
+        missing_completed_refund_amounts_in_snapshot,
+    )
+
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        event_time = datetime.combine(
+            scope["anchor"] + timedelta(days=day_offset), clock, TZ
+        )
+        order.order_time = None if paid_fallback else event_time
+        # A conflicting paid date must not override a present order date.
+        order.paid_at = (
+            event_time
+            if paid_fallback
+            else datetime.combine(scope["anchor"], time(12), TZ)
+        )
+        session.commit()
+    _add_comparison_refund(db_engine, scope)
+    with Session(db_engine) as session, consistent_read_snapshot(session):
+        for label, start_offset, end_offset in (
+            ("previous", -13, -7),
+            ("current", -6, 0),
+        ):
+            missing = missing_completed_refund_amounts_in_snapshot(
+                session,
+                shop_pk=scope["shop"],
+                spu_pks=tuple(scope["products"]),
+                start_date=scope["anchor"] + timedelta(days=start_offset),
+                end_date=scope["anchor"] + timedelta(days=end_offset),
+            )
+            assert missing == (
+                {scope["products"][0]} if label == expected_period else set()
+            )
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    for label in ("previous", "current"):
+        assert (item[label + "Roi"] is None) is (label == expected_period)
+        assert (item[label + "NetProfitCny"] is None) is (label == expected_period)
+
+
+def _add_comparison_settlement(
+    db_engine, scope, *, order_id="TEST_COMPARE_ORDER_2", components=()
+):
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == order_id)
+        )
+        assert order is not None
+        statement = SettlementStatement(
+            external_statement_id=f"TEST_COMPARE_STATEMENT_{order_id}",
+            statement_time=datetime.combine(
+                scope["anchor"] + timedelta(days=2), time(12), TZ
+            ),
+            currency="VND",
+        )
+        session.add(statement)
+        session.flush()
+        # Separate transactions permit several SETTLEMENT components whose sum
+        # is zero. An empty transaction alone must not count as settlement.
+        for n in range(max(1, len(components))):
+            transaction = SettlementTransaction(
+                settlement_statement_id=statement.id,
+                external_transaction_id=f"TEST_COMPARE_TXN_{order_id}_{n}",
+                order_pk=order.id,
+                transaction_time=statement.statement_time,
+            )
+            session.add(transaction)
+            session.flush()
+            if components:
+                code, amount = components[n]
+                session.add(
+                    SettlementComponent(
+                        transaction_id=transaction.id,
+                        component_code=code,
+                        amount=Decimal(amount),
+                        currency="VND",
+                    )
+                )
+        session.commit()
+
+
+def _canonical_comparison_metric(db_engine, scope, period):
+    from tts_erp_v2.analytics.spu_profitability import (
+        ExactIdsSelection,
+        ProfitScope,
+        RowView,
+        read_overview,
+    )
+
+    with Session(db_engine) as session:
+        return read_overview(
+            session,
+            scope=ProfitScope(
+                shop_pk=scope["shop"],
+                start_date=scope["anchor"]
+                - timedelta(days=6 if period == "current" else 13),
+                end_date=scope["anchor"]
+                - timedelta(days=0 if period == "current" else 7),
+                include_inactive=True,
+                selection=ExactIdsSelection(("TEST_COMPARE_0",)),
+            ),
+            view=RowView(limit=1),
+        ).items[0]
+
+
+@pytest.mark.parametrize("period", ["current", "previous"])
+@pytest.mark.parametrize(
+    ("components", "settled"),
+    [
+        ((("SETTLEMENT", "90000"),), True),
+        ((("SETTLEMENT", "0"),), True),
+        ((("SETTLEMENT", "90000"), ("SETTLEMENT", "-90000")), True),
+        ((("PLATFORM_COMMISSION", "-3000"),), False),
+        ((("CUSTOMER_REFUND", "-100000"),), False),
+        ((), False),
+    ],
+    ids=["positive", "zero", "sum-zero", "fee-only", "refund-only", "empty-txn"],
+)
+def test_missing_refund_amount_preserves_independent_settled_current_metrics(
+    api_client, readonly_key, comparison_scope, db_engine, period, components, settled
+):
+    from tts_erp_v2.analytics.spu_profitability import (
+        consistent_read_snapshot,
+        missing_completed_refund_amounts_in_snapshot,
+    )
+
+    scope = comparison_scope
+    order_id = "TEST_COMPARE_ORDER_2" if period == "current" else "TEST_COMPARE_ORDER_1"
+    _add_comparison_settlement(
+        db_engine, scope, order_id=order_id, components=components
+    )
+    _add_comparison_refund(db_engine, scope, order_id=order_id)
+    metric = _canonical_comparison_metric(db_engine, scope, period)
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = next(i for i in body["items"] if i["spuPk"] == scope["products"][0])
+    if settled:
+        # Compare canonical outputs, not a second financial formula in the test.
+        assert item[period + "NetProfitCny"] is not None
+        assert Decimal(item[period + "NetProfitCny"]) == metric.net_profit.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        assert item[period + "Roi"] is not None
+        assert metric.roi_real is not None
+        assert Decimal(item[period + "Roi"]) == metric.roi_real.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        assert item[period + "RoiUnavailableReason"] is None
+    else:
+        assert item[period + "NetProfitCny"] is None
+        assert item[period + "Roi"] is None
+        assert "退款金额缺失" in item[period + "RoiUnavailableReason"]
+    assert item[period + "OrderCount"] == 1
+    assert item[period + "NoOrderAdSpend"] is False
+    assert Decimal(item[period + "SpendCny"]) == 49
+    other = "previous" if period == "current" else "current"
+    assert item[other + "Roi"] is not None
+    assert item[other + "NetProfitCny"] is not None
+    assert body["totals"][period + "OrderCount"] == (2 if period == "current" else 1)
+    for known in body["items"]:
+        if known["spuPk"] in scope["products"][1:4]:
+            assert known[period + "Roi"] is not None
+            assert known[period + "NetProfitCny"] is not None
+    with Session(db_engine) as session, consistent_read_snapshot(session):
+        # NOT NULL makes component presence equivalent to a non-NULL SUM,
+        # including explicit zero and offsetting amounts, in the sales SQL.
+        assert (
+            session.scalar(
+                text(
+                    "SELECT is_nullable FROM information_schema.columns "
+                    "WHERE table_schema = 'finance' "
+                    "AND table_name = 'settlement_components' AND column_name = 'amount'"
+                )
+            )
+            == "NO"
+        )
+        missing = missing_completed_refund_amounts_in_snapshot(
+            session,
+            shop_pk=scope["shop"],
+            spu_pks=tuple(scope["products"]),
+            start_date=scope["anchor"]
+            - timedelta(days=6 if period == "current" else 13),
+            end_date=scope["anchor"] - timedelta(days=0 if period == "current" else 7),
+        )
+        assert missing == (set() if settled else {scope["products"][0]})
+
+
+@pytest.mark.parametrize("unsettled_refund_amount", [None, 0])
+def test_mixed_settled_and_unsettled_refunds_keep_order_specific_completeness(
+    api_client, readonly_key, comparison_scope, db_engine, unsettled_refund_amount
+):
+    from tts_erp_v2.analytics.spu_profitability import (
+        consistent_read_snapshot,
+        missing_completed_refund_amounts_in_snapshot,
+    )
+
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        small = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_SMALL")
+        )
+        assert small is not None
+        line = session.scalar(
+            select(SalesOrderLine).where(SalesOrderLine.order_pk == small.id)
+        )
+        assert line is not None
+        line.spu_pk = scope["products"][0]
+        session.commit()
+    _add_comparison_settlement(db_engine, scope, components=(("SETTLEMENT", "90000"),))
+    _add_comparison_refund(db_engine, scope)
+    _add_comparison_refund(
+        db_engine, scope, order_id="TEST_COMPARE_SMALL", amount=unsettled_refund_amount
+    )
+    metric = _canonical_comparison_metric(db_engine, scope, "current")
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = next(i for i in body["items"] if i["spuPk"] == scope["products"][0])
+    if unsettled_refund_amount is None:
+        assert item["currentNetProfitCny"] is None
+        assert item["currentRoi"] is None
+        assert "退款金额缺失" in item["currentRoiUnavailableReason"]
+    else:
+        assert item["currentNetProfitCny"] is not None
+        assert Decimal(item["currentNetProfitCny"]) == metric.net_profit.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        assert item["currentRoi"] is not None
+        assert metric.roi_real is not None
+        assert Decimal(item["currentRoi"]) == metric.roi_real.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        assert item["currentRoiUnavailableReason"] is None
+    assert item["currentOrderCount"] == 2
+    assert item["currentNoOrderAdSpend"] is False
+    assert Decimal(item["currentSpendCny"]) == 49
+    assert body["totals"]["currentOrderCount"] == 2
+    assert item["previousNetProfitCny"] is not None
+    assert item["previousRoi"] is not None
+    for known in body["items"]:
+        if known["spuPk"] in scope["products"][1:4]:
+            assert known["currentNetProfitCny"] is not None
+            assert known["currentRoi"] is not None
+    with Session(db_engine) as session, consistent_read_snapshot(session):
+        missing = missing_completed_refund_amounts_in_snapshot(
+            session,
+            shop_pk=scope["shop"],
+            spu_pks=tuple(scope["products"]),
+            start_date=scope["anchor"] - timedelta(days=6),
+            end_date=scope["anchor"],
+        )
+        assert missing == (
+            {scope["products"][0]} if unsettled_refund_amount is None else set()
+        )
+
+
+def test_malformed_legacy_alert_config_does_not_block_valid_comparison(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    from tts_erp_v2.analytics.spu_deterioration_alert.config import ALERT_CONFIG_KEY
+    from tts_erp_v2.db.models.config import RuntimeConfigItem, RuntimeConfigRevision
+
+    def clear_test_config():
+        with Session(db_engine) as session:
+            session.execute(
+                delete(RuntimeConfigRevision).where(
+                    RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY
+                )
+            )
+            session.execute(
+                delete(RuntimeConfigItem).where(
+                    RuntimeConfigItem.config_key == ALERT_CONFIG_KEY
+                )
+            )
+            session.commit()
+
+    clear_test_config()
+    before = get(api_client, readonly_key, comparison_scope)
+    assert before.status_code == 200
+    baseline = before.json()
+    try:
+        with Session(db_engine) as session:
+            session.add(
+                RuntimeConfigItem(
+                    config_key=ALERT_CONFIG_KEY,
+                    display_name="TEST comparison ignores malformed legacy policy",
+                    json_schema={"type": "object"},
+                    draft_payload=None,
+                    draft_rollout=[],
+                    draft_version=0,
+                    published_version=1,
+                )
+            )
+            session.add(
+                RuntimeConfigRevision(
+                    config_key=ALERT_CONFIG_KEY,
+                    version=1,
+                    payload=["malformed"],  # type: ignore[arg-type]
+                    rollout=[],
+                    created_by="TEST_comparison_legacy_config",
+                )
+            )
+            session.commit()
+        response = get(api_client, readonly_key, comparison_scope)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["total"] == baseline["total"] > 0
+        assert body["totals"] == baseline["totals"]
+        fields = (
+            "spuPk",
+            "previousRoi",
+            "currentRoi",
+            "previousNetProfitCny",
+            "currentNetProfitCny",
+            "previousSpendCny",
+            "currentSpendCny",
+            "previousOrderCount",
+            "currentOrderCount",
+        )
+        assert [[row[key] for key in fields] for row in body["items"]] == [
+            [row[key] for key in fields] for row in baseline["items"]
+        ]
+        assert "effectiveConfig" not in body["meta"]
+    finally:
+        clear_test_config()
