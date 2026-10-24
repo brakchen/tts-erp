@@ -535,3 +535,65 @@ def test_channel_accounts_exposes_opened_date(api_client, admin_key, readonly_ke
     assert SHOP_A in rows
     assert rows[SHOP_A]["opened_date"] == "2026-06-01"
     assert rows[SHOP_A]["credential_id"] is None  # 插件店铺，无 API 凭证
+
+
+def _login_p2_shop_operator(api_client, ua_user_factory) -> None:
+    user = ua_user_factory("test_ua_p2_shop", roles=("operator",))
+    result = api_client.post(
+        "/v2/auth/login", json={"username": user.username, "password": user.password},
+    )
+    assert result.status_code == 200
+
+
+@pytest.mark.parametrize("method", ["POST", "PATCH"])
+@pytest.mark.parametrize("header", [None, "wrong"])
+def test_cookie_shop_write_requires_csrf_even_with_bearer(
+    api_client, admin_key, ua_user_factory, method: str, header: str | None,
+) -> None:
+    pk = None
+    if method == "PATCH":
+        created = _register(api_client, admin_key, account_name="TEST_original")
+        pk = created.json()["shop"]["id"]
+    _login_p2_shop_operator(api_client, ua_user_factory)
+    headers = {"Authorization": f"Bearer {admin_key}"}
+    if header is not None:
+        headers["X-Requested-With"] = header
+    if method == "POST":
+        response = api_client.post(
+            "/v2/admin/shops/register", headers=headers,
+            json={"shop_id": SHOP_A, "account_name": "TEST_changed"},
+        )
+    else:
+        response = api_client.patch(
+            f"/v2/admin/shops/{pk}", headers=headers, json={"account_name": "TEST_changed"},
+        )
+    assert response.status_code == 403
+    assert "X-Requested-With" in response.json()["detail"]
+    if pk is not None:
+        row = api_client.get(f"/v2/commerce/channel-accounts/{pk}").json()
+        assert row["account_name"] == "TEST_original"
+    else:
+        rows = api_client.get("/v2/commerce/channel-accounts?platform=tiktok&limit=500").json()
+        assert all(row["shop_id"] != SHOP_A for row in rows)
+
+
+def test_cookie_readwrite_keeps_app_pair_and_metadata_writes(
+    api_client, ua_user_factory,
+) -> None:
+    _login_p2_shop_operator(api_client, ua_user_factory)
+    headers = {"x-requested-with": "tts-erp"}
+    result = api_client.post(
+        "/v2/admin/shops/register", headers=headers,
+        json={"shop_id": SHOP_A, "account_name": "TEST_registered", "service_id": SERVICE_A,
+              "app_key": "TEST_ADMIN_APP_KEY_123", "app_secret": "TEST_ADMIN_APP_SECRET_123"},
+    )
+    assert result.status_code == 200
+    row = result.json()["shop"]
+    assert row["app_credentials_configured"] is True
+    assert "TEST_ADMIN_APP_SECRET_123" not in result.text
+    updated = api_client.patch(
+        f"/v2/admin/shops/{row['id']}", headers=headers, json={"account_name": "TEST_updated"},
+    )
+    assert updated.status_code == 200
+    read = api_client.get(f"/v2/commerce/channel-accounts/{row['id']}")
+    assert read.status_code == 200 and read.json()["account_name"] == "TEST_updated"

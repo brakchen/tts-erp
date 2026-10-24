@@ -1,6 +1,6 @@
 # 前端 P2 实现计划：普通页面与首个隔离写闭环
 
-> 状态：合同/计划门禁完成，进入 run-binding 基础实现；三页业务/API迁移尚未开始。窄测试只证明所覆盖切片，不是 P2 GREEN 或交付声明。
+> 状态：run-binding 原子切片已验，四个 cookie 写入口安全修复验证中；三页尚未迁移。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
 > 权威父方案：[渐进迁移方案](frontend-progressive-migration.md)；组件标准：[前端开发规范](../guides/frontend-development.md)。
 > 用户在 P0/P1 交付后连续要求继续开发、直到任务完成：按既定前端路线先完成 P2，再逐批核对 P3–P6 的门槛；不接管其他会话或自动生产上线。
 
@@ -10,7 +10,7 @@
 - UTC：2026-10-24。独立 `feature/frontend-p2` / `.worktrees/frontend-p2`，从 fresh `origin/master=e86817a3f28d4267ce0527a43ed7887795da81c3` 建立。
 - P0/P1 已完成，代码精确集成 `8f1b752` 的 fast 基线零新增稳定失败；不把其证据冒充 P2 通过。
 - Change Necessity：三页仍依赖旧模板/脚本，复制了会话、路径、请求与布局逻辑；需接入既有 React/HeroUI 骨架，保留有效查询、管理和错误恢复。
-- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide；`m-f3272c5e-978` 追加 no-dotenv bootstrap 的精确子进程透传修复。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
+- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide；`m-f3272c5e-978` 追加 no-dotenv bootstrap 的精确子进程透传修复；`m-296716be-6d8` 追加 deps/admin/config 的最小安全接线、旧enum两头及3个API测试路径。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
 - 保留 main 的 `plugins/monitor` 和未跟踪 `node_modules/`；原 child/coord 审计工作树不动。
 - 不改 app/access/middleware、schema/models/migrations、财务口径、TikTok 店铺写端点、插件、生产数据/服务。后端现有缺陷只在确定 canonical owner、登记 scope、写回归及安全审查后处理。
 - ArchitectureReviewRequired：是，涉及共享权限事实、凭证输入、OAuth 命令及真实浏览器/API 写入边界；沿用原架构，不另造 session/menu/client/chart engine。
@@ -115,7 +115,9 @@ P2 只逐页切换已验 React 页面。旧页面资源暂不在本计划写域�
 ## 7. 当前证据与未覆盖
 
 已做：合同审计及 e404c10 计划独立 F1 复审 PASS（`/tmp/frontend-p2-plan-f1-review.md`），精确登记 `m-badab46c-d24`；按原 lock 私有 npm ci 准备工具，未新增图表依赖。实际 strict TDD：producer/保留名称4 RED；canonical preconnection2 RED（旧 probe 请求 fake engine）；非普通 proof/FIFO 真实阻塞 RED 后在读取 owner 非阻塞打开并 fstat 拒绝。对应日志 `/tmp/frontend-p2-run-binding-{red-reserved,consumer-red,fifo-red,checkpoint-green}.log`；24eb775 检查点的两文件窄回归66 passed及独立源码审查 PASS（`/tmp/frontend-p2-binding-implementation-review.md`）只覆盖其版本。后续补齐私有/畸形/oversize/type/symlink、模板/base/retained/URI参数、活跃非祖先/死 owner/start变化、实际返回engine零connect/实际库名错仅identity SQL、真实test.sh传播、clone/issuer/command/proof-cleanup失败与失效proof拒绝；`/tmp/frontend-p2-run-binding-full-matrix.log` exit0/111 passed无skip，Ruff0及fresh LSP3 confirmed clean。RB-01 的本机原生有界深JSON本来已拒绝；明确用decoder RecursionError故障注入观察边界RED，再在load owner归一化，未谎称原生默认解码器已复现该异常。790b135 上一次完整 baseline 如实 exit1/新增6（`/tmp/frontend-p2-binding-baseline-verdict.log`），均为旧 no-dotenv 子进程 allowlist 未传新 proof；最小文件同样6失败，非flake。按追加scope仅透传2个新env及有界timeout、整理旧import空行，原dotenv/no-read/export断言及新guard不变；`/tmp/frontend-p2-binding-dotenv-green.log` 的三文件窄回归exit0/117 passed无skip，Ruff0/LSP1clean。此后只有该测试消费者/说明变更，无应用或runner代码delta；没有重跑全套或改baseline，不能声称完整suite exit0。增量独立复审仍待完成，binding任务未完成，更非P2验收。
-未做：图表依赖适配/审计、P2公共权限/业务API安全修复、三页业务实现、child/HTTP/canary真实写闭环、页面切换或交付。run-binding 仍 in_progress，补齐矩阵/实现复审后才解锁 core；不把局部测试、源码审计或计划 PASS 当整体 GREEN。
+run-binding 在 4f5 增量独立源码复审 PASS 后按原子切片完成，原完整执行 exit1/六项已聚焦修复的事实保留，最终 P2 baselines 仍有独立门禁。backend-safety 已观察13个真实RED（缺CSRF前触库、cookie缺/错头仍200、DELETE前无guard），最小实现后51例安全回归及64例连同未改runtime-config邻居全部通过；日志 `/tmp/frontend-p2-backend-safety-{red,matrix,neighbors}.log`。同提交为旧enum PUT/DELETE补头；角色、事务、OAuth GET、app/access/middleware均未改。原 config.py 的18个 FastAPI Depends/B008 Ruff签名与 HEAD完全一致，deps.py 的2个旧get_session返回类型LSP错误对应AST未变；不隐藏或冒充全路径lint clean，不顺手重构P3/旧DI。其余受测路径Ruff0、JS syntax0、LSP5文件clean；backend源码独立审查待做。
+
+未做：图表依赖适配/审计、P2公共权限/共享client、三页业务实现、child/HTTP/canary真实写闭环、页面切换或交付。core 仍依赖backend安全审查；不把局部测试、源码审计或计划 PASS 当整体 GREEN。
 
 F1 producer/consumer 已登记的当前写域（回执 m-badab46c-d24）：`scripts/{test_isolated.sh,_test_db_connections.py}`、`tests/conftest.py`、`tests/test_test_run_binding.py`、`tests/test_test_template_refresh.py`、`docs/guides/agent-testing.md`。`scripts/test.sh` 已在 DB URL 存在时不加载 .env.test，只验证新输出能原样传递，不预计修改它。已获计划复审/登记只允许此切片；真实 writable-fixture seed 仍须等实际门禁、child attestation/canary 支持实现并验证。
 

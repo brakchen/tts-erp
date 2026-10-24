@@ -78,6 +78,22 @@ def require_role_at_least(request: Request, min_role: str) -> None:
         )
 
 
+def require_cookie_csrf(request: Request) -> None:
+    """Reuse the focused-SPU/reporting contract for resolved cookie mutations.
+
+    AuthMiddleware owns the source: a valid cookie wins over a supplied key.
+    API-key and bypass callers retain their existing non-cookie behavior.
+    """
+    if (
+        request.scope.get("auth_method") == "cookie"
+        and request.headers.get("x-requested-with") != "tts-erp"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="cookie-authenticated mutations require X-Requested-With: tts-erp",
+        )
+
+
 # ─── Prod-shape destructive guard (2026-09-13) ────────────────────────
 #
 # Why this exists

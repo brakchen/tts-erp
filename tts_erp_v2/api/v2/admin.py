@@ -33,6 +33,7 @@ from tts_erp_v2.api.deps import (
     is_prod_shaped_db as _is_prod_shaped_db,
 )
 from tts_erp_v2.api.deps import (
+    require_cookie_csrf,
     require_role_at_least,
 )
 from tts_erp_v2.middleware.rate_limit import (
@@ -654,6 +655,7 @@ def register_shop(request: Request, body: ShopRegisterBody) -> ShopRegisterRespo
     the shop/service_id write. Secret is only stored encrypted, never returned.
     """
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     plaintext_app_secret = _validated_plaintext_app_secret(
         service_id=body.service_id,
         app_key=body.app_key,
@@ -798,6 +800,7 @@ def update_shop(
     fallback.
     """
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     plaintext_app_secret = _validated_plaintext_app_secret(
         service_id=body.service_id,
         app_key=body.app_key,
