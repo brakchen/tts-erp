@@ -86,3 +86,8 @@
 - `loginNextPath` 仅用于匿名登录，由既有服务端 `_valid_next` 和 root_path 幂等前缀逻辑给出。共享 parser 复用 `pathFor` 核验同源、无穿越且前缀已存在；缺失/非法目标或匿名文档包含导航/高权限提示时拒绝初始化，不信任浏览器查询串另造 redirect 政策。
 - 用户名/密码 JSON、认证、cookie 和会话归属不变。既有限流 body `retry_after_s` 保留，并补同值标准 `Retry-After` 响应头，使唯一 client 的 header-first 429 处理能保留完整等待时间。
 - `shared/api/request-lifetime.ts` 是从已验证用户页提取的原生 AbortController/Promise.race 小原语，只限定 30 秒本地 UI 等待并清理计时器，不决定服务端执行、认证状态、自动重放或 Retry-After。未知登录结果仍需显式查询当前会话、明确决定，不凭 GET 断言原密码/提交事实。
+
+## 视频诊断的公开边界
+
+- 诊断仍是显式授权读取，默认任务读取不附带 prompt/Artemis 输出。`promptSnapshot` 保持可空文本 wire 字段，生产者 `_attempt` 复用既有 `publishing.diagnostics.sanitize_text`：沿用凭证赋值/认证头/URL query 的脱敏规则和最多 2000 字符边界，不增加客户端 redactor 或另一解析引擎。
+- 原始完整 `prompt_snapshot` 审计事实不修改、不删除；Artemis 输出继续沿用既有结构化脱敏器。新 UI 必须明确标为“脱敏诊断节选”，不能把有限公开节选声称为完整原始 prompt，也不能把其值用于发布/重试资格判断。
