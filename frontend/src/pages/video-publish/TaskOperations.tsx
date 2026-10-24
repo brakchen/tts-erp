@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Input, Label, Modal, TextArea, TextField } from '@heroui/react';
 import { ApiError, requestJson } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
+import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { decodeDetail, decodeTask, type Detail, type Task } from './contracts';
 import { Facts } from './TaskFacts';
 import type { VideoCommand } from './useVideoCommand';
@@ -32,7 +33,7 @@ export default function TaskOperations({ operation, command, canWrite, onClose, 
   const [discard, setDiscard] = useState(false); const [settled, setSettled] = useState(false);
   const [locked, setLocked] = useState(false); const controller = useRef<AbortController | undefined>(undefined); const mounted = useRef(true);
   const sent = useRef(false); const attemptedPath = useRef(''); const dirty = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; controller.current?.abort(); }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; controller.current?.abort(); controller.current = undefined; }; }, []);
   const current = facts ?? original;
   const endpoint = `/v2/video-publish/tasks/${original.taskId}/${action === 'retry_cleanup' ? 'cleanup/retry' : action === 'replace_upload' ? 'replace-upload' : action === 'edit_settings' ? 'settings' : action.replaceAll('_', '-')}`;
   const allowed = canWrite && current.allowedActions.includes(action) && !locked && !settled;
@@ -40,19 +41,19 @@ export default function TaskOperations({ operation, command, canWrite, onClose, 
     if (checking || command.cooldown || command.pending) return;
     const abort = new AbortController(); controller.current?.abort(); controller.current = abort; setChecking(true);
     try {
-      const result = await requestJson<unknown>(operation.root, `/v2/video-publish/tasks/${original.taskId}`, { signal: abort.signal }, parseIdentityJson);
+      const result = await withinRequestLifetime(abort, (signal) => requestJson<unknown>(operation.root, `/v2/video-publish/tasks/${original.taskId}`, { signal }, parseIdentityJson));
       const row = decodeDetail(result.data); if (row.taskId !== original.taskId) throw new Error('任务身份不匹配');
-      if (!mounted.current || abort.signal.aborted) return;
+      if (!mounted.current || controller.current !== abort || abort.signal.aborted) return;
       setFacts(row); setSettled(false); command.checked(attemptedPath.current);
       if ((action === 'edit_settings' || action === 'cancel') && row.paramsLockedAt !== null) setLocked(true);
       if (action === 'edit_settings' && !dirty.current) setAppPackage(row.target.appPackage);
       setMessage('当前事实已读取，仅供核对，不证明原操作是否提交；输入保留。请根据当前版本与允许操作明确决定是否再次操作。');
     } catch (error: unknown) {
-      if (!mounted.current || abort.signal.aborted) return;
+      if (!mounted.current || controller.current !== abort) return;
       command.hold(error);
       if (error instanceof ApiError && error.status === 404) { command.checked(attemptedPath.current); setMessage('当前任务不可见或不存在，不证明原操作未提交；原目标及输入保留。'); }
       else setMessage('读取当前事实失败；原目标及输入保留，请明确重试查询。');
-    } finally { if (mounted.current) setChecking(false); }
+    } finally { if (mounted.current && controller.current === abort) { controller.current = undefined; setChecking(false); } }
   }
   async function perform() {
     if (sent.current || checking || command.blocked || !allowed || (action === 'edit_settings' && !facts)) return;

@@ -759,4 +759,165 @@ describe('video publish read slice', () => {
     expect(() => decodeTicket({ ...ticket, upload: { ...ticket.upload, url: 'https://TEST_user:TEST_value@test.store.invalid/minio/TEST' } })).toThrow('视频发布响应格式错误');
   });
 
+  function stalledJson(stage: 'fetch' | 'body', payload: unknown, lateRejection = false) {
+    let release!: () => void;
+    if (stage === 'fetch') return { result: new Promise<Response>((resolve, reject) => { release = () => lateRejection ? reject(new TypeError('TEST_late_transport')) : resolve(json(payload)); }), release: () => release() };
+    const response = json(null);
+    vi.spyOn(response, 'text').mockImplementation(() => new Promise<string>((resolve, reject) => { release = () => lateRejection ? reject(new TypeError('TEST_late_body')) : resolve(JSON.stringify(payload)); }));
+    return { result: response, release: () => release() };
+  }
+  async function prepareConfirmation(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByText('TEST_device_locked');
+    const file = new File(['TEST_VIDEO'], 'TEST_upload.mp4', { type: 'video/mp4' });
+    await user.upload(screen.getByLabelText('选择 MP4 视频'), file); await user.type(screen.getByRole('textbox', { name: '发布文案' }), 'TEST_captured_caption');
+    await user.click(screen.getByRole('button', { name: '上传并加入发布队列' })); return file;
+  }
+  it.each(['fetch', 'body'] as const)('bounds a stalled create %s to 30s, preserves capture/unknown and ignores late success', async (stage) => {
+    const bodies: string[] = []; let stalled!: ReturnType<typeof stalledJson>; let signal: AbortSignal | null | undefined;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') {
+        bodies.push(init.body as string); if (bodies.length > 1) return json(ticketFor(JSON.parse(init.body as string)));
+        signal = init.signal; stalled = stalledJson(stage, ticketFor(JSON.parse(init.body as string))); return stalled.result;
+      } return undefined;
+    });
+    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); const file = await prepareConfirmation(user);
+    vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '确认并上传' }).click(); });
+    expect(screen.getByLabelText('选择 MP4 视频')).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(29999); }); expect(screen.getByLabelText('选择 MP4 视频')).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByRole('button', { name: '核对上传任务' })).toBeEnabled();
+    expect(screen.getByRole('textbox', { name: '发布文案' })).toBeEnabled(); expect(screen.getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_captured_caption');
+    expect((screen.getByLabelText('选择 MP4 视频') as HTMLInputElement).files?.[0]).toBe(file);
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled(); expect(signal?.aborted).toBe(true);
+    await act(async () => { stalled.release(); });
+    expect(TestPut.requests).toHaveLength(0); expect(within(screen.getByRole('region', { name: '新建发布任务' })).queryByText('上传任务 ID')).toBeNull();
+    await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
+    expect(screen.getByText(/当前第一页未查到匹配任务，不证明不存在或原创建未提交/)).toBeVisible(); expect(bodies).toHaveLength(1);
+    await act(async () => { screen.getByRole('button', { name: '明确重试原上传' }).click(); });
+    await act(async () => { screen.getByRole('button', { name: '确认并上传' }).click(); });
+    expect(bodies).toHaveLength(2); expect(bodies[1]).toBe(bodies[0]); expect(TestPut.requests).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(31000); });
+    expect(TestPut.requests[0].abort).not.toHaveBeenCalled(); expect(screen.getByRole('button', { name: '取消上传' })).toBeEnabled();
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(2); view.unmount();
+  });
+  it.each(['fetch', 'body'] as const)('bounds mandatory upload verification %s without clearing uncertainty or accepting late task facts', async (stage) => {
+    let body: Record<string, unknown> = {}; let block = false; let stalled!: ReturnType<typeof stalledJson>;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') { body = JSON.parse(init.body as string); return Promise.reject(new TypeError('TEST_unknown')); }
+      if (url.endsWith('/tasks') && init.method === 'GET' && block) { stalled = stalledJson(stage, { ...list, items: [uploadingTask(body)] }); return stalled.result; }
+      return undefined;
+    });
+    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareUpload(user); block = true;
+    vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(screen.getByRole('button', { name: '核对上传任务' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled(); expect(screen.getByRole('button', { name: '清除选择 / 放弃续传' })).toBeDisabled();
+    expect(screen.getByText(/当前事实读取未完成/)).toBeVisible();
+    await act(async () => { stalled.release(); });
+    expect(within(screen.getByRole('region', { name: '新建发布任务' })).queryByText('上传任务 ID')).toBeNull();
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    block = false; await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled();
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1); view.unmount();
+  });
+  it.each(['fetch', 'body'] as const)('bounds mandatory task verification %s and keeps original target until an explicit fresh GET', async (stage) => {
+    let block = true; let stalled!: ReturnType<typeof stalledJson>;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/retry')) return Promise.reject(new TypeError('TEST_unknown'));
+      if (url.endsWith('/tasks/' + id)) { if (!block) return json({ ...detail, rowVersion: 5 }); stalled = stalledJson(stage, { ...detail, rowVersion: 999 }); return stalled.result; }
+      return undefined;
+    });
+    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />);
+    await user.click(await within(await screen.findByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重试原任务' }));
+    await user.click(screen.getByRole('button', { name: '确认重试原任务' }));
+    const panel = screen.getByRole('region', { name: '任务操作与核对' });
+    vi.useFakeTimers(); await act(async () => { within(panel).getByRole('button', { name: '查询当前事实' }).click(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(within(panel).getByRole('button', { name: '查询当前事实' })).toBeEnabled();
+    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeDisabled(); expect(within(panel).getByRole('button', { name: '关闭操作面板（保留服务端任务）' })).toBeDisabled();
+    block = false; await act(async () => { within(panel).getByRole('button', { name: '查询当前事实' }).click(); });
+    await act(async () => { stalled.release(); });
+    expect(within(panel).queryByText('999')).toBeNull(); expect(within(panel).getByText('5')).toBeVisible();
+    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeEnabled();
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1); view.unmount();
+  });
+
+  it.each(['fetch', 'body'] as const)('releases a keyboard-submitted task command after stalled %s without accepting its late success', async (stage) => {
+    let stalled!: ReturnType<typeof stalledJson>; let signal: AbortSignal | null | undefined; let removal: ReturnType<typeof vi.spyOn> | undefined;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/retry')) { signal = init.signal; removal = vi.spyOn(signal!, 'removeEventListener'); stalled = stalledJson(stage, { ...task, rowVersion: 999 }); return stalled.result; }
+      return undefined;
+    });
+    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />);
+    await user.click(await within(await screen.findByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重试原任务' }));
+    vi.useFakeTimers(); const keyboard = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    screen.getByRole('button', { name: '确认重试原任务' }).focus();
+    await act(async () => { const press = keyboard.keyboard('{Enter}'); await vi.advanceTimersByTimeAsync(1); await press; });
+    const panel = screen.getByRole('region', { name: '任务操作与核对' });
+    expect(within(panel).getByRole('button', { name: '查询当前事实' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(within(panel).getByRole('button', { name: '查询当前事实' })).toBeEnabled();
+    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeDisabled();
+    expect(signal?.aborted).toBe(true); expect(removal).toHaveBeenCalledWith('abort', expect.any(Function));
+    const calls = fetcher.mock.calls.length; await act(async () => { stalled.release(); });
+    expect(fetcher).toHaveBeenCalledTimes(calls); expect(within(panel).queryByText('999')).toBeNull();
+    expect(screen.queryByText(/服务端已确认本次操作/)).toBeNull();
+    within(panel).getByRole('button', { name: '查询当前事实' }).focus();
+    await act(async () => { const press = keyboard.keyboard('{Enter}'); await vi.advanceTimersByTimeAsync(1); await press; });
+    expect(within(panel).getByRole('button', { name: '关闭操作面板（保留服务端任务）' })).toBeEnabled();
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1); view.unmount();
+  });
+  it.each(['fetch', 'body'] as const)('aborts owned command %s and removes its lifetime listener on unmount, ignoring late IO quietly', async (stage) => {
+    let stalled!: ReturnType<typeof stalledJson>; let signal: AbortSignal | null | undefined; let removal: ReturnType<typeof vi.spyOn> | undefined;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') { signal = init.signal; removal = vi.spyOn(signal!, 'removeEventListener'); stalled = stalledJson(stage, ticketFor(JSON.parse(init.body as string))); return stalled.result; } return undefined;
+    });
+    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareConfirmation(user);
+    vi.useFakeTimers();
+    await act(async () => { screen.getByRole('button', { name: '确认并上传' }).click(); });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {}); const calls = fetcher.mock.calls.length;
+    await act(async () => { view.unmount(); });
+    expect(signal?.aborted).toBe(true); expect(removal).toHaveBeenCalledWith('abort', expect.any(Function));
+    await act(async () => { stalled.release(); await vi.advanceTimersByTimeAsync(31000); });
+    expect(fetcher).toHaveBeenCalledTimes(calls); expect(TestPut.requests).toHaveLength(0); expect(errors).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(['fetch', 'body'] as const)('aborts owned verification %s on unmount and observes its later rejection quietly', async (stage) => {
+    let block = false; let stalled!: ReturnType<typeof stalledJson>; let signal: AbortSignal | null | undefined; let removal: ReturnType<typeof vi.spyOn> | undefined;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') return Promise.reject(new TypeError('TEST_unknown'));
+      if (url.endsWith('/tasks') && init.method === 'GET' && block) { signal = init.signal; removal = vi.spyOn(signal!, 'removeEventListener'); stalled = stalledJson(stage, { ...list, items: [] }, true); return stalled.result; } return undefined;
+    });
+    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareUpload(user); block = true;
+    vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {}); const calls = fetcher.mock.calls.length;
+    await act(async () => { view.unmount(); }); expect(signal?.aborted).toBe(true);
+    expect(removal).toHaveBeenCalledWith('abort', expect.any(Function)); expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { stalled.release(); await vi.advanceTimersByTimeAsync(31000); });
+    expect(fetcher).toHaveBeenCalledTimes(calls); expect(errors).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('preserves a header-authoritative HTTP500 Retry-After600 despite stalled body/cancel, edits, local deadlines and reads', async () => {
+    let text: ReturnType<typeof vi.spyOn> | undefined;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') {
+        const response = json({}, 500, { 'Retry-After': '600' });
+        text = vi.spyOn(response, 'text').mockImplementation(() => new Promise<string>(() => {}));
+        vi.spyOn(response.body!, 'cancel').mockImplementation(() => new Promise<void>(() => {})); return response;
+      } return undefined;
+    });
+    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareConfirmation(user);
+    vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '确认并上传' }).click(); });
+    expect(text).not.toHaveBeenCalled(); expect(screen.getByRole('textbox', { name: '发布文案' })).toBeEnabled();
+    await act(async () => { fireEvent.change(screen.getByRole('textbox', { name: '发布文案' }), { target: { value: 'TEST_edited_but_original_retained' } }); screen.getByRole('button', { name: '立即刷新' }).click(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(599000); });
+    expect(screen.getByRole('button', { name: '核对上传任务' })).toBeDisabled(); expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByRole('button', { name: '核对上传任务' })).toBeEnabled(); expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+    await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
+    await act(async () => { screen.getByRole('button', { name: '明确重试原上传' }).click(); });
+    const dialog = screen.getByRole('dialog', { name: '确认加入发布队列' }); expect(dialog).toHaveTextContent('TEST_captured_caption'); expect(dialog).not.toHaveTextContent('TEST_edited_but_original_retained');
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1); view.unmount();
+  });
+
 });

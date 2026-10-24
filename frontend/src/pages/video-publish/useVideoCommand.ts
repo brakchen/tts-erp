@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import { parseIdentityJson } from '../../shared/api/identity-json';
+import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 
 const labels = { caption: '发布文案', filename: '视频文件', sizeBytes: '视频大小', deviceSerial: '设备序列号', prompt: '正文 Prompt', appPackage: 'App 包名' };
 // Static presentation copy only; neither response.message nor an unknown code is a display string.
@@ -35,7 +36,8 @@ export function useVideoCommand(root: string) {
   const [failure, setFailure] = useState<CommandFailure>();
   const busy = useRef(false); const deadline = useRef(0); const uncertain = useRef(false); const attemptPath = useRef('');
   const mounted = useRef(true); const cancelDelay = useRef<(() => void) | undefined>(undefined);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; cancelDelay.current?.(); }; }, []);
+  const request = useRef<AbortController | undefined>(undefined);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current?.abort(); request.current = undefined; busy.current = false; cancelDelay.current?.(); }; }, []);
   function reject(error: unknown) {
     if (!mounted.current) return;
     const failed = commandFailure(error, labels);
@@ -58,13 +60,20 @@ export function useVideoCommand(root: string) {
   }
   async function send<T>(path: string, body: Record<string, unknown>, decode: (value: unknown) => T, method = 'POST'): Promise<T | undefined> {
     if (busy.current || performance.now() < deadline.current || uncertain.current) return;
+    const controller = new AbortController(); request.current = controller;
     busy.current = true; attemptPath.current = path; setPending(true); setFailure(undefined);
     try {
-      const result = await requestJson<unknown>(root, path, { method, body: JSON.stringify(body) }, parseIdentityJson);
+      const result = await withinRequestLifetime(controller, (signal) => requestJson<unknown>(root, path, { method, body: JSON.stringify(body), signal }, parseIdentityJson));
+      if (!mounted.current || request.current !== controller || controller.signal.aborted) return;
       const data = decode(result.data);
       return mounted.current ? data : undefined;
-    } catch (error: unknown) { reject(error); return undefined; }
-    finally { busy.current = false; if (mounted.current) setPending(false); }
+    } catch (error: unknown) {
+      // A local deadline is an unknown command outcome, not a rollback or an unmount.
+      if (mounted.current && request.current === controller) reject(error);
+      return undefined;
+    } finally {
+      if (request.current === controller) { request.current = undefined; busy.current = false; if (mounted.current) setPending(false); }
+    }
   }
   function binaryPending(value: boolean) { busy.current = value; setPending(value); }
   function checked(path: string) { if (path !== attemptPath.current) return; uncertain.current = false; setNeedsCheck(false); }
