@@ -21,7 +21,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.deps import get_session, require_role_at_least
+from tts_erp_v2.api.deps import (
+    get_session,
+    require_cookie_csrf,
+    require_destructive_guard,
+    require_role_at_least,
+)
 from tts_erp_v2.db.models.config import (
     EnumMap,
     RuntimeConfigItem,
@@ -136,6 +141,7 @@ def upsert_enum_map(
 ) -> dict:
     """新增或更新一条枚举映射。admin 角色。"""
     require_role_at_least(request, "admin")
+    require_cookie_csrf(request)
 
     existing = sess.execute(
         select(EnumMap).where(
@@ -174,6 +180,8 @@ def delete_enum_map(
 ) -> dict:
     """删除一条枚举映射。admin 角色。"""
     require_role_at_least(request, "admin")
+    require_cookie_csrf(request)
+    require_destructive_guard(request, op_name="enum_map.delete")
 
     row = sess.get(EnumMap, id)
     if not row:

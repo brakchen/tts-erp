@@ -1,7 +1,8 @@
 import { pathFor } from './paths';
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly retryAfter?: number, readonly requestId?: string) {
+  /** detail is untrusted: consumers must select safe fields, never log/render input or ctx. */
+  constructor(message: string, readonly status: number, readonly retryAfter?: number, readonly requestId?: string, readonly detail?: unknown) {
     super(message);
     this.name = 'ApiError';
   }
@@ -67,7 +68,7 @@ export async function requestJson<T>(rootPath: string, path: string, init: Reque
   if (!response.ok) {
     const detail = data && typeof data === 'object' && 'detail' in data ? data.detail : undefined;
     throw new ApiError(typeof detail === 'string' ? detail : `HTTP ${response.status}`, response.status,
-      retryDelay(response.headers.get('Retry-After')), requestId);
+      retryDelay(response.headers.get('Retry-After')), requestId, detail);
   }
   return { data: data as T, status: response.status, headers: response.headers };
 }

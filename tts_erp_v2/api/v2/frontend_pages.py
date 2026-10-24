@@ -21,10 +21,11 @@ from fastapi.responses import HTMLResponse
 
 from tts_erp_v2.access._context import user_pages_var
 from tts_erp_v2.accounts.pages import PAGES
+from tts_erp_v2.api.deps import require_role_at_least
 
-# P1 accepted against the current build in isolated desktop/mobile browser tests.
-# This is the only runtime migration selector; missing assets never fall back.
-MIGRATED_PAGE_IDS: frozenset[str] = frozenset({"dashboard", "intercept-requests"})
+# The sole renderer wiring for the implemented pages, including P2 candidate
+# acceptance. This is not a traffic switch; missing assets never fall back.
+MIGRATED_PAGE_IDS: frozenset[str] = frozenset({"dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"})
 _FRONTEND_DIR = Path(__file__).resolve().parents[2] / "static" / "frontend"
 _ENTRY = "src/main.tsx"
 _CACHE_CONTROL = {"Cache-Control": "private, no-store"}
@@ -161,6 +162,21 @@ def _safe_json(value: object) -> str:
     )
 
 
+def _role_capabilities(request: Request) -> dict[str, bool]:
+    """Presentation hints from the canonical gate, not resource/guard authority."""
+    capabilities: dict[str, bool] = {}
+    for role in ("readwrite", "admin"):
+        try:
+            require_role_at_least(request, role)
+        except HTTPException as error:
+            if error.status_code != 403:
+                raise
+            capabilities[role] = False
+        else:
+            capabilities[role] = True
+    return capabilities
+
+
 def render_frontend_page(request: Request, page_id: str) -> HTMLResponse:
     """Render after the existing route's authentication and permission gates."""
     root_path = request.scope.get("root_path", "").rstrip("/")
@@ -194,6 +210,7 @@ def render_frontend_page(request: Request, page_id: str) -> HTMLResponse:
             if allowed is None or page.permission_code in allowed
         ],
         "releaseId": assets.release_id,
+        "roleCapabilities": _role_capabilities(request),
     }
     links = [
         f'<link rel="stylesheet" href="{escape(href, quote=True)}">'

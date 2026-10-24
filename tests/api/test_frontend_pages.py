@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from tts_erp_v2.access import AccessGrant, AuthMode, Role
 from tts_erp_v2.access._context import user_pages_var
 from tts_erp_v2.accounts.pages import PAGES
 from tts_erp_v2.api.v2 import frontend_pages
@@ -77,7 +78,8 @@ def test_document_bootstrap_and_recursive_assets(release, prefix):
     assert response.headers["cache-control"] == "private, no-store"
     body = bytes(response.body).decode()
     bootstrap = _bootstrap(body)
-    assert set(bootstrap) == {"rootPath", "pageId", "navigation", "releaseId"}
+    assert set(bootstrap) == {"rootPath", "pageId", "navigation", "releaseId", "roleCapabilities"}
+    assert bootstrap["roleCapabilities"] == {"readwrite": False, "admin": False}
     assert bootstrap["rootPath"] == prefix
     assert bootstrap["pageId"] == "dashboard"
     assert bootstrap["releaseId"] == "TEST_release"
@@ -102,6 +104,57 @@ def test_document_bootstrap_and_recursive_assets(release, prefix):
         "dashboard.js",
     ):
         assert legacy not in body
+
+
+@pytest.mark.parametrize("mode,role,bypass,expected", [
+    ("enforce", "readonly", False, {"readwrite": False, "admin": False}),
+    ("enforce", "readwrite", False, {"readwrite": True, "admin": False}),
+    ("enforce", "admin", False, {"readwrite": True, "admin": True}),
+    ("enforce", None, False, {"readwrite": False, "admin": False}),
+    ("off", None, True, {"readwrite": True, "admin": True}),
+    ("shadow", "readonly", True, {"readwrite": True, "admin": True}),
+])
+def test_role_hints_use_canonical_grant_not_legacy_role_or_cookie_me(
+    release, mode, role, bypass, expected,
+):
+    request = _request()
+    request.scope["api_key_role"] = "admin"  # Must not override a resolved readonly grant.
+    request.scope["access_grant"] = AccessGrant(
+        mode=AuthMode(mode), role=Role(role) if role else None, bypass=bypass,
+    )
+    response = frontend_pages.render_frontend_page(request, "dashboard")
+    assert _bootstrap(bytes(response.body).decode())["roleCapabilities"] == expected
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.parametrize("key_fixture,expected", [
+    ("readonly_key", {"readwrite": False, "admin": False}),
+    ("readwrite_key", {"readwrite": True, "admin": False}),
+    ("admin_key", {"readwrite": True, "admin": True}),
+])
+def test_role_hints_follow_actual_key_middleware(api_client, request, release, key_fixture, expected):
+    key = request.getfixturevalue(key_fixture)
+    response = api_client.get("/v2/pages/dashboard", headers={"Authorization": f"Bearer {key}"})
+    assert response.status_code == 200
+    assert _bootstrap(response.text)["roleCapabilities"] == expected
+    assert key not in response.text
+
+
+@pytest.mark.parametrize("role,expected", [
+    ("viewer", {"readwrite": False, "admin": False}),
+    ("operator", {"readwrite": True, "admin": False}),
+    ("admin", {"readwrite": True, "admin": True}),
+])
+def test_role_hints_cookie_wins_over_admin_bearer(
+    api_client, admin_key, ua_user_factory, release, role, expected,
+):
+    user = ua_user_factory("test_ua_p2_capabilities", roles=(role,))
+    login = api_client.post("/v2/auth/login", json={"username": user.username, "password": user.password})
+    assert login.status_code == 200
+    response = api_client.get("/v2/pages/dashboard", headers={"Authorization": f"Bearer {admin_key}"})
+    assert response.status_code == 200
+    assert _bootstrap(response.text)["roleCapabilities"] == expected
+    assert admin_key not in response.text and user.username not in response.text
 
 
 @pytest.mark.parametrize("allowed", [frozenset(), frozenset({"page:dashboard"})])
@@ -264,8 +317,8 @@ def test_explicit_development_origin_injects_react_refresh(
     assert body.index("injectIntoGlobalHook") < body.index(f"{origin}/src/main.tsx")
 
 
-def test_pilot_activation_matches_browser_accepted_pages():
-    assert frontend_pages.MIGRATED_PAGE_IDS == frozenset({"dashboard", "intercept-requests"})
+def test_activation_matches_implemented_candidate_pages():
+    assert frontend_pages.MIGRATED_PAGE_IDS == frozenset({"dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"})
 
 
 @pytest.fixture
@@ -273,11 +326,11 @@ def activated(release, monkeypatch):
     monkeypatch.setattr(
         frontend_pages,
         "MIGRATED_PAGE_IDS",
-        frozenset({"dashboard", "intercept-requests"}),
+        frozenset({"dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"}),
     )
 
 
-@pytest.mark.parametrize("page_id", ["dashboard", "intercept-requests"])
+@pytest.mark.parametrize("page_id", ["dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"])
 def test_original_route_uses_frontend_only_when_activated(
     api_client, readonly_key, activated, page_id
 ):
@@ -334,7 +387,7 @@ def test_activated_route_never_falls_back_when_release_missing(
 
 
 def test_non_migrated_route_keeps_legacy_renderer(api_client, readonly_key, activated):
-    response = api_client.get("/v2/pages/shops", headers={"X-API-Key": readonly_key})
+    response = api_client.get("/v2/pages/intercept-configs", headers={"X-API-Key": readonly_key})
     assert response.status_code == 200
     assert "bootstrap.min.css" in response.text
     assert "frontend-bootstrap" not in response.text

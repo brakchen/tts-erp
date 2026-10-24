@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.22.2 <23" },
+  "engines": {
+    "node": ">=22.22.2 <23"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
@@ -14,7 +16,9 @@
     "@heroui/react": "3.2.6",
     "@heroui/styles": "3.2.6",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "uplot": "1.6.32",
+    "uplot-react": "1.2.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

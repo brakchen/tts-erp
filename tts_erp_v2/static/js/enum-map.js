@@ -43,7 +43,7 @@
     return fetch(PREFIX + "/v2/config/enum-map", {
       method: "PUT",
       credentials: "include",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "tts-erp" },
       body: JSON.stringify(body),
     }).then(function(r) {
       if (r.status === 401) { window.location.href = loginUrl(); throw new Error("unauthorized"); }
@@ -57,7 +57,7 @@
     return fetch(PREFIX + "/v2/config/enum-map/" + id, {
       method: "DELETE",
       credentials: "include",
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", "X-Requested-With": "tts-erp" },
     }).then(function(r) {
       if (r.status === 401) { window.location.href = loginUrl(); throw new Error("unauthorized"); }
       if (r.status === 403) throw new Error("需要 admin 权限");

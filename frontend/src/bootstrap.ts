@@ -25,5 +25,11 @@ export function readBootstrap(): FrontendBootstrap {
     if (pathFor(value.rootPath as string, item.href) !== item.href) throw new Error('导航地址缺少部署前缀');
     return { id: item.id, label: item.label, group: item.group, href: item.href };
   });
-  return { rootPath: value.rootPath, pageId: value.pageId, releaseId: value.releaseId, navigation };
+  const bootstrap: FrontendBootstrap = { rootPath: value.rootPath, pageId: value.pageId, releaseId: value.releaseId, navigation };
+  const hints = value.roleCapabilities;
+  // Old documents remain readable; missing/malformed hints never enable writes.
+  if (isRecord(hints) && typeof hints.readwrite === 'boolean' && typeof hints.admin === 'boolean') {
+    bootstrap.roleCapabilities = { readwrite: hints.readwrite, admin: hints.admin };
+  }
+  return bootstrap;
 }

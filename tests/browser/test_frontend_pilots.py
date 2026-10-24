@@ -68,6 +68,10 @@ def test_dashboard_and_new_old_navigation(frontend_browser_renderer):
     page.get_by_role("heading", level=1, name="拦截记录", exact=True).wait_for()
     page.get_by_role("navigation", name="主导航").get_by_role("link", name="店铺注册", exact=True).click()
     page.wait_for_url("**/tts/v2/pages/shops")
+    page.get_by_role("heading", level=1, name="店铺注册", exact=True).wait_for()
+    assert page.locator("#frontend-root").count() == 1
+    page.get_by_role("navigation", name="主导航").get_by_role("link", name="采购工作台", exact=True).click()
+    page.wait_for_url("**/tts/v2/pages/manual-costs")
     assert page.locator("#frontend-root").count() == 0
     assert page.locator('link[href*="bootstrap.min.css"]').count() == 1
 

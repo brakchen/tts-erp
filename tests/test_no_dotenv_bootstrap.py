@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.layer_unit
 
 REAL_CONFTST = Path(__file__).with_name("conftest.py")
@@ -57,6 +56,8 @@ def _run_conftest(
         "PATH",
         "PYTHONPATH",
         "TTS_ERP_DB_URL_TEST",
+        "TTS_ERP_TEST_RUN_PROOF",
+        "TTS_ERP_TEST_RUN_ID",
         "VIRTUAL_ENV",
     }
     environment = {
@@ -81,6 +82,7 @@ def _run_conftest(
         check=False,
         capture_output=True,
         text=True,
+        timeout=20,
     )
 
 

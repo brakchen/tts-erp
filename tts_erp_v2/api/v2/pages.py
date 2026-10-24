@@ -498,7 +498,7 @@ def _render_page(template: str, *, current_page: str = "", **context: Any) -> HT
 
 
 @router.get("/shops", response_class=HTMLResponse)
-def shops_page() -> HTMLResponse:
+def shops_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """店铺注册台（feature/shop-registration）。
 
   用途：Chrome 插件同步的店铺没有 API credential，OAuth callback 不会给
@@ -507,10 +507,14 @@ def shops_page() -> HTMLResponse:
   注册只影响查询关联，数据同步不依赖注册状态。
 
   两段式：注册表单 / 已注册列表（GET /v2/commerce/channel-accounts）。
-  行为在 static/js/shops.js；写入端点 POST /v2/admin/shops/register 要 readwrite
+  已迁移行为在 frontend/src/pages/shops/；写入端点 POST /v2/admin/shops/register 要 readwrite
   会话（readonly 会话降级只读展示）。注：「待注册候选」section 已于
   2026-09-29 用户拍板下线；后端 GET /v2/admin/shops/unregistered 端点保留。
   """
+  if "shops" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "shops")
   return _render_page("shops.html", current_page="shops")
 
 
@@ -673,12 +677,16 @@ def intercept_requests_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLRe
 
 
 @router.get("/intercept-stats", response_class=HTMLResponse)
-def intercept_stats_page() -> HTMLResponse:
+def intercept_stats_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """拦截统计概览页面。
 
   功能：总览统计卡片、按域名/方法/状态码分布、最近 7 天每日趋势。
-  行为在 static/js/intercept-stats.js。
+  已迁移内容在 frontend/src/pages/intercept-stats/。
   """
+  if "intercept-stats" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "intercept-stats")
   return _render_page("intercept-stats.html", current_page="intercept-stats")
 
 
@@ -696,8 +704,12 @@ def intercept_stats_page() -> HTMLResponse:
 
 
 @router.get("/enum-map", response_class=HTMLResponse)
-def enum_map_page() -> HTMLResponse:
+def enum_map_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """枚举映射管理页面。CRUD 管理 config.enum_map 枚举翻译。"""
+  if "enum-map" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "enum-map")
   return _render_page("enum-map.html", current_page="enum-map")
 
 

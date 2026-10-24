@@ -7,11 +7,18 @@ export interface NavigationItem {
   href: string;
 }
 
+export interface RoleCapabilities {
+  readwrite: boolean;
+  admin: boolean;
+}
+
 export interface FrontendBootstrap {
   rootPath: string;
   pageId: string;
   navigation: NavigationItem[];
   releaseId: string;
+  /** Backend role-gate hints only; APIs remain authoritative for every command. */
+  roleCapabilities?: RoleCapabilities;
 }
 
 export interface PageProps {

@@ -56,6 +56,22 @@ describe('requestJson', () => {
     await expect(requestJson('', '/v2/items')).rejects.toMatchObject({ status: 429, retryAfter: 7, requestId: 'TEST-request' });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    { code: 'TEST_REGION_REQUIRED', message: '请选择区域', field: 'region' },
+    [{ loc: ['body', 'sort_order'], msg: '应为非负整数', type: 'greater_than_equal' }],
+  ])('preserves untrusted structured detail for explicit safe field consumption: %j', async (detail) => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), { status: 422 }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(requestJson('', '/v2/config/enum-map', { method: 'PUT', body: '{}' })).rejects.toMatchObject({ status: 422, message: 'HTTP 422', detail });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('does not replay an unknown mutation result', async () => {
+    const lost = new TypeError('TEST response lost after possible commit');
+    const fetcher = vi.fn().mockRejectedValue(lost);
+    vi.stubGlobal('fetch', fetcher);
+    await expect(requestJson('', '/v2/config/enum-map', { method: 'PUT', body: '{}' })).rejects.toBe(lost);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it('does not turn successful malformed JSON into an empty result', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not json')));
     await expect(requestJson('', '/v2/items')).rejects.toBeInstanceOf(ApiError);

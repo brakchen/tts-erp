@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.api.test_frontend_pages import _bootstrap
 from tts_erp_v2.access._policy import required_role
 from tts_erp_v2.access._types import Role
 from tts_erp_v2.accounts.pages import (
@@ -31,7 +32,7 @@ from tts_erp_v2.api.v2.pages import (
     _SIDEBAR_CSS,
     _SIDEBAR_TOGGLE_JS,
     _sidebar_html,
-    enum_map_page,
+    intercept_configs_page,
     runtime_configs_page,
     sync_jobs_page,
 )
@@ -92,7 +93,7 @@ def test_sidebar_css_is_injected_after_page_styles():
     has to come after every ``<link rel="stylesheet">``. A page-level
     ``margin`` must not override the sidebar offset.
     """
-    body = bytes(enum_map_page().body).decode()
+    body = bytes(intercept_configs_page().body).decode()
     sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
 
     stylesheet_links = [m.start() for m in re.finditer(r'<link rel="stylesheet"', body)]
@@ -108,7 +109,7 @@ def test_pages_share_the_design_token_stylesheet():
     component layer; both must load before any page-specific stylesheet.
     """
     for rendered in (
-        enum_map_page(),
+        intercept_configs_page(),
         runtime_configs_page(),
         sync_jobs_page(),
     ):
@@ -142,7 +143,7 @@ def test_sidebar_tokens_fall_back_on_pages_with_a_different_theme_vocabulary():
     ``tokens.css``, but the sidebar keeps its ``var(--paper, var(--bg, …))``
     fallback chain so a page that opts out of the shared layer still renders.
     """
-    body = bytes(enum_map_page().body).decode()
+    body = bytes(intercept_configs_page().body).decode()
 
     assert "--sidebar-paper-deep: var(--paper-deep, var(--card, #EAE3D2));" in body
     assert "--sidebar-ink: var(--ink, var(--text, #1B1814));" in body
@@ -270,16 +271,10 @@ def test_shops_page_returns_200_with_html(api_client, readonly_key):
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("text/html")
     body = r.text
-    assert "../../static/vendor/bootstrap.min.css" in body
-    assert "../../static/js/shops.js" in body
-    assert 'id="f-service-id"' in body
-    assert 'id="f-app-key"' in body
-    assert 'id="f-app-secret"' in body
-    assert 'id="app-credentials-dialog"' in body
-    assert 'id="d-app-secret"' in body
-    assert body.count('type="password"') >= 2
-    assert 'href="/static/' not in body
-    assert 'src="/static/' not in body
+    assert _bootstrap(body)["pageId"] == "shops"
+    assert _bootstrap(body)["roleCapabilities"] == {"readwrite": False, "admin": False}
+    assert 'id="frontend-root"' in body
+    assert "shops.js" not in body and "bootstrap.min.css" not in body
 
 
 def test_shops_page_js_manages_service_app_credentials() -> None:

@@ -6,6 +6,8 @@ Versions are pinned in `package.json` and resolved completely in `package-lock.j
 | Dependency | Pinned version | License | Upstream |
 | --- | --- | --- | --- |
 | React / React DOM | 19.3.1 | MIT | https://github.com/facebook/react |
+| uPlot | 1.6.32 | MIT | https://github.com/leeoniya/uPlot |
+| uPlot React wrapper | 1.2.4 | MIT | https://github.com/skalinichev/uplot-wrappers |
 | HeroUI React / Styles | 3.2.6 | MIT | https://github.com/heroui-inc/heroui |
 | Tailwind CSS / Vite plugin | 4.3.3 | MIT | https://github.com/tailwindlabs/tailwindcss |
 | Vite | 8.3.5 | MIT | https://github.com/vitejs/vite |
@@ -23,5 +25,9 @@ JavaScript/CSS assets. Build/test-only packages are not installed on the product
 
 Initial implementation checks: clean pinned installation, Node 22.23.3, TypeScript/build and `npm audit`
 (including development dependencies) passed with zero reported vulnerabilities on 2026-10-23. This is a
-point-in-time result, not a promise that later audits or upstream changes will stay clean. Use `npm ci
---include=dev`, retain the lock, and review dependency upgrades separately.
+point-in-time result, not a promise that later audits or upstream changes will stay clean. The P2 chart
+addition on 2026-10-24 adds exactly the two pinned packages above (neither declares runtime dependencies);
+the wrapper declares React >=16.8.6 and uPlot ^1.6.32 peers. Installed MIT license texts were checked and
+`npm audit`, including development packages, reported zero vulnerabilities. This is dependency evidence,
+not native chart/StrictMode/resize/browser acceptance; those remain page-level gates before activation.
+Use `npm ci --include=dev`, retain the lock, and review dependency upgrades separately.

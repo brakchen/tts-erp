@@ -136,6 +136,9 @@ refresh_template() {
   TEMPLATE_CREATED_OR_REFRESHED=1
 }
 RUN_CREATED=0
+RUN_PROOF_DIR=''
+RUN_PROOF_PATH=''
+RUN_ID=''
 prepare_template_and_clone() {
   exec 9>"$TEMPLATE_LOCK_PATH"
   flock -w "$TEMPLATE_LOCK_TIMEOUT_S" 9 || fail 'could not acquire template lock'
@@ -148,8 +151,24 @@ prepare_template_and_clone() {
   flock -u 9
   exec 9>&-
 }
+issue_run_binding() {
+  [[ "$RUN_CREATED" -eq 1 ]] || fail 'cannot issue proof before clone creation'
+  RUN_PROOF_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tts-erp-test-run.XXXXXXXX")"
+  RUN_PROOF_PATH="$RUN_PROOF_DIR/run.json"
+  RUN_ID="$("$PYTHON" -c 'import secrets; print(secrets.token_hex(32))')"
+  TTS_ERP_DB_URL_TEST="$RUN_URL" "$PYTHON" -m scripts._test_db_connections issue-run-proof \
+    --base-db "${connection_fields[0]}" --template-db "$TEMPLATE_DB" --run-db "$RUN_DB" \
+    --run-id "$RUN_ID" --owner-pid "$$" --proof-file "$RUN_PROOF_PATH"
+}
 cleanup() {
   local rc=$?
+  # keep-db preserves data for diagnosis, never current-run write provenance.
+  if [[ -n "$RUN_PROOF_DIR" ]]; then
+    if ! rm -f -- "$RUN_PROOF_PATH" || ! rmdir -- "$RUN_PROOF_DIR"; then
+      echo '[isolated-test] ERROR: run proof cleanup failed' >&2
+      if [[ "$rc" -eq 0 ]]; then rc=1; fi
+    fi
+  fi
   if [[ "$RUN_CREATED" -eq 1 ]]; then
     if [[ "$KEEP_DB" -eq 1 ]]; then echo "[isolated-test] keeping ephemeral DB: $RUN_DB"
     else
@@ -164,6 +183,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 prepare_template_and_clone
+issue_run_binding
 if [[ "$TEMPLATE_CREATED_OR_REFRESHED" -eq 0 ]]; then echo "[isolated-test] using existing template DB: $TEMPLATE_DB"; fi
 echo "[isolated-test] running: bash scripts/test.sh ${*:-}"
-TTS_ERP_DB_URL_TEST="$RUN_URL" bash scripts/test.sh "$@"
+TTS_ERP_DB_URL_TEST="$RUN_URL" TTS_ERP_TEST_RUN_PROOF="$RUN_PROOF_PATH" \
+  TTS_ERP_TEST_RUN_ID="$RUN_ID" bash scripts/test.sh "$@"

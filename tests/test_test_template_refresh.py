@@ -118,6 +118,9 @@ if name in {"createdb", "dropdb"}:
             sys.exit(4)
         fresh.write_text("TEST_new_database")
     elif name == "createdb":
+        if os.environ.get("FAKE_CLONE_FAIL") == "1":
+            record("TEST_CLONE_REFUSED")
+            sys.exit(4)
         record("CLONE " + database)
     sys.exit(0)
 sys.exit(2)
