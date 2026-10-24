@@ -51,8 +51,8 @@ credential kinds:
 | SPU 盈利看板主表 | `GET /v2/analytics/spu-roi` | readonly — 实现/接口见 [`../design/spu-profitability-technical-design.md`](../design/spu-profitability-technical-design.md)；业务公式/日期口径见 [`../business/spu-profitability.md`](../business/spu-profitability.md) |
 | SPU 实际 ROI 页面 (HTML) | `GET /v2/pages/spu-roi` | readonly (browser → 302 login) |
 | 重点关注 SPU 页面 (HTML) | `GET /v2/pages/focused-spus` | readonly (browser → 302 login) |
-| SPU 利润劣化告警主表 | `GET /v2/analytics/spu-profit-deterioration` | readonly — 逐字段契约见本文《Analytics — SPU 利润劣化告警》；设计/回测见 [`../design/spu-profit-deterioration-alert.md`](../design/spu-profit-deterioration-alert.md) |
-| SPU 利润劣化告警页面 (HTML) | `GET /v2/pages/spu-profit-deterioration` | readonly (browser → 302 login)；阈值设置抽屉只读 `meta.effectiveConfig` |
+| SPU 盈利表现对比 | `GET /v2/analytics/spu-profit-deterioration` | readonly — 7 天主参考、3 天辅助；现行契约见本文同名章节及 [技术设计](../spu-profit-deterioration/02-technical-design.md) |
+| SPU 盈利表现对比页面 (HTML) | `GET /v2/pages/spu-profit-deterioration` | readonly (browser → 302 login)；保留既有页面入口与权限点，不再提供告警配置编辑 |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | TikTok video publish workflow | `GET /v2/pages/video-publish`, `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, replace-upload, verify, `/cleanup/retry`, `POST /v2/video-publish/tasks/{id}/confirm-published`, `PATCH /v2/video-publish/tasks/{id}/settings` | session: page:video-publish + readonly/readwrite action tier; API key: admin by default; page-level scope (every task in the workspace) |
 | Browser login / logout / whoami | `GET\|POST /v2/auth/login`, `POST /v2/auth/logout`, `GET /v2/auth/me` | public |
@@ -363,7 +363,7 @@ rollout columns keep their historical data and are not migrated or dropped.
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console（店铺切换、全部 SPU / 最近提交、仅展示未登记 SPU 的后端筛选、人工采购价录入）。Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板。与重点关注页共享 `/static/js/spu-profitability-page.js` kernel；`/static/js/spu-roi.js` 只定义标准 PageProfile。 |
-| `GET /v2/pages/spu-profit-deterioration` | readonly + `page:spu-profit-deterioration` | SPU 利润劣化告警页（经营分析组，紧邻 SPU ROI）。只读消费 `GET /v2/analytics/spu-profit-deterioration`；header-right「阈值设置」抽屉只读 `meta.effectiveConfig`，readonly 会话全部输入 disabled 只能跳运行配置页查看，readwrite/admin 的草稿与发布走现有 `/v2/config/runtime/*` 端点（该前缀是 readwrite，与本页面的 readonly 路由分开授权）。页面筛选含 SPU scope（`spu_ids`，内部 spu_pk，上限 100）、`state` 下拉、窗口 tabs、层级/严重度/样本下拉与 anchor 日期，全部写回 URL query。行点击展开 summary card（两个窗口原值、降幅、状态、样本、配置基准，全部照抄服务端）；主 CTA「查看利润详情」进入 `/v2/pages/spu-roi`，原始 JSON 端点降为次要链接。页头新鲜度提示由 `meta.calculatedAt` / `basisCalculatedAt` / `anchorDate` 驱动，新快照到达时显示「快照已更新」。告警行/卡片/横幅同时带文案 + 图标 + 行处理，颜色只作辅助。 |
+| `GET /v2/pages/spu-profit-deterioration` | readonly + `page:spu-profit-deterioration` | 保留既有入口的 SPU 盈利表现对比。只读消费同名 analytics API；默认 7 天、辅助 3 天，店铺/精确内部 SPU/活动范围/日期/分页可恢复。显示两期盈利原值、展示变化、订单/广告消耗、无单投放事实和来源限制；旧结果可读，日期不得超过后台上限；详情进入同店业务 SPU 与明确经营日期。没有阈值、severity/state/sample/layer、告警数量或配置写操作。 |
 | `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。使用相同盈利汇总、表格、分页和钻取；`/static/js/focused-spus.js` 提供持久 selection adapter 与编辑器。 |
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
 | `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理页。读取 `/v2/sync/jobs`；readwrite 会话可调用 `/v2/admin/sync-jobs/{job_name}/trigger` 立即提交后台执行；admin 会话还可调用 `/v2/admin/sync-jobs/{job_name}/enabled` 启停周期 tick。 |
@@ -495,85 +495,50 @@ SPU 盈利主端点和四个懒加载钻取端点是稳定的 readonly API。完
 
 鉴权沿用本文件前文的 readonly 角色矩阵、API key/session 方式、限流和标准错误；盈利 GET 不写入数据。`/v2/analytics/sync/*` 是 Chrome 扩展 ingest 的另一组 readwrite+scope API，不属于盈利查询契约。
 
-### Analytics — SPU 利润劣化告警 (`/v2/analytics/spu-profit-deterioration`)
+### Analytics — SPU 盈利表现对比 (`/v2/analytics/spu-profit-deterioration`)
 
-物化告警快照的只读查询端点 + 服务端渲染页面。设计、回测结论、状态枚举、阈值取舍与运维边界：
-[`../design/spu-profit-deterioration-alert.md`](../design/spu-profit-deterioration-alert.md)；业务口径仍以
-[`../business/spu-profitability.md`](../business/spu-profitability.md) 为准。浏览器不计算 ROI、净利润或阈值。
+现行功能依据 [PRD v3](../spu-profit-deterioration/01-product-proposal.md)，字段依据
+[技术设计 §5](../spu-profit-deterioration/02-technical-design.md)。盈利由 canonical
+`analytics.spu_profitability` 在同一个只读一致性快照计算，浏览器仅做展示变化。
+本节替代旧物化告警契约；URL 与权限不变，但旧告警筛选/返回字段已退休。
 
-| Endpoint | Role | Purpose |
-| --- | --- | --- |
-| `GET /v2/analytics/spu-profit-deterioration` | readonly | 最新（或指定 anchor）物化告警明细 + 完整 scope `totals` + `meta`（含 effective config 投影） |
-| `GET /v2/pages/spu-profit-deterioration` | readonly + `page:spu-profit-deterioration` | 告警页面（表格 + 卡片列表 + 阈值设置抽屉）；页面行为在 `/static/js/spu-profit-deterioration.js` |
+| 参数 | 规则 |
+| --- | --- |
+| `shop_pk` | 必填内部正整数店铺主键，不接受上游 shop_id |
+| `spu_ids` | 重复参数；1..100 个内部正整数SPU主键；精确调查绕过活动排除，不退回整店 |
+| `window_days` | 单一 `7`（默认）或 `3`；1/全部/多窗口返回422 |
+| `activity` | `recent`默认或`all`；recent以截至日近7天固定范围，普通累计至少3单且近期有单；近期零单正广告费例外保留 |
+| `anchor_date` | 店铺当地ISO日期；默认后台最新可用日；更晚日期422，不静默换日期；历史可读 |
+| `limit` / `offset` | 1..500（默认100）/ >=0；只影响列表 |
 
-Query 参数（全部 camelCase → 本文件用 snake_case wire 名）：
+`layer`、`severity`、`state`、`sample` 不再受支持，须明确拒绝而非静默忽略。
 
-| 参数 | 必填 | 取值 |
-| --- | --- | --- |
-| `shop_pk` | 是 | 内部店铺主键（`ge=1`），不接受上游 `shop_id` |
-| `spu_ids` | 否 | 可重复；内部 SPU 主键（整数），最多 100 个，每个 `ge=1`；与盈利页 exact scope 同一习惯（页面用逗号串回写 URL，调用 API 时发重复参数） |
-| `window_days` | 否 | 可重复；`1`/`3`/`7`，其它值 422 |
-| `layer` | 否 | `all`（默认）/`fast`/`confirmation` |
-| `severity` | 否 | `all`（默认）/`none`/`warning`/`critical` |
-| `state` | 否 | 可重复；见下方状态枚举（页面一次只发一个值；端点参数本身可重复，多值为 OR 语义） |
-| `sample` | 否 | `all`（默认）/`sufficient`/`sample_insufficient`/`unavailable`，逐项匹配 item 的 `sampleStatus` |
-| `activity` | 否 | `all`（默认）/`recent`，其它值 422。`recent` = SPU 级展示过滤：仅保留近 14 天出单大于 3 单的 SPU（其 fast 7d 行 previous+current 订单数 >3，正好覆盖最近 14 天），保留 SPU 的全部窗口行；页面默认开启并提供开关。显式 `spu_ids` 精确调查时不生效 |
-| `anchor_date` | 否 | 当地日期；默认最新已物化 anchor |
-| `limit`/`offset` | 否 | `limit` 1..500（默认 100），`offset` ≥0；只影响 `items`，不影响 `totals` |
+响应 `{items,total,totals,meta}`：
 
-响应形状：`{items, total, totals, meta}`。`items[]` 为 camelCase：`shopPk`、`spuPk`、`windowDays`、`layer`、
-`severity`、`state`、`sampleStatus`、`previousRoi`/`currentRoi`/`roiDecline`、
-`previousNetProfitCny`/`currentNetProfitCny`/`netProfitDecline`、
-`previousSpendCny`/`currentSpendCny`、`previousOrderCount`/`currentOrderCount`、
-`previousAdOrderCount`/`currentAdOrderCount`、`anchorDate`、`basisCalculatedAt`、`configSource`、
-`configVersion`、`provisionalLabel`、`warningCode`、`warningText`、`drilldown{profitabilityUrl,pageUrl}`。
-ROI / 净利润 / 消耗是 Decimal wire string，统一两位小数（ROUND_HALF_UP，零值输出 `0`）；`null` 表示数学无解或样本不足（客户端不得显示为 0）；订单数为 int。
-`totals` = `{scopeTotal, warningCount, criticalCount, insufficientSampleCount, shopSpuCount}`，按完整 scope 计算，不是当前页可见行；`scopeTotal` 是全量行数，与分页分母 `total`（匹配当前筛选含 activity）分开。
+- `items` 每SPU一条：`shopPk`, `spuPk`, `spuId`, `windowDays`, `anchorDate`；
+  `previousRoi/currentRoi`, `previousNetProfitCny/currentNetProfitCny`,
+  `previousSpendCny/currentSpendCny` 为Decimal字符串或null；
+  `previousOrderCount/currentOrderCount` 为整数或null；
+  `previousNoOrderAdSpend/currentNoOrderAdSpend` 为服务端事实bool或null（未知不冒充零单）；
+  `previousRoiUnavailableReason/currentRoiUnavailableReason`, `warnings`, `basisCalculatedAt`；
+  `drilldown.pageUrl` 为同店业务SPU ID及经营日期的完整页面链接，API链接则遵循目标API的主键契约。
+- `totals`：`analysisSpuCount`, `previousOrderCount`, `currentOrderCount`, `unavailableReason`；
+  按完整已应用范围去重，不受分页影响。订单跨SPU全局COUNT DISTINCT，不相加行数。
+  不可用值为null并说明原因；`total`仅为分页记录数，无告警统计。
+- `meta`：`requestId`, `shopPk`, `anchorDate`, `latestAvailableDate`, `windowDays`,
+  `reportingTimezone`, `periods.current/previous.{startDate,endDate}`, `dataAsOf`,
+  `calculatedAt`, `stale`, `coverage`, `warnings`, `activityBypassed`, `scopeDescription`。
+  `dataAsOf`是实际数据日期，不用计算时间冒充更新；`coverage`披露多源观测、推定方法和具体限制，
+  不声称已经穷尽所有上游采集。必要来源缺失或已知事实缺口不能返回成功全零/空列表。
 
-`meta` 关键字段：`requestId`、`enabled`、`anchorDate`、`batchThrough`、`maturityDays`、`calculatedAt`、`stale`、
-`coverage{materialized,stale,missingWindowCount}`、`config{key,source,version,updatedAt,updatedBy,validation}`，
-以及 `effectiveConfig`。
+ROI正、零、负数可计算时均保留；无解才null并解释。展示百分比仅上期>0且两期有值；
+展示差额/百分比不决定资格、事实标记、状态或总计。历史估值可随成本/汇率/已确认退款变化。
 
-`meta.effectiveConfig` 是阈值设置抽屉的**唯一** readonly-safe 完整投影（同时也是本节唯一允许 readonly 会话读取的
-配置视图）：包含 `source`、`version`、`updatedAt`、`updatedBy`、`validation`、顶层显式的 `enabled` 与
-`maturityDays`、完整 effective `thresholds`、`payloadHash`、`provisionalLabel`，以及仅描述投影边界的
-`drawer{mode,canEdit,draftIncluded,rolloutIncluded,secretsIncluded}`。
-`thresholds` 是**完整 published payload**（与顶层 `enabled`/`maturityDays` 同源、值一致），
-其阈值矩阵为 `fast`/`confirmation` × `1|3|7` × `warning|critical`，字段
-`roiAbsDelta`/`roiRelativeDecline`/`netProfitDecline`/`minSpendCny`/`minOrders`/`minAdOrders`。
-**消费方约定**：页面与任何客户端读 `enabled` / `maturityDays` 时一律用 `effectiveConfig` 的顶层字段，
-不要从 `thresholds` 里取（`thresholds.enabled` / `thresholds.maturityDays` 只是同一份 payload 的重复投影，
-不作为契约保证）。
-它只由 published revision 生成，**绝不包含** draft payload、secret reference 或明文 secret；
-`meta.config` 仅为 key/source/version/audit/validation 的 summary metadata，不是抽屉数据源。
-readonly 会话不访问 `/v2/config/runtime/items` 或 `/v2/config/runtime/snapshot`（那些是 readwrite 档）。
+2xx表示读取处理完成；401未认证、403无权限、422非法参数/日期、503必要来源或读取不可用。
+错误包含请求编号，日期越界错误包含`latestAvailableDate`。旧结果允许200并`stale=true`说明“数据未更新”，
+不会因旧告警任务disabled、旧配置版本或单纯过期而拒读；刷新不承诺同步/重算。
 
-枚举：
-
-- `severity`：`none`/`warning`/`critical`（页面显示 `无告警`/`告警`/`严重告警`，并附非颜色图标）。
-- `sampleStatus`（wire）：`sufficient`/`sample_insufficient`/`unavailable`，与 `sample` 过滤一一对应；
-  缺 facts / ROI 无解 / 门槛不满足的 item 绝不显示为 `stable`。
-- `state`：`profit_to_loss`、`loss_expanding`、`loss_to_profit`、`roi_deterioration`、`net_profit_deterioration`、
-  `stable`、`sample_insufficient`、`unavailable`；未知值原样显示不静默留空。
-- `warningCode`：`ROI_AND_NET_PROFIT_DETERIORATED`、`PROFIT_TO_LOSS`、`LOSS_EXPANDING`、`SAMPLE_INSUFFICIENT`、
-  `DATA_STALE`。以上五个即全部可达值（由 `state` 经固定映射得出），没有其它值；
-  客户端不得对未列出的 `warningCode` 做分支。
-
-Seed fallback 与全局 key 规则：
-
-- 配置 key `analytics.spu_profit_deterioration_alert.v1` 的已发布 revision 是 materialization 与 readonly API 的
-  唯一权威；没有已发布版本时 resolver 回退到代码内 seed，API 返回 `source=seed_fallback` 且
-  `provisionalLabel` 为字面量 `回测暂定`，页面横幅、每行/卡片与抽屉都显示该标签。旧 published revision 读取失败时
-  fail closed（503），不静默切 seed。
-- 该 global key 一直不支持 rollout：payload 内出现 `rollout`/`draftRollout` 会被拒绝。通用 rollout 能力现已整体退役，
-  `PUT .../draft` 请求里的 `rollout` 字段不再被接受或求值；保留的历史 revision 若带非空 rollout sidecar，
-  仍会被 `validate_spu_deterioration_alert_runtime_mutation` 拒绝（fail closed），不会被当成生效行为。
-- 抽屉的草稿/发布仍走本文《Runtime configuration》的 `PUT .../draft`、`POST .../publish`：`409` 表示草稿版本冲突
-  （重新加载后再保存/发布），`422` 返回字段级校验错误（页面在对应字段旁显示，不只 toast）。
-
-HTTP 语义：`2xx` 只表示参数校验和读取完成。缺 `shop_pk` → `422`；非法 enum/date/limit → `422`；
-该店没有可用物化快照 / 快照过期 / 已发布配置不可解析 → `503`（**不会**用 `200` + `items=[]` 伪装空结果）；
-未认证 `401`；缺 readonly 或页面权限点 `403`。页面路由与静态资源同上表。
+旧告警job/config/物化表因独立消费者和生产迁移边界保留，不再控制本页或通过本页发布配置。
 
 ### Analytics Sync (`/v2/analytics/sync/*`)
 
@@ -1064,7 +1029,7 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /v2/pages/manual-costs` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/pages/spu-roi` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/analytics/spu-roi` | readonly | stable 只读；实现/接口见 [`../design/spu-profitability-technical-design.md`](../design/spu-profitability-technical-design.md)，业务公式/日期口径见 [`../business/spu-profitability.md`](../business/spu-profitability.md) |
-| `GET /v2/analytics/spu-profit-deterioration` | readonly | v2 只读；物化告警快照 + `meta.effectiveConfig`；契约见本文《Analytics — SPU 利润劣化告警》 |
+| `GET /v2/analytics/spu-profit-deterioration` | readonly | v2只读7/3天盈利对比；当前契约见本文《Analytics — SPU 盈利表现对比》；旧告警字段/筛选退休，URL与权限保留 |
 | `GET /v2/pages/spu-profit-deterioration` | readonly | v2 (HTML — not a machine contract) |
 | `GET /v2/spu-images`, upload/confirm/delete | readonly / readwrite | v2 |
 | `GET /v2/llm-context` | readonly | v2 (content evolves with the schema) |
