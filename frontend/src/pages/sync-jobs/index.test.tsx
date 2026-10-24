@@ -156,6 +156,57 @@ describe('sync-jobs content', () => {
     expect(writes(fetcher)[1][0]).toBe('/tts/v2/admin/sync-jobs/TEST_system/trigger');
     expect(JSON.parse(String(writes(fetcher)[1][1].body))).toEqual({});
   });
+  it('reconciles a removed selected shop on both refresh and successful verification without a stale-ID POST', async () => {
+    for (const viaVerification of [false, true]) {
+      let reads = 0; let commands = 0;
+      const fetcher = mockApi(async (url, init) => {
+        if (viaVerification && ++commands === 1) return json({}, 500);
+        const body = JSON.parse(String(init.body));
+        return json({ accepted: true, job_name: url.includes('TEST_system') ? 'TEST_system' : 'tiktok.orders', shop_id: body.shop_id ?? null, accepted_at: stamp, message: 'queued' });
+      }, async () => json(++reads === 1 ? data : { ...data, tiktok_shops: [] }));
+      const user = userEvent.setup(); const view = await mount();
+      await user.click(within(await row()).getByRole('button', { name: /执行店铺/ }));
+      await user.click(screen.getByRole('option', { name: /TEST_长店铺/ }));
+      if (viaVerification) {
+        await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' }));
+        await screen.findByText(/提交结果未确认/);
+        await user.click(screen.getByRole('button', { name: '查询核对' }));
+        await screen.findByText(/不能证明原命令是否生效/);
+        await user.click(screen.getByRole('button', { name: '核对后明确重试原操作' }));
+        await screen.findByText(/已提交后台，尚未确认完成/);
+      } else {
+        await user.click(screen.getByRole('button', { name: '刷新任务' }));
+      }
+      const priorWrites = viaVerification ? 2 : 0;
+      await user.click(within(await row()).getByRole('button', { name: '执行 tiktok.orders' }));
+      expect(writes(fetcher)).toHaveLength(priorWrites);
+      expect(screen.queryByRole('dialog')).not.toBeNull();
+      expect(screen.getByRole('dialog')).toHaveTextContent(/全部授权店铺.*上游同步/);
+      expect(screen.queryByText(/原执行店铺已不可用/)).toBeVisible();
+      await user.click(screen.getByRole('button', { name: '确认全店铺执行' }));
+      await screen.findByText(/已提交后台，尚未确认完成/);
+      expect(writes(fetcher)).toHaveLength(priorWrites + 1);
+      expect(JSON.parse(String(writes(fetcher)[priorWrites][1].body))).toEqual({});
+      expect(writes(fetcher).some(([, init]) => String(init.body).includes(data.tiktok_shops[0].shop_id))).toBe(false);
+      view.unmount();
+    }
+  });
+  it('clears an obsolete refresh error when verification accepts a valid snapshot without clearing command uncertainty', async () => {
+    let reads = 0;
+    const fetcher = mockApi(async () => json({}, 500), async () => ++reads === 2 ? json({}, 503) : json(data));
+    const user = userEvent.setup(); await mount();
+    await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' }));
+    await screen.findByText(/提交结果未确认/);
+    await user.click(screen.getByRole('button', { name: '刷新任务' }));
+    await screen.findByText(/任务列表不可用/);
+    await user.click(screen.getByRole('button', { name: '查询核对' }));
+    await screen.findByText(/不能证明原命令是否生效/);
+    expect(screen.queryByText(/任务列表不可用/)).toBeNull();
+    expect(screen.getByText(/提交结果未确认/)).toBeVisible();
+    expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '核对后明确重试原操作' })).toBeEnabled();
+    expect(writes(fetcher)).toHaveLength(1);
+  });
   it('preserves full Retry-After across refresh; expiry only permits explicit action', async () => {
     const fetcher = mockApi(async () => json({}, 429, { 'Retry-After': '600' })); const user = userEvent.setup(); const view = await mount(); const first = await row('TEST_system'); vi.useFakeTimers();
     fireEvent.click(within(first).getByRole('button', { name: '执行 TEST_system' })); await act(async () => {}); expect(screen.getByRole('button', { name: '刷新任务' })).toBeDisabled(); expect(within(first).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();

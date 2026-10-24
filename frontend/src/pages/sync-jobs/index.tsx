@@ -17,6 +17,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
   const [readError, setReadError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const [selection, setSelection] = useState<Record<string, string>>({});
+  const [scopeReset, setScopeReset] = useState(false);
   const [confirmation, setConfirmation] = useState<Attempt>();
   const [pending, setPending] = useState(false);
   const [cooldown, setCooldown] = useState(false);
@@ -40,6 +41,19 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     stopDelay.current?.(); setCooldown(true);
     stopDelay.current = scheduleReadDelay(() => { if (mounted.current) setCooldown(false); }, notBefore.current - performance.now());
   }
+  function acceptSnapshot(snapshot: JobsData) {
+    const availableShops = new Set(snapshot.tiktok_shops.map((shop) => shop.shop_id));
+    const nextSelection = { ...selection };
+    let removedSelection = false;
+    for (const [jobName, shopId] of Object.entries(nextSelection)) {
+      if (shopId && !availableShops.has(shopId)) {
+        nextSelection[jobName] = ''; removedSelection = true;
+      }
+    }
+    setSelection(nextSelection);
+    if (removedSelection) setScopeReset(true);
+    setData(snapshot); setReadError('');
+  }
   function invalidateVerification() {
     const previous = gate.current;
     if (previous?.phase !== 'checked' && previous?.phase !== 'checking') return;
@@ -55,7 +69,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     reading.current = true; setLoading(true); setReadError('');
     requestJson<unknown>(bootstrap.rootPath, listPath, { signal: controller.signal }).then(({ data: value }) => {
       const decoded = decodeJobs(value);
-      if (current) setData(decoded);
+      if (current) acceptSnapshot(decoded);
     }).catch((error: unknown) => {
       if (!current) return;
       if (error instanceof ApiError) wait(error.retryAfter ?? 0);
@@ -117,7 +131,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
       const job = decoded.jobs.find((j) => j.job_name === attempt.job_name);
       if (!job || (attempt.kind === 'trigger' && attempt.shop_id !== null
         && (!job.is_tiktok || !decoded.tiktok_shops.some((s) => s.shop_id === attempt.shop_id)))) throw new Error('核对未完成');
-      if (mounted.current) { setData(decoded); const checked: Recovery = { ...previous, phase: 'checked' }; gate.current = checked; setRecovery(checked); }
+      if (mounted.current) { acceptSnapshot(decoded); const checked: Recovery = { ...previous, phase: 'checked' }; gate.current = checked; setRecovery(checked); }
     } catch (error: unknown) {
       if (!mounted.current || controller.signal.aborted) return;
       if (error instanceof ApiError) wait(error.retryAfter ?? 0);
@@ -142,6 +156,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     <p>立即执行权限：readwrite / admin；启停周期调度需要 admin。停用周期调度不影响立即执行，权限以服务端判定为准。</p>
     {!canRead && <p role="alert">需要 readwrite 或 admin 才能读取任务管理数据。</p>}
     {loading && <p role="status">加载任务中…</p>}{readError && <p role="alert">{readError}</p>}
+    {scopeReset && <p role="status">原执行店铺已不可用，已重置为全部授权店铺；请重新选择执行店铺，或通过全店铺确认明确执行。</p>}
     {pending && <p role="status">提交中，请勿重复操作…</p>}{notice && <p role="status">{notice}</p>}
     {failure && <div role="alert"><p>{failure.message}</p>{Object.values(failure.fieldErrors).map((text) => <p key={text}>{text}</p>)}</div>}
     {cooldown && <p role="status">服务端指定冷却中，读取和提交均暂停；到期不会自动重试。</p>}
@@ -162,7 +177,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
         <Table.Cell><p>开始：{displayTime(job.last_status.last_run_at)}</p><p>结束：{displayTime(job.last_status.last_finished_at)}</p><p>下次预计：{displayTime(job.last_status.next_expected_at)}</p></Table.Cell>
         <Table.Cell focusMode="child"><p>{job.enabled ? '已启用' : '已停用'}</p><Button size="sm" isDisabled={blocked || !canAdmin} aria-label={`${job.enabled ? '停用' : '启用'} ${job.job_name} 周期调度`} onPress={() => { void submit({ kind: 'enabled', job_name: job.job_name, enabled: !job.enabled }); }}>{job.enabled ? '停用' : '启用'}</Button></Table.Cell>
         <Table.Cell focusMode="child"><div className="w-64 space-y-2">{job.is_tiktok && <Select aria-label={`执行店铺 ${job.job_name}`} value={selection[job.job_name] || 'all'} isDisabled={blocked} onChange={(key) => {
-          if (typeof key === 'string') { setSelection((s) => ({ ...s, [job.job_name]: key === 'all' ? '' : key })); setFailure((f) => f && Object.keys(f.fieldErrors).length ? { ...f, fieldErrors: {} } : f); }
+          if (typeof key === 'string') { setSelection((s) => ({ ...s, [job.job_name]: key === 'all' ? '' : key })); setScopeReset(false); setFailure((f) => f && Object.keys(f.fieldErrors).length ? { ...f, fieldErrors: {} } : f); }
         }}><Label>执行店铺</Label><Select.Trigger aria-label={`执行店铺 ${job.job_name}`}><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="all" textValue="全部授权店铺">全部授权店铺</ListBox.Item>{data.tiktok_shops.map((s) => <ListBox.Item key={s.shop_id} id={s.shop_id} textValue={`${s.account_name ?? '未命名'} · ${s.shop_id}`}>{s.account_name ?? '未命名'} · {s.shop_id}{s.status === null ? '' : ` · ${s.status}`}</ListBox.Item>)}</ListBox></Select.Popover></Select>}
         <Button size="sm" isDisabled={blocked} aria-label={`执行 ${job.job_name}`} onPress={() => trigger(job)}>执行</Button></div></Table.Cell>
       </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table></>}
