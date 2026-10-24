@@ -1,6 +1,6 @@
 # 前端 P2 实现计划：普通页面与首个隔离写闭环
 
-> 状态：run-binding 原子切片已验，四个 cookie 写入口安全修复验证中；三页尚未迁移。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
+> 状态：run-binding 与后端安全原子切片已验，共享权限/错误契约及图表依赖准备待审；三页尚未迁移。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
 > 权威父方案：[渐进迁移方案](frontend-progressive-migration.md)；组件标准：[前端开发规范](../guides/frontend-development.md)。
 > 用户在 P0/P1 交付后连续要求继续开发、直到任务完成：按既定前端路线先完成 P2，再逐批核对 P3–P6 的门槛；不接管其他会话或自动生产上线。
 
@@ -10,7 +10,7 @@
 - UTC：2026-10-24。独立 `feature/frontend-p2` / `.worktrees/frontend-p2`，从 fresh `origin/master=e86817a3f28d4267ce0527a43ed7887795da81c3` 建立。
 - P0/P1 已完成，代码精确集成 `8f1b752` 的 fast 基线零新增稳定失败；不把其证据冒充 P2 通过。
 - Change Necessity：三页仍依赖旧模板/脚本，复制了会话、路径、请求与布局逻辑；需接入既有 React/HeroUI 骨架，保留有效查询、管理和错误恢复。
-- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide；`m-f3272c5e-978` 追加 no-dotenv bootstrap 的精确子进程透传修复；`m-296716be-6d8` 追加 deps/admin/config 的最小安全接线、旧enum两头及3个API测试路径。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
+- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide；`m-f3272c5e-978` 追加 no-dotenv bootstrap 的精确子进程透传修复；`m-296716be-6d8` 追加 deps/admin/config 的最小安全接线、旧enum两头及3个API测试路径；`m-53f8e91b-13d` 登记共享bootstrap/client/契约测试与3个图表依赖文件。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
 - 保留 main 的 `plugins/monitor` 和未跟踪 `node_modules/`；原 child/coord 审计工作树不动。
 - 不改 app/access/middleware、schema/models/migrations、财务口径、TikTok 店铺写端点、插件、生产数据/服务。后端现有缺陷只在确定 canonical owner、登记 scope、写回归及安全审查后处理。
 - ArchitectureReviewRequired：是，涉及共享权限事实、凭证输入、OAuth 命令及真实浏览器/API 写入边界；沿用原架构，不另造 session/menu/client/chart engine。
@@ -55,7 +55,7 @@
 - 复用已落地 AppShell/Header/navigation、bootstrap/path/client、401 单一 handler、纯读 Retry-After 调度及打包 manifest/license 流程；页面只产出内容。
 - 项目已 vendored uPlot 1.6.32 MIT，当前 npm latest 仍为 1.6.32。官方 README 提供 bars/React wrapper 链接；不自造图表引擎。
 - 优先验证维护中的 `uplot-react@1.2.4`（MIT，peer `react>=16.8.6`、`uplot^1.6.32`），配合锁定 `uplot@1.6.32` 直接采用。GitHub repo 非 archived，最近 pushed 为 2025-09-25；`updated_at` 不是代码维护证明。
-- 实际 npm 安装、审计、TS7/React19 构建和 StrictMode/unmount/resize 验证尚未进行。若不满足，记录具体不兼容证据再选择已维护适配，不强制 peer、降级 React 或偷偷复制上游代码。
+- 已 exact 安装两包、无额外runtime transitive、已读两份 MIT 原文及 wrapper 真实 hooks/create/destroy/update 源码，npm audit（含dev）0；声明 peer 与本工程相容。现有 TS7/React19 工程构建通过，但尚未实际引入图表页面：不能据此声称 native chart / StrictMode / resize / unmount 验收。wrapper 的类型仍使用旧全局 JSX，工程原有 skipLibCheck 未改，P2实际图表消费/浏览器仍须验证；若不满足，按具体证据换维护方案，不强制 peer、降级或新增忽略。
 - 上游：<https://github.com/leeoniya/uPlot>、<https://registry.npmjs.org/uplot/latest>、<https://github.com/skalinichev/uplot-wrappers>、<https://registry.npmjs.org/uplot-react/latest>。
 - 新图表依赖须进入既有 lock/license 包装；提供语义化日期/数量表作为可访问数据出口，图形不是第二个统计真相。
 
@@ -117,7 +117,9 @@ P2 只逐页切换已验 React 页面。旧页面资源暂不在本计划写域�
 已做：合同审计及 e404c10 计划独立 F1 复审 PASS（`/tmp/frontend-p2-plan-f1-review.md`），精确登记 `m-badab46c-d24`；按原 lock 私有 npm ci 准备工具，未新增图表依赖。实际 strict TDD：producer/保留名称4 RED；canonical preconnection2 RED（旧 probe 请求 fake engine）；非普通 proof/FIFO 真实阻塞 RED 后在读取 owner 非阻塞打开并 fstat 拒绝。对应日志 `/tmp/frontend-p2-run-binding-{red-reserved,consumer-red,fifo-red,checkpoint-green}.log`；24eb775 检查点的两文件窄回归66 passed及独立源码审查 PASS（`/tmp/frontend-p2-binding-implementation-review.md`）只覆盖其版本。后续补齐私有/畸形/oversize/type/symlink、模板/base/retained/URI参数、活跃非祖先/死 owner/start变化、实际返回engine零connect/实际库名错仅identity SQL、真实test.sh传播、clone/issuer/command/proof-cleanup失败与失效proof拒绝；`/tmp/frontend-p2-run-binding-full-matrix.log` exit0/111 passed无skip，Ruff0及fresh LSP3 confirmed clean。RB-01 的本机原生有界深JSON本来已拒绝；明确用decoder RecursionError故障注入观察边界RED，再在load owner归一化，未谎称原生默认解码器已复现该异常。790b135 上一次完整 baseline 如实 exit1/新增6（`/tmp/frontend-p2-binding-baseline-verdict.log`），均为旧 no-dotenv 子进程 allowlist 未传新 proof；最小文件同样6失败，非flake。按追加scope仅透传2个新env及有界timeout、整理旧import空行，原dotenv/no-read/export断言及新guard不变；`/tmp/frontend-p2-binding-dotenv-green.log` 的三文件窄回归exit0/117 passed无skip，Ruff0/LSP1clean。此后只有该测试消费者/说明变更，无应用或runner代码delta；没有重跑全套或改baseline，不能声称完整suite exit0。增量独立复审仍待完成，binding任务未完成，更非P2验收。
 run-binding 在 4f5 增量独立源码复审 PASS 后按原子切片完成，原完整执行 exit1/六项已聚焦修复的事实保留，最终 P2 baselines 仍有独立门禁。backend-safety 已观察13个真实RED（缺CSRF前触库、cookie缺/错头仍200、DELETE前无guard），最小实现后51例安全回归及64例连同未改runtime-config邻居全部通过；日志 `/tmp/frontend-p2-backend-safety-{red,matrix,neighbors}.log`。同提交为旧enum PUT/DELETE补头；角色、事务、OAuth GET、app/access/middleware均未改。原 config.py 的18个 FastAPI Depends/B008 Ruff签名与 HEAD完全一致，deps.py 的2个旧get_session返回类型LSP错误对应AST未变；不隐藏或冒充全路径lint clean，不顺手重构P3/旧DI。其余受测路径Ruff0、JS syntax0、LSP5文件clean；backend源码独立审查待做。
 
-未做：图表依赖适配/审计、P2公共权限/共享client、三页业务实现、child/HTTP/canary真实写闭环、页面切换或交付。core 仍依赖backend安全审查；不把局部测试、源码审计或计划 PASS 当整体 GREEN。
+backend-safety 在 c59 独立源码审查 PASS 后完成。共享core已观察14个API/5个Vitest真实契约RED（`/tmp/frontend-p2-core-contracts-red.log`），实现最小server-owned roleCapabilities和additive ApiError unknown detail后，含API/旧路由/Node adapter/P0-P1浏览器的97个pytest用例通过（`/tmp/frontend-p2-core-contracts-neighbors.log`，内部Node 76例）。角色hint仅复用canonical gate，含Cookie优先/APIkey/off-shadow bypass；缺失坏值禁写，原4字段payload兼容；不改401 owner或重放。图表两包已安装/许可证/审计，原生图表生命周期仍未验。fresh LSP7无primary类型诊断，另有21条auxiliary advisory（含既有应向上抛出的JSON解析、bundler无扩展名import、I/O边界unknown/typeof及短ApiError参数风格提示），未新增抑制，不声称全部0。core独立审查待做。
+
+未做：三页业务/图表实际消费、child/HTTP/canary真实写闭环、页面切换或交付。core待当前增量独立审查；后续P2 fixed/prospective baselines保留，不把局部测试、源码审计或计划 PASS 当整体 GREEN。
 
 F1 producer/consumer 已登记的当前写域（回执 m-badab46c-d24）：`scripts/{test_isolated.sh,_test_db_connections.py}`、`tests/conftest.py`、`tests/test_test_run_binding.py`、`tests/test_test_template_refresh.py`、`docs/guides/agent-testing.md`。`scripts/test.sh` 已在 DB URL 存在时不加载 .env.test，只验证新输出能原样传递，不预计修改它。已获计划复审/登记只允许此切片；真实 writable-fixture seed 仍须等实际门禁、child attestation/canary 支持实现并验证。
 
