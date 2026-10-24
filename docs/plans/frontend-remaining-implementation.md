@@ -24,7 +24,7 @@
 - 复用 `PageProps`、共享 `requestJson`、路径工具、`ApiError`、`scheduleReadDelay` 和既有命令错误分类；不复制网络/会话基础设施。
 - 后端持有权限、财务精度、聚合、排序/筛选范围和业务判断。保留实际 wire 拼写，包括合法 camelCase，长 ID 保持字符串，null/0 不混淆。
 - 写操作显式、single-flight，不自动重放。未知结果保留草稿、阻断普通重提，提供可用显式读取和用户明确重试决定；GET 不能证明原提交、密码或秘密值已生效。
-- Retry-After 全时长跨刷新/核查保留，过期只允许显式操作；401 共享处理，403 独立。提交快照字段错误在真实编辑时作废，但不能清掉未知恢复/冷却/权限状态。
+- Retry-After 全时长跨刷新/核查保留，过期只允许显式操作；401 共享处理，403 独立。共享 client 收到 403/429 响应头就以同一 `ApiError` 输出状态、request ID 和 Retry-After，取消未读正文，不等待可能停滞且不可信的错误正文。其 detail 不作为展示/业务契约；422/409/404 的既有结构化解析及 2xx 解析保持原路径。无响应头或未完成的 2xx 写结果仍不确定。提交快照字段错误在真实编辑时作废，但不能清掉未知恢复/冷却/权限状态。
 - 公有 HeroUI/React Aria API，默认主题和少量布局，复用一个 AppShell；表格可局部滚动但不丢字段。避免 Card 内容槽默认列布局造成假响应式。
 - 结构化配置需保留 code/tree/view、无效文本和大整数。先复用现有/维护中的 JSON 工具；依赖和 lossless 响应 seam 由 parent 一处处理，不能自造 parser/编辑器或悄悄舍入。
 - 秘密不预填、不存储、不日志、不输出原始错误/载荷，不采集客户截图、cookie、trace。
@@ -51,7 +51,7 @@
 
 1. 维护现有 page-loader、bootstrap/共享传输及唯一 `MIGRATED_PAGE_IDS`，不增加第二激活表或 missing-asset fallback；每页保持原 handler/页面授权。
 2. 各内容 writer 只写自己的新目录。parent 在其内容 handoff 冻结/释放后消费提交，不并发修改 child 文件。
-3. 审计实际命令入口的 cookie CSRF、原服务端权限和必要破坏 guard；最小修补，权限不扩大。不得改 middleware 顺序、schema/migration、金融计算或并行 owner 路径。
+3. 审计实际命令入口的 cookie CSRF、原服务端权限和必要破坏 guard；最小修补，权限不扩大。不得改 middleware 顺序、数据库 schema/migration、金融计算或并行 owner 路径。
 4. 新 native/support 测试使用独立文件，复用 P2 当前 wrapper proof、实际 Engine/Session、owned Popen liveness、nonce/attestation、canary、TEST 账户与 request fence；不重写 DSN/provenance/lifecycle owner。
 5. sync/视频等外部动作以隔离可证 no-op/受控替身验证入口，禁止借浏览器测试执行真实上游任务。
 6. 用户/运行配置等契约缺口先核 canonical API/legacy behavior；普通可逆实现细节由 owner 决定，不反复请求已满足的授权。新财务/权限政策或未获生产操作授权才上报。
@@ -66,3 +66,16 @@
 - parent 同步最新 master，固定候选通过窄测试及 `bash scripts/test_baseline.sh`，提交推送；精确 prospective master 在锁内验证再非 force push，按 board ready FIFO 交付。
 - 不设计灰度、流量分批或额外观察等待。只在有效操作授权内启用同版本后端/manifest/assets；不擅自生产数据库操作、迁移或重启。
 - 替代已验且确无消费者才清非 ROI 旧实现；仍被两个排除页面使用的 vendor/模板/盈利内核必须保留。保留 Git/同版包应急撤销能力，不引入第二套长期运行 owner。
+
+## 同步命令与公开错误的安全出口
+
+- 同步启停仍要求 admin，手动触发仍要求 readwrite。解析后的 cookie 身份必须通过既有 `require_cookie_csrf`，然后才校验任务/店铺、访问数据库或加入后台任务；同时携带 Bearer 不豁免 cookie。既有 API-key 调用方式不变。
+- `/v2/sync/status` 的 `last_error` 保持可空字符串字段，但非空时仅公开固定错误存在提示，不再返回 scheduler 保存的异常正文。上游正文可能含凭证、签名 URL 或业务载荷，不适合作为浏览器/只读 API 的错误详情。
+- 此变更不修改存储的 `error_message` 审计事实，也不改变 `last_status`、时间、周期和 severity 的原有业务判定。页面不得把错误存在提示解释为新的调度决策。
+
+## 人工成本目标与生效时间契约
+
+- `POST /v2/reporting/manual-costs` 保留既有 `spu_id` / Decimal 成本 / 币种 / note 等字段，新增可选正 bigint `spu_pk`。新页面提交所选行的内部主键和同一行的外部 ID，后端必须同时匹配，不能在主键无效或不匹配时回退到外部 ID 的第一行。
+- 旧 external-only 调用在唯一匹配时仍可用；零匹配返回 404，多店铺匹配返回 409，均不得先关闭或新增任何成本事实。外部 SPU ID 的实际唯一键包含店铺，不能把它当作全局唯一键。
+- 身份核对后仍复用原每 SPU 锁及单事务 close-old + insert，保留历史，不改金额精度、财务公式或写权限。这里只扩展 Pydantic 请求 DTO，不修改数据库 schema。
+- 未传 `valid_from` 时使用 aware UTC 的实际当前时刻；不能把宿主机的 naive 本地墙钟作为 UTC 存储，导致成本在未来数小时才生效。显式传入时间的既有契约保持不变。
