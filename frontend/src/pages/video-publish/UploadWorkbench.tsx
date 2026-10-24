@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Label, Modal, TextArea, TextField } from '@heroui/react';
 import { ApiError, requestJson, retryAfterSeconds } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
-import { decodeDetail, decodeDevices, decodeList, decodeTask, decodeTicket, type Config, type Device, type Task } from './contracts';
+import { decodeDetail, decodeDevices, decodeList, decodeTask, decodeTicket, requireIsolatedUploadOrigin, UploadOriginError, uploadOriginConfigurationHelp, type Config, type Device, type Task } from './contracts';
 import { Facts } from './TaskFacts';
 import type { VideoCommand } from './useVideoCommand';
 
@@ -51,6 +51,9 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     setFile(next); setUploaded(false); edit();
   }
   function clear() {
+    if (busy.current || locked || command.needsCheck || command.cooldown) return;
+    readController.current?.abort(); readController.current = undefined; setChecking(false);
+    setConfirmation(undefined); setCompletionTarget(undefined);
     draftRevision.current++; setFile(undefined); setCaption(''); setDevice(''); selectedDevice.current = undefined; setResumeDeviceLabel(''); setTask(undefined); setCaptured(undefined); setUploaded(false); setFacts(undefined); setMessage(''); setAbandon(false);
     if (picker.current) picker.current.value = '';
   }
@@ -59,9 +62,9 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     const controller = new AbortController(); readController.current?.abort(); readController.current = controller; setChecking(true);
     try {
       const result = await requestJson<unknown>(root, '/v2/video-publish/devices', { signal: controller.signal });
-      const rows = decodeDevices(result.data); if (mounted.current && !controller.signal.aborted) { setDevices(rows); setDeviceNotice('设备列表已更新；原选择保持不变。'); }
-    } catch (error: unknown) { if (mounted.current && !controller.signal.aborted) { command.hold(error); setDeviceNotice('设备列表不可用，仍可使用默认设备；不会替换当前选择。'); } }
-    finally { if (mounted.current) setChecking(false); }
+      const rows = decodeDevices(result.data); if (mounted.current && readController.current === controller && !controller.signal.aborted) { setDevices(rows); setDeviceNotice('设备列表已更新；原选择保持不变。'); }
+    } catch (error: unknown) { if (mounted.current && readController.current === controller && !controller.signal.aborted) { command.hold(error); setDeviceNotice('设备列表不可用，仍可使用默认设备；不会替换当前选择。'); } }
+    finally { if (mounted.current && readController.current === controller) { readController.current = undefined; setChecking(false); } }
   }
   function requestUpload(retry = false) {
     if (!canWrite || command.blocked || locked) return;
@@ -78,10 +81,15 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     const expected = task;
     try {
       const validate = (value: unknown) => {
-        const ticket = decodeTicket(value);
-        if (ticket.task.clientRequestId !== snapshot.clientRequestId || ticket.task.filename !== snapshot.file.name || String(ticket.task.sizeBytes) !== String(snapshot.file.size)
-          || (expected && ticket.task.taskId !== expected.taskId)) throw new Error('上传任务身份不匹配');
-        return ticket;
+        const candidate = decodeTask(value);
+        if (candidate.clientRequestId !== snapshot.clientRequestId || candidate.filename !== snapshot.file.name || String(candidate.sizeBytes) !== String(snapshot.file.size)
+          || (expected && candidate.taskId !== expected.taskId)) throw new Error('上传任务身份不匹配');
+        try { return decodeTicket(value); }
+        catch (error: unknown) {
+          // Preserve only the validated captured task, never the rejected signed URL.
+          if (mounted.current && error instanceof UploadOriginError) { setTask(candidate); setMessage(uploadOriginConfigurationHelp); }
+          throw error;
+        }
       };
       attemptedPath.current = expected ? `/v2/video-publish/tasks/${expected.taskId}/upload-url` : '/v2/video-publish/tasks';
       const ticket = await command.send(attemptedPath.current, expected ? {} : {
@@ -91,8 +99,10 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
       if (!ticket || !mounted.current) return;
       setTask(ticket.task); onChanged();
       if (!ticket.upload) { setMessage('服务端已确认原幂等任务进入后续处理；当前草稿保留供核对，不会再次上传。'); return; }
+      requireIsolatedUploadOrigin(new URL(ticket.upload.url));
       const request = new XMLHttpRequest(); xhr.current = request; command.binaryPending(true); setUploading(true); setProgress(0);
-      // Presigned binary transport has no ERP auth, CSRF, cookies or response-body diagnostics.
+      // The origin fence plus withCredentials=false isolates cross-origin PUT credentials.
+      // Only Content-Type is sent; no ERP auth/CSRF or response-body diagnostics.
       // Retry-After parsing stays with the shared HTTP policy, including numeric/date waits.
       request.open('PUT', ticket.upload.url); request.withCredentials = false; request.setRequestHeader('Content-Type', 'video/mp4');
       request.upload.onprogress = (event) => { if (mounted.current && event.lengthComputable) setProgress(Math.round(event.loaded / event.total * 100)); };
@@ -103,25 +113,26 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
         request.send(snapshot.file);
       });
       if (mounted.current) { setUploaded(true); setProgress(100); setMessage('二进制上传已完成。请核对后明确点击「确认上传并入队」；尚未发布。'); }
-    } catch (error: unknown) { if (mounted.current) { command.reject(error); setMessage('上传未确认，文件与文案已保留。先查询当前任务，再明确决定重试上传；不会自动入队。'); } }
+    } catch (error: unknown) { if (mounted.current) { command.reject(error); setMessage(error instanceof UploadOriginError ? uploadOriginConfigurationHelp : '上传未确认，文件与文案已保留。先查询当前任务，再明确决定重试上传；不会自动入队。'); } }
     finally { busy.current = false; xhr.current = undefined; if (mounted.current) { command.binaryPending(false); setUploading(false); } }
   }
   async function check() {
     if (!captured || checking || command.cooldown) return;
+    const revision = draftRevision.current;
     const controller = new AbortController(); readController.current?.abort(); readController.current = controller; setChecking(true);
     try {
       const result = await requestJson<unknown>(root, task ? `/v2/video-publish/tasks/${task.taskId}` : '/v2/video-publish/tasks', { signal: controller.signal }, parseIdentityJson);
       const found = task ? decodeDetail(result.data) : decodeList(result.data).items.find((row) => row.clientRequestId === captured.clientRequestId);
       if (found && (found.clientRequestId !== captured.clientRequestId || (task && found.taskId !== task.taskId))) throw new Error('任务身份不匹配');
-      if (!mounted.current || controller.signal.aborted) return;
+      if (!mounted.current || readController.current !== controller || controller.signal.aborted || revision !== draftRevision.current) return;
       setFacts(found); if (found) setTask(found);
       command.checked(attemptedPath.current); setMessage(found ? '已读取当前事实，不代表原提交或对象上传已确认。请自行核对后决定下一步。' : '当前第一页未查到匹配任务，不证明不存在或原创建未提交；原幂等键与请求仍保留。');
     } catch (error: unknown) {
-      if (!mounted.current || controller.signal.aborted) return;
+      if (!mounted.current || readController.current !== controller || controller.signal.aborted || revision !== draftRevision.current) return;
       command.hold(error);
       if (error instanceof ApiError && error.status === 404) { command.checked(attemptedPath.current); setMessage('当前记录不可见或不存在，不证明原提交未生效。原草稿与幂等键保留。'); }
       else setMessage('当前事实读取未完成，请稍后明确重试查询；草稿保留。');
-    } finally { if (mounted.current) setChecking(false); }
+    } finally { if (mounted.current && readController.current === controller) { readController.current = undefined; setChecking(false); } }
   }
   async function complete() {
     if (!completionTarget || command.blocked || !canWrite) return;
@@ -140,14 +151,14 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     try {
       const result = await requestJson<unknown>(root, `/v2/video-publish/tasks/${target.taskId}`, { signal: controller.signal }, parseIdentityJson);
       const row = decodeDetail(result.data);
-      if (!mounted.current || controller.signal.aborted) return;
+      if (!mounted.current || readController.current !== controller || controller.signal.aborted) return;
       if (row.taskId !== target.taskId || row.clientRequestId !== target.clientRequestId || !row.allowedActions.includes('continue_upload')) throw new Error('续传事实不匹配');
       if (revision !== draftRevision.current) { setMessage('加载期间草稿已修改，未覆盖输入。请再次明确接受续传。'); return; }
       setTask(row); setCaptured(undefined); setFile(undefined); setCaption(row.caption); setDevice(''); setResumeDeviceLabel(row.target.deviceSerialMasked); setUploaded(false); setFacts(undefined);
       if (picker.current) picker.current.value = '';
       setMessage('已选择续传任务；请选择原视频。原任务身份与完整文案保留。'); onResumeAccepted();
-    } catch (error: unknown) { if (mounted.current && !controller.signal.aborted) { command.hold(error); setMessage('续传事实读取失败或动作已变化；当前草稿未覆盖，请刷新核对。'); } }
-    finally { if (mounted.current) setChecking(false); }
+    } catch (error: unknown) { if (mounted.current && readController.current === controller && !controller.signal.aborted && revision === draftRevision.current) { command.hold(error); setMessage('续传事实读取失败或动作已变化；当前草稿未覆盖，请刷新核对。'); } }
+    finally { if (mounted.current && readController.current === controller) { readController.current = undefined; setChecking(false); } }
   }
   return <section aria-label="新建发布任务" className="space-y-3 rounded-lg border border-default p-4">
     <h2 className="text-xl font-semibold">新建发布任务 / 继续上传</h2>

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import VideoPublish from './index';
+import { decodeTicket } from './contracts';
 import type { PageProps } from '../../shared/contracts';
 
 const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'video-publish', navigation: [], releaseId: 'TEST' } };
@@ -656,6 +657,106 @@ describe('video publish read slice', () => {
     expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1);
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/tasks/current')).length).toBeGreaterThan(2);
     view.unmount();
+  });
+
+  it('does not resurrect an abandoned upload task when its old GET settles after a new draft', async () => {
+    const bodies: Record<string, unknown>[] = []; let resolve!: (response: Response) => void;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') { const body = JSON.parse(init.body as string); bodies.push(body); return json(ticketFor(body)); }
+      if (url.endsWith('/tasks/' + id)) return new Promise<Response>((r) => { resolve = r; }); return undefined;
+    });
+    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    await act(async () => { TestPut.requests[0].finish(); });
+    await user.click(screen.getByRole('button', { name: '核对上传任务' }));
+    await user.click(screen.getByRole('button', { name: '清除选择 / 放弃续传' })); await user.click(screen.getByRole('button', { name: '确认清除本地草稿' }));
+    const next = new File(['TEST_NEXT_VIDEO'], 'TEST_next.mp4', { type: 'video/mp4' });
+    await user.upload(screen.getByLabelText('选择 MP4 视频'), next); await user.type(screen.getByRole('textbox', { name: '发布文案' }), 'TEST_next_caption');
+    await act(async () => { resolve(json({ ...detail, ...uploadingTask(bodies[0]) })); });
+    const workbench = screen.getByRole('region', { name: '新建发布任务' });
+    expect(within(workbench).getByRole('textbox', { name: '发布文案' })).toBeEnabled();
+    expect(within(workbench).getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_next_caption');
+    expect(within(workbench).getByRole('combobox', { name: '创建目标设备' })).toBeEnabled();
+    expect(within(workbench).queryByText('上传任务 ID')).toBeNull();
+    await user.click(within(workbench).getByRole('button', { name: '上传并加入发布队列' })); await user.click(screen.getByRole('button', { name: '确认并上传' }));
+    expect(bodies).toHaveLength(2); expect(bodies[1].clientRequestId).not.toBe(bodies[0].clientRequestId);
+    expect(bodies[1]).toMatchObject({ filename: 'TEST_next.mp4', caption: 'TEST_next_caption' });
+    expect(TestPut.requests[1].send).toHaveBeenCalledWith(next);
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith('/confirm-upload'))).toBe(false);
+  });
+  it.each([200, 429])('does not let an abandoned GET status %s finish or throttle a newer workbench read', async (status) => {
+    let body: Record<string, unknown> = {}; let oldResolve!: (response: Response) => void; let nextResolve!: (response: Response) => void;
+    let oldSignal: AbortSignal | null | undefined;
+    mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') { body = JSON.parse(init.body as string); return json(ticketFor(body)); }
+      if (url.endsWith('/tasks/' + id)) return new Promise<Response>((r) => { oldResolve = r; oldSignal = init.signal; });
+      if (url.endsWith('/devices')) return new Promise<Response>((r) => { nextResolve = r; }); return undefined;
+    });
+    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user); await act(async () => { TestPut.requests[0].finish(); });
+    await user.click(screen.getByRole('button', { name: '核对上传任务' }));
+    await user.click(screen.getByRole('button', { name: '清除选择 / 放弃续传' })); await user.click(screen.getByRole('button', { name: '确认清除本地草稿' }));
+    await user.click(screen.getByRole('button', { name: '加载设备列表' }));
+    await act(async () => { oldResolve(status === 200 ? json({ ...detail, ...uploadingTask(body) }) : json({}, 429, { 'Retry-After': '600' })); });
+    expect(screen.queryByText(/请等待完整 Retry-After/)).toBeNull();
+    expect(screen.getByRole('button', { name: '加载设备列表' })).toBeDisabled();
+    await act(async () => { nextResolve(json({ devices: [] })); });
+    expect(screen.getByRole('button', { name: '加载设备列表' })).toBeEnabled(); expect(oldSignal?.aborted).toBe(true);
+  });
+  it.each(['', '/tts'])('rejects an ERP-origin PUT before constructing XHR and retains captured task/draft under root %s', async (rootPath) => {
+    let body: Record<string, unknown> = {};
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') { body = JSON.parse(init.body as string); const ticket = ticketFor(body); return json({ ...ticket, upload: { ...ticket.upload, url: `${location.origin}${rootPath}/minio/TEST_object?TEST_signature=TEST_fixture` } }); }
+      return undefined;
+    });
+    const user = userEvent.setup(); render(<VideoPublish bootstrap={{ ...commandProps.bootstrap, rootPath }} />); const file = await prepareUpload(user);
+    expect(TestPut.requests).toHaveLength(0);
+    expect(await screen.findByText(/上传地址与 ERP 同源/)).toBeVisible();
+    const workbench = screen.getByRole('region', { name: '新建发布任务' });
+    expect(within(workbench).getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_new_caption');
+    expect((screen.getByLabelText('选择 MP4 视频') as HTMLInputElement).files?.[0]).toBe(file);
+    expect(within(workbench).getByText('上传任务 ID')).toBeVisible();
+    expect(within(workbench).getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+    expect(screen.queryByText(/TEST_signature=TEST_fixture/)).toBeNull();
+  });
+  it.each([
+    ['http://test.erp.invalid', 'http://TEST.erp.invalid:80/minio/TEST'],
+    ['https://test.erp.invalid', 'https://TEST.erp.invalid:443/tts/minio/TEST'],
+    ['https://test.erp.invalid:444', 'https://TEST.erp.invalid:0444/minio/TEST'],
+  ])('canonical ticket boundary rejects same-origin aliases for %s', (origin, url) => {
+    vi.stubGlobal('location', new URL(origin));
+    const ticket = ticketFor({ clientRequestId: task.clientRequestId, filename: 'TEST_file.mp4', sizeBytes: 4, caption: 'TEST_caption' });
+    expect(() => decodeTicket({ ...ticket, upload: { ...ticket.upload, url } })).toThrow(/上传地址与 ERP 同源/);
+  });
+  it.each(['http://test.store.invalid:80/minio/TEST', 'https://test.store.invalid:443/minio/TEST'])('retains absolute cross-origin http(s) tickets without adding a TLS deployment policy: %s', (url) => {
+    vi.stubGlobal('location', new URL('https://test.erp.invalid'));
+    const ticket = ticketFor({ clientRequestId: task.clientRequestId, filename: 'TEST_file.mp4', sizeBytes: 4, caption: 'TEST_caption' });
+    expect(decodeTicket({ ...ticket, upload: { ...ticket.upload, url } }).upload?.url).toBe(url);
+  });
+
+  it('rechecks actual browser origin after ticket decoding and before constructing the native PUT', async () => {
+    let originReads = 0;
+    vi.stubGlobal('location', { get origin() { return ++originReads === 1 ? 'https://test.erp.invalid' : 'https://test.invalid'; } });
+    mockReads((url, init) => url.endsWith('/tasks') && init.method === 'POST' ? json(ticketFor(JSON.parse(init.body as string))) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    expect(originReads).toBe(2); expect(TestPut.requests).toHaveLength(0);
+    expect(await screen.findByText(/上传地址与 ERP 同源/)).toBeVisible();
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+  });
+  it('preserves the known same-origin task for explicit GET verification without replaying the create or uploading', async () => {
+    let body: Record<string, unknown> = {};
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks') && init.method === 'POST') { body = JSON.parse(init.body as string); const ticket = ticketFor(body); return json({ ...ticket, upload: { ...ticket.upload, url: `${location.origin}/tts/minio/TEST` } }); }
+      if (url.endsWith('/tasks/' + id)) return json({ ...detail, ...uploadingTask(body) }); return undefined;
+    });
+    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    await user.click(screen.getByRole('button', { name: '核对上传任务' }));
+    expect(await screen.findByText(/已读取当前事实，不代表原提交或对象上传已确认/)).toBeVisible();
+    expect(fetcher.mock.calls.some(([url]) => url === `/tts/v2/video-publish/tasks/${id}`)).toBe(true);
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1); expect(TestPut.requests).toHaveLength(0);
+  });
+  it('retains the existing prohibition on userinfo in a cross-origin ticket', () => {
+    const ticket = ticketFor({ clientRequestId: task.clientRequestId, filename: 'TEST_file.mp4', sizeBytes: 4, caption: 'TEST_caption' });
+    expect(() => decodeTicket({ ...ticket, upload: { ...ticket.upload, url: 'https://TEST_user:TEST_value@test.store.invalid/minio/TEST' } })).toThrow('视频发布响应格式错误');
   });
 
 });

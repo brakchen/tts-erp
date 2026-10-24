@@ -100,6 +100,14 @@ export function decodeConfig(value: unknown): Config {
     canWrite: bool(row.canWrite), writeBlockReason: nullableText(row.writeBlockReason), serverTime: text(row.serverTime) };
 }
 
+export const uploadOriginConfigurationHelp = '上传地址与 ERP 同源，请配置独立的对象存储上传域名；当前草稿和任务已保留，请核对后再手动重试。';
+export class UploadOriginError extends Error {
+  constructor() { super(uploadOriginConfigurationHelp); this.name = 'UploadOriginError'; }
+}
+/** Same-origin XHR sends ERP cookies even when withCredentials=false. */
+export function requireIsolatedUploadOrigin(url: URL): void {
+  if (url.origin === new URL(location.origin).origin) throw new UploadOriginError();
+}
 export interface UploadTicket { task: Task; idempotentReplay: boolean; upload: { url: string; expiresAt: string | null } | null }
 export function decodeTicket(value: unknown): UploadTicket {
   const row = object(value); const upload = object(row.upload); const headers = object(upload.headers);
@@ -109,6 +117,7 @@ export function decodeTicket(value: unknown): UploadTicket {
   const parsed = new URL(url);
   if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password || upload.method !== 'PUT'
       || Object.keys(headers).length !== 1 || headers['Content-Type'] !== 'video/mp4') return invalid();
+  requireIsolatedUploadOrigin(parsed);
   return { task, idempotentReplay: replay, upload: { url, expiresAt: nullableText(upload.expiresAt) } };
 }
 export interface Device { serial: string; serialMasked: string; model: string; product: string; state: string; isBusy: boolean; isEmulator: boolean }
