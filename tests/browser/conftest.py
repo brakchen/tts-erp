@@ -151,119 +151,67 @@ _SPU_ITEMS = [
 # 覆盖它的多视口横向溢出与字体栈。
 _ALERT_SLUG = "spu-profit-deterioration"
 
-_ALERT_ITEMS = [
-    {
-        "shopPk": 7,
-        "spuPk": 1000 + i,
-        "windowDays": days,
-        "layer": layer,
-        "severity": severity,
-        "state": "roi_deterioration" if severity != "none" else "stable",
-        "sampleStatus": "sufficient" if severity != "none" else "unavailable",
-        "previousRoi": "1.1200" if severity != "none" else None,
-        "currentRoi": "0.8400" if severity != "none" else None,
-        "roiDecline": "0.2500" if severity != "none" else None,
-        "previousNetProfitCny": "420.0000" if severity != "none" else None,
-        "currentNetProfitCny": "290.0000" if severity != "none" else None,
-        "netProfitDecline": "0.3095" if severity != "none" else None,
-        "previousSpendCny": "500.0000" if severity != "none" else None,
-        "currentSpendCny": "510.0000" if severity != "none" else None,
-        "previousOrderCount": 18,
-        "currentOrderCount": 16,
-        "previousAdOrderCount": 12,
-        "currentAdOrderCount": 11,
-        "anchorDate": "2026-10-03",
-        "basisCalculatedAt": _NOW,
-        "configSource": "runtime_config",
-        "configVersion": 3,
-        "provisionalLabel": None,
-        "warningCode": "ROI_AND_NET_PROFIT_DETERIORATED"
-        if severity != "none"
-        else "DATA_STALE",
-        "warningText": "实际 ROI 与净利润比较恶化" if severity != "none" else None,
-        "drilldown": {
-            "profitabilityUrl": f"/v2/analytics/spu-roi?shop_pk=7&spu_pk={1000 + i}",
-            "pageUrl": "/v2/pages/spu-roi",
-        },
-    }
-    for i, (days, layer, severity) in enumerate(
-        [(1, "fast", "critical"), (3, "fast", "warning"), (7, "confirmation", "none")]
-    )
-]
-
-
-def _alert_block(warning: str, critical: str) -> dict[str, Any]:
-    def pair(value: str) -> dict[str, Any]:
-        return {
-            "roiAbsDelta": value,
-            "roiRelativeDecline": value,
-            "netProfitDecline": value,
-            "minSpendCny": "100",
-            "minOrders": 3,
-            "minAdOrders": 1,
-        }
-
-    return {
-        "warning": pair(warning),
-        "critical": pair(critical),
-    }
-
-
-def _alert_thresholds() -> dict[str, Any]:
-    return {
-        "enabled": True,
-        "maturityDays": 7,
-        "fast": {days: _alert_block("0.2", "0.4") for days in ("1", "3", "7")},
-        "confirmation": {days: _alert_block("0.1", "0.3") for days in ("1", "3", "7")},
-    }
-
-
 def _alert_payload() -> dict[str, Any]:
+    """Populated PRD-v3 comparison for the shared layout/font gate only."""
+    items = [
+        {
+            "shopPk": 7,
+            "spuPk": 1000 + i,
+            "spuId": f"TEST_RENDER_COMPARE_{i}",
+            "windowDays": 7,
+            "anchorDate": "2026-10-03",
+            "previousRoi": "0" if i == 2 else "1.12",
+            "currentRoi": "0" if i == 2 else "0.84",
+            "previousNetProfitCny": "-100" if i == 2 else "420",
+            "currentNetProfitCny": "-100" if i == 2 else "290",
+            "previousSpendCny": "100" if i == 2 else "500",
+            "currentSpendCny": "100" if i == 2 else "510",
+            "previousOrderCount": 0 if i == 2 else 18,
+            "currentOrderCount": 0 if i == 2 else 16,
+            "previousNoOrderAdSpend": i == 2,
+            "currentNoOrderAdSpend": i == 2,
+            "previousRoiUnavailableReason": None,
+            "currentRoiUnavailableReason": None,
+            "warnings": [],
+            "basisCalculatedAt": _NOW,
+            "drilldown": {
+                "pageUrl": (
+                    f"/v2/pages/spu-roi?shop_pk=7&spu_ids=TEST_RENDER_COMPARE_{i}"
+                    "&w_start=2026-09-27&w_end=2026-10-03"
+                ),
+                "period": "current",
+            },
+        }
+        for i in range(3)
+    ]
     return {
-        "items": _ALERT_ITEMS,
-        "total": len(_ALERT_ITEMS),
+        "items": items,
+        "total": len(items),
+        # The first two fixture SPUs share orders; these are not row sums.
         "totals": {
-            "warningCount": 1,
-            "criticalCount": 1,
-            "insufficientSampleCount": 1,
-            "shopSpuCount": len(_ALERT_ITEMS),
+            "analysisSpuCount": len(items),
+            "previousOrderCount": 18,
+            "currentOrderCount": 16,
+            "unavailableReason": None,
         },
         "meta": {
             "requestId": "TEST_render_gate",
-            "enabled": True,
+            "shopPk": 7,
+            "windowDays": 7,
             "anchorDate": "2026-10-03",
-            "batchThrough": "2026-10-03",
-            "maturityDays": 7,
+            "latestAvailableDate": "2026-10-03",
+            "reportingTimezone": "Asia/Ho_Chi_Minh",
+            "dataAsOf": "2026-10-03",
             "calculatedAt": _NOW,
-            "stale": False,
-            "coverage": {"materialized": True, "stale": False, "missingWindowCount": 0},
-            "config": {
-                "key": "analytics.spu_profit_deterioration_alert.v1",
-                "source": "runtime_config",
-                "version": 3,
-                "updatedAt": _NOW,
-                "updatedBy": "TEST_config_publisher",
-                "validation": "passed",
+            "stale": True,
+            "periods": {
+                "current": {"startDate": "2026-09-27", "endDate": "2026-10-03"},
+                "previous": {"startDate": "2026-09-20", "endDate": "2026-09-26"},
             },
-            "effectiveConfig": {
-                "source": "runtime_config",
-                "version": 3,
-                "updatedAt": _NOW,
-                "updatedBy": "TEST_config_publisher",
-                "validation": "passed",
-                "enabled": True,
-                "maturityDays": 7,
-                "thresholds": _alert_thresholds(),
-                "payloadHash": "TEST_render_gate_hash",
-                "provisionalLabel": None,
-                "drawer": {
-                    "mode": "published_effective_readonly_safe",
-                    "canEdit": False,
-                    "draftIncluded": False,
-                    "rolloutIncluded": False,
-                    "secretsIncluded": False,
-                },
-            },
+            "coverage": {"status": "limited"},
+            "warnings": ["渲染夹具，仅验证布局，不证明盈利或来源完整性。"],
+            "activityBypassed": False,
+            "scopeDescription": "固定近7天活动范围；保留无单投放",
         },
     }
 

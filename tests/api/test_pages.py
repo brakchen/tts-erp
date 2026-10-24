@@ -311,9 +311,10 @@ def test_spu_profit_deterioration_page_shell_and_sidebar(api_client, readonly_ke
     assert "/static/js/spu-profit-deterioration.js?v=" in body
     assert 'href="../../v2/pages/spu-profit-deterioration"' in body
     assert 'title="利润劣化告警" aria-current="page"' in body
-    # 阈值设置抽屉 + 告警横幅 + 筛选 + 状态面板（aria-live）都在 HTML 里。
-    assert 'id="btn-settings"' in body
-    assert 'id="settings-drawer"' in body
+    # PRD v3: read-only comparison, not an alert/configuration workflow.
+    assert 'id="btn-settings"' not in body
+    assert 'id="settings-drawer"' not in body
+    assert 'id="filter-severity"' not in body
     assert 'id="alert-banner"' in body
     assert 'id="alert-status" role="status" aria-live="polite"' in body
     assert 'id="filter-window-days"' in body
@@ -322,9 +323,10 @@ def test_spu_profit_deterioration_page_shell_and_sidebar(api_client, readonly_ke
     assert 'id="filter-sample"' not in body
     assert 'id="alert-rows"' in body
     assert 'id="alert-cards"' in body
-    # design §6.1/§6.2 的新接线也必须随 HTML 下发（不靠 JS 注入）。
     assert 'id="filter-spu-ids"' in body
-    assert 'id="filter-state"' in body
+    assert 'id="filter-state"' not in body
+    assert 'id="total-current-orders"' in body
+    assert 'id="total-previous-orders"' in body
     assert 'id="alert-summary"' in body
     assert 'id="alert-freshness" data-kind="loading"' in body
     assert 'href="/static/' not in body
@@ -368,35 +370,21 @@ def test_spu_profit_deterioration_page_permission_gate(
     assert readonly_publish.status_code == 401, readonly_publish.text
 
 
-def test_spu_profit_deterioration_page_state_header_filter_matches_documented_enum(api_client, readonly_key):
-    """状态表头筛选的 data-state-values 必须与被服务端接受的枚举一致（design §6.1）。"""
+def test_spu_profit_deterioration_page_only_offers_prd_comparison_windows(
+    api_client, readonly_key
+):
+    """AC-001/012: seven-day main reference, three-day auxiliary, no alerts."""
     body = api_client.get(
         "/v2/pages/spu-profit-deterioration",
         headers={"Authorization": f"Bearer {readonly_key}"},
     ).text
-    documented = [
-        "profit_to_loss",
-        "loss_expanding",
-        "loss_to_profit",
-        "roi_deterioration",
-        "net_profit_deterioration",
-        "stable",
-        "sample_insufficient",
-        "unavailable",
-    ]
-    # 状态下拉已从工具条移除（owner 2026-10-08：业务用户理解不了枚举码）；
-    # 筛选入口是「状态」列表头按钮，枚举唯一来源是其 data-state-values。
-    assert '<select id="filter-state"' not in body
-    match = re.search(
-        r'<button[^>]*id="filter-state"[^>]*data-state-values="([^"]+)"', body
-    )
-    assert match, body[body.index('id="filter-state"') - 200: body.index('id="filter-state"') + 400]
-    state_values = [value.strip() for value in match.group(1).split(",") if value.strip()]
-    assert state_values == documented
-    # B-04：roi_recovery / recovery 在 _state() 中永不可达，枚举里没有它们。
-    # 点名断言（而不是靠上面的等值比较隐含），任何人把死状态加回模板都会在这里失败。
-    assert len(state_values) == 8, state_values
-    assert not {"roi_recovery", "recovery"} & set(state_values), state_values
+    assert set(re.findall(r'data-window-days="([^"]*)"', body)) == {"3", "7"}
+    assert 'id="filter-state"' not in body
+    assert 'data-state-values=' not in body
+    assert 'id="filter-severity"' not in body
+    assert 'id="settings-drawer"' not in body
+    assert "无单但有广告费" in body
+    assert "CNY" in body
 
 
 def test_spu_profit_deterioration_page_requires_some_auth(api_client):
@@ -431,36 +419,20 @@ def test_spu_profit_deterioration_page_registry_entry():
     assert body.index("利润劣化告警") < body.index("广告日明细")
 
 
-def test_spu_profit_deterioration_page_assets_cover_all_documented_states():
-    """页面 JS/CSS 必须覆盖文档要求的状态与非颜色告警信号。"""
+def test_spu_profit_deterioration_page_assets_are_readonly_comparison():
+    """PRD v3 retires config writes and frontend business decisions."""
     root = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
     js = (root / "js" / "spu-profit-deterioration.js").read_text(encoding="utf-8")
-    css = (root / "css" / "spu-profit-deterioration.css").read_text(encoding="utf-8")
-
     assert "/analytics/spu-profit-deterioration" in js
-    # 抽屉唯一数据源 = meta.effectiveConfig；编辑走现有 runtime 端点。
-    assert "meta.effectiveConfig" in js
-    assert "/config/runtime/items/" in js and "/draft" in js and "/publish" in js
-    # enabled / maturityDays 读 effectiveConfig 的**顶层**字段（docs 的消费方约定），
-    # 不得从 thresholds 里取——thresholds 只是同一份 payload 的重复投影。
-    assert "eff.enabled" in js and "eff.maturityDays" in js
-    assert "thresholds.enabled" not in js
-    assert "thresholds.maturityDays" not in js
-    # 只渲染主响应里的 readonly-safe 投影，不渲染 draft / rollout / 明文 secret。
-    assert "drawer.draftIncluded" in js
-    assert "回测暂定" in js
-    for state in ("sample_insufficient", "unavailable", "stale", "disabled", "正在加载告警"):
-        assert state in js, state
-    # 硬规则：浏览器不算业务公式、不硬编码 effective 阈值。
-    for forbidden in ("roiReal", "net_profit =", "calculateRoi", "0.20", "0.40"):
+    for forbidden in (
+        "/config/runtime/items/",
+        "meta.effectiveConfig",
+        "calculateRoi",
+        "net_profit =",
+    ):
         assert forbidden not in js, forbidden
-    # 非颜色告警信号：图标 + 徽章 + 行处理（纯色浅底、边框样式；不用斜纹）。
-    assert "alert-icon" in js and "alert-badge" in js
-    assert "--paper-warn-soft" in css and "--paper-danger-soft" in css
-    assert "repeating-linear-gradient" not in css
-    assert ".alert-row--sample" in css and ".alert-card--sample" in css
-    assert ".alert-row--unavailable" in css and ".alert-card--unavailable" in css
-    assert "dashed var(--muted)" in css
+    # User-visible state/keyboard/race assertions belong in browser tests,
+    # not CSS substring assertions that fossilize one visual technique.
 
 
 def test_endpoints_index_lists_included_router_routes(api_client):

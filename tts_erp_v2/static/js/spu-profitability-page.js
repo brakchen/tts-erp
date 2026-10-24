@@ -299,6 +299,17 @@
     if (saved.projectionLookbackDays === 90) state.projectionLookbackDays = 90;
   }
 
+  function restoreDateRangeFromUrl() {
+    var params = new URLSearchParams(location.search);
+    if (!params.has("w_start") && !params.has("w_end")) return;
+    // Explicit drill-down scope wins over saved preferences and automatic T-1.
+    // Preserve supplied values for the existing date/API validation; never
+    // silently substitute a different successful business window.
+    state.wStart = params.get("w_start") || "";
+    state.wEnd = params.get("w_end") || "";
+    state.datesTouched = true;
+  }
+
   function persistPagePreferences() {
     var key = preferenceStorageKey();
     if (!key) return;
@@ -3226,6 +3237,7 @@
     state.sort = defaults.sort || DEFAULT_SORT;
     state.order = defaults.order || DEFAULT_ORDER;
     restorePagePreferences();
+    restoreDateRangeFromUrl();
     var limitInput = $("#filter-limit");
     if (limitInput) limitInput.value = String(state.limit);
     var includeInput = $("#filter-include-all");

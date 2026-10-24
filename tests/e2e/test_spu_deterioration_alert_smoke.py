@@ -1,129 +1,258 @@
-"""Live 冒烟：SPU 利润劣化告警页与只读端点（需 :9877）。
+"""Current-worktree SPU comparison journey: isolated DB + cold API + Chromium.
 
-本层是**有界**冒烟：只断言页面路由可鉴权访问、侧边栏入口存在，以及
-「缺 shop 不会伪装成空 200」。告警数值正确性属于 tests/api 与领域层。
-
-**部署前置（人工）**：live 服务必须跑在部署了本分支的代码上。实测本次运行的
-:9877 ``/endpoints`` 索引里没有 ``spu-profit-deterioration`` 路由（服务在跑，
-但进程早于本分支），且本 worktree 没有配置 ``TTS_ERP_SERVICE_KEY``。所以下面
-需要真实数据的用例全部按 **not-run（skip）** 记录，并写明确切原因，
-绝不把 404 / 缺 key 伪造成通过。
-
-重新启用条件（两步都由人执行）：
-
-1. 在本分支上重启 API（``bash restart.sh``），使 ``/endpoints`` 出现
-   ``/v2/analytics/spu-profit-deterioration`` 与 ``/v2/pages/spu-profit-deterioration``；
-2. 在环境变量或仓库根 ``.env`` 里提供 ``TTS_ERP_SERVICE_KEY``（readonly 即可）。
+Never targets a resident :9877 service or production data. Run only through
+``bash scripts/test_isolated.sh e2e tests/e2e/test_spu_deterioration_alert_smoke.py``.
+Missing browser/runtime prerequisites fail rather than produce an all-skip gate.
+The API fixture supplies known facts; assertions below are independent expected
+business counts/amounts, not values copied from the API into the expected DOM.
 """
 
 from __future__ import annotations
 
-import urllib.error
+import hashlib
+import re
+from collections.abc import Iterator
+from datetime import timedelta
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
+from sqlalchemy import delete, insert
 
-from conftest import request_json  # pyright: ignore[reportAttributeAccessIssue]
+from tests.support.frontend_p2_live import live_api_server
+from tts_erp_v2.db.base import Base
 
-pytestmark = [pytest.mark.domain_e2e]
+# Reuse the maintained SQL acceptance scene without cloning its seed logic.
+pytest_plugins = ["tests.api.test_spu_deterioration_alert_api"]
+pytestmark = [pytest.mark.domain_e2e, pytest.mark.requires_browser]
 
-ALERT_PAGE = "/v2/pages/spu-profit-deterioration"
-ALERT_API = "/v2/analytics/spu-profit-deterioration"
-
-_NOT_DEPLOYED = (
-    "not run：live :9877 的 /endpoints 索引里没有 spu-profit-deterioration 路由"
-    "（服务在跑，但运行进程早于本分支）。部署前置：人工在本分支上重启 API"
-    "（bash restart.sh）后本用例才可能执行。本次记为 not-run，不是通过。"
-)
-_NO_SERVICE_KEY = (
-    "not run：本 worktree 未配置 TTS_ERP_SERVICE_KEY（环境变量与仓库根 .env 均无），"
-    "无法对 live 路由做带鉴权的断言。本次记为 not-run，不是通过。"
-)
-_UNREACHABLE = "not run：live :9877 不可达（{reason}）。本次记为 not-run，不是通过。"
+PAGE = "/v2/pages/spu-profit-deterioration"
+API = "/v2/analytics/spu-profit-deterioration"
 
 
-def _request_json(method: str, path: str, **kwargs: Any) -> tuple[int, Any]:
-    """live 不可达时如实 skip（HTTPError 由 request_json 自己处理，不会逃到这里）。"""
+@pytest.fixture()
+def comparison_live(
+    db_url, db_engine, comparison_scope, ua_user_factory, ua_role_factory
+):
+    """Use the maintained child/HTTP/clone binding proof, not a guessed port."""
+    role = ua_role_factory(
+        "test_ua_compare_reader",
+        api_tier="readonly",
+        permissions=("page:spu-profit-deterioration", "page:spu-roi"),
+    )
+    user = ua_user_factory("test_ua_compare_e2e", roles=(role,))
+    key = "ttserp_readonly_TEST_COMPARE_E2E"
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    table = Base.metadata.tables["security.api_keys"]
+    with db_engine.begin() as connection:
+        connection.execute(
+            insert(table).values(
+                key_hash=digest,
+                key_prefix=key[:16],
+                name="TEST_COMPARE_E2E_READONLY",
+                role="readonly",
+                status="active",
+            )
+        )
     try:
-        return request_json(method, path, **kwargs)
-    except urllib.error.URLError as exc:
-        pytest.skip(_UNREACHABLE.format(reason=exc.reason))
+        with live_api_server(db_url) as child:
+            yield child, comparison_scope, user, key
+    finally:
+        with db_engine.begin() as connection:
+            connection.execute(delete(table).where(table.c.key_hash == digest))
 
 
-def _live_route_index() -> list[str]:
-    """/endpoints 是公开路由；用它区分「服务没部署本分支」与「鉴权缺失」。"""
-    status, body = _request_json("GET", "/endpoints", require_key=False, send_key=False)
-    if status != 200 or not isinstance(body, (list, dict)):
-        pytest.skip(_UNREACHABLE.format(reason=f"/endpoints 返回 {status}"))
-    # live 响应是 {"endpoints": [...], "count": N} 信封；兼容顶层数组。
-    entries = body.get("endpoints", body) if isinstance(body, dict) else body
-    return [entry["path"] for entry in entries if isinstance(entry, dict) and "path" in entry]
+@pytest.fixture()
+def chromium() -> Iterator[Any]:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            yield browser
+        finally:
+            browser.close()
 
 
-def _skip_unless_deployed() -> None:
-    paths = _live_route_index()
-    if ALERT_API not in paths or ALERT_PAGE not in paths:
-        pytest.skip(_NOT_DEPLOYED)
+def _comparison_response(response: Any, window: int | None = None) -> bool:
+    parsed = urlsplit(response.url)
+    return parsed.path.endswith(API) and (
+        window is None
+        or parse_qs(parsed.query).get("window_days") == [str(window)]
+    )
 
 
-@pytest.fixture(autouse=True)
-def live_alert_deployed() -> None:
-    """先判部署、再判凭据：skip 原因必须是确切的那一个。"""
-    _skip_unless_deployed()
-    # require_key=True 时 request_json 缺 key 会 skip；这里先显式检查一次，
-    # 保证「部署了但没凭据」也有独立的可读原因。
-    _request_json("GET", "/healthz", require_key=False, send_key=False)
+@pytest.mark.parametrize("auth,width", [("session", 1440), ("api_key", 390)])
+def test_real_comparison_journey(comparison_live, chromium, tmp_path, auth, width):
+    """AC-001/009/013/014/022: real values and stale readability."""
+    from playwright.sync_api import expect
+
+    child, scope, user, key = comparison_live
+    child.require_live()
+    context = chromium.new_context(viewport={"width": width, "height": 1000})
+    if auth == "session":
+        login = context.request.post(
+            child.base + "/v2/auth/login",
+            data={"username": user.username, "password": user.password},
+        )
+        assert login.status == 200
+        assert any(c["name"] == "tts_erp_session" for c in context.cookies())
+    else:
+        context.set_extra_http_headers({"Authorization": f"Bearer {key}"})
+    page = context.new_page()
+    writes: list[str] = []
+    page.on("request", lambda request: writes.append(request.method)
+            if request.method not in {"GET", "HEAD"} else None)
+    query = urlencode({"shop_pk": scope["shop"]})
+    try:
+        with page.expect_response(_comparison_response) as loaded:
+            page.goto(child.base + "/tts" + PAGE + "?" + query)
+        assert loaded.value.status == 200, loaded.value.text()
+        payload = loaded.value.json()
+        assert payload["totals"] == {
+            "analysisSpuCount": 4,
+            "previousOrderCount": 1,
+            "currentOrderCount": 1,
+            "unavailableReason": None,
+        }
+        anchor = scope["anchor"].isoformat()
+        expect(page.locator("#filter-anchor-date")).to_have_value(anchor)
+        expect(page.locator("#filter-anchor-date")).to_have_attribute("max", anchor)
+        expect(page.locator("#total-spus")).to_have_text("4")
+        expect(page.locator("#total-current-orders")).to_have_text("1")
+        expect(page.locator("#total-previous-orders")).to_have_text("1")
+        expect(page.locator("#alert-freshness")).to_contain_text("数据未更新")
+        container = page.locator("#alert-rows" if width > 1000 else "#alert-cards")
+        expect(container).to_contain_text("TEST_COMPARE_3")
+        expect(container).to_contain_text("无单但有广告费")
+        # Independent oracle, scoped to the actual ad-only record (not another
+        # row that happens to contain the same amount).
+        ad_only = container.locator("tr" if width > 1000 else "article").filter(
+            has_text="TEST_COMPARE_3"
+        )
+        expect(ad_only.locator('[data-value="currentOrderCount"]')).to_have_text("0")
+        expect(ad_only.locator('[data-value="currentSpendCny"]')).to_have_text(
+            re.compile(r"49(?:\.0+)?$")
+        )
+        expect(ad_only.locator('[data-value="currentNetProfitCny"]')).to_have_text(
+            re.compile(r"[-−]49(?:\.0+)?$")
+        )
+        # Canonical ROI excludes ad spend from its numerator; the net profit
+        # above is negative while zero revenue/return loss yields an ROI of 0.
+        expect(ad_only.locator('[data-value="currentRoi"]')).to_have_text(
+            re.compile(r"0(?:\.0+)?$")
+        )
+        assert page.locator("#btn-settings, #filter-severity, #filter-state").count() == 0
+        with page.expect_response(lambda response: _comparison_response(response, 3)) as short:
+            page.locator('[data-window-days="3"]').click()
+        assert short.value.status == 200
+        assert short.value.json()["meta"]["latestAvailableDate"] == anchor
+        expect(page.locator("#total-spus")).to_have_text("4")
+        expect(page.locator("#total-previous-orders")).to_have_text("0")
+        expect(ad_only.locator('[data-value="currentNetProfitCny"]')).to_have_text(
+            re.compile(r"[-−]21(?:\.0+)?$")
+        )
+        expect(page.locator("#filter-anchor-date")).to_have_value(anchor)
+        # Re-reading never invents a later source-data day.
+        with page.expect_response(_comparison_response) as refreshed:
+            page.locator("#btn-refresh").click()
+        assert refreshed.value.status == 200
+        assert refreshed.value.json()["meta"]["dataAsOf"] == anchor
+        page.screenshot(path=str(tmp_path / f"comparison-{auth}-{width}.png"), full_page=True)
+        assert writes == [], writes
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+    finally:
+        context.close()
 
 
-def test_alert_page_route_and_sidebar_entry() -> None:
-    status, body = _request_json("GET", ALERT_PAGE)
-    assert status == 200, body
-    assert isinstance(body, str), body
-    assert "利润劣化告警" in body
-    # 侧边栏入口 + 共享 sidebar 外壳 + 阈值设置抽屉外壳都随页面下发。
-    assert 'href="../../v2/pages/spu-profit-deterioration"' in body
-    assert 'title="利润劣化告警" aria-current="page"' in body
-    assert 'id="sidebar"' in body
-    assert 'id="btn-settings"' in body
-    assert 'id="settings-drawer"' in body
-    assert 'aria-live="polite"' in body
-    assert "/static/js/spu-profit-deterioration.js" in body
-    # design §6.1/§6.2 的筛选与交互外壳：SPU scope、状态表头筛选（filter-state
-    # 已迁至表头按钮）、summary 容器、新鲜度提示都必须随 HTML 下发（不依赖 JS 注入）。
-    for marker in (
-        'id="filter-spu-ids"',
-        'id="filter-state"',
-        'id="alert-summary"',
-        'id="alert-freshness"',
-    ):
-        assert marker in body, marker
+def test_real_http_auth_date_and_legacy_filter_boundaries(comparison_live, chromium):
+    """No live-service fallback, silent date clamping or anonymous business data."""
+    child, scope, _user, key = comparison_live
+    with chromium.new_context() as context:
+        anonymous = context.request.get(child.base + API + f"?shop_pk={scope['shop']}")
+        assert anonymous.status == 401
+        context.set_extra_http_headers({"Authorization": f"Bearer {key}"})
+        missing = context.request.get(child.base + API)
+        assert missing.status == 422
+        tomorrow = scope["anchor"] + timedelta(days=1)
+        future = context.request.get(
+            child.base + API + "?" + urlencode({"shop_pk": scope["shop"], "anchor_date": tomorrow.isoformat()})
+        )
+        assert future.status == 422
+        assert scope["anchor"].isoformat() in future.text()
+        for name in ("layer", "severity", "state", "sample"):
+            response = context.request.get(
+                child.base + API + "?" + urlencode({"shop_pk": scope["shop"], name: "all"})
+            )
+            assert response.status == 422, name
 
 
-def test_alert_page_requires_auth() -> None:
-    status, _ = _request_json("GET", ALERT_PAGE, require_key=False, send_key=False)
-    assert status in (302, 401), status
+def test_real_page_permission_and_existing_readonly_api_tier_are_distinct(
+    comparison_live, chromium, ua_user_factory
+):
+    """Page denial stays distinct from the established global readonly API tier."""
+    child, scope, _user, _key = comparison_live
+    denied = ua_user_factory("test_ua_compare_denied")
+    with chromium.new_context() as context:
+        login = context.request.post(
+            child.base + "/v2/auth/login",
+            data={"username": denied.username, "password": denied.password},
+        )
+        assert login.status == 200
+        page = context.request.get(child.base + PAGE)
+        assert page.status == 403
+        assert "TEST_COMPARE_3" not in page.text()
+        # accounts.pages.required_page_permission intentionally leaves these
+        # data APIs under api_tier; _build_context defaults to readonly. This
+        # slice preserves that existing policy rather than inventing page gates.
+        data = context.request.get(
+            child.base + API + f"?shop_pk={scope['shop']}"
+        )
+        assert data.status == 200
+        assert data.json()["meta"]["shopPk"] == scope["shop"]
 
 
-def test_alert_endpoint_never_fakes_an_empty_200_without_a_shop() -> None:
-    status, body = _request_json("GET", ALERT_API)
-    # shop_pk 是必填内部主键：缺失必须 422，不能回 200 + items=[]。
-    assert status == 422, body
+def test_real_keyboard_drilldown_preserves_business_spu_and_dates(
+    comparison_live, chromium
+):
+    """AC-016/017: follow the actual target, not merely inspect a plausible href."""
+    from playwright.sync_api import expect
 
-    status, body = _request_json("GET", f"{ALERT_API}?shop_pk=999999999")
-    assert status != 200, body
-    assert status in (422, 503), body
-    assert "materialized alert snapshot" in str(body), body
-
-
-def test_alert_filters_reject_invalid_enum_and_over_cap_spu_ids() -> None:
-    """页面接线依赖的 422 契约：非法枚举与超过 100 个的 spu_ids 不得被静默接受。"""
-    over_cap = "&".join(f"spu_ids={n}" for n in range(1, 102))
-    for query in (
-        "&state=not_a_state",
-        "&sample=not_a_sample",
-        "&layer=not_a_layer",
-        "&severity=not_a_severity",
-        f"&{over_cap}",
-    ):
-        status, body = _request_json("GET", f"{ALERT_API}?shop_pk=1{query}")
-        assert status == 422, (query, status, body)
+    child, scope, _user, key = comparison_live
+    context = chromium.new_context(
+        viewport={"width": 1440, "height": 1000},
+        extra_http_headers={"Authorization": f"Bearer {key}"},
+    )
+    page = context.new_page()
+    try:
+        source = child.base + PAGE + "?" + urlencode({"shop_pk": scope["shop"]})
+        with page.expect_response(_comparison_response):
+            page.goto(source)
+        row = page.locator("#alert-rows tr").filter(has_text="TEST_COMPARE_3")
+        button = row.get_by_role("button").first
+        button.focus()
+        button.press("Enter")
+        expect(page.locator("#alert-summary")).to_be_visible()
+        link = page.locator('#alert-summary a[href*="/v2/pages/spu-roi"]').first
+        expect(link).to_be_visible()
+        link.focus()
+        with page.expect_response(
+            lambda response: urlsplit(response.url).path.endswith("/v2/analytics/spu-roi")
+            and parse_qs(urlsplit(response.url).query).get("spu_ids") == ["TEST_COMPARE_3"]
+        ) as details:
+            link.press("Enter")
+        assert details.value.status == 200
+        details_query = parse_qs(urlsplit(details.value.url).query)
+        assert details_query["shop_pk"] == [str(scope["shop"])]
+        assert details_query["w_start"] == [
+            (scope["anchor"] - timedelta(days=6)).isoformat()
+        ]
+        assert details_query["w_end"] == [scope["anchor"].isoformat()]
+        expect(page.locator("#filter-w-start")).to_have_value(details_query["w_start"][0])
+        expect(page.locator("#filter-w-end")).to_have_value(details_query["w_end"][0])
+        # Back/forward cache may restore the validated DOM without another GET.
+        page.go_back(wait_until="domcontentloaded")
+        expect(page.locator("#filter-shop")).to_have_value(str(scope["shop"]))
+        expect(page.locator("#filter-anchor-date")).to_have_value(scope["anchor"].isoformat())
+    finally:
+        context.close()
