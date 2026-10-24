@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setUnauthorizedHandler } from '../../shared/api/client';
 import type { PageProps } from '../../shared/contracts';
+import Page from './index';
 
 const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'sync-jobs', navigation: [], releaseId: 'TEST', roleCapabilities: { readwrite: true, admin: true } } };
 const stamp = '2026-10-24T13:00:00Z';
@@ -14,10 +15,8 @@ const json = (value: unknown, status = 200, headers = {}) => new Response(JSON.s
 function mockApi(command: (url: string, init: RequestInit) => Promise<Response> = async () => json({}), read: () => Promise<Response> = async () => json(data)) {
   const fetcher = vi.fn((url: string, init: RequestInit) => init.method === 'GET' ? read() : command(url, init)); vi.stubGlobal('fetch', fetcher); return fetcher;
 }
-// Test-only absence harness: RED renders no content rather than failing module resolution.
+// Final behavior oracle always renders the recovered React page.
 async function mount(bootstrap = props.bootstrap) {
-  const modules = import.meta.glob<{ default: React.ComponentType<PageProps> }>('./index.tsx');
-  const Page = modules['./index.tsx'] ? (await modules['./index.tsx']()).default : () => null;
   return render(<Page bootstrap={bootstrap} />);
 }
 const row = async (name = 'tiktok.orders') => (await screen.findByText(name)).closest('tr')!;
@@ -81,6 +80,39 @@ describe('sync-jobs content', () => {
   it('renders valid empty state, rejects malformed required job fields, and permits explicit read retry', async () => {
     let reads = 0; mockApi(undefined, async () => json(++reads === 1 ? { ...data, jobs: [{ ...job(), enabled: 'false' }] } : { ...data, jobs: [] })); const user = userEvent.setup(); await mount(); await screen.findByText(/任务列表不可用/); expect(screen.queryByRole('button', { name: '执行 tiktok.orders' })).toBeNull();
     await user.click(screen.getByRole('button', { name: '刷新任务' })); expect(await screen.findByText('暂无注册任务')).toBeVisible();
+  });
+  it('treats a mismatched enable acknowledgement as uncertain and retries the captured command only after a usable read', async () => {
+    const fetcher = mockApi(async () => json({ job_name: 'tiktok.orders', enabled: false, updated_at: stamp }));
+    const user = userEvent.setup(); await mount();
+    await user.click(within(await row()).getByRole('button', { name: '启用 tiktok.orders 周期调度' }));
+    await screen.findByText(/提交结果未确认/);
+    expect(within(await row()).getByRole('button', { name: '启用 tiktok.orders 周期调度' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '查询核对' }));
+    await screen.findByText(/不能证明原命令是否生效/);
+    expect(writes(fetcher)).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: '核对后明确重试原操作' }));
+    expect(writes(fetcher)).toHaveLength(2);
+    expect(JSON.parse(String(writes(fetcher)[1][1].body))).toEqual({ enabled: true });
+  });
+  it('routes command 401 to the shared session handler without rendering server detail', async () => {
+    const unauthorized = vi.fn(); const unset = setUnauthorizedHandler(unauthorized);
+    try {
+      mockApi(async () => json({ detail: 'TEST_private_session_detail' }, 401));
+      const user = userEvent.setup(); await mount();
+      await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' }));
+      await screen.findByText(/登录已失效/);
+      expect(unauthorized).toHaveBeenCalledTimes(1);
+      expect(document.body.textContent).not.toContain('TEST_private_session_detail');
+      expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();
+    } finally { unset(); }
+  });
+  it('preserves null and zero status values and server error evidence in the task table', async () => {
+    mockApi(undefined, async () => json({ ...data, jobs: [{ ...job(), last_status: { ...job().last_status, last_run_at: null, lag_seconds: 0, cycles_late: null, last_error: 'TEST_job_failure_evidence' } }] }));
+    await mount(); const first = await row();
+    expect(within(first).getByText('落后周期：—')).toBeVisible();
+    expect(within(first).getByText('间隔秒数：0')).toBeVisible();
+    expect(within(first).getByText('开始：—')).toBeVisible();
+    expect(within(first).getByText('错误：TEST_job_failure_evidence')).toBeVisible();
   });
   it('preserves full Retry-After across refresh; expiry only permits explicit action', async () => {
     const fetcher = mockApi(async () => json({}, 429, { 'Retry-After': '600' })); const user = userEvent.setup(); const view = await mount(); const first = await row('TEST_system'); vi.useFakeTimers();
