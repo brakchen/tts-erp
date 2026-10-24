@@ -28,6 +28,30 @@ describe('authoritative denial/throttle headers before an unfinished error body'
   }
 });
 
+describe('a received error Retry-After fence does not depend on body completion', () => {
+  for (const status of [400, 401, 404, 409, 422, 500, 503]) for (const method of ['GET', 'POST']) {
+    it(`${method} HTTP ${status} preserves a 600-second fence before a stalled body`, async () => {
+      let stream!: ReadableStreamDefaultController<Uint8Array>;
+      const response = new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }), {
+        status, headers: { 'Retry-After': '600', 'x-request-id': 'TEST_error_fence' },
+      });
+      const text = vi.spyOn(response, 'text');
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+      let observed: unknown;
+      const pending = requestJson('', '/v2/TEST_error_fence', { method }).catch((error: unknown) => { observed = error; });
+      try {
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+        expect(observed).toBeInstanceOf(ApiError);
+        expect(observed).toMatchObject({ status, retryAfter: 600, requestId: 'TEST_error_fence', message: `HTTP ${status}` });
+        expect(text).not.toHaveBeenCalled();
+      } finally {
+        try { stream.close(); } catch { /* The client may have cancelled the unread body. */ }
+        await pending;
+      }
+    });
+  }
+});
+
 it.each([400, 401, 404, 409, 422, 500, 503])('keeps HTTP %s untrusted body out of the public Error message', async (status) => {
   const detail = 'TEST_untrusted_upstream_body';
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), { status })));
