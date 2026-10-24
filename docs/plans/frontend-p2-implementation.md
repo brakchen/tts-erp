@@ -2,7 +2,7 @@
 
 > 状态：run-binding、后端安全、共享契约与未激活统计内容切片已验；统计越界筛选已修回固定7天并通过增量源审。店铺UI三个阻塞及aware-expiry已strict修复并通过增量源审，仍待真实写闭环；枚举内容已通过组件/只读原生预览与独立源审，仍待真实写闭环；test-only child身份支持已实现并验无seed冷启，独立源审PASS并修复非阻塞decoder归一化；未开放seed/业务写。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
 > 权威父方案：[渐进迁移方案](frontend-progressive-migration.md)；组件标准：[前端开发规范](../guides/frontend-development.md)。
-> 用户在 P0/P1 交付后连续要求继续开发、直到任务完成：按既定前端路线先完成 P2，再逐批核对 P3–P6 的门槛；不接管其他会话或自动生产上线。
+> 用户在 P0/P1 交付后连续要求继续开发、直到任务完成。2026-10-24 明确本次不需要灰度逻辑或放量过程：完成改造与必要验收后直接合并 `master` 启用，不做灰度开关、逐页/流量分批放量或观察等待。P0–P6 仅为开发任务分解；权限/隔离数据安全及并行 owner 边界不变。
 
 ## 1. TaskStartSnapshot、必要性与边界
 
@@ -84,6 +84,9 @@
 
 ### 4.2 同轮 clone 的真实 API/browser 支持
 
+本节旧术语 `canary` 仅指隔离测试库中不可预测 TEST 数据的认证读回探针，**不是用户流量灰度或放量步骤**。
+它用于避免误连数据库，保留数据安全要求，不建立发布系统或流量观察等待。对外统一称“隔离数据读回验证”。
+
 新增候选 `tests/support/frontend_p2_live.py`，调用 `tests/browser/test_frontend_p2_live.py`；拒绝/teardown 单元在 `tests/scripts/test_frontend_p2_live_support.py`。复用 `support/spu_price_stats_live.py` 的 env allowlist、端口/进程组生命周期等已维护机制或小范围适配，不放宽其 `LiveBrowser` 的只读断言，不修改邻居业务场景。
 
 独立计划评审 `6bdedd35` 对 a994ff3 判 FAIL/F1：候选 URL 自己解析出的 expected、实际库名与同库 canary 会共同证实同一个误绑定，现有 wrapper 没有独立 current-run 产物。下列 producer→consumer 修订是代码必须实现的合同；不是用额外 prefix 判断掩盖 F1。
@@ -102,7 +105,7 @@
 
 1. 完成三页源码/权限/DTO及真实 API fixture 清单，补齐本计划的确切测试节点和文件所有权，完成独立架构/安全检查；再完成 `frontend-p2-contracts`。
 2. 仅补必要的共享契约及验证后的直接依赖；先观察 focused 行为 RED，再实现，完成 `frontend-p2-core`。没有新路由/权限 authority 或财务计算。
-3. 统计→店铺→枚举逐页实现与验证，每页独立激活提交；沿用后端唯一 `MIGRATED_PAGE_IDS`，不增加环境开关、第二套名单或缺资产 legacy fallback。
+3. 统计→店铺→枚举按工程任务实现与验证，在任务分支接好真实 renderer 以便隔离验收；完成后直接随版本合并 master 启用，不设逐页放量流程。沿用后端唯一 `MIGRATED_PAGE_IDS` 技术接线，不增加环境/灰度开关、第二套名单或缺资产 legacy fallback。
 4. 所有测试唯一入口 `bash scripts/test_isolated.sh ...`。写入验收启动临时 API，证明它与浏览器实际连接本轮 `tts_erp_test_*` clone；不使用 live `:9877`，不从生产 `.env` 引入凭据。用 TEST_ 命名、数值字段遵守后端 schema 的隔离测试数据，禁止真实 OAuth/店铺网络变更。
 5. 对真实 server 做 read-after-write、刷新、readonly/RW/admin、缺页面权限、CSRF、字段错误保留输入、重复点击单次提交、401/403/429/5xx与未知结果不重放。仅 mock 响应不足以证明持久化/权限闭环。
 6. 浏览器覆盖空前缀和 `/tts`、375/768/1440 宽度、键盘/焦点归还、长值/空值/空分类、resize/unmount、坏 chunk。表格可局部滚动而全页不横溢；少量布局样式，不搬旧皮肤。原生产业务数据不进入截图/日志。
@@ -110,7 +113,7 @@
 
 ## 6. 保留与退役
 
-P2 只逐页切换已验 React 页面。旧页面资源暂不在本计划写域内；只有消费者/回退条件确认且登记 scope 后才可删除。P3 的高权限/编辑器、P4 的复杂表格/SPU内核、P5 的产品冲突与专题交接分别审核；P6 必须等全部目标页、无旧消费者及回退期结束，开发指令不是生产上线或回退期验收。
+按用户无灰度口径，P2 候选在任务分支接线和验收，完成后直接交付，不按用户/流量分批切换。旧资源仍须先登记写域，确认替代已验且无消费者即可删除，不等待回退期或流量观察。P3 的高权限/编辑器、P4 的复杂表格/SPU内核、P5 的有效产品需求与专题 owner 仍须对齐；这些是正确性/所有权边界，不是放量门槛。P6 在全部目标页通过必要验收、无旧消费者后完成清理，保留 Git/完整包应急撤销能力，不保留永久灰度/双栈。
 
 ## 7. 当前证据与未覆盖
 
@@ -165,7 +168,7 @@ Child支持检查点：`/tmp/frontend-p2-live-support-red.log` 30项因新module
 
 在固定checkpoint前另补child于HTTP返回期间退出的liveness回归，`/tmp/frontend-p2-live-child-exit-red.log`明确DID NOT RAISE真实RED；原来只在请求前poll，改为private/HTTP验证后、yield前再poll，拒绝已死child，仍不声称能原子保证未来永远存活。`/tmp/frontend-p2-live-support-final-identity.log` 最终163例（46 support+117原producer/consumer邻居）全PASS/no skips/exit0含2次真实冷启/双prefix健康GET和完整停止，Ruff0；一次并发LSP2clean/1silent不确定后对变动2路径serverScopeall主动补探针均confirmedclean0，未把silent当clean（未变binding上轮confirmed0）。对peer m-465254c6-418已读并按原UUID回信确认：此刻0071窗口未申请、不暂停clone、不复活旧partial告警；保持runner/guard/conftest/v16冻结/释放合同，未来明确begin/end再暂停。d3b1138独立身份/readiness-only源审PASS（`/tmp/frontend-p2-child-identity-review.md`全文含JSON已读），无Critical/Important，minor为深JSON可能抛RecursionError而漏固定诊断；不是ready旁路，finally仍cleanup。首次fresh默认Python subprocess测2200bytes depth1100实际未触发RecursionError（`/tmp/frontend-p2-live-json-recursion-red.log` nativeRecursion=False/normalised=True/closed=True，预期nativeTrue断言失败只是错误复现假设，不算source行为RED），与早前RunBinding原生深JSON不复现历史一致；不调全局recursionlimit凑复现，不谎称当前平台原生漏洞。native诊断program不作为冗余测试框架保留，只保已有HTTP-body参数化深数组用例；单独decoder故障注入在原owner真实RED（`/tmp/frontend-p2-live-json-decoder-boundary-red.log` RecursionError:TEST_decoder_depth穿出），仅为异常边界证明。最小将RecursionError加入该JSON解析tuple，不造新parser/深度fallback/修改上游authority；injected例及bounded深body均断言固定ValueError和close。首次含诊断program全166例green（`/tmp/frontend-p2-live-json-recursion-green.log`），随后去掉一次性native诊断program、不削弱已有owner回归；最终`/tmp/frontend-p2-live-json-minor-final.log`165例（48support+117邻居）全PASS/no skips/exit0、clone已清，Ruff0/freshLSP2confirmed0；不把该166冒充最后代码快照。sourcePASS不取消canary/真实写/同步baseline门禁。
 
-当前scope仅允许上述连接/身份负例及无seed SELECT+health GET；TEST canary/用户/key seed、cookie login、OAuth/业务命令/浏览器写仍禁止，必须等child gates实现/实证/独立审查后另登记后续fixture范围。source待审，尚无authenticated canary，更非持久化/wholeP2 GREEN；认证GET可能写last_used_at事实保留。未做：child/HTTP/canary真实写闭环、页面切换或交付。后续P2 fixed/prospective baselines保留，不把局部测试、源码审计或计划 PASS 当整体 GREEN。
+0d0f57d 身份/readiness-only source 已PASS，minor归一化已修且165窄例通过；此前scope确仅允许无seed身份验证。m-3738951b-785 在短锁2492631读全lane/ownership后追加2份前端规范文档与2个隔离读回支持/测试路径，总53路径并读回，允许**下一工程步骤**在fresh parent/child/实际session门禁后仅向本轮clone提交随机TEST探针和readonly ApiKey再做真实认证GET，不是放量。当前尚未执行该seed；用户/cookie login/OAuth/Shops或Enum业务命令/浏览器写仍禁止，须相应后续范围与门禁。尚无authenticated隔离读回，更非持久化/wholeP2 GREEN；认证GET可能写last_used_at事实保留。未做：child/HTTP/canary真实写闭环、页面切换或交付。后续P2 fixed/prospective baselines保留，不把局部测试、源码审计或计划 PASS 当整体 GREEN。
 
 F1 producer/consumer 已登记的当前写域（回执 m-badab46c-d24）：`scripts/{test_isolated.sh,_test_db_connections.py}`、`tests/conftest.py`、`tests/test_test_run_binding.py`、`tests/test_test_template_refresh.py`、`docs/guides/agent-testing.md`。`scripts/test.sh` 已在 DB URL 存在时不加载 .env.test，只验证新输出能原样传递，不预计修改它。已获计划复审/登记只允许此切片；真实 writable-fixture seed 仍须等实际门禁、child attestation/canary 支持实现并验证。
 
