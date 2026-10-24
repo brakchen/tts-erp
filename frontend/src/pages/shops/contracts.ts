@@ -41,7 +41,10 @@ export function decodeShopCommand(value: unknown, expected: { id?: number; shop_
   return shop;
 }
 export function decodeAuthorization(value: unknown): AuthorizationLink {
-  if (!record(value) || typeof value.authorize_url !== 'string' || typeof value.state_expires_at !== 'string' || !Number.isFinite(Date.parse(value.state_expires_at))) throw new Error('授权链接响应格式错误');
+  if (!record(value) || typeof value.authorize_url !== 'string' || typeof value.state_expires_at !== 'string') throw new Error('授权链接响应格式错误');
+  const timestamp = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(value.state_expires_at);
+  if (!timestamp || timestamp[1].startsWith('0000') || !dateOnly(timestamp[1]) || Number(timestamp[2]) > 23 || Number(timestamp[3]) > 59 || Number(timestamp[4]) > 59 || Number(timestamp[5] ?? 0) > 23 || Number(timestamp[6] ?? 0) > 59 || !Number.isFinite(Date.parse(value.state_expires_at))) throw new Error('授权链接响应格式错误');
+  // Representation check only: expiry/eligibility remains server-owned, not browser-clock policy.
   let url: URL;
   try { url = new URL(value.authorize_url); } catch { throw new Error('授权链接响应格式错误'); }
   if (url.protocol !== 'https:' || url.username || url.password) throw new Error('授权链接响应格式错误');

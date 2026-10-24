@@ -1,6 +1,6 @@
 # 前端 P2 实现计划：普通页面与首个隔离写闭环
 
-> 状态：run-binding、后端安全、共享契约与未激活统计内容切片已验；统计越界筛选已修回固定7天并通过增量源审。店铺UI已实现/组件与只读浏览器预览已验，待源审和真实写闭环；枚举UI与真实child fixture待实现。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
+> 状态：run-binding、后端安全、共享契约与未激活统计内容切片已验；统计越界筛选已修回固定7天并通过增量源审。店铺UI源审指出3个阻塞项，已strict修复待增量复审与真实写闭环；枚举仅DTO边界已实现，枚举UI与真实child fixture待实现。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
 > 权威父方案：[渐进迁移方案](frontend-progressive-migration.md)；组件标准：[前端开发规范](../guides/frontend-development.md)。
 > 用户在 P0/P1 交付后连续要求继续开发、直到任务完成：按既定前端路线先完成 P2，再逐批核对 P3–P6 的门槛；不接管其他会话或自动生产上线。
 
@@ -10,7 +10,7 @@
 - UTC：2026-10-24。独立 `feature/frontend-p2` / `.worktrees/frontend-p2`，从 fresh `origin/master=e86817a3f28d4267ce0527a43ed7887795da81c3` 建立。
 - P0/P1 已完成，代码精确集成 `8f1b752` 的 fast 基线零新增稳定失败；不把其证据冒充 P2 通过。
 - Change Necessity：三页仍依赖旧模板/脚本，复制了会话、路径、请求与布局逻辑；需接入既有 React/HeroUI 骨架，保留有效查询、管理和错误恢复。
-- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide；`m-f3272c5e-978` 追加 no-dotenv bootstrap 的精确子进程透传修复；`m-296716be-6d8` 追加 deps/admin/config 的最小安全接线、旧enum两头及3个API测试路径；`m-53f8e91b-13d` 登记共享bootstrap/client/契约测试与3个图表依赖文件；`m-b6fa2a47-144` 登记统计4文件、loader及其测试、只读native browser测试共7路径（无backend激活权）；`m-5ec16f02-e60` 追加shops五文件及shared command-errors两文件，并明确日期控件越界应修回原计划，不追认；`m-8ee8f0f6-518` 追加只读shops browser并允许既有loader两文件提供shops代码映射，均非backend激活权。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
+- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide；`m-f3272c5e-978` 追加 no-dotenv bootstrap 的精确子进程透传修复；`m-296716be-6d8` 追加 deps/admin/config 的最小安全接线、旧enum两头及3个API测试路径；`m-53f8e91b-13d` 登记共享bootstrap/client/契约测试与3个图表依赖文件；`m-b6fa2a47-144` 登记统计4文件、loader及其测试、只读native browser测试共7路径（无backend激活权）；`m-5ec16f02-e60` 追加shops五文件及shared command-errors两文件，并明确日期控件越界应修回原计划，不追认；`m-8ee8f0f6-518` 追加只读shops browser并允许既有loader两文件提供shops代码映射；`m-66070242-2d9` 追加enum contracts两文件，均非backend激活权。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
 - 保留 main 的 `plugins/monitor` 和未跟踪 `node_modules/`；原 child/coord 审计工作树不动。
 - 不改 app/access/middleware、schema/models/migrations、财务口径、TikTok 店铺写端点、插件、生产数据/服务。后端现有缺陷只在确定 canonical owner、登记 scope、写回归及安全审查后处理。
 - ArchitectureReviewRequired：是，涉及共享权限事实、凭证输入、OAuth 命令及真实浏览器/API 写入边界；沿用原架构，不另造 session/menu/client/chart engine。
@@ -131,7 +131,17 @@ Shops UI 后继（m-5e/m-8e登记内）：实际12行为RED（最初测试ByRole
 
 open-draft hint消失与429把取消/输入也锁死分别出现真实2RED（`/tmp/frontend-p2-shops-recovery-red.log`），最小分离pending与blocked后，禁写但可编辑/取消/cooldown说明，无第二权限或命令引擎。同步方式缺失另1RED后恢复原凭据关联的API/插件展示，明确App配置≠OAuth有效。实际原生长名称宽1197px出现RED（`/tmp/frontend-p2-shops-long-name-red.log`），仅max-width/break-all少量布局，不改库内部。原生Dialog关闭后测试最初要求精确子按钮，4次观察实际返回原TR；已核对React Aria useGridCell onFocus源码的单tab-stop键盘恢复策略，不做自有焦点管理。测试契约更正为精确invoking row或button（非任意元素），只证明原上下文恢复，不冒称精确子按钮/完整键盘导航。
 
-`/tmp/frontend-p2-shops-neighbors.log` 的80 pytest（API安全/Node adapter/P0-P1/stats/shops）全通过；其后仅长名称wrap/同步文案与对应断言，`/tmp/frontend-p2-shops-layout-final.log` 的全部131 Node+8只读原生browser无skip通过，包含375/1440×双prefix×RO/RW、Dialog Enter/Escape/取消清密钥/原行焦点上下文、长值局部scroll无整页溢出。8张TEST截图在frontend/.cache/screenshots，375RW与1440RO人工查看（后者wrap后重新查看）。Ruff0/active LSP7无primary，29条decoder IO/typeof/Record/bundler辅助提示如实保留。以上写命令只在Node mock层验证；browser严格GET-only，未POST/PATCH或调用OAuth GET；测试preview的直接grant/render不是实际角色鉴权。loader只增加可加载模块，MIGRATED仍2。该UI/边界源码待独立审查，Shops task仍待真实写验收。
+`/tmp/frontend-p2-shops-neighbors.log` 的80 pytest（API安全/Node adapter/P0-P1/stats/shops）全通过；其后仅长名称wrap/同步文案与对应断言，`/tmp/frontend-p2-shops-layout-final.log` 的全部131 Node+8只读原生browser无skip通过，包含375/1440×双prefix×RO/RW、Dialog Enter/Escape/取消清密钥/原行焦点上下文、长值局部scroll无整页溢出。8张TEST截图在frontend/.cache/screenshots，375RW与1440RO人工查看（后者wrap后重新查看）。Ruff0/active LSP7无primary，29条decoder IO/typeof/Record/bundler辅助提示如实保留。以上写命令只在Node mock层验证；browser严格GET-only，未POST/PATCH或调用OAuth GET；测试preview的直接grant/render不是实际角色鉴权。loader只增加可加载模块，MIGRATED仍2。882的UI/边界源码独立审查FAIL（`/tmp/frontend-p2-shops-review.md`）：SHOPS-01警告不能替代保留草稿的显式GET核对；SHOPS-02确认写后refresh绕过list Retry-After；SHOPS-03 max-width-only仍让375一行约3k高。均按原owner修复，不更改批准合同追认；04 aware expiry为非blocking同步补格式回归。真实写仍未验。
+
+修复严格证据：`/tmp/frontend-p2-shops-review-contract-red.log` 五个组件真实RED（未知后普通Save仍可用/无核对按钮×3/列表reads2≠1）；02测试首轮假计时器+userEvent timeout未冒称行为RED，改先真实打开草稿再注入计时/429后重跑得到确切reads2≠1。native375宽13/高2800的真实RED在`/tmp/frontend-p2-shops-review-red.log`。04 date-only/无offset/非法日历的真实RED在`/tmp/frontend-p2-shops-expiry-red.log`。
+
+恢复UI在原Modal内提供可Tab/Enter到达的查询核对：保留draft/secret、按内部PK单条GET；未知注册没有内部PK时只用既有limit500列表按精确platform/external string选公开记录，不调用另有region门槛的by-external来假称全量查询。不自动重放，不加status endpoint/idempotency token，查询结果/未在前500中找到/404都不证明原提交是否已commit；尤其App配置bit不证明具体密钥更新、公开店铺GET不恢复丢失OAuth state。错误/身份错/坏GET继续禁普通提交，成功读公开事实后按钮明确“核对后明确重新提交”，仍由用户决定；取消会清表单密钥但保留未知核对上下文，不能误开普通命令绕过未核对状态。
+
+feature-owned monotonic readNotBefore及单一read timer不随read Effect刷新cleanup取消，manual/post-success/check均过同一fence；确认写与延期列表读取分开，600秒完整到期只重新开放显式读，不重放写/自动读。测试覆盖599秒无第二listGET/600秒手动读、核对读也禁早发、unmount无后续请求；新写不是第二权限或query engine。窄屏使用公开Table.ScrollContainer region与最小表宽/名称和ID固定可读宽，限定行高400以内、局部横滚身份→操作、完整文本，不删业务列/改库DOM/focus。expiry只校验aware ISO表示和日历，不用browserclock判有效性；2020年有效格式仍接受。旧cancel测试名已更正为实际覆盖，未冒称metadata failure case。
+
+`/tmp/frontend-p2-shops-repair-matrix.log` 全155 Node+8原生只读browser通过无skip；`/tmp/frontend-p2-shops-repair-neighbors.log` 同80 pytest API安全/P0-P1/stats/shops邻居通过。Ruff0/activeLSP6无primary，13条既有IO边界辅助提示未屏蔽。新375RO/1440RW截图人工复核，行高/文本可读且本地滚动；核对与命令仍只在Node mock层证明，未假称实际commit/read-after-write或真实browser写验收。修复增量待独立复审，Shops任务仍不能完成。
+
+不相交Enum边界检查点ac3cc10：m-660登记读回后17新Node真实RED→全148 Node通过（`/tmp/frontend-p2-enum-boundary-{red,green}.log`），保留snake_case/后台返回顺序/未知类别、非负安全整数格式拒绝小数/部分数字/空值，不新造排序或业务计算；只有2contracts文件。activeLSP2无primary，8条unknown/typeof辅助提示保留。没有Enum UI/角色控制/确认删除/实际写验收。
 
 未做：枚举内容与child/HTTP/canary真实写闭环、页面切换或交付；现有scope不授权枚举TS或真实写fixture。后续P2 fixed/prospective baselines保留，不把局部测试、源码审计或计划 PASS 当整体 GREEN。
 

@@ -47,12 +47,23 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
     page.get_by_role("grid", name="已注册店铺").get_by_text(SHOP["shop_id"], exact=True).wait_for()
     assert page.get_by_text("已注册总数：502", exact=False).is_visible()
     name_box = page.get_by_text(SHOP["account_name"], exact=True).bounding_box()
-    assert name_box is not None and name_box["width"] <= 256, name_box
+    assert name_box is not None and 160 <= name_box["width"] <= 256, name_box
+    row_box = page.get_by_role("row").filter(has=page.get_by_text(SHOP["shop_id"], exact=True)).bounding_box()
+    assert row_box is not None and row_box["height"] <= 400, row_box
     report = overflow_report(page)
     assert report["scrollWidth"] <= report["clientWidth"] + 1, report
     assert not report["offenders"], report
     assert calls == ["GET"]
+    scroll = page.get_by_role("region", name="店铺表格")
+    scroll.evaluate("el => { el.scrollLeft = 0; }")
+    identity_box = page.get_by_text(SHOP["shop_id"], exact=True).bounding_box()
+    scroll_box = scroll.bounding_box()
+    assert identity_box is not None and scroll_box is not None
+    assert identity_box["x"] >= scroll_box["x"] and identity_box["x"] + identity_box["width"] <= scroll_box["x"] + scroll_box["width"]
+    if width == 375:
+        assert scroll.evaluate("el => el.scrollWidth > el.clientWidth")
     if role == "readonly":
+        page.get_by_role("button", name="获取授权链接", exact=True).scroll_into_view_if_needed()
         for name in ("注册店铺", "编辑元信息", "配置 App", "获取授权链接"):
             assert page.get_by_role("button", name=name, exact=True).is_disabled()
     else:
@@ -79,6 +90,7 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
         dialog.wait_for(state="hidden")
         assert calls == ["GET"]
     assert "shops" not in frontend_pages.MIGRATED_PAGE_IDS
+    scroll.evaluate("el => { el.scrollLeft = 0; }")
     artifacts = ROOT / "frontend/.cache/screenshots"
     artifacts.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(artifacts / f"TEST_shops_{role}_{width}_{prefix.strip('/') or 'direct'}.png"), full_page=True)

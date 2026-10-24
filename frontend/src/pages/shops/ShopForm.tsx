@@ -12,8 +12,8 @@ export const fieldLabels: Record<keyof ShopDraft, string> = {
   service_id: 'Service ID', app_key: 'App Key', app_secret: 'App Secret',
 };
 
-export default function ShopForm({ kind, shop, pending, blocked, errors, onSubmit, onCancel }: {
-  kind: ShopFormKind; shop?: Shop; pending: boolean; blocked: boolean; errors: Record<string, string>;
+export default function ShopForm({ kind, shop, pending, blocked, errors, submitLabel = '保存店铺', onSubmit, onCancel }: {
+  kind: ShopFormKind; shop?: Shop; pending: boolean; blocked: boolean; errors: Record<string, string>; submitLabel?: string;
   onSubmit: (draft: ShopDraft) => void; onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<ShopDraft>({ shop_id: shop?.shop_id ?? '', account_name: shop?.account_name ?? '',
@@ -33,6 +33,6 @@ export default function ShopForm({ kind, shop, pending, blocked, errors, onSubmi
         maxLength={key === 'app_secret' ? 512 : key === 'app_key' ? 128 : key === 'account_name' ? 200 : key === 'region' ? 16 : 64} />
       <FieldError>{errors[key]}</FieldError>
     </TextField>)}
-    <div className="flex flex-wrap gap-3"><Button type="submit" isDisabled={pending || blocked}>保存店铺</Button><Button type="button" variant="secondary" isDisabled={pending} onPress={onCancel}>取消</Button></div>
+    <div className="flex flex-wrap gap-3"><Button type="submit" isDisabled={pending || blocked}>{submitLabel}</Button><Button type="button" variant="secondary" isDisabled={pending} onPress={onCancel}>取消</Button></div>
   </form>;
 }

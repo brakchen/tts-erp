@@ -30,5 +30,7 @@ describe('shop wire decoding', () => {
     const link = { authorize_url: 'https://services.tiktokshop.com/open/authorize?state=TEST_one', state_expires_at: '2026-10-24T20:00:00+00:00' };
     expect(decodeAuthorization(link)).toEqual(link);
     for (const bad of [null, {}, { ...link, authorize_url: 'javascript:alert(1)' }, { ...link, authorize_url: '/TEST/relative' }, { ...link, state_expires_at: 'tomorrow' }]) expect(() => decodeAuthorization(bad)).toThrow();
+    for (const state_expires_at of ['2026-10-24', '2026-10-24T20:00:00', '2026-02-31T20:00:00+00:00']) expect(() => decodeAuthorization({ ...link, state_expires_at })).toThrow();
+    expect(decodeAuthorization({ ...link, state_expires_at: '2020-01-01T00:00:00.123456Z' }).state_expires_at).toBe('2020-01-01T00:00:00.123456Z');
   });
 });
