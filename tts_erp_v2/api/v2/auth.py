@@ -128,6 +128,7 @@ def login(body: LoginBody, request: Request) -> Response:
     )
     return JSONResponse(
       status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+      headers={"Retry-After": str(retry_after)},
       content={
         "detail": "too many login attempts",
         "retry_after_s": retry_after,

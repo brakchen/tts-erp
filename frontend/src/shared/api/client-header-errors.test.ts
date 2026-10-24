@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, requestJson } from './client';
+import { ApiError, requestJson, retryAfterSeconds } from './client';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -26,4 +26,23 @@ describe('authoritative denial/throttle headers before an unfinished error body'
       }
     });
   }
+});
+
+it.each([400, 401, 404, 409, 422, 500, 503])('keeps HTTP %s untrusted body out of the public Error message', async (status) => {
+  const detail = 'TEST_untrusted_upstream_body';
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), { status })));
+  await expect(requestJson('', '/v2/TEST_public_error')).rejects.toMatchObject({
+    status, message: `HTTP ${status}`, detail,
+  });
+});
+
+it('shares the existing numeric Retry-After policy with native binary uploads', () => {
+  expect(retryAfterSeconds('60')).toBe(60);
+  expect(retryAfterSeconds('0')).toBe(0);
+  expect(retryAfterSeconds(null)).toBeUndefined();
+  expect(retryAfterSeconds('TEST_invalid_header')).toBeUndefined();
+});
+it('shares the existing HTTP-date Retry-After policy without shortening it', () => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-24T20:00:00Z'));
+  expect(retryAfterSeconds('Sat, 24 Oct 2026 20:01:00 GMT')).toBe(60);
 });

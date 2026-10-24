@@ -318,7 +318,7 @@ def test_explicit_development_origin_injects_react_refresh(
 
 
 def test_activation_matches_implemented_candidate_pages():
-    assert frontend_pages.MIGRATED_PAGE_IDS == frozenset({"dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"})
+    assert frontend_pages.MIGRATED_PAGE_IDS == frozenset({"dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map", "ad-daily", "sync-jobs"})
 
 
 @pytest.fixture

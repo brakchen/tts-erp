@@ -24,7 +24,7 @@
 - 复用 `PageProps`、共享 `requestJson`、路径工具、`ApiError`、`scheduleReadDelay` 和既有命令错误分类；不复制网络/会话基础设施。
 - 后端持有权限、财务精度、聚合、排序/筛选范围和业务判断。保留实际 wire 拼写，包括合法 camelCase，长 ID 保持字符串，null/0 不混淆。
 - 写操作显式、single-flight，不自动重放。未知结果保留草稿、阻断普通重提，提供可用显式读取和用户明确重试决定；GET 不能证明原提交、密码或秘密值已生效。
-- Retry-After 全时长跨刷新/核查保留，过期只允许显式操作；401 共享处理，403 独立。共享 client 收到 403/429 响应头就以同一 `ApiError` 输出状态、request ID 和 Retry-After，取消未读正文，不等待可能停滞且不可信的错误正文。其 detail 不作为展示/业务契约；422/409/404 的既有结构化解析及 2xx 解析保持原路径。无响应头或未完成的 2xx 写结果仍不确定。提交快照字段错误在真实编辑时作废，但不能清掉未知恢复/冷却/权限状态。
+- Retry-After 全时长跨刷新/核查保留，过期只允许显式操作；401 共享处理，403 独立。共享 client 收到 403/429 响应头就以同一 `ApiError` 输出状态、request ID 和 Retry-After，取消未读正文，不等待可能停滞且不可信的错误正文。所有非 2xx 的公开 `ApiError.message` 仅包含 HTTP 状态，不拼接上游正文；独立的 `detail` 保持不可信，仅供显式白名单字段映射，不能直接展示。422/409/404 的既有结构化解析及 2xx 解析保持原路径。无响应头或未完成的 2xx 写结果仍不确定。提交快照字段错误在真实编辑时作废，但不能清掉未知恢复/冷却/权限状态。
 - 公有 HeroUI/React Aria API，默认主题和少量布局，复用一个 AppShell；表格可局部滚动但不丢字段。避免 Card 内容槽默认列布局造成假响应式。
 - 结构化配置需保留 code/tree/view、无效文本和大整数。先复用现有/维护中的 JSON 工具；依赖和 lossless 响应 seam 由 parent 一处处理，不能自造 parser/编辑器或悄悄舍入。
 - 秘密不预填、不存储、不日志、不输出原始错误/载荷，不采集客户截图、cookie、trace。
@@ -79,3 +79,15 @@
 - 旧 external-only 调用在唯一匹配时仍可用；零匹配返回 404，多店铺匹配返回 409，均不得先关闭或新增任何成本事实。外部 SPU ID 的实际唯一键包含店铺，不能把它当作全局唯一键。
 - 身份核对后仍复用原每 SPU 锁及单事务 close-old + insert，保留历史，不改金额精度、财务公式或写权限。这里只扩展 Pydantic 请求 DTO，不修改数据库 schema。
 - 未传 `valid_from` 时使用 aware UTC 的实际当前时刻；不能把宿主机的 naive 本地墙钟作为 UTC 存储，导致成本在未来数小时才生效。显式传入时间的既有契约保持不变。
+
+## 匿名登录展示契约
+
+- 仍只有一份 frontend bootstrap、AppShell 与 HTTP client。匿名文档以 `pageId=login` 标识，导航为空、业务写权限提示均为 false；不加入用户页面权限目录，不发起独立会话探测引擎。
+- `loginNextPath` 仅用于匿名登录，由既有服务端 `_valid_next` 和 root_path 幂等前缀逻辑给出。共享 parser 复用 `pathFor` 核验同源、无穿越且前缀已存在；缺失/非法目标或匿名文档包含导航/高权限提示时拒绝初始化，不信任浏览器查询串另造 redirect 政策。
+- 用户名/密码 JSON、认证、cookie 和会话归属不变。既有限流 body `retry_after_s` 保留，并补同值标准 `Retry-After` 响应头，使唯一 client 的 header-first 429 处理能保留完整等待时间。
+- `shared/api/request-lifetime.ts` 是从已验证用户页提取的原生 AbortController/Promise.race 小原语，只限定 30 秒本地 UI 等待并清理计时器，不决定服务端执行、认证状态、自动重放或 Retry-After。未知登录结果仍需显式查询当前会话、明确决定，不凭 GET 断言原密码/提交事实。
+
+## 视频诊断的公开边界
+
+- 诊断仍是显式授权读取，默认任务读取不附带 prompt/Artemis 输出。`promptSnapshot` 保持可空文本 wire 字段，生产者 `_attempt` 复用既有 `publishing.diagnostics.sanitize_text`：沿用凭证赋值/认证头/URL query 的脱敏规则和最多 2000 字符边界，不增加客户端 redactor 或另一解析引擎。
+- 原始完整 `prompt_snapshot` 审计事实不修改、不删除；Artemis 输出继续沿用既有结构化脱敏器。新 UI 必须明确标为“脱敏诊断节选”，不能把有限公开节选声称为完整原始 prompt，也不能把其值用于发布/重试资格判断。

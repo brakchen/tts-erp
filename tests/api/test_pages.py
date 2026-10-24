@@ -31,10 +31,10 @@ from tts_erp_v2.accounts.pages import (
 from tts_erp_v2.api.v2.pages import (
     _SIDEBAR_CSS,
     _SIDEBAR_TOGGLE_JS,
+    _render_page,
     _sidebar_html,
     intercept_configs_page,
     runtime_configs_page,
-    sync_jobs_page,
 )
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -108,12 +108,10 @@ def test_pages_share_the_design_token_stylesheet():
     ``tokens.css`` is the single :root source and ``common.css`` the shared
     component layer; both must load before any page-specific stylesheet.
     """
-    for rendered in (
-        intercept_configs_page(),
-        runtime_configs_page(),
-        sync_jobs_page(),
-    ):
-        body = bytes(rendered.body).decode()
+    # Retained legacy templates remain coherent until same-version runtime
+    # activation/retirement. Migrated routes are tested through their bootstrap.
+    for page_id in ("intercept-configs", "runtime-configs", "sync-jobs"):
+        body = bytes(_render_page(f"{page_id}.html", current_page=page_id).body).decode()
         tokens_at = body.index("static/css/tokens.css")
         common_at = body.index("static/css/common.css")
 
@@ -125,8 +123,8 @@ def test_pages_share_the_design_token_stylesheet():
 
 def test_sidebar_css_is_injected_for_external_stylesheet_pages():
     """Pages with only linked CSS still need the shared responsive sidebar CSS."""
-    for rendered in (runtime_configs_page(), sync_jobs_page()):
-        body = bytes(rendered.body).decode()
+    for page_id in ("runtime-configs", "sync-jobs"):
+        body = bytes(_render_page(f"{page_id}.html", current_page=page_id).body).decode()
         sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
 
         assert "<style>" in body
@@ -211,14 +209,6 @@ def test_runtime_config_page_requires_readwrite_operator(
 
 
 def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key, readwrite_key):
-    body = bytes(sync_jobs_page().body).decode()
-
-    assert "定时任务管理" in body
-    assert "../../static/css/sync-jobs.css?v=" in body
-    assert "../../static/js/sync-jobs.js?v=" in body
-    assert 'href="../../v2/pages/sync-jobs"' in body
-    assert 'title="定时任务" aria-current="page"' in body
-
     readonly_response = api_client.get(
         "/v2/pages/sync-jobs",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -231,6 +221,12 @@ def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key, 
     )
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/html")
+    data = _bootstrap(response.text)
+    assert data["pageId"] == "sync-jobs"
+    assert any(page["id"] == "sync-jobs" for page in data["navigation"])
+    assert data["roleCapabilities"] == {"readwrite": True, "admin": False}
+    assert "static/js/sync-jobs.js" not in response.text
+    assert response.headers["cache-control"] == "private, no-store"
 
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
