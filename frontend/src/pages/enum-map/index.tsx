@@ -148,7 +148,7 @@ export default function EnumMap({ bootstrap }: PageProps) {
       <Modal.CloseTrigger aria-label="关闭枚举表单" isDisabled={pending} /><Modal.Header><Modal.Heading>{dialog?.kind === 'delete' ? '确认删除映射' : dialog?.kind === 'edit' ? '编辑映射' : '新增映射'}</Modal.Heading></Modal.Header>
       <Modal.Body className="space-y-3">{alert}{check}{dialog && <><p className="break-all">分类：{categoryName(dialog.enum_type)}</p>{failure?.fieldErrors.enum_type && <p>{failure.fieldErrors.enum_type}</p>}
         {dialog.kind === 'delete' ? <><p className="break-all">确认删除 {dialog.enum_type} / {dialog.row?.enum_value}？</p><p>此操作删除配置映射，仍须通过服务端安全检查；不会自动重试。</p><div className="flex flex-wrap gap-3"><Button variant="danger" isDisabled={disabled} onPress={() => { void submit(); }}>{recovery?.phase === 'checked' ? '核对后明确再次删除' : '确认删除'}</Button><Button variant="secondary" isDisabled={pending} onPress={close}>取消</Button></div></>
-          : <EnumForm key={`${dialog.kind}-${dialog.row?.id ?? 'new'}`} row={dialog.row} pending={pending} blocked={disabled} errors={failure?.fieldErrors ?? {}} submitLabel={recovery?.phase === 'checked' ? '核对后明确重新提交' : '保存映射'} onSubmit={(draft) => { void submit(draft); }} onCancel={close} />}</>}</Modal.Body>
+          : <EnumForm key={`${dialog.kind}-${dialog.row?.id ?? 'new'}`} row={dialog.row} pending={pending} blocked={disabled} errors={failure?.fieldErrors ?? {}} onFieldEdit={() => setFailure((current) => current && Object.keys(current.fieldErrors).length > 0 ? { ...current, fieldErrors: {} } : current)} submitLabel={recovery?.phase === 'checked' ? '核对后明确重新提交' : '保存映射'} onSubmit={(draft) => { void submit(draft); }} onCancel={close} />}</>}</Modal.Body>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
   </div>;
 }

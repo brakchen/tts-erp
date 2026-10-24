@@ -163,7 +163,7 @@ export default function Shops({ bootstrap }: PageProps) {
     </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>}
     <Modal.Backdrop isOpen={dialog !== undefined} isDismissable={!pending} isKeyboardDismissDisabled={pending} onOpenChange={(isOpen) => { if (!isOpen) close(); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭店铺表单" isDisabled={pending} /><Modal.Header><Modal.Heading>{dialog?.kind === 'register' ? '注册店铺' : dialog?.kind === 'app' ? '配置 App' : '编辑元信息'}</Modal.Heading></Modal.Header>
-      <Modal.Body className="space-y-3">{commandAlert}{checkPanel}{dialog && <ShopForm key={`${dialog.kind}-${dialog.shop?.id ?? 'new'}`} kind={dialog.kind} shop={dialog.shop} pending={pending} blocked={cooldown || !canWrite || requiresCheck} submitLabel={failure?.uncertain && recovery?.phase === 'checked' ? '核对后明确重新提交' : '保存店铺'} errors={failure?.fieldErrors ?? {}} onSubmit={(draft) => { void save(draft); }} onCancel={close} />}</Modal.Body>
+      <Modal.Body className="space-y-3">{commandAlert}{checkPanel}{dialog && <ShopForm key={`${dialog.kind}-${dialog.shop?.id ?? 'new'}`} kind={dialog.kind} shop={dialog.shop} pending={pending} blocked={cooldown || !canWrite || requiresCheck} submitLabel={failure?.uncertain && recovery?.phase === 'checked' ? '核对后明确重新提交' : '保存店铺'} errors={failure?.fieldErrors ?? {}} onFieldEdit={() => setFailure((current) => current && Object.keys(current.fieldErrors).length > 0 ? { ...current, fieldErrors: {} } : current)} onSubmit={(draft) => { void save(draft); }} onCancel={close} />}</Modal.Body>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
   </div>;
 }

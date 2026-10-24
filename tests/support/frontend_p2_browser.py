@@ -6,6 +6,7 @@ No raw request/body/query/console, credentials, trace or screenshots are saved.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -40,6 +41,11 @@ class BrowserFence:
     drop_next: tuple[str, str] | None = None
     lost: int = 0
     closing: bool = False
+    invalid_region_next: bool = False
+    mutated: int = 0
+    error_next: tuple[str, str, int, int] | None = None
+    responses: list[tuple[str, str, int]] = field(default_factory=list)
+    injected: list[tuple[str, str, int]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         require_data_probe(self.probe)
@@ -91,7 +97,8 @@ class BrowserFence:
                 safe = set(body) <= allowed
                 safe = safe and (not register or body.get("shop_id") == self.shop_id and body.get("platform") == "tiktok")
                 safe = safe and all(isinstance(body[key], str) and body[key].startswith("TEST_") for key in ("account_name", "app_key", "app_secret") if key in body)
-                safe = safe and ("service_id" not in body or body["service_id"] == self.service_id)
+                services = {self.service_id, self.service_id + "_conflict"} if register else {self.service_id}
+                safe = safe and ("service_id" not in body or body["service_id"] in services)
                 if safe:
                     return path
             if (method == "PUT" and path == "/v2/config/enum-map" and set(body) == {"enum_type", "enum_value", "label_zh", "sort_order"}
@@ -103,20 +110,49 @@ class BrowserFence:
             return path
         raise ValueError(REFUSAL)
 
+    def inject_next(self, method: str, path: str, status: int, *, retry_after: int = 0) -> None:
+        read = method == "GET" and path in {"/v2/commerce/channel-accounts", "/v2/config/enum-map/list"} and status == 429 and retry_after > 0
+        write = status == 500 and retry_after == 0 and (method == "PUT" and path == "/v2/config/enum-map" or method == "PATCH" and path in {f"/v2/admin/shops/{pk}" for pk in self.shop_pks})
+        if not (read or write) or self.error_next is not None:
+            raise ValueError(REFUSAL)
+        self.error_next = (method, path, status, retry_after)
+
+    def request_body(self, method: str, path: str, body: object) -> object:
+        if self.invalid_region_next and method == "POST" and path == "/v2/admin/shops/register":
+            if not isinstance(body, dict):
+                raise ValueError(REFUSAL)
+            body = {**body, "region": "TEST_region_exceeds_16"}
+            self.check_request(method, self.probe.child.base + self.probe.prefix + path, body)
+            self.invalid_region_next = False
+            self.mutated += 1
+        return body
+
     def handle(self, route: Route) -> None:
         if self.closing:
             route.abort()
             return
         try:
             request = route.request
-            path = self.check_request(request.method, request.url, request.post_data_json)
+            original = request.post_data_json
+            path = self.check_request(request.method, request.url, original)
+            body = self.request_body(request.method, path, original)
+            wire_body = request.post_data if body is original else json.dumps(body, ensure_ascii=False)
             self.calls.append((request.method, path, request.headers.get("x-requested-with") == "tts-erp"))
-            response = route.fetch(max_redirects=0, max_retries=0, timeout=10_000)
+            response = route.fetch(post_data=wire_body, max_redirects=0, max_retries=0, timeout=10_000)
             verify_attestation(self.probe.child.attestation, self.probe.child.binding,
                                nonce=self.probe.child.nonce, child_pid=self.probe.child.pid,
                                child_start=self.probe.child.start, http_nonce=response.headers.get(NONCE_HEADER))
             _require_child(self.probe.child)
-            if self.drop_next == (request.method, path) and 200 <= response.status < 300:
+            self.responses.append((request.method, path, response.status))
+            if self.error_next and self.error_next[:2] == (request.method, path) and 200 <= response.status < 300:
+                _method, _path, status, retry = self.error_next
+                self.error_next = None
+                self.injected.append((request.method, path, status))
+                headers = {NONCE_HEADER: self.probe.child.nonce, "content-type": "application/json"}
+                if retry:
+                    headers["retry-after"] = str(retry)
+                route.fulfill(status=status, headers=headers, body='{"detail":"TEST_wire_failure"}')
+            elif self.drop_next == (request.method, path) and 200 <= response.status < 300:
                 self.drop_next = None
                 self.lost += 1
                 route.abort("failed")  # Actual processing/commit already returned 2xx.

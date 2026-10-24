@@ -40,7 +40,7 @@ describe('readonly stats content', () => {
   it('distinguishes empty daily/distributions from errors, retaining genuine zero metrics', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ ...stats, total_requests: 0, daily: [], by_host: [], by_method: [], by_status: [] })));
     await mount(); expect(await screen.findByText('暂无每日数据')).toBeVisible();
-    expect(screen.getByText('暂无域名数据')).toBeVisible(); expect(screen.getByRole('region', { name: '总请求数' })).toHaveTextContent('0');
+    expect(await screen.findByText('暂无域名数据')).toBeVisible(); expect(screen.getByRole('region', { name: '总请求数' })).toHaveTextContent('0');
     expect(screen.queryByTestId('TEST_plot_data')).toBeNull();
   });
   it('keeps the approved fixed seven-day workflow on initial load, refresh and retry without date controls', async () => {

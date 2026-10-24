@@ -68,6 +68,33 @@ def test_current_launch_exit_is_checked_before_browser_transport(monkeypatch):
     route.abort.assert_called_once()
 
 
+@pytest.mark.parametrize(("method", "path", "status"), [
+    ("GET", "/v2/config/enum-map/list", 200),
+    ("POST", "/v2/auth/login", 500),
+    ("GET", "/v2/intercept/requests/stats", 429),
+    ("PATCH", "/v2/admin/shops/987", 500),
+])
+def test_error_injection_cannot_fabricate_success_or_change_auth_or_other_objects(monkeypatch, method, path, status):
+    gate = fence(monkeypatch)
+    with pytest.raises(ValueError, match="^P2 browser request refused$"):
+        gate.inject_next(method, path, status)
+
+
+def test_scoped_read_failure_and_test_field_mutation_are_explicit_and_one_shot(monkeypatch):
+    gate = fence(monkeypatch)
+    gate.inject_next("GET", "/v2/commerce/channel-accounts", 429, retry_after=600)
+    assert gate.error_next == ("GET", "/v2/commerce/channel-accounts", 429, 600)
+    body = {"shop_id": gate.shop_id, "account_name": "TEST_name", "platform": "tiktok", "region": "VN"}
+    gate.invalid_region_next = True
+    result = gate.request_body("POST", "/v2/admin/shops/register", body)
+    assert result["shop_id"] == gate.shop_id and result["region"] == "TEST_region_exceeds_16"
+    assert body["region"] == "VN" and not gate.invalid_region_next and gate.mutated == 1
+    assert gate.request_body("POST", "/v2/admin/shops/register", body) is body
+    gate.check_request("POST", "http://127.0.0.1:12345/v2/admin/shops/register", {**body, "service_id": gate.service_id + "_conflict"})
+    with pytest.raises(ValueError):
+        gate.check_request("POST", "http://127.0.0.1:12345/v2/admin/shops/register", {**body, "service_id": "TEST_unrelated_service"})
+
+
 def test_sensitive_input_driver_failure_never_surfaces_the_value():
     module = importlib.import_module(MODULE)
     locator = MagicMock()

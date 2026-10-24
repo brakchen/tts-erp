@@ -118,10 +118,12 @@ def shop_task(page, gate, probe):
     rotated = "TEST_rotated_9_" + secrets.token_hex(16)
     fill_sensitive(dialog.get_by_label("App Key", exact=True), app_key)
     fill_sensitive(dialog.get_by_label("App Secret", exact=True), rotated)
+    lost_before = gate.lost
     gate.drop_next = ("PATCH", f"/v2/admin/shops/{shop_pk}")
     dialog.get_by_role("button", name="保存店铺", exact=True).click()
     expect(dialog.get_by_role("button", name="查询核对", exact=True)).to_be_visible()
     expect(dialog.get_by_role("button", name="保存店铺", exact=True)).to_be_disabled()
+    assert gate.lost == lost_before + 1 and gate.drop_next is None
     draft_preserved = dialog.get_by_label("App Secret", exact=True).input_value() == rotated
     assert draft_preserved
     with independent(probe) as session:

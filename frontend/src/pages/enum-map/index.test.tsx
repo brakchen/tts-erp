@@ -56,9 +56,22 @@ describe('enum content', () => {
   it('retains PUT draft and requires explicit GET facts before explicit uncertain resubmission', async () => {
     let writes = 0; const fetcher = api(async () => { writes++; return json({}, 500); }); const user = userEvent.setup(); await mount(); const dialog = await edit(user);
     await user.clear(within(dialog).getByRole('textbox', { name: '中文标签' })); await user.type(within(dialog).getByRole('textbox', { name: '中文标签' }), 'TEST_keep'); await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/结果未确认/);
+    await user.type(within(dialog).getByRole('textbox', { name: '中文标签' }), '_edited');
     expect(within(dialog).getByRole('button', { name: '保存映射' })).toBeDisabled(); fireEvent.submit(within(dialog).getByRole('form', { name: '枚举表单' })); expect(writes).toBe(1);
-    await user.click(within(dialog).getByRole('button', { name: '查询核对' })); await within(dialog).findByText(/公开列表已读取/); expect(within(dialog).getByRole('textbox', { name: '中文标签' })).toHaveValue('TEST_keep'); expect(writes).toBe(1); expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(2);
+    await user.click(within(dialog).getByRole('button', { name: '查询核对' })); await within(dialog).findByText(/公开列表已读取/); expect(within(dialog).getByRole('textbox', { name: '中文标签' })).toHaveValue('TEST_keep_edited'); expect(writes).toBe(1); expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(2);
     expect(within(dialog).getByRole('button', { name: '核对后明确重新提交' })).toBeEnabled(); expect(screen.queryByText('映射保存已确认')).toBeNull();
+  });
+  it('revalidates corrected enum fields after every server 422 without suppressing the next rejection', async () => {
+    let writes = 0; api(async () => ++writes < 3 ? json({ detail: [{ loc: ['body', 'label_zh'], type: 'string_too_long' }] }, 422) : json({ id: 41, action: 'updated' }));
+    const user = userEvent.setup(); await mount(); const dialog = await edit(user); const field = within(dialog).getByRole('textbox', { name: '中文标签' });
+    await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/HTTP 422/); expect(field).toBeInvalid();
+    for (const value of ['TEST_corrected_one', 'TEST_corrected_two']) {
+      await user.clear(field); await user.type(field, value); expect(field).toBeValid();
+      expect(within(dialog).getByRole('textbox', { name: '英文值' })).toHaveAttribute('readonly');
+      await user.click(within(dialog).getByRole('button', { name: '保存映射' }));
+      if (writes < 3) { await within(dialog).findByText(/HTTP 422/); expect(field).toBeInvalid(); }
+    }
+    await screen.findByText('映射保存已确认'); expect(writes).toBe(3);
   });
   it('retains safe field errors and cancels after capability downgrade without another write', async () => {
     let writes = 0; api(async () => { writes++; return json({ detail: [{ loc: ['body', 'label_zh'], type: 'string_too_long', msg: 'TEST_raw', input: 'TEST_secret' }] }, 422); }); const user = userEvent.setup(); const view = await mount(); const dialog = await edit(user);

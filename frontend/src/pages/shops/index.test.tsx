@@ -57,6 +57,19 @@ describe('shops content', () => {
     expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('TEST_secret'); expect(document.body.textContent).not.toContain('TEST_ECHO_SECRET');
     expect(commands).toBe(1); expect(screen.queryByText('店铺保存已确认')).toBeNull();
   });
+  it('invalidates the submitted field-error snapshot so successive 422 corrections can submit again', async () => {
+    let writes = 0; api(async () => ++writes < 3 ? json({ detail: [{ loc: ['body', 'region'], type: 'string_too_long' }] }, 422) : json({ created: false, shop }));
+    const user = userEvent.setup(); await mount(); const dialog = await openRegister(user); await fillRegister(user, dialog);
+    const field = within(dialog).getByRole('textbox', { name: '区域' }); await user.type(field, 'VN');
+    await user.click(within(dialog).getByRole('button', { name: '保存店铺' })); await within(dialog).findByText(/HTTP 422/); expect(field).toBeInvalid();
+    for (const value of ['TH', 'VN']) {
+      await user.clear(field); await user.type(field, value); expect(field).toBeValid();
+      expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('TEST_secret');
+      await user.click(within(dialog).getByRole('button', { name: '保存店铺' }));
+      if (writes < 3) { await within(dialog).findByText(/HTTP 422/); expect(field).toBeInvalid(); }
+    }
+    await screen.findByText('店铺保存已确认'); expect(writes).toBe(3);
+  });
   it('PATCHes metadata by internal PK and leaves blank values as no change, not clear-to-null', async () => {
     const commands: { url: string; init: RequestInit }[] = []; api(async (url, init) => { commands.push({ url, init }); return json({ shop: { ...shop, account_name: 'TEST_changed' } }); });
     const user = userEvent.setup(); await mount(); await screen.findByText(shop.shop_id); await user.click(screen.getByRole('button', { name: '编辑元信息' }));
@@ -105,6 +118,17 @@ describe('shops content', () => {
     expect(commands).toHaveLength(1); expect(commands[0].url).toBe('/tts/v2/admin/shops/41');
     expect(JSON.parse(commands[0].init.body as string)).toEqual({ service_id: 'TEST_svc', app_key: 'TEST_key', app_secret: 'TEST_pair' });
   });
+  it('invalidates correlated pair errors when editing the command back to a metadata-only registration', async () => {
+    let writes = 0; api(async () => { writes++; return json({ created: false, shop }); });
+    const user = userEvent.setup(); await mount(); const dialog = await openRegister(user);
+    await user.type(within(dialog).getByLabelText('店铺 ID', { exact: true }), shop.shop_id);
+    await user.type(within(dialog).getByLabelText('Service ID', { exact: true }), 'TEST_svc');
+    const key = within(dialog).getByLabelText('App Key', { exact: true }); const secret = within(dialog).getByLabelText('App Secret', { exact: true });
+    await user.type(key, 'TEST_half'); await user.click(within(dialog).getByRole('button', { name: '保存店铺' }));
+    await within(dialog).findByText('请检查 App 凭证输入'); expect(secret).toBeInvalid(); expect(writes).toBe(0);
+    await user.clear(key); expect(secret).toBeValid();
+    await user.click(within(dialog).getByRole('button', { name: '保存店铺' })); await screen.findByText('店铺保存已确认'); expect(writes).toBe(1);
+  });
   it('keeps an incomplete App pair local without submitting or losing the draft', async () => {
     let commands = 0; api(async () => { commands++; return json({ created: true, shop }); });
     const user = userEvent.setup(); await mount(); const dialog = await openRegister(user);
@@ -123,6 +147,7 @@ describe('shops content', () => {
     let writes = 0; const fetcher = api(async () => { writes++; return json({}, 500); });
     const user = userEvent.setup(); await mount(); const dialog = await openRegister(user); await fillRegister(user, dialog);
     await user.click(within(dialog).getByRole('button', { name: '保存店铺' })); await screen.findByText(/结果未确认/);
+    await user.type(within(dialog).getByLabelText('App Key', { exact: true }), '_edited');
     expect(within(dialog).getByRole('button', { name: '保存店铺' })).toBeDisabled();
     fireEvent.submit(within(dialog).getByRole('form', { name: '店铺表单' })); expect(writes).toBe(1);
     const check = within(dialog).getByRole('button', { name: '查询核对' });

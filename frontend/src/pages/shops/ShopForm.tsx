@@ -12,9 +12,9 @@ export const fieldLabels: Record<keyof ShopDraft, string> = {
   service_id: 'Service ID', app_key: 'App Key', app_secret: 'App Secret',
 };
 
-export default function ShopForm({ kind, shop, pending, blocked, errors, submitLabel = '保存店铺', onSubmit, onCancel }: {
+export default function ShopForm({ kind, shop, pending, blocked, errors, submitLabel = '保存店铺', onSubmit, onCancel, onFieldEdit }: {
   kind: ShopFormKind; shop?: Shop; pending: boolean; blocked: boolean; errors: Record<string, string>; submitLabel?: string;
-  onSubmit: (draft: ShopDraft) => void; onCancel: () => void;
+  onSubmit: (draft: ShopDraft) => void; onCancel: () => void; onFieldEdit: (field: keyof ShopDraft) => void;
 }) {
   const [draft, setDraft] = useState<ShopDraft>({ shop_id: shop?.shop_id ?? '', account_name: shop?.account_name ?? '',
     region: shop?.region ?? '', opened_date: shop?.opened_date ?? '', service_id: shop?.service_id ?? '', app_key: '', app_secret: '' });
@@ -26,7 +26,7 @@ export default function ShopForm({ kind, shop, pending, blocked, errors, submitL
     {kind !== 'edit' && <p>App 凭据按 Service ID 共享；修改会影响使用同一 Service ID 的店铺。App Key 与 App Secret 必须成对填写；不会回显已有密钥。</p>}
     {fields.map((key) => <TextField key={key} name={key} value={draft[key]} isDisabled={pending} isInvalid={Boolean(errors[key])}
       isRequired={(kind === 'register' && key === 'shop_id') || (kind === 'app' && ['service_id', 'app_key', 'app_secret'].includes(key))}
-      onChange={(value) => setDraft((previous) => ({ ...previous, [key]: value }))}>
+      onChange={(value) => { onFieldEdit(key); setDraft((previous) => ({ ...previous, [key]: value })); }}>
       <Label>{fieldLabels[key]}</Label>
       <Input type={key === 'app_secret' ? 'password' : key === 'opened_date' ? 'date' : 'text'}
         autoComplete={key === 'app_secret' ? 'new-password' : 'off'} inputMode={key === 'shop_id' ? 'numeric' : undefined}
