@@ -31,10 +31,10 @@
 
 ### 2.2 shops
 
-来源：`templates/pages/shops.html`、`static/js/shops.js`；旧注释的 role 有矛盾，必须以实际服务端 gate 为准。
+来源：`templates/pages/shops.html`、`static/js/shops.js`、`api/v2/admin.py`。旧 UI 的 admin 文案已过时：`docs/api/external-api.md` 的 shops/register/PATCH 条目、实际 `require_role_at_least(readwrite)` 以及 `tests/api/test_admin_shops.py::{test_register_app_credentials_allow_readwrite,test_update_app_credentials_allow_readwrite}` 一致确认，2026-09-29 已由用户决定 App pair 也是 readwrite。迁移保留该有效契约，不擅自改成 admin-only。
 
 - 列表：`GET /v2/commerce/channel-accounts?platform=tiktok&limit=500`，保留 shop_id、名称、区域、service_id、App 凭证状态、开店日期、同步方式与状态；内部更新使用 `shop_pk`，不拿 external `shop_id` 当主键。
-- 人工注册本地店铺记录，已有字段为空时补填，不覆盖既有凭证/状态；可选名称/区域/日期/service_id。不是 TikTok 店铺写操作。
+- 人工注册本地店铺记录（readwrite），已有元信息为空时补填，不覆盖既有 OAuth credential_id/同步状态；App pair 的显式提交按 service_id 配置，不能误写成“重复注册永不更新 App 凭证”。service_id 不一致时返回 409 并要求显式编辑；App Key/Secret 成对且 service_id 必填。不是 TikTok 店铺写操作。
 - 元信息编辑：名称、区域、service_id、开店日期；保留取消与失败恢复，不照搬旧单元格先改显示再回滚造成输入丢失的实现。
 - App 凭证管理：App Key/App Secret 成对，secret 仅 password 输入，不预填、不回显、不写 bootstrap/storage/log；按 service_id 共享的影响必须在对话框中说明。关闭/确认成功后清除 secret；失败处理及未知结果不能自动重放。
 - OAuth：生成授权链接、自动尝试复制、手动复制和新窗口打开、单次 state/UTC 到期提示。此 GET 会创建本地授权状态，应按用户命令处理，禁止套用纯读自动重试；测试不实际访问 TikTok。
@@ -63,9 +63,9 @@
 
 `auth.py::me` 只自校验 cookie；无 cookie、API-key 页面访问和 auth-off 情形可能返回 `authenticated:false`，不可据此擅自跳登录或猜测角色。
 
-优先核对 renderer 已有 request grant，把最小、后端拥有的权限事实加入受测试的 bootstrap（如 apiTier）；不新造 session provider/cache 或客户端授权真相，不改保留给其他 owner 的 access/middleware。UI 禁用仅为展示保护，最终 API gate、页面权限和 api_tier 不退化；未知权限 fail-closed。
+选择最小的、后端拥有的 role capability hints（建议 `roleCapabilities: {readwrite, admin}`）加入受测试的 bootstrap，直接复用 `api.deps.require_role_at_least` 的 canonical `AccessGrant.allows` 语义，不在浏览器重建 role hierarchy。不能只发送 raw apiTier 再忽略 auth-off/bypass 语义，也不能用 cookie-only me 降级有效 API-key/auth-off 页面。未知/缺失 hints 默认禁用写操作；旧 P0/P1 bootstrap 测试兼容性须覆盖。hints 不是资源级授权或持久缓存，下一次 API 仍执行真实 page/api_tier/guard；不增加 session provider，也不改其他 owner 的 access/middleware。
 
-仍需直接读取/确认：shops register/patch 的准确 role 与凭证条件；channel-account DTO/null；OAuth 返回与副作用；HTML/API-key/auth-off 的现有 gate；共享 client 的 204/422/CSRF/unknown-outcome；同轮 clone 的真实测试 API fixture。
+已确认 OAuth authorize 只有显式用户命令时创建单次 state，无 upstream 请求；`format=json` 成功返回 authorize_url/state_expires_at，SigningError 是 HTTP 500；不以 body.ok 另造成功通道。仍需确认 channel-account DTO/null、HTML/API-key/auth-off 的完整 gate、共享 client 的 204/422/CSRF/unknown-outcome、同轮 clone 的真实测试 API fixture及其启动副作用隔离。
 
 后台 readonly 审计 `5d82ae14` 因 runner 消失以 `proof-write-failed` 失败，未产出有效结果。已报告；不当作审查通过、不静默切换 agent CLI。父会话继续源码核对，后续独立计划/安全审查仍是实际门槛。
 
