@@ -53,6 +53,7 @@ from tts_erp_v2.api.v2 import (
     fx,
     intercept,
     llm_context,
+    monitor_health,
     oauth,
     order_sync,
     pages,
@@ -126,6 +127,7 @@ def _build_routes(app: FastAPI) -> None:
     # Chrome 扩展订单/物流/结算数据同步（readwrite；与 analytics 同级）。
     # 详见 docs/archive/chrome-ext-order-sync-design.md。
     app.include_router(order_sync.router)
+    app.include_router(monitor_health.router)
     # config schema 枚举映射 CRUD（GET readonly；PUT/DELETE admin）。
     # 详见 docs/design/spu-roi-enum-translation-plan.md。
     app.include_router(config_router.router)

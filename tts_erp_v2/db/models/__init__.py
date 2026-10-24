@@ -69,6 +69,7 @@ from tts_erp_v2.db.models.miaoshou import (
     MiaoshouSyncCursor,
     MiaoshouSyncIssue,
 )
+from tts_erp_v2.db.models.monitor_health import MonitorHealth
 from tts_erp_v2.db.models.plugin import (
     AdDaily,
     AdRawLog,
@@ -138,6 +139,7 @@ __all__ = [
     "MiaoshouPurchasePrice",
     "MiaoshouSyncCursor",
     "MiaoshouSyncIssue",
+    "MonitorHealth",
     "Payout",
     "PluginLog",
     "ProcurementAccount",

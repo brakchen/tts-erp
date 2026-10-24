@@ -78,14 +78,15 @@ EXPECTED_JOB_INTERVALS = {
     "fx.sync": 3600,
     "analytics.shop_fee_rate": 86400,
     "analytics.spu_profit_deterioration_alert": 86400,
+    "plugin.monitor_health": 15,
 }
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """19 jobs total — keeps us honest if a new one slips in unannounced."""
-    # 6 TikTok + 13 system jobs, including the source-owned purchase-price
+    """21 jobs total — keeps us honest if a new one slips in unannounced."""
+    # 6 TikTok + 15 system jobs, including the source-owned purchase-price
     # cleaner and excluding the retired EWM purchase-order sync.
-    assert len(JOBS) == 20
+    assert len(JOBS) == 21
 
 
 @pytest.mark.parametrize(
@@ -153,7 +154,10 @@ def test_build_scheduler_interval_trigger_uses_spec_seconds(
     for name, spec in JOBS.items():
         trigger = by_id[name].trigger
         assert trigger.interval.total_seconds() == spec.interval_seconds
-        assert trigger.jitter == 42
+        expected_jitter = (
+            spec.jitter_seconds if spec.jitter_seconds is not None else 42
+        )
+        assert trigger.jitter == expected_jitter
 
 
 # ─── catch-up scheduling (_overdue_first_runs) ───────────────────
