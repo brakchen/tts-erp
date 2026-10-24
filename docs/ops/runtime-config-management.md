@@ -22,13 +22,13 @@
 
 - 请求体不再接受 `rollout` / `draftRollout`，响应不再返回 `draftRollout` / `publishedRollout` / `rolloutRuleIndex`，页面也不再提供灰度规则编辑器。
 - `GET /v2/config/runtime/snapshot` 只返回每个未归档配置项的**已发布默认 payload 与 version**，请求按 `subject` 区分的行为已移除（遗留 `subject` 查询参数被忽略）；ETag 只由版本映射生成。
-- `resolve_runtime_config()` / `select_payload()` 等 resolver 导出已删除，进程内不再有解密入口。
+- `resolve_runtime_config()` / `select_payload()` 等通用 resolver 导出已删除，不恢复通用明文解密入口；受控业务消费者见下方 Secret 引用。
 - `config.runtime_config_items.draft_rollout` 与 `config.runtime_config_revisions.rollout` **列与历史数据一律保留**，本仓库不为此新增迁移、也不执行任何 `DROP COLUMN`/`DROP TABLE`。它们只剩两个作用：满足旧表 `NOT NULL DEFAULT '[]'` 定义以保证新写入合法，以及供审计读取。新代码不读写灰度行为；新 revision 固定写 `[]`。
 - 保留的读取侧护栏：`analytics.spu_profit_deterioration_alert.v1` 仍会拒绝带非空 rollout sidecar 的历史 revision（fail closed），不会把退役数据当成生效行为。
 
 ## Secret 引用
 
-页面/API 只接受和展示 `secret://<name>`，不会回读明文。保存 secret 时使用 `token_service.encrypt()` 加密；列表仅返回引用、截短 fingerprint 和更新时间。HTTP snapshot 同样保持引用。当前没有任何 HTTP 端点或进程内 resolver 会解密 secret 值。
+页面/API 只接受和展示 `secret://<name>`，不会回读明文。保存 secret 时使用 `token_service.encrypt()` 加密；列表仅返回引用、截短 fingerprint 和更新时间。HTTP snapshot 同样保持引用；HTTP 端点和通用 resolver 均不返回 secret 明文。受控业务消费者 `tts_erp_v2.plugin.monitor_health.notifications.webhook()` 仅为服务端健康告警读取已发布配置引用的活动 secret，并经 `token_service.decrypt()` 解密使用，不向 HTTP 或插件暴露明文。
 
 先保存 secret，再在配置草稿或 payload 中引用它。发布时服务验证所有引用均存在且未归档；`secret://` 后必须是非空的小写名称（字母、数字、点、下划线或短横线）。
 
@@ -37,6 +37,8 @@
 ## 服务端使用
 
 服务端按 `config_key` + `published_version` 直接读取已发布 revision（例如 `tts_erp_v2.analytics.spu_deterioration_alert.read.effective_config_details`）。对外读取一律使用 snapshot 端点。
+
+Monitor 健康告警固定读取 `plugin.monitor_health.v1`，已发布 payload 为 `{"feishuWebhook":"secret://monitor-health-feishu"}`。先通过现有凭证管理保存该命名 secret，再发布配置；secret 明文应为官方 HTTPS 飞书机器人 Webhook。系统不会自动写入真实配置；未发布、已归档、secret 不可用或遗留非空 rollout 均明确失败。插件不持有这份 Webhook，健康上报持久化也不以飞书配置可用为前提。具体行为见[最小探活需求](../plugins/monitor/04-health-reporting-requirements.md)。
 
 ## 权限与页面
 
