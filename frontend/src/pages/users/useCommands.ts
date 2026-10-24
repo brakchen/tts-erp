@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
+import { parseIdentityJson } from '../../shared/api/identity-json';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import { commandResult, labels, type CommandKind } from './contracts';
 
@@ -26,7 +27,7 @@ export function useCommands(root: string, canManage: boolean) {
   async function read<T>(path: string, decode: (data: unknown) => T): Promise<T> {
     if (!readyRead()) throw new Error('读取冷却中');
     const controller = new AbortController(); controllers.current.add(controller);
-    try { const result = await requestJson<unknown>(root, path, { signal: controller.signal }); return decode(result.data); }
+    try { const result = await requestJson<unknown>(root, path, { signal: controller.signal }, parseIdentityJson); return decode(result.data); }
     catch (error) { if (alive.current && error instanceof ApiError) wait(error.retryAfter ?? 0); throw error; }
     finally { controllers.current.delete(controller); }
   }
@@ -36,7 +37,7 @@ export function useCommands(root: string, canManage: boolean) {
     lock.current = true; setPending(true); setFailure(undefined); setNotice('');
     recovery.current = 'none'; setPhase('none');
     try {
-      const { data } = await requestJson<unknown>(root, command.path, { method: command.method, body: command.body === undefined ? undefined : JSON.stringify(command.body) });
+      const { data } = await requestJson<unknown>(root, command.path, { method: command.method, body: command.body === undefined ? undefined : JSON.stringify(command.body) }, parseIdentityJson);
       commandResult(data, command.kind);
       if (alive.current) { setNotice('操作已确认'); return true; }
       return false;

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import Users from './index';
@@ -36,4 +36,13 @@ it('enables a disabled user with a status-only PATCH after confirmation', async 
   const row = (await screen.findByText('test_user')).closest('tr')!; await user.click(within(row).getByRole('button', { name: '启用' })); const dialog = screen.getByRole('dialog');
   expect(within(dialog).getByText('确认启用用户？')).toBeVisible(); await user.click(within(dialog).getByRole('button', { name: '确认操作' }));
   const write = fetcher.mock.calls.find(([, init]) => init.method === 'PATCH')!; expect(write[0]).toBe('/tts/v2/users/12'); expect(JSON.parse(String(write[1].body))).toEqual({ status: 'active' });
+});
+it('uses the public modal keyboard focus lifecycle and restores the launching button', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/roles') ? { roles: [], allPermissions: [] } : { users: [person] })));
+  const user = userEvent.setup({ delay: null }); render(<Users bootstrap={bootstrap} />);
+  const row = (await screen.findByText('test_user')).closest('tr')!;
+  const launch = within(row).getByRole('button', { name: '编辑显示名' }); launch.focus();
+  await user.keyboard('{Enter}'); const dialog = screen.getByRole('dialog');
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  await user.keyboard('{Escape}'); expect(screen.queryByRole('dialog')).toBeNull(); await waitFor(() => expect(launch).toHaveFocus());
 });
