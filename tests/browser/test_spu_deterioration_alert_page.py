@@ -34,7 +34,7 @@ def _item(**overrides: Any) -> dict[str, Any]:
         "previousRoiUnavailableReason": None, "currentRoiUnavailableReason": None,
         "warnings": ["含未结算平台费估算；历史估值可能随成本和汇率更新"],
         "basisCalculatedAt": CALCULATED,
-        "drilldown": {"pageUrl": "/v2/pages/spu-roi?shop_pk=7&spu_ids=TEST-BIZ-SPU-1001&w_start=2026-09-20&w_end=2026-10-03"},
+        "drilldown": {"period": "current", "pageUrl": "/v2/pages/spu-roi?shop_pk=7&spu_ids=TEST-BIZ-SPU-1001&w_start=2026-09-27&w_end=2026-10-03"},
     }
     item.update(overrides)
     return item
@@ -361,16 +361,21 @@ def test_latest_wins_shop_initialization_does_not_revert_edited_scope(site: Comp
     assert site.requests[-1]["spu_ids"] == ["1001"]
 
 
-@pytest.mark.parametrize("missing", ["total", "latestAvailableDate", "periodEnd", "currentOrderCount", "factFlag"])
+@pytest.mark.parametrize("missing", [
+    "total", "latestAvailableDate", "anchorDate", "windowDays", "dataAsOf",
+    "currentStart", "currentEnd", "previousStart", "previousEnd", "currentOrderCount", "factFlag",
+])
 def test_malformed_success_is_unavailable_not_partial_results(site: ComparisonSite, missing: str) -> None:
     def respond(route: Any, query: dict[str, list[str]]) -> None:
         payload = _payload(query)
         if missing == "total":
             del payload["total"]
-        elif missing == "latestAvailableDate":
-            del payload["meta"]["latestAvailableDate"]
-        elif missing == "periodEnd":
-            del payload["meta"]["periods"]["current"]["endDate"]
+        elif missing in ("latestAvailableDate", "anchorDate", "windowDays", "dataAsOf"):
+            del payload["meta"][missing]
+        elif missing in ("currentStart", "currentEnd", "previousStart", "previousEnd"):
+            period = "current" if missing.startswith("current") else "previous"
+            date_key = "startDate" if missing.endswith("Start") else "endDate"
+            del payload["meta"]["periods"][period][date_key]
         elif missing == "currentOrderCount":
             del payload["totals"]["currentOrderCount"]
         else:
@@ -383,6 +388,8 @@ def test_malformed_success_is_unavailable_not_partial_results(site: ComparisonSi
     expect(page.locator("#total-spus")).to_have_text("—")
     expect(page.locator("#filter-echo")).not_to_contain_text("undefined")
     expect(page.locator("#filter-anchor-date")).not_to_have_attribute("max", ANCHOR)
+    expect(page.locator("#filter-anchor-date")).to_have_value("")
+    assert "anchor_date" not in page.url  # no invented date/cap fallback
 
 
 def test_shop_switch_clears_bound_and_ignores_late_old_shop_date_error(site: ComparisonSite) -> None:
@@ -458,7 +465,8 @@ def test_keyboard_detail_link_focus_return_and_responsive_fields(site: Compariso
     expect(link).to_be_focused()
     href = link.get_attribute("href")
     assert href == prefix + _item()["drilldown"]["pageUrl"]
-    assert "TEST-BIZ-SPU-1001" in href and "w_start=2026-09-20" in href
+    assert "TEST-BIZ-SPU-1001" in href and "w_start=2026-09-27" in href
+    expect(link).to_have_text("本期盈利详情（2026-09-27 至 2026-10-03）")
     assert link.evaluate("el => el.tagName") == "A"
     assert link.get_attribute("target") in (None, "_self")
     # The parent-owned cold E2E exercises the real target and browser history;
@@ -470,6 +478,9 @@ def test_keyboard_detail_link_focus_return_and_responsive_fields(site: Compariso
     summary_link = summary.locator("a.profitability-link")
     expect(summary_link).to_be_focused()
     expect(summary_link).to_have_attribute("href", href)
+    expect(summary_link).to_contain_text("本期盈利详情（2026-09-27 至 2026-10-03）")
+    expect(summary_link).not_to_contain_text("两期完整日期范围")
+    expect(summary).to_contain_text("上期 2026-09-20 至 2026-09-26")
     page.keyboard.press("Escape")
     expect(summary).to_be_hidden()
     expect(trigger).to_be_focused()

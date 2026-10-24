@@ -270,11 +270,16 @@
     return `${rootPrefix}${supplied}`;
   }
 
-  function identity(item, index) {
+  function detailLabel(meta) {
+    const current = meta.periods.current;
+    return `本期盈利详情（${current.startDate} 至 ${current.endDate}）`;
+  }
+
+  function identity(item, index, meta) {
     const href = detailHref(item);
     return `<strong>${text(item.spuId)}</strong><small>内部编号 ${text(item.spuPk)} · 店铺 ${text(item.shopPk)}</small>
       <button type="button" class="btn-secondary summary-trigger" data-index="${index}" aria-expanded="false" aria-controls="alert-summary">查看对比明细</button>
-      ${href ? `<a class="profitability-link" href="${esc(href)}">盈利详情（两期完整日期范围）</a>` : '<p>盈利详情链接不可用</p>'}`;
+      ${href ? `<a class="profitability-link" href="${esc(href)}">${esc(detailLabel(meta))}</a>` : '<p>盈利详情链接不可用</p>'}`;
   }
 
   function metrics(item) {
@@ -305,10 +310,10 @@
     $('totals-note').textContent = totals.unavailableReason || '完整范围：SPU 去重，每期订单跨 SPU 全局去重；不是当前页或行级订单相加。';
     // Static markup only; all wire strings/attributes pass through esc().
     // pi-lens-ignore: no-inner-html-js
-    $('alert-rows').innerHTML = items.map((item, index) => `<tr data-spu-pk="${esc(item.spuPk)}"><td>${identity(item, index)}</td>${metrics(item).map((html) => `<td>${html}</td>`).join('')}<td>${facts(item)}</td></tr>`).join('');
+    $('alert-rows').innerHTML = items.map((item, index) => `<tr data-spu-pk="${esc(item.spuPk)}"><td>${identity(item, index, meta)}</td>${metrics(item).map((html) => `<td>${html}</td>`).join('')}<td>${facts(item)}</td></tr>`).join('');
     // Same escaped comparison renderer as desktop, no untrusted HTML fields.
     // pi-lens-ignore: no-inner-html-js
-    $('alert-cards').innerHTML = items.map((item, index) => `<article class="comparison-card" data-spu-pk="${esc(item.spuPk)}"><div>${identity(item, index)}</div><div class="card-metrics">${metrics(item).join('')}</div><div>${facts(item)}</div></article>`).join('');
+    $('alert-cards').innerHTML = items.map((item, index) => `<article class="comparison-card" data-spu-pk="${esc(item.spuPk)}"><div>${identity(item, index, meta)}</div><div class="card-metrics">${metrics(item).join('')}</div><div>${facts(item)}</div></article>`).join('');
     const offset = Number(raw('offset', '0')), limit = Number(raw('limit', '100'));
     $('alert-pager-label').textContent = `第 ${Math.floor(offset / limit) + 1} 页 · ${payload.total} 条对比记录（不是订单数）`;
     $('alert-pager-prev').disabled = offset <= 0;
@@ -328,7 +333,7 @@
     // pi-lens-ignore: no-inner-html-js
     $('alert-summary-body').innerHTML = `<p>店铺 ${text(item.shopPk)} · 内部编号 ${text(item.spuPk)} · ${esc(periods(state.payload.meta))}</p>
       <div class="card-metrics">${metrics(item).join('')}</div>${facts(item)}
-      ${href ? `<a class="profitability-link" href="${esc(href)}">进入盈利详情（两期完整日期范围；可通过浏览器返回原查询）</a>` : '<p>盈利详情链接不可用</p>'}`;
+      ${href ? `<a class="profitability-link" href="${esc(href)}">${esc(detailLabel(state.payload.meta))}；可通过浏览器返回原查询</a>` : '<p>盈利详情链接不可用</p>'}`;
     $('alert-summary').hidden = false;
     $('alert-summary-title').focus();
   }
