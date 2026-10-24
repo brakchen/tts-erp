@@ -8,8 +8,10 @@ reporting + token.refresh) and ``test_scheduler_token_refresh.py``
   legacy ``sync_cron.py`` cadence.
 * :func:`build_scheduler` registers every job with the right trigger,
   jitter, max_instances=1, and coalesce=True.
-* :func:`_make_executor` routes tiktok jobs through
-  ``_run_tiktok_job`` and system jobs through ``_run_system_job``.
+* :func:`_make_executor` starts a short-lived ``sync_worker.main run``
+  child for both TikTok and system jobs. The child exits so the kernel
+  reclaims the tick heap. ``_run_tiktok_job`` / ``_run_system_job`` stay
+  the in-process implementation used by that child and by manual runs.
 * :func:`_enumerate_tiktok_shops` only returns credentials that own a
   commerce.shops row (EXISTS filter) and skips MOCK_*/TEST_* prefixes; it
   tolerates DB errors.
@@ -27,6 +29,8 @@ on every branch that wasn't already exercised.
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+
+import subprocess
 
 import pytest
 from sqlalchemy import text
@@ -304,36 +308,38 @@ def test_build_scheduler_uses_default_session_factory_when_none(
 # ─── _make_executor dispatch ───────────────────────────────────────
 
 
-def test_make_executor_for_tiktok_calls_run_tiktok_job(monkeypatch) -> None:
-    """A spec with is_tiktok=True → callable that delegates to _run_tiktok_job."""
-    seen: dict = {}
-    monkeypatch.setattr(
-        scheduler,
-        "_run_tiktok_job",
-        lambda spec, sf: seen.setdefault("called", (spec, sf)),
-    )
+def test_make_executor_for_tiktok_starts_one_shot_child(monkeypatch) -> None:
+    """A scheduled TikTok tick is a child process, not an in-process call."""
+    monkeypatch.setattr(scheduler, "_is_job_enabled_in_factory", lambda _sf, _j: True)
+    seen: list[list[str]] = []
 
+    def _fake_run(command, check):
+        seen.append(command)
+        assert check is False
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(scheduler.subprocess, "run", _fake_run)
     spec = JobSpec(
         job_name="tiktok.orders",
         module_path="tts_erp_v2.jobs.tiktok.orders",
         interval_seconds=600,
         is_tiktok=True,
     )
-    fake_sf = MagicMock()
-    fn = _make_executor(spec, fake_sf)
-    fn()
-    assert seen["called"] == (spec, fake_sf)
+    _make_executor(spec, MagicMock())()
+    assert seen == [scheduler._scheduled_child_command("tiktok.orders")]
 
 
-def test_make_executor_for_system_calls_run_system_job(monkeypatch) -> None:
-    """spec.is_tiktok=False → callable that delegates to _run_system_job."""
-    seen: dict = {}
-    monkeypatch.setattr(
-        scheduler,
-        "_run_system_job",
-        lambda spec, sf: seen.setdefault("called", (spec, sf)),
-    )
+def test_make_executor_for_system_starts_one_shot_child(monkeypatch) -> None:
+    """A scheduled system tick is the same short-lived child."""
+    monkeypatch.setattr(scheduler, "_is_job_enabled_in_factory", lambda _sf, _j: True)
+    seen: list[list[str]] = []
 
+    def _fake_run(command, check):
+        seen.append(command)
+        assert check is False
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(scheduler.subprocess, "run", _fake_run)
     spec = JobSpec(
         job_name="token.refresh",
         module_path="tts_erp_v2.jobs.token_refresh",
@@ -342,10 +348,8 @@ def test_make_executor_for_system_calls_run_system_job(monkeypatch) -> None:
         entrypoint="sync_token_refresh",
         needs_token_registry=True,
     )
-    fake_sf = MagicMock()
-    fn = _make_executor(spec, fake_sf)
-    fn()
-    assert seen["called"] == (spec, fake_sf)
+    _make_executor(spec, MagicMock())()
+    assert seen == [scheduler._scheduled_child_command("token.refresh")]
 
 
 # ─── _enumerate_tiktok_shops (DB-backed, TEST_-sentinel isolation) ──

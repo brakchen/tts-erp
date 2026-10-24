@@ -34,7 +34,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -201,39 +201,48 @@ def _select_tracking_targets(
         .exists()
     )
     overfetch = max(limit, limit * _DEDUPE_OVERFETCH)
+    # Project only the tracking fields. Loading the RawRecord entity pulls
+    # the whole order JSON (line items, addresses, payment) into the
+    # identity map every 10 minutes and the long-lived worker never
+    # returns that heap to the OS.
+    payload = RawRecord.payload
     rows = session.execute(
-        select(RawRecord)
+        select(
+            func.coalesce(payload["id"].astext, payload["order_id"].astext),
+            payload["tracking_number"].astext,
+            payload["packages"],
+            payload["shipping_provider_id"].astext,
+            payload["shipping_provider_name"].astext,
+        )
         .where(RawRecord.endpoint == ORDERS_ENDPOINT)
-        .where(RawRecord.payload["id"].astext.not_in(terminal_orders))
+        .where(payload["id"].astext.not_in(terminal_orders))
         # Keep the order if it is ours or known to nobody yet (genuine
         # "orders job hasn't synced it" signal); drop it only when it
         # belongs exclusively to a different shop.
         .where((~foreign_order) | own_order)
         .order_by(RawRecord.captured_at.desc(), RawRecord.id.desc())
         .limit(overfetch)
-    ).scalars().all()
+    ).all()
 
     targets: list[dict] = []
     seen: set[str] = set()
-    for row in rows:
-        payload = row.payload if isinstance(row.payload, dict) else {}
-        oid = payload.get("id") or payload.get("order_id")
-        tracking = payload.get("tracking_number") or ""
+    for oid, tracking, packages, provider_id, provider_name in rows:
         if not oid or not tracking:
             continue
         oid = str(oid)
         if oid in seen:
             continue
         seen.add(oid)
-        packages = payload.get("packages") or []
-        pkg_id = packages[0].get("id") if packages and isinstance(packages[0], dict) else None
+        pkg_id = None
+        if isinstance(packages, list) and packages and isinstance(packages[0], dict):
+            pkg_id = packages[0].get("id")
         targets.append(
             {
                 "order_id": oid,
                 "tracking_number": tracking,
-                "external_package_id": str(pkg_id) if pkg_id else str(oid),
-                "provider_id": payload.get("shipping_provider_id"),
-                "provider_name": payload.get("shipping_provider_name"),
+                "external_package_id": str(pkg_id) if pkg_id else oid,
+                "provider_id": provider_id,
+                "provider_name": provider_name,
             }
         )
         if len(targets) >= limit:
