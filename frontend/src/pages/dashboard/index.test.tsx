@@ -26,6 +26,18 @@ function responses(url: string) {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('dashboard page', () => {
+  it('exposes grouped quick actions and labelled shop columns without flattening the overview', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => responses(url)));
+    render(<Dashboard {...props} />);
+    await screen.findByText(shop.shop_id);
+    const actions = screen.getByRole('navigation', { name: '快速导航' });
+    expect(within(actions).getAllByRole('link')).toHaveLength(props.bootstrap.navigation.length);
+    expect(screen.getByRole('heading', { name: '数据摘要', level: 2 })).toBeVisible();
+    const shops = await screen.findByRole('grid', { name: '已注册店铺' });
+    for (const title of ['店铺', '店铺 ID', '地区', '平台']) expect(within(shops).getByRole('columnheader', { name: title })).toBeVisible();
+    expect(within(shops).getByText(shop.account_name)).toBeVisible();
+    expect(within(shops).getByText(shop.shop_id)).toBeVisible();
+  });
   it.each([120, 600, 3_000_000])('blocks retries and sync polling for the full Retry-After of %s seconds', async (seconds) => {
     vi.useFakeTimers();
     let polls = 0;

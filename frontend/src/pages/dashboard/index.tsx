@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Link, Table } from '@heroui/react';
+import { buttonVariants } from '@heroui/styles';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { pathFor } from '../../shared/api/paths';
 import type { NavigationItem, PageProps } from '../../shared/contracts';
@@ -109,31 +110,49 @@ export default function Dashboard({ bootstrap }: PageProps) {
   ];
   const sortedJobs = sync.data?.jobs.slice().sort((a, b) => (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) || a.job_name.localeCompare(b.job_name));
   return <div className="space-y-6">
-    <Card><Card.Header><Card.Title>快速导航</Card.Title></Card.Header><Card.Content className="flex flex-wrap gap-4">
-      {bootstrap.navigation.filter((item) => quickPageIds.has(item.id)).map((item) => <Link key={item.id} href={href(item)}>{item.label}</Link>)}
+    <Card><Card.Header><Card.Title render={(props) => <h2 {...props} />} className="text-base font-semibold">快速导航</Card.Title><Card.Description>按当前权限显示常用入口</Card.Description></Card.Header><Card.Content>
+      <nav aria-label="快速导航" className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        {bootstrap.navigation.filter((item) => quickPageIds.has(item.id)).map((item) => <a key={item.id} href={href(item)} className={buttonVariants({ variant: 'secondary', className: 'w-full justify-between' })}>
+          <span>{item.label}</span><span aria-hidden="true">→</span>
+        </a>)}
+      </nav>
     </Card.Content></Card>
-    <Card><Card.Header><Card.Title>数据摘要</Card.Title><Card.Description>{scope}</Card.Description></Card.Header><Card.Content>
+    <Card><Card.Header className="flex-row flex-wrap items-center justify-between gap-3"><div><Card.Title render={(props) => <h2 {...props} />} className="text-base font-semibold">数据摘要</Card.Title><Card.Description>{scope}</Card.Description></div>
+      {navigation('enum-map') && <a href={href(navigation('enum-map')!)} className={buttonVariants({ variant: 'tertiary', size: 'sm' })}>枚举映射管理</a>}
+    </Card.Header><Card.Content>
       <ReadFeedback state={coverage} label="数据摘要" />
       <div className="grid gap-4 sm:grid-cols-3">{metrics.map((metric) => {
         const target = navigation(metric.pageId);
-        return <Card key={metric.label} role="region" aria-label={metric.label}><Card.Header><Card.Title>{metric.label}</Card.Title></Card.Header><Card.Content><p>{metric.value ?? '—'}</p><p>{metric.hint}</p>{target && <Link href={href(target)}>{target.label}</Link>}</Card.Content></Card>;
+        return <Card variant="secondary" key={metric.label} role="region" aria-label={metric.label}>
+          <Card.Header><Card.Title className="text-muted">{metric.label}</Card.Title></Card.Header>
+          <Card.Content><p className="text-3xl font-semibold tabular-nums">{metric.value ?? '—'}</p><Card.Description>{metric.hint}</Card.Description>
+            {target && <Link href={href(target)} className="mt-2 font-medium text-accent">{target.label}<span aria-hidden="true"> →</span></Link>}
+          </Card.Content>
+        </Card>;
       })}</div>
-      {navigation('enum-map') && <Link href={href(navigation('enum-map')!)}>枚举映射管理</Link>}
     </Card.Content></Card>
-    <Card><Card.Header><Card.Title>已注册店铺</Card.Title>{navigation('shops') && <Link href={href(navigation('shops')!)}>管理店铺</Link>}</Card.Header><Card.Content>
+    <Card><Card.Header className="flex-row flex-wrap items-center justify-between gap-3"><Card.Title render={(props) => <h2 {...props} />} className="text-base font-semibold">已注册店铺</Card.Title>
+      {navigation('shops') && <a href={href(navigation('shops')!)} className={buttonVariants({ variant: 'tertiary', size: 'sm' })}>管理店铺</a>}
+    </Card.Header><Card.Content>
       <ReadFeedback state={shops} label="店铺" />
-      {shops.data && (shops.data.items.length === 0 ? <p>暂无店铺</p> : <ul className="space-y-3">{shops.data.items.map((shop) => <li key={shop.id} className="flex flex-wrap gap-3 break-all">
-        <span>{shop.account_name || '(未命名)'}</span><span>{shop.shop_id}</span><span>{shop.region || '?'}</span><span>{shop.platform}</span>
-      </li>)}</ul>)}
+      {shops.data && (shops.data.items.length === 0 ? <p>暂无店铺</p> : <Table><Table.ScrollContainer><Table.Content aria-label="已注册店铺" className="min-w-[40rem]">
+        <Table.Header><Table.Column isRowHeader>店铺</Table.Column><Table.Column>店铺 ID</Table.Column><Table.Column>地区</Table.Column><Table.Column>平台</Table.Column></Table.Header>
+        <Table.Body>{shops.data.items.map((shop) => <Table.Row key={shop.id} id={shop.id}>
+          <Table.Cell><span className="block max-w-72 break-words font-medium">{shop.account_name || '(未命名)'}</span></Table.Cell>
+          <Table.Cell><span className="font-mono text-sm tabular-nums">{shop.shop_id}</span></Table.Cell><Table.Cell>{shop.region || '?'}</Table.Cell><Table.Cell>{shop.platform}</Table.Cell>
+        </Table.Row>)}</Table.Body>
+      </Table.Content></Table.ScrollContainer></Table>)}
     </Card.Content></Card>
-    <Card><Card.Header><Card.Title>系统状态</Card.Title></Card.Header><Card.Content className="space-y-3">
+    <Card><Card.Header><Card.Title render={(props) => <h2 {...props} />} className="text-base font-semibold">系统状态</Card.Title></Card.Header><Card.Content>
       <ReadFeedback state={health} label="API" />
-      {health.data && <p>{health.data.status === 'ok' ? 'API 正常' : `API 异常 (${health.data.status})`} <span>auth: {health.data.auth_mode ?? '?'}</span></p>}
-      {['数据库 · PostgreSQL', '存储 · MinIO', '同步服务 · APScheduler'].map((label) => <div key={label}><span>{label}</span><p>健康状态未知（接口未提供）</p></div>)}
+      <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="space-y-1"><dt className="font-medium">API</dt><dd>{health.data && <><p className="font-semibold">{health.data.status === 'ok' ? 'API 正常' : `API 异常 (${health.data.status})`}</p><p className="text-sm text-muted">auth: {health.data.auth_mode ?? '?'}</p></>}</dd></div>
+        {['数据库 · PostgreSQL', '存储 · MinIO', '同步服务 · APScheduler'].map((label) => <div key={label} className="space-y-1"><dt className="font-medium">{label}</dt><dd className="text-sm text-muted">健康状态未知（接口未提供）</dd></div>)}
+      </dl>
     </Card.Content></Card>
-    <Card><Card.Header><Card.Title>数据同步状态</Card.Title><Card.Description>{sync.data ? `刷新于 ${formatTime(sync.data.server_time)}` : '—'}</Card.Description></Card.Header><Card.Content>
+    <Card><Card.Header><Card.Title render={(props) => <h2 {...props} />} className="text-base font-semibold">数据同步状态</Card.Title><Card.Description>{sync.data ? `刷新于 ${formatTime(sync.data.server_time)}` : '—'}</Card.Description></Card.Header><Card.Content>
       <ReadFeedback state={sync} label="同步状态" />
-      {sortedJobs && <Table><Table.ScrollContainer><Table.Content aria-label="数据同步状态">
+      {sortedJobs && <Table><Table.ScrollContainer><Table.Content aria-label="数据同步状态" className="min-w-[56rem]">
         <Table.Header>{['健康', '作业', '周期', '最近一次同步', '预计下次同步', '状态'].map((label) => <Table.Column key={label} isRowHeader={label === '作业'}>{label}</Table.Column>)}</Table.Header>
         <Table.Body renderEmptyState={() => '暂无周期作业'}>{sortedJobs.map((job) => <Table.Row key={job.job_name} id={job.job_name}>
           <Table.Cell>{severityLabels[job.severity] ?? severityLabels.unknown}</Table.Cell><Table.Cell>{job.job_name}</Table.Cell><Table.Cell>{formatInterval(job.interval_seconds)}</Table.Cell>
