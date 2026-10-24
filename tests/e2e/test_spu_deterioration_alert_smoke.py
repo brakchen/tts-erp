@@ -130,8 +130,10 @@ def test_real_comparison_journey(comparison_live, chromium, tmp_path, auth, widt
         expect(ad_only.locator('[data-value="currentNetProfitCny"]')).to_have_text(
             re.compile(r"[-−]49(?:\.0+)?$")
         )
+        # Canonical ROI excludes ad spend from its numerator; the net profit
+        # above is negative while zero revenue/return loss yields an ROI of 0.
         expect(ad_only.locator('[data-value="currentRoi"]')).to_have_text(
-            re.compile(r"[-−]1(?:\.0+)?$")
+            re.compile(r"0(?:\.0+)?$")
         )
         assert page.locator("#btn-settings, #filter-severity, #filter-state").count() == 0
         with page.expect_response(lambda response: _comparison_response(response, 3)) as short:
