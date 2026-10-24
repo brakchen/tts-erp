@@ -11,6 +11,11 @@ it('uses the library UTC calendar as well as unchanged backend counts/UTC x valu
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 480 } as DOMRect);
   render(<DailyChart rows={[{ date: '2026-10-24', count: 41 }, { date: '2026-10-25', count: 0 }]} />);
   expect(probe.data).toEqual([[Date.parse('2026-10-24T00:00:00Z') / 1000, Date.parse('2026-10-25T00:00:00Z') / 1000], [41, 0]]);
+  const range = probe.options?.scales?.x?.range;
+  expect(range).toBeTypeOf('function');
+  if (typeof range !== 'function') throw new Error('Missing native display range');
+  const first = Date.parse('2026-10-24T00:00:00Z') / 1000;
+  expect(range({} as uPlot, first, first + 86400, 'x')).toEqual([first - 43200, first + 86400 + 43200]);
   expect(probe.options?.axes?.[0].incrs).toEqual(expect.arrayContaining([86400]));
   expect(probe.options?.tzDate).toBeTypeOf('function');
   const calendar = probe.options!.tzDate!(Date.parse('2026-10-24T00:00:00Z') / 1000);

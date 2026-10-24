@@ -24,7 +24,7 @@ describe('readonly stats content', () => {
     expect(screen.getByRole('region', { name: '白名单命中' })).toHaveTextContent('1,001');
     expect(screen.getByRole('region', { name: '今日请求（UTC）' })).toHaveTextContent('11');
     expect(screen.getByRole('region', { name: '错误请求' })).toHaveTextContent('7');
-    expect(screen.getByText('99.7%')).toBeVisible(); expect(screen.getByText('88.8%')).toBeVisible(); expect(screen.getByText('77.7%')).toBeVisible();
+    expect(await screen.findByText('99.7%')).toBeVisible(); expect(screen.getByText('88.8%')).toBeVisible(); expect(screen.getByText('77.7%')).toBeVisible();
     expect(screen.getByText('TEST_<script>.example')).toBeVisible(); expect(document.querySelector('script')).toBeNull();
     const table = screen.getByRole('grid', { name: '每日请求（UTC）' });
     expect(within(table).getByText('2026-10-24')).toBeVisible(); expect(within(table).getByText('0')).toBeVisible();
@@ -43,16 +43,15 @@ describe('readonly stats content', () => {
     expect(screen.getByText('暂无域名数据')).toBeVisible(); expect(screen.getByRole('region', { name: '总请求数' })).toHaveTextContent('0');
     expect(screen.queryByTestId('TEST_plot_data')).toBeNull();
   });
-  it('keeps UTC query values explicit and allows independent from/to defaults', async () => {
-    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(json(stats))); vi.stubGlobal('fetch', fetcher);
+  it('keeps the approved fixed seven-day workflow on initial load, refresh and retry without date controls', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json(stats)).mockResolvedValueOnce(json({}, 403)).mockResolvedValue(json(stats)); vi.stubGlobal('fetch', fetcher);
     const user = userEvent.setup(); await mount(); await screen.findByText('99.7%');
-    await user.clear(screen.getByRole('spinbutton', { name: '最近天数' })); await user.type(screen.getByRole('spinbutton', { name: '最近天数' }), '31');
-    const start = screen.getByLabelText('起始（UTC）');
-    // jsdom does not provide datetime-local keyboard editing.
-    const { fireEvent } = await import('@testing-library/react'); fireEvent.change(start, { target: { value: '2026-10-01T00:00' } });
-    await user.click(screen.getByRole('button', { name: '查询统计' })); await screen.findByText('99.7%');
-    const url = new URL(fetcher.mock.calls.at(-1)![0], 'https://TEST.example');
-    expect(url.searchParams.get('days')).toBe('31'); expect(url.searchParams.get('from')).toBe('2026-10-01T00:00Z'); expect(url.searchParams.has('to')).toBe(false);
+    expect(screen.queryByRole('spinbutton')).toBeNull(); expect(document.querySelector('input[type="datetime-local"],input[type="date"]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '刷新统计' })); await screen.findByText(/HTTP 403/);
+    expect(screen.queryByText('99.7%')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '重试统计' })); await screen.findByText('99.7%');
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls.every(([url]) => url === '/tts/v2/intercept/requests/stats?days=7')).toBe(true);
   });
   it('aborts obsolete reads and never lets an old root replace current data', async () => {
     let resolve!: (r: Response) => void; let oldSignal: AbortSignal | undefined;

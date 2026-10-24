@@ -56,20 +56,42 @@ def test_compiled_stats_native_chart_and_table(stats_renderer, prefix, width):
     page.locator(".uplot canvas").wait_for()
     assert page.locator(".uplot").count() == 1
     assert page.locator("canvas").evaluate("canvas => { const p=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data; for(let i=0;i<p.length;i+=4) if(p[i]===37&&p[i+1]===99&&p[i+2]===235&&p[i+3]>0) return true; return false; }")
+    widths = page.locator("canvas").evaluate("""canvas => {
+      const {width,height}=canvas,p=canvas.getContext('2d').getImageData(0,0,width,height).data,groups=[];
+      let start=null;
+      for(let x=0;x<=width;x++) {
+        let blue=false;
+        if(x<width) for(let y=0;y<height;y++) {const i=(y*width+x)*4;if(p[i]===37&&p[i+1]===99&&p[i+2]===235&&p[i+3]>0){blue=true;break;}}
+        if(blue&&start===null)start=x;
+        if(!blue&&start!==null){groups.push(x-start);start=null;}
+      }
+      return groups;
+    }""")
+    assert len(widths) == 3 and max(widths) - min(widths) <= 2, widths
     assert requests == ["GET"]
+    refresh = page.get_by_role("button", name="刷新统计")
+    refresh.focus()
+    page.wait_for_function("el => document.activeElement === el", arg=refresh.element_handle())
+    with page.expect_request(lambda request: request.url.endswith('/v2/intercept/requests/stats?days=7')):
+        page.keyboard.press("Enter")
+    page.locator(".uplot canvas").wait_for()
+    grid = page.get_by_role("grid", name="每日请求（UTC）")
+    grid.focus()
+    page.keyboard.press("ArrowDown")
+    assert grid.evaluate("el => el === document.activeElement || el.contains(document.activeElement)")
     report = overflow_report(page)
     assert report["scrollWidth"] <= report["clientWidth"] + 1, report
     page.set_viewport_size({"width": 1440 if width == 375 else 375, "height": 900})
     page.wait_for_function("() => { const c=document.querySelector('canvas'); const host=c?.closest('.uplot').parentElement; return c && host && Math.abs(c.getBoundingClientRect().width-host.getBoundingClientRect().width)<=1 && c.getBoundingClientRect().width<=document.documentElement.clientWidth; }")
     assert page.locator(".uplot").count() == 1
     payload[0] = {**PAYLOAD, "daily": []}
-    page.get_by_role("button", name="查询统计").click()
+    page.get_by_role("button", name="刷新统计").click()
     page.get_by_text("暂无每日数据", exact=True).wait_for()
     assert page.locator(".uplot canvas").count() == 0
     payload[0] = PAYLOAD
-    page.get_by_role("button", name="查询统计").click()
+    page.get_by_role("button", name="刷新统计").click()
     page.locator(".uplot canvas").wait_for()
-    assert page.locator(".uplot").count() == 1 and requests == ["GET", "GET", "GET"]
+    assert page.locator(".uplot").count() == 1 and requests == ["GET", "GET", "GET", "GET"]
     page.set_viewport_size({"width": width, "height": 1200})
     page.wait_for_function("() => { const c=document.querySelector('canvas'); return c && Math.abs(c.getBoundingClientRect().width-c.closest('.uplot').parentElement.getBoundingClientRect().width)<=1; }")
     artifacts = ROOT / "frontend/.cache/screenshots"

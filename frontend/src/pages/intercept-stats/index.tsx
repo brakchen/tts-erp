@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Input, Label, Table, TextField } from '@heroui/react';
+import { Alert, Button, Table } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import type { PageProps } from '../../shared/contracts';
 import DailyChart, { type DailyCount } from './DailyChart';
@@ -22,7 +22,6 @@ function decode(value: unknown): Stats {
   return value as unknown as Stats;
 }
 const number = (value: number) => value.toLocaleString('en-US');
-const initialFilters = { days: '7', from: '', to: '' };
 function DistributionTable({ title, rows }: { title: string; rows: Distribution[] }) {
   return <section className="min-w-0 space-y-2"><h2>{title}分布</h2><Table><Table.ScrollContainer><Table.Content aria-label={`${title}分布`}>
     <Table.Header><Table.Column isRowHeader>{title}</Table.Column><Table.Column>请求数</Table.Column><Table.Column>占比（服务端）</Table.Column></Table.Header>
@@ -33,18 +32,12 @@ function DistributionTable({ title, rows }: { title: string; rows: Distribution[
 }
 
 export default function InterceptStats({ bootstrap }: PageProps) {
-  const [draft, setDraft] = useState(initialFilters);
-  const [filters, setFilters] = useState(initialFilters);
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<{ loading: boolean; data?: Stats; error?: string; blocked?: boolean }>({ loading: true });
   useEffect(() => {
     const controller = new AbortController(); let current = true; let stopDelay: (() => void) | undefined;
     setState({ loading: true });
-    const params = new URLSearchParams({ days: filters.days });
-    // These controls explicitly represent UTC; do not reinterpret them in the browser timezone.
-    if (filters.from) params.set('from', `${filters.from}Z`);
-    if (filters.to) params.set('to', `${filters.to}Z`);
-    requestJson<unknown>(bootstrap.rootPath, `/v2/intercept/requests/stats?${params}`, { signal: controller.signal })
+    requestJson<unknown>(bootstrap.rootPath, '/v2/intercept/requests/stats?days=7', { signal: controller.signal })
       .then(({ data }) => { const decoded = decode(data); if (current) setState({ loading: false, data: decoded }); })
       .catch((error: unknown) => {
         if (!current) return;
@@ -55,15 +48,11 @@ export default function InterceptStats({ bootstrap }: PageProps) {
         if (delay > 0) stopDelay = scheduleReadDelay(() => { if (current) setState((previous) => ({ ...previous, blocked: false })); }, delay);
       });
     return () => { current = false; controller.abort(); stopDelay?.(); };
-  }, [bootstrap.rootPath, filters, refresh]);
+  }, [bootstrap.rootPath, refresh]);
   const stats = state.data;
   return <div className="space-y-4">
-    <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); if (state.blocked) return; setFilters({ ...draft }); setRefresh((value) => value + 1); }}>
-      <TextField value={draft.days} onChange={(value) => setDraft((previous) => ({ ...previous, days: value }))}><Label>最近天数</Label><Input type="number" min={1} max={31} step={1} required /></TextField>
-      {(['from', 'to'] as const).map((key) => <TextField key={key} value={draft[key]} onChange={(value) => setDraft((previous) => ({ ...previous, [key]: value }))}><Label>{key === 'from' ? '起始（UTC）' : '截止（UTC）'}</Label><Input type="datetime-local" /></TextField>)}
-      <Button type="submit" isDisabled={state.blocked}>查询统计</Button>
-    </form>
-    <p>每日按 UTC 分组；起止留空时由服务端独立取默认值。今日请求是 UTC 今日总数，不受所选窗口限制。</p>
+    <Button isDisabled={state.blocked} onPress={() => setRefresh((value) => value + 1)}>刷新统计</Button>
+    <p>最近 7 天，每日按 UTC 分组。今日请求是 UTC 今日总数，不受最近 7 天范围限制。</p>
     {state.loading && <p role="status">加载统计中…</p>}
     {state.error && <Alert status="danger"><Alert.Content><Alert.Title>统计不可用</Alert.Title><Alert.Description>{state.error}</Alert.Description><Button isDisabled={state.blocked} onPress={() => setRefresh((value) => value + 1)}>重试统计</Button></Alert.Content></Alert>}
     {stats && <>
