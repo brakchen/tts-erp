@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { parse, parseNumberAndBigInt, stringify } from 'lossless-json';
+import { parse, stringify } from 'lossless-json';
+import { parseIdentityJson } from './identity-json';
 import { ApiError, requestJson, type ApiResponse } from './client';
 
 // Invoke the desired extra argument before the transport supports it, so RED is
@@ -18,10 +19,7 @@ it('gives an explicit decoder untouched response text before large IDs can round
 });
 it('supports the maintained parser for exact large IDs without changing safe counters', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{"id":900719925474099312345,"activeSessions":0}')));
-  const result = await readWith('', '/v2/users', {}, (raw) => parse(raw,
-    (_key, value) => typeof value === 'bigint'
-      ? Number.isSafeInteger(Number(value)) ? Number(value) : value.toString()
-      : value, parseNumberAndBigInt));
+  const result = await readWith('', '/v2/users', {}, parseIdentityJson);
   expect(result.data).toEqual({ id: '900719925474099312345', activeSessions: 0 });
 });
 it('round-trips config numeric values through the maintained lossless parser and serializer', async () => {
