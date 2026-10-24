@@ -8,7 +8,7 @@ export interface Attempt {
 }
 export interface Task {
   taskId: string; clientRequestId: string; rowVersion: Count; filename: string; objectFilename: string; sizeBytes: Count;
-  captionPreview: string; status: string; statusLabel: string; stage: string; stageLabel: string;
+  caption?: string; captionPreview: string; status: string; statusLabel: string; stage: string; stageLabel: string;
   queuedAt: string | null; queuePosition: Count | null; operationalStage: string; stageStartedAt: string | null;
   operationalStageStartedAt: string | null; cleanupNextAttemptAt: string | null; latestArtemisSessionId: string | null;
   attemptCount: Count; publishAttemptCount: Count; verifyAttemptCount: Count; lastErrorCode: string | null;
@@ -51,7 +51,7 @@ function attempt(value: unknown): Attempt {
 export function decodeTask(value: unknown): Task {
   const row = object(value);
   return { taskId: uuid(row.taskId), clientRequestId: uuid(row.clientRequestId), rowVersion: count(row.rowVersion), filename: text(row.filename), objectFilename: text(row.objectFilename), sizeBytes: count(row.sizeBytes),
-    captionPreview: text(row.captionPreview), status: text(row.status), statusLabel: text(row.statusLabel), stage: text(row.stage), stageLabel: text(row.stageLabel),
+    ...(row.caption !== undefined ? { caption: text(row.caption) } : {}), captionPreview: text(row.captionPreview), status: text(row.status), statusLabel: text(row.statusLabel), stage: text(row.stage), stageLabel: text(row.stageLabel),
     queuedAt: nullableText(row.queuedAt), queuePosition: row.queuePosition === null ? null : count(row.queuePosition), operationalStage: text(row.operationalStage), stageStartedAt: nullableText(row.stageStartedAt),
     operationalStageStartedAt: nullableText(row.operationalStageStartedAt), cleanupNextAttemptAt: nullableText(row.cleanupNextAttemptAt), latestArtemisSessionId: row.latestArtemisSessionId === null ? null : uuid(row.latestArtemisSessionId),
     attemptCount: count(row.attemptCount), publishAttemptCount: count(row.publishAttemptCount), verifyAttemptCount: count(row.verifyAttemptCount), lastErrorCode: nullableText(row.lastErrorCode), lastErrorMessage: nullableText(row.lastErrorMessage),
@@ -78,4 +78,20 @@ export function decodeConfig(value: unknown): Config {
     target: target(row.target), worker: { status: text(worker.status), lastHeartbeatAt: nullableText(worker.lastHeartbeatAt) }, device: { status: text(device.status), message: text(device.message) },
     artemis: { profile: text(artemis.profile), verificationLevel: text(artemis.verificationLevel) }, workerTiming: { pollSeconds: positive(timing.pollSeconds), leaseSeconds: positive(timing.leaseSeconds), heartbeatSeconds: positive(timing.heartbeatSeconds) },
     canWrite: bool(row.canWrite), writeBlockReason: nullableText(row.writeBlockReason), serverTime: text(row.serverTime) };
+}
+
+export interface UploadTicket { task: Task; idempotentReplay: boolean; upload: { url: string; expiresAt: string | null } | null }
+export function decodeTicket(value: unknown): UploadTicket {
+  const row = object(value); const upload = object(row.upload); const headers = object(upload.headers);
+  const task = decodeTask(row); const replay = row.idempotentReplay === undefined ? false : bool(row.idempotentReplay);
+  const url = text(upload.url);
+  if (replay && task.stage !== 'awaiting_upload' && url === '') return { task, idempotentReplay: replay, upload: null };
+  const parsed = new URL(url);
+  if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password || upload.method !== 'PUT'
+      || Object.keys(headers).length !== 1 || headers['Content-Type'] !== 'video/mp4') return invalid();
+  return { task, idempotentReplay: replay, upload: { url, expiresAt: nullableText(upload.expiresAt) } };
+}
+export interface Device { serial: string; serialMasked: string; model: string; product: string; state: string; isBusy: boolean; isEmulator: boolean }
+export function decodeDevices(value: unknown): Device[] {
+  const row = object(value); return array(row.devices, (v) => { const d = object(v); return { serial: text(d.serial), serialMasked: text(d.serialMasked), model: text(d.model), product: text(d.product), state: text(d.state), isBusy: bool(d.isBusy), isEmulator: bool(d.isEmulator) }; });
 }

@@ -4,6 +4,9 @@ import type { PageProps } from '../../shared/contracts';
 import { decodeConfig, decodeCurrent, decodeDetail, decodeList, type Task } from './contracts';
 import { AttemptFacts, AvailableActions, DetailFacts, Facts, Identity, TargetFacts } from './TaskFacts';
 import { useVideoRead } from './useVideoRead';
+import { useVideoCommand } from './useVideoCommand';
+import UploadWorkbench from './UploadWorkbench';
+import TaskOperations, { ActionButtons, type Operation } from './TaskOperations';
 
 const api = '/v2/video-publish';
 const refreshKey = 'tts-erp.video-publish.refresh-preference';
@@ -16,8 +19,18 @@ function PollFacts({ poll }: { poll: { running: boolean; cleaning: boolean; queu
 }
 function unique(tasks: Task[]): Task[] { const seen = new Set<string>(); return tasks.filter((task) => { if (seen.has(task.taskId)) return false; seen.add(task.taskId); return true; }); }
 
-export default function VideoPublish({ bootstrap }: PageProps) {
+function VideoPublishContent({ bootstrap }: PageProps) {
   const [revision, setRevision] = useState(0);
+  const command = useVideoCommand(bootstrap.rootPath);
+  const canTaskWrite = bootstrap.roleCapabilities?.readwrite === true;
+  const [resume, setResume] = useState<Task>();
+  const [operation, setOperation] = useState<Operation>();
+  function actOn(task: Task, action: string) {
+    if (command.blocked || !canTaskWrite) return;
+    if (operation) { setNotice('请先完成或关闭当前操作面板；原目标和输入不会被新选择覆盖。'); return; }
+    if (action === 'continue_upload') { setResume(task); setSelected(null); return; }
+    setSelected(null); setOperation({ task, action, root: bootstrap.rootPath });
+  }
   const [auto, setAuto] = useState(() => { try { return localStorage.getItem(refreshKey) !== 'off'; } catch { return true; } });
   const [visible, setVisible] = useState(() => !document.hidden);
   const [filter, setFilter] = useState('');
@@ -44,7 +57,7 @@ export default function VideoPublish({ bootstrap }: PageProps) {
     setAppendPath(null);
   }, [more.data, appendPath, filter]);
   // A root change must not carry any previous deployment's appended records or selection.
-  useEffect(() => { setExtra({ filter: '', items: [], nextCursor: null, appended: false }); setAppendPath(null); setSelected(null); }, [bootstrap.rootPath]);
+  useEffect(() => { setExtra({ filter: '', items: [], nextCursor: null, appended: false }); setAppendPath(null); setSelected(null); setResume(undefined); setOperation(undefined); }, [bootstrap.rootPath]);
   const rows = history.data ? unique([...history.data.items, ...(extra.filter === filter ? extra.items : [])]) : [];
   const nextCursor = extra.filter === filter && extra.appended ? extra.nextCursor : history.data?.nextCursor;
   const blocked = config.blocked || current.blocked || history.blocked || more.blocked || detail.blocked;
@@ -60,20 +73,25 @@ export default function VideoPublish({ bootstrap }: PageProps) {
   }
   function toggleAuto(value: string) { const enabled = value === 'on'; setAuto(enabled); try { localStorage.setItem(refreshKey, enabled ? 'on' : 'off'); } catch { /* Preference persistence is optional; no task data is stored. */ } }
   return <div className="min-w-0 space-y-6">
-    <p>迁移阶段：当前提供任务读取与核对。新建、上传、确认、重试、取消、设置及诊断交互尚未接入此 React 内容；不是权限限制。</p>
+    {command.failure && <Alert status="danger"><Alert.Content><Alert.Title>操作未完成</Alert.Title><Alert.Description>{command.failure.message}</Alert.Description></Alert.Content></Alert>}
+    {command.cooldown && <p role="status">请等待完整 Retry-After；读取、编辑或刷新不会缩短写入冷却，期满也不会自动重试。</p>}
+    {command.needsCheck && <p role="status">原操作结果待核对。先使用对应操作的「查询当前事实」或「核对上传任务」，再由你明确决定是否重试。</p>}
+    <UploadWorkbench key={bootstrap.rootPath} root={bootstrap.rootPath} config={config.data} canTaskWrite={canTaskWrite} command={command} resume={resume} onResumeAccepted={() => setResume(undefined)} onChanged={() => setRevision((value) => value + 1)} />
+    {operation?.root === bootstrap.rootPath && <TaskOperations operation={operation} command={command} canWrite={canTaskWrite} onClose={() => setOperation(undefined)} onChanged={() => setRevision((value) => value + 1)} onResume={(task) => { setResume(task); }} />}
     <div className="flex flex-wrap items-center gap-3"><label className="flex flex-wrap items-center gap-2">自动刷新<select aria-label="自动刷新" value={auto ? 'on' : 'off'} onChange={(event) => toggleAuto(event.target.value)}><option value="on">开（每 5 秒）</option><option value="off">关</option></select></label>
       <Button variant="secondary" isDisabled={blocked} onPress={() => setRevision((value) => value + 1)}>立即刷新</Button>
       <span>上一响应结束后计时；隐藏页面暂停。</span>
     </div>
     {blocked && <p role="status">读取冷却中；等待完整 Retry-After 后可明确刷新，不会自动重试。</p>}
     {notice && <p role="status">{notice}</p>}
+    {!canTaskWrite && <p>任务写操作需要服务端提供的 readwrite 能力提示；仍可读取详情，接口会再次验证权限。创建条件与任务允许操作分别由服务端判定。</p>}
     <section aria-label="发布配置" className="space-y-3"><h2 className="text-xl font-semibold">发布配置与服务端能力</h2>
       {config.loading && !config.data && <p role="status">加载配置中…</p>}<ReadError name="配置" error={config.error} />
       {config.data && <><TargetFacts target={config.data.target} /><Facts items={[
         ['允许内容类型', config.data.acceptedContentTypes.join('、')], ['允许扩展名', config.data.acceptedExtensions.join('、')], ['视频上限（字节）', config.data.maxVideoBytes], ['文案上限（字符）', config.data.maxCaptionCharacters], ['上传票据 TTL（秒）', config.data.uploadUrlTtlSeconds],
         ['Worker 状态', config.data.worker.status], ['最近心跳', config.data.worker.lastHeartbeatAt], ['设备状态', config.data.device.status], ['设备说明', config.data.device.message],
         ['Artemis profile', config.data.artemis.profile], ['核验等级', config.data.artemis.verificationLevel], ['Worker poll（秒）', config.data.workerTiming.pollSeconds], ['Worker lease（秒）', config.data.workerTiming.leaseSeconds], ['Worker heartbeat（秒）', config.data.workerTiming.heartbeatSeconds],
-        ['服务端 canWrite', config.data.canWrite], ['写入阻止原因', config.data.writeBlockReason], ['配置服务器时间', config.data.serverTime],
+        ['创建条件 canWrite', config.data.canWrite], ['创建阻止原因', config.data.writeBlockReason], ['配置服务器时间', config.data.serverTime],
       ]} /><p>设备与 Worker 状态、canWrite、队列位置、允许操作均由服务端决定；不由浏览器推算。</p></>}
     </section>
     <section aria-label="当前发布轨道" className="space-y-3"><h2 className="text-xl font-semibold">当前发布轨道</h2>
@@ -86,7 +104,7 @@ export default function VideoPublish({ bootstrap }: PageProps) {
           ]} /><ol className="list-inside list-decimal"><li>创建 {task.createdAt}</li><li>开始 {task.startedAt ?? '—'}</li><li aria-current="step">{task.stageLabel} · {task.operationalStage}</li></ol>
           <Identity value={task.latestArtemisSessionId} label={`轨道 ${task.taskId} Artemis ID`} copy={(value) => { void copy(value); }} />
           {task.currentAttempt ? <AttemptFacts attempt={task.currentAttempt} label={`轨道 ${task.taskId} 当前执行`} copy={(value) => { void copy(value); }} /> : <p>尚未创建执行记录。</p>}
-          <AvailableActions task={task} />{task.allowedActions.includes('view') && <Button variant="secondary" aria-label={`轨道详情 ${task.taskId}`} onPress={() => setSelected(task.taskId)}>查看详情</Button>}
+          <AvailableActions task={task} /><ActionButtons task={task} disabled={command.blocked || !canTaskWrite} onAction={actOn} />{task.allowedActions.includes('view') && <Button variant="secondary" aria-label={`轨道详情 ${task.taskId}`} onPress={() => setSelected(task.taskId)}>查看详情</Button>}
         </article>)}
       </>}
     </section>
@@ -104,7 +122,7 @@ export default function VideoPublish({ bootstrap }: PageProps) {
           <Table.Cell>{task.publishAttemptCount} / {task.verifyAttemptCount} / {task.attemptCount}</Table.Cell>
           <Table.Cell focusMode="child"><Identity value={task.latestArtemisSessionId} label={`任务 ${task.taskId} Artemis ID`} copy={(value) => { void copy(value); }} /></Table.Cell>
           <Table.Cell><p>{task.createdBy}</p><p>{task.createdAt}</p><p>更新 {task.updatedAt}</p></Table.Cell>
-          <Table.Cell focusMode="child"><div className="space-y-2"><AvailableActions task={task} />{task.allowedActions.includes('view') && <Button size="sm" variant="secondary" aria-label={`查看详情 ${task.taskId}`} onPress={() => setSelected(task.taskId)}>查看详情</Button>}</div></Table.Cell>
+          <Table.Cell focusMode="child"><div className="space-y-2"><AvailableActions task={task} /><ActionButtons task={task} disabled={command.blocked || !canTaskWrite} onAction={actOn} />{task.allowedActions.includes('view') && <Button size="sm" variant="secondary" aria-label={`查看详情 ${task.taskId}`} onPress={() => setSelected(task.taskId)}>查看详情</Button>}</div></Table.Cell>
         </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>
         {nextCursor && <Button variant="secondary" isDisabled={more.loading || blocked} onPress={loadMore}>加载更多</Button>}
       </>}
@@ -115,7 +133,11 @@ export default function VideoPublish({ bootstrap }: PageProps) {
         {detail.loading && !detail.data && <p role="status">加载任务详情中…</p>}<ReadError name="任务详情" error={detail.error} />
         <Button variant="secondary" isDisabled={detail.blocked} onPress={() => setRevision((value) => value + 1)}>刷新当前事实</Button>
         {detail.data && detail.data.taskId !== selected && <p role="alert">任务身份不匹配，请关闭后重试。</p>}
-        {detail.data && detail.data.taskId === selected && <DetailFacts task={detail.data} copy={(value) => { void copy(value); }} />}
+        {detail.data && detail.data.taskId === selected && <><DetailFacts task={detail.data} copy={(value) => { void copy(value); }} /><ActionButtons task={detail.data} disabled={command.blocked || !canTaskWrite} onAction={actOn} /></>}
       </Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
   </div>;
+}
+
+export default function VideoPublish(props: PageProps) {
+  return <VideoPublishContent key={props.bootstrap.rootPath} {...props} />;
 }
