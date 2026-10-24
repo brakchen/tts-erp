@@ -33,6 +33,55 @@ const writes = (fetcher: ReturnType<typeof api>) => fetcher.mock.calls.filter(([
 async function select() { fireEvent.click(await screen.findByRole('button', { name: '打开 test.flags' })); await screen.findByText('草稿版本 3'); }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('runtime-configs React content', () => {
+  it('blocks manual A history refresh during deferred B selection and rolls back only B history', async () => {
+    let releaseB!: (response: Response) => void; let releaseA: ((response: Response) => void) | undefined; let aReads = 0;
+    const revision = (version: number, comment: string) => ({ version, payload: {}, comment, createdBy: 'TEST', createdAt: 'TEST' });
+    const fetcher = api(async () => json({ configKey: 'test.other', publishedVersion: 3, rolledBackFrom: 2 }), (url) => {
+      if (url.endsWith('/items/test.other')) return new Promise<Response>((resolve) => { releaseB = resolve; });
+      if (url.endsWith('/items/test.flags/revisions')) return ++aReads === 1 ? json({ items: [revision(7, 'TEST A history')] }) : new Promise<Response>((resolve) => { releaseA = resolve; });
+      if (url.endsWith('/items/test.other/revisions')) return json({ items: [revision(2, 'TEST B history')] });
+      if (url.endsWith('/items/test.flags')) return json(detail);
+      return json({ items: url.includes('/secrets') ? [] : [item, { ...item, configKey: 'test.other' }] });
+    });
+    await mount(); await select(); await screen.findByText('TEST A history'); fireEvent.click(screen.getByRole('button', { name: '打开 test.other' }));
+    const refresh = screen.getByRole('button', { name: '刷新发布历史' }); expect(refresh).toBeDisabled(); fireEvent.click(refresh); expect(aReads).toBe(1);
+    await act(async () => { releaseB(json({ ...detail, configKey: 'test.other', draftVersion: 9 })); }); await screen.findByText('TEST B history');
+    if (releaseA) await act(async () => { releaseA!(json({ items: [revision(7, 'TEST A stale')] })); });
+    expect(screen.queryByText('TEST A stale')).toBeNull(); expect(screen.queryByRole('button', { name: '恢复 v7 为新版本' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '恢复 v2 为新版本' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认执行' })); await screen.findByText('历史恢复已确认');
+    expect(writes(fetcher)[0][0]).toBe('/tts/v2/config/runtime/items/test.other/rollback'); expect(JSON.parse(String(writes(fetcher)[0][1]?.body))).toEqual({ expectedDraftVersion: 9, targetVersion: 2, comment: null });
+  });
+  it('protects comment-only edits from selection until an explicit discard reload', async () => {
+    const fetcher = api(async () => json(detail), (url) => url.endsWith('/items/test.flags') ? json(detail) : url.endsWith('/items/test.other') ? json({ ...detail, configKey: 'test.other', displayName: 'TEST B' }) : json({ items: url.includes('/revisions') || url.includes('/secrets') ? [] : [item, { ...item, configKey: 'test.other' }] }));
+    await mount(); await select(); fireEvent.change(screen.getByLabelText('发布说明'), { target: { value: 'TEST comment only' } }); fireEvent.click(screen.getByRole('button', { name: '打开 test.other' }));
+    expect(screen.getByLabelText('发布说明')).toHaveValue('TEST comment only'); expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/items/test.other'))).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: '重新载入所选配置（放弃本地编辑）' })); await waitFor(() => expect(screen.getByLabelText('发布说明')).toHaveValue(''));
+    await waitFor(() => expect(screen.getByRole('button', { name: '打开 test.other' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: '打开 test.other' })); await screen.findByText('TEST B / test.other');
+  });
+  it('keeps an unsent publication comment through same-item draft save and resets it only after explicit publish', async () => {
+    const fetcher = api(async (url) => url.endsWith('/draft') ? json({ ...detail, draftVersion: 4 }) : json({ configKey: 'test.flags', publishedVersion: 2 }));
+    await mount(); await select(); fireEvent.change(screen.getByLabelText('发布说明'), { target: { value: 'TEST publish later' } }); fireEvent.change(screen.getByLabelText('草稿配置 JSON 文本'), { target: { value: '{"TEST_edit":true}' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' })); await screen.findByText('草稿保存已确认'); expect(screen.getByLabelText('发布说明')).toHaveValue('TEST publish later');
+    expect(JSON.parse(String(writes(fetcher)[0][1]?.body))).not.toHaveProperty('comment');
+    fireEvent.click(screen.getByRole('button', { name: '发布新版本' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认执行' })); await screen.findByText('发布已确认');
+    expect(JSON.parse(String(writes(fetcher)[1][1]?.body))).toEqual({ expectedDraftVersion: 4, comment: 'TEST publish later' }); await waitFor(() => expect(screen.getByLabelText('发布说明')).toHaveValue(''));
+  });
+  it('keeps archive scope locked until both list reads settle, then fetches both lists for that exact scope', async () => {
+    let releaseSecrets!: (response: Response) => void;
+    const fetcher = api(async () => json({}, 500), (url) => url.endsWith('/secrets') ? new Promise<Response>((resolve) => { releaseSecrets = resolve; }) : json({ items: url.includes('/secrets') ? [{ ...secret, retiredAt: 'TEST retired' }] : [item] }));
+    await mount(); await screen.findByText('TEST 配置'); const toggle = screen.getByRole('checkbox', { name: '包含已归档配置与凭证' });
+    expect(toggle).toBeDisabled(); expect(screen.getByRole('button', { name: '刷新配置列表' })).toBeDisabled();
+    await act(async () => { releaseSecrets(json({ items: [secret] })); }); await waitFor(() => expect(toggle).toBeEnabled()); fireEvent.click(toggle);
+    await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => url.endsWith('?includeRetired=true'))).toHaveLength(2));
+    expect(toggle).toBeChecked(); expect(await screen.findByText('TEST retired')).toBeVisible();
+  });
+  it.each(['success', 'error'])('ignores late initial secret metadata %s after post-save refresh succeeds', async (late) => {
+    let releaseOld!: (response: Response) => void; let reads = 0;
+    api(async () => json({ name: secret.name, ref: secret.ref, fingerprint: 'TEST newest' }), (url) => url.includes('/secrets') ? ++reads === 1 ? new Promise<Response>((resolve) => { releaseOld = resolve; }) : json({ items: [{ ...secret, fingerprint: 'TEST newest' }] }) : json({ items: [item] }));
+    await mount(); await screen.findByText('TEST 配置'); fireEvent.change(screen.getByLabelText('凭证名称'), { target: { value: 'test_token' } }); fireEvent.change(screen.getByLabelText('凭证明文'), { target: { value: 'TEST_secret' } }); fireEvent.submit(screen.getByRole('form', { name: '凭证写入' }));
+    await screen.findByText('TEST newest'); await act(async () => { releaseOld(late === 'success' ? json({ items: [{ ...secret, fingerprint: 'TEST stale' }] }) : json({}, 503)); });
+    expect(screen.queryByText('TEST stale')).toBeNull(); expect(screen.queryByText(/读取失败/)).toBeNull(); expect(screen.getByText('TEST newest')).toBeVisible();
+  });
   it('checks create-only current absence after an uncertain POST without replay or discarding the create draft', async () => {
     const fetcher = api(async () => json({}, 500), (url) => url.endsWith('/items/test.new') ? json({ detail: 'runtime config not found' }, 404) : json({ items: [] }));
     const view = await mount(); fireEvent.change(await screen.findByLabelText('新配置键'), { target: { value: 'test.new' } }); fireEvent.change(screen.getByLabelText('新配置名称'), { target: { value: 'TEST new' } });

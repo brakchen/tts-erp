@@ -24,9 +24,12 @@ export default function RuntimeConfigs({ bootstrap }: PageProps) {
   const [selectedError, setSelectedError] = useState(''); const [selecting, setSelecting] = useState(false);
   const [payload, setPayload] = useState(''); const [savedPayload, setSavedPayload] = useState(''); const [comment, setComment] = useState('');
   const [includeRetired, setIncludeRetired] = useState(false);
+  const [listsLoading, setListsLoading] = useState(true);
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [snapshotNotice, setSnapshotNotice] = useState('');
   const selectedRequest = useRef(0);
+  const selectedKey = useRef<string | undefined>(undefined);
+  const secretRequest = useRef(0);
   const snapshot = useRef<{ etag?: string; items: Record<string, Published> } | undefined>(undefined);
   const alive = useRef(true);
   const listsFlight = useRef(false); const selectFlight = useRef(false); const previewFlight = useRef(false);
@@ -37,19 +40,21 @@ export default function RuntimeConfigs({ bootstrap }: PageProps) {
   useEffect(() => { alive.current = true; return () => { alive.current = false; selectedRequest.current++; }; }, []);
   async function loadLists(retired = includeRetired) {
     if (!commands.canRead() || listsFlight.current) return;
-    listsFlight.current = true;
+    listsFlight.current = true; setListsLoading(true);
     setItems((old) => ({ ...old, loading: true, error: undefined }));
     const suffix = writable && retired ? '?includeRetired=true' : '';
     const list = commands.read<unknown>(`/items${suffix}`, {}, parseRuntime).then(({ data }) => {
       const rows = decodeList(data, decodeItem); if (alive.current) setItems({ data: rows, loading: false });
     }).catch((error: unknown) => { if (alive.current) setItems((old) => ({ ...old, loading: false, error: errorMessage(error) })); });
     const secretList = writable ? loadSecrets(suffix) : Promise.resolve();
-    await Promise.all([list, secretList]); listsFlight.current = false;
+    try { await Promise.all([list, secretList]); }
+    finally { listsFlight.current = false; if (alive.current) setListsLoading(false); }
   }
   async function loadSecrets(suffix = includeRetired ? '?includeRetired=true' : '') {
+    const request = ++secretRequest.current;
     setSecrets((old) => ({ ...old, loading: true, error: undefined }));
-    try { const { data } = await commands.read<unknown>(`/secrets${suffix}`, {}, parseRuntime); const rows = decodeList(data, decodeSecret); if (alive.current) setSecrets({ data: rows, loading: false }); }
-    catch (error: unknown) { if (alive.current) setSecrets((old) => ({ ...old, loading: false, error: errorMessage(error) })); }
+    try { const { data } = await commands.read<unknown>(`/secrets${suffix}`, {}, parseRuntime); const rows = decodeList(data, decodeSecret); if (alive.current && request === secretRequest.current) setSecrets({ data: rows, loading: false }); }
+    catch (error: unknown) { if (alive.current && request === secretRequest.current) setSecrets((old) => ({ ...old, loading: false, error: errorMessage(error) })); }
   }
   useEffect(() => { void loadLists(false); /* bootstrap lifetime is owned by the shared shell */ }, [bootstrap.rootPath, writable]);
   async function readSnapshot() {
@@ -62,18 +67,21 @@ export default function RuntimeConfigs({ bootstrap }: PageProps) {
       throw error;
     }
   }
-  function applyDetail(row: Detail) {
+  function applyDetail(row: Detail, preserveComment = false) {
+    selectedKey.current = row.configKey;
     setDetail(row); const text = stringifyRuntime(row.draftPayload ?? row.publishedPayload ?? {}, 2);
-    setPayload(text); setSavedPayload(text); setPublished(undefined); setComment('');
+    setPayload(text); setSavedPayload(text); setPublished(undefined); if (!preserveComment) setComment('');
   }
   async function loadHistory(key: string, request: number) {
+    const current = () => alive.current && request === selectedRequest.current && key === selectedKey.current;
+    if (!current()) return;
     setHistory({ loading: true });
-    try { const { data } = await commands.read<unknown>(`/items/${encodeURIComponent(key)}/revisions`, {}, parseRuntime); const rows = decodeList(data, decodeRevision); if (alive.current && request === selectedRequest.current) setHistory({ data: rows, loading: false }); }
-    catch (error: unknown) { if (alive.current && request === selectedRequest.current) setHistory({ loading: false, error: errorMessage(error) }); }
+    try { const { data } = await commands.read<unknown>(`/items/${encodeURIComponent(key)}/revisions`, {}, parseRuntime); const rows = decodeList(data, decodeRevision); if (current()) setHistory({ data: rows, loading: false }); }
+    catch (error: unknown) { if (current()) setHistory({ loading: false, error: errorMessage(error) }); }
   }
   async function openItem(row: Item, overwrite = false) {
     if (!commands.canRead() || selectFlight.current || commands.pending) return;
-    if (dirty && detail && !overwrite) { commands.invalid('当前草稿尚未保存。请先保存，或明确重新载入所选配置以放弃本地编辑。'); return; }
+    if ((dirty || comment.length > 0) && detail && !overwrite) { commands.invalid('当前草稿或发布说明尚未提交。请先保存草稿并发布，或明确重新载入所选配置以放弃本地编辑。'); return; }
     const request = ++selectedRequest.current; selectFlight.current = true; setSelecting(true); setSelectedError(''); setSnapshotNotice('');
     try {
       if (writable) {
@@ -94,7 +102,7 @@ export default function RuntimeConfigs({ bootstrap }: PageProps) {
     if (!detail || disabled || detail.retiredAt) return;
     let parsed: Record<string, unknown>; try { parsed = parseObject(payload); } catch { commands.invalid('草稿配置必须是有效 JSON 对象'); return; }
     const result = await commands.run({ kind: 'draft', key: detail.configKey }, `/items/${encodeURIComponent(detail.configKey)}/draft`, 'PUT', stringifyRuntime({ expectedDraftVersion: detail.draftVersion, payload: parsed }), '草稿保存已确认');
-    if (result && result !== true) { applyDetail(result); void loadLists(); }
+    if (result && result !== true) { applyDetail(result, true); void loadLists(); }
   }
   function confirmItem(kind: 'publish' | 'rollback' | 'retire' | 'restore', target?: number) {
     if (!detail || disabled || (detail.retiredAt && kind !== 'restore')) return;
@@ -124,8 +132,8 @@ export default function RuntimeConfigs({ bootstrap }: PageProps) {
   return <div className="min-w-0 space-y-6">
     <p>先保存草稿，再发布不可变版本。财务和业务规则由服务器校验；凭证仅以引用出现。</p>
     {!writable && <p>当前只读；只能查看已发布快照，不能访问草稿、Schema 或凭证管理。</p>}
-    <div className="flex flex-wrap items-center gap-3"><Button variant="secondary" isDisabled={commands.blocked || items.loading} onPress={() => { void loadLists(); }}>刷新配置列表</Button>
-      {writable && <label><input type="checkbox" checked={includeRetired} disabled={commands.blocked || items.loading} onChange={(e) => { setIncludeRetired(e.target.checked); void loadLists(e.target.checked); }} /> 包含已归档配置与凭证</label>}</div>
+    <div className="flex flex-wrap items-center gap-3"><Button variant="secondary" isDisabled={commands.blocked || listsLoading} onPress={() => { void loadLists(); }}>刷新配置列表</Button>
+      {writable && <label><input type="checkbox" checked={includeRetired} disabled={commands.blocked || listsLoading} onChange={(e) => { if (!commands.canRead() || listsFlight.current) return; setIncludeRetired(e.target.checked); void loadLists(e.target.checked); }} /> 包含已归档配置与凭证</label>}</div>
     {commands.pending && <p role="status">提交中，请等待确认，不要重复操作…</p>}
     {commands.blocked && <p role="status">服务端冷却中；读写都须等待完整 Retry-After，不会自动重试。</p>}
     {commands.notice && <p role="status">{commands.notice}</p>}
@@ -155,7 +163,7 @@ export default function RuntimeConfigs({ bootstrap }: PageProps) {
       <TextField value={comment} isDisabled={commands.pending || selecting} isInvalid={Boolean(errors.comment)} onChange={(value) => { if (!selectFlight.current) { commands.edited(); setComment(value); } }}><Label>发布说明</Label><Input maxLength={2000} /></TextField>{errors.comment && <p role="alert">{errors.comment}</p>}
       <div className="flex flex-wrap gap-3"><Button isDisabled={disabled || Boolean(detail.retiredAt)} onPress={() => { void saveDraft(); }}>保存草稿</Button><Button isDisabled={disabled || dirty || detail.draftPayload === null || Boolean(detail.retiredAt)} onPress={() => confirmItem('publish')}>发布新版本</Button><Button variant="secondary" isDisabled={disabled} onPress={() => confirmItem(detail.retiredAt ? 'restore' : 'retire')}>{detail.retiredAt ? '恢复配置' : '归档配置'}</Button></div>
       {dirty && <p>存在未保存编辑；发布按钮仅在草稿保存后开放。</p>}
-      <section aria-label="发布历史" className="space-y-3"><h3 className="font-semibold">发布历史</h3><p>历史恢复会直接发布为更高新版本。</p><Button variant="secondary" isDisabled={commands.blocked || history.loading} onPress={() => { void loadHistory(detail.configKey, selectedRequest.current); }}>刷新发布历史</Button>
+      <section aria-label="发布历史" className="space-y-3"><h3 className="font-semibold">发布历史</h3><p>历史恢复会直接发布为更高新版本。</p><Button variant="secondary" isDisabled={commands.blocked || history.loading || selecting} onPress={() => { if (!selectFlight.current) void loadHistory(detail.configKey, selectedRequest.current); }}>刷新发布历史</Button>
         {history.loading && <p role="status">读取历史…</p>}{history.error && <p role="alert">{history.error}</p>}
         {history.data && <Table><Table.ScrollContainer role="region" aria-label="发布历史表格"><Table.Content aria-label="发布历史" className="min-w-[44rem]"><Table.Header><Table.Column isRowHeader>版本</Table.Column><Table.Column>说明</Table.Column><Table.Column>发布者</Table.Column><Table.Column>时间</Table.Column><Table.Column>内容与操作</Table.Column></Table.Header><Table.Body renderEmptyState={() => '尚无发布历史'}>{history.data.map((row) => <Table.Row key={row.version} id={row.version}><Table.Cell>v{row.version}</Table.Cell><Table.Cell><span className="block w-48 break-all">{row.comment ?? '—'}</span></Table.Cell><Table.Cell>{row.createdBy}</Table.Cell><Table.Cell>{row.createdAt}</Table.Cell><Table.Cell focusMode="child"><details><summary>查看 v{row.version} 内容</summary><JsonEditor label={`历史 v${row.version}`} value={stringifyRuntime(row.payload, 2)} readOnly /></details><Button size="sm" isDisabled={disabled || Boolean(detail.retiredAt) || dirty} onPress={() => confirmItem('rollback', row.version)}>恢复 v{row.version} 为新版本</Button></Table.Cell></Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>}
       </section>
