@@ -51,13 +51,18 @@ def periods(
 ) -> tuple[tuple[date, date], tuple[date, date]]:
     if window_days not in (3, 7):
         raise ComparisonInputError("window_days must be 3 or 7")
-    return (
-        (
-            anchor - timedelta(days=2 * window_days - 1),
-            anchor - timedelta(days=window_days),
-        ),
-        (anchor - timedelta(days=window_days - 1), anchor),
-    )
+    try:
+        return (
+            (
+                anchor - timedelta(days=2 * window_days - 1),
+                anchor - timedelta(days=window_days),
+            ),
+            (anchor - timedelta(days=window_days - 1), anchor),
+        )
+    except OverflowError as exc:
+        raise ComparisonInputError(
+            "anchor_date cannot represent the complete comparison span"
+        ) from exc
 
 
 def no_order_ad_spend(orders: int | None, spend: Decimal | None) -> bool | None:
@@ -203,6 +208,9 @@ def read_comparison(
                 "anchor_date exceeds latestAvailableDate",
                 latest_date=availability.latest_date,
             )
+        # Availability always discloses a fixed 14-day envelope, including
+        # when the requested comparison is only 3 days.
+        periods(anchor, 7)
         previous, current = periods(anchor, window_days)
         products = list(
             session.scalars(

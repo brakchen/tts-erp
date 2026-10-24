@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import cast, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
@@ -40,25 +41,6 @@ def days_between(start: date, end: date) -> set[date]:
     return {start + timedelta(days=n) for n in range((end - start).days + 1)}
 
 
-def _valid_empty_observation(row: AdRawLog) -> bool:
-    # The archive stores dump.response (status/body), not just the upstream body.
-    response = row.response_body
-    if not isinstance(response, dict) or not isinstance(response.get("body"), dict):
-        return False
-    body = response["body"]
-    data = body.get("data")
-    return (
-        row.response_status is not None
-        and 200 <= row.response_status < 300
-        and body.get("code") == 0
-        and isinstance(data, dict)
-        and isinstance(data.get("table"), list)
-        and data["table"] == []
-        and row.campaign_id is not None
-        and row.day is not None
-    )
-
-
 @dataclass(frozen=True)
 class Availability:
     latest_date: date
@@ -74,7 +56,7 @@ class Availability:
         # after a campaign stopped or before it was first observed.
         for observed_days in self.observations.values():
             first, last = min(observed_days), max(observed_days)
-            gaps |= (requested & days_between(first, last)) - observed_days
+            gaps |= {day for day in requested if first <= day <= last} - observed_days
         return gaps
 
     def coverage(self, anchor: date) -> dict[str, Any]:
@@ -123,24 +105,23 @@ def resolve_availability(
         "广告覆盖仅限已观察 seller/advertiser/campaign/day；不证明活动发现或分页完整，活动首末观察之外可能缺数据。",
     ]
     for name in SOURCE_JOBS:
-        runs = session.scalars(
+        source_scope = (
+            SyncJob.job_name == name,
+            SyncJob.extra["shop_id"].astext == shop.shop_id,
+        )
+        ordering = (SyncJob.started_at.desc(), SyncJob.id.desc())
+        valid = session.scalar(
             select(SyncJob)
             .where(
-                SyncJob.job_name == name,
-                SyncJob.extra["shop_id"].astext == shop.shop_id,
+                *source_scope,
+                SyncJob.status == "succeeded",
+                SyncJob.finished_at.is_not(None),
+                SyncJob.rows_failed == 0,
+                SyncJob.started_at <= SyncJob.finished_at,
+                SyncJob.finished_at <= now,
             )
-            .order_by(SyncJob.started_at.desc(), SyncJob.id.desc())
-        ).all()
-        valid = next(
-            (
-                run
-                for run in runs
-                if run.status == "succeeded"
-                and run.finished_at is not None
-                and run.rows_failed == 0
-                and run.started_at <= run.finished_at <= now
-            ),
-            None,
+            .order_by(*ordering)
+            .limit(1)
         )
         if valid is None or valid.finished_at is None:
             raise ComparisonUnavailable(
@@ -158,7 +139,10 @@ def resolve_availability(
             "operationalCutoff": operational.isoformat(),
             "reportedFailures": valid.rows_failed,
         }
-        if any(run.started_at > valid.started_at for run in runs):
+        latest_started = session.scalar(
+            select(SyncJob.started_at).where(*source_scope).order_by(*ordering).limit(1)
+        )
+        if latest_started is not None and latest_started > valid.started_at:
             warnings.append(f"{name} 有较晚未成功/未完成采集，保留较早可用数据。")
     observations: dict[tuple[str, str], set[date]] = defaultdict(set)
     daily = session.execute(
@@ -173,21 +157,36 @@ def resolve_availability(
             AdDaily.day <= cutoff,
         )
         .distinct()
-    ).all()
+        .execution_options(yield_per=500)
+    )
     for advertiser, campaign, day in daily:
         observations[(advertiser, campaign)].add(day)
-    raw_rows = session.scalars(
-        select(AdRawLog).where(
+    # The archive stores dump.response (status/body). Validate empty success in
+    # SQL and stream only distinct scope/day keys, never whole response blobs.
+    # Keep all historical days: truncating to a guessed horizon would lose old
+    # readable results and campaign-lifespan evidence.
+    body = AdRawLog.response_body["body"]
+    raw_rows = session.execute(
+        select(AdRawLog.advertiser_id, AdRawLog.campaign_id, AdRawLog.day)
+        .where(
             AdRawLog.seller_id == shop.shop_id,
             AdRawLog.endpoint == AD_ENDPOINT,
             AdRawLog.kind == "daily",
             AdRawLog.day <= cutoff,
+            AdRawLog.campaign_id.is_not(None),
+            AdRawLog.response_status >= 200,
+            AdRawLog.response_status < 300,
+            func.jsonb_typeof(body) == "object",
+            func.jsonb_typeof(body["data"]) == "object",
+            body["code"] == cast(literal("0"), JSONB),
+            body["data"]["table"] == cast(literal("[]"), JSONB),
         )
-    ).all()
-    for row in raw_rows:
-        if _valid_empty_observation(row):
-            assert row.campaign_id is not None and row.day is not None
-            observations[(row.advertiser_id, row.campaign_id)].add(row.day)
+        .distinct()
+        .execution_options(yield_per=500)
+    )
+    for advertiser, campaign, day in raw_rows:
+        assert campaign is not None and day is not None
+        observations[(advertiser, campaign)].add(day)
     if not observations:
         raise ComparisonUnavailable(
             "缺少本店盈利广告端点的日观察依据（空响应也必须有效且成功）"

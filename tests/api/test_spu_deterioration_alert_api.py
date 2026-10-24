@@ -314,6 +314,90 @@ def test_date_cap_historical_reads_and_auth(api_client, readonly_key, comparison
     )
 
 
+@pytest.mark.parametrize("anchor", ["0001-01-01", "0001-01-06"])
+@pytest.mark.parametrize("window_days", [3, 7])
+def test_calendar_date_without_supported_comparison_span_is_422(
+    api_client, readonly_key, comparison_scope, anchor, window_days
+):
+    response = get(
+        api_client,
+        readonly_key,
+        comparison_scope,
+        anchor_date=anchor,
+        window_days=window_days,
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["requestId"] == "TEST_COMPARE_REQ"
+
+
+def test_availability_history_reads_are_bounded_and_do_not_load_raw_payloads(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        for n in range(30):
+            for name in ("tiktok.orders", "tiktok.after_sales", "tiktok.finance"):
+                session.add(
+                    SyncJob(
+                        job_name=name,
+                        started_at=scope["started"] - timedelta(days=n + 2),
+                        finished_at=scope["started"]
+                        - timedelta(days=n + 2)
+                        + timedelta(hours=1),
+                        status="succeeded",
+                        rows_failed=0,
+                        extra={"shop_id": "TEST_COMPARE_SHOP"},
+                    )
+                )
+            session.add(
+                AdRawLog(
+                    seller_id="TEST_COMPARE_SHOP",
+                    advertiser_id="TEST_ADV",
+                    campaign_id="TEST_CAMPAIGN",
+                    endpoint=ENDPOINT,
+                    kind="daily",
+                    day=scope["anchor"] - timedelta(days=n),
+                    request_url="https://example.invalid",
+                    request_method="POST",
+                    response_status=500,
+                    response_body={"body": {"code": 4, "payload": "TEST_" * 1000}},
+                )
+            )
+        session.commit()
+    loaded = []
+    statements = []
+
+    def record_load(session, instance):
+        if isinstance(instance, (SyncJob, AdRawLog)):
+            loaded.append(instance)
+
+    def record_query(conn, cursor, statement, parameters, context, executemany):
+        statements.append((statement, context.execution_options))
+
+    event.listen(Session, "loaded_as_persistent", record_load)
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    try:
+        response = get(api_client, readonly_key, scope, limit=1)
+    finally:
+        event.remove(Session, "loaded_as_persistent", record_load)
+        event.remove(db_engine, "before_cursor_execute", record_query)
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["latestAvailableDate"] == scope["anchor"].isoformat()
+    assert len([row for row in loaded if isinstance(row, SyncJob)]) <= 3
+    assert not any(isinstance(row, AdRawLog) for row in loaded)
+    source_reads = [sql for sql, _ in statements if "FROM integration.sync_jobs" in sql]
+    assert len(source_reads) == 6
+    assert all("LIMIT" in sql for sql in source_reads)
+    raw_reads = [
+        (sql, options) for sql, options in statements if "FROM plugin.ad_raw_log" in sql
+    ]
+    assert len(raw_reads) == 1
+    sql, options = raw_reads[0]
+    assert "response_body" not in sql.split("FROM", 1)[0]
+    assert "response_status" in sql.split("WHERE", 1)[1]
+    assert options.get("yield_per") == 500
+
+
 def test_missing_source_is_unavailable_not_success_empty(
     api_client, readonly_key, comparison_scope, db_engine
 ):
@@ -401,10 +485,14 @@ def test_ad_coverage_holes_are_unknown_not_zero(
     assert item["previousSpendCny"] is not None
 
 
+@pytest.mark.parametrize("days_old", [0, 3650])
 def test_successful_empty_ads_and_local_start_cutoff(
-    api_client, readonly_key, comparison_scope, db_engine
+    api_client, readonly_key, comparison_scope, db_engine, days_old
 ):
-    scope = comparison_scope
+    scope = {
+        **comparison_scope,
+        "anchor": comparison_scope["anchor"] - timedelta(days=days_old),
+    }
     with Session(db_engine) as session:
         session.execute(delete(AdDaily).where(AdDaily.seller_id == "TEST_COMPARE_SHOP"))
         for ago in range(14):
@@ -432,12 +520,12 @@ def test_successful_empty_ads_and_local_start_cutoff(
     assert all(i["currentSpendCny"] == "0" for i in response.json()["items"])
     assert all(i["currentNoOrderAdSpend"] is False for i in response.json()["items"])
     # Start is 00:05 shop time, previous UTC calendar day: do not use UTC date or finish date.
-    assert scope["started"].astimezone(UTC).date() == scope["anchor"]
+    assert scope["started"].astimezone(UTC).date() == comparison_scope["anchor"]
     assert (
         response.json()["meta"]["coverage"]["sources"]["tiktok.orders"][
             "operationalCutoff"
         ]
-        == scope["anchor"].isoformat()
+        == comparison_scope["anchor"].isoformat()
     )
 
 

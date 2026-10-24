@@ -21,6 +21,17 @@ def test_comparison_periods_are_disjoint_and_inclusive() -> None:
     )
 
 
+@pytest.mark.parametrize("window_days", [3, 7])
+def test_periods_reject_calendar_underflow(window_days: int) -> None:
+    from tts_erp_v2.analytics.spu_deterioration_alert.comparison import (
+        ComparisonInputError,
+        periods,
+    )
+
+    with pytest.raises(ComparisonInputError):
+        periods(date.min, window_days)
+
+
 @pytest.mark.parametrize(
     ("orders", "spend", "expected"),
     [
