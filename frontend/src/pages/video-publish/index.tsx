@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Modal, Table } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
-import { decodeConfig, decodeCurrent, decodeDetail, decodeList, type Task } from './contracts';
+import { decodeConfig, decodeCurrent, decodeDetail, decodeList, decodeTaskDiagnostics, type Task } from './contracts';
 import { AttemptFacts, AvailableActions, DetailFacts, Facts, Identity, TargetFacts } from './TaskFacts';
 import { useVideoRead } from './useVideoRead';
 import { useVideoCommand } from './useVideoCommand';
 import UploadWorkbench from './UploadWorkbench';
 import TaskOperations, { ActionButtons, type Operation } from './TaskOperations';
+import DiagnosticFacts from './TaskDiagnostics';
 
 const api = '/v2/video-publish';
 const refreshKey = 'tts-erp.video-publish.refresh-preference';
@@ -36,9 +37,11 @@ function VideoPublishContent({ bootstrap }: PageProps) {
   const [filter, setFilter] = useState('');
   const [selection, setSelection] = useState<{ root: string; id: string } | null>(null);
   const selected = selection?.root === bootstrap.rootPath ? selection.id : null;
+  const [diagnosticRequest, setDiagnosticRequest] = useState<{ root: string; taskId: string }>();
+  const [diagnosticRevision, setDiagnosticRevision] = useState(0);
   const [appendQuery, setAppendQuery] = useState<{ root: string; path: string } | null>(null);
   const appendPath = appendQuery?.root === bootstrap.rootPath ? appendQuery.path : null;
-  function setSelected(id: string | null) { setSelection(id === null ? null : { root: bootstrap.rootPath, id }); }
+  function setSelected(id: string | null) { setDiagnosticRequest(undefined); setSelection(id === null ? null : { root: bootstrap.rootPath, id }); }
   function setAppendPath(path: string | null) { setAppendQuery(path === null ? null : { root: bootstrap.rootPath, path }); }
   const [extra, setExtra] = useState<{ filter: string; items: Task[]; nextCursor: string | null; appended: boolean }>({ filter: '', items: [], nextCursor: null, appended: false });
   const [notice, setNotice] = useState('');
@@ -50,6 +53,11 @@ function VideoPublishContent({ bootstrap }: PageProps) {
   const history = useVideoRead(bootstrap.rootPath, listPath, decodeList, revision, auto, visible);
   const more = useVideoRead(bootstrap.rootPath, appendPath, decodeList, revision, false, visible);
   const detail = useVideoRead(bootstrap.rootPath, selected ? `${api}/tasks/${selected}` : null, decodeDetail, revision, auto, visible);
+  const diagnosticPath = selected && diagnosticRequest?.taskId === selected && diagnosticRequest.root === bootstrap.rootPath ? `${api}/tasks/${selected}?includeDiagnostics=true` : null;
+  const decodeDiagnostics = useCallback((value: unknown) => decodeTaskDiagnostics(value, selected ?? ''), [selected]);
+  // A distinct explicit-only revision keeps toolbar refreshes/polling from fetching diagnostics.
+  // The existing hook keys its one validated cache by root + complete path, including the query.
+  const diagnostics = useVideoRead(bootstrap.rootPath, diagnosticPath, decodeDiagnostics, diagnosticRevision, false, true);
   useEffect(() => {
     if (!more.data || !appendPath) return;
     const incoming = more.data;
@@ -134,6 +142,14 @@ function VideoPublishContent({ bootstrap }: PageProps) {
         <Button variant="secondary" isDisabled={detail.blocked} onPress={() => setRevision((value) => value + 1)}>刷新当前事实</Button>
         {detail.data && detail.data.taskId !== selected && <p role="alert">任务身份不匹配，请关闭后重试。</p>}
         {detail.data && detail.data.taskId === selected && <><DetailFacts task={detail.data} copy={(value) => { void copy(value); }} /><ActionButtons task={detail.data} disabled={command.blocked || !canTaskWrite} onAction={actOn} /></>}
+        <section aria-label="读取诊断" className="space-y-3">
+          <Button variant="secondary" isDisabled={!selected || diagnostics.blocked || diagnostics.loading} onPress={() => { if (selected) { setDiagnosticRequest({ root: bootstrap.rootPath, taskId: selected }); setDiagnosticRevision((value) => value + 1); } }}>{diagnosticPath ? '刷新脱敏诊断节选' : '读取脱敏诊断节选'}</Button>
+          {diagnosticPath && <Button variant="secondary" onPress={() => setDiagnosticRequest(undefined)}>隐藏诊断节选</Button>}
+          {diagnostics.blocked && <p role="status">诊断读取冷却中；等待完整 Retry-After 后明确重试，不会自动获取。</p>}
+          {diagnosticPath && diagnostics.loading && <p role="status">读取脱敏诊断中…</p>}
+          {diagnosticPath && <ReadError name="诊断节选" error={diagnostics.error} />}
+          {diagnosticPath && diagnostics.data && <DiagnosticFacts data={diagnostics.data} />}
+        </section>
       </Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
   </div>;
 }

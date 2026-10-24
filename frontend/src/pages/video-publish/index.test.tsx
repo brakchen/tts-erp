@@ -500,4 +500,162 @@ describe('video publish read slice', () => {
     expect(screen.queryByText('TEST_never_render_raw_body')).toBeNull();
   });
 
+  it('loads a sanitized diagnostic excerpt only after explicit GET, preserving structured output and plain escaped text', async () => {
+    const diagnostic = { ...detail, attempts: [{ ...attempt, promptSnapshot: 'TEST_prompt <script>TEST_escaped</script> token=[REDACTED]', artemisOutput: { verdict: 'TEST_published', steps: [{ count: 0, safe: false, note: null, text: 'TEST_output <b>plain</b>' }], authorization: '[REDACTED]' } }] };
+    const fetcher = mockReads((url) => url.endsWith('?includeDiagnostics=true') ? json(diagnostic, 200, { ETag: '"TEST_diagnostic"' }) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    const dialog = await screen.findByRole('dialog', { name: '任务详情' }); await within(dialog).findByText(/TEST_full_caption/);
+    expect(fetcher.mock.calls.some(([url]) => url.includes('includeDiagnostics'))).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: '读取脱敏诊断节选' }));
+    const region = await within(dialog).findByRole('region', { name: '脱敏诊断节选' });
+    expect(await within(region).findByText(/TEST_prompt/)).toHaveTextContent('<script>TEST_escaped</script>');
+    expect(region).toHaveTextContent('最多 2000 字符'); expect(region).toHaveTextContent('TEST_published'); expect(region).toHaveTextContent('false'); expect(region).toHaveTextContent('null');
+    expect(within(region).getByText('TEST_output <b>plain</b>')).toBeVisible(); expect(document.querySelector('script')).toBeNull();
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1);
+    expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => url === `/tts/v2/video-publish/tasks/${id}?includeDiagnostics=true`)).toBe(true);
+  });
+
+  it('keeps diagnostic query ETags separate from regular details and recognizes only a matching cached 304', async () => {
+    let reads = 0;
+    const diagnostic = { ...detail, attempts: [{ ...attempt, promptSnapshot: 'TEST_cached_excerpt', artemisOutput: { ok: true } }] };
+    const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? (++reads === 1 ? json(diagnostic, 200, { ETag: '"TEST_diag_only"' }) : new Response(null, { status: 304 })) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('TEST_cached_excerpt');
+    await user.click(screen.getByRole('button', { name: '刷新脱敏诊断节选' }));
+    expect(await screen.findByText('TEST_cached_excerpt')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '关闭任务详情' }));
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    expect(reads).toBe(2); expect(screen.queryByText('TEST_cached_excerpt')).toBeNull();
+    await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('TEST_cached_excerpt');
+    const queries = fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'));
+    expect(queries).toHaveLength(3);
+    expect(new Headers(queries[0][1].headers).has('If-None-Match')).toBe(false);
+    expect(new Headers(queries[1][1].headers).get('If-None-Match')).toBe('"TEST_diag_only"');
+    expect(new Headers(queries[2][1].headers).get('If-None-Match')).toBe('"TEST_diag_only"');
+  });
+  it('rejects an unsolicited diagnostic 304 rather than borrowing a regular detail cache', async () => {
+    mockReads((url) => url.includes('includeDiagnostics') ? new Response(null, { status: 304 }) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
+    expect(await screen.findByText(/读取失败（HTTP 304）/)).toBeVisible();
+    expect(screen.queryByRole('region', { name: '脱敏诊断节选' })).toBeNull();
+  });
+  it.each([
+    { promptSnapshot: null, artemisOutput: null, expected: '无 Prompt 节选。' },
+    { promptSnapshot: '', artemisOutput: {}, expected: '空 Prompt 节选。' },
+    { promptSnapshot: '测'.repeat(2000), artemisOutput: { empty: [], no: false, zero: 0, absent: null }, expected: '测'.repeat(2000) },
+  ])('preserves nullable/empty/max-length prompt and typed output values %#', async ({ promptSnapshot, artemisOutput, expected }) => {
+    mockReads((url) => url.includes('includeDiagnostics') ? json({ ...detail, attempts: [{ ...attempt, promptSnapshot, artemisOutput }] }) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
+    expect(await screen.findByText(expected)).toBeVisible();
+  });
+  it.each([
+    { ...detail, taskId: '00000000-0000-4000-8000-000000000004', attempts: [] },
+    { ...detail, attempts: null },
+    { ...detail, attempts: [{ ...attempt, artemisOutput: null }] },
+    { ...detail, attempts: [{ ...attempt, promptSnapshot: '测'.repeat(2001), artemisOutput: null }] },
+    { ...detail, attempts: [{ ...attempt, promptSnapshot: null, artemisOutput: [] }] },
+  ])('rejects wrong identity or malformed diagnostic projection without rendering it %#', async (payload) => {
+    mockReads((url) => url.includes('includeDiagnostics') ? json(payload) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
+    expect(await screen.findByText('视频发布响应格式错误')).toBeVisible();
+    expect(screen.queryByRole('region', { name: '脱敏诊断节选' })).toBeNull();
+  });
+  it('shows empty diagnostics distinctly from HTTP 403 and does not display denied body text', async () => {
+    let denied = false;
+    mockReads((url) => url.includes('includeDiagnostics') ? denied ? json({ detail: 'TEST_denied [REDACTED]' }, 403) : json({ ...detail, attempts: [] }) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('尚无执行诊断记录。');
+    denied = true; await user.click(screen.getByRole('button', { name: '刷新脱敏诊断节选' }));
+    expect(await screen.findByText(/无权读取（HTTP 403）/)).toBeVisible();
+    expect(screen.queryByText('尚无执行诊断记录。')).toBeNull(); expect(screen.queryByText('TEST_denied [REDACTED]')).toBeNull();
+  });
+  it('does not gate diagnostic GET on creation readiness, write role or mutation eligibility', async () => {
+    const fetcher = mockReads((url) => url.endsWith('/config') ? json({ ...config, canWrite: false, worker: { ...config.worker, status: 'unavailable' } }) : url.includes('includeDiagnostics') ? json({ ...detail, allowedActions: ['view'], attempts: [] }) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
+    expect(await screen.findByText('尚无执行诊断记录。')).toBeVisible(); expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+  });
+  it('aborts obsolete task diagnostics and drops a late result without transferring the validator to another task', async () => {
+    const secondId = '00000000-0000-4000-8000-000000000004';
+    let resolve!: (response: Response) => void; let oldSignal: AbortSignal | null | undefined;
+    const fetcher = mockReads((url, init) => {
+      if (url.endsWith('/tasks')) return json({ ...list, items: [task, { ...task, taskId: secondId }] });
+      if (url.endsWith(`/tasks/${id}?includeDiagnostics=true`)) return new Promise<Response>((r) => { resolve = r; oldSignal = init.signal; });
+      if (url.endsWith(`/tasks/${secondId}?includeDiagnostics=true`)) return json({ ...detail, taskId: secondId, attempts: [{ ...attempt, promptSnapshot: 'TEST_second_excerpt', artemisOutput: null }] });
+      if (url.endsWith('/tasks/' + secondId)) return json({ ...detail, taskId: secondId }); return undefined;
+    });
+    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
+    await user.click(screen.getByRole('button', { name: '关闭任务详情' })); expect(oldSignal?.aborted).toBe(true);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${secondId}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
+    await screen.findByText('TEST_second_excerpt');
+    await act(async () => { resolve(json({ ...detail, attempts: [{ ...attempt, promptSnapshot: 'TEST_old_excerpt', artemisOutput: null }] }, 200, { ETag: '"TEST_old"' })); });
+    expect(screen.queryByText('TEST_old_excerpt')).toBeNull(); expect(screen.getByText('TEST_second_excerpt')).toBeVisible();
+    const second = fetcher.mock.calls.find(([url]) => url.endsWith(`/tasks/${secondId}?includeDiagnostics=true`)); expect(new Headers(second![1].headers).has('If-None-Match')).toBe(false);
+  });
+  it('aborts old-root diagnostics and requires another explicit query in the new deployment scope', async () => {
+    let resolve!: (response: Response) => void; let oldSignal: AbortSignal | null | undefined;
+    const fetcher = mockReads((url, init) => {
+      if (url === `/tts/v2/video-publish/tasks/${id}?includeDiagnostics=true`) return new Promise<Response>((r) => { resolve = r; oldSignal = init.signal; });
+      if (url.includes('includeDiagnostics')) return json({ ...detail, attempts: [] }); return undefined;
+    });
+    const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
+    view.rerender(<VideoPublish bootstrap={{ ...props.bootstrap, rootPath: '' }} />); expect(oldSignal?.aborted).toBe(true);
+    await act(async () => { resolve(json({ ...detail, attempts: [{ ...attempt, promptSnapshot: 'TEST_old_root', artemisOutput: null }] })); });
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1);
+    await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('尚无执行诊断记录。');
+    expect(fetcher.mock.calls.some(([url]) => url === `/v2/video-publish/tasks/${id}?includeDiagnostics=true`)).toBe(true); expect(screen.queryByText('TEST_old_root')).toBeNull();
+  });
+  it('retains the full diagnostic cooldown through hiding and ordinary refresh; expiry does not replay GET', async () => {
+    let limited = true;
+    const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? limited ? json({}, 429, { 'Retry-After': '600' }) : json({ ...detail, attempts: [] }) : undefined);
+    const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
+    vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '读取脱敏诊断节选' }).click(); });
+    expect(screen.getByRole('button', { name: '刷新脱敏诊断节选' })).toBeDisabled();
+    await act(async () => { screen.getByRole('button', { name: '隐藏诊断节选' }).click(); screen.getByRole('button', { name: '刷新当前事实' }).click(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(599000); }); expect(screen.getByRole('button', { name: '读取脱敏诊断节选' })).toBeDisabled();
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(screen.getByRole('button', { name: '读取脱敏诊断节选' })).toBeEnabled();
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1);
+    limited = false; await act(async () => { screen.getByRole('button', { name: '读取脱敏诊断节选' }).click(); });
+    expect(screen.getByText('尚无执行诊断记录。')).toBeVisible(); view.unmount();
+  });
+  it('keeps diagnostics explicit-only while ordinary refresh runs and retrieves newly appended attempts only on its own refresh', async () => {
+    let latest = false;
+    const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? json({ ...detail, attempts: [{ ...attempt, sequenceNo: latest ? 2 : 1, promptSnapshot: latest ? 'TEST_new_attempt' : 'TEST_first_attempt', artemisOutput: { url: 'https://TEST.invalid/path?[REDACTED]' } }] }) : undefined);
+    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('TEST_first_attempt');
+    latest = true; await user.click(screen.getByRole('button', { name: '刷新当前事实' }));
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1); expect(screen.queryByText('TEST_new_attempt')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '刷新脱敏诊断节选' })); await screen.findByText('TEST_new_attempt');
+    const region = screen.getByRole('region', { name: '脱敏诊断节选' }); expect(within(region).queryByRole('link')).toBeNull();
+    expect(Array.from({ length: localStorage.length }, (_, i) => localStorage.getItem(localStorage.key(i)!)).join(' ')).not.toContain('TEST_new_attempt');
+  });
+
+  it('does not poll the diagnostic query when the ordinary five-second refresh is enabled', async () => {
+    const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? json({ ...detail, attempts: [] }) : undefined);
+    const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
+    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('尚无执行诊断记录。');
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.change(screen.getByRole('combobox', { name: '自动刷新', hidden: true }), { target: { value: 'on' } }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1);
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/tasks/current')).length).toBeGreaterThan(2);
+    view.unmount();
+  });
+
 });

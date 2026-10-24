@@ -70,6 +70,26 @@ export function decodeDetail(value: unknown): Detail {
     object: { bucket: text(obj.bucket), key: text(obj.key), etag: nullableText(obj.etag), deletedAt: nullableText(obj.deletedAt) },
     attempts: array(row.attempts, attempt), cleanup: { device: resource(cleanup.device), spool: resource(cleanup.spool) } };
 }
+export type DiagnosticValue = string | number | boolean | null | DiagnosticValue[] | { [key: string]: DiagnosticValue };
+export interface DiagnosticAttempt extends Attempt { promptSnapshot: string | null; artemisOutput: { [key: string]: DiagnosticValue } | null }
+export interface TaskDiagnostics { taskId: string; rowVersion: Count; attempts: DiagnosticAttempt[] }
+function diagnosticValue(value: unknown): DiagnosticValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : invalid();
+  if (Array.isArray(value)) return value.map(diagnosticValue);
+  return Object.fromEntries(Object.entries(object(value)).map(([key, item]) => [key, diagnosticValue(item)]));
+}
+/** Select only the server-redacted diagnostic projection, never cache the complete task body here. */
+export function decodeTaskDiagnostics(value: unknown, expectedTaskId: string): TaskDiagnostics {
+  const row = object(value); const taskId = uuid(row.taskId);
+  if (taskId !== expectedTaskId) return invalid();
+  return { taskId, rowVersion: count(row.rowVersion), attempts: array(row.attempts, (value) => {
+    const item = object(value); const promptSnapshot = nullableText(item.promptSnapshot);
+    if (promptSnapshot !== null && Array.from(promptSnapshot).length > 2000) return invalid();
+    const artemisOutput = item.artemisOutput === null ? null : Object.fromEntries(Object.entries(object(item.artemisOutput)).map(([key, child]) => [key, diagnosticValue(child)]));
+    return { ...attempt(item), promptSnapshot, artemisOutput };
+  }) };
+}
 export function decodeCurrent(value: unknown): Current { const row = object(value); return { tasks: array(row.tasks, decodeTask), pollState: poll(row.pollState), suggestedPollSeconds: positive(row.suggestedPollSeconds), serverTime: text(row.serverTime) }; }
 export function decodeList(value: unknown): TaskList { const row = object(value); return { items: array(row.items, decodeTask), pollState: poll(row.pollState), nextCursor: nullableText(row.nextCursor), totalApprox: count(row.totalApprox), serverTime: text(row.serverTime) }; }
 export function decodeConfig(value: unknown): Config {
