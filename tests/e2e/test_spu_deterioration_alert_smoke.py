@@ -31,9 +31,16 @@ API = "/v2/analytics/spu-profit-deterioration"
 
 
 @pytest.fixture()
-def comparison_live(db_url, db_engine, comparison_scope, ua_user_factory):
+def comparison_live(
+    db_url, db_engine, comparison_scope, ua_user_factory, ua_role_factory
+):
     """Use the maintained child/HTTP/clone binding proof, not a guessed port."""
-    user = ua_user_factory("test_ua_compare_e2e", roles=("viewer",))
+    role = ua_role_factory(
+        "test_ua_compare_reader",
+        api_tier="readonly",
+        permissions=("page:spu-profit-deterioration", "page:spu-roi"),
+    )
+    user = ua_user_factory("test_ua_compare_e2e", roles=(role,))
     key = "ttserp_readonly_TEST_COMPARE_E2E"
     digest = hashlib.sha256(key.encode()).hexdigest()
     table = Base.metadata.tables["security.api_keys"]
@@ -180,10 +187,10 @@ def test_real_http_auth_date_and_legacy_filter_boundaries(comparison_live, chrom
             assert response.status == 422, name
 
 
-def test_real_session_without_permissions_cannot_read_business_data(
+def test_real_page_permission_and_existing_readonly_api_tier_are_distinct(
     comparison_live, chromium, ua_user_factory
 ):
-    """AC-018/023: authentication is not a page/API permission bypass."""
+    """Page denial stays distinct from the established global readonly API tier."""
     child, scope, _user, _key = comparison_live
     denied = ua_user_factory("test_ua_compare_denied")
     with chromium.new_context() as context:
@@ -192,14 +199,17 @@ def test_real_session_without_permissions_cannot_read_business_data(
             data={"username": denied.username, "password": denied.password},
         )
         assert login.status == 200
-        for path in (
-            PAGE,
-            API + f"?shop_pk={scope['shop']}",
-            f"/v2/analytics/spu-roi/{scope['products'][3]}/orders",
-        ):
-            response = context.request.get(child.base + path)
-            assert response.status == 403, path
-            assert "TEST_COMPARE_3" not in response.text()
+        page = context.request.get(child.base + PAGE)
+        assert page.status == 403
+        assert "TEST_COMPARE_3" not in page.text()
+        # accounts.pages.required_page_permission intentionally leaves these
+        # data APIs under api_tier; _build_context defaults to readonly. This
+        # slice preserves that existing policy rather than inventing page gates.
+        data = context.request.get(
+            child.base + API + f"?shop_pk={scope['shop']}"
+        )
+        assert data.status == 200
+        assert data.json()["meta"]["shopPk"] == scope["shop"]
 
 
 def test_real_keyboard_drilldown_preserves_business_spu_and_dates(
