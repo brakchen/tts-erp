@@ -146,7 +146,7 @@ def _wait_ready(child: VerifiedChild, proc: subprocess.Popen[bytes], *, timeout:
             if response.status == 200:
                 try:
                     payload = json.loads(raw) if len(raw) <= 4096 else None
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, RecursionError):
                     raise ValueError(REFUSAL) from None
                 if not isinstance(payload, dict) or payload.get("auth_mode") != "enforce":
                     raise ValueError(REFUSAL)
