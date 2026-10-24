@@ -1,12 +1,25 @@
 # 通用插件状态与 monitor 单目标恢复实施计划
 
-## 当前执行快照：877双Alarm启动组、0bff原Runtime raw归属已push；完整生命周期仍开（2026-10-24）
+## 当前执行：4a4f360显式cleanup原生归属已push；五个旧正向链路仍未闭（2026-10-24）
+
+- Source **`4a4f360dd6350e03861c65a012d9f7bbec7f0deb`**。已全文消费e44/6ea4完成审查的45行HIGH：53b72使真实NoWindow HOLD的bare-stop丢Runtime归属，不能用新测试port自己adopt或620绿豁免。完成审查不恢复、不重跑；这是静态意见，非独立执行。
+- 拒绝“事实后finally等待stop”方案：13角色/type0绿但旧有限等待回归失败，已精确撤回该原型。现在Controller要求`ownCleanup(factory)`在IO前运输到**同一既有Runtime**；14个已知构造点迁移，纯Controller测试用真实canonical Runtime，真实组合不建第二owner。事实/控制可先结束，raw依既有pending/inFlight排空；原recovery observedBudget.guard仍登记，不补窗口、不造native grant。缺required callback的非类型调用仅事实、不直接裸调stop。
+- 7当前API业务RED/9对照/fulltsc0后精确Parent gate；**最终精确16角色PASS/完整tsc0**。另一次9相关668PASS/7FAIL/type0，7同案已在完整committed53冻结快照原样复现且type0；修正两项把held HOLD stop错当事实屏障的旧测试后，最小9案4PASS/5FAIL/type0。五个旧正向chain消费者仍用legacy业务fake，未完成持久pin/当前resume运输闭包；不改running/ACK/late-HOLD断言来充绿。不能将各轮合计、把known53失败当master允许基线或声明全插件GREEN。LSP4paths零reported，2clean/2inconclusive。
+- 原15仍4done11open，整体未验收/未ready；caps[]executors{}/0.4.27不变。后继先闭这五项，再source-owned PRE/own-post stop/noPRE事实、ACK tick/ALL legacy资源顺序/Worker、PageFactory/config/ERP/E2E。ERP无新DB/merge；config/perf未来写域未释放。证据`/tmp/plugin-status-continuous-01a1406d/scheduler-cleanup-owner-*`及`scheduler-chain-*`。
+
+### 历史：877双Alarm启动组、0bff原Runtime raw归属（以下为当轮证据）
 
 - **Source `87718fa57520777b9b5297d5b166111effdf28ba`**（前置 `0bff86641dd0949342331cebd727da3d5624d405`）。原Runtime可同步登记任务再启动，控制结束不早释已知raw，复用同一CycleLease/pending/inFlight而非新owner。managed启动固定SCAN＋NOTIFICATION各自cadence，实际stored root/source/leaf/pin＋原clock下单次admit紧邻无await双native调用；逐一观察、allSettled排空，partial失败不报fully running，展示字段各自原source/value/presence CAS。
 - BG显式ctx不再走human enable/bind/reload；复用原高层settingsSaveQueue串行managed组与legacy公开create，私有queued-save避免自锁，short业务queue不等待native。原callback/fence/native receiver必须在高层queue handoff前拥有：额外1业务RED/type0证实迟捕获会借替换callback，已在同薄adapter修；传既有orchestration callback不是新队列或授权令牌。
 - **验证**：原adoption 2＋3业务RED/type0→4相关335/type0；双组6业务RED/type0、partial四排列/两字段CAS/展示错误/实际Runtime applied或failed终态、late-callback1RED；fail-fast控变杀4例/type0，精确own working SHA还原。最终精确候选5相关文件 **533PASS/no skip/fulltsc0**，不是335＋533或全插件/live验收。LSP零reported但3inconclusive。`1943dfe` genuine clear→NEW recover/新Controller五矩阵与native255/type0亦已交付，不再列尚未执行。
 - **真实剩余**：source-owned PRE/own-post stop/noPRE fact-only，独立negative/HOLD事实不等stop；ACK-capable canonical running/applied-resume tick，stop/tick实际raw-adoption接线；所有legacy clear/disable/bind/retry与单scan兼容seam的资源顺序/Worker终止；PageFactory/Store/document/one-read script/staged capture/strict分页/manualAtoB/repair/两config/ERP/E2E。这里只窄B，整体C/原15仍4done11open，caps[]executors{}/0.4.27不变，不ready/业务merge/生产/发布/父指针。
 - **协调恢复**：原c397进程丢失及a567 key校验失败留证，同协议精确失败run恢复70b9已completed，d726 Scheduler92行＋3186 ERP86行全读及实际receipt核；咨询非Source/独立执行批准，完成作业不再恢复。ERP审计task完成、Scheduler实施仍in_progress，两infra blocker已解除。peer模板0069/24点与infra/v16释放已收，不再等旧writer；eba0071实际merge/scope/runner-helper-guard/schema/auth和协调isolated刷新仍是Parent pre-DB gate。旧config/perf core未来写域未回交，已明确询问用户，不擅改旧WIP。
+
+### 历史：53b72独立事实尝试及被确认的raw归属缺口
+
+Controller的initialize/invalidate/suspend把stop Promise作为事实提交的前置条件，使held/reject/syncThrow掩盖已合格失效/HOLD/login事实。Decision: code-change；只在既有Controller生命周期owner移除控制依赖，共用一个观察stop helper。**原recovery observedBudget.guard仍须登记raw stop**，只不await该guard；pending/physicalSettled不能因此早释放。当轮新测试在port自adopt，未证明既有bare-port消费者正确；e44随后确认HIGH，故53b72未接受。已被顶部4a强制cleanup-owner运输替代，不再把注释当接线。generic port不是native授权证明，完整Factory/PRE/own-post/native stop仍待后继。
+
+Mode auto / Decision strict（插件AGENTS）。当前合法API真实12业务RED/type0：9个discovering事实角色invalid/HOLD/login×held/reject/throw，另3个genuine READY协议路径上的wake重建；真实canonical/queued facts与原Runtime raw lease观测。初items属性错误/type2及试图用不存在recovering执行阶段的wake fixture/type2/timeout只算setup错误，已排除；wake改用既有genuine READY fixture，不伪造正向权限。Controller约2130行over-budget，仅local-fix-without-new-responsibility且净删wait耦合，不能往该文件塞native/SOT新策略。保原source/child-generation/原预算事实准入及旧raw drain oracle；先12GREEN/type0，再旧Controller/physical/runtime/native相关回归，任何旧排序断言差异先逐项核意图，不以弱化oracle充绿。
 
 ### 历史：f39单扫描Alarm入场与展示事实修复（以下为当时断点，不是当前归属/未实现判断）
 
