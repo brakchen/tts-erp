@@ -2,7 +2,7 @@
 
 旧文件测的 HMAC cookie 流程（``mint_session_cookie`` / ``tts_session`` / key
 表单登录）已随用户名+密码改造删除。本文件收窄为两块仍然成立的契约：
-- 登录页 HTML：用户名 + 密码表单、``next`` 注入/校验、外部前缀幂等；
+- 登录文档：公共 bootstrap、``next`` 注入/校验、外部前缀幂等；实际表单另由组件/native 验证；
 - 浏览器登录入口：HTML GET 未登录 302 → 登录页，API 形态保持 JSON 401。
 
 登录/登出/会话/改密流程见 tests/api/test_user_auth.py。
@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import pytest
+
+from tests.api.test_frontend_pages import _bootstrap
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -22,10 +24,15 @@ def test_login_page_renders_username_password_form(api_client):
     r = api_client.get("/v2/auth/login")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
-    assert 'id="username"' in r.text
-    assert 'id="password"' in r.text
-    assert 'id="login-form"' in r.text
-    assert 'type="password"' in r.text
+    data = _bootstrap(r.text)
+    assert data["pageId"] == "login"
+    assert data["navigation"] == []
+    assert data["roleCapabilities"] == {"readwrite": False, "admin": False}
+    assert data["loginNextPath"] == "/v2/pages/dashboard"
+    assert 'id="frontend-root"' in r.text
+    assert '<script type="module"' in r.text
+    assert "<form" not in r.text
+    assert r.headers["cache-control"] == "private, no-store"
     # 无自助注册/找回入口（设计 §1.1：账号只能由管理员代建）。
     assert "注册" not in r.text
 
@@ -35,13 +42,13 @@ def test_login_page_injects_next(api_client):
         "/v2/auth/login", params={"next": "/v2/pages/manual-costs?shop_id=749"}
     )
     assert r.status_code == 200
-    assert 'value="/v2/pages/manual-costs?shop_id=749"' in r.text
+    assert _bootstrap(r.text)["loginNextPath"] == "/v2/pages/manual-costs?shop_id=749"
 
 
 def test_login_page_validates_next(api_client):
     r = api_client.get("/v2/auth/login", params={"next": "https://evil.example/x"})
     assert r.status_code == 200
-    assert 'value="/v2/pages/dashboard"' in r.text
+    assert _bootstrap(r.text)["loginNextPath"] == "/v2/pages/dashboard"
     assert "evil.example" not in r.text
 
 
@@ -52,7 +59,8 @@ def test_login_page_does_not_duplicate_external_prefix(prefixed_client):
         params={"next": "/tts/v2/pages/spu-roi"},
     )
     assert response.status_code == 200, response.text
-    assert 'value="/tts/v2/pages/spu-roi"' in response.text
+    assert _bootstrap(response.text)["loginNextPath"] == "/tts/v2/pages/spu-roi"
+    assert _bootstrap(response.text)["rootPath"] == "/tts"
     assert "/tts/tts/" not in response.text
 
 
