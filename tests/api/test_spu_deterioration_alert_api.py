@@ -1419,3 +1419,74 @@ def test_mixed_settled_and_unsettled_refunds_keep_order_specific_completeness(
         assert missing == (
             {scope["products"][0]} if unsettled_refund_amount is None else set()
         )
+
+
+def test_malformed_legacy_alert_config_does_not_block_valid_comparison(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    from tts_erp_v2.analytics.spu_deterioration_alert.config import ALERT_CONFIG_KEY
+    from tts_erp_v2.db.models.config import RuntimeConfigItem, RuntimeConfigRevision
+
+    def clear_test_config():
+        with Session(db_engine) as session:
+            session.execute(
+                delete(RuntimeConfigRevision).where(
+                    RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY
+                )
+            )
+            session.execute(
+                delete(RuntimeConfigItem).where(
+                    RuntimeConfigItem.config_key == ALERT_CONFIG_KEY
+                )
+            )
+            session.commit()
+
+    clear_test_config()
+    before = get(api_client, readonly_key, comparison_scope)
+    assert before.status_code == 200
+    baseline = before.json()
+    try:
+        with Session(db_engine) as session:
+            session.add(
+                RuntimeConfigItem(
+                    config_key=ALERT_CONFIG_KEY,
+                    display_name="TEST comparison ignores malformed legacy policy",
+                    json_schema={"type": "object"},
+                    draft_payload=None,
+                    draft_rollout=[],
+                    draft_version=0,
+                    published_version=1,
+                )
+            )
+            session.add(
+                RuntimeConfigRevision(
+                    config_key=ALERT_CONFIG_KEY,
+                    version=1,
+                    payload=["malformed"],  # type: ignore[arg-type]
+                    rollout=[],
+                    created_by="TEST_comparison_legacy_config",
+                )
+            )
+            session.commit()
+        response = get(api_client, readonly_key, comparison_scope)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["total"] == baseline["total"] > 0
+        assert body["totals"] == baseline["totals"]
+        fields = (
+            "spuPk",
+            "previousRoi",
+            "currentRoi",
+            "previousNetProfitCny",
+            "currentNetProfitCny",
+            "previousSpendCny",
+            "currentSpendCny",
+            "previousOrderCount",
+            "currentOrderCount",
+        )
+        assert [[row[key] for key in fields] for row in body["items"]] == [
+            [row[key] for key in fields] for row in baseline["items"]
+        ]
+        assert "effectiveConfig" not in body["meta"]
+    finally:
+        clear_test_config()

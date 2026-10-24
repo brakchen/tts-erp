@@ -77,6 +77,8 @@
 
 最终子分支 `7214b178b653135bbd4e4f02a7ea9d39b07fbbb3`：**95比较API +34领域/公式 GREEN，0 failed/skip**。原独立backend reviewer针对最终提交范围复核、核对canonical源查询/实际公式和隔离日志：**No issues found，两个原P1 discharged，code OK with notes**；未把代码复审当全体验收。parent已集成 `763c10b0b8946233497d85241aec0f64e4875320`，再次独立执行完整比较API **95 passed/48.41s** 与真正冷启动全栈 **5 passed/36.98s**，均0 failed/skip；对应外部artifacts为 `missing-facts-parent.xml`、`cold-e2e-post-review.xml`。4条最后改动路径主动LSP再次0 reported errors但全部silent/unconfirmed；不声称有完整类型证明，Ruff/format/compile与测试另有通过证据。整段日志保留初轮夹具精度断言纠正：测试应比较既有HTTP两位HALF_UP串，不拿原始高精度Decimal直接作wire预期；生产精度/公式未为此改动。
 
+完整fast基线首轮已在 `c3a57da7851f7c0fb4396cbc919cda85b33fa69b` 执行，原始机械diff为13项对零基线，**未当作通过**：12项是另一未合并lane通过官方runner把默认模板升级到 `0070_monitor_health`，本源head为0069造成的迁移解析/schema清单错误；1项是旧runtime-config测试仍要求坏告警策略阻断新比较API。先依规依赖体检并与模板升级owner协调，再用官方 `--refresh-template` 恢复默认0069，最小复验得到 **21 passed、仅旧守卫1 RED**。保留旧内部 `effective_config_details` 的坏配置失败关闭守卫，另以有效比较数据证明坏旧配置不改变事实/统计；没有恢复新页对旧告警策略的依赖。随后使用官方 `--template-db tts_erp_test_template_spu_compare_0069` 独占模板，runtime-config全文件、新比较独立性回归、价格采集全文件及两个schema/head守卫 **35 passed、0 failed**，所有原13失败均已分类并针对性解除。没有更新零基线或反复全套重跑掩盖信号；最后精确prospective master必须另执行规定的完整基线。上述修正仅测试/文档，生产实现保持基线运行时的代码。
+
 **最终交付门槛：**完整fast基线、精确prospective master验证、推送与board收口，必须按实际提交执行；最新执行SHA、原始日志、基线机械diff与最终结果记在canonical board的 `spu-compare-delivery` 线程，不在本固定功能证据段另维护实时状态。该段提交前已显式fetch远端master并同步 `4bcef08df77172b6cb48007267d3927e4078ca19`；若master再前进，须再次同步和验证。上述功能证据不代替最终门槛，也不是生产部署声明。
 
 ## 5. 历史结果的处置
