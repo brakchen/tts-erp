@@ -23,17 +23,28 @@ export default function Users({ bootstrap }: PageProps) {
   const [verificationSummary, setVerificationSummary] = useState('');
   const [keyword, setKeyword] = useState(''), [status, setStatus] = useState('');
   const alive = useRef(true), listVersion = useRef(0), catalogVersion = useRef(0), dialogVersion = useRef(0);
+  const rolesHeading = useRef<HTMLHeadingElement>(null);
+  const deletedRole = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (isOpen || catalog.loading || !catalog.data || !deletedRole.current) return;
+    if (catalog.data.roles.some((role) => role.code === deletedRole.current)) return;
+    deletedRole.current = undefined;
+    // A removed row cannot receive Modal's normal focus restoration. Do not
+    // steal focus if the user has already moved to another connected control.
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.isConnected) rolesHeading.current?.focus({ preventScroll: true });
+  }, [catalog.data, catalog.loading, isOpen]);
   async function loadPeople() {
     if (!command.readyRead()) return;
-    const version = ++listVersion.current; setPeople({ loading: true });
+    const version = ++listVersion.current; setPeople((previous) => ({ ...previous, loading: true, error: undefined }));
     try { const data = await command.read('/v2/users', decodeUsers); if (alive.current && version === listVersion.current) setPeople({ loading: false, data }); }
-    catch (error) { if (alive.current && version === listVersion.current) setPeople({ loading: false, error: readError(error) }); }
+    catch (error) { if (alive.current && version === listVersion.current) setPeople((previous) => ({ ...previous, loading: false, error: readError(error) })); }
   }
   async function loadCatalog() {
     if (!command.readyRead()) return;
-    const version = ++catalogVersion.current; setCatalog({ loading: true });
+    const version = ++catalogVersion.current; setCatalog((previous) => ({ ...previous, loading: true, error: undefined }));
     try { const data = await command.read('/v2/roles', decodeCatalog); if (alive.current && version === catalogVersion.current) setCatalog({ loading: false, data }); }
-    catch (error) { if (alive.current && version === catalogVersion.current) setCatalog({ loading: false, error: readError(error) }); }
+    catch (error) { if (alive.current && version === catalogVersion.current) setCatalog((previous) => ({ ...previous, loading: false, error: readError(error) })); }
   }
   async function loadDialog(target: Dialog) {
     if (!target.user || !command.readyRead()) return;
@@ -85,6 +96,7 @@ export default function Users({ bootstrap }: PageProps) {
     if (await command.submit(request)) {
       if (!alive.current) return;
       setDraft(initialDraft());
+      if (dialog?.kind === 'deleteRole') deletedRole.current = dialog.role?.code;
       if (dialog?.kind === 'sessions') { setRevoke(undefined); void loadDialog(dialog); }
       else { setOpen(false); setDialog(undefined); }
       void loadPeople(); void loadCatalog();
@@ -92,21 +104,21 @@ export default function Users({ bootstrap }: PageProps) {
   }
   async function verify() {
     if (!dialog) return;
-    await command.verify(async () => {
+    await command.verify(async (signal) => {
       if (dialog.user) {
-        const result = await command.read(userPath(dialog.user.id), decodeDetail);
+        const result = await command.read(userPath(dialog.user.id), decodeDetail, signal);
         if (result.id !== dialog.user.id) throw new Error('身份不匹配');
         if (alive.current) setPublicUser({ loading: false, data: result });
-        if (dialog.kind === 'sessions') { const data = await command.read(`${userPath(dialog.user.id)}/sessions`, decodeSessions); if (alive.current) setSessionList({ loading: false, data }); }
+        if (dialog.kind === 'sessions') { const data = await command.read(`${userPath(dialog.user.id)}/sessions`, decodeSessions, signal); if (alive.current) setSessionList({ loading: false, data }); }
       } else if (dialog.kind === 'createUser') {
-        const data = await command.read('/v2/users', decodeUsers);
+        const data = await command.read('/v2/users', decodeUsers, signal);
         if (alive.current) {
           setPeople({ loading: false, data });
           const current = data.find((row) => row.username === draft.username.trim().toLowerCase());
           setVerificationSummary(current ? `当前公开用户：${current.username} · ID ${current.id} · ${current.status}` : '当前公开列表未找到该用户名；不能据此断定提交未生效。');
         }
       } else {
-        const data = await command.read('/v2/roles', decodeCatalog);
+        const data = await command.read('/v2/roles', decodeCatalog, signal);
         if (alive.current) {
           setCatalog({ loading: false, data });
           const current = data.roles.find((row) => row.code === (dialog.role?.code ?? draft.code.trim().toLowerCase()));
@@ -138,7 +150,7 @@ export default function Users({ bootstrap }: PageProps) {
         <Select value={status || 'all'} onChange={(key) => setStatus(key === 'all' ? '' : String(key))}><Label>用户状态</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="all">全部状态</ListBox.Item><ListBox.Item id="active">启用</ListBox.Item><ListBox.Item id="disabled">停用</ListBox.Item></ListBox></Select.Popover></Select>
         <Button variant="secondary" isDisabled={command.cooldown || people.loading} onPress={() => { void loadPeople(); }}>刷新用户</Button><Button isDisabled={!canManage || blockActions || !catalogReady} onPress={() => open({ kind: 'createUser' })}>新建用户</Button>
       </div>{people.loading && <p role="status">加载用户中…</p>}{people.error && <p role="alert">{people.error}</p>}{people.data && <UsersTable filtered={Boolean(status || keyword.trim())} rows={people.data.filter((p) => (!status || p.status === status) && (!keyword.trim() || `${p.username} ${p.displayName}`.toLowerCase().includes(keyword.trim().toLowerCase())))} canManage={canManage} blocked={blockActions} onAction={(kind, user) => open({ kind, user })} />}</Tabs.Panel>
-      <Tabs.Panel id="roles" className="space-y-4"><p>内置角色不可删除；内置 admin 不可编辑；其余内置角色不可改 API 档位。</p><div className="flex flex-wrap gap-3"><Button variant="secondary" isDisabled={command.cooldown || catalog.loading} onPress={() => { void loadCatalog(); }}>刷新角色</Button><Button isDisabled={!canManage || blockActions || !catalogReady} onPress={() => open({ kind: 'createRole' })}>新建角色</Button></div>{catalog.data && <RolesTable catalog={catalog.data} canManage={canManage} blocked={blockActions} onAction={(kind, role) => open({ kind, role })} />}</Tabs.Panel>
+      <Tabs.Panel id="roles" className="space-y-4"><h2 ref={rolesHeading} tabIndex={-1}>角色权限目录</h2><p>内置角色不可删除；内置 admin 不可编辑；其余内置角色不可改 API 档位。</p><div className="flex flex-wrap gap-3"><Button variant="secondary" isDisabled={command.cooldown || catalog.loading} onPress={() => { void loadCatalog(); }}>刷新角色</Button><Button isDisabled={!canManage || blockActions || !catalogReady} onPress={() => open({ kind: 'createRole' })}>新建角色</Button></div>{catalog.data && <RolesTable catalog={catalog.data} canManage={canManage} blocked={blockActions} onAction={(kind, role) => open({ kind, role })} />}</Tabs.Panel>
     </Tabs>
     {catalog.loading && <p role="status">加载角色目录中…</p>}{catalog.error && <div role="alert"><p>{catalog.error}</p><Button isDisabled={command.cooldown} onPress={() => { void loadCatalog(); }}>重试角色目录</Button></div>}
     <Modal.Backdrop isOpen={isOpen} isDismissable={!command.pending && command.phase !== 'checking'} isKeyboardDismissDisabled={command.pending || command.phase === 'checking'} onOpenChange={(open) => { if (!open) close(); }}><Modal.Container size={dialog?.kind === 'sessions' ? 'full' : 'lg'} scroll="inside"><Modal.Dialog>

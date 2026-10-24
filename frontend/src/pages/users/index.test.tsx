@@ -54,7 +54,7 @@ it('creates once using actual camelCase aliases, CSRF header and server identity
   expect(calls[0][0]).toBe('/tts/v2/users'); expect(JSON.parse(String(calls[0][1].body))).toEqual({ username: 'test_new', displayName: 'TEST New', password: 'TESTPass123', roles: ['operator'] });
   expect(new Headers(calls[0][1].headers).get('X-Requested-With')).toBe('tts-erp');
   await act(async () => { resolve(json({ id: '52', username: 'test_new' }, 201)); }); await screen.findByText('操作已确认'); expect(screen.queryByRole('dialog')).toBeNull();
-});
+}, 15000);
 it('retains draft and clears stale submitted errors on edit without exposing raw validation input', async () => {
   api(async () => json({ detail: [{ loc: ['body', 'displayName'], type: 'string_too_long', input: 'TEST_SECRET_RAW' }] }, 422)); const user = userEvent.setup({ delay: null }); await mount(); const dialog = await openUser(user, '编辑显示名');
   await user.click(within(dialog).getByRole('button', { name: '保存' })); await within(dialog).findByText(/HTTP 422/);

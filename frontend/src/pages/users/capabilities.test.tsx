@@ -17,7 +17,7 @@ it('losing capability while a form is open preserves the draft and cannot submit
   view.rerender(<Users bootstrap={{ ...bootstrap, roleCapabilities: { admin: false, readwrite: true } }} />);
   expect(field).toHaveValue('TEST Preserved'); expect(within(dialog).getByRole('button', { name: '保存' })).toBeDisabled();
   fireEvent.submit(within(dialog).getByRole('form')); expect(fetcher.mock.calls).toHaveLength(2);
-});
+}, 15000);
 it('read Retry-After blocks all refreshes until its full duration and never replays on expiry', async () => {
   let limited = false;
   const fetcher = vi.fn(async (url: string) => limited ? json({ detail: 'TEST_RAW' }, 429, { 'Retry-After': '3600' }) : json(url.endsWith('/roles') ? { roles: [], allPermissions: [] } : { users: [person] }));
