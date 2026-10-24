@@ -296,6 +296,7 @@ def set_sync_job_enabled(
     APScheduler's periodic tick path in the sync-worker process.
     """
     require_role_at_least(request, "admin")
+    require_cookie_csrf(request)
     _require_registered_job(job_name)
 
     from tts_erp_v2.db.base import get_engine
@@ -323,6 +324,7 @@ def trigger_sync_job(
 ) -> SyncJobTriggerResponse:
     """Queue one immediate run in the API process background task runner."""
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     _validate_manual_shop_scope(job_name, body.shop_id)
     background_tasks.add_task(run_scheduled_job_once, job_name, shop_id=body.shop_id)
     return SyncJobTriggerResponse(

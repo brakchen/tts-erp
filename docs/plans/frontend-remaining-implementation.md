@@ -66,3 +66,9 @@
 - parent 同步最新 master，固定候选通过窄测试及 `bash scripts/test_baseline.sh`，提交推送；精确 prospective master 在锁内验证再非 force push，按 board ready FIFO 交付。
 - 不设计灰度、流量分批或额外观察等待。只在有效操作授权内启用同版本后端/manifest/assets；不擅自生产数据库操作、迁移或重启。
 - 替代已验且确无消费者才清非 ROI 旧实现；仍被两个排除页面使用的 vendor/模板/盈利内核必须保留。保留 Git/同版包应急撤销能力，不引入第二套长期运行 owner。
+
+## 同步命令与公开错误的安全出口
+
+- 同步启停仍要求 admin，手动触发仍要求 readwrite。解析后的 cookie 身份必须通过既有 `require_cookie_csrf`，然后才校验任务/店铺、访问数据库或加入后台任务；同时携带 Bearer 不豁免 cookie。既有 API-key 调用方式不变。
+- `/v2/sync/status` 的 `last_error` 保持可空字符串字段，但非空时仅公开固定错误存在提示，不再返回 scheduler 保存的异常正文。上游正文可能含凭证、签名 URL 或业务载荷，不适合作为浏览器/只读 API 的错误详情。
+- 此变更不修改存储的 `error_message` 审计事实，也不改变 `last_status`、时间、周期和 severity 的原有业务判定。页面不得把错误存在提示解释为新的调度决策。
