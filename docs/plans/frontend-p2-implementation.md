@@ -1,6 +1,6 @@
 # 前端 P2 实现计划：普通页面与首个隔离写闭环
 
-> 状态：行为清单与契约核对中，尚未开始业务代码实现/切换；不是 GREEN 或交付声明。
+> 状态：合同/计划门禁完成，进入 run-binding 基础实现；三页业务/API迁移尚未开始。窄测试只证明所覆盖切片，不是 P2 GREEN 或交付声明。
 > 权威父方案：[渐进迁移方案](frontend-progressive-migration.md)；组件标准：[前端开发规范](../guides/frontend-development.md)。
 > 用户在 P0/P1 交付后连续要求继续开发、直到任务完成：按既定前端路线先完成 P2，再逐批核对 P3–P6 的门槛；不接管其他会话或自动生产上线。
 
@@ -10,7 +10,7 @@
 - UTC：2026-10-24。独立 `feature/frontend-p2` / `.worktrees/frontend-p2`，从 fresh `origin/master=e86817a3f28d4267ce0527a43ed7887795da81c3` 建立。
 - P0/P1 已完成，代码精确集成 `8f1b752` 的 fast 基线零新增稳定失败；不把其证据冒充 P2 通过。
 - Change Necessity：三页仍依赖旧模板/脚本，复制了会话、路径、请求与布局逻辑；需接入既有 React/HeroUI 骨架，保留有效查询、管理和错误恢复。
-- 当前 lane 只保留本计划文件。任何源代码、依赖、测试或后端 guard 变更，必须先在 canonical lane 完整记录中扩展精确 scope 并读回。没有 child 写 reservation。
+- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
 - 保留 main 的 `plugins/monitor` 和未跟踪 `node_modules/`；原 child/coord 审计工作树不动。
 - 不改 app/access/middleware、schema/models/migrations、财务口径、TikTok 店铺写端点、插件、生产数据/服务。后端现有缺陷只在确定 canonical owner、登记 scope、写回归及安全审查后处理。
 - ArchitectureReviewRequired：是，涉及共享权限事实、凭证输入、OAuth 命令及真实浏览器/API 写入边界；沿用原架构，不另造 session/menu/client/chart engine。
@@ -90,7 +90,7 @@
 
 1. **唯一 producer**：`scripts/test_isolated.sh` 已持有原始 BASE_TEST_URL、TEMPLATE_DB、RUN_DB、派生的 canonical RUN_URL 及 pinned transport。保持 derive 的六字段合同、现有锁/clone/cleanup；只有 createdb 成功且 RUN_CREATED=1 后，才在私有临时目录生成全新的 run ID 和 run proof，调用同一 `scripts/_test_db_connections.py` 的新 issue-run-proof 操作。proof 不由候选 URL 或可选输入 TTS_ERP_TEST_DB_NAME 推断。新增路径须先登记脚本 owner scope；不引入第二个 URI parser/生产 override。
 2. **独立输出**：wrapper 每次无条件覆盖传给 test.sh 的 `TTS_ERP_TEST_RUN_PROOF` 和 `TTS_ERP_TEST_RUN_ID`，同时传 canonical `TTS_ERP_DB_URL_TEST`。proof 为 version=1、created=true、run ID、wrapper PID/进程启动标识、原始有效 base DB、所选 template DB（含自定义名）、run DB、规范化连接身份摘要的严格 JSON。由 authority 用已验证参数和 run ID 计算带随机 salt 的摘要，覆盖有效 host/port/user/db及其余连接参数；不在 proof/argv/log 中存 URI、password 或完整参数字典。文件 O_EXCL/no-follow、同 UID、目录0700/文件0600；输出只在成功 clone 后存在。cleanup 无论 keep-db 与否都移除自己生成的 proof/目录；遗留库不因此获得下一轮写权。PID 加启动标识与独立 nonce 防 stale/reused-PID 混淆，不宣称防恶意同 UID 进程的密码学边界。
-3. **同一 authority 的 consumer API**：新增 load/validate run binding，读取 wrapper 的独立 proof+run ID、核对版本/类型/私有普通文件/活跃 owner+启动标识/created（owner 必须在当前进程的内核 parent 链上，不能接受另一个仍活跃 wrapper 的完整旧环境）、base/template/run 互斥与共享/prod拒绝，再把候选 URL 的有效身份与摘要比较。新 helper 复用 `_parameters`/`_test_name`/SQLAlchemy serializer；run 候选 URL 的 dbname query override/不一致 intent 一律拒绝，不以 URL 自己的 dbname 当 expected。缺失、陈旧、畸形、不一致均固定脱敏诊断，零 connect；不回退普通 test-shaped URL。
+3. **同一 authority 的 consumer API**：新增 load/validate run binding，读取 wrapper 的独立 proof+run ID、核对版本/类型/私有普通文件/活跃 owner+启动标识/created（owner 必须在当前进程的内核 parent 链上，不能接受另一个仍活跃 wrapper 的完整旧环境）、run 与 base/template 各自不同（base 与 template 可相同，保持 derive 旧合同）及共享/prod拒绝，再把候选 URL 的有效身份与摘要比较。新 helper 复用 `_parameters`/`_test_name`/SQLAlchemy serializer；run 候选 URL 的 dbname query override/不一致 intent 一律拒绝，不以 URL 自己的 dbname 当 expected。缺失、陈旧、畸形、不一致均固定脱敏诊断，零 connect；不回退普通 test-shaped URL。
 4. **父进程连接前门禁**：`tests/conftest.py` 的既有 autouse schema probe 会先于 P2 fixture 连接，不能略过。将 run binding 消费接到该 canonical 测试入口及 probe/engine 的连接前边界，先验证 wrapper URL，再检查实际 engine 有效身份，最后才 connect。P2 fixture 也只使用通过该 identity 的 engine/session，先 SELECT current_database 精确等于 proof.run_db，再提交 TEST seed。拒绝既有 direct/shared fallback，不修改角色/破坏 guard 来制造通过；纯离线 fake-engine 反例不建真实连接。脚本发行证明、conftest 门禁和对应 fake-wrapper 兼容回归为同一个提交切片。
 5. **子进程启动绑定**：继承显式 allowlist，并显式转交 proof/run ID；两 DB 变量同 canonical URL、enforce、测试 Fernet key、no dotenv。每次 launch 新生成独立 launch nonce 和全新私有 attestation 路径，禁止复用旧文件；factory 在连接前验证 run proof、实际 app engine/session 有效身份，连接后核对 actual DB，再构造/服务实际 app，并以 exclusive 文件输出 run ID+launch nonce+child PID/启动标识+identity digest+actual DB。仅 test-support ASGI wrapper 给实际响应附本次 launch nonce，绑定 readiness/canary HTTP 到这个 child，不新增 production 路由或改 app.py 中间件。父进程必须核对本次 launch/run 全部字段、Popen child 身份、owner ancestry/liveness及 probe 响应 nonce，不仅看文件或 healthz 存在。缺失/上一 launch/上一 run 的证明都失败且不开放业务写。没有 production 诊断 HTTP 路由。
 6. **明确 canary 顺序**：父进程通过上述门禁后提交不可预测 TEST canary、测试用户及 readonly API key。子进程 identity/readiness 通过后，先用已 seed 的 readonly key 做真实 canary GET 并比对，再允许 cookie login 和被测 OAuth/业务命令，之后 UI写→独立 GET/DB读→reload。源码 `access/_credentials.py::_db_lookup` 会 best-effort 更新 last_used_at；因此不谎称带认证 GET 完全无存储副作用：此认证元数据更新只发生在 child identity 门禁之后，canary 之前仍禁止 login/session 创建、OAuth state 与被测业务写，不预热/伪造 auth cache 绕过真实认证。canary 是数据通路证明，不替代 run provenance。
@@ -114,9 +114,9 @@ P2 只逐页切换已验 React 页面。旧页面资源暂不在本计划写域�
 
 ## 7. 当前证据与未覆盖
 
-已做：三页旧模板/脚本及关键服务端源码阅读、恢复后的独立 backend contract audit、公开官方/npm 复用核对、计划工作树登记。审计只证明其读取到的合同，不代替独立计划/安全评审。
-未做：依赖安装/审计、P2代码实现、任何P2测试、真实写闭环或P2切换/交付。下一门禁是本修订计划评审与精确 source/test scope 登记；后继任务保持依赖，不能把源码审计、本计划或失败委派记成 GREEN。
+已做：合同审计及 e404c10 计划独立 F1 复审 PASS（`/tmp/frontend-p2-plan-f1-review.md`），精确登记 `m-badab46c-d24`；按原 lock 私有 npm ci 准备工具，未新增图表依赖。实际 strict TDD：producer/保留名称4 RED；canonical preconnection2 RED（旧 probe 请求 fake engine）；非普通 proof/FIFO 真实阻塞 RED 后在读取 owner 非阻塞打开并 fstat 拒绝。对应日志 `/tmp/frontend-p2-run-binding-{red-reserved,consumer-red,fifo-red,checkpoint-green}.log`；最近两文件隔离窄回归 exit0/66 passed，Ruff0。没有全套 baseline 或完整拒绝矩阵/独立实现审查；这不是 binding任务完成或P2验收。
+未做：图表依赖适配/审计、P2公共权限/业务API安全修复、三页业务实现、child/HTTP/canary真实写闭环、页面切换或交付。run-binding 仍 in_progress，补齐矩阵/实现复审后才解锁 core；不把局部测试、源码审计或计划 PASS 当整体 GREEN。
 
-F1 producer/consumer 的新增候选写域（不是现有写权）：`scripts/{test_isolated.sh,_test_db_connections.py}`、`tests/conftest.py`、`tests/test_test_run_binding.py`、`tests/test_test_template_refresh.py`、`docs/guides/agent-testing.md`。`scripts/test.sh` 已在 DB URL 存在时不加载 .env.test，只验证新输出能原样传递，不预计修改它。修订计划复审通过且 canonical registry 核对/登记读回前，禁止这些文件的实现编辑或任何 writable-fixture seed。
+F1 producer/consumer 已登记的当前写域（回执 m-badab46c-d24）：`scripts/{test_isolated.sh,_test_db_connections.py}`、`tests/conftest.py`、`tests/test_test_run_binding.py`、`tests/test_test_template_refresh.py`、`docs/guides/agent-testing.md`。`scripts/test.sh` 已在 DB URL 存在时不加载 .env.test，只验证新输出能原样传递，不预计修改它。已获计划复审/登记只允许此切片；真实 writable-fixture seed 仍须等实际门禁、child attestation/canary 支持实现并验证。
 
 其他候选实现文件（不是现有写权）：`frontend/src/pages/{intercept-stats,shops,enum-map}/`；`frontend/src/{bootstrap.ts,bootstrap.test.ts,shared/contracts.ts,shared/api/client.ts,shared/api/client.test.ts,app/page-loader.ts}`；`frontend/{package.json,package-lock.json,NOTICE.md}`；`tts_erp_v2/api/{deps.py,v2/frontend_pages.py,v2/admin.py,v2/config.py}`；`tts_erp_v2/static/js/enum-map.js` 仅旧写请求补头；`tests/api/{test_frontend_pages,test_admin_shops,test_enum_map,test_cookie_csrf}.py`；上述 P2 live/support 文件及本计划。若组件/旧测试还需其他修改，先重新核对 owner 并扩展 scope，不能顺手改其他 lane。

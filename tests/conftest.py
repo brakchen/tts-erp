@@ -16,10 +16,14 @@ import sys
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from scripts._test_db_connections import RunBinding
 
 # Make project root importable.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -27,7 +31,26 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-# Ensure .env is loaded before reading TTS_ERP_DB_URL.
+def _isolated_test_context() -> tuple[str, RunBinding]:
+    from scripts._test_db_connections import load_run_binding
+
+    value = os.environ.get("TTS_ERP_DB_URL_TEST", "")
+    try:
+        return value, load_run_binding(value)
+    except ValueError:
+        sys.stderr.write(
+            "[conftest] REFUSED: current isolated run proof is required; "
+            "use bash scripts/test_isolated.sh\n"
+        )
+        raise SystemExit(2) from None
+
+
+# Bind before dotenv or any schema/fixture connection; no direct/shared fallback.
+_db_url, _run_binding = _isolated_test_context()
+os.environ["TTS_ERP_DB_URL"] = _db_url
+
+
+# Load optional non-DB defaults only after the independent run binding passed.
 def _load_env() -> None:
     if os.environ.get("TTS_ERP_TEST_NO_DOTENV") == "1":
         return
@@ -93,96 +116,13 @@ def _coerce_psycopg(url: str) -> str:
     return url
 
 
-# Test-DB override resolution (2026-09-07):
-#
-# The project historically had every test connect to the production
-# database (``TTS_ERP_DB_URL`` from ``.env``). That shared-DB coupling
-# is what allowed test commits to leak into prod (the 2026-09-07
-# audit found 150 ``integration.sync_jobs`` rows and 1
-# ``integration.credentials`` row with ``TEST_`` prefixes sitting in
-# the live ``tts_erp`` DB). The fix is env-driven:
-#
-#   1. ``scripts/test_isolated.sh fast`` clones a per-run ``tts_erp_test_*``
-#      database from ``tts_erp_test_template`` and sets ``TTS_ERP_DB_URL_TEST``
-#      to that isolated database. Direct ``scripts/test.sh`` remains the
-#      serialized shared-DB fallback for ``tts_erp_v3_test``.
-#   2. ``tests/conftest.py`` (here) prefers ``TTS_ERP_DB_URL_TEST``
-#      over the prod ``TTS_ERP_DB_URL``; tests run against the test DB.
-#   3. The prod API service (``tts-erp.service``) still reads ``.env``
-#      unchanged and keeps talking to ``tts_erp``. Zero restart, zero
-#      docker change.
-#
-# We do NOT hard-fail when ``TTS_ERP_DB_URL_TEST`` is unset: that
-# keeps direct ``pytest`` invocations (e.g. ``pytest tests/db/`` for
-# a one-off introspection) working. Instead we print a one-line
-# warning the first time we resolve to a prod-shaped dbname so the
-# developer notices. The normal agent entry point is ``scripts/test_isolated.sh``;
-# direct ``scripts/test.sh`` is only the serialized shared-DB fallback.
-from urllib.parse import urlparse as _urlparse
-
-_db_url_test = os.environ.get("TTS_ERP_DB_URL_TEST")
-_db_url_prod = os.environ.get("TTS_ERP_DB_URL")
-
-if _db_url_test:
-    _db_url = _coerce_psycopg(_db_url_test)
-    os.environ["TTS_ERP_DB_URL"] = _db_url  # propagate so SQLAlchemy
-    # picks up the override too
-elif _db_url_prod:
-    _db_url = _coerce_psycopg(_db_url_prod)
-    # Defensive: warn if we're about to run tests against what looks
-    # like the production DB AND the caller didn't opt in via
-    # ``TTS_ERP_DB_URL_TEST``. This catches ``pytest`` invoked without
-    # ``scripts/test.sh`` when a developer has only ``.env`` on disk.
-    try:
-        _dbname = (_urlparse(_db_url).path or "").lstrip("/")
-        if _dbname in {"tts_erp", "tts_erp_prod"} or _dbname.startswith(
-            "tts_erp_prod_"
-        ):
-            # 2026-09-13 incident: warning was not loud enough. The
-            # ``tests/api/test_admin_purge.py::test_purge_plugin_data_clears_ad_tables``
-            # ran against prod ``tts_erp`` from a worktree whose ``.env``
-            # symlinked to the main repo's prod ``.env`` and the runner
-            # did not source ``.env.test``. The wipe blanked 14,719 rows
-            # of ``plugin.ad_daily`` (246 campaigns × 65 days). We now
-            # FAIL FAST on prod-shaped dbnames by default — only an
-            # explicit env opt-in (TTS_ERP_TEST_OFF=1) can override, and
-            # even then stderr still gets a loud banner. See
-            # ``docs/ops/incident-reports/2026-09-13-ad-daily-purge.md``.
-            test_off = os.environ.get("TTS_ERP_TEST_OFF", "0") == "1"
-            if not test_off:
-                # NOTE: We use ``sys.exit(2)`` instead of ``pytest.exit()``
-                # because pytest catches its own Exit class to set
-                # returncode and continue collection. ``sys.exit`` raises
-                # SystemExit which propagates through pytest's collect
-                # phase as a collection error — session aborts immediately.
-                import sys as _sys2
-
-                _sys2.stderr.write(
-                    "\n[conftest] REFUSED: prod-shaped DB ``"
-                    f"{_dbname}``\n"
-                    "             Use ``bash scripts/test_isolated.sh fast`` "
-                    "(preferred),\n"
-                    "             or set TTS_ERP_DB_URL_TEST to point at a\n"
-                    "             test-shaped DB. TTS_ERP_TEST_OFF=1 bypasses\n"
-                    "             this guard (NOT recommended; you will run\n"
-                    "             tests against prod and may damage live data).\n\n"
-                )
-                _sys2.stderr.flush()
-                raise SystemExit(2)
-            sys.stderr.write(
-                "\n[conftest] !!! TTS_ERP_TEST_OFF=1 !!! Running tests against\n"
-                f"             prod-shaped DB ``{_dbname}``. LIVE DATA AT RISK.\n\n"
-            )
-    except Exception:  # noqa: BLE001, S110 — defensive: URL parse failure
-        # must never block a test run; we already have a usable _db_url.
-        pass
-else:
-    _db_url = None  # type: ignore[assignment]
+# The wrapper's canonical run URL and independent proof were resolved before
+# dotenv above. A merely test-shaped URL or TTS_ERP_TEST_OFF is not a fallback.
 
 
 @pytest.fixture(scope="session")
 def db_url() -> str:
-    return _db_url  # type: ignore[return-value]
+    return _db_url
 
 
 # Schema prerequisite probe result. The answer ("does this database have the
@@ -202,10 +142,15 @@ def _probe_schema_tables(db_url: str) -> frozenset[str]:
 
     # A throwaway engine, not the shared session engine: the probe must not
     # seed the pool that ``db_engine`` later hands out.
+    _run_binding.validate_url(db_url)
     eng = create_engine(db_url, pool_pre_ping=False, pool_size=1, max_overflow=0)
     try:
+        _run_binding.validate_url(eng.url.render_as_string(hide_password=False))
         with eng.connect() as conn:
-            # pi-lens-ignore: python-sql-injection — static schema introspection, no user input
+            # pi-lens-ignore: python-sql-injection
+            actual_database = conn.execute(text("SELECT current_database()")).scalar_one()
+            _run_binding.verify_database(actual_database)
+            # pi-lens-ignore: python-sql-injection
             rows = conn.execute(
                 text(
                     "SELECT table_schema || '.' || table_name FROM information_schema.tables "
@@ -236,8 +181,10 @@ def db_engine(db_url: str):
     """
     from tts_erp_v2.db.base import get_engine, reset_for_testing
 
+    _run_binding.validate_url(db_url)
     reset_for_testing()
     eng = get_engine(db_url)
+    _run_binding.validate_url(eng.url.render_as_string(hide_password=False))
     yield eng
     reset_for_testing()
 
