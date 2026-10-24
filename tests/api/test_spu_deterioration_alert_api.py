@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
 
@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import delete, event, select, text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
 from tts_erp_v2.db.models import (
     AdDaily,
     AdRawLog,
@@ -20,6 +21,9 @@ from tts_erp_v2.db.models import (
     ChannelProduct,
     SalesOrder,
     SalesOrderLine,
+    SettlementComponent,
+    SettlementStatement,
+    SettlementTransaction,
     SyncIssue,
     SyncJob,
 )
@@ -143,6 +147,21 @@ def comparison_scope(db_engine):
     yield scope
     with Session(db_engine) as session:
         order_ids = select(SalesOrder.id).where(SalesOrder.shop_pk == scope["shop"])
+        statement_ids = list(
+            session.scalars(
+                select(SettlementTransaction.settlement_statement_id).where(
+                    SettlementTransaction.order_pk.in_(order_ids)
+                )
+            )
+        )
+        session.execute(
+            delete(SettlementTransaction).where(
+                SettlementTransaction.order_pk.in_(order_ids)
+            )
+        )
+        session.execute(
+            delete(SettlementStatement).where(SettlementStatement.id.in_(statement_ids))
+        )
         session.execute(delete(Case).where(Case.shop_pk == scope["shop"]))
         session.execute(
             delete(SalesOrderLine).where(SalesOrderLine.order_pk.in_(order_ids))
@@ -635,7 +654,9 @@ def test_unresolved_parse_failures_do_not_masquerade_as_complete_financial_facts
         assert item["currentNoOrderAdSpend"] is True
 
 
-@pytest.mark.parametrize("missing_fact", ["date", "spu_pk", "quantity", "unit_price"])
+@pytest.mark.parametrize(
+    "missing_fact", ["date", "status", "spu_pk", "quantity", "unit_price"]
+)
 def test_missing_header_or_line_facts_remain_unknown_with_exists_checks(
     api_client, readonly_key, comparison_scope, db_engine, missing_fact
 ):
@@ -648,6 +669,8 @@ def test_missing_header_or_line_facts_remain_unknown_with_exists_checks(
         if missing_fact == "date":
             order.order_time = None
             order.paid_at = None
+        elif missing_fact == "status":
+            order.status = None
         else:
             line = session.scalar(
                 select(SalesOrderLine)
@@ -906,3 +929,493 @@ def test_malformed_or_failed_empty_ads_are_not_availability_evidence(
         )
         session.commit()
     assert get(api_client, readonly_key, scope, activity="all").status_code == 503
+
+
+@pytest.mark.parametrize("status", [None, "", " ", "TEST_UNKNOWN"])
+def test_unknown_order_status_is_not_zero_or_default_activity(
+    api_client, readonly_key, comparison_scope, db_engine, status
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        order.status = status
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = body["items"][0]
+    assert item["currentOrderCount"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["currentRoi"] is None
+    assert item["currentNetProfitCny"] is None
+    assert item["currentRoiUnavailableReason"]
+    assert Decimal(item["currentSpendCny"]) == 49
+    assert body["totals"]["currentOrderCount"] is None
+    assert item["previousOrderCount"] == 1
+    assert item["previousRoi"] is not None
+    assert body["totals"]["previousOrderCount"] == 1
+    assert get(api_client, readonly_key, scope).status_code == 503
+
+
+@pytest.mark.parametrize("status", ["UNPAID", "ON_HOLD", "CANCELLED"])
+@pytest.mark.parametrize("missing_lines", [False, True])
+def test_known_excluded_status_keeps_its_existing_missing_line_semantics(
+    api_client, readonly_key, comparison_scope, db_engine, status, missing_lines
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        order.status = status
+        if missing_lines:
+            session.execute(
+                delete(SalesOrderLine).where(SalesOrderLine.order_pk == order.id)
+            )
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    unknown = status == "CANCELLED" and missing_lines
+    assert item["currentOrderCount"] == (None if unknown else 0)
+    assert item["currentNoOrderAdSpend"] is (None if unknown else True)
+    assert (item["currentRoi"] is None) is unknown
+    assert (item["currentNetProfitCny"] is None) is unknown
+    assert get(api_client, readonly_key, scope).status_code == (503 if unknown else 200)
+
+
+def _add_comparison_refund(
+    db_engine,
+    scope,
+    *,
+    order_id="TEST_COMPARE_ORDER_2",
+    amount=None,
+    status="RETURN_OR_REFUND_REQUEST_COMPLETE",
+    case_type="RETURN_AND_REFUND",
+):
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == order_id)
+        )
+        assert order is not None
+        line = session.scalar(
+            select(SalesOrderLine).where(
+                SalesOrderLine.order_pk == order.id,
+                SalesOrderLine.spu_pk == scope["products"][0],
+            )
+        )
+        assert line is not None
+        case = Case(
+            shop_pk=scope["shop"],
+            order_pk=order.id,
+            external_case_id=f"TEST_COMPARE_MISSING_REFUND_{order_id}",
+            case_type=case_type,
+            status=status,
+            # A case's update day must not move it out of its original order window.
+            updated_at_source=datetime.combine(
+                scope["anchor"] + timedelta(days=2), time(12), TZ
+            ),
+        )
+        session.add(case)
+        session.flush()
+        session.add(
+            CaseLine(
+                case_id=case.id,
+                sales_order_line_id=line.id,
+                external_case_line_id="TEST_COMPARE_MISSING_REFUND_LINE",
+                quantity=1,
+                refund_amount=amount,
+                currency="VND",
+                should_replenish_stock=False,
+            )
+        )
+        session.commit()
+
+
+@pytest.mark.parametrize("period", ["current", "previous"])
+@pytest.mark.parametrize("case_type", ["REFUND_ONLY", "RETURN_AND_REFUND"])
+@pytest.mark.parametrize(
+    "status", ["RETURN_OR_REFUND_REQUEST_COMPLETE", "CANCELLATION_REQUEST_COMPLETE"]
+)
+def test_missing_completed_refund_amount_masks_only_affected_profitability(
+    api_client, readonly_key, comparison_scope, db_engine, period, case_type, status
+):
+    scope = comparison_scope
+    _add_comparison_refund(
+        db_engine,
+        scope,
+        order_id="TEST_COMPARE_ORDER_2"
+        if period == "current"
+        else "TEST_COMPARE_ORDER_1",
+        status=status,
+        case_type=case_type,
+    )
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = next(i for i in body["items"] if i["spuPk"] == scope["products"][0])
+    assert item[period + "Roi"] is None
+    assert item[period + "NetProfitCny"] is None
+    assert "退款金额缺失" in item[period + "RoiUnavailableReason"]
+    assert item[period + "OrderCount"] == 1
+    assert item[period + "NoOrderAdSpend"] is False
+    assert Decimal(item[period + "SpendCny"]) == 49
+    assert body["totals"][period + "OrderCount"] == (2 if period == "current" else 1)
+    other = "previous" if period == "current" else "current"
+    assert item[other + "Roi"] is not None
+    assert item[other + "NetProfitCny"] is not None
+    for known in body["items"]:
+        if known["spuPk"] in scope["products"][1:4]:
+            assert known[period + "Roi"] is not None
+            assert known[period + "NetProfitCny"] is not None
+    assert any("退款金额缺失" in w for w in body["meta"]["warnings"])
+    assert get(api_client, readonly_key, scope).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("amount", "status", "case_type", "order_status"),
+    [
+        (0, "RETURN_OR_REFUND_REQUEST_COMPLETE", "RETURN_AND_REFUND", "DELIVERED"),
+        (None, "RETURN_OR_REFUND_REQUEST_PENDING", "RETURN_AND_REFUND", "DELIVERED"),
+        (None, "CANCELLATION_REQUEST_COMPLETE", "CANCELLATION", "CANCELLED"),
+        (None, "RETURN_OR_REFUND_REQUEST_COMPLETE", "REFUND_ONLY", "UNPAID"),
+        (None, "RETURN_OR_REFUND_REQUEST_COMPLETE", "REFUND_ONLY", "ON_HOLD"),
+    ],
+)
+def test_non_contributing_or_known_zero_refund_amount_does_not_mask_profitability(
+    api_client,
+    readonly_key,
+    comparison_scope,
+    db_engine,
+    amount,
+    status,
+    case_type,
+    order_status,
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        order.status = order_status
+        session.commit()
+    _add_comparison_refund(
+        db_engine, scope, amount=amount, status=status, case_type=case_type
+    )
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentRoi"] is not None
+    assert item["currentNetProfitCny"] is not None
+    assert item["currentRoiUnavailableReason"] is None
+    assert not any("退款金额缺失" in w for w in response.json()["meta"]["warnings"])
+
+
+@pytest.mark.parametrize("status", sorted(PAID_SALES_ORDER_STATUSES))
+def test_known_paid_order_status_still_has_known_comparison_facts(
+    api_client, readonly_key, comparison_scope, db_engine, status
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        order.status = status
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentOrderCount"] == 1
+    assert item["currentNoOrderAdSpend"] is False
+    assert item["currentRoi"] is not None
+    assert item["currentNetProfitCny"] is not None
+    assert get(api_client, readonly_key, scope).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("day_offset", "clock", "paid_fallback", "expected_period"),
+    [
+        (-6, time.min, False, "current"),
+        (-7, time(23, 59, 59), False, "previous"),
+        (1, time.min, False, None),
+        (-14, time(23, 59, 59), False, None),
+        (-6, time.min, True, "current"),
+    ],
+)
+def test_canonical_refund_completeness_uses_original_order_local_window(
+    api_client,
+    readonly_key,
+    comparison_scope,
+    db_engine,
+    day_offset,
+    clock,
+    paid_fallback,
+    expected_period,
+):
+    from tts_erp_v2.analytics.spu_profitability import (
+        consistent_read_snapshot,
+        missing_completed_refund_amounts_in_snapshot,
+    )
+
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        event_time = datetime.combine(
+            scope["anchor"] + timedelta(days=day_offset), clock, TZ
+        )
+        order.order_time = None if paid_fallback else event_time
+        # A conflicting paid date must not override a present order date.
+        order.paid_at = (
+            event_time
+            if paid_fallback
+            else datetime.combine(scope["anchor"], time(12), TZ)
+        )
+        session.commit()
+    _add_comparison_refund(db_engine, scope)
+    with Session(db_engine) as session, consistent_read_snapshot(session):
+        for label, start_offset, end_offset in (
+            ("previous", -13, -7),
+            ("current", -6, 0),
+        ):
+            missing = missing_completed_refund_amounts_in_snapshot(
+                session,
+                shop_pk=scope["shop"],
+                spu_pks=tuple(scope["products"]),
+                start_date=scope["anchor"] + timedelta(days=start_offset),
+                end_date=scope["anchor"] + timedelta(days=end_offset),
+            )
+            assert missing == (
+                {scope["products"][0]} if label == expected_period else set()
+            )
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    for label in ("previous", "current"):
+        assert (item[label + "Roi"] is None) is (label == expected_period)
+        assert (item[label + "NetProfitCny"] is None) is (label == expected_period)
+
+
+def _add_comparison_settlement(
+    db_engine, scope, *, order_id="TEST_COMPARE_ORDER_2", components=()
+):
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == order_id)
+        )
+        assert order is not None
+        statement = SettlementStatement(
+            external_statement_id=f"TEST_COMPARE_STATEMENT_{order_id}",
+            statement_time=datetime.combine(
+                scope["anchor"] + timedelta(days=2), time(12), TZ
+            ),
+            currency="VND",
+        )
+        session.add(statement)
+        session.flush()
+        # Separate transactions permit several SETTLEMENT components whose sum
+        # is zero. An empty transaction alone must not count as settlement.
+        for n in range(max(1, len(components))):
+            transaction = SettlementTransaction(
+                settlement_statement_id=statement.id,
+                external_transaction_id=f"TEST_COMPARE_TXN_{order_id}_{n}",
+                order_pk=order.id,
+                transaction_time=statement.statement_time,
+            )
+            session.add(transaction)
+            session.flush()
+            if components:
+                code, amount = components[n]
+                session.add(
+                    SettlementComponent(
+                        transaction_id=transaction.id,
+                        component_code=code,
+                        amount=Decimal(amount),
+                        currency="VND",
+                    )
+                )
+        session.commit()
+
+
+def _canonical_comparison_metric(db_engine, scope, period):
+    from tts_erp_v2.analytics.spu_profitability import (
+        ExactIdsSelection,
+        ProfitScope,
+        RowView,
+        read_overview,
+    )
+
+    with Session(db_engine) as session:
+        return read_overview(
+            session,
+            scope=ProfitScope(
+                shop_pk=scope["shop"],
+                start_date=scope["anchor"]
+                - timedelta(days=6 if period == "current" else 13),
+                end_date=scope["anchor"]
+                - timedelta(days=0 if period == "current" else 7),
+                include_inactive=True,
+                selection=ExactIdsSelection(("TEST_COMPARE_0",)),
+            ),
+            view=RowView(limit=1),
+        ).items[0]
+
+
+@pytest.mark.parametrize("period", ["current", "previous"])
+@pytest.mark.parametrize(
+    ("components", "settled"),
+    [
+        ((("SETTLEMENT", "90000"),), True),
+        ((("SETTLEMENT", "0"),), True),
+        ((("SETTLEMENT", "90000"), ("SETTLEMENT", "-90000")), True),
+        ((("PLATFORM_COMMISSION", "-3000"),), False),
+        ((("CUSTOMER_REFUND", "-100000"),), False),
+        ((), False),
+    ],
+    ids=["positive", "zero", "sum-zero", "fee-only", "refund-only", "empty-txn"],
+)
+def test_missing_refund_amount_preserves_independent_settled_current_metrics(
+    api_client, readonly_key, comparison_scope, db_engine, period, components, settled
+):
+    from tts_erp_v2.analytics.spu_profitability import (
+        consistent_read_snapshot,
+        missing_completed_refund_amounts_in_snapshot,
+    )
+
+    scope = comparison_scope
+    order_id = "TEST_COMPARE_ORDER_2" if period == "current" else "TEST_COMPARE_ORDER_1"
+    _add_comparison_settlement(
+        db_engine, scope, order_id=order_id, components=components
+    )
+    _add_comparison_refund(db_engine, scope, order_id=order_id)
+    metric = _canonical_comparison_metric(db_engine, scope, period)
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = next(i for i in body["items"] if i["spuPk"] == scope["products"][0])
+    if settled:
+        # Compare canonical outputs, not a second financial formula in the test.
+        assert item[period + "NetProfitCny"] is not None
+        assert Decimal(item[period + "NetProfitCny"]) == metric.net_profit.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        assert item[period + "Roi"] is not None
+        assert metric.roi_real is not None
+        assert Decimal(item[period + "Roi"]) == metric.roi_real.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        assert item[period + "RoiUnavailableReason"] is None
+    else:
+        assert item[period + "NetProfitCny"] is None
+        assert item[period + "Roi"] is None
+        assert "退款金额缺失" in item[period + "RoiUnavailableReason"]
+    assert item[period + "OrderCount"] == 1
+    assert item[period + "NoOrderAdSpend"] is False
+    assert Decimal(item[period + "SpendCny"]) == 49
+    other = "previous" if period == "current" else "current"
+    assert item[other + "Roi"] is not None
+    assert item[other + "NetProfitCny"] is not None
+    assert body["totals"][period + "OrderCount"] == (2 if period == "current" else 1)
+    for known in body["items"]:
+        if known["spuPk"] in scope["products"][1:4]:
+            assert known[period + "Roi"] is not None
+            assert known[period + "NetProfitCny"] is not None
+    with Session(db_engine) as session, consistent_read_snapshot(session):
+        # NOT NULL makes component presence equivalent to a non-NULL SUM,
+        # including explicit zero and offsetting amounts, in the sales SQL.
+        assert (
+            session.scalar(
+                text(
+                    "SELECT is_nullable FROM information_schema.columns "
+                    "WHERE table_schema = 'finance' "
+                    "AND table_name = 'settlement_components' AND column_name = 'amount'"
+                )
+            )
+            == "NO"
+        )
+        missing = missing_completed_refund_amounts_in_snapshot(
+            session,
+            shop_pk=scope["shop"],
+            spu_pks=tuple(scope["products"]),
+            start_date=scope["anchor"]
+            - timedelta(days=6 if period == "current" else 13),
+            end_date=scope["anchor"] - timedelta(days=0 if period == "current" else 7),
+        )
+        assert missing == (set() if settled else {scope["products"][0]})
+
+
+@pytest.mark.parametrize("unsettled_refund_amount", [None, 0])
+def test_mixed_settled_and_unsettled_refunds_keep_order_specific_completeness(
+    api_client, readonly_key, comparison_scope, db_engine, unsettled_refund_amount
+):
+    from tts_erp_v2.analytics.spu_profitability import (
+        consistent_read_snapshot,
+        missing_completed_refund_amounts_in_snapshot,
+    )
+
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        small = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_SMALL")
+        )
+        assert small is not None
+        line = session.scalar(
+            select(SalesOrderLine).where(SalesOrderLine.order_pk == small.id)
+        )
+        assert line is not None
+        line.spu_pk = scope["products"][0]
+        session.commit()
+    _add_comparison_settlement(db_engine, scope, components=(("SETTLEMENT", "90000"),))
+    _add_comparison_refund(db_engine, scope)
+    _add_comparison_refund(
+        db_engine, scope, order_id="TEST_COMPARE_SMALL", amount=unsettled_refund_amount
+    )
+    metric = _canonical_comparison_metric(db_engine, scope, "current")
+    response = get(api_client, readonly_key, scope, activity="all")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = next(i for i in body["items"] if i["spuPk"] == scope["products"][0])
+    if unsettled_refund_amount is None:
+        assert item["currentNetProfitCny"] is None
+        assert item["currentRoi"] is None
+        assert "退款金额缺失" in item["currentRoiUnavailableReason"]
+    else:
+        assert item["currentNetProfitCny"] is not None
+        assert Decimal(item["currentNetProfitCny"]) == metric.net_profit.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        assert item["currentRoi"] is not None
+        assert metric.roi_real is not None
+        assert Decimal(item["currentRoi"]) == metric.roi_real.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        assert item["currentRoiUnavailableReason"] is None
+    assert item["currentOrderCount"] == 2
+    assert item["currentNoOrderAdSpend"] is False
+    assert Decimal(item["currentSpendCny"]) == 49
+    assert body["totals"]["currentOrderCount"] == 2
+    assert item["previousNetProfitCny"] is not None
+    assert item["previousRoi"] is not None
+    for known in body["items"]:
+        if known["spuPk"] in scope["products"][1:4]:
+            assert known["currentNetProfitCny"] is not None
+            assert known["currentRoi"] is not None
+    with Session(db_engine) as session, consistent_read_snapshot(session):
+        missing = missing_completed_refund_amounts_in_snapshot(
+            session,
+            shop_pk=scope["shop"],
+            spu_pks=tuple(scope["products"]),
+            start_date=scope["anchor"] - timedelta(days=6),
+            end_date=scope["anchor"],
+        )
+        assert missing == (
+            {scope["products"][0]} if unsettled_refund_amount is None else set()
+        )

@@ -17,7 +17,10 @@ from sqlalchemy import cast, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
+from tts_erp_v2.db.constants import (
+    PAID_SALES_ORDER_STATUSES,
+    UNPAID_SALES_ORDER_STATUSES,
+)
 from tts_erp_v2.db.models import (
     AdDaily,
     AdRawLog,
@@ -264,11 +267,18 @@ def order_limitations(
     """Known header/line/link failures must never be reinterpreted as zero orders."""
     end_utc = datetime.combine(end + timedelta(days=1), time.min, timezone)
     event_time = func.coalesce(SalesOrder.order_time, SalesOrder.paid_at)
+    unknown_status = or_(
+        SalesOrder.status.is_(None),
+        SalesOrder.status.not_in(
+            PAID_SALES_ORDER_STATUSES | UNPAID_SALES_ORDER_STATUSES
+        ),
+    )
     conditions = [
         SalesOrder.shop_pk == shop.id,
         or_(
             SalesOrder.status.in_(PAID_SALES_ORDER_STATUSES),
             SalesOrder.status == "CANCELLED",
+            unknown_status,
         ),
         or_(event_time < end_utc, event_time.is_(None)),
     ]
@@ -307,14 +317,14 @@ def order_limitations(
         select(SalesOrder.id)
         .where(
             *conditions,
-            or_(event_time.is_(None), ~has_lines, has_bad_line),
+            or_(unknown_status, event_time.is_(None), ~has_lines, has_bad_line),
         )
         .limit(1)
     )
     limitations = []
     if missing is not None:
         limitations.append(
-            "订单存在日期、商品行、金额或 SPU 关联缺失，不能确认实际订单数/利润。"
+            "订单存在状态未知、日期、商品行、金额或 SPU 关联缺失，不能确认实际订单数/利润。"
         )
     return limitations + source_issue_limitations(
         session,
