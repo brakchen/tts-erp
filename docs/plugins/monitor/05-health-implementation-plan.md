@@ -42,7 +42,7 @@ ArchitectureReviewRequired=true：新增公开契约/权限/持久化/producer-c
 
 拒绝 extra、错误类型和无效 step/status 组合；小请求体上限 4 KiB。时间由服务器接收时记录。只允许 readwrite+，保留现有 API key 鉴权/店铺 seller scope；不能把 advertiser-only scope 当作任意 shop 授权。HTTP 成功必须在持久化完成后返回；204 即可，不增加并行业务状态字段。
 
-源 ID 必须核对 Seller Center 捕获的 sellerId 语义与现有文档，不按 display name 关联 commerce 主键；健康域以已授权 shopId 字符串分区，不强行猜内部 shop_pk。准确来源未证实时不能虚构可用店铺身份。
+已核对插件 `src/core/tab-binding.ts`：身份取 URL 的 `oec_seller_id`，其次 `seller_id`。本契约 shopId 使用这一稳定 Seller Center 店铺身份，与既有 `seller:<id>` scope 字面匹配；不按 display name 关联 commerce 主键，不声称它与 OpenAPI shop_id 或内部 shop_pk 等价。准确来源未识别时不能虚构可用店铺身份。
 
 ### 3.2 处理/告警语义
 
