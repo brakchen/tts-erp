@@ -1,3 +1,5 @@
+import { isLosslessNumber, isSafeNumber } from 'lossless-json';
+
 export interface Item {
   configKey: string; displayName: string; publishedVersion: number | null; hasDraft: boolean;
   updatedAt: string; publishedAt: string | null; retiredAt: string | null;
@@ -6,14 +8,14 @@ export interface Detail extends Item { jsonSchema: Record<string, unknown>; draf
 export interface Revision { version: number; payload: Record<string, unknown>; comment: string | null; createdBy: string; createdAt: string }
 export interface Secret { name: string; ref: string; fingerprint: string; updatedAt: string; retiredAt: string | null }
 export interface Published { version: number; payload: Record<string, unknown> }
-export const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+export const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) && !isLosslessNumber(value);
 const fail = (): never => { throw new Error('运行配置响应格式不正确'); };
 const text = (v: unknown): string => typeof v === 'string' ? v : fail();
 const nullableText = (v: unknown): string | null => v === null ? null : text(v);
 export const version = (v: unknown): number => {
   // Versions are bounded UI metadata; payload numbers never pass this conversion.
-  if (typeof v === 'bigint' && v >= 0n && v <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(v);
-  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : fail();
+  const numeric = isLosslessNumber(v) && isSafeNumber(v.value) ? Number(v.value) : v;
+  return typeof numeric === 'number' && Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : fail();
 };
 const object = (v: unknown): Record<string, unknown> => record(v) ? v : fail();
 export function decodeItem(v: unknown): Item {

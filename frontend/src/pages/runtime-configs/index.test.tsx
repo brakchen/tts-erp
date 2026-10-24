@@ -1,13 +1,18 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
+import RuntimeConfigs from './index';
+// Command/DTO tests use the public editor lifecycle model. Real SDK rendering
+// and lossless mode transitions are covered separately in JsonEditor.test.tsx.
+vi.mock('vanilla-jsoneditor', () => ({
+  Mode: { text: 'text', tree: 'tree' },
+  createJSONEditor: () => ({ updateProps: vi.fn(), destroy: async () => {} }),
+}));
 // Recovery draft originally drove legacy duplicateSecretPUT (a38d1cee).
 // Its final oracle must exercise the replacement content, never legacy code.
-const modules = import.meta.glob('./index.tsx');
 const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'runtime-configs', navigation: [], releaseId: 'TEST', roleCapabilities: { readwrite: true, admin: false } } };
 async function mount(writable = true) {
-  const module = modules['./index.tsx'] ? await modules['./index.tsx']() as { default: React.ComponentType<PageProps> } : { default: () => null };
-  return render(<module.default bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: writable, admin: false } }} />);
+  return render(<RuntimeConfigs bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: writable, admin: false } }} />);
 }
 const item = { configKey: 'test.flags', displayName: 'TEST 配置', publishedVersion: 1, hasDraft: true, updatedAt: '2026-01-01', publishedAt: '2026-01-01', retiredAt: null };
 const detail = { ...item, jsonSchema: { type: 'object' }, draftPayload: { enabled: false, zero: 0, absent: null }, draftVersion: 3, publishedPayload: {} };
@@ -92,6 +97,41 @@ describe('runtime-configs React content', () => {
     fireEvent.change(await screen.findByLabelText('凭证名称'), { target: { value: 'test_token' } }); fireEvent.change(screen.getByLabelText('凭证明文'), { target: { value: 'TEST_secret' } }); fireEvent.submit(screen.getByRole('form', { name: '凭证写入' }));
     await screen.findByText(/结果未确认/); fireEvent.click(screen.getByRole('button', { name: '查询核对' })); await screen.findByText(/核对失败/);
     expect(screen.getByRole('button', { name: '加密保存凭证' })).toBeDisabled(); fireEvent.click(screen.getByRole('button', { name: '查询核对' })); await screen.findByText(/元数据不能证明原凭证/); expect(writes(fetcher)).toHaveLength(1);
+  });
+  it('preserves cached snapshot on a conditional 304 and reports a first uncached 304 as failure', async () => {
+    let snapshots = 0;
+    api(async () => json({}, 500), (url) => {
+      if (url.endsWith('/snapshot')) return ++snapshots === 2 ? new Response(null, { status: 304 }) : json({ items: { 'test.flags': { version: 1, payload: { ratio: 'TEST_snapshot' } } } }, 200, { ETag: '\"TEST_etag\"' });
+      return json({ items: [item] });
+    });
+    const view = await mount(false); fireEvent.click(await screen.findByRole('button', { name: '打开 test.flags' })); await screen.findByText('已发布 v1');
+    fireEvent.click(screen.getByRole('button', { name: '刷新已发布快照' })); await screen.findByText('已发布快照未变化（304）');
+    expect(screen.getByLabelText('已发布配置 JSON 文本')).toHaveValue('{\n  "ratio": "TEST_snapshot"\n}');
+    view.unmount();
+    api(async () => json({}, 500), (url) => url.endsWith('/snapshot') ? new Response(null, { status: 304 }) : json({ items: [item] }));
+    await mount(false); fireEvent.click(await screen.findByRole('button', { name: '打开 test.flags' })); expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 304');
+    expect(screen.queryByText('已发布 v1')).toBeNull();
+  });
+  it('executes confirmed item and secret retire/restore paths without deleting history', async () => {
+    const fetcher = api(async (url) => json(url.includes('/secrets/') ? { name: 'test_token', status: url.endsWith('/retire') ? 'retired' : 'active' } : { configKey: 'test.flags', status: url.endsWith('/retire') ? 'retired' : 'active' }));
+    const view = await mount(); await select(); fireEvent.click(screen.getByRole('button', { name: '归档配置' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认执行' })); await screen.findByText('配置归档已确认');
+    expect(writes(fetcher)[0][0]).toBe('/tts/v2/config/runtime/items/test.flags/retire');
+    fireEvent.click(await screen.findByRole('button', { name: '归档凭证 test_token' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认执行' })); await screen.findByText('凭证归档已确认');
+    expect(writes(fetcher)[1][0]).toBe('/tts/v2/config/runtime/secrets/test_token/retire'); view.unmount();
+    const retiredFetch = api(async (url) => json(url.includes('/secrets/') ? { name: 'test_token', status: 'active' } : { configKey: 'test.flags', status: 'active' }), (url) => url.includes('/secrets') ? json({ items: [{ ...secret, retiredAt: 'TEST_date' }] }) : url.includes('/revisions') ? json({ items: [] }) : url.includes('/items/test.flags') ? json({ ...detail, retiredAt: 'TEST_date' }) : json({ items: [{ ...item, retiredAt: 'TEST_date' }] }));
+    await mount(); await select(); fireEvent.click(screen.getByRole('button', { name: '恢复配置' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认执行' })); await screen.findByText('配置恢复已确认');
+    fireEvent.click(await screen.findByRole('button', { name: '恢复凭证 test_token' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认执行' })); await screen.findByText('凭证恢复已确认');
+    expect(writes(retiredFetch).map(([url]) => url)).toEqual(['/tts/v2/config/runtime/items/test.flags/restore', '/tts/v2/config/runtime/secrets/test_token/restore']);
+  });
+  it('clears submitted field errors on a real draft edit but preserves full server cooldown across reads and writes', async () => {
+    let count = 0; const fetcher = api(async () => ++count === 1 ? json({ detail: [{ loc: ['body', 'value'], type: 'string_too_long' }] }, 422) : json({}, 429, { 'Retry-After': '2147483648' }));
+    await mount(); fireEvent.change(await screen.findByLabelText('凭证名称'), { target: { value: 'test_token' } }); const input = screen.getByLabelText('凭证明文');
+    fireEvent.change(input, { target: { value: 'TEST_first' } }); fireEvent.submit(screen.getByRole('form', { name: '凭证写入' })); await screen.findByText(/HTTP 422/); expect(input).toBeInvalid();
+    fireEvent.change(input, { target: { value: 'TEST_corrected' } }); expect(input).toBeValid(); fireEvent.submit(screen.getByRole('form', { name: '凭证写入' })); await screen.findByText(/HTTP 429/);
+    const requests = fetcher.mock.calls.length; fireEvent.change(input, { target: { value: 'TEST_during_cooldown' } }); fireEvent.submit(screen.getByRole('form', { name: '凭证写入' }));
+    expect(screen.getByRole('button', { name: '加密保存凭证' })).toBeDisabled(); expect(screen.getByRole('button', { name: '刷新配置列表' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '刷新配置列表' })); expect(fetcher.mock.calls).toHaveLength(requests); expect(writes(fetcher)).toHaveLength(2); expect(input).toHaveValue('TEST_during_cooldown');
   });
   it('does not claim success for mismatched secret acknowledgement', async () => {
     api(async () => json({ name: 'other', ref: 'secret://other', fingerprint: 'TEST' })); await mount();
