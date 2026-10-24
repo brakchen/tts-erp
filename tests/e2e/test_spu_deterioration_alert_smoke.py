@@ -19,12 +19,11 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import pytest
 from sqlalchemy import delete, insert
 
-from tests.api.test_spu_deterioration_alert_api import (
-    comparison_scope as comparison_scope,
-)
 from tests.support.frontend_p2_live import live_api_server
 from tts_erp_v2.db.base import Base
 
+# Reuse the maintained SQL acceptance scene without cloning its seed logic.
+pytest_plugins = ["tests.api.test_spu_deterioration_alert_api"]
 pytestmark = [pytest.mark.domain_e2e, pytest.mark.requires_browser]
 
 PAGE = "/v2/pages/spu-profit-deterioration"
@@ -119,8 +118,21 @@ def test_real_comparison_journey(comparison_live, chromium, tmp_path, auth, widt
         container = page.locator("#alert-rows" if width > 1000 else "#alert-cards")
         expect(container).to_contain_text("TEST_COMPARE_3")
         expect(container).to_contain_text("无单但有广告费")
-        # Known ad-only SPU: seven daily USD1 spends, USD/CNY=7; no orders.
-        expect(container).to_contain_text(re.compile(r"[-−]49(?:\.0+)?"))
+        # Independent oracle, scoped to the actual ad-only record (not another
+        # row that happens to contain the same amount).
+        ad_only = container.locator("tr" if width > 1000 else "article").filter(
+            has_text="TEST_COMPARE_3"
+        )
+        expect(ad_only.locator('[data-value="currentOrderCount"]')).to_have_text("0")
+        expect(ad_only.locator('[data-value="currentSpendCny"]')).to_have_text(
+            re.compile(r"49(?:\.0+)?$")
+        )
+        expect(ad_only.locator('[data-value="currentNetProfitCny"]')).to_have_text(
+            re.compile(r"[-−]49(?:\.0+)?$")
+        )
+        expect(ad_only.locator('[data-value="currentRoi"]')).to_have_text(
+            re.compile(r"[-−]1(?:\.0+)?$")
+        )
         assert page.locator("#btn-settings, #filter-severity, #filter-state").count() == 0
         with page.expect_response(lambda response: _comparison_response(response, 3)) as short:
             page.locator('[data-window-days="3"]').click()
@@ -128,7 +140,9 @@ def test_real_comparison_journey(comparison_live, chromium, tmp_path, auth, widt
         assert short.value.json()["meta"]["latestAvailableDate"] == anchor
         expect(page.locator("#total-spus")).to_have_text("4")
         expect(page.locator("#total-previous-orders")).to_have_text("0")
-        expect(container).to_contain_text(re.compile(r"[-−]21(?:\.0+)?"))
+        expect(ad_only.locator('[data-value="currentNetProfitCny"]')).to_have_text(
+            re.compile(r"[-−]21(?:\.0+)?$")
+        )
         expect(page.locator("#filter-anchor-date")).to_have_value(anchor)
         # Re-reading never invents a later source-data day.
         with page.expect_response(_comparison_response) as refreshed:
