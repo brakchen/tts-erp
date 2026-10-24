@@ -59,7 +59,14 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     SpuProfitExplanation,
     SpuSelection,
 )
-from tts_erp_v2.db.models import Case, CaseLine, SalesOrder, SalesOrderLine
+from tts_erp_v2.db.models import (
+    Case,
+    CaseLine,
+    SalesOrder,
+    SalesOrderLine,
+    SettlementComponent,
+    SettlementTransaction,
+)
 
 __all__ = [
     "REFUND_RATE_ALERT_THRESHOLD",
@@ -200,11 +207,12 @@ def missing_completed_refund_amounts_in_snapshot(
     start_date: date,
     end_date: date,
 ) -> set[int]:
-    """Find SPUs with unknown confirmed-refund money, without coercing NULL to zero.
+    """Find SPUs whose current ROI/profit need missing unsettled refund money.
 
-    Match ``_SQL_ROI_REFUND_SCOPE``: linked paid order lines, the canonical
-    completed case statuses/types, and the original order's local window (not
-    the case update day). This is evidence completeness, not another formula.
+    Match ``_SQL_ROI_REFUND_SCOPE`` case/order/window criteria and
+    ``_SQL_ROI_SALES``'s unsettled-refund cohort. Settled current metrics use
+    actual net receipts and known refund quantity, not case refund amounts;
+    amount-dependent projection classifications are not current metrics.
     """
     if not spu_pks:
         return set()
@@ -212,6 +220,20 @@ def missing_completed_refund_amounts_in_snapshot(
         start_date, end_date, reporting_timezone(session, shop_pk=shop_pk)
     )
     event_time = func.coalesce(SalesOrder.order_time, SalesOrder.paid_at)
+    # Component.amount is NOT NULL: presence is exactly SUM(amount) IS NOT NULL
+    # in _SQL_ROI_SALES, even for explicit zero or offsetting settlements.
+    has_settlement = (
+        select(SettlementTransaction.id)
+        .join(
+            SettlementComponent,
+            SettlementComponent.transaction_id == SettlementTransaction.id,
+        )
+        .where(
+            SettlementTransaction.order_pk == SalesOrder.id,
+            SettlementComponent.component_code == "SETTLEMENT",
+        )
+        .exists()
+    )
     return {
         pk
         for pk in session.scalars(
@@ -226,6 +248,7 @@ def missing_completed_refund_amounts_in_snapshot(
                 Case.status.in_(_implementation._CASE_COMPLETED_STATUSES),
                 Case.case_type.in_(("REFUND_ONLY", "RETURN_AND_REFUND")),
                 CaseLine.refund_amount.is_(None),
+                ~has_settlement,
                 event_time >= start,
                 event_time < end,
             )
