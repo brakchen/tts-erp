@@ -73,9 +73,11 @@
 
 共享布局夹具另行发现并修复：`tests/browser/conftest.py` 仍返回旧告警shape，导致共享字体/溢出巡检实际只看错误态。新增桌面/手机“必须ready且有真实比较行”的回归，先观察 **2个预期RED**，再仅更新SPU canned payload并退休无消费者的旧阈值helpers；`shared_layout_fixture` 与关联字体/溢出选择 **8 passed、0 failed**。未改公共server/renderer或其他页面mock；mock只证明布局，不代替真实SQL/E2E。
 
-**独立后端复审结果：BLOCK。**发现两条上述177/5未覆盖的 P1：NULL订单状态被当作零单/无单投放；已完成退款行金额缺失仍被当成零金额并输出数值盈利。已创建 `spu-compare-missing-facts` 严格测试先行修复：在事实完整性/canonical出口标记未知，保留独立已知订单/消耗，不为让测试通过修改盈利公式。前述绿色证据不能覆盖或取消这两个阻塞。
+**独立后端复审闭环：两条 P1 已解除。**初轮发现上述177/5未覆盖的路径：NULL订单状态假零/假无单投放；未结算完成退款的必要金额缺失仍输出数值盈利。`spu-compare-missing-facts` 先实际最小 **2 RED**、变体 **12 RED/17 controls GREEN**，再在订单事实检查与canonical完整性出口修复；保留其他可用事实，不改公式。随后补充已结算邻居，观察 **7 RED/7 controls GREEN**，证实实际ROI与净利润均不依赖已结算订单这笔售后金额，最小收窄到必要未结算退款；不复制预测或盈利公式。真实 `SETTLEMENT` 为0、正数、多个分量相抵为0均可保留；只有fee/refund组件、空交易、同SPU混合结算/未结算时不假定已结算。数据库非空约束也在隔离库实查。
 
-**仍待交付门槛：**修复两条 P1 并复审清零、完整fast基线、与当前master同步、精确prospective master验证和推送/board收口。当前功能证据不是完成这些门槛或生产部署的声明。
+最终子分支 `7214b178b653135bbd4e4f02a7ea9d39b07fbbb3`：**95比较API +34领域/公式 GREEN，0 failed/skip**。原独立backend reviewer针对最终提交范围复核、核对canonical源查询/实际公式和隔离日志：**No issues found，两个原P1 discharged，code OK with notes**；未把代码复审当全体验收。parent已集成 `763c10b0b8946233497d85241aec0f64e4875320`，再次独立执行完整比较API **95 passed/48.41s** 与真正冷启动全栈 **5 passed/36.98s**，均0 failed/skip；对应外部artifacts为 `missing-facts-parent.xml`、`cold-e2e-post-review.xml`。4条最后改动路径主动LSP再次0 reported errors但全部silent/unconfirmed；不声称有完整类型证明，Ruff/format/compile与测试另有通过证据。整段日志保留初轮夹具精度断言纠正：测试应比较既有HTTP两位HALF_UP串，不拿原始高精度Decimal直接作wire预期；生产精度/公式未为此改动。
+
+**最终交付门槛：**完整fast基线、精确prospective master验证、推送与board收口，必须按实际提交执行；最新执行SHA、原始日志、基线机械diff与最终结果记在canonical board的 `spu-compare-delivery` 线程，不在本固定功能证据段另维护实时状态。该段提交前已显式fetch远端master并同步 `4bcef08df77172b6cb48007267d3927e4078ca19`；若master再前进，须再次同步和验证。上述功能证据不代替最终门槛，也不是生产部署声明。
 
 ## 5. 历史结果的处置
 
