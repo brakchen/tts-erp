@@ -7,6 +7,8 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   'intercept-stats': () => import('../pages/intercept-stats'),
   shops: () => import('../pages/shops'),
   'enum-map': () => import('../pages/enum-map'),
+  'ad-daily': () => import('../pages/ad-daily'),
+  'sync-jobs': () => import('../pages/sync-jobs'),
 };
 
 /** Code mapping only: page metadata and permissions remain backend-owned. */

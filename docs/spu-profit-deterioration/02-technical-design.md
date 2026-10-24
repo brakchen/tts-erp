@@ -1,144 +1,108 @@
-# SPU 利润劣化告警：技术设计
+# SPU 盈利表现对比：技术设计
 
-> 状态：目标技术契约。盈利公式以 `docs/business/spu-profitability.md` 为唯一业务口径。
+> 2026-10-24 修订，开发目标契约，未声称已实现/上线。[PRD v3](01-product-proposal.md) 是功能权威；[盈利计算契约](../business/spu-profitability.md) 是业务口径。旧阈值、严重程度、历史确认设计不再适用于本页。
 
-## 1. 所有权与不变量
+## 1. 所有权与最小边界
 
-- 盈利事实、ROI 和净利润：`analytics.spu_profitability` canonical seam。
-- 告警 evidence、sample gate、state/severity 和最终决策：`analytics.spu_deterioration_alert`。
-- 生效阈值：`config.runtime_config_items` 已发布 revision；draft 不是运行时 authority。
-- 历史：物化层保存 anchor、basis、配置 source/version/hash 和 Decimal 原值。
-- HTTP：校验参数、授权、序列化；不重算业务结论。
-- 浏览器：允许展示性 `displayChange`，禁止盈利公式、阈值、状态、去重和业务 totals。
+- 盈利事实/公式/金额/ROI/全局去重：`analytics.spu_profitability`；复用现有 SQL 与 Decimal，不复制公式。
+- 本页范围、日期校验、对比编排、事实标记：`analytics.spu_deterioration_alert` 内的独立比较读取 seam；不再经过旧 evaluator/config/sample gate。
+- HTTP：现有 `/v2/analytics/spu-profit-deterioration`，只读授权、严格参数和序列化。
+- 浏览器：原值与事实显示、请求生命周期、展示性的 `displayChange`，不拥有范围、盈利公式、订单总数、事实标记或日期上限。
+- 保留页面 URL、权限点及全站导航 owner。此次修复不承担整页 React 迁移、全站 shell 改造、生产发布或删除旧物化表/配置。
 
-金额和比率使用 Decimal/numeric；null 表示无解或不足，不能伪装为 0。报告日期按店铺 IANA 时区。
+ArchitectureReviewRequired=yes：producer/consumer 契约改变、只读一致性和日期来源需要跨边界验证。新逻辑不追加到四千行 canonical implementation；只暴露既有 snapshot-aware 读取的最小公共组合出口。旧 job/配置若有独立消费者则保留，不再决定本页可读性。
 
-## 2. 数据流
+## 2. 数据流与一致性
 
 ```text
-canonical profitability facts
-        + published runtime config
-        -> current evidence
-        -> shifted persistence evidence
-        -> one AlertDecision
-        -> materialized history
-        -> readonly API
-        -> page / drill-down
+shop-local availability + requested anchor
+  -> validated date and fixed recent-7-day analysis SPU scope
+  -> canonical previous/current profitability in ONE read-only REPEATABLE READ snapshot
+  -> one comparison item per SPU + distinct full-scope period order totals
+  -> readonly HTTP -> page/details
 ```
 
-## 3. 窗口与 evidence
+日期依据、活动范围、两期事实共享计算快照及 `calculatedAt`。估值采用统一盈利 owner 的当前成本/汇率和未结算平台费估算，不平均日 ROI；历史经营日期不意味着历史固定会计值。重复调用公共函数时不得无意产生不同的计算时间/快照，新增出口应复用现有 snapshot-aware 实现。
 
-anchor `A` 为店铺当地最新完整数据日 T-1。
+## 3. 周期与范围
 
-当前 evidence：
+截至日 A 为后台实际可用的店铺当地完整日：
 
-| window | current | previous |
+| windowDays | current（含首尾） | previous（含首尾） |
 | --- | --- | --- |
-| 1d | T-1 | T-2 |
-| 3d | T-3..T-1 | T-6..T-4 |
-| 7d | T-7..T-1 | T-14..T-8 |
+| 7 | A−6..A | A−13..A−7 |
+| 3 | A−2..A | A−5..A−3 |
 
-历史持续性 evidence 整体向前平移 7 天：1d 为 T-8 vs T-9；3d 为 T-10..T-8 vs T-13..T-11；7d 为 T-14..T-8 vs T-21..T-15。
+普通范围由 A−6..A 的活动确定，与所选 3/7 窗口无关：累计已付款订单至少 3 且近期有单的普通样本；近期实际零单但正广告费作为例外保留，不受累计不足 3 单排除。累计仅指库内可用历史，并截止 A。明确精确 SPU 主键查询绕过活动排除；非法/不存在/跨店选择不得悄悄回退整店。允许 `activity=all` 明确调查其他范围，说明已应用条件和数据限制。
 
-这两组 evidence 不能作为两个用户可见告警行。目标领域对象：
+某一期零单且广告消耗 >0 的事实标记在后台基于未舍入事实计算。缺失为 unknown/null，不能转成零或 false。订单状态为 NULL、空白或 canonical 未识别状态时，不能因付款计数排除了该订单就声称实际零单，也不能据此通过默认无单投放资格。已知付款/未计入付款/取消状态继续使用既有 canonical 分类，不另造状态映射。
 
-```text
-AlertDecision
-  shop_pk, spu_pk, anchor_date, window_days
-  current_evidence
-  persistence_evidence
-  confirmation_status
-  severity, state, sample_status
-  decision_thresholds/config basis
-```
+ROI 能算则正/零/负正常返回，不能算提供具体原因；保留其他可用值。已完成退款金额缺失通过 canonical 事实完整性出口按**当前实际指标所需输入**判断：未结算退款的必要金额缺失时，仅相关 SPU/周期的 ROI/净利润不可用，订单数、广告费、其他 SPU/周期保留。已有有效 `SETTLEMENT`（含真实零结算）的实际收入分支不依赖这笔未结算退款金额，不因它把已可计算的实际 ROI/净利润变空；结算判定与 canonical SQL 完全一致，不能使用金额真值判断。预测字段的依赖不是本页实际指标的依赖，不为此新增另一套盈利公式。不输出 severity、sampleStatus、confirmationStatus、thresholds 或策略结论。
 
-实现可暂时保留内部 `layer=fast|confirmation` 行作为 evidence storage，但主 API 必须组合成一个用户决策；`layer` 不属于产品筛选。
+## 4. 日期依据与旧结果
 
-## 4. sample、state 与 severity
+`latestAvailableDate` 必须结合必要来源的可用状态，且不晚于店铺当地昨天。区分源数据日期、读取/计算时间、同步观察时间；不能用 MAX(order time)、MAX(ad day)、cursor update-time 或生成快照的时间单独声称所有源数据齐全。
 
-先判 evaluability/sample，再判 state，最后判 severity：
+实现须披露每项依据及限制；已知缺来源/范围或无法建立可用上限时返回类型化不可用，不伪造默认昨天或成功空列表。成功空采集和真实零事实应能与未采集区分；不要求所有订单已经结算。
 
-1. 任一窗口缺 required fact：`unavailable`；
-2. ROI 无解或 warning gates 不满足：`sample_insufficient`；
-3. 只有两窗 facts、ROI defined 且 gates 满足时才 `sufficient`；
-4. previous ROI/net profit ≤0 时不做非法百分比，使用 `profit_to_loss`、`loss_expanding`、`loss_to_profit`；
-5. warning/critical 分别使用自己的 gates 与阈值，边界 inclusive。
+本版本采用 **observed-data availability（观测数据可用性）**，不是穷尽上游采集的认证：在同一快照取订单、售后、财务最近按店归因、已完成且 `rows_failed=0` 的成功作业；推定操作截止日为各作业 `started_at` 的店铺当地日期减一，再与当地昨天及该店相关广告日依据取保守交集。用开始而非结束时点避免跨日作业过度声称覆盖。不能将该推定值命名为已记录的 query-through；当前 JobResult/extra 未保存这样的边界。
 
-ROI absolute 与 relative 条件使用 AND 还是 OR 仍是阻塞决策；确定前不得把任一版本写成“回测证明”。
+广告使用与 canonical 盈利相同 endpoint 的 seller/advertiser/campaign 日级观测，结合固定 14 天 envelope 检查已知缺口（窗口切换不改上限），可复用成功空响应作为“已观测空采集”的依据；不要求所有历史 campaign 永远有行，不声称已发现全部 campaign/页。`coverage.status="limited"` 必须附具体来源、推定方法、观察时间、已知缺口和限制，不能只有笼统标签。保留更晚失败的说明，不抹掉之前可读数据。检查订单行解析/关联的未解决 issue；仅 `rows_failed=0` 不能把已知缺失变成零单或无单投放事实。必要来源完全缺失或已知缺口影响某项事实时，对应事实不可用/请求不可用，不用成功全零替代。
 
-## 5. 业务 totals
+此规则是本页可用性策略，不新增生产采集认证、schema 或插件改造门槛。来源审计已明确：缺少完备 manifest 本身不违反 PRD，但假零、空结果掩盖缺失、或计算时间推进日期上限会违反 AC-010/011/021/022。
 
-API 必须在完整 base scope 内直接计算：
+有合法可用上限后，默认取该日；请求更晚日期 422 并返回上限，禁止静默钳制；更早历史日期允许读取。旧结果可用时 `stale=true` 仍返回并显示实际数据日期及“数据未更新”，不受旧告警任务 enabled/config version 影响。`calculatedAt` 变化不代表数据更新。
 
-- `currentOrderCount = COUNT(DISTINCT order_pk)`；
-- `alertSpuCount = COUNT(DISTINCT spu_pk)` where final severity in warning/critical；
-- `criticalSpuCount = COUNT(DISTINCT spu_pk)` where final severity=critical；
-- 可选诊断字段 `decisionRowCount`，不得映射成订单/SPU 标签。
+## 5. HTTP 查询契约（本次 producer/consumer 冻结字段）
 
-SPU 行订单数不能相加得到订单总数；同一订单包含多个 SPU 时仍只计一次。
+| 参数 | 规则 |
+| --- | --- |
+| shop_pk | 必需正整数；只读访问沿用既有授权；校验对应店铺 |
+| spu_ids | 可重复内部主键，最多 100 个正整数；空/非法不扩大查询 |
+| window_days | 单一 3 或 7，默认 7；多窗口、1/全部等返回 422 |
+| activity | `recent` 默认，或 `all`；精确调查标记活动排除不生效 |
+| anchor_date | 当地 ISO 日期；默认后台最新可用日；越界 422 |
+| limit / offset | 默认 100/0，1..500 / >=0；只影响列表，不影响业务统计 |
 
-## 6. Snapshot 与物化
+旧 layer/severity/state/sample 筛选退出此 endpoint，不得被忽略后伪装成成功查询；返回明确修正提示。旧物化诊断函数可保留给独立内部消费者，不为本页新增第二条兼容业务路径。
 
-建议内部 evidence 唯一键继续使用：
+响应形状保持 `{items, total, totals, meta}`：
 
-```text
-(shop_pk, spu_pk, anchor_date, window_days, layer)
-```
+### items（一个 SPU 一行）
 
-但替换原子边界必须至少是 `(shop_pk, anchor_date)`，不能只按 `anchor_date` 全局删除；不同店铺可能在同一 UTC 时刻处于不同当地日期。
+- `shopPk`, `spuPk`（内部）, `spuId`（业务 ID）, `windowDays`, `anchorDate`。
+- `previousRoi`, `currentRoi`；`previousNetProfitCny`, `currentNetProfitCny`；`previousSpendCny`, `currentSpendCny`：Decimal 字符串或 null。
+- `previousOrderCount`, `currentOrderCount`：int 或 null，真实零不转空。
+- `previousNoOrderAdSpend`, `currentNoOrderAdSpend`：bool 或 null，由后端未舍入事实决定。
+- `previousRoiUnavailableReason`, `currentRoiUnavailableReason`：可空的具体说明；`warnings` 为数据/估值限制说明列表。
+- `basisCalculatedAt`；`drilldown.pageUrl` 为完整的既有盈利页面 URL，使用该页面实际接受的业务 SPU ID 和日期字段；`drilldown.profitabilityUrl` 如保留则使用 API 自身正确的内部主键契约。链接应说明对应期间且浏览器历史可回原查询。
 
-job：
+### totals（完整已应用范围）
 
-- 在一个只读 `REPEATABLE READ` 快照读取 facts/config；
-- 在受控事务写派生 snapshot；
-- 失败保留最近成功快照；
-- 检查订单、售后、广告等必需上游成功水位；
-- 在有界窗口内补齐每店缺失 anchors，而不是只重算当前 T-1；
-- 不记录 shop/SPU/订单标识到日志。
+`analysisSpuCount`, `previousOrderCount`, `currentOrderCount`, `unavailableReason`。SPU 去重；每期订单跨 SPU `COUNT(DISTINCT order_pk)`，不得相加分页/批次/行数。不可用值为 null 并说明，不伪造 0。`total` 只是分页记录数。
 
-## 7. Runtime config
+### meta
 
-key：`analytics.spu_profit_deterioration_alert.v1`。
+- `requestId`, `shopPk`, `anchorDate`, `latestAvailableDate`, `windowDays`, `reportingTimezone`。
+- `periods.current.{startDate,endDate}` / `periods.previous.{startDate,endDate}`（含首尾）。
+- `dataAsOf`（实际数据日）, `calculatedAt`（UTC 计算时间）, `stale`。
+- `coverage`（真实来源依据、可用/不足状态及原因；不预设 materialized=true/stale=false），`warnings`（说明列表）。
+- `activityBypassed`（精确调查绕过），`scopeDescription`（已应用范围说明）。
 
-published revision 是唯一 authority；缺失时可显式使用 `seed_fallback/回测暂定`，published revision 无效时 fail closed。
+2xx 只表示契约读取/处理成功。401/403 权限、422 参数/日期、503 必要来源或读取不可用分开。错误保留请求编号；日期错误还给出 `latestAvailableDate`；HTTP 层不泄露异常、SQL 或凭证。
 
-当前 payload 的 `fast/confirmation × 1/3/7 × warning/critical` 是内部算法配置。普通业务页面不因隐藏 layer 而复制第二份配置；阈值编辑保留在管理员抽屉或运行配置页。
+## 6. 页面与失败恢复
 
-`maturityDays` 在 v1 固定为 7，如果不允许修改，应在下一版本从用户配置中移为算法常量，避免虚假可配置性。
+只呈现 7 天主参考/3 天近期观察、店铺/SPU/日期/活动范围、两期原值及订单/消耗、范围统计和盈利详情。保持现有共享导航，最小专属样式；本页不再编辑 runtime config。
 
-## 8. API 目标契约
+差额 = 本期−上期；仅两值存在且上期 >0 显示百分比。它们是展示值，不形成状态或总计。两项指标方向、3/7 天方向可不同。零广告费用 ROI 无解、事实缺失和真实零/负值分别解释；3 天有短期波动说明。
 
-主查询保持 readonly，base query 支持 shop、SPU、window、severity、state、anchor、activity 和分页。普通页面不发送 layer；兼容期若保留 `layer` 参数，仅作为诊断/旧客户端入口，并记录退休条件。
+加载新条件时关闭旧明细、清除旧列表/汇总/期间说明；所有请求（包含店铺/日期依据初始化）受 latest-wins 约束，旧响应和旧错误都不能覆盖新条件。失败保留输入并可重试，真实空范围说明可调整条件，不称全店正常。非法 URL/SPU/window 不静默扩范围，保留输入与错误。
 
-每个 item 至少返回：
+详情使用原生链接/按钮，不能拦截链接 Enter；打开/关闭有焦点进入与返回。当前/上期无单投放标注含文字/结构信号，不只靠颜色。桌面表格和窄屏卡片必须能读取相同信息。
 
-- 当前 evidence 的 prior/current ROI、净利润、spend、order/ad-order；
-- 服务端精确 `roiDecline/netProfitDecline`；
-- `confirmationStatus` 与必要的 persistence 摘要；
-- severity/state/sampleStatus 与 sample reason codes；
-- anchor/basis/config source/version/hash；
-- drilldown URLs。
+## 7. Verification / Retirement
 
-meta 返回：timezone policy、calculatedAt、真实 coverage/lastSuccessAt/missing windows、warnings、requestId 和 readonly-safe effective config。
+AC-001～023 的测试映射与实际执行见 [04](04-test-plan-and-results.md)，顺序见 [03](03-implementation-plan.md)。公共盈利 seam、真实查询去重/时间边界、HTTP 错误与 browser consumer 均需验证；mock、构建或截图不能单独证明全部验收。
 
-前端可从 wire display values 派生 `displayChange`，但 API 精确 decline 继续是告警判定与审计值。
-
-## 9. stale/disabled
-
-产品语义以 [`01-product-proposal.md`](01-product-proposal.md) 最终决策为准。技术层必须区分：
-
-- never materialized；
-- stale but readable；
-- disabled with retained history；
-- config unavailable/invalid；
-- snapshot basis incoherent。
-
-这些情况使用类型化错误/状态，不能都映射为 `SNAPSHOT_UNAVAILABLE`。
-
-## 10. 可访问性与视觉边界
-
-要求文本、图标/徽章、结构信号和键盘可达；颜色不能是唯一信号。不规定必须斜纹、某种 gradient 或具体 loading 组件。测试应断言用户可观察结果，不断言 CSS 实现字符串。
-
-## 11. Observability
-
-日志/指标覆盖 job、anchor、window、内部 evidence、配置 source/version、rows、warning/critical/sample counts、duration、snapshot age、fallback/invalid config、API stale 与 persistence denominator；全部 aggregate/redacted。
+退休本页旧告警控件、写请求、错误统计和 stale 拒读。保留旧后台 job/config/表仅因其独立消费者/迁移安全边界，不再影响本页；未做生产删除、配置发布或重启。未来清理这些后台资产须独立审计消费者与生产授权。

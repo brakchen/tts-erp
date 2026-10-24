@@ -28,6 +28,14 @@ describe('authoritative denial/throttle headers before an unfinished error body'
   }
 });
 
+it.each([400, 401, 404, 409, 422, 500, 503])('keeps HTTP %s untrusted body out of the public Error message', async (status) => {
+  const detail = 'TEST_untrusted_upstream_body';
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), { status })));
+  await expect(requestJson('', '/v2/TEST_public_error')).rejects.toMatchObject({
+    status, message: `HTTP ${status}`, detail,
+  });
+});
+
 it('shares the existing numeric Retry-After policy with native binary uploads', () => {
   expect(retryAfterSeconds('60')).toBe(60);
   expect(retryAfterSeconds('0')).toBe(0);

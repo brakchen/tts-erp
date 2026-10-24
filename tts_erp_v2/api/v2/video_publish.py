@@ -222,7 +222,15 @@ def _attempt(a: VideoPublishAttempt, *, diagnostics: bool = False) -> dict:
         "finishedAt": a.finished_at,
     }
     if diagnostics:
-        result.update(promptSnapshot=a.prompt_snapshot, artemisOutput=output)
+        # Use the existing bounded/redacted diagnostic policy at the producer;
+        # the persisted full prompt remains an audit fact, not a public payload.
+        result.update(
+            promptSnapshot=(
+                sanitize_text(a.prompt_snapshot)
+                if a.prompt_snapshot is not None else None
+            ),
+            artemisOutput=output,
+        )
     return result
 
 

@@ -23,9 +23,12 @@ from tts_erp_v2.access._context import user_pages_var
 from tts_erp_v2.accounts.pages import PAGES
 from tts_erp_v2.api.deps import require_role_at_least
 
-# The sole renderer wiring for the implemented pages, including P2 candidate
-# acceptance. This is not a traffic switch; missing assets never fall back.
-MIGRATED_PAGE_IDS: frozenset[str] = frozenset({"dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"})
+# Sole activation owner for reviewed content candidates, not a traffic switch.
+# Candidate/native acceptance and same-version publication remain separate.
+MIGRATED_PAGE_IDS: frozenset[str] = frozenset({
+    "dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map",
+    "ad-daily", "sync-jobs",
+})
 _FRONTEND_DIR = Path(__file__).resolve().parents[2] / "static" / "frontend"
 _ENTRY = "src/main.tsx"
 _CACHE_CONTROL = {"Cache-Control": "private, no-store"}
