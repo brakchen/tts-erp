@@ -27,6 +27,7 @@ from tts_erp_v2.analytics.spu_profitability import (
     SpuProfitability,
     consistent_read_snapshot,
     count_orders_in_snapshot,
+    missing_completed_refund_amounts_in_snapshot,
     read_overview_in_snapshot,
     reporting_timezone,
 )
@@ -256,6 +257,7 @@ def read_comparison(
         order_problems: dict[str, list[str]] = {}
         ad_problems: dict[str, list[str]] = {}
         unknown_costs: dict[str, set[str]] = {}
+        unknown_refunds: dict[str, set[int]] = {}
         totals: dict[str, Any] = {
             "analysisSpuCount": len(products),
             "unavailableReason": None,
@@ -271,6 +273,17 @@ def read_comparison(
                 calculated_at=calculated_at,
             )
             warnings.extend(basis_warnings)
+            unknown_refunds[label] = missing_completed_refund_amounts_in_snapshot(
+                session,
+                shop_pk=shop_pk,
+                spu_pks=tuple(product.id for product in page_products),
+                start_date=start,
+                end_date=end,
+            )
+            if unknown_refunds[label]:
+                warnings.append(
+                    "已完结售后退款金额缺失，涉及 SPU 的对应期间 ROI/净利润不可确认。"
+                )
             order_problems[label] = order_limitations(
                 session, shop=shop, timezone=timezone, start=start, end=end
             )
@@ -326,7 +339,17 @@ def read_comparison(
                     else []
                 )
                 spend = metric.spend if not spend_problems else None
-                problems = order_problems[label] + spend_problems + financial_problems
+                refund_problems = (
+                    ["已完结售后退款金额缺失，对应期间 ROI/净利润不可确认。"]
+                    if product.id in unknown_refunds[label]
+                    else []
+                )
+                problems = (
+                    order_problems[label]
+                    + spend_problems
+                    + financial_problems
+                    + refund_problems
+                )
                 roi = metric.roi_real if not problems else None
                 item.update(
                     {

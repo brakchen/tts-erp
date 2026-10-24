@@ -16,6 +16,7 @@ from datetime import date, datetime, tzinfo
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_profitability import _implementation
@@ -58,6 +59,7 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     SpuProfitExplanation,
     SpuSelection,
 )
+from tts_erp_v2.db.models import Case, CaseLine, SalesOrder, SalesOrderLine
 
 __all__ = [
     "REFUND_RATE_ALERT_THRESHOLD",
@@ -97,6 +99,7 @@ __all__ = [
     "count_orders_in_snapshot",
     "explain_spu",
     "is_price_sort_field",
+    "missing_completed_refund_amounts_in_snapshot",
     "read_overview",
     "read_overview_in_snapshot",
     "reporting_timezone",
@@ -187,6 +190,49 @@ def count_orders_in_snapshot(
         .one()
     )
     return int(row["order_count"])
+
+
+def missing_completed_refund_amounts_in_snapshot(
+    session: Session,
+    *,
+    shop_pk: int,
+    spu_pks: tuple[int, ...],
+    start_date: date,
+    end_date: date,
+) -> set[int]:
+    """Find SPUs with unknown confirmed-refund money, without coercing NULL to zero.
+
+    Match ``_SQL_ROI_REFUND_SCOPE``: linked paid order lines, the canonical
+    completed case statuses/types, and the original order's local window (not
+    the case update day). This is evidence completeness, not another formula.
+    """
+    if not spu_pks:
+        return set()
+    start, end = _implementation._window_dates(
+        start_date, end_date, reporting_timezone(session, shop_pk=shop_pk)
+    )
+    event_time = func.coalesce(SalesOrder.order_time, SalesOrder.paid_at)
+    return {
+        pk
+        for pk in session.scalars(
+            select(SalesOrderLine.spu_pk)
+            .join(SalesOrder, SalesOrder.id == SalesOrderLine.order_pk)
+            .join(CaseLine, CaseLine.sales_order_line_id == SalesOrderLine.id)
+            .join(Case, Case.id == CaseLine.case_id)
+            .where(
+                SalesOrderLine.spu_pk.in_(spu_pks),
+                SalesOrder.shop_pk == shop_pk,
+                SalesOrder.status.in_(_implementation.PAID_SALES_ORDER_STATUSES),
+                Case.status.in_(_implementation._CASE_COMPLETED_STATUSES),
+                Case.case_type.in_(("REFUND_ONLY", "RETURN_AND_REFUND")),
+                CaseLine.refund_amount.is_(None),
+                event_time >= start,
+                event_time < end,
+            )
+            .distinct()
+        ).all()
+        if pk is not None
+    }
 
 
 def read_overview(
