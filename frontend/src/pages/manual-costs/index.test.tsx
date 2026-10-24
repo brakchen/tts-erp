@@ -384,3 +384,65 @@ describe('manual-costs deadline cleanup', () => {
     expect(screen.queryByText('已确认成功')).toBeNull();
   });
 });
+
+describe('manual-costs received error-header fences', () => {
+  it.each(['POST', 'verification GET'])('keeps a received 600-second fence from %s despite a stalled 500 body and local deadline', async (source) => {
+    const stalled = new Response(new ReadableStream<Uint8Array>({ start() {} }), {
+      status: 500, headers: { 'Retry-After': '600', 'x-request-id': 'TEST_fenced_error' },
+    });
+    const writes: RequestInit[] = [];
+    const fetcher = setup(async (_url, init) => {
+      writes.push(init);
+      if (writes.length === 1) return source === 'POST' ? stalled : json({}, 500);
+      const body = JSON.parse(init.body as string) as { spu_pk: string; unit_cost: string };
+      return saved(body.spu_pk, body.unit_cost);
+    }, [product(), product('9007199254740996', 'TEST 第二')]);
+    const user = userEvent.setup(); const page = render(<ManualCosts {...props} />);
+    await editCost(); await editCost('22.0000', 'TEST 第二');
+    if (source === 'POST') {
+      await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
+    } else {
+      await confirmBatch(user); await screen.findByRole('region', { name: '提交结果核对' });
+      fetcher.mockImplementationOnce(async () => stalled);
+    }
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(source === 'POST'
+      ? within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' })
+      : screen.getByRole('button', { name: '查询当前事实' })); });
+    const calls = fetcher.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(screen.getByRole('region', { name: '提交结果核对' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '停止后续行' })).toBeNull();
+    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '刷新当前列表' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
+    expect(writes).toHaveLength(1); expect(screen.queryByText('已确认成功')).toBeNull();
+    const first = screen.getByText('TEST 商品').closest('tr')!;
+    expect(within(first).getByRole('textbox', { name: '单位成本' })).toHaveValue('123456789012345.1234');
+    expect(within(screen.getByText('TEST 第二').closest('tr')!).getByRole('textbox', { name: '单位成本' })).toHaveValue('22.0000');
+    fireEvent.change(within(first).getByRole('textbox', { name: '单位成本' }), { target: { value: '33.0000' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); fireEvent.click(screen.getByRole('button', { name: '最近提交' })); });
+    expect(fetcher.mock.calls).toHaveLength(calls);
+    await act(async () => { await vi.advanceTimersByTimeAsync(569_999); });
+    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); fireEvent.click(screen.getByRole('button', { name: '全部 SPU' })); });
+    expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
+    expect(fetcher.mock.calls).toHaveLength(calls); // Expiry never sends a request.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); });
+    expect(fetcher.mock.calls).toHaveLength(calls + 1); expect(writes).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeEnabled();
+    expect(screen.getByText(/GET 不能证明原提交是否生效/)).toBeVisible();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '核对后决定重新提交' })); });
+    const dialog = screen.getByRole('dialog'); expect(within(dialog).getByText(/33.0000 VND/)).toBeVisible();
+    expect(writes).toHaveLength(1);
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '确认逐行提交' })); });
+    expect(writes).toHaveLength(2);
+    expect(JSON.parse(writes[1].body as string)).toMatchObject({ spu_pk: '9007199254740995', spu_id: 'TEST_same_external', unit_cost: '33.0000', currency: 'VND' });
+    expect(screen.getByText('已确认成功')).toBeVisible();
+    expect(within(screen.getByText('TEST 第二').closest('tr')!).getByRole('textbox', { name: '单位成本' })).toHaveValue('22.0000');
+    page.unmount();
+  });
+});
