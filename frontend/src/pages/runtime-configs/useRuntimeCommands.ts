@@ -70,7 +70,14 @@ export function useRuntimeCommands(rootPath: string, canWrite: boolean) {
       }
       if (alive.current) { gate.current = { ...current, phase: 'checked', summary }; setRecovery(gate.current); }
     } catch (error) {
-      if (alive.current) { delay(error); gate.current = { ...current, phase: 'failed', summary: '核对失败，操作仍被阻止；请稍后明确重试查询。' }; setRecovery(gate.current); }
+      if (alive.current) {
+        delay(error);
+        const createAbsent = current.attempt.kind === 'create' && error instanceof ApiError && error.status === 404 && error.detail === 'runtime config not found';
+        gate.current = createAbsent
+          ? { ...current, phase: 'checked', summary: `当前未找到 ${current.attempt.key}；不能证明原创建是否提交，也不能证明已回滚。创建输入仍保留；重新操作前须明确决定。` }
+          : { ...current, phase: 'failed', summary: '核对失败，操作仍被阻止；请稍后明确重试查询。' };
+        setRecovery(gate.current);
+      }
     } finally { checkFlight.current = false; }
   }
   function allowManual() {

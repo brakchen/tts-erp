@@ -1,17 +1,18 @@
 import { useRef, useState } from 'react';
-import { Button, FieldError, Input, Label, TextField } from '@heroui/react';
+import { Button, FieldError, Input, Label, Modal, TextField } from '@heroui/react';
 import JsonEditor from './JsonEditor';
 import { parseObject, stringifyRuntime } from './json';
 import type { Detail } from './contracts';
 export interface CreateDraft { configKey: string; displayName: string; draftPayload: Record<string, unknown>; jsonSchema?: Record<string, unknown> }
-export default function CreateConfig({ disabled, pending, errors, edited, invalid, create, preview }: {
-  disabled: boolean; pending: boolean; errors: Record<string, string>; edited: () => void; invalid: (message: string) => void;
+export default function CreateConfig({ disabled, pending, replacesUnsavedDraft, errors, edited, invalid, create, preview }: {
+  disabled: boolean; pending: boolean; replacesUnsavedDraft: boolean; errors: Record<string, string>; edited: () => void; invalid: (message: string) => void;
   create: (draft: CreateDraft) => Promise<Detail | undefined>;
   preview: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
 }) {
   const [key, setKey] = useState(''); const [name, setName] = useState(''); const [payload, setPayload] = useState('{}');
   const [schema, setSchema] = useState('{}'); const [custom, setCustom] = useState(false); const [previewing, setPreviewing] = useState(false);
   const [message, setMessage] = useState(''); const previewFlight = useRef(false); const editVersion = useRef(0);
+  const [confirming, setConfirming] = useState<CreateDraft>();
   function edit() { edited(); editVersion.current++; setMessage(''); }
   async function infer() {
     if (disabled || previewFlight.current) return;
@@ -26,7 +27,13 @@ export default function CreateConfig({ disabled, pending, errors, edited, invali
     let draft: CreateDraft;
     try { draft = { configKey: key.trim(), displayName: name.trim(), draftPayload: parseObject(payload), ...(custom ? { jsonSchema: parseObject(schema) } : {}) }; }
     catch { invalid('初始草稿和 Schema 必须是有效 JSON 对象'); return; }
-    if (await create(draft)) { setKey(''); setName(''); setPayload('{}'); setSchema('{}'); setCustom(false); setMessage(''); }
+    if (replacesUnsavedDraft) { setConfirming(draft); return; }
+    await persist(draft);
+  }
+  async function persist(draft: CreateDraft) {
+    if (disabled || previewFlight.current) return;
+    try { if (await create(draft)) { setKey(''); setName(''); setPayload('{}'); setSchema('{}'); setCustom(false); setMessage(''); } }
+    finally { setConfirming(undefined); }
   }
   return <section className="space-y-3" aria-label="创建配置项"><h2 className="text-lg font-semibold">创建配置项</h2>
     <form aria-label="创建配置" className="space-y-3" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
@@ -40,5 +47,12 @@ export default function CreateConfig({ disabled, pending, errors, edited, invali
       {Object.entries(errors).filter(([key]) => ['jsonSchema', 'draftPayload'].includes(key)).map(([key, value]) => <p role="alert" key={key}>{value}</p>)}
       <Button type="submit" isDisabled={disabled || previewing}>创建草稿</Button>
     </form>
+    <Modal.Backdrop isOpen={confirming !== undefined} isDismissable={!pending} isKeyboardDismissDisabled={pending} onOpenChange={(open) => { if (!open && !pending) setConfirming(undefined); }}><Modal.Container size="lg"><Modal.Dialog>
+      <Modal.CloseTrigger aria-label="取消创建并保留草稿" isDisabled={pending} /><Modal.Header><Modal.Heading>确认替换未保存草稿</Modal.Heading></Modal.Header>
+      <Modal.Body className="space-y-3"><p>当前所选配置有未保存编辑或发布说明。创建成功后将替换所选草稿并放弃这些本地编辑；创建失败则保留。</p><p className="break-all">新配置：{confirming?.configKey}</p><div className="flex flex-wrap gap-3">
+        <Button isDisabled={disabled || previewing} onPress={() => { if (confirming) void persist(confirming); }}>确认创建并替换所选草稿</Button>
+        <Button variant="secondary" isDisabled={pending} onPress={() => setConfirming(undefined)}>取消</Button>
+      </div></Modal.Body>
+    </Modal.Dialog></Modal.Container></Modal.Backdrop>
   </section>;
 }
