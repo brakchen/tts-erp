@@ -17,6 +17,7 @@ from tts_erp_v2.analytics.spu_deterioration_alert.config import (
     SEED_FALLBACK_CONFIG,
     config_to_payload,
 )
+from tts_erp_v2.analytics.spu_deterioration_alert.read import effective_config_details
 from tts_erp_v2.db.models.config import (
     RuntimeConfigItem,
     RuntimeConfigRevision,
@@ -560,9 +561,8 @@ def test_alert_runtime_config_lifecycle_and_legacy_rollout_rejection(
         _clear_alert_runtime_config(db_engine)
 
 
-def test_alert_malformed_published_payload_fails_closed(
-    api_client, db_engine, readonly_key
-):
+def test_alert_malformed_published_payload_fails_closed(db_engine):
+    """The retained internal alert reader rejects bad config; v3 is independent."""
     _clear_alert_runtime_config(db_engine)
     with Session(db_engine) as session:
         session.add(
@@ -587,11 +587,13 @@ def test_alert_malformed_published_payload_fails_closed(
         )
         session.commit()
     try:
-        response = api_client.get(
-            "/v2/analytics/spu-profit-deterioration?shop_pk=1",
-            headers=_headers(readonly_key),
-        )
-        assert response.status_code == 503
+        with (
+            Session(db_engine) as session,
+            pytest.raises(
+                RuntimeError, match="published alert configuration is invalid"
+            ),
+        ):
+            effective_config_details(session)
     finally:
         _clear_alert_runtime_config(db_engine)
 
