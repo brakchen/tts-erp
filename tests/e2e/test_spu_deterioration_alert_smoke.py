@@ -164,6 +164,28 @@ def test_real_http_auth_date_and_legacy_filter_boundaries(comparison_live, chrom
             assert response.status == 422, name
 
 
+def test_real_session_without_permissions_cannot_read_business_data(
+    comparison_live, chromium, ua_user_factory
+):
+    """AC-018/023: authentication is not a page/API permission bypass."""
+    child, scope, _user, _key = comparison_live
+    denied = ua_user_factory("test_ua_compare_denied")
+    with chromium.new_context() as context:
+        login = context.request.post(
+            child.base + "/v2/auth/login",
+            data={"username": denied.username, "password": denied.password},
+        )
+        assert login.status == 200
+        for path in (
+            PAGE,
+            API + f"?shop_pk={scope['shop']}",
+            f"/v2/analytics/spu-roi/{scope['products'][3]}/orders",
+        ):
+            response = context.request.get(child.base + path)
+            assert response.status == 403, path
+            assert "TEST_COMPARE_3" not in response.text()
+
+
 def test_real_keyboard_drilldown_preserves_business_spu_and_dates(
     comparison_live, chromium
 ):
@@ -202,8 +224,8 @@ def test_real_keyboard_drilldown_preserves_business_spu_and_dates(
         assert details_query["w_end"] == [scope["anchor"].isoformat()]
         expect(page.locator("#filter-w-start")).to_have_value(details_query["w_start"][0])
         expect(page.locator("#filter-w-end")).to_have_value(details_query["w_end"][0])
-        with page.expect_response(_comparison_response):
-            page.go_back()
+        # Back/forward cache may restore the validated DOM without another GET.
+        page.go_back(wait_until="domcontentloaded")
         expect(page.locator("#filter-shop")).to_have_value(str(scope["shop"]))
         expect(page.locator("#filter-anchor-date")).to_have_value(scope["anchor"].isoformat())
     finally:
