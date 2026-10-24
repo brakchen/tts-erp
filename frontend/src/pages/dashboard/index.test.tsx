@@ -106,8 +106,9 @@ describe('dashboard page', () => {
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     render(<Dashboard {...props} />);
-    expect(await screen.findByText(/TEST shops denied.*403/)).toBeVisible();
-    expect(screen.getByText(/TEST coverage unavailable.*503/)).toBeVisible();
+    expect(await screen.findByText(/HTTP 403/)).toBeVisible();
+    expect(screen.getByText(/HTTP 503/)).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/TEST shops denied|TEST coverage unavailable/);
     expect(screen.queryByText('暂无店铺')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'SPU 总数' })).toHaveTextContent('—');
     expect(screen.getByText('API 正常')).toBeVisible();
@@ -127,8 +128,9 @@ describe('dashboard page', () => {
     }));
     const user = userEvent.setup();
     render(<Dashboard {...props} />);
-    expect(await screen.findByText(/TEST health error.*500/)).toBeVisible();
-    expect(screen.getByText(/TEST sync limit.*429/)).toBeVisible();
+    expect(await screen.findByText(/HTTP 500/)).toBeVisible();
+    expect(screen.getByText(/HTTP 429/)).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/TEST health error|TEST sync limit/);
     expect(screen.queryByText('API 正常')).not.toBeInTheDocument();
     expect(screen.queryByText('暂无周期作业')).not.toBeInTheDocument();
     retry = true;

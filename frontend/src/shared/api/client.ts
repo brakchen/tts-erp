@@ -81,7 +81,9 @@ export async function requestJson<T>(rootPath: string, path: string, init: Reque
   }
   if (!response.ok) {
     const detail = data && typeof data === 'object' && 'detail' in data ? data.detail : undefined;
-    throw new ApiError(typeof detail === 'string' ? detail : `HTTP ${response.status}`, response.status,
+    // Error.message is rendered by legacy read consumers; raw detail is not a
+    // public message. Keep it separate for explicit allowlisted field mapping.
+    throw new ApiError(`HTTP ${response.status}`, response.status,
       retryDelay(response.headers.get('Retry-After')), requestId, detail);
   }
   return { data: data as T, status: response.status, headers: response.headers };

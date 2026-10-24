@@ -68,7 +68,8 @@ describe('intercept-requests page', () => {
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     render(<InterceptRequests {...props} />);
-    expect(await screen.findByText(new RegExp(`TEST access failure.*${status}`))).toBeVisible();
+    expect(await screen.findByText(new RegExp(`HTTP ${status}`))).toBeVisible();
+    expect(screen.queryByText(/TEST access failure/)).not.toBeInTheDocument();
     expect(screen.queryByText('暂无记录')).not.toBeInTheDocument();
     expect(screen.getByText('共 — 条')).toBeVisible();
     await user.click(screen.getByRole('button', { name: '重试列表' }));
@@ -97,7 +98,8 @@ describe('intercept-requests page', () => {
     render(<InterceptRequests {...props} />);
     await screen.findByText('seller.example');
     await user.click(screen.getAllByRole('button', { name: '查看详情' })[0]);
-    expect(await screen.findByText(/TEST detail unavailable.*404/)).toBeVisible();
+    expect(await screen.findByText(/HTTP 404/)).toBeVisible();
+    expect(screen.queryByText(/TEST detail unavailable/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '重试详情' }));
     expect(screen.getByRole('status')).toHaveTextContent('加载详情');
     await user.click(screen.getByRole('button', { name: '关闭详情' }));
