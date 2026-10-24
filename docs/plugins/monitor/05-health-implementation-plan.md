@@ -49,7 +49,7 @@ ArchitectureReviewRequired=true：新增公开契约/权限/持久化/producer-c
 - 接收 heartbeat/running 或 stopped 时更新在线证据与监控意图；stopped 立即抑制业务超时，心跳丢失仍检查。恢复 running 为业务建立新观察起点，不继承停止期间超时。
 - scan 表示完整广告列表扫描；evaluate 表示原有规则检查；close 表示整个处理流程，无候选正常结束。失败不变成 completed，不变更已有广告执行结果。
 - 只检查当前应执行环节与下一轮扫描是否按时启动；不把等待上游的环节或正常批量总耗时当作无进展。started 不能反复续命，真实 progress/completed 才推进成功进展基线；普通心跳不能刷新业务进展。
-- 完全失联首报目标 180 秒内：建议心跳 30 秒，服务端 scan 15 秒，失联判定 150 秒，单次通知总预算不超过 10 秒，留有余量；不是等满 180 秒再扫描。内部阶段按 180 秒无进展判异常，15 秒扫描附加时延要在结果中如实说明。上述为固定实现常量，不增加客户端阈值配置。
+- 完全失联首报目标 180 秒内：心跳 30 秒，服务端 scan 15 秒且本 job 的 jitter 为 0，失联判定 150 秒，整轮通知总预算不超过 10 秒，留有余量；不是等满 180 秒再扫描。内部阶段按 180 秒无进展判异常，15 秒扫描附加时延要在结果中如实说明。上述为固定实现常量，不增加客户端阈值配置。多个 16 KiB UTF-8 消息块共用一次请求总预算，不能每块再独享 8 秒或每个 15 秒 tick 只发一块；只确认已成功接受的前缀，其余保持待发，部分失败明确返回 degraded 并提交已有确认。
 - 同一故障已成功通知后不再发送；失败允许有界重试且不标已通知。每个故障恢复后一次恢复消息；主动停止不冒充业务恢复。事务与并发保护需防止多个扫描器重复成功投递、故障变化后旧发送结果误覆盖。
 - 不重放旧埋点，不无限积累 HTTP 任务；正常网络失败后只上报当前心跳意图和新发生的工作，传输有界且独立于广告执行队列。序列化与合并只在上报器内部，不另造业务调度器。
 
@@ -71,7 +71,7 @@ Webhook 只能由服务端经 token_service 解密，普通 snapshot 仅 secret 
 
 交付：严格契约/授权/大小限制；纯状态推进与异常计划；最多一个健康当前态表和加法 migration；原子 upsert/停止与恢复/通知去重；固定配置+secret读取及有界 Webhook 发送；暴露 `run(session)` 供现有 system job 接线。
 
-测试：行为 RED→GREEN（不可只报 import RED）；覆盖 179/180 秒边界、重复开始、有效进展、无候选、上下游等待、停止与重启、先失联后业务仍未恢复、重名不同 ID、未知 scope/readonly、extra/4KiB、Webhook HTTP200业务失败、缺配置、发失败重试/并发/恢复。命令 `bash scripts/test_isolated.sh fast tests/unit/test_monitor_health*.py tests/api/test_monitor_health.py`（shell 展开只限实际新增文件）。migration 仅通过 isolated runner 验证，不运行生产升级。
+测试：行为 RED→GREEN（不可只报 import RED）；覆盖 179/180 秒边界、重复开始、有效进展、无候选、上下游等待、停止与重启、先失联后业务仍未恢复、重名不同 ID、未知 scope/readonly、extra/4KiB、Webhook HTTP200业务失败、缺配置、发失败重试/并发/恢复。命令 `bash scripts/test_isolated.sh --template-db tts_erp_test_monitor_health_template fast tests/unit/test_monitor_health*.py tests/api/test_monitor_health.py`（shell 展开只限实际新增文件）。migration 仅通过同一官方 runner 的私有模板 `--refresh-template` 验证，不刷新其他 0069 lane 使用的默认模板，不运行生产升级。
 
 不得改 app/auth 全局策略、model registry、scheduler 或其他测试；父级后续接线。不得新建通用 outbox/事件/实例表或删除任何事实。
 
@@ -86,11 +86,11 @@ Webhook 只能由服务端经 token_service 解密，普通 snapshot 仅 secret 
 ### C. 串行接线与交付（父级，组件交付后）
 
 1. 独立 spec-compliance 审查，再 quality/security 审查；接受的问题回到同一 writer 修复，不接受 self-report 代替验收。为每组件形成可恢复的提交/报告后再集成。
-2. ERP 只编辑 `tts_erp_v2/{app.py,db/models/__init__.py,access/_policy.py,sync_worker/scheduler.py}`：挂新 router/model、精确 POST readwrite、注册独立 15 秒 system job。不得改 middleware 顺序。新增专属 wiring tests，不改现有 foreign WIP 测试。
+2. ERP 只编辑 `tts_erp_v2/{app.py,db/models/__init__.py,access/_policy.py,sync_worker/scheduler.py}`：挂新 router/model、精确 POST readwrite、注册 `plugin.monitor_health` 独立 15 秒 system job。既有 JobSpec 增加可选 jitter 覆盖值，仅本 job 取 0，其他 job 仍沿用原全局 jitter。不得改 middleware 顺序。新增专属 wiring tests；仅在隔离工作树更新既有 scheduler registry 测试的新增 job/count/jitter 契约，主仓 foreign WIP 不移植、不修改。
 3. 插件共享入口由 perf/ROI/auto-bind owner 明确交接后再写。把埋点接入真实 scan/evaluate/close 分支、主动停止和 Alarm；加入必要 server URL/key 设置与 host permissions。交接前该部分诚实 blocked，不把独立组件宣称完整功能。
 4. 仅获交接后同步插件版本元数据/README/CHANGELOG，执行 focused→全 suite→coverage→tsc→build；需要 ZIP 时验证 manifest/hash，不把 mock 当真实 Chrome/飞书验收。
 5. 更新本组文档、运行配置使用说明；`docs/api/external-api.md` 由其当前 SPU owner 接收专属段落补丁或明确移交后再追加，不越权写。
-6. ERP narrow isolated tests 与一次 baseline；主动停监控→业务免告警→关浏览器失联、正常心跳但 scan 卡住、无候选 close 等用户路径必须有跨端契约/集成证据。生产迁移/配置/安装/重启由人操作，明确未验证边界。
+6. ERP narrow isolated tests 与一次 `TTS_ERP_TEST_TEMPLATE_DB=tts_erp_test_monitor_health_template bash scripts/test_baseline.sh`；所有本 lane 的 0070 验证只使用该私有模板。主动停监控→业务免告警→关浏览器失联、正常心跳但 scan 卡住、无候选 close 等用户路径必须有跨端契约/集成证据。生产迁移/配置/安装/重启由人操作，明确未验证边界。
 7. 明确 paths staging、提交推送；满足 current-master 同步、锁内 prospective merge/验证/push 与 board reconciliation 后才能声明 integrated。插件指针仅在有意推进时修改，不把插件源代码暂存父仓。
 
 ## 5. 风险与停止条件

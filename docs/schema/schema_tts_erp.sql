@@ -1330,6 +1330,15 @@ ALTER TABLE plugin.intercepted_requests ALTER COLUMN id ADD GENERATED ALWAYS AS 
 );
 
 
+-- Name: monitor_health; Type: TABLE; Schema: plugin; Owner: -
+
+CREATE TABLE IF NOT EXISTS plugin.monitor_health (
+    shop_id character varying(128) NOT NULL,
+    shop_name character varying(200) NOT NULL,
+    state jsonb NOT NULL
+);
+
+
 -- Name: order_details; Type: TABLE; Schema: plugin; Owner: -
 
 CREATE TABLE IF NOT EXISTS plugin.order_details (
@@ -2562,6 +2571,12 @@ ALTER TABLE ONLY plugin.intercepted_requests
 
 ALTER TABLE ONLY plugin.intercepted_requests
     ADD CONSTRAINT intercepted_requests_request_id_key UNIQUE (request_id);
+
+
+-- Name: monitor_health monitor_health_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
+
+ALTER TABLE ONLY plugin.monitor_health
+    ADD CONSTRAINT monitor_health_pkey PRIMARY KEY (shop_id);
 
 
 -- Name: order_details order_details_pkey; Type: CONSTRAINT; Schema: plugin; Owner: -
