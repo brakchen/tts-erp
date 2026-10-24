@@ -231,23 +231,26 @@ def source_issue_limitations(
     job_names: tuple[str, ...],
 ) -> list[str]:
     """Unattributed issues conservatively affect every shop, not just one."""
-    issues = session.scalars(
-        select(SyncIssue).where(
-            SyncIssue.job_name.in_(job_names),
-            SyncIssue.resolved_at.is_(None),
-            SyncIssue.issue_type != "STALE_OBSERVATION_SKIPPED",
+    limitations = []
+    # PostgreSQL returns NULL for absent keys and non-object JSON. Treat these
+    # as unattributed issues rather than loading blobs or calling dict.get().
+    attributed_shop = SyncIssue.details["shop_id"].astext
+    for name in sorted(job_names):
+        issue_id = session.scalar(
+            select(SyncIssue.id)
+            .where(
+                SyncIssue.job_name == name,
+                SyncIssue.resolved_at.is_(None),
+                SyncIssue.issue_type != "STALE_OBSERVATION_SKIPPED",
+                or_(attributed_shop.is_(None), attributed_shop == shop.shop_id),
+            )
+            .limit(1)
         )
-    ).all()
-    affected = {
-        issue.job_name
-        for issue in issues
-        if (issue.details or {}).get("shop_id") is None
-        or str((issue.details or {}).get("shop_id")) == shop.shop_id
-    }
-    return [
-        f"{name} 存在未解决解析/关联问题（部分问题未归属店铺），相关事实不可确认。"
-        for name in sorted(affected)
-    ]
+        if issue_id is not None:
+            limitations.append(
+                f"{name} 存在未解决解析/关联问题（部分问题未归属店铺），相关事实不可确认。"
+            )
+    return limitations
 
 
 def order_limitations(
@@ -276,23 +279,35 @@ def order_limitations(
                 event_time.is_(None),
             )
         )
-    missing = session.scalar(
-        select(SalesOrder.id)
-        .outerjoin(
-            SalesOrderLine,
+    has_lines = (
+        select(SalesOrderLine.id)
+        .where(
             SalesOrderLine.order_pk == SalesOrder.id,
         )
-        .outerjoin(ChannelProduct, ChannelProduct.id == SalesOrderLine.spu_pk)
+        .exists()
+    )
+    has_bad_line = (
+        select(SalesOrderLine.id)
+        .outerjoin(
+            ChannelProduct,
+            ChannelProduct.id == SalesOrderLine.spu_pk,
+        )
         .where(
-            *conditions,
+            SalesOrderLine.order_pk == SalesOrder.id,
             or_(
-                event_time.is_(None),
-                SalesOrderLine.id.is_(None),
                 ChannelProduct.shop_pk.is_(None),
                 ChannelProduct.shop_pk != shop.id,
                 SalesOrderLine.quantity.is_(None),
                 SalesOrderLine.unit_price.is_(None),
             ),
+        )
+        .exists()
+    )
+    missing = session.scalar(
+        select(SalesOrder.id)
+        .where(
+            *conditions,
+            or_(event_time.is_(None), ~has_lines, has_bad_line),
         )
         .limit(1)
     )

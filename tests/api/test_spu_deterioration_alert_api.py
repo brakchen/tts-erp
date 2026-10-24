@@ -635,6 +635,155 @@ def test_unresolved_parse_failures_do_not_masquerade_as_complete_financial_facts
         assert item["currentNoOrderAdSpend"] is True
 
 
+@pytest.mark.parametrize("missing_fact", ["date", "spu_pk", "quantity", "unit_price"])
+def test_missing_header_or_line_facts_remain_unknown_with_exists_checks(
+    api_client, readonly_key, comparison_scope, db_engine, missing_fact
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        order = session.scalar(
+            select(SalesOrder).where(SalesOrder.order_id == "TEST_COMPARE_ORDER_2")
+        )
+        assert order is not None
+        if missing_fact == "date":
+            order.order_time = None
+            order.paid_at = None
+        else:
+            line = session.scalar(
+                select(SalesOrderLine)
+                .where(SalesOrderLine.order_pk == order.id)
+                .limit(1)
+            )
+            assert line is not None
+            setattr(line, missing_fact, None)
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][3])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentOrderCount"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["currentRoi"] is None
+    assert get(api_client, readonly_key, scope).status_code == 503
+
+
+@pytest.mark.parametrize("details", [{}, None, ["TEST_BAD"], "TEST_BAD"])
+def test_unattributed_or_malformed_issue_details_are_unknown_not_server_error(
+    api_client, readonly_key, comparison_scope, db_engine, details
+):
+    scope = comparison_scope
+    with Session(db_engine) as session:
+        session.add(
+            SyncIssue(
+                job_name="tiktok.orders",
+                issue_type="PARSE_ERROR",
+                external_id="TEST_COMPARE_BAD_DETAILS",
+                details=details,
+            )
+        )
+        session.commit()
+    response = get(api_client, readonly_key, scope, spu_ids=scope["products"][3])
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["currentOrderCount"] is None
+    assert item["currentNoOrderAdSpend"] is None
+    assert item["warnings"]
+
+
+def test_global_warnings_are_not_repeated_in_every_row(
+    api_client, readonly_key, comparison_scope
+):
+    body = get(api_client, readonly_key, comparison_scope).json()
+    assert body["meta"]["warnings"]
+    assert all(item["warnings"] == [] for item in body["items"])
+
+
+def test_order_and_issue_checks_do_not_scale_queries_or_load_lifetime_entities(
+    api_client, readonly_key, comparison_scope, db_engine
+):
+    scope = comparison_scope
+    queries = []
+    loaded = []
+
+    def record_query(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
+            queries.append(statement)
+
+    def record_load(session, instance):
+        if isinstance(instance, (SalesOrder, SalesOrderLine, SyncIssue)):
+            loaded.append(instance)
+
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    try:
+        baseline = get(api_client, readonly_key, scope, limit=1)
+        assert baseline.status_code == 200, baseline.text
+        baseline_count = len(queries)
+    finally:
+        event.remove(db_engine, "before_cursor_execute", record_query)
+    with Session(db_engine) as session:
+        for n in range(30):
+            order = SalesOrder(
+                shop_pk=scope["shop"],
+                order_id=f"TEST_COMPARE_HISTORY_{n}",
+                status="DELIVERED",
+                order_time=datetime.combine(
+                    scope["anchor"] - timedelta(days=60 + n), time(12), TZ
+                ),
+            )
+            session.add(order)
+            session.flush()
+            session.add(
+                SalesOrderLine(
+                    order_pk=order.id,
+                    spu_pk=scope["products"][0],
+                    external_line_id=f"TEST_COMPARE_HISTORY_LINE_{n}",
+                    quantity=1,
+                    unit_price=100000,
+                    currency="VND",
+                )
+            )
+            session.add(
+                SyncIssue(
+                    job_name="tiktok.orders",
+                    issue_type="PARSE_ERROR",
+                    external_id=f"TEST_COMPARE_OTHER_ISSUE_{n}",
+                    details={"shop_id": "TEST_OTHER_SHOP", "payload": "TEST_" * 1000},
+                )
+            )
+        session.add(
+            SyncIssue(
+                job_name="tiktok.orders",
+                issue_type="STALE_OBSERVATION_SKIPPED",
+                external_id="TEST_COMPARE_STALE_ISSUE",
+                details={"shop_id": "TEST_COMPARE_SHOP"},
+            )
+        )
+        session.add(
+            SyncIssue(
+                job_name="tiktok.orders",
+                issue_type="PARSE_ERROR",
+                external_id="TEST_COMPARE_RESOLVED_ISSUE",
+                details={"shop_id": "TEST_COMPARE_SHOP"},
+                resolved_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    queries.clear()
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    event.listen(Session, "loaded_as_persistent", record_load)
+    try:
+        response = get(api_client, readonly_key, scope, limit=1)
+    finally:
+        event.remove(db_engine, "before_cursor_execute", record_query)
+        event.remove(Session, "loaded_as_persistent", record_load)
+    assert response.status_code == 200, response.text
+    assert response.json()["totals"] == baseline.json()["totals"]
+    assert len(queries) <= baseline_count + 2
+    assert loaded == []
+    issue_reads = [sql for sql in queries if "FROM integration.sync_issues" in sql]
+    assert issue_reads and all("LIMIT" in sql for sql in issue_reads)
+    assert all("details" not in sql.split("FROM", 1)[0] for sql in issue_reads)
+
+
 def test_distinct_order_total_across_canonical_batches(
     api_client, readonly_key, comparison_scope, db_engine
 ):

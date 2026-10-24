@@ -343,7 +343,7 @@ def read_comparison(
                     }
                 )
                 item["warnings"].extend(problems)
-            item["warnings"] = list(dict.fromkeys(item["warnings"] + warnings))
+            item["warnings"] = list(dict.fromkeys(item["warnings"]))
             dates = {"w_start": current[0].isoformat(), "w_end": current[1].isoformat()}
             item["drilldown"] = {
                 "pageUrl": "/v2/pages/spu-roi?"
