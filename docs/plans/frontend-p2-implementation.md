@@ -1,6 +1,6 @@
 # 前端 P2 实现计划：普通页面与首个隔离写闭环
 
-> 状态：run-binding 与后端安全原子切片已验，共享权限/错误契约及图表依赖准备待审；三页尚未迁移。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
+> 状态：run-binding、后端安全和共享契约切片已验；统计内容模块及真实图表消费已做聚焦验收、待独立审查，尚未激活。店铺/枚举与真实写闭环待实现。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
 > 权威父方案：[渐进迁移方案](frontend-progressive-migration.md)；组件标准：[前端开发规范](../guides/frontend-development.md)。
 > 用户在 P0/P1 交付后连续要求继续开发、直到任务完成：按既定前端路线先完成 P2，再逐批核对 P3–P6 的门槛；不接管其他会话或自动生产上线。
 
@@ -10,7 +10,7 @@
 - UTC：2026-10-24。独立 `feature/frontend-p2` / `.worktrees/frontend-p2`，从 fresh `origin/master=e86817a3f28d4267ce0527a43ed7887795da81c3` 建立。
 - P0/P1 已完成，代码精确集成 `8f1b752` 的 fast 基线零新增稳定失败；不把其证据冒充 P2 通过。
 - Change Necessity：三页仍依赖旧模板/脚本，复制了会话、路径、请求与布局逻辑；需接入既有 React/HeroUI 骨架，保留有效查询、管理和错误恢复。
-- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide；`m-f3272c5e-978` 追加 no-dotenv bootstrap 的精确子进程透传修复；`m-296716be-6d8` 追加 deps/admin/config 的最小安全接线、旧enum两头及3个API测试路径；`m-53f8e91b-13d` 登记共享bootstrap/client/契约测试与3个图表依赖文件。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
+- 初始 lane 仅本计划；现已按回执 `m-badab46c-d24` 登记并读回本计划、run-binding 的2scripts/conftest/binding与refresh tests/testing guide；`m-f3272c5e-978` 追加 no-dotenv bootstrap 的精确子进程透传修复；`m-296716be-6d8` 追加 deps/admin/config 的最小安全接线、旧enum两头及3个API测试路径；`m-53f8e91b-13d` 登记共享bootstrap/client/契约测试与3个图表依赖文件；`m-b6fa2a47-144` 登记统计4文件、loader及其测试、只读native browser测试共7路径（无backend激活权）。其余源代码、依赖、API guard/live支持变更仍须先扩展精确 scope 并读回。没有 child 写 reservation。
 - 保留 main 的 `plugins/monitor` 和未跟踪 `node_modules/`；原 child/coord 审计工作树不动。
 - 不改 app/access/middleware、schema/models/migrations、财务口径、TikTok 店铺写端点、插件、生产数据/服务。后端现有缺陷只在确定 canonical owner、登记 scope、写回归及安全审查后处理。
 - ArchitectureReviewRequired：是，涉及共享权限事实、凭证输入、OAuth 命令及真实浏览器/API 写入边界；沿用原架构，不另造 session/menu/client/chart engine。
@@ -55,7 +55,7 @@
 - 复用已落地 AppShell/Header/navigation、bootstrap/path/client、401 单一 handler、纯读 Retry-After 调度及打包 manifest/license 流程；页面只产出内容。
 - 项目已 vendored uPlot 1.6.32 MIT，当前 npm latest 仍为 1.6.32。官方 README 提供 bars/React wrapper 链接；不自造图表引擎。
 - 优先验证维护中的 `uplot-react@1.2.4`（MIT，peer `react>=16.8.6`、`uplot^1.6.32`），配合锁定 `uplot@1.6.32` 直接采用。GitHub repo 非 archived，最近 pushed 为 2025-09-25；`updated_at` 不是代码维护证明。
-- 已 exact 安装两包、无额外runtime transitive、已读两份 MIT 原文及 wrapper 真实 hooks/create/destroy/update 源码，npm audit（含dev）0；声明 peer 与本工程相容。现有 TS7/React19 工程构建通过，但尚未实际引入图表页面：不能据此声称 native chart / StrictMode / resize / unmount 验收。wrapper 的类型仍使用旧全局 JSX，工程原有 skipLibCheck 未改，P2实际图表消费/浏览器仍须验证；若不满足，按具体证据换维护方案，不强制 peer、降级或新增忽略。
+- 已 exact 安装两包、无额外runtime transitive、已读两份 MIT 原文及 wrapper 真实 hooks/create/destroy/update 源码，npm audit（含dev）0；声明 peer 与本工程相容。依赖准备时的工程构建并不证明原生消费。后继统计切片已实际 typed import/props、native canvas、React19开发StrictMode重建/销毁、数据更新、resize/empty/unmount验收，见§7；不泛化成该旧wrapper的全部React19用法都已兼容。wrapper类型仍用旧全局JSX，工程原有skipLibCheck未改，无新忽略/peer强制/降级。
 - 上游：<https://github.com/leeoniya/uPlot>、<https://registry.npmjs.org/uplot/latest>、<https://github.com/skalinichev/uplot-wrappers>、<https://registry.npmjs.org/uplot-react/latest>。
 - 新图表依赖须进入既有 lock/license 包装；提供语义化日期/数量表作为可访问数据出口，图形不是第二个统计真相。
 
@@ -119,7 +119,13 @@ run-binding 在 4f5 增量独立源码复审 PASS 后按原子切片完成，原
 
 backend-safety 在 c59 独立源码审查 PASS 后完成。共享core已观察14个API/5个Vitest真实契约RED（`/tmp/frontend-p2-core-contracts-red.log`），实现最小server-owned roleCapabilities和additive ApiError unknown detail后，含API/旧路由/Node adapter/P0-P1浏览器的97个pytest用例通过（`/tmp/frontend-p2-core-contracts-neighbors.log`，内部Node 76例）。角色hint仅复用canonical gate，含Cookie优先/APIkey/off-shadow bypass；缺失坏值禁写，原4字段payload兼容；不改401 owner或重放。图表两包已安装/许可证/审计，原生图表生命周期仍未验。fresh LSP7无primary类型诊断，另有21条auxiliary advisory（含既有应向上抛出的JSON解析、bundler无扩展名import、I/O边界unknown/typeof及短ApiError参数风格提示），未新增抑制，不声称全部0。core独立审查待做。
 
-未做：三页业务/图表实际消费、child/HTTP/canary真实写闭环、页面切换或交付。core待当前增量独立审查；后续P2 fixed/prospective baselines保留，不把局部测试、源码审计或计划 PASS 当整体 GREEN。
+core 在 f6d37e2 独立增量源码审查 PASS 后完成（`/tmp/frontend-p2-core-contracts-review.md`），图表准备证据当时仍非native验收。
+
+统计后继：m-b6fa2a47-144登记后观察11个Node行为RED（loader拒绝未提供模块，`/tmp/frontend-p2-stats-red.log`），实现内容页/严格DTO/UTC筛选/只读生命周期和上游wrapper适配。typed import暴露bars可选类型，显式检查缺失时报错，未强制断言/忽略；UTC日历缺失独立真实RED（`/tmp/frontend-p2-stats-utc-red.log`）后使用uPlot.tzDate，UTC+7 Node回归通过。桌面截图发现小时刻度重复日标签，在公开incrs配置前观察独立RED（`/tmp/frontend-p2-stats-ticks-red.log`），最小日刻度/UTC图例后重验。图表仅绘制服务器日计数，分布原样显示server percentage，不做aggregation/业务计算；伴随可访问日期计数表。
+
+实际TS7/React19编译/组件测试、4个375/1440双prefix生产bundle原生蓝色像素/resize/每日空→清理→再挂载，以及1个真实Vite开发React.StrictMode的create≥2/destroy≥1、更新/最终全部native destroy通过。dev探针首轮CJS named import/过早快照问题已在测试owner修正（真实模块interop/等实际创建，不弱化断言），未伪称产品缺陷。102个pytest共享API/旧routes/Node adapter/P0-P1/native browser回归通过（`/tmp/frontend-p2-stats-neighbors.log`）；qualified helper import消除3个新Pyright误解析而不屏蔽，5 browser再通过；最后UTC+7下全90个Node及5 native browser通过（`/tmp/frontend-p2-stats-final.log`）。Ruff0/active LSP7无primary错误，loader仍有5条bundler import/既有Record辅助提示未隐藏。实际bundled license含uplot/uplot-react及两版权人。4张TEST截图在frontend/.cache/screenshots，375和1440人工查看；源码仅增加可加载模块，MIGRATED仍2页。当前统计切片待独立源码审查，不是服务端路由/权限或生产数据验收。
+
+未做：店铺/枚举内容与child/HTTP/canary真实写闭环、页面切换或交付；统计scope不授权后两页。后续P2 fixed/prospective baselines保留，不把局部测试、源码审计或计划 PASS 当整体 GREEN。
 
 F1 producer/consumer 已登记的当前写域（回执 m-badab46c-d24）：`scripts/{test_isolated.sh,_test_db_connections.py}`、`tests/conftest.py`、`tests/test_test_run_binding.py`、`tests/test_test_template_refresh.py`、`docs/guides/agent-testing.md`。`scripts/test.sh` 已在 DB URL 存在时不加载 .env.test，只验证新输出能原样传递，不预计修改它。已获计划复审/登记只允许此切片；真实 writable-fixture seed 仍须等实际门禁、child attestation/canary 支持实现并验证。
 
