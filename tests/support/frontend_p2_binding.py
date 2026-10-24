@@ -10,6 +10,8 @@ import hmac
 import os
 import re
 import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,10 +49,11 @@ def current_binding() -> tuple[str, RunBinding]:
         raise ValueError(REFUSAL) from None
 
 
-def validate_application(
+@contextmanager
+def checked_session(
     binding: RunBinding, engine: Engine, factory: sessionmaker[Session],
-) -> str:
-    """Validate actual engine AND API session routes before the first connect.
+) -> Iterator[Session]:
+    """Yield the same identity-checked session; callers own any test transaction.
 
     Nonempty per-entity binds are unsupported, not guessed. This checks the
     canonical API factory, rather than constructing a reassuring second engine.
@@ -68,9 +71,17 @@ def validate_application(
         with factory() as session:
             check(session.get_bind())
             binding.verify_database(session.scalar(text("SELECT current_database()")))
-        return binding.run_db
+            yield session
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RuntimeError, SQLAlchemyError):
         raise ValueError(REFUSAL) from None
+
+
+def validate_application(
+    binding: RunBinding, engine: Engine, factory: sessionmaker[Session],
+) -> str:
+    """Compatibility consumer: verify canonical API session without any writes."""
+    with checked_session(binding, engine, factory):
+        return binding.run_db
 
 
 def private_directory(path: Path) -> None:
