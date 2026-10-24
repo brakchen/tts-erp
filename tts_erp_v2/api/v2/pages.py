@@ -722,8 +722,12 @@ def runtime_configs_page() -> HTMLResponse:
 @router.get(
   "/sync-jobs", response_class=HTMLResponse, dependencies=[Depends(_require_readwrite)]
 )
-def sync_jobs_page() -> HTMLResponse:
+def sync_jobs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """定时任务管理页：启停周期调度，或手动触发系统/店铺级任务。"""
+  if "sync-jobs" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "sync-jobs")
   return _render_page("sync-jobs.html", current_page="sync-jobs")
 
 

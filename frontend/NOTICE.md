@@ -8,6 +8,8 @@ Versions are pinned in `package.json` and resolved completely in `package-lock.j
 | React / React DOM | 19.3.1 | MIT | https://github.com/facebook/react |
 | uPlot | 1.6.32 | MIT | https://github.com/leeoniya/uPlot |
 | uPlot React wrapper | 1.2.4 | MIT | https://github.com/skalinichev/uplot-wrappers |
+| Lossless JSON | 4.3.3 | MIT | https://github.com/josdejong/lossless-json |
+| Vanilla JSONEditor | 3.13.0 | ISC | https://github.com/josdejong/svelte-jsoneditor |
 | HeroUI React / Styles | 3.2.6 | MIT | https://github.com/heroui-inc/heroui |
 | Tailwind CSS / Vite plugin | 4.3.3 | MIT | https://github.com/tailwindlabs/tailwindcss |
 | Vite | 8.3.5 | MIT | https://github.com/vitejs/vite |
@@ -30,4 +32,20 @@ addition on 2026-10-24 adds exactly the two pinned packages above (neither decla
 the wrapper declares React >=16.8.6 and uPlot ^1.6.32 peers. Installed MIT license texts were checked and
 `npm audit`, including development packages, reported zero vulnerabilities. This is dependency evidence,
 not native chart/StrictMode/resize/browser acceptance; those remain page-level gates before activation.
+The remaining-page migration uses the maintained specialized vanilla-jsoneditor 3.13.0
+(published 2026-07-24, ISC, about 10.3 MB unpacked) and dependency-free lossless-json 4.3.3
+(published 2026-10-21, MIT, about 365 KB unpacked). Initial JSONEditor 10.4.3 evaluation found
+no public custom-parser option: its internal native JSON conversion cannot meet numeric fidelity.
+That candidate and its separate type package were removed, not bypassed with casts or private DOM.
+The selected library exposes typed `createJSONEditor`, `parser`, `validationParser`, `mode`,
+`readOnly`, `updateProps` and `destroy`. Its internal Svelte/CodeMirror dependencies remain inside
+the specialized editor adapter; they do not own application navigation, state or authentication.
+Code maps to text mode, tree to tree mode, and view to tree mode with readOnly. A real-engine
+component capability check preserves oversized integers and precise decimals across public document
+updates and mode changes with the maintained lossless parser. Programmatic patch results are applied
+through public update, not private editor state. This is not native keyboard/visual acceptance.
+The correctly scoped frontend installation, including development dependencies, reported zero
+npm audit vulnerabilities. Native editor interaction and page acceptance remain separate gates.
+Only a consumer explicitly requesting a success-response decoder changes JSON numeric parsing;
+the ordinary client, authorization/error policy and transport remain shared and unchanged.
 Use `npm ci --include=dev`, retain the lock, and review dependency upgrades separately.
