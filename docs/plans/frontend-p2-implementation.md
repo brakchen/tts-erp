@@ -1,6 +1,6 @@
 # 前端 P2 实现计划：普通页面与首个隔离写闭环
 
-> 状态：run-binding、后端安全、共享契约与未激活统计内容切片已验；统计越界筛选已修回固定7天并通过增量源审。店铺UI源审指出3个阻塞项，已strict修复待增量复审与真实写闭环；枚举仅DTO边界已实现，枚举UI与真实child fixture待实现。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
+> 状态：run-binding、后端安全、共享契约与未激活统计内容切片已验；统计越界筛选已修回固定7天并通过增量源审。店铺UI三个阻塞及aware-expiry已strict修复并通过增量源审，仍待真实写闭环；枚举内容已实现并通过组件/只读原生预览，待源码审查与真实写闭环；真实child fixture待实现。窄测试只证明其覆盖切片，不是 P2 GREEN 或交付声明。
 > 权威父方案：[渐进迁移方案](frontend-progressive-migration.md)；组件标准：[前端开发规范](../guides/frontend-development.md)。
 > 用户在 P0/P1 交付后连续要求继续开发、直到任务完成：按既定前端路线先完成 P2，再逐批核对 P3–P6 的门槛；不接管其他会话或自动生产上线。
 
@@ -139,11 +139,21 @@ open-draft hint消失与429把取消/输入也锁死分别出现真实2RED（`/t
 
 feature-owned monotonic readNotBefore及单一read timer不随read Effect刷新cleanup取消，manual/post-success/check均过同一fence；确认写与延期列表读取分开，600秒完整到期只重新开放显式读，不重放写/自动读。测试覆盖599秒无第二listGET/600秒手动读、核对读也禁早发、unmount无后续请求；新写不是第二权限或query engine。窄屏使用公开Table.ScrollContainer region与最小表宽/名称和ID固定可读宽，限定行高400以内、局部横滚身份→操作、完整文本，不删业务列/改库DOM/focus。expiry只校验aware ISO表示和日历，不用browserclock判有效性；2020年有效格式仍接受。旧cancel测试名已更正为实际覆盖，未冒称metadata failure case。
 
-`/tmp/frontend-p2-shops-repair-matrix.log` 全155 Node+8原生只读browser通过无skip；`/tmp/frontend-p2-shops-repair-neighbors.log` 同80 pytest API安全/P0-P1/stats/shops邻居通过。Ruff0/activeLSP6无primary，13条既有IO边界辅助提示未屏蔽。新375RO/1440RW截图人工复核，行高/文本可读且本地滚动；核对与命令仍只在Node mock层证明，未假称实际commit/read-after-write或真实browser写验收。修复增量待独立复审，Shops任务仍不能完成。
+`/tmp/frontend-p2-shops-repair-matrix.log` 全155 Node+8原生只读browser通过无skip；`/tmp/frontend-p2-shops-repair-neighbors.log` 同80 pytest API安全/P0-P1/stats/shops邻居通过。Ruff0/activeLSP6无primary，13条既有IO边界辅助提示未屏蔽。新375RO/1440RW截图人工复核，行高/文本可读且本地滚动；核对与命令仍只在Node mock层证明，未假称实际commit/read-after-write或真实browser写验收。63e363e增量源审PASS（`/tmp/frontend-p2-shops-delta-review.md`，全文已读），SHOPS01/02/03/04源码层已关闭；可选pending-cancel/internal404/capped-absence/shorter-wait回归并非新增阻塞。Shops任务仍不能完成：sourcePASS不替代真实current-run child/HTTP/canary/commit与浏览器写恢复验收。
 
 不相交Enum边界检查点ac3cc10：m-660登记读回后17新Node真实RED→全148 Node通过（`/tmp/frontend-p2-enum-boundary-{red,green}.log`），保留snake_case/后台返回顺序/未知类别、非负安全整数格式拒绝小数/部分数字/空值，不新造排序或业务计算；只有2contracts文件。activeLSP2无primary，8条unknown/typeof辅助提示保留。没有Enum UI/角色控制/确认删除/实际写验收。
 
-未做：枚举内容与child/HTTP/canary真实写闭环、页面切换或交付；现有scope不授权枚举TS或真实写fixture。后续P2 fixed/prospective baselines保留，不把局部测试、源码审计或计划 PASS 当整体 GREEN。
+Enum UI inline执行snapshot：63e363e clean+push/freshfetch同e868（16ahead）、无Git操作、保留16worktrees/foreignWIP，owner仍parent单writer。2026-10-24 m-bdd323a0-8ce在短锁2335300读全current lanes/reservations无冲突后追加enum index/index.test/EnumForm和tests/browser/test_frontend_enum.py四路径，扩原loader映射测试权限；完整读回后已释放锁。46路径，不包括真实写fixture。Change Necessity=code-change：旧enum页无React内容，非代码不能提供批准的分类浏览/维护；最小页面+表单+测试，复用shared client/commandFailure和HeroUI3.2.6公开Select/Table/Modal/字段，不加包或API。TDD Mode:auto/Route:strict、authority=原auto风险决策（权限/写/异步），先实际UI行为RED再实现，Node仅mock命令/browser仅GET预览。ArchitectureReviewRequired沿e404已审方案，不另造role/query/status/business排序权威；保持已核验guard/CSRF边界。预算page feature lifecycle约230行、Form50，新增内容owner而非塞shared transport/其他页；read-fence仿既有Shops受审feature lifecycle，不抽新全局engine，任何实测owner混杂则停分片。七种known+unknown/空分类采用原生Select（窄屏比横排密集tab更稳），仅选分类与呈现backendorder、不重排/聚合/算业务；编辑英文值只读、label/sort可改，upsert/add及明确delete确认。字段按已有64/128/256与整数输入验证，unknown结果保draft和显式GET核对，不以列表当前事实证原commit；所有读入口保RetryAfter，权限撤回禁写但可取消。原API/source真实写和整套最终验收仍独立待做。
+
+Enum内容后继证据：`/tmp/frontend-p2-enum-ui-red.log` 15个真实Node运行RED（14 UI缺模块+DELETE缺decoder），而非编译失败；最小实现index+EnumForm，新增DELETE合同只接受matching deleted内部PK，不以body.ok/错误身份/204空body称成功。PUT保持tuple upsert，不擅自改现有英文值；Form只读英文值、label/sort保留，Unicode长度按codepoint而非UTF16截断，数值只显式parseSortOrder，坏输入无写。admin exacttrue，非admin无行写控件；capability撤回后已开表单也禁submit但可取消，最终API权限/CSRF/共享guard不变。ref singleflight、safe commandFailure、无自动replay；unknown当场禁普通重提，在Modal内GET完整既有list核对tuple或delete内部PK；当前存在/不存在都不证原commit/rollback，保draft并由用户明确重新提交/再次删除，未核对取消后外层仍保持门禁。list/manual/post-confirmation/check共用feature-owned单读timer与完整monotonic deadline，Effect cleanup不缩短等待。无新增query/status/权限引擎。
+
+`/tmp/frontend-p2-enum-loader-red.log` 1真实代码映射RED→仅加lazy module，不扩MIGRATED。第一轮UI31/32中唯一失败为Select原生可访问名包含当前值+分类，测试按真实完整名称修正，不改组件ARIA或放松为任意按钮。新增upsert后果说明前1真实RED（`/tmp/frontend-p2-enum-upsert-warning-red.log`）→新增时明确同tuple会更新已有label/sort；最后unknown类别删除后丢失选择1真实RED（`/tmp/frontend-p2-enum-category-continuity-red.log`）→在本地展示选择中保留已由后端出现的类别及空状态，不悄然切另一分类、不新造业务类别/排序。expanded回归含empty-known add/匹配DELETE成功/CSRF/重复提交单次、坏JSON/403/network核对仍保draft和禁写、取消unknown后外层门禁；只有上述Red先行部分声称strict新增行为证明，后续绿色边界测试不伪称均先RED。
+
+`/tmp/frontend-p2-enum-ui-native.log` 全组件与12个真实compiled browser375/768/1440×direct/tts×RO/admin GET-only预览通过；`/tmp/frontend-p2-enum-ui-neighbors.log` 92 pytest API安全/全部Node adapter/P0P1/stats/shops/enum原生回归全PASS/no skips。全部Node由其中一个pytest adapter执行，不能当92个pytest之外额外DB验收；权限/mutation/recovery在Node mock层，不是live API持久化。Native验证长值/name宽≥200/行高≤400/无整页横溢/局部滚动/Select键盘Enter与known/unknown/empty、不改native focus owner的调用行或按钮恢复/两次开关草稿/删除确认取消零写；没有PUT/DELETE，仍Rendererwriteveto。12张TEST截图在frontend/.cache/screenshots，375RO和1440admin人工查看：可读有界长文本，本地横滚非一字符3k竖排。Ruff0、fresh active LSP8无primary；16条I/O decoder/bundler辅助提示未屏蔽。source审查未做，不能完成Enum整体任务。
+
+登记身份异常保留：板显示名变“前后端分离改造”后m-bdd默认message.from与record UUID不符，发现即停下一写；原session环境PI_SESSION_ID核对不变，以显式as原UUID发送owner确认m-cb8d9a15-30f，并在短锁2388406全链/所有lane核对，完整继任m-9909a7e0-f16读回后释放锁。新record identityReconciliation只引用该单一被原owner确认的alias，并非其他owner接管、fork、改历史日志或全局放松sender校验；之后lane工具固定as原UUID。涉及WIP仅既定9文件，无外国WIP混入，scope仍46/无child reservation。未来日志投影需消费该明确owner确认，不能以显示名自发接管。
+
+未做：Enum独立源审、child/HTTP/canary真实写闭环、页面切换或交付；现有scope不授权真实写fixture。后续P2 fixed/prospective baselines保留，不把局部测试、源码审计或计划 PASS 当整体 GREEN。
 
 F1 producer/consumer 已登记的当前写域（回执 m-badab46c-d24）：`scripts/{test_isolated.sh,_test_db_connections.py}`、`tests/conftest.py`、`tests/test_test_run_binding.py`、`tests/test_test_template_refresh.py`、`docs/guides/agent-testing.md`。`scripts/test.sh` 已在 DB URL 存在时不加载 .env.test，只验证新输出能原样传递，不预计修改它。已获计划复审/登记只允许此切片；真实 writable-fixture seed 仍须等实际门禁、child attestation/canary 支持实现并验证。
 

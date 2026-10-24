@@ -15,6 +15,10 @@ export function parseSortOrder(value: string): number {
   if (!Number.isSafeInteger(parsed)) throw new Error('排序超出安全整数范围');
   return parsed;
 }
+export function decodeEnumDelete(value: unknown, expectedId: number): number {
+  if (!record(value) || !integer(value.deleted) || value.deleted !== expectedId) throw new Error('枚举删除响应格式错误');
+  return value.deleted;
+}
 export function decodeEnumUpsert(value: unknown): { id: number; action: 'created' | 'updated' } {
   if (!record(value) || !integer(value.id) || value.id <= 0 || (value.action !== 'created' && value.action !== 'updated')) throw new Error('枚举保存响应格式错误');
   return { id: value.id, action: value.action };

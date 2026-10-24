@@ -18,6 +18,11 @@ describe('enum wire/input boundary', () => {
   it('accepts genuine nonnegative integer input, including zero, without monetary or threshold logic', async () => {
     const { parseSortOrder } = await import(modulePath); expect(parseSortOrder('0')).toBe(0); expect(parseSortOrder('23')).toBe(23);
   });
+  it('requires the exact deleted internal PK after a successful HTTP response', async () => {
+    const { decodeEnumDelete } = await import(modulePath);
+    expect(decodeEnumDelete({ deleted: 41 }, 41)).toBe(41);
+    for (const bad of [null, {}, { ok: true }, { deleted: 42 }, { deleted: '41' }]) expect(() => decodeEnumDelete(bad, 41)).toThrow();
+  });
   it('checks contracted upsert metadata after HTTP success, not alternate status fields', async () => {
     const { decodeEnumUpsert } = await import(modulePath);
     expect(decodeEnumUpsert({ id: 41, action: 'created' })).toEqual({ id: 41, action: 'created' });
