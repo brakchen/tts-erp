@@ -151,6 +151,42 @@ def test_logistics_writes_shipment_and_tracks_watermark(db_session) -> None:
     assert cursor == 1_700_002_100_000
 
 
+def test_select_tracking_targets_does_not_load_full_raw_record(db_session) -> None:
+    """Tracking selection must not materialize the whole order JSON.
+
+    The worker is long-lived. Loading RawRecord entities pulls line items
+    and payment blobs into the identity map every tick.
+    """
+    account = _make_account_with_order(db_session)
+    record = _seed_orders_raw_record(
+        db_session,
+        order_id="TEST_SO_L",
+        tracking_number="TN1",
+        package_id="PKG1",
+    )
+    record.payload = {
+        **record.payload,
+        "line_items": [{"blob": "x" * 4000}],
+    }
+    db_session.flush()
+    db_session.expunge_all()
+
+    targets = logistics_job._select_tracking_targets(
+        db_session, account_id=account.id
+    )
+
+    assert targets[0]["order_id"] == "TEST_SO_L"
+    assert targets[0]["tracking_number"] == "TN1"
+    assert targets[0]["external_package_id"] == "PKG1"
+    assert targets[0]["provider_id"] == "UPS"
+    loaded = [
+        obj
+        for obj in db_session.identity_map.values()
+        if isinstance(obj, RawRecord)
+    ]
+    assert loaded == []
+
+
 def test_logistics_synthesizes_package_id_from_order_id(db_session) -> None:
     """When the order payload has no packages list, fall back to the
     order_id as the synthetic external_package_id."""

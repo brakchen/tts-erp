@@ -23,6 +23,8 @@ without one calling the other — which the design explicitly forbids.
 
 from __future__ import annotations
 
+import ctypes
+import gc
 import importlib
 import logging
 import random
@@ -476,6 +478,7 @@ def _run_tiktok_job_for_shop(
                 )
         finally:
             session.close()
+            release_tick_memory()
 
 
 def _run_system_job(
@@ -530,6 +533,22 @@ def _run_system_job(
         log.exception("[%s] tick failed", spec.job_name)
     finally:
         session.close()
+        release_tick_memory()
+
+
+def release_tick_memory() -> None:
+    """Return freed heap pages after a tick.
+
+    Jobs materialize order JSON and page lists, then drop them when the
+    session closes. CPython and glibc keep that high-water mark in the
+    long-lived worker unless malloc_trim is asked to release empty arenas.
+    Missing malloc_trim (non-glibc) is ignored.
+    """
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        return
 
 
 def _enumerate_tiktok_shops_in_factory(
