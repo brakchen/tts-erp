@@ -56,7 +56,26 @@
 | `bash scripts/test_isolated.sh api tests/api/test_spu_deterioration_alert_api.py`（旧实现） | 15 passed；仅证明旧告警测试，不能作为v3验收。日志 `/tmp/spu-compare-initial-api.log` |
 | `bash scripts/test_isolated.sh api tests/api/test_pages.py -k spu_profit_deterioration`（新shell断言/源码未改） | 严格RED：3 failed、3 passed；失败分别为旧settings仍存在、额外1/全部窗口、旧config写路径仍存在；日志 `/tmp/spu-compare-shell-red.log` |
 
-实施后的 GREEN、SQL去重、browser结果、独立复审与baseline尚须追加；上述结果不代表本页已修好或部署完成。
+### 4.1 集成后功能证据（代码 HEAD `df19d0140beb6242236da7fd12309ad3254be555`）
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `bash scripts/test_isolated.sh fast tests/analytics/test_spu_deterioration_alert.py tests/analytics/test_spu_deterioration_comparison.py tests/analytics/test_spu_profitability_formula.py tests/api/test_spu_deterioration_alert_api.py tests/api/test_pages.py tests/browser/test_spu_deterioration_alert_page.py tests/browser/test_spu_comparison_drilldown_dates.py tests/browser/test_spu_date_range.py -o addopts=-ra --tb=short` | **177 passed，0 failed，0 skipped**；127.26s。分解：旧 evaluator15、比较领域8、canonical公式26、比较API46、页面API25、比较browser48、新日期browser7、原日期guard2。一个既有 Starlette/httpx 弃用 warning，不作为失败。 |
+| `bash scripts/test_isolated.sh e2e tests/e2e/test_spu_deterioration_alert_smoke.py -o addopts=-ra --tb=short`（最终完整运行） | **5 passed，0 failed，0 skipped**；27.18s。当前隔离 clone + 冷启真实 API + Chromium；覆盖带前缀 cookie 桌面1440、API-key手机390、真实业务值/旧结果/日期上限/7→3/去重统计、参数和匿名边界、键盘详情正确业务ID及经营日期/浏览器返回。不是常驻 :9877 的部署证明。 |
+| UI 独立复审 | fresh reviewer读取完整提交范围索引、相关实际 diff/当前代码、177/5 XML及390/1440/2560截图：未发现问题，`OK with notes`，仅保留完整baseline门槛。 |
+| 主动 LSP probe（13条实际改动路径） | 0 reported errors；3 confirmed clean，10 push-only/silent unconfirmed。不声称13条全部完成静态类型证明。Ruff/Node语法/编译检查及runner前端typecheck/build另已通过。 |
+
+**验收夹具纠正，不改业务规则：**首轮真实 E2E 为3通过2失败。内置 viewer 并不包含此页面权限，改为显式授权 comparison/ROI 页面、API层级为 readonly 的 TEST 角色后，失败用例最小重跑2/2通过，再完整5/5通过。无页面权限的 HTML 仍403；数据API沿用既有全局readonly层级（`accounts.pages.required_page_permission` 与 `service._build_context`），没有借修页面改成另一份授权矩阵。
+
+独立查验 canonical `calculate()`：真实零单投放样本消耗49 CNY、净利润−49 CNY、ROI **0**（ROI分子不减广告费），修正父验收曾误写的−1预期；另有已确认退款场景验证可计算负ROI正常保留，未修改统一公式。
+
+后端已验证未知商品/金额/订单行/关联、空广告金额、不归属店铺或畸形issue不冒充零；全范围订单跨SPU/分页/批次去重；金融读取仅计算当前页，存在性查询不随历史订单增长，原始广告响应不整批物化。日期下溢422、旧成功晚于新失败仍可读、3650天前有效空广告观察等均有回归。`coverage=limited`披露具体观测与限制，不认证所有上游campaign/页采集完整，也未做生产规模延迟承诺。
+
+共享布局夹具另行发现并修复：`tests/browser/conftest.py` 仍返回旧告警shape，导致共享字体/溢出巡检实际只看错误态。新增桌面/手机“必须ready且有真实比较行”的回归，先观察 **2个预期RED**，再仅更新SPU canned payload并退休无消费者的旧阈值helpers；`shared_layout_fixture` 与关联字体/溢出选择 **8 passed、0 failed**。未改公共server/renderer或其他页面mock；mock只证明布局，不代替真实SQL/E2E。
+
+**独立后端复审结果：BLOCK。**发现两条上述177/5未覆盖的 P1：NULL订单状态被当作零单/无单投放；已完成退款行金额缺失仍被当成零金额并输出数值盈利。已创建 `spu-compare-missing-facts` 严格测试先行修复：在事实完整性/canonical出口标记未知，保留独立已知订单/消耗，不为让测试通过修改盈利公式。前述绿色证据不能覆盖或取消这两个阻塞。
+
+**仍待交付门槛：**修复两条 P1 并复审清零、完整fast基线、与当前master同步、精确prospective master验证和推送/board收口。当前功能证据不是完成这些门槛或生产部署的声明。
 
 ## 5. 历史结果的处置
 

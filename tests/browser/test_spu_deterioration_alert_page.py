@@ -760,3 +760,17 @@ def test_keyboard_detail_link_focus_return_and_responsive_fields(
     screenshots = Path(".pi/subagents/recovery/logs/screenshots")
     screenshots.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(screenshots / f"comparison-{width}.png"), full_page=True)
+
+
+@pytest.mark.parametrize("width", [390, 1440])
+def test_shared_layout_fixture_renders_comparison_data_not_only_error_shell(
+    browser_renderer: Any, width: int
+) -> None:
+    """The shared overflow/font gate must actually exercise populated v3 UI."""
+    page = browser_renderer.open(PAGE, width=width)
+    expect(page.locator("#alert-status")).to_have_attribute("data-kind", "ready")
+    container = page.locator("#alert-cards" if width < 992 else "#alert-rows")
+    expect(container).to_contain_text("TEST_RENDER_COMPARE_")
+    expect(container).to_contain_text("本期：无单但有广告费")
+    expect(page.locator("#total-spus")).to_have_text("3")
+    expect(page.locator("#filter-anchor-date")).to_have_attribute("max", ANCHOR)
