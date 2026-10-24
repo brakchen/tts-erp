@@ -1,4 +1,4 @@
-"""Unactivated shops preview: real compiled HeroUI, canned GET only; not persistence/auth acceptance."""
+"""Compiled shops preview: canned GET only; actual auth/persistence is tested separately."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -89,7 +89,7 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
         dialog.get_by_role("button", name="取消", exact=True).click()
         dialog.wait_for(state="hidden")
         assert calls == ["GET"]
-    assert "shops" not in frontend_pages.MIGRATED_PAGE_IDS
+    assert "shops" in frontend_pages.MIGRATED_PAGE_IDS
     scroll.evaluate("el => { el.scrollLeft = 0; }")
     artifacts = ROOT / "frontend/.cache/screenshots"
     artifacts.mkdir(parents=True, exist_ok=True)

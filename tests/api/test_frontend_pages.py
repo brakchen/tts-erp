@@ -317,8 +317,8 @@ def test_explicit_development_origin_injects_react_refresh(
     assert body.index("injectIntoGlobalHook") < body.index(f"{origin}/src/main.tsx")
 
 
-def test_pilot_activation_matches_browser_accepted_pages():
-    assert frontend_pages.MIGRATED_PAGE_IDS == frozenset({"dashboard", "intercept-requests"})
+def test_activation_matches_implemented_candidate_pages():
+    assert frontend_pages.MIGRATED_PAGE_IDS == frozenset({"dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"})
 
 
 @pytest.fixture
@@ -326,11 +326,11 @@ def activated(release, monkeypatch):
     monkeypatch.setattr(
         frontend_pages,
         "MIGRATED_PAGE_IDS",
-        frozenset({"dashboard", "intercept-requests"}),
+        frozenset({"dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"}),
     )
 
 
-@pytest.mark.parametrize("page_id", ["dashboard", "intercept-requests"])
+@pytest.mark.parametrize("page_id", ["dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map"])
 def test_original_route_uses_frontend_only_when_activated(
     api_client, readonly_key, activated, page_id
 ):
@@ -387,7 +387,7 @@ def test_activated_route_never_falls_back_when_release_missing(
 
 
 def test_non_migrated_route_keeps_legacy_renderer(api_client, readonly_key, activated):
-    response = api_client.get("/v2/pages/shops", headers={"X-API-Key": readonly_key})
+    response = api_client.get("/v2/pages/intercept-configs", headers={"X-API-Key": readonly_key})
     assert response.status_code == 200
     assert "bootstrap.min.css" in response.text
     assert "frontend-bootstrap" not in response.text

@@ -1,4 +1,4 @@
-"""Unactivated stats module: compiled/native chart and dev StrictMode; canned GET only."""
+"""Compiled/native stats chart and dev StrictMode preview; canned GET only."""
 from __future__ import annotations
 
 import os
@@ -98,7 +98,7 @@ def test_compiled_stats_native_chart_and_table(stats_renderer, prefix, width):
     artifacts.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(artifacts / f"TEST_intercept-stats_{width}_{prefix.strip('/') or 'direct'}.png"), full_page=True)
     assert all("bootstrap.min" not in url for url in page.evaluate("performance.getEntriesByType('resource').map(x=>x.name)"))
-    assert "intercept-stats" not in frontend_pages.MIGRATED_PAGE_IDS
+    assert "intercept-stats" in frontend_pages.MIGRATED_PAGE_IDS
 
 
 def test_dev_upstream_wrapper_strictmode_update_destroy(frontend_browser_renderer, tmp_path, monkeypatch):

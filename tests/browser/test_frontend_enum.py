@@ -1,4 +1,4 @@
-"""Compiled unactivated enum preview. GET-only, not auth or persistence acceptance."""
+"""Compiled enum preview. GET-only, not actual auth or persistence acceptance."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -102,4 +102,4 @@ def test_native_enum_categories_and_cancel(enum_preview, prefix, width):
     page.get_by_role("option", name="售后类型（case_type）", exact=True).click()
     grid.get_by_text("该分类暂无映射", exact=True).wait_for()
     assert calls == ["GET"]
-    assert "enum-map" not in frontend_pages.MIGRATED_PAGE_IDS
+    assert "enum-map" in frontend_pages.MIGRATED_PAGE_IDS
