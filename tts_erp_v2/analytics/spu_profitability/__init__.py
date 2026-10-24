@@ -12,6 +12,7 @@ behind this seam.  HTTP adapters must not reach into private implementation file
 
 from __future__ import annotations
 
+from datetime import date, datetime, tzinfo
 from decimal import Decimal
 from typing import Any
 
@@ -68,33 +69,37 @@ __all__ = [
     "FormulaStatus",
     "FxBasis",
     "FxRateUnavailable",
-    "ProfitScope",
-    "ProfitabilityBasis",
-    "ProjectionBasis",
-    "ProjectionPolicy",
     "PriceCoverage",
     "PriceCoverageStatus",
     "PriceFxUnavailable",
     "PriceMetric",
     "PriceSource",
     "PriceStatsOverview",
+    "ProfitScope",
+    "ProfitabilityBasis",
     "ProfitabilityError",
     "ProfitabilityEvidence",
     "ProfitabilityOverview",
     "ProfitabilityTotals",
+    "ProjectionBasis",
+    "ProjectionPolicy",
     "ReportingTimezoneUnavailable",
     "RowView",
     "SnapshotIsolationUnavailable",
     "SortDirection",
     "SortField",
     "SpuNotFound",
+    "SpuPriceStats",
     "SpuProfitExplanation",
     "SpuProfitability",
-    "SpuPriceStats",
     "SpuSelection",
+    "consistent_read_snapshot",
+    "count_orders_in_snapshot",
     "explain_spu",
     "is_price_sort_field",
     "read_overview",
+    "read_overview_in_snapshot",
+    "reporting_timezone",
 ]
 
 
@@ -137,6 +142,53 @@ def _read_overview_in_snapshot(
     )
 
 
+def reporting_timezone(session: Session, *, shop_pk: int) -> tzinfo:
+    """Resolve the canonical shop-local reporting calendar."""
+    return _implementation._shop_reporting_timezone(session, shop_pk=shop_pk)
+
+
+def read_overview_in_snapshot(
+    session: Session,
+    *,
+    scope: ProfitScope,
+    view: RowView,
+    calculated_at: datetime,
+) -> ProfitabilityOverview:
+    """Compose reads inside ``consistent_read_snapshot`` with its shared timestamp."""
+    return _read_overview_in_snapshot(
+        session, scope=scope, view=view, calculated_at=calculated_at
+    )
+
+
+def count_orders_in_snapshot(
+    session: Session,
+    *,
+    shop_pk: int,
+    spu_pks: tuple[int, ...],
+    start_date: date,
+    end_date: date,
+) -> int:
+    """Canonical paid-order DISTINCT over the full relation, never batch totals."""
+    start, end = _implementation._window_dates(
+        start_date, end_date, reporting_timezone(session, shop_pk=shop_pk)
+    )
+    row = (
+        session.execute(
+            _implementation._SQL_ROI_ORDER_SCOPE,
+            {
+                "pks": list(spu_pks),
+                "paid_statuses": list(_implementation.PAID_SALES_ORDER_STATUSES),
+                "ac": _implementation._TRACK_ACTION_CODE_OVERSEAS,
+                "ws": start,
+                "we": end,
+            },
+        )
+        .mappings()
+        .one()
+    )
+    return int(row["order_count"])
+
+
 def read_overview(
     session: Session,
     *,
@@ -156,7 +208,9 @@ def read_overview(
         )
 
 
-def _typed_evidence_rows(kind: EvidenceKind, payload: dict[str, Any]) -> tuple[dict, ...]:
+def _typed_evidence_rows(
+    kind: EvidenceKind, payload: dict[str, Any]
+) -> tuple[dict, ...]:
     """Keep native PostgreSQL/domain values; the HTTP adapter formats them."""
     return tuple(dict(row) for row in payload.get(kind.value, []))
 
