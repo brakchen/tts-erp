@@ -4,6 +4,7 @@ import type { PageProps } from '../../shared/contracts';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import { parseIdentityJson } from '../../shared/api/identity-json';
+import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { count, decodeHistory, decodeMissing, decodeProduct, decodeProducts, decodeSaved, decodeShops, fieldLabels, fieldsEqual, initialFields, validateFields, type Fields, type History, type Product, type Shop } from './contracts';
 import CostFields from './CostFields';
 
@@ -47,7 +48,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     const next = update(draftsRef.current); draftsRef.current = next; setDrafts(next);
   }
   function updateRecovery(value: Recovery | undefined) { recoveryRef.current = value; setRecovery(value); }
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; stopBatch.current = true; cancelDelay.current?.(); verification.current?.abort(); writeController.current?.abort(); }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; stopBatch.current = true; cancelDelay.current?.(); verification.current?.abort(); verification.current = undefined; writeController.current?.abort(); writeController.current = undefined; }; }, []);
   useEffect(() => {
     if (performance.now() < notBefore.current) return;
     const controller = new AbortController(); let current = true; setShopError('');
@@ -112,14 +113,15 @@ export default function ManualCosts({ bootstrap }: PageProps) {
       const controller = new AbortController(); writeController.current = controller;
       try {
         const body = { spu_pk: id, spu_id: attempt.target.spu_id, unit_cost: attempt.fields.unit_cost, currency: attempt.fields.currency, note: attempt.fields.note, ...(attempt.fields.valid_from ? { valid_from: attempt.fields.valid_from } : {}) };
-        const { data, status: responseStatus } = await requestJson<unknown>(bootstrap.rootPath, '/v2/reporting/manual-costs', { method: 'POST', body: JSON.stringify(body), signal: controller.signal }, parseIdentityJson);
+        // This bounds local waiting across both fetch and body reads, not server execution or commit.
+        const { data, status: responseStatus } = await withinRequestLifetime(controller, (signal) => requestJson<unknown>(bootstrap.rootPath, '/v2/reporting/manual-costs', { method: 'POST', body: JSON.stringify(body), signal }, parseIdentityJson));
         if (responseStatus !== 201) throw new Error('提交响应未确认');
         const saved = decodeSaved(data, attempt.target);
-        if (!mounted.current) break;
+        if (!mounted.current || writeController.current !== controller) break;
         succeeded++; updateDrafts((previous) => ({ ...previous, [id]: { target: { ...attempt.target, ...saved }, baseline: { ...attempt.fields }, fields: { ...attempt.fields }, status: 'success' } }));
         setList((previous) => ({ ...previous, products: previous.products?.map((product) => product.id === id ? { ...product, ...saved } : product) }));
       } catch (error: unknown) {
-        if (!mounted.current) break;
+        if (!mounted.current || writeController.current !== controller) break;
         failed++; const failure = commandFailure(error, fieldLabels); gate(error);
         updateDrafts((previous) => ({ ...previous, [id]: { ...previous[id], status: failure.uncertain ? 'unknown' : 'error', failure } }));
         if (failure.uncertain) { updateRecovery({ attempt, phase: 'unverified' }); break; }
@@ -135,12 +137,13 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     if (!previous || previous.phase === 'checking' || singleFlight.current || performance.now() < notBefore.current) return;
     const controller = new AbortController(); verification.current = controller; updateRecovery({ ...previous, phase: 'checking', message: undefined });
     try {
-      const { data } = await requestJson<unknown>(bootstrap.rootPath, `/v2/commerce/channel-products/${previous.attempt.target.id}`, { signal: controller.signal }, parseIdentityJson);
+      const { data } = await withinRequestLifetime(controller, (signal) => requestJson<unknown>(bootstrap.rootPath, `/v2/commerce/channel-products/${previous.attempt.target.id}`, { signal }, parseIdentityJson));
       const snapshot = decodeProduct(data); const target = previous.attempt.target;
       if (snapshot.id !== target.id || snapshot.shop_pk !== target.shop_pk || snapshot.spu_id !== target.spu_id) throw new Error('身份不匹配');
-      if (mounted.current) updateRecovery({ ...previous, phase: 'checked', snapshot, message: '已读取当前公开记录；GET 不能证明原提交是否生效，也不会自动重试。' });
+      if (mounted.current && verification.current === controller) updateRecovery({ ...previous, phase: 'checked', snapshot, message: '已读取当前公开记录；GET 不能证明原提交是否生效，也不会自动重试。' });
     } catch (error: unknown) {
-      if (!mounted.current || controller.signal.aborted) return;
+      // Deadline abort is a usable failed check; only an ended UI lifetime stays quiet.
+      if (!mounted.current || verification.current !== controller) return;
       gate(error);
       if (error instanceof ApiError && error.status === 404) updateRecovery({ ...previous, phase: 'checked', message: '当前记录不存在；GET 不能证明原提交是否生效。请先核对身份。' });
       else updateRecovery({ ...previous, phase: 'failed', message: `核对未完成：${errorMessage(error)}。草稿和目标仍保留。` });
