@@ -42,6 +42,8 @@ LAUNCH = "TTS_ERP_TEST_P2_LAUNCH_NONCE"
 ATTESTATION = "TTS_ERP_TEST_P2_ATTESTATION"
 PARENT_PID = "TTS_ERP_TEST_P2_PARENT_PID"
 PARENT_START = "TTS_ERP_TEST_P2_PARENT_START"
+COLLABORATORS = "TTS_ERP_TEST_P2_COLLABORATORS"
+_COLLABORATOR_PROFILE = "remaining-console-v1"
 
 
 def child_environment(value: str, *, nonce: str, attestation: Path) -> dict[str, str]:
@@ -55,6 +57,8 @@ def child_environment(value: str, *, nonce: str, attestation: Path) -> dict[str,
         from tests.support.spu_price_stats_live import api_env
 
         env = api_env(value)
+        # Opt-in belongs to this launch, never an inherited parent environment.
+        env.pop(COLLABORATORS, None)
         env.update({
             "TTS_ERP_TEST_RUN_PROOF": os.environ["TTS_ERP_TEST_RUN_PROOF"],
             "TTS_ERP_TEST_RUN_ID": binding.run_id,
@@ -92,6 +96,9 @@ def create_app() -> ASGIApp:
         attestation = Path(os.environ[ATTESTATION])
         require_nonce(nonce)
         private_directory(attestation)
+        profile = os.environ.get(COLLABORATORS)
+        if profile not in (None, _COLLABORATOR_PROFILE):
+            raise ValueError(REFUSAL)
         parent, _ = _process_state(os.getpid())
         _, parent_start = _process_state(parent)
         if (os.environ.get("TTS_ERP_DB_URL") != value
@@ -113,7 +120,16 @@ def create_app() -> ASGIApp:
         app = build_app()
         # Recheck the actual API singleton/factory after all app imports.
         validate_application(binding, get_engine(), get_session_factory())
-        mounted = Starlette(routes=[Mount("/tts", app=app), Mount("/", app=app)])
+        lifespan = None
+        if profile == _COLLABORATOR_PROFILE:
+            # Fixed test module only: no caller-supplied factory/import/callback.
+            from tests.support.frontend_test_collaborators import install
+
+            lifespan = install(app)
+            if not callable(lifespan):
+                raise ValueError(REFUSAL)
+            validate_application(binding, get_engine(), get_session_factory())
+        mounted = Starlette(routes=[Mount("/tts", app=app), Mount("/", app=app)], lifespan=lifespan)
         write_attestation(attestation, binding, nonce)
         return NonceApp(mounted, nonce)
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RuntimeError, SQLAlchemyError):
@@ -169,15 +185,19 @@ def _wait_ready(child: VerifiedChild, *, timeout: float = 30) -> None:
 
 
 @contextmanager
-def live_api_server(value: str) -> Iterator[VerifiedChild]:
+def live_api_server(value: str, *, collaborators: bool = False) -> Iterator[VerifiedChild]:
     """No yield until actual child/file/HTTP all match this fresh launch."""
     from tests.support.spu_price_stats_live import _free_port, _stop_process_group
 
+    if type(collaborators) is not bool:
+        raise ValueError(REFUSAL)
     binding = load_run_binding(value)
     with tempfile.TemporaryDirectory(prefix="tts-erp-p2-child-") as directory:
         path = Path(directory) / "TEST_child_attestation.json"
         nonce = secrets.token_hex(32)
         env = child_environment(value, nonce=nonce, attestation=path)
+        if collaborators:
+            env[COLLABORATORS] = _COLLABORATOR_PROFILE
         port = _free_port()
         command = [sys.executable, "-m", "uvicorn", "tests.support.frontend_p2_live:create_app",
                    "--factory", "--host", "127.0.0.1", "--port", str(port),
