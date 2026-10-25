@@ -54,6 +54,89 @@ describe('manual-costs workbench', () => {
   });
 });
 
+describe('manual-costs server-total pagination', () => {
+  const pageRows = (offset = 0) => Array.from({ length: 50 }, (_, index) => product(String(1000 + offset + index), `TEST page ${offset} row ${index}`));
+  const historyRows = (rows: ReturnType<typeof pageRows>) => rows.map((row) => ({
+    id: row.id, spu_pk: row.id, shop_pk: row.shop_pk, spu_id: row.spu_id, title: row.title,
+    unit_cost: row.unit_cost, currency: row.currency, prev_unit_cost: null, prev_currency: null,
+    note: null, valid_from: null, valid_to: null, created_at: null,
+  }));
+  function setupPages(view: 'all' | 'recent', total: string, fullPage = true) {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes('channel-accounts?')) return json([shop]);
+      const offset = Number(new URL(url, 'https://test.invalid').searchParams.get('offset'));
+      const rows = fullPage ? pageRows(offset) : [product('1000', 'TEST partial page')];
+      if (url.includes('channel-products?')) return view === 'all' ? json(rows, 200, { 'X-Total-Count': total }) : json([]);
+      if (url.includes('/reporting/manual-costs?')) {
+        // Exercise raw JSON integer decoding, not a pre-rounded JavaScript number.
+        return new Response(`{"items":${JSON.stringify(historyRows(rows))},"total":${total}}`);
+      }
+      throw new Error('TEST unexpected page request');
+    });
+    vi.stubGlobal('fetch', fetcher); return fetcher;
+  }
+  async function openView(view: 'all' | 'recent', user: ReturnType<typeof userEvent.setup>) {
+    render(<ManualCosts {...props} />);
+    if (view === 'recent') {
+      await screen.findByText('当前页暂无候选');
+      await user.click(screen.getByRole('button', { name: '最近提交' }));
+    }
+  }
+  it.each(['all', 'recent'] as const)('disables next on a full final %s page at zero and nonzero offsets', async (view) => {
+    const fetcher = setupPages(view, '100'); const user = userEvent.setup(); await openView(view, user);
+    await screen.findByText('TEST page 0 row 0');
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText('TEST page 50 row 0');
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    const calls = fetcher.mock.calls.length;
+    await user.click(screen.getByRole('button', { name: '下一页' })); expect(fetcher.mock.calls).toHaveLength(calls);
+    await user.click(screen.getByRole('button', { name: '上一页' })); await screen.findByText('TEST page 0 row 0');
+    fetcher.mockImplementationOnce(async () => view === 'all' ? json(pageRows(), 200, { 'X-Total-Count': '50' }) : json({ items: historyRows(pageRows()), total: 50 }));
+    await user.click(screen.getByRole('button', { name: '刷新当前列表' })); await screen.findByText(/服务端总数：50/);
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(fetcher.mock.calls.some(([url]) => url.includes('offset=50') && url.includes(view === 'all' ? 'channel-products?' : '/reporting/manual-costs?'))).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => url.includes('offset=100'))).toBe(false);
+  });
+  it.each(['all', 'recent'] as const)('uses an authoritative remaining %s total even when the returned page is short', async (view) => {
+    setupPages(view, '51', false); const user = userEvent.setup(); await openView(view, user);
+    await screen.findByText('TEST partial page');
+    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
+  });
+  it.each(['all', 'recent'] as const)('preserves an oversized %s total exactly and leaves remaining pages available', async (view) => {
+    setupPages(view, '9007199254740997', false); const user = userEvent.setup(); await openView(view, user);
+    await screen.findByText('TEST partial page');
+    expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
+  });
+  it('falls back to original row count when the catalogue total is unknown', async () => {
+    const fetcher = setupPages('all', '50');
+    fetcher.mockImplementation(async (url: string) => url.includes('channel-accounts?') ? json([shop])
+      : json(new URL(url, 'https://test.invalid').searchParams.get('offset') === '0' ? pageRows() : [product('1050', 'TEST last unknown')]));
+    const user = userEvent.setup(); await openView('all', user); await screen.findByText('TEST page 0 row 0');
+    expect(screen.getByText(/服务端总数：未知/)).toBeVisible();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '下一页' })); await screen.findByText('TEST last unknown');
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+  });
+  it('keeps missing-candidate paging on raw rows, not the photo total or current-page display filter', async () => {
+    const fetcher = setupPages('all', '50'); const user = userEvent.setup(); await openView('all', user); await screen.findByText('TEST page 0 row 0');
+    fetcher.mockImplementation(async (url: string) => {
+      const offset = Number(new URL(url, 'https://test.invalid').searchParams.get('offset'));
+      return json({ items: (offset === 0 ? pageRows() : pageRows(offset).slice(0, 1)).map(({ id, ...row }) => ({ ...row, spu_pk: id, missing_photo: false })), total_missing_photo: '9007199254740997' });
+    });
+    await user.click(screen.getByRole('button', { name: '缺成本候选' })); await screen.findByText(/服务端缺图总数：9007199254740997/);
+    await user.click(screen.getByRole('checkbox', { name: /仅显示本页 missing_photo/ })); await screen.findByText('当前页暂无候选');
+    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText(/服务端缺图总数：9007199254740997/);
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(screen.queryByText(/服务端总数：/)).toBeNull();
+    expect(fetcher.mock.calls.some(([url]) => url.includes('missing-cost-products?') && url.includes('offset=50') && !url.includes('q='))).toBe(true);
+  });
+});
+
 const saved = (id = '9007199254740995', cost = '123456789012345.1234') => json({ id: '9223372036854775800', spu_pk: id, unit_cost: cost, currency: 'VND', valid_from: '2026-10-24T12:00:00+00:00', valid_to: null }, 201);
 describe('manual-costs draft and batch recovery', () => {
   it('undoes a later edit back to the last confirmed submission rather than a stale pre-submit catalogue value', async () => {
