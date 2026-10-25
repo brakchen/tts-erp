@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from tts_erp_v2.accounts import service
 from tts_erp_v2.accounts.pages import permission_catalog
 from tts_erp_v2.accounts.passwords import PasswordPolicyError
-from tts_erp_v2.api.deps import SessionDep
+from tts_erp_v2.api.deps import SessionDep, require_cookie_csrf
 
 router = APIRouter(tags=["users"])
 
@@ -95,6 +95,7 @@ def list_users(session: SessionDep) -> dict:
 
 @router.post("/v2/users", status_code=status.HTTP_201_CREATED)
 def create_user(body: UserCreate, request: Request, session: SessionDep) -> Response:
+    require_cookie_csrf(request)
     try:
         user = service.create_user(
             session,
@@ -122,6 +123,7 @@ def show_user(user_id: int, session: SessionDep) -> Response:
 def patch_user(
     user_id: int, body: UserPatch, request: Request, session: SessionDep
 ) -> Response:
+    require_cookie_csrf(request)
     actor_id = request.scope.get("user_id")
     try:
         if body.displayName is not None:
@@ -148,6 +150,7 @@ def patch_user(
 def reset_password(
     user_id: int, body: PasswordReset, request: Request, session: SessionDep
 ) -> Response:
+    require_cookie_csrf(request)
     try:
         service.reset_password(
             session,
@@ -191,6 +194,7 @@ def revoke_all_sessions(
 def _revoke(
     request: Request, session: SessionDep, user_id: int, session_id: int | None
 ) -> Response:
+    require_cookie_csrf(request)
     try:
         count = service.revoke_session_for_user(
             session, user_id=user_id, session_id=session_id
@@ -219,6 +223,7 @@ def list_roles(session: SessionDep) -> dict:
 
 @router.post("/v2/roles", status_code=status.HTTP_201_CREATED)
 def create_role(body: RoleCreate, request: Request, session: SessionDep) -> Response:
+    require_cookie_csrf(request)
     try:
         role = service.create_role(
             session,
@@ -239,6 +244,7 @@ def create_role(body: RoleCreate, request: Request, session: SessionDep) -> Resp
 def patch_role(
     code: str, body: RolePatch, request: Request, session: SessionDep
 ) -> Response:
+    require_cookie_csrf(request)
     try:
         service.update_role(
             session,
@@ -260,6 +266,7 @@ def patch_role(
 
 @router.delete("/v2/roles/{code}")
 def delete_role(code: str, request: Request, session: SessionDep) -> Response:
+    require_cookie_csrf(request)
     try:
         service.delete_role(session, code=code)
     except (service.AccountError, service.NotFoundError) as exc:
