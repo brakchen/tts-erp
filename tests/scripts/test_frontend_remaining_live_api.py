@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -187,9 +187,11 @@ def cost_history(clone: OwnedClone, spu_pks: tuple[int, ...]) -> list[tuple]:
         return [tuple(row) for row in session.execute(statement)]
 
 
-def test_manual_cost_exact_identity_decimal_history_and_rejections(
+@pytest.fixture
+def manual_cost_facts(
     clone: OwnedClone,
-) -> None:
+) -> Iterator[tuple[str, tuple[int, ...], int]]:
+    """Own committed HTTP-visible facts only for this test's lifetime."""
     require_data_probe(clone.probe)
     marker = "TEST_remaining_cost_" + uuid4().hex
     shared_external = marker + "_shared"
@@ -230,9 +232,72 @@ def test_manual_cost_exact_identity_decimal_history_and_rejections(
         session.add_all(products)
         session.flush()
         spu_pks = tuple(product.id for product in products)
+        shop_pks = tuple(shop.id for shop in shops)
         shop_pk = shops[0].id
+        # Failed setup before commit rolls back when checked_session closes.
         clone.child.require_live()
         session.commit()
+    try:
+        yield marker, spu_pks, shop_pk
+    finally:
+        require_data_probe(clone.probe)
+        with checked_session(clone.child.binding, clone.engine, clone.factory) as session:
+            clone.child.require_live()
+            # Verify both ownership sets before deleting any dependent history.
+            assert set(
+                session.execute(
+                    select(
+                        ChannelAccount.id,
+                        ChannelAccount.platform,
+                        ChannelAccount.shop_id,
+                        ChannelAccount.account_name,
+                    ).where(ChannelAccount.id.in_(shop_pks))
+                )
+            ) == {
+                (shop_pks[0], "tiktok", marker + "_shop_a", marker),
+                (shop_pks[1], "tiktok", marker + "_shop_b", marker),
+            }
+            assert set(
+                session.execute(
+                    select(
+                        ChannelProduct.id,
+                        ChannelProduct.shop_pk,
+                        ChannelProduct.spu_id,
+                        ChannelProduct.title,
+                    ).where(ChannelProduct.id.in_(spu_pks))
+                )
+            ) == {
+                (spu_pks[0], shop_pks[0], shared_external, marker),
+                (spu_pks[1], shop_pks[1], shared_external, marker),
+                (spu_pks[2], shop_pks[0], other_external, marker),
+            }
+            session.execute(
+                delete(ManualProductCost).where(ManualProductCost.spu_pk.in_(spu_pks))
+            )
+            session.execute(delete(ChannelProduct).where(ChannelProduct.id.in_(spu_pks)))
+            session.execute(delete(ChannelAccount).where(ChannelAccount.id.in_(shop_pks)))
+            clone.child.require_live()
+            session.commit()
+        with checked_session(clone.child.binding, clone.engine, clone.factory) as session:
+            clone.child.require_live()
+            assert session.scalar(
+                select(ManualProductCost.id).where(ManualProductCost.spu_pk.in_(spu_pks))
+            ) is None
+            assert session.scalar(
+                select(ChannelProduct.id).where(ChannelProduct.id.in_(spu_pks))
+            ) is None
+            assert session.scalar(
+                select(ChannelAccount.id).where(ChannelAccount.id.in_(shop_pks))
+            ) is None
+
+
+def test_manual_cost_exact_identity_decimal_history_and_rejections(
+    clone: OwnedClone, manual_cost_facts: tuple[str, tuple[int, ...], int],
+) -> None:
+    require_data_probe(clone.probe)
+    marker, spu_pks, shop_pk = manual_cost_facts
+    shared_external = marker + "_shared"
+    other_external = marker + "_other"
     assert cost_history(clone, spu_pks) == []
     payload = {
         "spu_pk": spu_pks[0],
