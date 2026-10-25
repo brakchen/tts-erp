@@ -12,6 +12,20 @@ See ``docs/archive/procurement-ui-redesign.md`` §2 (design tokens) and §6
 from __future__ import annotations
 
 
+def _retained_legacy_manual_costs_html() -> str:
+    """Render the retained Jinja artifact explicitly, without rerouting HTTP.
+
+    These 15 template/asset contracts do not describe the active React DOM.
+    Active interactions live in manual-costs/legacy-compat.test.tsx and
+    index.test.tsx; shared release/prefix wiring is covered by
+    test_frontend_pages.py and test_frontend_remaining_pages.py.
+    """
+    from tts_erp_v2.api.v2.pages import _render_page
+
+    response = _render_page("manual-costs.html", current_page="manual-costs")
+    return bytes(response.body).decode("utf-8")
+
+
 def test_manual_costs_page_v2_returns_200_html(api_client, readonly_key):
     """GET the redesigned page → 200 text/html."""
     r = api_client.get(
@@ -22,19 +36,17 @@ def test_manual_costs_page_v2_returns_200_html(api_client, readonly_key):
     assert r.headers["content-type"].startswith("text/html"), r.headers
 
 
-def test_manual_costs_page_v2_references_static_assets(api_client, readonly_key):
-    """Page HTML must link Bootstrap (vendored) + console.js, prefix-relative.
+def test_manual_costs_page_v2_references_static_assets():
+    """Retained legacy artifact, not the active React route.
+
+    Page HTML must link Bootstrap (vendored) + console.js, prefix-relative.
 
     Styling is Bootstrap 5.3.8 self-hosted at /static/vendor/ (2026-08-31:
     the custom console.css design system was dropped per user decision).
     All asset paths must be RELATIVE (../../static/...) so the page works
     behind the NGINX /tts prefix as well as on :9877 directly.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     assert "../../static/vendor/bootstrap.min.css" in body, "missing Bootstrap CSS link"
     assert "../../static/js/console.js" in body, "missing JS link"
     assert "/static/css/console.css" not in body, (
@@ -42,18 +54,16 @@ def test_manual_costs_page_v2_references_static_assets(api_client, readonly_key)
     )
 
 
-def test_manual_costs_page_v2_has_two_operational_tabs(api_client, readonly_key):
-    """Page must render exactly two tabs: 全部 SPU + 最近提交.
+def test_manual_costs_page_v2_has_two_operational_tabs():
+    """Retained legacy artifact, not the active React route.
+
+    Page must render exactly two tabs: 全部 SPU + 最近提交.
 
     2026-09-06: the 待处理 tab is retired. The editable catalogue (全部
     SPU, cost inline-editable + 提交全部) and the change log (最近提交,
     变更前 → 变更后) are the only two views.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     for label in ("全部 SPU", "最近提交"):
         assert label in body, f"missing tab label: {label!r}"
     # The retired labels must be gone (regression guard).
@@ -61,13 +71,11 @@ def test_manual_costs_page_v2_has_two_operational_tabs(api_client, readonly_key)
         assert retired not in body, f"retired tab label still rendered: {retired!r}"
 
 
-def test_manual_costs_page_v2_has_shop_switcher(api_client, readonly_key):
-    """Header must expose a shop switcher dropdown (id="shop-switcher")."""
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
+def test_manual_costs_page_v2_has_shop_switcher():
+    """Retained legacy artifact, not the active React route.
+
+    Header must expose a shop switcher dropdown (id="shop-switcher")."""
+    body = _retained_legacy_manual_costs_html()
     assert 'id="shop-switcher"' in body, "missing shop switcher control"
     assert 'name="shop_pk"' in body, "shop switcher missing name attr"
 
@@ -89,8 +97,10 @@ def test_manual_costs_page_v2_drops_token_paste_block(api_client, readonly_key):
     assert "mc_token" not in body, "legacy localStorage key still referenced"
 
 
-def test_manual_costs_page_v2_asset_paths_prefix_safe(api_client, readonly_key):
-    """No root-absolute asset hrefs/srcs — regression guard for the 404.
+def test_manual_costs_page_v2_asset_paths_prefix_safe():
+    """Retained legacy artifact, not the active React route.
+
+    No root-absolute asset hrefs/srcs — regression guard for the 404.
 
     2026-08-31: absolute /static/... links 404'd behind the NGINX /tts
     prefix (daqiang.nat100.top/static/... has no route), leaving the page
@@ -98,11 +108,7 @@ def test_manual_costs_page_v2_asset_paths_prefix_safe(api_client, readonly_key):
     /v2/pages/manual-costs, so ../../static/ resolves to the deployment
     root under any prefix.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     assert 'href="/' not in body, "root-absolute href found"
     assert 'src="/' not in body, "root-absolute src found"
 
@@ -150,19 +156,17 @@ def test_manual_costs_page_v2_uses_design_token_variables(api_client, readonly_k
     )
 
 
-def test_manual_costs_page_v2_signature_counter_present(api_client, readonly_key):
-    """The signature oversized queue counter element must render.
+def test_manual_costs_page_v2_signature_counter_present():
+    """Retained legacy artifact, not the active React route.
+
+    The signature oversized queue counter element must render.
 
     The .op-counter block (with id="op-counter", the .op-counter-num
     span, and the .op-counter-label) is the page's primary visual
     element. JS populates .op-counter-num with the active tab's row
     count (catalogue SPUs on 全部 SPU, change-log rows on 最近提交).
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     assert 'id="op-counter"' in body, "signature counter section missing"
     assert 'id="op-counter-num"' in body, "signature counter num span missing"
     assert "op-counter-label" in body, "counter label class missing"
@@ -326,8 +330,10 @@ def test_console_js_unwraps_api_envelope():
     )
 
 
-def test_page_has_submit_all_button(api_client, readonly_key):
-    """The toolbar must expose a 提交全部 (batch submit) control.
+def test_page_has_submit_all_button():
+    """Retained legacy artifact, not the active React route.
+
+    The toolbar must expose a 提交全部 (batch submit) control.
 
     2026-09-06 operator request: one click files every EDITED row on the
     全部 SPU tab (dirty-tracking marks rows whose cost input changed).
@@ -335,12 +341,7 @@ def test_page_has_submit_all_button(api_client, readonly_key):
     wires it to submitAllEdited(); a live status banner (.op-batch-status)
     reports filed / failed counts.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     assert 'data-act="submit-all"' in body, "submit-all button missing"
     assert "提交全部" in body, "submit-all button label missing"
     assert 'class="op-batch-status"' in body, "batch status banner missing"
@@ -360,20 +361,17 @@ def test_page_has_submit_all_button(api_client, readonly_key):
     assert "submit-all" in src, "console.js must bind [data-act=submit-all]"
 
 
-def test_page_has_all_spu_tab(api_client, readonly_key):
-    """The tab bar exposes a 全部 SPU view.
+def test_page_has_all_spu_tab():
+    """Retained legacy artifact, not the active React route.
+
+    The tab bar exposes a 全部 SPU view.
 
     2026-09-06 operator request: see every SPU (not just pending / recent)
     with its status, current manual cost, and mirrored main image. The tab
     reads GET /v2/commerce/channel-products which now carries per-row
     unit_cost / currency / image_url alongside the legacy fields.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     assert 'data-tab="all"' in body, "all-SPU tab missing"
     assert "全部 SPU" in body, "all-SPU tab label missing"
     assert 'id="badge-all"' in body, "all-SPU badge missing"
@@ -395,32 +393,26 @@ def test_page_has_all_spu_tab(api_client, readonly_key):
     )
 
 
-def test_page_has_no_pending_tab(api_client, readonly_key):
-    """待处理 tab retired: the data-tab=pending button is gone entirely."""
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
+def test_page_has_no_pending_tab():
+    """Retained legacy artifact, not the active React route.
+
+    待处理 tab retired: the data-tab=pending button is gone entirely."""
+    body = _retained_legacy_manual_costs_html()
     assert 'data-tab="pending"' not in body, "pending tab button still rendered"
     assert 'id="badge-pending"' not in body, "pending badge still rendered"
     assert 'data-tab="all"' in body, "all tab must still be present"
     assert 'data-tab="recent"' in body, "recent tab must still be present"
 
 
-def test_manual_costs_page_labels_product_identifier_as_spu(
-    api_client, readonly_key
-):
-    """The workbench renders ``spu_id`` values, so every label says SPU."""
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    assert ">SKU<" not in r.text
-    assert 'placeholder="SKU 或标题"' not in r.text
-    assert ">SPU<" in r.text
-    assert 'placeholder="SPU 或标题"' in r.text
+def test_manual_costs_page_labels_product_identifier_as_spu():
+    """Retained legacy artifact, not the active React route.
+
+    The workbench renders ``spu_id`` values, so every label says SPU."""
+    body = _retained_legacy_manual_costs_html()
+    assert ">SKU<" not in body
+    assert 'placeholder="SKU 或标题"' not in body
+    assert ">SPU<" in body
+    assert 'placeholder="SPU 或标题"' in body
 
     from pathlib import Path
 
@@ -437,18 +429,15 @@ def test_manual_costs_page_labels_product_identifier_as_spu(
     assert 'search.placeholder = "SPU 或标题"' in src
 
 
-def test_page_has_editable_catalogue_hooks(api_client, readonly_key):
-    """全部 SPU rows are editable: cost input + dirty markers.
+def test_page_has_editable_catalogue_hooks():
+    """Retained legacy artifact, not the active React route.
+
+    全部 SPU rows are editable: cost input + dirty markers.
 
     The static thead carries the sortable headers (data-sort on 成本 /
     创建 / 更新) so the operator can re-sort the catalogue.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     for hook in (
         'data-sort="unit_cost"',
         'data-sort="created_at"',
@@ -502,19 +491,16 @@ def test_console_js_recent_tab_renders_prev_and_new():
     assert 'data-label="变更时间"' in src, "recent rows must show the change timestamp"
 
 
-def test_page_has_status_filter_dropdown(api_client, readonly_key):
-    """The toolbar exposes a 状态 filter dropdown (id="filter-status").
+def test_page_has_status_filter_dropdown():
+    """Retained legacy artifact, not the active React route.
+
+    The toolbar exposes a 状态 filter dropdown (id="filter-status").
 
     Options are populated from console.js' STATUS_LABELS at boot, so the
     static HTML only carries the empty <select> — the page test asserts
     the select exists, and the JS test below locks the label mapping.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     assert 'id="filter-status"' in body, "status filter select missing"
     assert 'aria-label="按状态过滤"' in body, "status filter aria-label missing"
 
@@ -552,18 +538,15 @@ def test_console_js_status_label_mapping_and_sort():
     assert 'order: "asc"' in src, "default order must be asc (在售 first)"
 
 
-def test_page_has_pager_controls(api_client, readonly_key):
-    """The catalogue has prev/next paging + a row-count label.
+def test_page_has_pager_controls():
+    """Retained legacy artifact, not the active React route.
+
+    The catalogue has prev/next paging + a row-count label.
 
     2026-09-06: channel-products is a bare-array contract, so the total
     travels in X-Total-Count; the pager lives under the table.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     assert 'id="grid-pager"' in body, "pager section missing"
     assert 'id="btn-prev"' in body, "prev button missing"
     assert 'id="btn-next"' in body, "next button missing"
@@ -591,20 +574,17 @@ def test_page_has_pager_controls(api_client, readonly_key):
     )
 
 
-def test_page_script_has_cache_bust_version(api_client, readonly_key):
-    """console.js must be referenced with ?v=<content hash>.
+def test_page_script_has_cache_bust_version():
+    """Retained legacy artifact, not the active React route.
+
+    console.js must be referenced with ?v=<content hash>.
 
     2026-09-06: /static has no Cache-Control and browsers heuristically
     cache console.js, so users kept seeing the previous build (e.g. the
     pre-pagination 50-row catalogue). Stamping a content-hash query makes
     every deploy invalidate the stale copy automatically.
     """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     import re
 
     m = re.search(r'src="([^"]*console\.js[^"]*)"', body)
@@ -617,15 +597,12 @@ def test_page_script_has_cache_bust_version(api_client, readonly_key):
     )
 
 
-def test_page_has_has_orders_toggle(api_client, readonly_key):
-    """The toolbar exposes 仅看有单 (id="filter-has-orders") and console.js
+def test_page_has_has_orders_toggle():
+    """Retained legacy artifact, not the active React route.
+
+    The toolbar exposes 仅看有单 (id="filter-has-orders") and console.js
     forwards has_orders=true on the channel-products request."""
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.text
+    body = _retained_legacy_manual_costs_html()
     assert 'id="filter-has-orders"' in body, "has-orders checkbox missing"
     assert "仅看有单" in body, "has-orders label missing"
 
@@ -646,14 +623,11 @@ def test_page_has_has_orders_toggle(api_client, readonly_key):
     )
 
 
-def test_page_has_backend_missing_manual_cost_toggle(api_client, readonly_key):
-    """The unregistered-only checkbox delegates filtering to the API."""
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.text
+def test_page_has_backend_missing_manual_cost_toggle():
+    """Retained legacy artifact, not the active React route.
+
+    The unregistered-only checkbox delegates filtering to the API."""
+    body = _retained_legacy_manual_costs_html()
     assert 'id="filter-missing-manual-cost"' in body
     assert "仅展示未登记 SPU" in body
 
