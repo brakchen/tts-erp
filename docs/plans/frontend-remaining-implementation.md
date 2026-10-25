@@ -102,11 +102,11 @@
 
 ## 后续验收接点与未完成事项
 
-- manual 内容 a94fced 的 37 个组件用例和独立 SPEC/QUALITY 已闭环，显式释放后合入父候选。新增 loader/route/registry 的 4 个真实 RED 后接入唯一入口（候选现为 13 个；video 仍待最终质量修复），相关路由与组件通过。`tests/api/test_manual_costs_page_v2.py` 尚有 15 个旧 SSR DOM/资产断言需逐项映射到保留的 legacy artifact 与实际 React 控件，不把这些已识别失败当作全套 GREEN；完整 baseline 未运行。
+- manual 内容 a94fced 的 37 项恢复/精度用例保持。已知 server total 的分页缺陷经 6 个真实组件 RED 后修复，新增 8 项含整页末页、短页但仍有总数、大整数及无总数 fallback；分页选择 45 项通过。15 个旧 SSR 断言明确重绑定到仍保留的 legacy artifact，另增 19 项真实 React 筛选/排序/翻页/确认/lightbox/精度行为，原 27 个测试名保持且其余 12 个函数 byte-exact；API/资产 27 项及组件选择 56 项通过。两条并行切片经 SPEC 和 fresh QUALITY 后释放、合入父候选，仍需组合验证。
 - 先前登录/其他页面的 9 个旧 SSR 兼容失败已按新文档协议适配，两个文件 33 项通过；其余 4 个 SPU 函数和 4 个非展示 auth 函数与 a452 基线逐函数 byte-exact。没有以旧告警规则或旧 CSS 恢复新产品行为。
-- manual 旧契约逐项只读映射另发现已知总数的最后一整页仍可点“下一页”（P2）；需优先用精确 server total 判断耗尽，无 total 的候选保留行数 fallback。status/has-orders/排序/实际翻页/lightbox 等还需补直接组件行为覆盖，不能仅把 15 个失败替换为重复 bootstrap 检查。此修复和 legacy-artifact 标注尚未完成。
-- 当前 P2 live launcher 硬编码原 factory，没有 child 内协作者接点。`sync trigger` 会运行真实 background job，视频 store/device 路径可访问真实外部系统；浏览器拦截伪 200 不能证明真实 API 持久化或 cookie wire。完整安全 native 验收需要经批准的受限 consumer factory/setup 扩展，保留原数据库绑定/proof/nonce/runner/conftest；在批准前不绕过冻结护栏、不执行这些副作用。此为验收接点决定，不是重新请求已授权的页面实施批准。
-- 已在 board 将真实 clone/API、native、三宽度双前缀视觉拆为独立任务；native 显式记录接点批准阻塞。源代码/构建/API-unit、真实 clone、native、截图、精确 master 与运行激活仍分别记账，不能相互替代。
+- 视频完整内容 99a43ce（83 项组件选择，独立 SPEC/QUALITY 闭环）已按目录 tree hash 原样合入；4 个入口行为 RED 后经既有 loader、renderer 和原 handler 接线，23 项针对入口/路由的 wrapper 通过。唯一 registry 现为 14 个源码候选，两个 ROI 仍排除；这不是生产激活。
+- 用户已明确批准并完成单一受限测试接点：默认 factory 不变，显式 `collaborators=True` 仅选择固定三协作者替身；保留原 DB/auth/proof/nonce/runner/conftest 边界。来源精确核对 ASGI 实际监听地址，上传拒绝 Cookie/Authorization/X-API-Key/ERP CSRF。82 项新旧 guard/cold-clone 选择、源码与精确合并基线均通过，master `0f6a4a573770bbe2802818bf35f57ae23d663319` 已非 force 推送并由父候选消费。用法与未证明的范围见 [受限测试接点](../testing/frontend-test-collaborators.md)；替身成功不证明真实同步、MinIO 或设备发布完成。
+- 合并后的全 `src` 选择首次为 659/660 通过，一项新增采购完整分页故事超过默认 5 秒；按最小可选择文件重跑 45 项通过。保留这次超时事实，不把它称为全前端 GREEN；仍需完整基线确认稳定性。真实 clone/API、native、三宽度双前缀视觉和精确交付继续在 board 独立记账。native 不再以“尚未批准接点”为阻塞理由，实际完整浏览器/cookie/CORS/视觉/运行验收仍未完成，不能用 HTTP client 冷启验证替代。
 
 ## 视频诊断的公开边界
 
