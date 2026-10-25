@@ -183,6 +183,7 @@ _SORT_TAILS_CHANNEL_PRODUCTS = {
     ),
     # Back-compat default: stable insertion order.
     "id-asc": "ORDER BY cp.id",
+    "id-desc": "ORDER BY cp.id DESC",
 }
 _PAGE_SUFFIX = "LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 _SQL_LIST_CHANNEL_PRODUCTS = {

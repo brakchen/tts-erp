@@ -302,7 +302,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
-| `GET /v2/commerce/channel-products` | `shop_pk`, `status`, `q`, `has_orders`, `missing_manual_cost` | SPU list: `{id, shop_pk, spu_id, title, status, source_created_at, source_updated_at}`；`q` 在服务端对 `spu_id/title` 做大小写不敏感子串过滤；`missing_manual_cost=true` 由服务端仅返回 `procurement.manual_product_costs` 中没有当前有效行的 SPU；`X-Total-Count` 返回全部服务端过滤后、分页前总数 |
+| `GET /v2/commerce/channel-products` | `shop_pk`, `status`, `q`, `has_orders`, `missing_manual_cost`; `sort` 为 `id`（默认）、`created_at`、`updated_at`、`unit_cost` 或 `status`，`order` 为 `asc`（默认）或 `desc` | SPU list: `{id, shop_pk, spu_id, title, status, source_created_at, source_updated_at}`；`q` 在服务端对 `spu_id/title` 做大小写不敏感子串过滤；`missing_manual_cost=true` 由服务端仅返回 `procurement.manual_product_costs` 中没有当前有效行的 SPU；`X-Total-Count` 返回全部服务端过滤后、分页前总数 |
 | `GET /v2/commerce/channel-product-options` | required `shop_pk`; optional `q`, `spu_ids`, `limit` (1..100, default 50) | Bootstrap multi-select 的轻量 SPU 选项：`[{spu_id,title,status}]`。`q` 对 `spu_id/title` 做 ILIKE；`spu_ids` 按中英文逗号拆分后精确匹配，最多 100 个。 |
 | `GET /v2/commerce/channel-products/{spu_pk}` | — | one SPU; 404 if unknown |
 | `GET /v2/commerce/channel-products/{spu_pk}/variants` | — | SKU list: `{id, spu_pk, sku_id, seller_sku, variant_name}` |
