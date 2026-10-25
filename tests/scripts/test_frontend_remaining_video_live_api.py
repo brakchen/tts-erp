@@ -57,8 +57,10 @@ def _code(response: httpx.Response) -> str:
 
 
 def _flag(value: bool) -> bool:
-    """Pass a comparison through as a bool so no raw value is echoed."""
-    return bool(value)
+    """Pass a comparison through as a bool, failing inside so no operand is echoed."""
+    if not value:
+        raise AssertionError("privacy flag failed")
+    return True
 
 
 def _session(clone: OwnedClone):
@@ -564,29 +566,29 @@ def test_owned_task_detail_list_and_diagnostics_project_only_safe_fields(
         task_path = tasks_path + "/" + task_id
 
         detail = owned(clone, admin.get(task_path), 200).json()
-        assert detail["taskId"] == task_id
-        assert detail["clientRequestId"] == key
-        assert detail["filename"] == filename
-        assert detail["caption"] == marker
-        assert detail["status"] == "pending"
-        assert detail["stage"] == "awaiting_upload"
-        assert detail["attempts"] == []
-        assert detail["confirmation"] is None
-        assert detail["paramsLockedAt"] is None
-        assert detail["object"]["etag"] is None
+        assert _flag(detail["taskId"] == task_id) is True
+        assert _flag(detail["clientRequestId"] == key) is True
+        assert _flag(detail["filename"] == filename) is True
+        assert _flag(detail["caption"] == marker) is True
+        assert _flag(detail["status"] == "pending") is True
+        assert _flag(detail["stage"] == "awaiting_upload") is True
+        assert _flag(detail["attempts"] == []) is True
+        assert _flag(detail["confirmation"] is None) is True
+        assert _flag(detail["paramsLockedAt"] is None) is True
+        assert _flag(detail["object"]["etag"] is None) is True
         assert detail["object"]["deletedAt"] is None
         assert detail["target"]["deviceSerialMasked"] == mask_device_serial(TEST_DEVICE)
         body = json.dumps(detail)
-        assert TEST_DEVICE not in body
+        assert _flag(TEST_DEVICE not in body) is True
         assert _flag(created["upload"]["url"] not in body) is True
 
         diagnostics = owned(
             clone, admin.get(task_path, params={"includeDiagnostics": "true"}), 200
         ).json()
         assert diagnostics["taskId"] == task_id
-        assert diagnostics["attempts"] == []
-        assert "promptSnapshot" not in diagnostics
-        assert "artemisOutput" not in diagnostics
+        assert _flag(diagnostics["attempts"] == []) is True
+        assert _flag("promptSnapshot" not in diagnostics) is True
+        assert _flag("artemisOutput" not in diagnostics) is True
 
         listing = owned(clone, admin.get(tasks_path, params={"limit": 100}), 200).json()
         rows = {row["taskId"]: row for row in listing["items"]}
