@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import delete, inspect, select
+from sqlalchemy import Engine, delete, inspect, select
 from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.layer_integration
@@ -483,3 +483,65 @@ def test_invalid_accepted_prefix_never_acknowledged(monkeypatch, accepted):
             now=datetime.fromtimestamp(165, UTC),
         )
     assert not row.state["faults"]["heartbeat"]["notified"]
+
+
+def test_failed_close_clock_and_recovery_survive_new_cycle_and_restart(
+    health_schema: Engine, shops: list[str]
+) -> None:
+    from tts_erp_v2.db.models.monitor_health import MonitorHealth
+    from tts_erp_v2.plugin.monitor_health.domain import acknowledge, plan
+    from tts_erp_v2.plugin.monitor_health.repository import ingest
+
+    def report(step: str, status: str, seconds: int) -> None:
+        with Session(health_schema) as session:
+            ingest(
+                session,
+                shops[0],
+                "TEST_cycle",
+                step,
+                status,
+                now=BASE + timedelta(seconds=seconds),
+            )
+            session.commit()
+
+    for step, status, seconds in (
+        ("heartbeat", "running", 0),
+        ("scan", "completed", 1),
+        ("evaluate", "completed", 2),
+        ("close", "failed", 3),
+        ("scan", "started", 10),
+        ("scan", "progress", 180),
+        ("heartbeat", "running", 181),
+    ):
+        report(step, status, seconds)
+
+    with Session(health_schema) as session:
+        row = session.get(MonitorHealth, shops[0])
+        assert row is not None
+        assert row.state["expected"] == "scan"
+        state, pending = plan(row.state, (BASE + timedelta(seconds=182)).timestamp())
+        assert pending == ["close:fault"]
+        row.state = acknowledge(state, pending)
+        session.commit()
+
+    report("scan", "completed", 183)
+    report("evaluate", "completed", 184)
+    with Session(health_schema) as session:
+        row = session.get(MonitorHealth, shops[0])
+        assert row is not None
+        assert plan(row.state, (BASE + timedelta(seconds=185)).timestamp())[1] == []
+        assert row.state["faults"]["close"]["active"]
+
+    report("close", "progress", 186)
+    with Session(health_schema) as session:
+        row = session.get(MonitorHealth, shops[0])
+        assert row is not None
+        state, pending = plan(row.state, (BASE + timedelta(seconds=187)).timestamp())
+        assert pending == ["close:recovery"]
+        row.state = acknowledge(state, pending)
+        session.commit()
+
+    with Session(health_schema) as session:
+        row = session.get(MonitorHealth, shops[0])
+        assert row is not None
+        assert plan(row.state, (BASE + timedelta(seconds=188)).timestamp())[1] == []
