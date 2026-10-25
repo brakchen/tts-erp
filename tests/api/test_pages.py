@@ -234,26 +234,37 @@ def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key, 
 
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
-    """GET the page → 200 text/html shell linking the static assets."""
+    """GET stays readonly React HTML; old asset checks describe only the artifact."""
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("text/html"), r.headers
+    assert r.headers["cache-control"] == "private, no-store"
     body = r.text
-    # The page is a shell; endpoint URLs and the grid DOM live in
-    # /static/js/console.js (see test_manual_costs_page_v2.py).
-    # Asset paths are RELATIVE so the page works both on :9877 directly
-    # and behind the NGINX /tts prefix (2026-08-31: absolute /static/...
-    # links 404'd publicly — the unstyled page looked broken).
-    assert "../../static/vendor/bootstrap.min.css" in body
-    assert "../../static/js/console.js" in body
-    assert 'href="/static/' not in body
-    assert 'src="/static/' not in body
-    # Token-paste UI must stay gone.
+    data = _bootstrap(body)
+    assert data["pageId"] == "manual-costs"
+    assert data["roleCapabilities"] == {"readwrite": False, "admin": False}
+    assert readonly_key not in body
+    assert "bootstrap.min.css" not in body
+    assert "static/js/console.js" not in body
+    # Token-paste UI must stay gone from the actual HTTP document.
     assert "API token" not in body
     assert "mc_token" not in body
+
+    # Active interactions: manual-costs/{index,legacy-compat}.test.tsx.
+    # Shared manifest/prefix and fail-closed policy: test_frontend_pages.py
+    # and test_frontend_remaining_pages.py, not legacy relative-URL rules.
+    # Match test_manual_costs_page_v2.py's retained-artifact owner; never
+    # reroute the real HTTP request or re-enable the old console.
+    legacy_body = bytes(
+        _render_page("manual-costs.html", current_page="manual-costs").body
+    ).decode("utf-8")
+    assert "../../static/vendor/bootstrap.min.css" in legacy_body
+    assert "../../static/js/console.js" in legacy_body
+    assert 'href="/static/' not in legacy_body
+    assert 'src="/static/' not in legacy_body
 
 
 def test_manual_costs_page_requires_some_auth(api_client):
