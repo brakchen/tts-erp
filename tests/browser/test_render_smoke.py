@@ -76,12 +76,12 @@ def test_spu_deterioration_alert_has_no_horizontal_overflow_at_any_viewport(
 def test_page_font_stacks_come_only_from_tokens(browser_renderer, token_font_stacks, slug):
     """页面上每一段文字的 computed font-family 必须是 tokens 的三套栈之一。"""
     page = browser_renderer.open(page_path(slug))
-    from tts_erp_v2.api.v2.frontend_pages import MIGRATED_PAGE_IDS
-
     allowed = token_font_stacks
-    if slug in MIGRATED_PAGE_IDS:
-        # Migrated pages use the native Tailwind/HeroUI font tokens, not old skin CSS.
-        native = page.evaluate("() => ['--font-sans','--font-mono'].map(name => getComputedStyle(document.documentElement).getPropertyValue(name).trim())")
+    if page.locator("#frontend-bootstrap").count():
+        # Use the rendered document's tokens; retained legacy artifacts use old skin CSS.
+        native = page.evaluate(
+            "() => ['--font-sans','--font-mono'].map(name => getComputedStyle(document.documentElement).getPropertyValue(name).trim())"
+        )
         assert all(native), "native design-system font tokens must be present"
         allowed = {normalize_stack(stack) for stack in native}
     stray = sorted({s for s in font_stacks(page) if normalize_stack(s) not in allowed})

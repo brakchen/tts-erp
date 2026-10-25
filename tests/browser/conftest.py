@@ -345,7 +345,9 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
     for slug, tpl in _PLAIN.items():
         if slug in effective:
             for prefix in ("", "/tts"):
-                request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}"})
+                request = Request(
+                    {"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}"}
+                )
                 resp = frontend_pages.render_frontend_page(request, slug)
                 name = ("tts-" if prefix else "") + slug
                 (out / f"{name}.html").write_bytes(resp.body)
@@ -362,7 +364,8 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
     (out / f"{_ALERT_SLUG}.html").write_bytes(
         _render_page(f"{_ALERT_SLUG}.html", current_page=_ALERT_SLUG).body
     )
-    (out / "ad-daily.html").write_bytes(ad_daily_page().body)
+    request = Request({"type": "http", "root_path": "", "path": "/v2/pages/ad-daily"})
+    (out / "ad-daily.html").write_bytes(ad_daily_page(request).body)
 
 
 class _Handler(BaseHTTPRequestHandler):
