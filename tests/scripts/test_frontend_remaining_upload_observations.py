@@ -26,6 +26,21 @@ pytestmark = [
 SIZE = 24 * 1024 * 1024
 
 
+
+def _failure_label(value: str | None) -> str:
+    return {
+        None: "NONE",
+        "net::ERR_ABORTED": "ABORTED",
+        "net::ERR_FAILED": "FAILED",
+        "net::ERR_BLOCKED_BY_RESPONSE": "BLOCKED_BY_RESPONSE",
+        "cors": "CORS_BLOCKED",
+        "mixed-content": "MIXED_CONTENT",
+        "inspector": "INSPECTOR_BLOCKED",
+        "net::ERR_CONNECTION_REFUSED": "CONNECTION_REFUSED",
+        "net::ERR_CONNECTION_RESET": "CONNECTION_RESET",
+    }.get(value, "OTHER")
+
+
 def evaluate(page, script, argument=None):
     try:
         return page.evaluate(script, argument)
@@ -53,7 +68,7 @@ def test_wire_upload_complete(clone: video.OwnedClone, worker: str, case: str):
     for _ in range(24):
         hasher.update(b"T" * (1024 * 1024))
     expected_hash = hasher.hexdigest()
-    runtime = {"putObserved": False, "putCount": 0, "requestFailed": False, "failedCount": 0}
+    runtime = {"putObserved": False, "putCount": 0, "requestFailed": False, "failedCount": 0, "failureLabel": "NONE"}
     try:
         with live_browser(
             clone.probe,
@@ -74,6 +89,7 @@ def test_wire_upload_complete(clone: video.OwnedClone, worker: str, case: str):
                 if request.method == "PUT":
                     runtime["requestFailed"] = True
                     runtime["failedCount"] += 1
+                    runtime["failureLabel"] = _failure_label(request.failure)
 
             page.on("request", observe_request)
             page.on("requestfailed", request_failed)
@@ -207,10 +223,11 @@ def test_wire_upload_complete(clone: video.OwnedClone, worker: str, case: str):
                     and wire["loaded"] == SIZE
                     and wire["total"] == SIZE
                 )
-                counts_ok = (
-                    facts["putCount"] == before["putCount"] + 1
-                    and facts["optionsCount"] == before["optionsCount"] + 1
-                )
+                put_count_ok = facts["putCount"] == before["putCount"] + 1
+                # Playwright Chromium 1.63.0 auto-fulfills intercepted preflights.
+                # Not receiver preflight/CORS proof. Primary implementation:
+                # https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/chromium/crNetworkManager.ts#L313-L331
+                options_intercepted = facts["optionsCount"] == before["optionsCount"]
                 bytes_ok = (
                     facts["bytesReceived"] - before["bytesReceived"] == SIZE
                     and facts["lastSize"] == SIZE
@@ -233,7 +250,8 @@ def test_wire_upload_complete(clone: video.OwnedClone, worker: str, case: str):
                     == 1
                 )
                 assert progress_ok
-                assert counts_ok
+                assert put_count_ok
+                assert options_intercepted
                 assert bytes_ok
                 assert hash_ok
                 assert credentials_absent
@@ -253,7 +271,9 @@ def test_wire_upload_complete(clone: video.OwnedClone, worker: str, case: str):
                 failure = {"phase": phase, "exceptionClass": type(error).__name__,
                            "ownLine": own_line,
                            "contextClass": type(error.__context__).__name__ if error.__context__ is not None else "",
-                           "runtime": runtime, "violations": len(gate.violations)}
+                           "runtime": runtime, "violations": len(gate.violations),
+                           "nativeStages": {key: gate.native_stages[key] for key in (
+                               "entry", "bound", "header_requested", "header_read", "accepted", "continued")}}
                 try:
                     failure["store"] = gate.observe_store()
                 except (AssertionError, ValueError, TypeError, OSError, KeyError, PlaywrightError, SQLAlchemyError):

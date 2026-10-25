@@ -60,6 +60,10 @@ class BrowserFence:
     _tasks: dict[str, TaskTarget] = field(default_factory=dict, repr=False)
     _products: tuple[ManualTarget, ...] = field(default=(), repr=False)
     _observations: dict = field(default_factory=dict, repr=False)
+    native_stages: dict[str, int] = field(default_factory=lambda: {
+        "entry": 0, "bound": 0, "header_requested": 0,
+        "header_read": 0, "accepted": 0, "continued": 0,
+    }, repr=False)
 
     def __post_init__(self) -> None:
         require_data_probe(self.probe)
@@ -164,14 +168,18 @@ class BrowserFence:
         request = route.request
         if request.url not in self._tickets:
             return False
+        self.native_stages["entry"] += 1
         self._validate_remaining()
+        self.native_stages["bound"] += 1
         task_id, client_id, size = self._tickets[request.url]
         task = self._tasks.get(task_id)
         target = urlsplit(request.url)
         if (task is None or task.client_id != client_id or task.size != size or task.stage != "awaiting_upload"
                 or request.redirected_from is not None or f"{target.scheme}://{target.netloc}" != self._store_origin or request.method not in {"PUT", "OPTIONS"}):
             raise ValueError(REFUSAL)
+        self.native_stages["header_requested"] += 1
         headers = request.all_headers()
+        self.native_stages["header_read"] += 1
         if any(key in headers for key in ("cookie", "authorization", "x-api-key", "x-requested-with", "x-csrf-token")):
             raise ValueError(REFUSAL)
         if headers.get("origin") != self.probe.child.base:
@@ -182,7 +190,9 @@ class BrowserFence:
         if request.method == "OPTIONS" and (headers.get("access-control-request-method") != "PUT" or
                 set(part.strip().lower() for part in headers.get("access-control-request-headers", "").split(",") if part.strip()) - {"content-type"}):
             raise ValueError(REFUSAL)
+        self.native_stages["accepted"] += 1
         route.continue_()  # Native browser owns CORS/streaming/progress/abort.
+        self.native_stages["continued"] += 1
         return True
 
     def _learn_response(self, method: str, path: str, body: object, response) -> None:

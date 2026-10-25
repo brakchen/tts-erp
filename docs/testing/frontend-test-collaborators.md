@@ -136,3 +136,21 @@ N1 允许的新增请求形状（不是页面全部交互已完成）：
 先前失败发生于实际执行的 f3ae… 源码；其后的 e764… 仅为 AST 相同的格式化快照，不能冒充在该字节版本执行过。
 本次是独立新执行点；G/F 都停止，不自动启动 abort、矩阵、第三次探测或修改冻结 helper。
 即使反事实通过，也只支持 observer 交互假说，不足以解释所有历史失败或证明视频 UI/可播放 MP4。
+
+### 被动诊断与 Playwright 1.63.0 协议边界（尚不授权新 native probe）
+
+安装环境 Playwright Python/driver 1.63.0、Chromium 153.0.8010.12 在请求拦截开启时会自动 fulfill preflight OPTIONS，
+而不发送到 receiver/user route。主实现：
+https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/chromium/crNetworkManager.ts#L313-L331 。
+因此该拦截路径测试应独立要求 PUT delta=1、receiver OPTIONS delta=0；先前 OPTIONS delta=1 是不可满足的测试预期。
+这不是 receiver CORS 验证成功：**真实 receiver OPTIONS/CORS 目标仍未满足**，不能用驱动生成的预检响应替代。
+此协议事实也没有解释两次实际失败中的 zero PUT。
+
+原 requestfailed listener 只将 Python `request.failure` **property** 即时映射为固定标签：ABORTED、FAILED、BLOCKED_BY_RESPONSE、
+CORS_BLOCKED、MIXED_CONTENT、INSPECTOR_BLOCKED、CONNECTION_REFUSED、CONNECTION_RESET、NONE；未知为 OTHER。
+不保留/输出原 failure 文本、console、URL、header、nonce 或 body。observer 不读完整 headers；原 canonical `all_headers()` 严格检查不变。
+
+唯一 BrowserFence 增加每实例六个整数计数：entry（已匹配票据候选）、bound、header_requested、header_read、accepted、continued。
+仅固定位置 `+=1`，不是授权状态，不参与任何安全决策，不新增拒绝分支、IO 或异常处理。只输出固定六键计数。
+新单元只证明固定标签映射、未知 canary 不返回/日志、默认值六个整数零及实例隔离；不调用 guard 构造器、不伪造 probe，不是 native/ownership acceptance。
+本阶段仅原 115 cold selection 加新被动单元。独立 SPEC 被动安全审查后，Root 才可另行决定一次新 native probe；本阶段无 native 执行许可。
