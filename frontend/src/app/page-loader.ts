@@ -14,6 +14,7 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   'intercept-configs': () => import('../pages/intercept-configs'),
   'spu-profit-deterioration': () => import('../pages/spu-profit-deterioration'),
   'manual-costs': () => import('../pages/manual-costs'),
+  'video-publish': () => import('../pages/video-publish'),
   login: () => import('../pages/login'),
 };
 

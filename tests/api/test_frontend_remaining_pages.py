@@ -46,6 +46,7 @@ def _bootstrap(text):
         "intercept-configs",
         "spu-profit-deterioration",
         "manual-costs",
+        "video-publish",
     ],
 )
 def test_actual_reviewed_page_routes_use_one_document(
@@ -74,6 +75,7 @@ def test_actual_reviewed_page_routes_use_one_document(
         "intercept-configs",
         "spu-profit-deterioration",
         "manual-costs",
+        "video-publish",
     ],
 )
 def test_missing_candidate_assets_are_not_a_legacy_fallback(

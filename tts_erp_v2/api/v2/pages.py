@@ -726,8 +726,12 @@ def sync_jobs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
 
 
 @router.get("/video-publish", response_class=HTMLResponse)
-def video_publish_page() -> HTMLResponse:
+def video_publish_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Serial TikTok video publishing workbench."""
+  if "video-publish" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "video-publish")
   return _render_page("video-publish.html", current_page="video-publish")
 
 
