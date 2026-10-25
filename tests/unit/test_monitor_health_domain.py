@@ -243,6 +243,104 @@ def test_legacy_failed_state_accepts_next_scan_without_masking_old_failure() -> 
     assert state["observed_at"] == 2
 
 
+@pytest.mark.parametrize("status", ["started", "progress", "completed", "failed"])
+def test_current_close_after_scheduled_join_needs_no_replayed_evaluation(
+    status: str,
+) -> None:
+    # Capture already evaluated before the scheduled run joined its active drain.
+    # Only newly observed close facts are sent; the first may be coalesced.
+    state = event(event(), "scan", "completed", 1)
+    changed = event(state, "close", status, 10)
+    assert changed["expected"] == ("scan" if status == "completed" else "close")
+    assert changed["stages"]["close"] == status
+    assert changed["observed_at"] == 10
+    assert "evaluate" not in changed["stages"]
+    assert state["expected"] == "evaluate"
+    assert "close" not in state["stages"]
+
+
+def test_late_shared_close_genuine_progress_does_not_raise_missing_evaluation_fault() -> (
+    None
+):
+    state = event(event(), "scan", "completed", 1)
+    state = event(state, "close", "started", 10)
+    for time in (100, 250, 400):
+        state = event(state, "close", "progress", time)
+        state = event(state, now=time)
+        assert notices(state, time) == []
+    assert "evaluate" not in state["stages"]
+    state = event(state, "close", "completed", 401)
+    assert state["expected"] == "scan"
+    assert state["waiting_scan"] is True
+
+
+def test_late_close_repeated_started_cannot_renew_its_observation() -> None:
+    state = event(event(), "scan", "completed", 1)
+    for time in (10, 100, 179):
+        state = event(state, "close", "started", time)
+    state = event(state, now=189)
+    assert notices(state, 189) == []
+    assert notices(state, 190) == ["close:fault"]
+
+
+def test_late_close_does_not_mask_or_recover_known_failed_evaluation() -> None:
+    state = event(event(), "scan", "completed", 1)
+    state = event(state, "evaluate", "failed", 2)
+    state = event(state, now=180)
+    state, pending = plan(state, 181)
+    assert pending == ["evaluate:fault"]
+    state = acknowledge(state, pending)
+    changed = event(state, "close", "progress", 182)
+    assert changed["expected"] == "close"
+    assert changed["failed_observed_at"]["evaluate"] == 1
+    assert changed["stages"]["evaluate"] == "failed"
+    assert changed["faults"]["evaluate"] == state["faults"]["evaluate"]
+    assert notices(changed, 182) == []
+    changed = event(changed, "close", "completed", 183)
+    changed = event(changed, "scan", "completed", 184)
+    changed = event(changed, "evaluate", "completed", 185)
+    assert notices(changed, 185) == ["evaluate:recovery"]
+    assert state["expected"] == "evaluate"
+
+
+@pytest.mark.parametrize("status", ["started", "failed"])
+def test_current_close_admission_keeps_previous_close_failure_deadline(
+    status: str,
+) -> None:
+    state = event(event(), "scan", "completed", 1)
+    state = event(state, "evaluate", "completed", 2)
+    state = event(state, "close", "failed", 3)
+    state = event(state, "scan", "completed", 10)
+    state = event(state, "close", status, 180)
+    state = event(state, now=181)
+    assert state["expected"] == "close"
+    assert state["failed_observed_at"]["close"] == 2
+    assert state["stages"]["close"] == "failed"
+    assert notices(state, 181) == []
+    assert notices(state, 182) == ["close:fault"]
+
+
+def test_stopped_intent_must_be_reenabled_before_current_close_can_be_observed() -> (
+    None
+):
+    state = event(status="stopped")
+    for step, status in (("scan", "completed"), ("close", "failed")):
+        assert event(state, step, status, 1) == state
+    state = event(state, now=2)
+    state = event(state, "scan", "completed", 3)
+    state = event(state, "close", "failed", 4)
+    assert state["enabled"] is True
+    assert state["expected"] == "close"
+    assert state["stages"]["close"] == "failed"
+    assert "evaluate" not in state["stages"]
+
+
+@pytest.mark.parametrize("status", ["started", "progress", "completed", "failed"])
+def test_close_cannot_bypass_unfinished_scan(status: str) -> None:
+    state = event()
+    assert event(state, "close", status, 179) == state
+
+
 def test_restarted_scan_started_does_not_renew_either_observation() -> None:
     state = event()
     state = event(state, "scan", "completed", 1)

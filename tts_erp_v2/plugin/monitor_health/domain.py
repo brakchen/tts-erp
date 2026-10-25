@@ -1,9 +1,10 @@
 """Pure current-state transitions; server UTC epoch seconds, never client time.
 
-Only the expected stage advances, except that a terminal downstream failure
-allows the next scheduled scan. Failed-stage clocks survive that restart;
-other stages and repeated ``started`` signals cannot renew them. Waiting for
-another scan is itself observed, so a silently abandoned cycle is detectable.
+The expected stage advances, with narrow admissions for a next scan after a
+terminal downstream failure and a current close observed after scan completion.
+Failed-stage clocks survive either admission; other stages and repeated
+``started`` signals cannot renew them. Waiting for another scan is itself
+observed, so a silently abandoned cycle is detectable.
 """
 
 from __future__ import annotations
@@ -78,6 +79,12 @@ def receive(state: dict | None, step: str, status: str, now: float) -> dict:
         # progress/completed/failed rather than started. No fake completion of
         # the previous failed stage is required or inferred.
         result.update(expected="scan", observed_at=now, waiting_scan=False)
+    if step == "close" and result["expected"] == "evaluate":
+        # A scheduled scan can join a capture-owned drain after its initial
+        # evaluation. Observe its current close without replaying evaluation
+        # events, inferring evaluation success, or recovering another stage.
+        # _failed_observations above retains even legacy evaluation failures.
+        result.update(expected="close", observed_at=now, waiting_scan=False)
     if step != result["expected"]:
         return result
     if status == "failed":
