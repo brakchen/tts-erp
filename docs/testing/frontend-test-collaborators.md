@@ -71,3 +71,42 @@ TTS_ERP_TEST_TEMPLATE_DB=tts_erp_test_monitor_health_template bash scripts/test_
 4. 独占 clone 冷启真实子进程，root 和 `/tts` 的真实 TEST 登录/CSRF、设备替身、创建任务、受控上传、真实 SQL 上传确认/独立读取、同步入口 no-op、真实登出，逐响应验证原 nonce/attestation。
 
 第 4 层使用独立 HTTP client 上传，**不是浏览器 cookie/CORS/媒体进度验收**。剩余页面的 native、截图、完整业务操作、精确 master 和运行发布仍需各自的证据；本接点绿色不能代替它们。
+
+## N1 未发布的两页护栏切片（不是八页验收）
+
+`BrowserFence` 的新 opt-in **目前只支持 manual-costs / video-publish**；原 P2 默认四页和默认启动流程不变。
+其余六页 `ad-daily`、`spu-profit-deterioration`、`users`、`runtime-configs`、`intercept-configs`、`sync-jobs`
+及其新增业务接口明确拒绝，留待 N2。生产页面并未删除；整体八页目标仍未完成。
+
+```python
+from tests.support.frontend_remaining_targets import RemainingTargets
+# 只接受下列字段；PK 集合为 frozenset[int]，task_ids / dates 为 frozenset[str]。
+targets = RemainingTargets(marker="TEST_example", shop_pks=frozenset(),
+                           product_pks=frozenset(), task_ids=frozenset(), dates=frozenset())
+# live_browser(..., remaining=targets)；默认 remaining=None 不启用此切片。
+```
+
+- 每次新授权前，先由原 probe/child/nonce 验证固定 TEST 外层元数据接点；调用者可替换的 `collaborator_profile` 字段不是授权证据。
+- 现存店铺 `account_name`、商品 `title` 必须与 marker **精确相等**，PK 必须实际存在；商品与店铺、外部 SPU ID 是同一条实际 SQL 记录的关系，不是三个独立集合。
+- 人工成本的每个显式身份条件必须同时对应同一商品。只有外部 ID 且存在歧义时，仅当全部实际候选均为 owned 才允许由后端返回原有 409；绝不改写后端解析范围。
+- 新商品/成本列表限定具体 owned shop；若该店铺可见商品中包含未登记目标，拒绝，而非过滤响应。视频 tasks/current/list 属于有限全局读取；若实际表中存在未登记任务，拒绝。config/devices 只读取固定测试 profile 配置与设备替身。不依赖模板业务数据为空。
+- 视频任务必须由当前真实 TEST 登录用户创建；任务/客户端 ID/请求字段须与已 attested 响应和真实 SQL 一致。重发必须响应原路径的同一任务；新票据使原票据失效，取消/确认上传也移除该任务票据。票据绑定 task/client/size，不接受调用者 URL。
+- origin 只从原 nonce 包装的固定接点学习。观察字段严格封闭为计数、布尔、SHA-256，不扩大为任意标量数据。`gate.observe_store()` 返回安全观察；`gate.store_control(page, 'pause'|'release')` 只走原固定接点。
+- 固定 TEST 外层 GET `/__test__/remaining-console-v1/store`（及 `/tts` 挂载）；POST 仅 `/pause` 和 `/release`，必须原 nonce。默认 factory 不安装；生产 ERP auth/router/middleware 未修改。
+- native PUT 保留 `all_headers()` 凭证拒绝、精确 origin/MIME/声明长度及 32 MiB 上限，并只 `continue_()`。这只是实现约束，**尚未证明 native 实际通过**。receiver 的 EOF 短读才是取消事实，释放控制不是取消证据。
+
+本轮只授权冷启动 profile/ownership 回归；不得重跑先前四组 UI native 失败测试。原 native 文件是未完成 WIP，非通过证据、非跳过的验收项。
+后续 Option B 需要 Parent 单独授权：同一浏览器 origin、同一 canonical fence、实际 attested ERP task/ticket 的 test-only XHR 消费者，
+仅证明 CORS/OPTIONS/PUT/progress/EOF-abort，不新增页面/路由/传输/鉴权旁路，也不冒充实际视频 UI 可用性；真实 MP4 与 UI 仍待独立验收。
+
+N1 允许的新增请求形状（不是页面全部交互已完成）：
+
+| 领域 | 有限形状 |
+| --- | --- |
+| manual-costs | GET 商品/缺成本/成本列表：显式 owned shop、有限分页及字段；GET 精确 owned product；POST 人工成本：实际同一商品身份元组 |
+| video-publish | GET config/devices；GET 无查询 tasks/current/tasks（全部可见任务须 owned）；GET 精确 owned task，可选 `includeDiagnostics=true` |
+| video-publish 写 | POST 创建固定 marker 文件名/文案的 MP4 上传任务（≤32 MiB）；POST 精确 task 的 upload-url `{}`、confirm-upload/cancel `{rowVersion}` |
+| 控制观察 | 固定 TEST 外层 metadata/pause/release，原 nonce/current binding 验证 |
+
+视频 status/cursor 分页、retry/replace-upload/verify/settings/cleanup 等其余写动作目前拒绝。
+这意味着即使两页冷护栏通过，也不能称两页完整 UI 功能或原生上传验收通过。默认 P2 已有 API 形状不因此扩大。
