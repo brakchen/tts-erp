@@ -112,3 +112,13 @@
 
 - 诊断仍是显式授权读取，默认任务读取不附带 prompt/Artemis 输出。`promptSnapshot` 保持可空文本 wire 字段，生产者 `_attempt` 复用既有 `publishing.diagnostics.sanitize_text`：沿用凭证赋值/认证头/URL query 的脱敏规则和最多 2000 字符边界，不增加客户端 redactor 或另一解析引擎。
 - 原始完整 `prompt_snapshot` 审计事实不修改、不删除；Artemis 输出继续沿用既有结构化脱敏器。新 UI 必须明确标为“脱敏诊断节选”，不能把有限公开节选声称为完整原始 prompt，也不能把其值用于发布/重试资格判断。
+
+## 2026-10-25 验证检查点：仍不是整体验收或生产交付
+
+- 三处已授权 browser 函数已独立修复并采用（`86dd6b6` → `737e550`）：只改三个函数体，19 行新增、11 行删除，其余字节/AST 保持；61 个 browser 控制通过，SPEC 与 fresh QUALITY 通过。原 P2 真实 native 文件另一次 6 项通过。三函数授权和受限协作者接点不再是待批事项。
+- 后续父候选完整 baseline 的工具在 900 秒被中断，没有正式 verdict，不能记作 GREEN。找回该轮 pytest 摘要的 6 个旧作业失败；已证明新增真实 API 测试提交的活跃 TEST 店铺跨测试存留导致代表作业时区解析失败：作业独立 1 GREEN、原 API 8 项后同作业 8 GREEN/1 RED。修复唯一新测试文件的自有事实生命周期后，同配对 9 GREEN、完整旧作业文件 11 GREEN，经 SPEC/fresh QUALITY，原 23 个人工成本断言同序不变；`b527539` 已在父候选采用为 `a279c2b`。没有改作业、财务、时区政策，或把事实从一开始改为 inactive。
+- 中断留下的唯一自有旧 clone 已核原 proof、相同 connection digest、owner 已退出与零会话，再用**现有公共隔离 runner** 的显式 run 名先重建新 clone，仅收集 8 项而不执行测试体，最后正常清理。独立元数据确认该 run 不存在、私有模板仍为 `0070_monitor_health`；旧过期 proof 精确移除。没有手工 DROP、修改原 helper 或把旧库作为测试 fallback。
+- 登录 native 子集 `d99aa12` → `57b00c4` 已采用：root 与 `/tts` 的 375/1440/2560 六个键盘登录/登出场景、两个 1440 未知结果恢复场景，共 8 项通过。六张输入凭证前的空登录截图已逐张打开。五处 URL 断言改为等价布尔断言，避免该断言通道打印 URL 原值，SPEC 闭环与 fresh QUALITY 通过；不宣称 Playwright 全通道脱敏或全部页面视觉验收。
+- 新增配置/用户真实 API 的初始 4 RED 与最小两个 root RED 确认缺少 cookie CSRF：有效 cookie 缺少 XHR 头时发生真实 200/201 写入及 SQL 变化。保留全部严格失败断言，未放宽成功状态。父级仅在原持久化 owner 调用既有 `require_cookie_csrf`：9 个 runtime mutation、7 个 users owner（共享 `_revoke` 覆盖两条路由），即 16 次调用保护 17 条写路由。角色检查、签名、服务、认证协议、middleware 和 guard 实现不变，纯 schema preview/read 不新增写 guard；API-key/bypass 保持原行为。
+- guard 的 39 个直接入口检查及 12 个原 cookie 控制共 51 项通过，原 runtime/user-auth 两文件另 39 项通过。新配置/用户 4 个 root/`/tts` 真实场景在修复后全部通过：版本/发布/历史/409、readonly/CSRF SQL 不变、实际密码登录/重置/旧会话吊销/停用均有独立 SQL 证据；原登录限流未改。数值证据限于大整数和支持的精确二进制小数，不声称任意财务 JSON 小数精度。SPEC 与 fresh QUALITY 已通过，新的完整候选 baseline 仍待后续闭环。源码/Node/API 成功不等于 JSON 编辑器 native、媒体/CORS 或生产运行验收。
+- **另一个独立授权边界仍未获批**：既有 canonical browser fence 的精确 TEST 页面/API/task-ticket 规则，以及既有受控上传的 progress/cancel 观察接点。不能把先前对协作者或三函数的“允许”解释成这项授权，不能绕过 fence 或新建白名单/权限 owner。其余八业务页 native、完整双前缀三宽度视觉、媒体恢复、精确 master/runtime 交付和非 ROI legacy 清理尚未完成；两个 ROI 页面及其共享资源继续保持不变。
