@@ -110,3 +110,29 @@ N1 允许的新增请求形状（不是页面全部交互已完成）：
 
 视频 status/cursor 分页、retry/replace-upload/verify/settings/cleanup 等其余写动作目前拒绝。
 这意味着即使两页冷护栏通过，也不能称两页完整 UI 功能或原生上传验收通过。默认 P2 已有 API 形状不因此扩大。
+
+## Option B 原生 wire 消费者安全规则（不等于视频 UI 验收）
+
+经 Parent 单独授权后，`test_frontend_remaining_upload_observations.py` 使用已允许的同源登录文档、原 clone/worker 夹具和唯一 BrowserFence，
+通过真实浏览器登录请求、真实 attested ERP 创建响应学习任务/票据。票据只留在页面内存，不作为 Python 观察值或日志输出；凭证填入后立即清空 DOM。
+不新增测试页面、路由、传输、白名单、鉴权或 provenance owner；不直接登记票据或修改 metadata origin。
+
+必须先确认实际 owned task/ticket 已就绪，才申请 pause；在控制 I/O **之前**记录 pauseRequested。
+从申请开始到所有后续步骤结束，必须在浏览器和原 child 仍存活时，用有界 `finally` 释放**待消费和已消费**的 pause；释放失败不得覆盖已有主错误。
+不得放松重复 pause 拒绝。成功必须有真实 OPTIONS/CORS、原生 progress 事件及 receiver 的完整 byte/hash/count 事实；取消只能以真实 native abort 加 EOF/短读/socket 事实证明，
+绝不把 release、取消意图或控制标志计为取消。无隐式 confirm-upload、写重放或任务入队。
+
+当前授权首次只执行 root-complete 精确节点；成功后停止，abort、`/tts` 和矩阵须另行 GO。失败后同样停止，
+只返回状态/布尔/计数/hash 和真实 header **可用性布尔**，不输出原 header、payload、nonce、Cookie、signed URL，不增加超时或修改冻结护栏。
+不透明 TEST 字节只证明 wire，不是可播放 MP4、视频 UI Ready、完整两页、八页或生产对象存储/发布成功。
+
+### 单变量 observer 反事实（仅一次 root-complete）
+
+在 Parent 新决策下，仅把 request observer 改为被动 method/计数/失败观察；observer 不再调用异步 `request.all_headers()`。
+完整 header/凭据/origin/长度验证仍只属于冻结的 canonical BrowserFence，不能由观察器补造“headersReadable=true”或免检。
+全部原完成断言保持不变。诊断仅增加异常 class、最后一条本测试源代码行号、静态 phase 和 finally release 尝试/成功布尔；
+不记录异常文本、参数、URL、header、body 或 traceback locals。
+
+先前失败发生于实际执行的 f3ae… 源码；其后的 e764… 仅为 AST 相同的格式化快照，不能冒充在该字节版本执行过。
+本次是独立新执行点；G/F 都停止，不自动启动 abort、矩阵、第三次探测或修改冻结 helper。
+即使反事实通过，也只支持 observer 交互假说，不足以解释所有历史失败或证明视频 UI/可播放 MP4。
