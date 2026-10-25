@@ -186,3 +186,88 @@ def test_offline_recurrence_keeps_pending_recovery_and_rearms_notice():
     assert notices(state, 302) == []
     state = event(state, status="stopped", now=303)
     assert notices(state, 303) == ["heartbeat:recovery"]
+
+
+@pytest.mark.parametrize("failed_step", ["evaluate", "close"])
+@pytest.mark.parametrize(
+    ("first_scan_status", "expected"),
+    [
+        ("started", "scan"),
+        ("progress", "scan"),
+        ("completed", "evaluate"),
+        ("failed", "scan"),
+    ],
+)
+def test_next_scan_is_observed_after_failed_downstream(
+    failed_step: str, first_scan_status: str, expected: str
+) -> None:
+    state = event()
+    state = event(state, "scan", "completed", 1)
+    if failed_step == "close":
+        state = event(state, "evaluate", "completed", 2)
+    state = event(state, failed_step, "failed", 3)
+    changed = event(state, "scan", first_scan_status, 10)
+    assert changed["expected"] == expected
+    assert changed["stages"]["scan"] == first_scan_status
+    assert changed["observed_at"] == 10
+    assert changed["stages"][failed_step] == "failed"
+    assert state["expected"] == failed_step
+
+
+def test_next_scan_progress_does_not_renew_failed_close_deadline() -> None:
+    state = event()
+    state = event(state, "scan", "completed", 1)
+    state = event(state, "evaluate", "completed", 2)
+    state = event(state, "close", "failed", 3)
+    state = event(state, "scan", "started", 10)
+    state = event(state, "scan", "progress", 180)
+    state = event(state, now=181)
+    assert "close:fault" not in notices(state, 181)
+    assert notices(state, 182) == ["close:fault"]
+
+
+def test_legacy_failed_state_accepts_next_scan_without_masking_old_failure() -> None:
+    state = {
+        "heartbeat_at": 179,
+        "enabled": True,
+        "expected": "close",
+        "observed_at": 2,
+        "waiting_scan": False,
+        "stages": {"scan": "completed", "evaluate": "completed", "close": "failed"},
+        "faults": {},
+    }
+    changed = event(state, "scan", "progress", 180)
+    assert changed["expected"] == "scan"
+    assert changed["observed_at"] == 180
+    assert notices(changed, 182) == ["close:fault"]
+    assert state["observed_at"] == 2
+
+
+def test_restarted_scan_started_does_not_renew_either_observation() -> None:
+    state = event()
+    state = event(state, "scan", "completed", 1)
+    state = event(state, "evaluate", "completed", 2)
+    state = event(state, "close", "failed", 3)
+    for time in (10, 100, 179):
+        state = event(state, "scan", "started", time)
+    state = event(state, now=189)
+    assert set(notices(state, 190)) == {"close:fault", "scan:fault"}
+
+
+def test_stop_resume_discards_old_failed_stage_deadlines_without_fake_recovery() -> (
+    None
+):
+    state = event()
+    state = event(state, "scan", "completed", 1)
+    state = event(state, "evaluate", "completed", 2)
+    state = event(state, "close", "failed", 3)
+    state = event(state, now=181)
+    state, pending = plan(state, 182)
+    assert pending == ["close:fault"]
+    state = acknowledge(state, pending)
+    state = event(state, status="stopped", now=183)
+    state = event(state, now=500)
+    assert notices(state, 500) == []
+    state = event(state, now=679)
+    assert notices(state, 679) == []
+    assert notices(state, 680) == ["scan:fault"]
