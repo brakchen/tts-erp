@@ -84,18 +84,20 @@ describe('manual-costs server-total pagination', () => {
   }
   it.each(['all', 'recent'] as const)('disables next on a full final %s page at zero and nonzero offsets', async (view) => {
     const fetcher = setupPages(view, '100'); const user = userEvent.setup(); await openView(view, user);
+    // Resolve the live controls each time without scanning all 50 rows' actions.
+    const pagingControls = () => within(screen.getByLabelText('分页'));
     await screen.findByText('TEST page 0 row 0');
-    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '下一页' }));
+    expect(pagingControls().getByRole('button', { name: '上一页' })).toBeDisabled();
+    expect(pagingControls().getByRole('button', { name: '下一页' })).toBeEnabled();
+    await user.click(pagingControls().getByRole('button', { name: '下一页' }));
     await screen.findByText('TEST page 50 row 0');
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(pagingControls().getByRole('button', { name: '下一页' })).toBeDisabled();
     const calls = fetcher.mock.calls.length;
-    await user.click(screen.getByRole('button', { name: '下一页' })); expect(fetcher.mock.calls).toHaveLength(calls);
-    await user.click(screen.getByRole('button', { name: '上一页' })); await screen.findByText('TEST page 0 row 0');
+    await user.click(pagingControls().getByRole('button', { name: '下一页' })); expect(fetcher.mock.calls).toHaveLength(calls);
+    await user.click(pagingControls().getByRole('button', { name: '上一页' })); await screen.findByText('TEST page 0 row 0');
     fetcher.mockImplementationOnce(async () => view === 'all' ? json(pageRows(), 200, { 'X-Total-Count': '50' }) : json({ items: historyRows(pageRows()), total: 50 }));
     await user.click(screen.getByRole('button', { name: '刷新当前列表' })); await screen.findByText(/服务端总数：50/);
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(pagingControls().getByRole('button', { name: '下一页' })).toBeDisabled();
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=50') && url.includes(view === 'all' ? 'channel-products?' : '/reporting/manual-costs?'))).toBe(true);
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=100'))).toBe(false);
   });
