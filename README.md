@@ -210,7 +210,7 @@ API-key 豁免路径为 `/healthz`、`/endpoints`、`/openapi.json`、`/docs`、
 
 `TTS_ERP_EXTERNAL_PREFIX` 是外部部署前缀的单一真相源，当前生产值为 `/tts`。
 本机直连使用 `http://127.0.0.1:9877/v2/...`；当前公网使用
-`http://daqiang.nat100.top/tts/v2/...`，不带端口且不能省略 `/tts`。
+`https://chen.daqiangplatform.com/tts/v2/...`，不带端口且不能省略 `/tts`。
 access module 同时兼容代理保留或剥离前缀的请求，并让 Auth 与 Docs Basic Auth
 使用相同 route-relative path。
 
