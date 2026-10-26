@@ -17,7 +17,9 @@ ArchitectureReviewRequired=yes（事实与诊断边界）；TDD Route=strict。
 顺序：先用真实 SQL API 回归证明通用异常会清空原值及无关期间，再移除比较层的全局财务
 否决并验证具体缺失仍受限，最后跑完整基线、同步提交和最终集成验证。
 源诊断记录只读，不清理或标记解决；生产迁移、同步及重启未获授权。
-最终交付分支 `codex/spu-comparison-facts-final` 从同一 master 收拢修复；原
+最终交付分支 `codex/spu-comparison-facts-final` 从新 master
+`7e3dfdc5ecfd50506bbf1a235d9892a229a81061` 同步收拢修复（新增仅 README、运维文档及
+monitor 子模块指针；应用/测试树未变）；原
 `codex/spu-comparison-facts` 保留 RED/GREEN 的开发证据，应用与测试内容保持一致。
 
 在现有 `/v2/pages/spu-profit-deterioration` 上实现 R-001～006、AC-001～023：7 天主参考、3 天辅助，显示两期盈利、订单和广告消耗，保留无单投放及旧结果，服务端限制可选日期，支持查证和失败恢复。不得恢复阈值、严重程度、历史确认或策略建议。
