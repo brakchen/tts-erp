@@ -55,6 +55,7 @@ pytestmark = [pytest.mark.domain_frontend, pytest.mark.layer_integration]
 clone = owned_clone
 manual_cost_facts = owned_facts
 financial_facts = facts_owner
+del owned_clone, owned_facts, facts_owner
 
 AD_DAILY = "/v2/reporting/ad-daily"
 AD_OPTIONS = "/v2/reporting/ad-daily/options"
@@ -463,6 +464,16 @@ def test_profit_scope_windows_and_totals_match_fresh_sql(
         assert meta["latestAvailableDate"] == facts.anchor.isoformat()
         assert meta["dataAsOf"] == facts.anchor.isoformat()
         assert meta["windowDays"] == 7
+        assert meta["periods"] == {
+            "previous": {
+                "startDate": (facts.anchor - timedelta(days=13)).isoformat(),
+                "endDate": (facts.anchor - timedelta(days=7)).isoformat(),
+            },
+            "current": {
+                "startDate": (facts.anchor - timedelta(days=6)).isoformat(),
+                "endDate": facts.anchor.isoformat(),
+            },
+        }
         assert meta["reportingTimezone"] == "Asia/Ho_Chi_Minh"
         assert meta["activityBypassed"] is False
         assert meta["stale"] is True
@@ -506,11 +517,16 @@ def test_profit_scope_windows_and_totals_match_fresh_sql(
         assert three["meta"]["windowDays"] == 3
         assert three["total"] == 4
         assert tuple(item["spuPk"] for item in three["items"]) == facts.scope_pks
-        assert three["meta"]["periods"] != meta["periods"]
-        assert (
-            three["meta"]["periods"]["current"]["startDate"]
-            != meta["periods"]["current"]["startDate"]
-        )
+        assert three["meta"]["periods"] == {
+            "previous": {
+                "startDate": (facts.anchor - timedelta(days=5)).isoformat(),
+                "endDate": (facts.anchor - timedelta(days=3)).isoformat(),
+            },
+            "current": {
+                "startDate": (facts.anchor - timedelta(days=2)).isoformat(),
+                "endDate": facts.anchor.isoformat(),
+            },
+        }
         assert three["meta"]["latestAvailableDate"] == meta["latestAvailableDate"]
         assert (
             three["meta"]["coverage"]["advertising"] == meta["coverage"]["advertising"]
