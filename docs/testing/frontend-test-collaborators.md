@@ -71,3 +71,37 @@ TTS_ERP_TEST_TEMPLATE_DB=tts_erp_test_monitor_health_template bash scripts/test_
 4. 独占 clone 冷启真实子进程，root 和 `/tts` 的真实 TEST 登录/CSRF、设备替身、创建任务、受控上传、真实 SQL 上传确认/独立读取、同步入口 no-op、真实登出，逐响应验证原 nonce/attestation。
 
 第 4 层使用独立 HTTP client 上传，**不是浏览器 cookie/CORS/媒体进度验收**。剩余页面的 native、截图、完整业务操作、精确 master 和运行发布仍需各自的证据；本接点绿色不能代替它们。
+
+
+## N1：采购与视频的有限浏览器目标
+
+N1 仍是同一个 `BrowserFence` 的测试专用扩展，不是第二白名单或权限 owner。默认不传 `remaining` 时保持原 P2 路径；只有原 `live_api_server(..., collaborators=True)` 启动的固定 profile、原 canary/probe、TEST 账户与 nonce/liveness 链可使用有限目标。
+
+`RemainingTargets` 只携带原事实夹具给出的 `marker`、`shop_pks`、`product_pks`、`task_ids` 和 `dates`；这些集合不是许可。canonical fence 每次先读取原 nonce 绑定的固定 profile/receiver 元数据，再经原 checked Session 验证实际店铺、商品与任务归属。伪造 child 字段、独立的 PK 集合、错误前缀或未知目标不能产生授权。
+
+- 仅准入采购和视频两页的有限页面/API。用户/角色、运行配置/秘密、拦截配置、同步任务、广告日明细和盈利变化六域仍拒绝；这不删减剩余八业务页的最终验收目标。
+- 采购每个显式身份条件必须同时匹配同一 SQL 商品行及 owned `(product_pk, shop_pk, external_id)` tuple；不能分别命中不同集合。无内部 PK 的旧外部 ID 请求仅在全部实际候选均 owned 时才允许由原后端返回既有 409，不改写后端查询范围。
+- `manual_pk_operand` 是唯一纯操作数规范化函数，不是 grant：既有 `spu_pk` / `shop_pk` 允许严格正 bigint 整数或等值 canonical ASCII 十进制字符串，范围为 `1..9223372036854775807`；字符串必须匹配 `[1-9][0-9]*`，长度在转换前限制为 1–19。拒绝 bool、float、类型子类、零、符号、前导零、空白、指数、小数、非 ASCII 数字及溢出。缺失与显式非法/null 不混淆，转发的原 wire body 不修改；schema 和 canonical 同行比较复用同一函数，不经浮点数。
+- 打开采购页面前，测试调用方须在本轮原官方 clone/checked Session 内验证接口实际返回的 TikTok 店铺集合（服务端 ID 排序、limit 500）全部属于自有 marker/PK，再进入 DOM。只核最低 ID 不足以保证下拉列表无外部数据；发现外部可见行即停止，不响应过滤、全表删除、改原 canary 或为测试改变生产默认店铺。该前置不是新的网络许可 owner。
+
+## N1 profile 元数据与受控传输
+
+固定外层 `/__test__/remaining-console-v1/store` 及其 `pause` / `release` 只属于此测试 profile，默认 child 和生产应用没有该入口。它复用原 binding/nonce/proof；父环境标志、caller dataclass 状态或任意 URL 不能替代实际的固定元数据。receiver origin 来自实际本实例监听地址，仍与 ERP origin 分离。
+
+视频 task/client/ticket 必须由真实 TEST API 与当前 SQL 关系学习，过期、撤销、来源错误或非本实例能力拒绝。原生二进制 PUT 只能由 canonical fence 完整校验请求头、来源、凭据、方法、MIME 和长度后 `route.continue_()`；不允许另一请求代理/缓冲重发、部分头替代或增加任意来源。暂停须在就绪后显式启用并在 finally 有界释放；取消意图不等于实际 EOF/短读。上传 URL/头值/载荷不日志，接收端只保留有界计数、size/hash 等元数据。
+
+用户已接受当前 Chromium / Playwright 拦截自动预检由 driver 回答的行为，**接收端真实自动 OPTIONS 不再是本次单独门槛**；不得把它写成 receiver 已实际处理预检，也不另下载 Firefox、启用其他浏览器模式或安装系统依赖。真实 PUT/字节/hash/进度/实际取消、无 ERP 凭据边界、有效媒体与页面交互仍须分别取得证据。工具冷验通过不代表这些 native/媒体/视觉/运行条件完成。
+
+支持层组合回归仍仅经官方 runner，在每次验证已确认的现存私有 `0070_monitor_health` 模板身份、schema 与源码 head 后 clone-only 执行。例如：
+
+```bash
+bash scripts/test_isolated.sh --template-db tts_erp_test_monitor_health_template fast \
+  tests/scripts/test_frontend_p2_browser.py \
+  tests/scripts/test_frontend_p2_live_support.py \
+  tests/scripts/test_frontend_test_collaborators.py \
+  tests/scripts/test_frontend_remaining_fence.py \
+  tests/scripts/test_frontend_remaining_video_live_api.py \
+  tests/scripts/test_frontend_remaining_video_projection_privacy.py
+```
+
+此组合必须保留父候选最新视频隐私 helper；旧 fence 分支的视频副本、未接纳的观察器或诊断脚本不随支持层整分支带入。不得把历史不同组合的通过数直接当作新组合结果。缺少或不匹配模板即停止；不 refresh/stamp、手工 DROP 或改用共享/生产库。
