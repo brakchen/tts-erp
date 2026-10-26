@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 import pytest
 from playwright.sync_api import expect
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tests.support.frontend_p2_accounts import seed_accounts
@@ -48,6 +48,27 @@ def independent(probe) -> Iterator[Session]:
         engine.dispose()
 
 
+def _command_facts_absent(
+    session: Session, *, shop_id: str, service_id: str, enum_value: str,
+) -> bool:
+    """Identity-only absence, including other shops referencing the exact app."""
+    return (
+        session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)) is None
+        and session.scalar(
+            select(ChannelAccount.id).where(ChannelAccount.service_id == service_id)
+        ) is None
+        and session.scalar(
+            select(TikTokAppCredential.service_id).where(TikTokAppCredential.service_id == service_id)
+        ) is None
+        and session.scalar(
+            select(OAuthState.id).where(OAuthState.extra["service_id"].astext == service_id)
+        ) is None
+        and session.scalar(
+            select(EnumMap.id).where(EnumMap.enum_type == "order_status", EnumMap.enum_value == enum_value)
+        ) is None
+    )
+
+
 @contextmanager
 def owned_command_facts(
     probe: VerifiedDataProbe,
@@ -57,44 +78,107 @@ def owned_command_facts(
     enum_value: str,
     profile: Literal["live", "errors"],
 ) -> Iterator[None]:
-    """One command-fact lifetime, sharing the original guarded session owner.
-
-    Phase R deliberately has no cleanup yet. Its committed-failure regression
-    must expose surviving facts before the same owner gains its finalizer.
-    """
+    """Own only prior-absent command intents inside the original live child."""
     require_data_probe(probe)
-    prefixes = {
-        "live": ("TEST_sid_", "TEST_enum_"),
-        "errors": ("TEST_error_sid_", "TEST_error_enum_"),
+    profiles = {
+        "live": (
+            "TEST_sid_", "TEST_enum_",
+            ("TEST_native_shop", "TEST_native_edited"),
+            ("TEST_native_label", "TEST_committed_response_lost"), 7,
+        ),
+        "errors": (
+            "TEST_error_sid_", "TEST_error_enum_",
+            ("TEST_error_shop", "TEST_revisit", "TEST_wire500_committed"),
+            ("TEST_enum_wire500", "TEST_after_cooldown_write"), 3,
+        ),
     }
-    selected = prefixes.get(profile)
+    selected = profiles.get(profile)
     intent_valid = (
         selected is not None
-        and shop_id.startswith("99")
-        and len(shop_id) == 16
-        and shop_id.isascii()
-        and shop_id.isdigit()
-        and service_id.startswith(selected[0])
-        and enum_value.startswith(selected[1])
+        and re.fullmatch(r"99[0-9]{14}", shop_id) is not None
+        and re.fullmatch(re.escape(selected[0]) + r"[0-9a-f]{16}", service_id) is not None
+        and re.fullmatch(re.escape(selected[1]) + r"[0-9a-f]{16}", enum_value) is not None
     )
     assert intent_valid, "TEST command facts intent refused"
     with independent(probe) as session:
-        prior_absent = (
-            session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)) is None
-            and session.scalar(
-                select(TikTokAppCredential.service_id).where(TikTokAppCredential.service_id == service_id)
-            ) is None
-            and session.scalar(
-                select(OAuthState.id).where(
-                    OAuthState.provider == "tiktok", OAuthState.extra["service_id"].astext == service_id
-                )
-            ) is None
-            and session.scalar(
-                select(EnumMap.id).where(EnumMap.enum_type == "order_status", EnumMap.enum_value == enum_value)
-            ) is None
+        prior_absent = _command_facts_absent(
+            session, shop_id=shop_id, service_id=service_id, enum_value=enum_value,
         )
     assert prior_absent, "TEST command facts already existed before their owner"
-    yield
+    try:
+        yield
+    finally:
+        with independent(probe) as session:
+            shops = session.execute(select(
+                ChannelAccount.id, ChannelAccount.platform, ChannelAccount.shop_id,
+                ChannelAccount.account_name, ChannelAccount.service_id, ChannelAccount.credential_id,
+            ).where(ChannelAccount.shop_id == shop_id)).all()
+            app_id = session.scalar(
+                select(TikTokAppCredential.service_id).where(TikTokAppCredential.service_id == service_id)
+            )
+            states = session.execute(select(
+                OAuthState.id, OAuthState.provider, OAuthState.consumed_at,
+            ).where(OAuthState.extra["service_id"].astext == service_id)).all()
+            enums = session.execute(select(
+                EnumMap.id, EnumMap.enum_type, EnumMap.enum_value, EnumMap.label_zh, EnumMap.sort_order,
+            ).where(EnumMap.enum_type == "order_status", EnumMap.enum_value == enum_value)).all()
+            references = session.scalars(
+                select(ChannelAccount.id).where(ChannelAccount.service_id == service_id)
+            ).all()
+            # Validate every recovered row and reference before issuing any delete.
+            ownership_valid = (
+                len(shops) <= 1
+                and all(
+                    isinstance(shop.id, int) and shop.id > 0
+                    and shop.platform == "tiktok" and shop.shop_id == shop_id
+                    and shop.account_name in selected[2]
+                    and shop.service_id in (None, service_id) and shop.credential_id is None
+                    for shop in shops
+                )
+                and app_id in (None, service_id)
+                and all(reference in {shop.id for shop in shops} for reference in references)
+                and (not states or (
+                    profile == "live" and len(states) == 1 and app_id == service_id
+                    and any(shop.service_id == service_id for shop in shops)
+                ))
+                and all(
+                    isinstance(state.id, int) and state.id > 0
+                    and state.provider == "tiktok" and state.consumed_at is None
+                    for state in states
+                )
+                and len(enums) <= 1
+                and all(
+                    isinstance(fact.id, int) and fact.id > 0
+                    and fact.enum_type == "order_status" and fact.enum_value == enum_value
+                    and fact.label_zh in selected[3] and fact.sort_order == selected[4]
+                    for fact in enums
+                )
+            )
+            assert ownership_valid, "TEST command facts cleanup ownership refused"
+            for fact in enums:
+                session.execute(delete(EnumMap).where(
+                    EnumMap.id == fact.id, EnumMap.enum_type == "order_status", EnumMap.enum_value == enum_value,
+                ))
+            for state in states:
+                session.execute(delete(OAuthState).where(
+                    OAuthState.id == state.id, OAuthState.provider == "tiktok", OAuthState.consumed_at.is_(None),
+                    OAuthState.extra["service_id"].astext == service_id,
+                ))
+            for shop in shops:
+                session.execute(delete(ChannelAccount).where(
+                    ChannelAccount.id == shop.id, ChannelAccount.platform == "tiktok", ChannelAccount.shop_id == shop_id,
+                ))
+            if app_id is not None:
+                session.execute(delete(TikTokAppCredential).where(
+                    TikTokAppCredential.service_id == app_id, TikTokAppCredential.service_id == service_id,
+                ))
+            session.commit()
+        # A new original independent session observes committed absence, not our own writes.
+        with independent(probe) as session:
+            fresh_absent = _command_facts_absent(
+                session, shop_id=shop_id, service_id=service_id, enum_value=enum_value,
+            )
+        assert fresh_absent, "TEST command facts survived owner cleanup"
 
 
 class _InjectedCommandFailure(RuntimeError):
