@@ -10,6 +10,7 @@ import re
 import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Literal
 from urllib.parse import urlencode
 
 import pytest
@@ -21,6 +22,7 @@ from tests.support.frontend_p2_accounts import seed_accounts
 from tests.support.frontend_p2_binding import checked_session, current_binding
 from tests.support.frontend_p2_browser import fill_sensitive, live_browser
 from tests.support.frontend_p2_canary import (
+    VerifiedDataProbe,
     _bound_json,
     require_data_probe,
     seed_and_check_canary,
@@ -29,7 +31,7 @@ from tests.support.frontend_p2_live import live_api_server
 from tests.support.spu_price_stats_live import api_env
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.config import EnumMap
-from tts_erp_v2.db.models.integration import OAuthState
+from tts_erp_v2.db.models.integration import OAuthState, TikTokAppCredential
 from tts_erp_v2.proxy import token_service
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
@@ -44,6 +46,93 @@ def independent(probe) -> Iterator[Session]:
             yield session
     finally:
         engine.dispose()
+
+
+@contextmanager
+def owned_command_facts(
+    probe: VerifiedDataProbe,
+    *,
+    shop_id: str,
+    service_id: str,
+    enum_value: str,
+    profile: Literal["live", "errors"],
+) -> Iterator[None]:
+    """One command-fact lifetime, sharing the original guarded session owner.
+
+    Phase R deliberately has no cleanup yet. Its committed-failure regression
+    must expose surviving facts before the same owner gains its finalizer.
+    """
+    require_data_probe(probe)
+    prefixes = {
+        "live": ("TEST_sid_", "TEST_enum_"),
+        "errors": ("TEST_error_sid_", "TEST_error_enum_"),
+    }
+    selected = prefixes.get(profile)
+    intent_valid = (
+        selected is not None
+        and shop_id.startswith("99")
+        and len(shop_id) == 16
+        and shop_id.isascii()
+        and shop_id.isdigit()
+        and service_id.startswith(selected[0])
+        and enum_value.startswith(selected[1])
+    )
+    assert intent_valid, "TEST command facts intent refused"
+    with independent(probe) as session:
+        prior_absent = (
+            session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)) is None
+            and session.scalar(
+                select(TikTokAppCredential.service_id).where(TikTokAppCredential.service_id == service_id)
+            ) is None
+            and session.scalar(
+                select(OAuthState.id).where(
+                    OAuthState.provider == "tiktok", OAuthState.extra["service_id"].astext == service_id
+                )
+            ) is None
+            and session.scalar(
+                select(EnumMap.id).where(EnumMap.enum_type == "order_status", EnumMap.enum_value == enum_value)
+            ) is None
+        )
+    assert prior_absent, "TEST command facts already existed before their owner"
+    yield
+
+
+class _InjectedCommandFailure(RuntimeError):
+    """Constant injected fault after a real commit, not an API mock."""
+
+
+def test_owned_command_facts_cleanup_after_committed_failure() -> None:
+    """Check the same fact lifetime without inventing another fixture factory."""
+    value, _binding = current_binding()
+    with live_api_server(value) as child:
+        probe = seed_and_check_canary(child, prefix="")
+        shop_id = "99" + str(secrets.randbelow(10**14)).zfill(14)
+        service_id = "TEST_sid_" + secrets.token_hex(8)
+        enum_value = "TEST_enum_" + secrets.token_hex(8)
+        committed = False
+        with (
+            pytest.raises(_InjectedCommandFailure, match="^TEST_after_committed_shop$"),
+            owned_command_facts(
+                probe, shop_id=shop_id, service_id=service_id,
+                enum_value=enum_value, profile="live",
+            ),
+        ):
+            with independent(probe) as session:
+                session.add(ChannelAccount(
+                    platform="tiktok", shop_id=shop_id,
+                    account_name="TEST_native_shop", region="VN", status="active",
+                ))
+                session.commit()
+                committed = True
+            # No internal PK is passed to the lifetime's caller. SQLAlchemy
+            # itself may have assigned one during the real flush/commit.
+            raise _InjectedCommandFailure("TEST_after_committed_shop")
+        assert committed, "TEST committed-failure injection was not reached"
+        with independent(probe) as session:
+            survived = session.scalar(
+                select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)
+            ) is not None
+        assert not survived, "TEST command facts survived committed setup failure"
 
 
 def public_get(probe, path):
@@ -230,39 +319,45 @@ def test_real_ui_persistence_permissions_and_lost_response(frontend_build, monke
             probe = seed_and_check_canary(child, prefix=prefix)
             account = next(account for account in seed_accounts(probe) if account.role_code == role)
             shop_id = "99" + str(secrets.randbelow(10**14)).zfill(14)
-            with independent(probe) as session:
-                assert session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)) is None
-            with live_browser(probe, account, shop_id=shop_id, service_id="TEST_sid_" + secrets.token_hex(8),
-                              enum_value="TEST_enum_" + secrets.token_hex(8), width=width) as (page, gate):
-                target = "/v2/pages/intercept-stats" if role == "viewer" else "/v2/pages/shops"
-                page.goto(child.base + prefix + "/v2/auth/login?" + urlencode({"next": prefix + target}), wait_until="networkidle")
-                page.get_by_label("用户名", exact=True).fill(account.username)
-                fill_sensitive(page.get_by_label("密码", exact=True), account.password)
-                page.get_by_role("button", name="登录", exact=True).click()
-                page.wait_for_url(child.base + prefix + target)
-                page.locator("#frontend-root").wait_for()
-                if role == "viewer":
-                    expect(page.get_by_role("button", name="刷新统计", exact=True)).to_be_visible()
-                    statistics = public_get(probe, "/v2/intercept/requests/stats?days=7")
-                    assert isinstance(statistics, dict)
-                    for label, key in (("总请求数", "total_requests"), ("白名单命中", "whitelisted_requests"),
-                                       ("今日请求（UTC）", "today_requests"), ("错误请求", "error_requests")):
-                        expect(page.get_by_role("region", name=label, exact=True).get_by_text(f"{statistics[key]:,}", exact=True)).to_be_visible()
-                    expect(page.get_by_role("grid", name="每日请求（UTC）", exact=True)).to_be_visible()
-                    denied_register(page, probe, gate, csrf=True)
-                    response = page.goto(child.base + prefix + "/v2/pages/shops")
-                    assert response is not None and response.status == 403
-                else:
-                    shop_task(page, gate, probe)
-                    if role == "admin":
-                        enum_task(page, gate, probe)
+            service_id = "TEST_sid_" + secrets.token_hex(8)
+            enum_value = "TEST_enum_" + secrets.token_hex(8)
+            with owned_command_facts(
+                probe, shop_id=shop_id, service_id=service_id,
+                enum_value=enum_value, profile="live",
+            ):
+                with independent(probe) as session:
+                    assert session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)) is None
+                with live_browser(probe, account, shop_id=shop_id, service_id=service_id,
+                                  enum_value=enum_value, width=width) as (page, gate):
+                    target = "/v2/pages/intercept-stats" if role == "viewer" else "/v2/pages/shops"
+                    page.goto(child.base + prefix + "/v2/auth/login?" + urlencode({"next": prefix + target}), wait_until="networkidle")
+                    page.get_by_label("用户名", exact=True).fill(account.username)
+                    fill_sensitive(page.get_by_label("密码", exact=True), account.password)
+                    page.get_by_role("button", name="登录", exact=True).click()
+                    page.wait_for_url(child.base + prefix + target)
+                    page.locator("#frontend-root").wait_for()
+                    if role == "viewer":
+                        expect(page.get_by_role("button", name="刷新统计", exact=True)).to_be_visible()
+                        statistics = public_get(probe, "/v2/intercept/requests/stats?days=7")
+                        assert isinstance(statistics, dict)
+                        for label, key in (("总请求数", "total_requests"), ("白名单命中", "whitelisted_requests"),
+                                           ("今日请求（UTC）", "today_requests"), ("错误请求", "error_requests")):
+                            expect(page.get_by_role("region", name=label, exact=True).get_by_text(f"{statistics[key]:,}", exact=True)).to_be_visible()
+                        expect(page.get_by_role("grid", name="每日请求（UTC）", exact=True)).to_be_visible()
+                        denied_register(page, probe, gate, csrf=True)
+                        response = page.goto(child.base + prefix + "/v2/pages/shops")
+                        assert response is not None and response.status == 403
                     else:
-                        page.goto(child.base + prefix + "/v2/pages/enum-map", wait_until="networkidle")
-                        expect(page.get_by_role("button", name="新增映射", exact=True)).to_be_disabled()
-                        assert page.get_by_role("button", name="编辑映射", exact=True).count() == 0
-                assert all(csrf for method, _path, csrf in gate.calls if method in {"PUT", "PATCH", "DELETE"})
-                dimensions = page.evaluate("({scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth})")
-                assert dimensions["scroll"] <= dimensions["client"] + 1
-                assert not gate.violations
+                        shop_task(page, gate, probe)
+                        if role == "admin":
+                            enum_task(page, gate, probe)
+                        else:
+                            page.goto(child.base + prefix + "/v2/pages/enum-map", wait_until="networkidle")
+                            expect(page.get_by_role("button", name="新增映射", exact=True)).to_be_disabled()
+                            assert page.get_by_role("button", name="编辑映射", exact=True).count() == 0
+                    assert all(csrf for method, _path, csrf in gate.calls if method in {"PUT", "PATCH", "DELETE"})
+                    dimensions = page.evaluate("({scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth})")
+                    assert dimensions["scroll"] <= dimensions["client"] + 1
+                    assert not gate.violations
     finally:
         token_service._reset_for_testing()
