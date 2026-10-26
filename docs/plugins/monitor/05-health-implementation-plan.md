@@ -103,3 +103,28 @@ Webhook 只能由服务端经 token_service 解密，普通 snapshot 仅 secret 
 - 新库无必要；新 schema 只加必要当前态。不退休原有报表、关停失败提醒或任意事实。禁止无关重构、自动接管其他 lane、生产迁移/重启及真实上游请求。
 
 执行路线：subagent-driven，两个已分区 writer 并行，父级集成串行；用户已授权，无需重复确认。所有 child 先报告真实 session UUID，父级登记 reservation 后才允许写入；父级保留 Git lifecycle 与最终验收权。
+
+## 6. 人工执行的 0070 一键数据库操作
+
+用户另行要求生成脚本，由其本人执行；这不授权 agent 访问或迁移生产库。
+
+- **Goal / Architecture**：`scripts/oneoff_migrate_monitor_health.py` 只包装现有 Alembic 和 PostgreSQL `pg_dump` / `pg_restore --list`；唯一 DDL owner 仍为已有 `0070_monitor_health` 及 Alembic 的共享生产护栏，不实现 SQL 迁移、stamp、回滚或备份平台。
+- **Tech / Reuse**：使用现有 SQLAlchemy、Alembic、psycopg 及 `uvicorn[standard]` 已包含的 python-dotenv；本次验证版本分别以环境为准（Alembic 1.20.0/MIT、psycopg 3.3.6/LGPL、python-dotenv 1.2.4/BSD-3-Clause）。参考 [Alembic 指定版本升级](https://alembic.sqlalchemy.org/en/latest/tutorial.html)、[PostgreSQL pg_dump](https://www.postgresql.org/docs/current/app-pgdump.html)。不调用现有通用安装器（会升级 head/触及服务），复用定时备份的“容器内 pg_dump”部署方式，但不直接调用其脚本（会轮转删除文件且不绑定本次校验的容器 ID）；保留两个旧工具的既有用途。
+- **Change Necessity**：当前干净发布目录没有独立、安全的 DB-only 操作入口；手工拼接安装器参数不能提供精确版本和备份先后保证。最小改动为一个人工脚本、一份专属测试及本节说明，无新模型、依赖或配置系统。
+- **Boundary**：默认只读检查，显式 `--apply` 后仍须在终端输入真实库名确认。只允许 `0069_video_publish_confirmation → 0070_monitor_health`；已经 0070 时核对表结构后成功退出。其他版本、多 head、版本/表结构不一致都停止，不猜测、修复或升级其余迁移。
+- **Safety**：从明确的私有 env 文件读取 DB URL，不执行 shell/source、不打印 URI/密码。拒绝模糊 libpq 路由/覆盖；备份、前后检查及 Alembic 使用同一显式连接身份。备份不删除旧文件、不覆盖已有文件；只有备份成功且 archive 可列举后才能迁移。生产 opt-in 仅传入经人工确认的 Alembic 子进程，agent 不设置、不执行它。错误脱敏，失败不自动重试、stamp、恢复或重启。
+- **TDD Route**：mode=auto，decision=strict，authority=本轮风险选择（人工生产迁移/权限/持久化入口）。先以可运行无操作骨架取得真实行为 RED，再实现；缺模块或 collection 失败不算 RED。覆盖 dry-run、确认取消、错版本/多 head/错表、备份失败、迁移失败、重复执行、连接同源及错误不泄露敏感信息。
+- **Verification**：只经官方 isolated runner，使用现有私有 0070 模板 clone-only，不 refresh/stamp，不选 archived/all/coverage。用 mocks 验证操作顺序和子进程，用独占 clone 只读验证已 0070 的真实表结构；父级完成 narrow + baseline、源码审查和精确 master 验证。应用测试不等于真实生产备份/恢复或生产迁移验证。
+- **Docker 修复 / Retirement**：用户实际执行时，宿主 pg_dump/pg_restore 16 与本机数据库容器 18 不兼容，备份停止且没有进入迁移；原 stderr 未保留，不能声称排除所有其他原因。用户明确要求复用现成容器：替换为唯一 Docker 备份路径，取消宿主 PG 客户端和临时 PGPASSFILE 依赖，不安装软件、不增加双后端或自动 fallback。只支持当前本机 `127.0.0.1:5432`，拒绝远程/上下文覆盖和容器不可见的 TLS 文件；固定本地 Unix daemon，检查运行中 `postgres` 的 IPv4 发布端口后固定完整容器 ID。导出与 archive 列举均使用此 ID，结束时重新核验此 ID/映射，变更即停止。备份数据流向宿主唯一 0600 文件，不写容器文件、不挂载目录、不创建容器。只把显式 PG 连接值传给短命 Docker/exec 进程环境，参数和日志不含密码；Docker 管理权限主体可观察该进程环境。Alembic 仍在宿主干净代码目录，经已有护栏执行，不能在操作期间并发迁移或替换数据库容器。
+- **Owner / Complexity**：父级唯一 writer/Git owner；只改本脚本、`tests/scripts/test_oneoff_migrate_monitor_health.py` 和本节。Docker 替换预算为格式化后脚本 340 行、测试 520 行，旧宿主分支和凭证文件路径必须删除；不加通用协调器、后台任务、第二套 DSN/迁移引擎、新模块或业务规则。TDD Route 继续 strict，先真实行为 RED（宿主客户端不可用时仍须使用容器、错误容器/端口/上下文不得继续）再最小实现，并覆盖同一 ID 的流式备份/核验/重新校验、失败脱敏和既有 0069/0070 人工工作流。若超预算、映射不符或生产版本不在允许集合，停止而非扩大支持面。
+
+人工执行命令（在脚本已进入干净发布目录后）：
+
+```bash
+# 只读检查，不迁移：
+/home/schan/tts-erp/.venv/bin/python /home/schan/tts-erp-releases/erp-master-01a16e3a/scripts/oneoff_migrate_monitor_health.py
+# 人工确认后：备份 → 仅升级 0070 → 核验；不重启服务：
+/home/schan/tts-erp/.venv/bin/python /home/schan/tts-erp-releases/erp-master-01a16e3a/scripts/oneoff_migrate_monitor_health.py --apply
+```
+
+默认配置文件为 `/home/schan/tts-erp/.env`，可显式指定 `--env-file`；默认备份目录为 `/home/schan/backups/tts_erp_monitor_health_0070`，可指定 `--backup-dir`。使用现有虚拟环境只是运行工具，代码与迁移从脚本所在的新发布目录加载；不把生产 `.env` 复制到发布目录；不再需要宿主 `/usr/lib/postgresql/18/bin` 或 PATH 覆盖。备份/核验只复用已经部署的本地容器工具；不安装依赖、不切换 systemd 工作目录。执行前确认 Docker 访问权限、容器映射和备份空间，避免并发人工迁移或容器变更；archive 可列举不等于已做真实恢复演练。迁移 0070 拒绝自动降级，失败保留备份供人工排查，不进行自动生产恢复。
