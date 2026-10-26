@@ -89,8 +89,8 @@ ssh schan@192.168.47.130 "bash /home/schan/tts-erp/restart.sh"
 ## 端口 + 公网
 
 - 内网：`http://127.0.0.1:9877`
-- 公网（已配 HTTPS + NAT 穿透）：`https://daqiang.nat100.top`（**已 strip 9877 端口**）
-- 对客户端 / 文档 / TikTok redirect URL 一律用 `https://daqiang.nat100.top/<path>`，不带端口
+- 公网（已配 HTTPS + NAT 穿透）：`https://chen.daqiangplatform.com/tts`（**已 strip 9877 端口**，保留 `/tts` 前缀）
+- 对客户端 / 文档 / TikTok redirect URL 一律用 `https://chen.daqiangplatform.com/tts/<path>`，不带端口
 - 本机 curl 测试仍可 `http://127.0.0.1:9877/...`（带端口）
 
 ## 健康检查
