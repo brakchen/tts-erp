@@ -22,7 +22,9 @@ from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.applications import Starlette
-from starlette.routing import Mount
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from scripts._test_db_connections import RunBinding, _process_state, load_run_binding
@@ -129,7 +131,38 @@ def create_app() -> ASGIApp:
             if not callable(lifespan):
                 raise ValueError(REFUSAL)
             validate_application(binding, get_engine(), get_session_factory())
-        mounted = Starlette(routes=[Mount("/tts", app=app), Mount("/", app=app)], lifespan=lifespan)
+        routes = []
+        if profile == _COLLABORATOR_PROFILE:
+            async def store_endpoint(request: Request) -> JSONResponse:
+                # Test-only outer routes; ERP middleware/auth/router are unchanged.
+                try:
+                    _actual, active_binding = current_binding()
+                    if (active_binding != binding or os.environ.get(COLLABORATORS) != _COLLABORATOR_PROFILE
+                            or getattr(app.state, "frontend_test_profile", None) != _COLLABORATOR_PROFILE
+                            or not secrets.compare_digest(request.headers.get(NONCE_HEADER, ""), nonce)):
+                        raise ValueError(REFUSAL)
+                    validate_application(binding, get_engine(), get_session_factory())
+                    store = app.state.frontend_test_collaborators.store
+                    if request.method == "POST":
+                        if request.url.query or await request.body() != b"{}":
+                            raise ValueError(REFUSAL)
+                        result = store.control(request.url.path.rsplit("/", 1)[-1])
+                    else:
+                        if request.url.query:
+                            raise ValueError(REFUSAL)
+                        result = {"profile": _COLLABORATOR_PROFILE, "origin": store.origin,
+                                  **store.observations()}
+                    return JSONResponse(result)
+                except (ValueError, TypeError, AttributeError, RuntimeError, SQLAlchemyError):
+                    return JSONResponse({"refused": True}, status_code=403)
+
+            for prefix in ("", "/tts"):
+                root = prefix + "/__test__/remaining-console-v1/store"
+                routes.append(Route(root, store_endpoint, methods=["GET"]))
+                for action in ("pause", "release"):
+                    routes.append(Route(root + "/" + action, store_endpoint, methods=["POST"],
+                                        name="TEST_store_" + action))
+        mounted = Starlette(routes=[*routes, Mount("/tts", app=app), Mount("/", app=app)], lifespan=lifespan)
         write_attestation(attestation, binding, nonce)
         return NonceApp(mounted, nonce)
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RuntimeError, SQLAlchemyError):
@@ -148,6 +181,7 @@ class VerifiedChild:
     attestation: Path
     binding: RunBinding
     process: subprocess.Popen[bytes] = field(repr=False, compare=False)
+    collaborator_profile: str | None = None
 
     def require_live(self) -> None:
         """Read exit status through the launch owner's retained Popen handle."""
@@ -210,7 +244,8 @@ def live_api_server(value: str, *, collaborators: bool = False) -> Iterator[Veri
             if parent != os.getpid():
                 raise ValueError(REFUSAL)
             child = VerifiedChild(base=f"http://127.0.0.1:{port}", port=port, pid=proc.pid,
-                                  start=start, nonce=nonce, attestation=path, binding=binding, process=proc)
+                                  start=start, nonce=nonce, attestation=path, binding=binding, process=proc,
+                                  collaborator_profile=_COLLABORATOR_PROFILE if collaborators else None)
             _wait_ready(child)
             yield child
         finally:

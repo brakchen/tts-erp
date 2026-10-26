@@ -10,6 +10,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
+from tests.api.test_frontend_pages import _bootstrap
+from tts_erp_v2.api.v2.ad_daily import _PAGE_HTML
+
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 _SELLER = "TEST_AD_DAILY_BROWSER"
@@ -89,6 +92,7 @@ def _auth(readonly_key: str) -> dict[str, str]:
 
 
 def test_ad_daily_page_returns_authenticated_shell(api_client, readonly_key):
+    """The real readonly route uses React; old DOM belongs only to its artifact."""
     response = api_client.get(
         "/v2/pages/ad-daily",
         headers=_auth(readonly_key),
@@ -96,19 +100,34 @@ def test_ad_daily_page_returns_authenticated_shell(api_client, readonly_key):
 
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "private, no-store"
     assert "广告日明细" in response.text
-    assert "../../static/css/ad-daily.css?v=" in response.text
-    assert "../../static/js/ad-daily.js?v=" in response.text
-    assert "plugin.ad_daily" in response.text
-    assert 'data-sort="day"' in response.text
-    assert 'class="mld-sort-button"' in response.text
-    assert response.text.count("class=\"mld-sort-button\"") == 9
-    assert 'id="sidebar"' in response.text
-    assert 'aria-label="主导航"' in response.text
-    assert 'href="../../v2/pages/ad-daily" class="nav-link active"' in response.text
-    assert "margin-left: var(--sidebar-width);" in response.text
-    assert 'href="/static/' not in response.text
-    assert 'src="/static/' not in response.text
+    data = _bootstrap(response.text)
+    assert data["pageId"] == "ad-daily"
+    assert data["roleCapabilities"] == {"readwrite": False, "admin": False}
+    assert readonly_key not in response.text
+    for legacy_asset in (
+        "bootstrap.min.css",
+        "static/css/ad-daily.css",
+        "static/js/ad-daily.js",
+    ):
+        assert legacy_asset not in response.text
+
+    # Shared manifest/prefix and fail-closed contracts: test_frontend_pages.py
+    # and test_frontend_remaining_pages.py. Active nine-column remote sorting:
+    # frontend/src/pages/ad-daily/{index,query}.test.* (not legacy DOM hooks).
+    # Sidebar markup/offset: test_pages.py::test_sidebar_*; active navigation
+    # and current-page semantics: frontend/src/app/AppShell.test.tsx.
+    # This retained inline artifact is NOT the response or a fallback renderer.
+    legacy_body = _PAGE_HTML
+    assert "../../static/css/ad-daily.css?v=" in legacy_body
+    assert "../../static/js/ad-daily.js?v=" in legacy_body
+    assert "plugin.ad_daily" in legacy_body
+    assert 'data-sort="day"' in legacy_body
+    assert 'class="mld-sort-button"' in legacy_body
+    assert legacy_body.count('class="mld-sort-button"') == 9
+    assert 'href="/static/' not in legacy_body
+    assert 'src="/static/' not in legacy_body
 
 
 def test_ad_daily_page_requires_auth(api_client):

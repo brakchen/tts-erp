@@ -562,38 +562,24 @@ def focused_spus_page() -> HTMLResponse:
 
 
 @router.get("/spu-profit-deterioration", response_class=HTMLResponse)
-def spu_profit_deterioration_page() -> HTMLResponse:
-  """SPU 利润劣化告警页（只读展示）：路线/权限/侧边栏同 SPU ROI 页。
-
-  HTML shell 只做骨架:标题/告警横幅/筛选/表格与卡片列表/分页/阈值设置抽屉;
-  数据与业务判断全部消费 GET /v2/analytics/spu-profit-deterioration(只读)。
-  服务端只发布已物化快照与 effective config,浏览器不计算 ROI/净利润/阈值。
-  行为在 static/js/spu-profit-deterioration.js,样式在
-  static/css/spu-profit-deterioration.css。
-  """
+def spu_profit_deterioration_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
+  """SPU 盈利变化的只读 7/3 日对比；日期、事实与可用性由既有 API 决定。"""
+  if "spu-profit-deterioration" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "spu-profit-deterioration")
   return _render_page(
     "spu-profit-deterioration.html", current_page="spu-profit-deterioration"
   )
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
-def manual_costs_page() -> HTMLResponse:
-  """Manual cost entry workbench (main-image mirror display).
-
-  The HTML shell is a small stub:
-  - links to ``/static/vendor/bootstrap.min.css`` (self-hosted, MIT)
-  - inline ``<style>`` block for the industrial-console personality
-  - links to ``/static/js/console.js`` (shop switcher, tabs, inline filing,
-    envelope unwrap for backend pagination, signature-counter population,
-    lightbox preview of the SPU's mirrored main image)
-  - the JS handles its own /v2/auth/me probe and redirects unauthenticated
-    callers to ``/v2/auth/login?next=/v2/pages/manual-costs``
-
-  2026-09-05 page-rework lane: the supplier-reference-photo upload flow
-  was removed. The 图片 column now shows the TikTok main image mirrored
-  into local MinIO (``image_url`` from the backend, fallback icon when the
-  mirror hasn't finished); cost currency is fixed to CNY.
-  """
+def manual_costs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
+  """Manual cost workbench; existing APIs own identities, currency and persistence."""
+  if "manual-costs" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "manual-costs")
   return _render_page("manual-costs.html", current_page="manual-costs")
 
 
@@ -653,12 +639,16 @@ def dashboard_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
 
 
 @router.get("/intercept-configs", response_class=HTMLResponse)
-def intercept_configs_page() -> HTMLResponse:
+def intercept_configs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """拦截配置管理页面。
 
   功能：配置列表、新增/编辑弹窗、批量操作、导入导出、筛选分页。
   行为在 static/js/intercept-configs.js。
   """
+  if "intercept-configs" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "intercept-configs")
   return _render_page("intercept-configs.html", current_page="intercept-configs")
 
 
@@ -714,32 +704,48 @@ def enum_map_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
 
 
 @router.get("/runtime-configs", response_class=HTMLResponse)
-def runtime_configs_page() -> HTMLResponse:
+def runtime_configs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Versioned runtime configuration and encrypted secret-reference console."""
+  if "runtime-configs" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "runtime-configs")
   return _render_page("runtime-configs.html", current_page="runtime-configs")
 
 
 @router.get(
   "/sync-jobs", response_class=HTMLResponse, dependencies=[Depends(_require_readwrite)]
 )
-def sync_jobs_page() -> HTMLResponse:
+def sync_jobs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """定时任务管理页：启停周期调度，或手动触发系统/店铺级任务。"""
+  if "sync-jobs" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "sync-jobs")
   return _render_page("sync-jobs.html", current_page="sync-jobs")
 
 
 @router.get("/video-publish", response_class=HTMLResponse)
-def video_publish_page() -> HTMLResponse:
+def video_publish_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Serial TikTok video publishing workbench."""
+  if "video-publish" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "video-publish")
   return _render_page("video-publish.html", current_page="video-publish")
 
 
 @router.get("/users", response_class=HTMLResponse)
-def users_page() -> HTMLResponse:
+def users_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """用户管理（设计 §9）：用户 + 角色权限两页签。
 
   入口受 ``page:users`` 权限点控制（access 层按路由判定）；页面行为在
   static/js/users.js，数据 API 为 /v2/users* 与 /v2/roles*。
   """
+  if "users" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "users")
   return _render_page("users.html", current_page="users")
 
 

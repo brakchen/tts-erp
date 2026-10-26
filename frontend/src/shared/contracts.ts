@@ -17,6 +17,8 @@ export interface FrontendBootstrap {
   pageId: string;
   navigation: NavigationItem[];
   releaseId: string;
+  /** Anonymous login only: server-validated, same-origin, mount-prefixed next path. */
+  loginNextPath?: string;
   /** Backend role-gate hints only; APIs remain authoritative for every command. */
   roleCapabilities?: RoleCapabilities;
 }

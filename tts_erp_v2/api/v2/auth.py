@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import html as _html
 import logging
+import re
 import sys
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -31,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from tts_erp_v2.accounts import service
 from tts_erp_v2.accounts.passwords import PasswordPolicyError
+from tts_erp_v2.api.v2 import frontend_pages
 from tts_erp_v2.middleware import session_auth
 from tts_erp_v2.middleware.access_log import _key_prefix
 
@@ -79,9 +82,21 @@ def _valid_next(raw: str | None) -> str:
   """Open-redirect guard: only same-origin absolute paths are allowed."""
   if not raw:
     return DEFAULT_NEXT
-  if raw.startswith("/") and not raw.startswith("//") and "\\" not in raw:
-    return raw
-  return DEFAULT_NEXT
+  if not raw.startswith("/") or raw.startswith("//") or "\\" in raw:
+    return DEFAULT_NEXT
+  # Match the existing shared pathFor boundary; do not normalize destinations.
+  path = raw.split("?", 1)[0].split("#", 1)[0]
+  if re.search(r"%(?![0-9a-fA-F]{2})", path):
+    return DEFAULT_NEXT
+  try:
+    decoded = unquote(path, errors="strict")
+  except UnicodeError:
+    return DEFAULT_NEXT
+  if (decoded.startswith("//") or "\\" in decoded
+      or re.search(r"[\x00-\x1f\x7f]", decoded)
+      or any(segment in {".", ".."} for segment in decoded.split("/"))):
+    return DEFAULT_NEXT
+  return raw
 
 
 def _client_bucket(request: Request) -> str:
@@ -102,7 +117,7 @@ def login_page(request: Request) -> HTMLResponse:
   raw_next = _valid_next(request.query_params.get("next"))
   # root_path (set once from TTS_ERP_EXTERNAL_PREFIX in app.py) is the
   # single source of truth for the external mount prefix.
-  prefix = request.scope.get("root_path", "")
+  prefix = request.scope.get("root_path", "").rstrip("/")
   # Middleware redirects keep ``next`` route-relative, but page JS from older
   # deployments may already include root_path (for example /tts/v2/pages/...).
   # Prefix idempotently so either caller lands on exactly one external prefix;
@@ -112,6 +127,8 @@ def login_page(request: Request) -> HTMLResponse:
     raw_next == prefix or raw_next.startswith(f"{prefix}/")
   )
   next_url = raw_next if already_prefixed else f"{prefix}{raw_next}"
+  if "login" in frontend_pages.MIGRATED_PAGE_IDS:
+    return frontend_pages.render_frontend_page(request, "login", login_next_path=next_url)
   return HTMLResponse(_LOGIN_HTML.replace("__NEXT__", _html.escape(next_url)))
 
 
@@ -128,6 +145,7 @@ def login(body: LoginBody, request: Request) -> Response:
     )
     return JSONResponse(
       status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+      headers={"Retry-After": str(retry_after)},
       content={
         "detail": "too many login attempts",
         "retry_after_s": retry_after,

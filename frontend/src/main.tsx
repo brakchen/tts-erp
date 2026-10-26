@@ -29,19 +29,20 @@ const mount = document.getElementById('frontend-root') ?? document.body.appendCh
 const root = createRoot(mount);
 try {
   const bootstrap = readBootstrap();
-  const title = bootstrap.navigation.find((item) => item.id === bootstrap.pageId)?.label;
+  const publicLogin = bootstrap.pageId === 'login';
+  const title = publicLogin ? '登录' : bootstrap.navigation.find((item) => item.id === bootstrap.pageId)?.label;
   if (!title) throw new Error('当前页面不在服务端导航目录中');
   const Page = lazy(pageLoader(bootstrap.pageId));
   let redirecting = false;
   const disposeUnauthorized = setUnauthorizedHandler(() => {
-    if (redirecting) return;
+    if (publicLogin || redirecting) return;
     redirecting = true;
     const next = encodeURIComponent(window.location.pathname + window.location.search);
     window.location.assign(pathFor(bootstrap.rootPath, `/v2/auth/login?next=${next}`));
   });
   import.meta.hot?.dispose(() => { disposeUnauthorized(); root.unmount(); });
   document.title = `${title} · tts-erp`;
-  root.render(<RenderBoundary><AppShell bootstrap={bootstrap} title={title} actions={<SessionActions rootPath={bootstrap.rootPath} />}>
+  root.render(<RenderBoundary><AppShell bootstrap={bootstrap} title={title} actions={publicLogin ? undefined : <SessionActions rootPath={bootstrap.rootPath} />}>
     <Suspense fallback={<div role="status" className="flex items-center gap-3"><Spinner />加载页面…</div>}>
       <Page bootstrap={bootstrap} />
     </Suspense>

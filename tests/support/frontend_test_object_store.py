@@ -13,7 +13,7 @@ import secrets
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import RLock, Thread
+from threading import Event, RLock, Thread
 from types import TracebackType
 from typing import Self
 from urllib.parse import urlsplit
@@ -35,6 +35,12 @@ class ControlledObjectStore:
         self._objects: dict[str, dict] = {}
         self._server: ThreadingHTTPServer | None = None
         self._thread: Thread | None = None
+        self._release = Event()
+        self._release.set()
+        self._pause_next = False
+        self._observations = {"optionsCount": 0, "putCount": 0, "completePuts": 0,
+                              "abortedPuts": 0, "bytesReceived": 0, "paused": False,
+                              "credentialsReceived": False, "lastSize": 0, "lastSha256": ""}
 
     def __enter__(self) -> Self:
         store = self
@@ -70,11 +76,14 @@ class ControlledObjectStore:
                                 "Authorization",
                                 "X-API-Key",
                                 "X-Requested-With",
+                                "X-CSRF-Token",
                             )
                         )
                     )
 
             def do_OPTIONS(self) -> None:
+                with store._lock:
+                    store._observations["optionsCount"] += 1
                 requested = {
                     part.strip().lower()
                     for part in self.headers.get(
@@ -99,6 +108,11 @@ class ControlledObjectStore:
                 self.end_headers()
 
             def do_PUT(self) -> None:
+                with store._lock:
+                    store._observations["putCount"] += 1
+                    store._observations["credentialsReceived"] |= any(
+                        self.headers.get(key) is not None for key in
+                        ("Cookie", "Authorization", "X-API-Key", "X-Requested-With", "X-CSRF-Token"))
                 if not self.permitted():
                     self.answer(403)
                     return
@@ -114,13 +128,35 @@ class ControlledObjectStore:
                     self.answer(415)
                     return
                 try:
-                    body = self.rfile.read(size)
-                    if len(body) != size:
-                        self.answer(400)
-                        return
-                    digest = hashlib.sha256(body).hexdigest()
+                    received = 0
+                    hasher = hashlib.sha256()
+                    with store._lock:
+                        pause = store._pause_next
+                        store._pause_next = False
+                    while received < size:
+                        chunk = self.rfile.read(min(65536, size - received))
+                        if not chunk:
+                            with store._lock:
+                                store._observations["abortedPuts"] += 1
+                            self.close_connection = True
+                            return
+                        received += len(chunk)
+                        hasher.update(chunk)
+                        with store._lock:
+                            store._observations["bytesReceived"] += len(chunk)
+                        if pause:
+                            with store._lock:
+                                store._observations["paused"] = True
+                            store._release.wait(timeout=8)
+                            with store._lock:
+                                store._observations["paused"] = False
+                            pause = False
+                    digest = hasher.hexdigest()
                     with store._lock:
                         key = store._tickets[self.path]
+                        store._observations["completePuts"] += 1
+                        store._observations["lastSize"] = size
+                        store._observations["lastSha256"] = digest
                         store._objects[key] = {
                             "size": size,
                             "etag": digest[:32],
@@ -130,6 +166,7 @@ class ControlledObjectStore:
                         }
                     self.answer(200)
                 except (OSError, KeyError):
+                    # A read timeout is not evidence of browser cancellation.
                     self.close_connection = True
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Upload)
@@ -148,6 +185,7 @@ class ControlledObjectStore:
         value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        self._release.set()
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
@@ -158,6 +196,24 @@ class ControlledObjectStore:
             self._objects.clear()
             self._tickets.clear()
             self._origins.clear()
+
+    def observations(self) -> dict:
+        self.check_available()
+        with self._lock:
+            return dict(self._observations)
+
+    def control(self, action: str) -> dict:
+        self.check_available()
+        with self._lock:
+            if action == "pause" and not self._pause_next and not self._observations["paused"]:
+                self._pause_next = True
+                self._release.clear()
+            elif action == "release":
+                self._pause_next = False
+                self._release.set()
+            else:
+                raise ValueError("TEST_UPLOAD_CONTROL_REFUSED")
+        return self.observations()
 
     @property
     def origin(self) -> str:

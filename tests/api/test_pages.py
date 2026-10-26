@@ -31,10 +31,8 @@ from tts_erp_v2.accounts.pages import (
 from tts_erp_v2.api.v2.pages import (
     _SIDEBAR_CSS,
     _SIDEBAR_TOGGLE_JS,
+    _render_page,
     _sidebar_html,
-    intercept_configs_page,
-    runtime_configs_page,
-    sync_jobs_page,
 )
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -93,7 +91,8 @@ def test_sidebar_css_is_injected_after_page_styles():
     has to come after every ``<link rel="stylesheet">``. A page-level
     ``margin`` must not override the sidebar offset.
     """
-    body = bytes(intercept_configs_page().body).decode()
+    # Retained legacy assets still support the not-yet-replaced runtime.
+    body = bytes(_render_page("intercept-configs.html", current_page="intercept-configs").body).decode()
     sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
 
     stylesheet_links = [m.start() for m in re.finditer(r'<link rel="stylesheet"', body)]
@@ -108,12 +107,10 @@ def test_pages_share_the_design_token_stylesheet():
     ``tokens.css`` is the single :root source and ``common.css`` the shared
     component layer; both must load before any page-specific stylesheet.
     """
-    for rendered in (
-        intercept_configs_page(),
-        runtime_configs_page(),
-        sync_jobs_page(),
-    ):
-        body = bytes(rendered.body).decode()
+    # Retained legacy templates remain coherent until same-version runtime
+    # activation/retirement. Migrated routes are tested through their bootstrap.
+    for page_id in ("intercept-configs", "runtime-configs", "sync-jobs"):
+        body = bytes(_render_page(f"{page_id}.html", current_page=page_id).body).decode()
         tokens_at = body.index("static/css/tokens.css")
         common_at = body.index("static/css/common.css")
 
@@ -125,8 +122,8 @@ def test_pages_share_the_design_token_stylesheet():
 
 def test_sidebar_css_is_injected_for_external_stylesheet_pages():
     """Pages with only linked CSS still need the shared responsive sidebar CSS."""
-    for rendered in (runtime_configs_page(), sync_jobs_page()):
-        body = bytes(rendered.body).decode()
+    for page_id in ("runtime-configs", "sync-jobs"):
+        body = bytes(_render_page(f"{page_id}.html", current_page=page_id).body).decode()
         sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
 
         assert "<style>" in body
@@ -143,7 +140,7 @@ def test_sidebar_tokens_fall_back_on_pages_with_a_different_theme_vocabulary():
     ``tokens.css``, but the sidebar keeps its ``var(--paper, var(--bg, …))``
     fallback chain so a page that opts out of the shared layer still renders.
     """
-    body = bytes(intercept_configs_page().body).decode()
+    body = bytes(_render_page("intercept-configs.html", current_page="intercept-configs").body).decode()
 
     assert "--sidebar-paper-deep: var(--paper-deep, var(--card, #EAE3D2));" in body
     assert "--sidebar-ink: var(--ink, var(--text, #1B1814));" in body
@@ -181,15 +178,20 @@ def test_dashboard_links_to_runtime_config_console(api_client, readonly_key):
     assert "即将上线" not in body
 
 
-def test_runtime_config_page_links_its_owned_assets():
-    body = bytes(runtime_configs_page().body).decode()
-
+def test_runtime_config_page_links_its_owned_assets(api_client, readwrite_key):
+    response = api_client.get(
+        "/v2/pages/runtime-configs", headers={"X-API-Key": readwrite_key}
+    )
+    assert response.status_code == 200
+    body = response.text
+    assert _bootstrap(body)["pageId"] == "runtime-configs"
     assert "运行配置" in body
-    # The shared mobile sidebar uses Bootstrap display/position utilities.
-    assert "../../static/vendor/bootstrap.min.css" in body
-    assert "../../static/css/runtime-configs.css?v=" in body
-    assert "../../static/js/runtime-configs.js?v=" in body
-    assert 'href="../../v2/pages/runtime-configs"' in body
+    assert '<script type="module"' in body
+    assert "frontend-root" in body
+    assert "static/js/runtime-configs.js" not in body
+    assert "static/css/runtime-configs.css" not in body
+    assert "bootstrap.min.css" not in body
+    assert response.headers["cache-control"] == "private, no-store"
 
 
 def test_runtime_config_page_requires_readwrite_operator(
@@ -211,14 +213,6 @@ def test_runtime_config_page_requires_readwrite_operator(
 
 
 def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key, readwrite_key):
-    body = bytes(sync_jobs_page().body).decode()
-
-    assert "定时任务管理" in body
-    assert "../../static/css/sync-jobs.css?v=" in body
-    assert "../../static/js/sync-jobs.js?v=" in body
-    assert 'href="../../v2/pages/sync-jobs"' in body
-    assert 'title="定时任务" aria-current="page"' in body
-
     readonly_response = api_client.get(
         "/v2/pages/sync-jobs",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -231,29 +225,46 @@ def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key, 
     )
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/html")
+    data = _bootstrap(response.text)
+    assert data["pageId"] == "sync-jobs"
+    assert any(page["id"] == "sync-jobs" for page in data["navigation"])
+    assert data["roleCapabilities"] == {"readwrite": True, "admin": False}
+    assert "static/js/sync-jobs.js" not in response.text
+    assert response.headers["cache-control"] == "private, no-store"
 
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
-    """GET the page → 200 text/html shell linking the static assets."""
+    """GET stays readonly React HTML; old asset checks describe only the artifact."""
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("text/html"), r.headers
+    assert r.headers["cache-control"] == "private, no-store"
     body = r.text
-    # The page is a shell; endpoint URLs and the grid DOM live in
-    # /static/js/console.js (see test_manual_costs_page_v2.py).
-    # Asset paths are RELATIVE so the page works both on :9877 directly
-    # and behind the NGINX /tts prefix (2026-08-31: absolute /static/...
-    # links 404'd publicly — the unstyled page looked broken).
-    assert "../../static/vendor/bootstrap.min.css" in body
-    assert "../../static/js/console.js" in body
-    assert 'href="/static/' not in body
-    assert 'src="/static/' not in body
-    # Token-paste UI must stay gone.
+    data = _bootstrap(body)
+    assert data["pageId"] == "manual-costs"
+    assert data["roleCapabilities"] == {"readwrite": False, "admin": False}
+    assert readonly_key not in body
+    assert "bootstrap.min.css" not in body
+    assert "static/js/console.js" not in body
+    # Token-paste UI must stay gone from the actual HTTP document.
     assert "API token" not in body
     assert "mc_token" not in body
+
+    # Active interactions: manual-costs/{index,legacy-compat}.test.tsx.
+    # Shared manifest/prefix and fail-closed policy: test_frontend_pages.py
+    # and test_frontend_remaining_pages.py, not legacy relative-URL rules.
+    # Match test_manual_costs_page_v2.py's retained-artifact owner; never
+    # reroute the real HTTP request or re-enable the old console.
+    legacy_body = bytes(
+        _render_page("manual-costs.html", current_page="manual-costs").body
+    ).decode("utf-8")
+    assert "../../static/vendor/bootstrap.min.css" in legacy_body
+    assert "../../static/js/console.js" in legacy_body
+    assert 'href="/static/' not in legacy_body
+    assert 'src="/static/' not in legacy_body
 
 
 def test_manual_costs_page_requires_some_auth(api_client):
@@ -298,7 +309,7 @@ def test_shops_page_requires_some_auth(api_client):
 
 
 def test_spu_profit_deterioration_page_shell_and_sidebar(api_client, readonly_key):
-    """告警页是只读 HTML shell：路由、侧边栏入口、抽屉与外链资产齐备。"""
+    """The existing readonly page now uses one bootstrap; React owns its controls."""
     r = api_client.get(
         "/v2/pages/spu-profit-deterioration",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -306,31 +317,18 @@ def test_spu_profit_deterioration_page_shell_and_sidebar(api_client, readonly_ke
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("text/html")
     body = r.text
-    assert "利润劣化告警" in body
-    assert "../../static/css/spu-profit-deterioration.css?v=" in body
-    assert "/static/js/spu-profit-deterioration.js?v=" in body
-    assert 'href="../../v2/pages/spu-profit-deterioration"' in body
-    assert 'title="利润劣化告警" aria-current="page"' in body
-    # PRD v3: read-only comparison, not an alert/configuration workflow.
-    assert 'id="btn-settings"' not in body
-    assert 'id="settings-drawer"' not in body
-    assert 'id="filter-severity"' not in body
-    assert 'id="alert-banner"' in body
-    assert 'id="alert-status" role="status" aria-live="polite"' in body
-    assert 'id="filter-window-days"' in body
-    # owner 2026-10-07：样本筛选下拉框已从页面移除（业务用户无法理解该概念），
-    # 默认只展示可判定行（sufficient）；URL ?sample= 保留为排查入口。
-    assert 'id="filter-sample"' not in body
-    assert 'id="alert-rows"' in body
-    assert 'id="alert-cards"' in body
-    assert 'id="filter-spu-ids"' in body
-    assert 'id="filter-state"' not in body
-    assert 'id="total-current-orders"' in body
-    assert 'id="total-previous-orders"' in body
-    assert 'id="alert-summary"' in body
-    assert 'id="alert-freshness" data-kind="loading"' in body
-    assert 'href="/static/' not in body
-    assert 'src="/static/' not in body
+    data = _bootstrap(body)
+    assert data["pageId"] == "spu-profit-deterioration"
+    assert data["roleCapabilities"] == {"readwrite": False, "admin": False}
+    entry = next(p for p in data["navigation"] if p["id"] == data["pageId"])
+    assert entry["label"] == "利润劣化告警"  # Existing page registry remains authoritative.
+    assert entry["href"] == "/v2/pages/spu-profit-deterioration"
+    assert 'id="frontend-root"' in body
+    assert '<script type="module"' in body
+    assert "static/js/spu-profit-deterioration.js" not in body
+    assert "static/css/spu-profit-deterioration.css" not in body
+    assert readonly_key not in body
+    assert r.headers["cache-control"] == "private, no-store"
 
 
 def test_spu_profit_deterioration_page_permission_gate(
@@ -373,18 +371,17 @@ def test_spu_profit_deterioration_page_permission_gate(
 def test_spu_profit_deterioration_page_only_offers_prd_comparison_windows(
     api_client, readonly_key
 ):
-    """AC-001/012: seven-day main reference, three-day auxiliary, no alerts."""
-    body = api_client.get(
-        "/v2/pages/spu-profit-deterioration",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    ).text
-    assert set(re.findall(r'data-window-days="([^"]*)"', body)) == {"3", "7"}
-    assert 'id="filter-state"' not in body
-    assert 'data-state-values=' not in body
-    assert 'id="filter-severity"' not in body
-    assert 'id="settings-drawer"' not in body
-    assert "无单但有广告费" in body
-    assert "CNY" in body
+    """AC-001/012: server still rejects other windows; actual controls live in React tests."""
+    for window in (1, 4, 14, 21):
+        response = api_client.get(
+            "/v2/analytics/spu-profit-deterioration",
+            params={"shop_pk": 1, "window_days": window},
+            headers={"Authorization": f"Bearer {readonly_key}"},
+        )
+        assert response.status_code == 422, response.text
+        assert "window_days" in str(response.json()["detail"])
+    # The React component suite exercises both supported options and the absence
+    # of retired state/severity/settings controls; SSR no longer renders them.
 
 
 def test_spu_profit_deterioration_page_requires_some_auth(api_client):

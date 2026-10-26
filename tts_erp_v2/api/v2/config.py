@@ -339,6 +339,7 @@ def create_runtime_config_item(
     sess: Session = Depends(get_session),
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     existing = sess.get(RuntimeConfigItem, body.config_key)
     if existing is not None:
         detail = (
@@ -400,6 +401,7 @@ def save_runtime_config_draft(
     sess: Session = Depends(get_session),
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(
@@ -426,6 +428,7 @@ def publish_runtime_config_item(
     sess: Session = Depends(get_session),
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(
@@ -485,6 +488,7 @@ def rollback_runtime_config_item(
 ) -> dict[str, Any]:
     """Republish a historical revision as a higher immutable version."""
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     item = _active_runtime_item_or_409(sess, config_key)
     if body.expected_draft_version != item.draft_version:
         raise HTTPException(
@@ -529,6 +533,7 @@ def retire_runtime_config_item(
 ) -> dict[str, str]:
     """Retire a key without deleting its immutable audit history."""
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     item = locked_item(sess, config_key)
     if item is None:
         raise HTTPException(status_code=404, detail="runtime config not found")
@@ -546,6 +551,7 @@ def restore_runtime_config_item(
     sess: Session = Depends(get_session),
 ) -> dict[str, str]:
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     item = locked_item(sess, config_key)
     if item is None:
         raise HTTPException(status_code=404, detail="runtime config not found")
@@ -642,6 +648,7 @@ def save_runtime_config_secret(
     sess: Session = Depends(get_session),
 ) -> dict[str, str]:
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     _validate_secret_name(name)
     try:
         row = upsert_secret(sess, name=name, value=body.value)
@@ -663,6 +670,7 @@ def retire_runtime_config_secret(
 ) -> dict[str, str]:
     """Retire an unreferenced secret; history remains encrypted and intact."""
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     _validate_secret_name(name)
     row = sess.execute(
         select(RuntimeConfigSecret)
@@ -689,6 +697,7 @@ def restore_runtime_config_secret(
     sess: Session = Depends(get_session),
 ) -> dict[str, str]:
     require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
     _validate_secret_name(name)
     row = sess.execute(
         select(RuntimeConfigSecret)

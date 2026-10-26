@@ -13,12 +13,13 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.api.v2 import frontend_pages
 from tts_erp_v2.api.v2.pages import _sidebar as _shared_sidebar
 from tts_erp_v2.api.v2.pages import _sidebar_css as _shared_sidebar_css
 
@@ -454,8 +455,10 @@ _PAGE_HTML = """<!doctype html>
 
 
 @router.get("/v2/pages/ad-daily", response_class=HTMLResponse)
-def ad_daily_page() -> HTMLResponse:
-    """Render the authenticated advertising-detail browser shell."""
+def ad_daily_page(request: Request) -> HTMLResponse:
+    """Render after the existing readonly/page-permission gates."""
+    if "ad-daily" in frontend_pages.MIGRATED_PAGE_IDS:
+        return frontend_pages.render_frontend_page(request, "ad-daily")
     html = (
         _PAGE_HTML.replace("__CSS_VERSION__", _asset_version("css/ad-daily.css"))
         .replace("__TOKENS_VERSION__", _asset_version("css/tokens.css"))

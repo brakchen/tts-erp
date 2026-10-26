@@ -51,6 +51,17 @@ describe('AppShell', () => {
     viewport(1440);
   });
 
+  it.each([375, 1440, 2560])('shares the header and main without empty business-navigation controls at %ipx', (width) => {
+    viewport(width);
+    render(<AppShell bootstrap={{ ...bootstrap, pageId: 'login', navigation: [], roleCapabilities: { readwrite: false, admin: false }, loginNextPath: '/tts/v2/pages/dashboard' }} title="登录"><p>TEST_public_login</p></AppShell>);
+    expect(screen.getAllByRole('banner')).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1, name: '登录' })).toBeVisible();
+    expect(within(screen.getByRole('main')).getByText('TEST_public_login')).toBeVisible();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /侧边栏|主导航/ })).not.toBeInTheDocument();
+  });
+
   it('renders only server navigation with real prefixed hrefs, long labels and current-page semantics', () => {
     renderShell();
     const navigation = screen.getByRole('navigation', { name: '主导航' });

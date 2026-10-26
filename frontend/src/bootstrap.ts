@@ -31,5 +31,13 @@ export function readBootstrap(): FrontendBootstrap {
   if (isRecord(hints) && typeof hints.readwrite === 'boolean' && typeof hints.admin === 'boolean') {
     bootstrap.roleCapabilities = { readwrite: hints.readwrite, admin: hints.admin };
   }
+  if (value.pageId === 'login') {
+    const next = value.loginNextPath;
+    if (!nonempty(next) || pathFor(value.rootPath, next) !== next || navigation.length
+      || !isRecord(hints) || hints.readwrite !== false || hints.admin !== false) {
+      throw new Error('匿名登录初始化数据无效');
+    }
+    bootstrap.loginNextPath = next;
+  }
   return bootstrap;
 }
