@@ -105,3 +105,14 @@ bash scripts/test_isolated.sh --template-db tts_erp_test_monitor_health_template
 ```
 
 此组合必须保留父候选最新视频隐私 helper；旧 fence 分支的视频副本、未接纳的观察器或诊断脚本不随支持层整分支带入。不得把历史不同组合的通过数直接当作新组合结果。缺少或不匹配模板即停止；不 refresh/stamp、手工 DROP 或改用共享/生产库。
+
+## P2 命令事实的自有生命周期
+
+`tests/browser/test_frontend_p2_live.py::owned_command_facts` 是店铺／枚举命令事实的唯一资源生命周期，错误恢复模块直接复用它；不另建 fixture、连接、认证或许可 owner。上下文必须嵌在原 live child 内，首个可提交命令之前声明意图并经原 `independent`／checked Session 证明精确身份先前不存在。
+
+- finalizer 按意图恢复自有 Shop、TikTokAppCredential、OAuthState、EnumMap 的必要身份元数据；验证全部行及外部店铺的 service 引用后，才在一个事务内按恢复的 PK 与精确意图删除自有行。未知平台、阶段、引用、非空 shop `credential_id` 或不符的 OAuth／枚举元数据一律拒绝，不删除外来依赖来强迫成功。
+- 正常退出、空／部分提交及调用方尚未学到 PK 的故障均走同一 finalizer。删除提交后退出该会话，再用**新的原 `independent` 会话**核对已提交不存在，期间原 child 仍存活；不能用同一未提交事务自证清理。原异常不吞掉，清理失败仍须报告。
+- 注册／更新命令只拥有 dedicated App 与 Shop；authorize 只创建 State，callback 不在允许路径内。通用 `integration.credentials` 不属于此 owner，不读取、删除或解密。先前 App 缺失与闭合的独占测试命令路径允许恢复该缺失状态，不声称已证明任意并发写入安全或完整外键目录。
+- `live`／`errors` 仅允许原命令真实产生的有限中间名称、枚举标签和顺序，包含错误恢复的 `TEST_revisit`；不同 enum type 的同值行不被接管。原 canary **不创建店铺**。采购的全可见店铺前置保护继续保留，不过滤响应或改变默认选店。
+
+审定 Green 源码检查点 `1bbad95fcf85e42fdca05ba2fa1ead38c0a13893` 的一次原生窄集 **11 passed**，随后独立登记的一次正常 baseline **3149 passed、14 skipped、1 xfail，零 failure/error、零新增稳定失败**。两次运行各自确认 977 个 tracked regular files 字节不变、自有 clone catalog 不存在、现存私有模板身份/head 保持 `0070_monitor_health`。这是该生产者生命周期和当前采购正例的回归证据，不扩大 N1 准入或宣告完整 Native／媒体／运行验收。
