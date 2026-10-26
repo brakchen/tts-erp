@@ -56,18 +56,23 @@
     </section>
     <p id="filter-spu-feedback" role="status" aria-live="polite"></p>
     <p id="date-limit-note">最新可用日期由后台确认；刷新只重新读取，不触发同步。</p>
-    <p id="filter-echo">等待确认已应用范围与两段日期。</p>
-    <p id="window-note">7 天覆盖完整星期，但不保证数据充分。3 天仅观察近期变化。</p>
-    <section id="alert-banner" aria-label="数据说明">
-      <p>无单但有广告费的记录保留并重点标注。ROI 可计算的正数、零和负数均正常展示；不可计算时显示原因。</p>
-      <div id="comparison-warnings"></div>
-    </section>
     <section class="comparison-totals" aria-label="完整分析范围统计">
       <div>分析 SPU 数<strong id="total-spus">—</strong></div>
       <div>本期订单数<strong id="total-current-orders">—</strong></div>
       <div>上期订单数<strong id="total-previous-orders">—</strong></div>
     </section>
     <p id="totals-note">完整范围去重统计由后台提供，不是行级订单相加。</p>
+    <section class="comparison-context" aria-label="已应用对比范围">
+      <p id="filter-echo">等待确认已应用范围与两段日期。</p>
+      <p id="window-note">7 天覆盖完整星期，但不保证数据充分。3 天仅观察近期变化。</p>
+    </section>
+    <section id="alert-banner" aria-label="数据说明">
+      <p>无单但有广告费的记录保留并重点标注。ROI 可计算的正数、零和负数均正常展示；不可计算时显示原因。</p>
+      <details>
+        <summary>数据说明与限制（展开查看）</summary>
+        <div id="comparison-warnings"></div>
+      </details>
+    </section>
     <section id="alert-status" role="status" aria-live="polite" data-kind="loading">正在加载对比…</section>
     <section id="alert-summary" hidden aria-labelledby="alert-summary-title">
       <h2 id="alert-summary-title" tabindex="-1">SPU 明细</h2>
