@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -133,48 +134,110 @@ def _child_env() -> dict[str, str]:
     return {k: os.environ[k] for k in keys if k in os.environ}
 
 
+def _docker_client(url: URL, reference: str = "postgres") -> tuple[list[str], str]:
+    if (
+        url.host != "127.0.0.1"
+        or url.port != 5432
+        or set(url.query) - {"sslmode", "connect_timeout"}
+    ):
+        raise OperatorError(
+            "容器备份只支持已核验的本机 127.0.0.1:5432，不支持 TLS 文件映射。"
+        )
+    if os.environ.get("DOCKER_HOST") or os.environ.get("DOCKER_CONTEXT"):
+        raise OperatorError("拒绝 Docker 远程/上下文覆盖；只允许本机 Unix daemon。")
+    docker = shutil.which("docker")
+    if not docker:
+        raise OperatorError("缺少 Docker 客户端；不会退回宿主机 PostgreSQL 工具。")
+    client = [docker, "--host", "unix:///var/run/docker.sock"]
+    fields = '{"id":{{json .Id}},"running":{{json .State.Running}},"ports":{{json .NetworkSettings.Ports}}}'
+    try:
+        result = subprocess.run(
+            client + ["inspect", "--type", "container", "--format", fields, reference],
+            env=_child_env(),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        info = json.loads(result.stdout)
+        cid = info["id"]
+        bindings = info["ports"].get("5432/tcp") or []
+        published = any(
+            b.get("HostIp") in {"127.0.0.1", "0.0.0.0"} and b.get("HostPort") == "5432"
+            for b in bindings
+        )
+        if (
+            not re.fullmatch(r"[0-9a-f]{64}", cid)
+            or info["running"] is not True
+            or not published
+        ):
+            raise ValueError
+        if reference != "postgres" and cid != reference:
+            raise ValueError
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        ValueError,
+    ):
+        raise OperatorError(
+            "容器身份/运行状态/本机端口校验失败，未执行迁移。"
+        ) from None
+    return client, cid
+
+
 def backup(url: URL, directory: Path) -> Path:
-    tools = {name: shutil.which(name) for name in ("pg_dump", "pg_restore")}
-    if not all(tools.values()):
-        raise OperatorError("缺少本机 pg_dump/pg_restore；不自动改用 Docker。")
+    client, cid = _docker_client(url)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(
         prefix="monitor-health-0070-", suffix=".dump", dir=directory
     )
     os.close(fd)
     destination = Path(name)
+    # Docker reads these named values from its short-lived client environment;
+    # no password/URI enters argv, files, metadata inspection output, or logs.
+    pg_env = {
+        "PGHOST": "127.0.0.1",
+        "PGPORT": "5432",
+        "PGDATABASE": str(url.database),
+        "PGUSER": str(url.username),
+        "PGPASSWORD": str(url.password),
+        "PGCONNECT_TIMEOUT": "10",
+    }
+    pg_env.update({SSL_ENV[k]: str(v) for k, v in url.query.items()})
+    env = _child_env() | pg_env
+    forward = [part for key in pg_env for part in ("--env", key)]
     try:
-        with tempfile.TemporaryDirectory(prefix="monitor-health-pgpass-") as temp:
-            passfile = Path(temp) / "pgpass"
-            fd = os.open(passfile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            fields = (url.host, str(url.port), url.database, url.username, url.password)
-            escaped = [str(v).replace("\\", "\\\\").replace(":", "\\:") for v in fields]
-            with os.fdopen(fd, "w") as stream:
-                stream.write(":".join(escaped) + "\n")
-            env = _child_env()
-            env.update(
-                PGHOST=str(url.host),
-                PGPORT=str(url.port),
-                PGDATABASE=str(url.database),
-                PGUSER=str(url.username),
-                PGPASSFILE=str(passfile),
-                PGCONNECT_TIMEOUT="10",
+        with destination.open("wb") as output:
+            cmd = client + ["exec", *forward, cid, "pg_dump"]
+            cmd += ["--format=custom", "--no-password"]
+            subprocess.run(
+                cmd,
+                env=env,
+                stdout=output,
+                stderr=subprocess.PIPE,
+                check=True,
+                timeout=1800,
             )
-            env.update({SSL_ENV[k]: str(v) for k, v in url.query.items()})
-            cmd = [
-                str(tools["pg_dump"]),
-                "--format=custom",
-                "--no-password",
-                "--file",
-                str(destination),
-            ]
-            subprocess.run(cmd, env=env, check=True, capture_output=True, timeout=1800)
-            if destination.stat().st_size == 0:
-                raise OperatorError("备份为空，未执行迁移。")
-            cmd = [str(tools["pg_restore"]), "--list", str(destination)]
-            subprocess.run(cmd, env=env, check=True, capture_output=True, timeout=60)
+        if destination.stat().st_size == 0:
+            raise OperatorError("备份为空，未执行迁移。")
+        with destination.open("rb") as archive:
+            cmd = client + ["exec", "-i", cid, "pg_restore", "--list"]
+            subprocess.run(
+                cmd,
+                env=_child_env(),
+                stdin=archive,
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+        _docker_client(url, cid)
     except (OSError, subprocess.SubprocessError, OperatorError):
-        raise OperatorError("备份/核验失败，未迁移；可能留有未完成 dump。") from None
+        raise OperatorError(
+            "容器备份/核验失败，未迁移；可能留有未完成 dump。"
+        ) from None
     return destination
 
 

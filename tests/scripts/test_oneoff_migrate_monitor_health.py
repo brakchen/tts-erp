@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import builtins
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -213,46 +214,130 @@ def test_upgrade_is_pinned_and_secrets_not_in_argv(monkeypatch):
     assert Path(options["cwd"]) == script.ROOT
 
 
-def test_backup_is_private_verified_and_does_not_rotate(tmp_path, monkeypatch):
-    old = tmp_path / "TEST_old.dump"
-    old.write_bytes(b"old")
+@pytest.fixture
+def docker_backend(monkeypatch):
     calls = []
-    password_files = []
-    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
+    state = {
+        "id": "a" * 64,
+        "running": True,
+        "ports": {"5432/tcp": [{"HostIp": "0.0.0.0", "HostPort": "5432"}]},
+        "fail": None,
+        "changed": False,
+    }
+
+    def which(name):
+        assert name == "docker", "must not require host PostgreSQL clients"
+        return "/usr/bin/docker"
 
     def command(argv, **kwargs):
         calls.append(argv)
-        assert "TEST_password" not in str(argv)
-        if Path(argv[0]).name == "pg_dump":
-            assert kwargs["env"]["PGDATABASE"] == URL_TEST.database
-            assert kwargs["env"]["PGHOST"] == URL_TEST.host
-            passfile = Path(kwargs["env"]["PGPASSFILE"])
-            password_files.append(passfile)
-            assert passfile.stat().st_mode & 0o777 == 0o600
-            assert "TEST_password" in passfile.read_text()
-            Path(argv[argv.index("--file") + 1]).write_bytes(b"PGDMP-TEST")
+        assert argv[:3] == ["/usr/bin/docker", "--host", "unix:///var/run/docker.sock"]
+        assert "TEST_password" not in str(argv) and "secret://" not in str(argv)
+        if "inspect" in argv:
+            data = {k: state[k] for k in ("id", "running", "ports")}
+            if state["changed"] and argv[-1] != "postgres":
+                data["running"] = False
+            return SimpleNamespace(returncode=0, stdout=json.dumps(data))
+        assert "exec" in argv and state["id"] in argv and "postgres" not in argv
+        tool = "pg_dump" if "pg_dump" in argv else "pg_restore"
+        if state["fail"] == tool:
+            raise subprocess.CalledProcessError(
+                1, argv, stderr="TEST_password secret://TEST_webhook"
+            )
+        if tool == "pg_dump":
+            env = kwargs["env"]
+            assert (
+                env["PGDATABASE"] == URL_TEST.database
+                and env["PGUSER"] == URL_TEST.username
+            )
+            assert env["PGHOST"] == "127.0.0.1" and env["PGPORT"] == "5432"
+            assert env["PGPASSWORD"] == "TEST_password" and "PGPASSFILE" not in env
+            assert ["--env", "PGPASSWORD"] == argv[
+                argv.index("PGPASSWORD") - 1 : argv.index("PGPASSWORD") + 1
+            ]
+            kwargs["stdout"].write(b"PGDMP-TEST")
+        else:
+            assert "-i" in argv and "--list" in argv
+            assert kwargs["stdin"].read() == b"PGDMP-TEST"
         return SimpleNamespace(returncode=0)
 
+    monkeypatch.setattr(shutil, "which", which)
     monkeypatch.setattr(subprocess, "run", command)
+    return state, calls
+
+
+def test_backup_uses_container_without_host_pg_and_preserves_old(
+    tmp_path, docker_backend
+):
+    state, calls = docker_backend
+    old = tmp_path / "TEST_old.dump"
+    old.write_bytes(b"old")
     path = script.backup(URL_TEST, tmp_path)
     assert path.stat().st_mode & 0o777 == 0o600
-    assert [Path(c[0]).name for c in calls] == ["pg_dump", "pg_restore"]
-    assert calls[1][1] == "--list" and old.read_bytes() == b"old"
-    assert all(not p.exists() for p in password_files)
+    assert path.read_bytes() == b"PGDMP-TEST" and old.read_bytes() == b"old"
+    assert [c[-1] for c in calls if "inspect" in c] == ["postgres", state["id"]]
+    assert (
+        sum("pg_dump" in c for c in calls) == sum("pg_restore" in c for c in calls) == 1
+    )
 
 
-def test_backup_error_is_sanitized(tmp_path, monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
-
-    def fail(argv, **kwargs):
-        raise subprocess.CalledProcessError(
-            1, argv, stderr="TEST_password secret://TEST_webhook"
-        )
-
-    monkeypatch.setattr(subprocess, "run", fail)
+@pytest.mark.parametrize("stage", ["pg_dump", "pg_restore"])
+def test_container_backup_error_is_sanitized(tmp_path, docker_backend, stage):
+    state, _ = docker_backend
+    state["fail"] = stage
     with pytest.raises(script.OperatorError) as exc:
         script.backup(URL_TEST, tmp_path)
     assert "TEST_password" not in str(exc.value) and "secret://" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["stopped", "bad_id", "wrong_port", "wrong_interface", "missing_port", "changed"],
+)
+def test_container_profile_mismatch_stops(tmp_path, docker_backend, case):
+    state, calls = docker_backend
+    if case == "stopped":
+        state["running"] = False
+    elif case == "bad_id":
+        state["id"] = "TEST-invalid"
+    elif case == "wrong_port":
+        state["ports"]["5432/tcp"][0]["HostPort"] = "6543"
+    elif case == "wrong_interface":
+        state["ports"]["5432/tcp"][0]["HostIp"] = "192.0.2.1"
+    elif case == "missing_port":
+        state["ports"] = {}
+    else:
+        state["changed"] = True
+    with pytest.raises(script.OperatorError):
+        script.backup(URL_TEST, tmp_path)
+    if case != "changed":
+        assert not any("pg_dump" in c for c in calls)
+
+
+@pytest.mark.parametrize("key", ["DOCKER_HOST", "DOCKER_CONTEXT"])
+def test_docker_context_overrides_are_refused(
+    tmp_path, docker_backend, monkeypatch, key
+):
+    _, calls = docker_backend
+    monkeypatch.setenv(key, "TEST_other")
+    with pytest.raises(script.OperatorError):
+        script.backup(URL_TEST, tmp_path)
+    assert not calls
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        URL_TEST.set(host="192.0.2.1"),
+        URL_TEST.set(port=6543),
+        URL_TEST.update_query_dict({"sslrootcert": "/TEST/ca.pem"}),
+    ],
+)
+def test_unverified_docker_target_is_refused(tmp_path, docker_backend, url):
+    _, calls = docker_backend
+    with pytest.raises(script.OperatorError):
+        script.backup(url, tmp_path)
+    assert not calls
 
 
 @pytest.fixture
