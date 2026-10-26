@@ -28,7 +28,7 @@ from tests.support.frontend_p2_canary import (
 )
 
 from tests.support.frontend_remaining_targets import (
-    REMAINING_PAGES, STORE_PATH, ManualTarget, TaskTarget, RemainingTargets, remaining_request,
+    REMAINING_PAGES, STORE_PATH, ManualTarget, TaskTarget, RemainingTargets, remaining_request, manual_pk_operand,
 )
 
 REFUSAL = "P2 browser request refused"
@@ -119,10 +119,13 @@ class BrowserFence:
                 if method == "POST" and path == "/v2/reporting/manual-costs":
                     if not isinstance(body, dict) or not isinstance(body.get("spu_id"), str):
                         raise ValueError(REFUSAL)
+                    operands = {key: manual_pk_operand(body[key]) for key in ("spu_pk", "shop_pk") if key in body}
+                    if any(value is None for value in operands.values()):
+                        raise ValueError(REFUSAL)
                     candidates = list(session.scalars(select(ChannelProduct).where(ChannelProduct.spu_id == body["spu_id"])))
                     # Each explicit operand restricts the same SQL row, not flat sets.
-                    candidates = [row for row in candidates if ("spu_pk" not in body or row.id == body["spu_pk"])
-                                  and ("shop_pk" not in body or row.shop_pk == body["shop_pk"])]
+                    candidates = [row for row in candidates if ("spu_pk" not in operands or row.id == operands["spu_pk"])
+                                  and ("shop_pk" not in operands or row.shop_pk == operands["shop_pk"])]
                     if not candidates or any(ManualTarget(row.id, row.shop_pk, row.spu_id) not in self._products for row in candidates):
                         raise ValueError(REFUSAL)
                 if method == "GET" and path in {"/v2/commerce/channel-products", "/v2/reporting/missing-cost-products", "/v2/reporting/manual-costs"}:

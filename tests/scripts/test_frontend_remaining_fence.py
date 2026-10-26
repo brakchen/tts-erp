@@ -564,3 +564,55 @@ def test_cold_manual_cost_canonical_wire_pk_strings(manual_owned):
     string_path = gate.check_request("POST", probe.child.base + path, wire_body)
     string_allowed = string_path == path
     assert string_allowed
+
+
+
+def test_manual_pk_operand_preserves_positive_bigint_values():
+    from tests.support.frontend_remaining_targets import manual_pk_operand
+
+    for value in (1, 9007199254740993, 2**63 - 1):
+        integer_result = manual_pk_operand(value)
+        string_result = manual_pk_operand(str(value))
+        assert type(integer_result) is int
+        assert type(string_result) is int
+        assert integer_result == value
+        assert string_result == value
+
+
+def test_manual_pk_operand_rejects_noncanonical_values():
+    from tests.support.frontend_remaining_targets import manual_pk_operand
+
+    class StringSubclass(str):
+        pass
+
+    invalid = (
+        None, True, False, 0, -1, 1.0, "", "0", "-1", "+1", "01",
+        " 1", "1 ", "1e3", "1.0", "١", "１", 2**63, str(2**63), "9" * 20,
+        StringSubclass("1"),
+    )
+    for value in invalid:
+        assert manual_pk_operand(value) is None
+
+
+def test_cold_manual_cost_pk_operand_negatives(manual_owned):
+    probe, marker, shops, products, _engine, _factory = manual_owned
+    gate = gate_for(probe, marker, shop_pks=frozenset(shops), product_pks=frozenset(products))
+    path = "/v2/reporting/manual-costs"
+    body = {"spu_id": marker + "_shared", "spu_pk": str(products[0]),
+            "shop_pk": str(shops[0]), "unit_cost": "1.0001", "currency": "USD"}
+    allowed_path = gate.check_request("POST", probe.child.base + path, body)
+    allowed = allowed_path == path
+    assert allowed
+    for key in ("spu_pk", "shop_pk"):
+        for value in (True, "01", "١", "1e3", str(2**63)):
+            with pytest.raises(ValueError):
+                gate.check_request("POST", probe.child.base + path, {**body, key: value})
+    rejected = (
+        {**body, "spu_pk": str(max(products) + 1000000)},
+        {**body, "shop_pk": str(max(shops) + 1000000)},
+        {**body, "shop_pk": str(shops[1])},
+        {**body, "spu_id": marker + "_other"},
+    )
+    for wire_body in rejected:
+        with pytest.raises(ValueError):
+            gate.check_request("POST", probe.child.base + path, wire_body)

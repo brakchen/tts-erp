@@ -59,6 +59,19 @@ class TaskTarget:
     stage: str
 
 
+
+def manual_pk_operand(value: object) -> int | None:
+    if type(value) is int:
+        return value if 0 < value <= 2**63 - 1 else None
+    if type(value) is not str:
+        return None
+    if not 1 <= len(value) <= 19 or not value.isascii():
+        return None
+    if re.fullmatch(r"[1-9][0-9]*", value) is None:
+        return None
+    result = int(value)
+    return result if result <= 2**63 - 1 else None
+
 def remaining_request(
     t: RemainingTargets,
     method: str,
@@ -143,7 +156,7 @@ def remaining_request(
             and cost >= 0
             and body["currency"] in ("USD", "VND", "CNY")
             and all(
-                type(body[key]) is int and body[key] > 0
+                manual_pk_operand(body[key]) is not None
                 for key in ("spu_pk", "shop_pk")
                 if key in body
             )
