@@ -70,7 +70,17 @@ SORT_KEYS = (
     "roi",
     "updated_at",
 )
-RETIRED_KEYS = {"severity", "state", "sample", "layer"}
+RETIRED_KEYS = {
+    "severity",
+    "state",
+    "sample",
+    "layer",
+    "sampleStatus",
+    "sample_status",
+    "confirmationStatus",
+    "confirmation_status",
+    "thresholds",
+}
 
 
 # --- independent SQL (fresh session, not the handler's rows) --------------
@@ -201,6 +211,7 @@ def _assert_server_order(
     seller_id: str,
 ) -> None:
     """Compare IDs to fresh SQL using the database's collation, not Python order."""
+    # Published contract: ad_daily._SORT_COLUMNS and its updated_at/id tiebreaks.
     columns = {
         "day": AdDaily.day,
         "shop": func.coalesce(ChannelAccount.account_name, AdDaily.seller_id),
@@ -459,7 +470,7 @@ def test_profit_scope_windows_and_totals_match_fresh_sql(
         assert meta["coverage"]["status"] == "limited"
         assert body["total"] == 4
         assert body["totals"]["analysisSpuCount"] == 4
-        # The lifetime-small SPU stays outside the recent activity scope.
+        # The lifetime paid-order gate excludes the small-count SPU.
         assert tuple(item["spuPk"] for item in body["items"]) == facts.scope_pks
         # The rate loader must select this file's own complete USD snapshot.
         assert _selected_fx(clone) == facts.fx_snapshot_id
@@ -493,6 +504,8 @@ def test_profit_scope_windows_and_totals_match_fresh_sql(
         # A three-day window changes the periods, not the observed coverage.
         three = _profit(clone, client, shop_pk=facts.own_shop_pk, window_days=3)
         assert three["meta"]["windowDays"] == 3
+        assert three["total"] == 4
+        assert tuple(item["spuPk"] for item in three["items"]) == facts.scope_pks
         assert three["meta"]["periods"] != meta["periods"]
         assert (
             three["meta"]["periods"]["current"]["startDate"]
@@ -512,6 +525,10 @@ def test_profit_scope_selection_and_rejections(
     """Exact ids, activity, invalid input and a shop without a region."""
     facts = financial_facts
     with session_client(clone, "viewer") as client:
+        for invalid in ({"window_days": 5}, {"activity": "bad"}):
+            _status(
+                clone, client, PROFIT, {"shop_pk": facts.own_shop_pk, **invalid}, 422
+            )
         exact = _profit(
             clone, client, shop_pk=facts.own_shop_pk, spu_ids=facts.scope_pks[0]
         )
@@ -591,7 +608,7 @@ def test_setup_failure_cleanup_recovery(
             clone, owned_intents, manual_cost_facts, fail_before_capture=True
         ),
     ):
-        pytest.fail("the setup failure must happen before any id capture")
+        pytest.fail("the committed setup fault must happen before Facts is returned")
     leftover = sorted(
         name for name, rows in _owned_candidates(clone, owned_intents).items() if rows
     )
