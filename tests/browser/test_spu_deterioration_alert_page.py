@@ -774,3 +774,48 @@ def test_shared_layout_fixture_renders_comparison_data_not_only_error_shell(
     expect(container).to_contain_text("本期：无单但有广告费")
     expect(page.locator("#total-spus")).to_have_text("3")
     expect(page.locator("#filter-anchor-date")).to_have_attribute("max", ANCHOR)
+
+
+@pytest.mark.parametrize("width", [390, 1440, 2560])
+def test_long_missing_reasons_keep_columns_balanced_and_notes_expandable(
+    site: ComparisonSite, width: int
+) -> None:
+    reason = "TEST：售后和财务存在未解决解析关联问题，相关事实不可确认。" * 6
+    site.items = [_item(previousRoi=None, previousRoiUnavailableReason=reason)]
+
+    def respond(route: Any, query: dict[str, list[str]]) -> None:
+        payload = _payload(query, site.items)
+        payload["meta"]["warnings"] = [f"TEST 来源限制 {index}" for index in range(20)]
+        route.fulfill(json=payload)
+
+    site.respond = respond
+    page = site.open(prefix="/tts", width=width)
+    site.ready()
+    totals = page.locator(".comparison-totals")
+    banner = page.locator("#alert-banner")
+    assert totals.bounding_box()["y"] < banner.bounding_box()["y"]
+    notes = banner.locator("details")
+    assert notes.get_attribute("open") is None
+    expect(page.locator("#comparison-warnings")).to_be_hidden()
+    summary = notes.locator("summary")
+    summary.focus()
+    page.keyboard.press("Enter")
+    expect(page.locator("#comparison-warnings")).to_be_visible()
+    expect(page.locator("#comparison-warnings")).to_contain_text("TEST 来源限制 19")
+    page.keyboard.press("Enter")
+    expect(page.locator("#comparison-warnings")).to_be_hidden()
+
+    if width >= 992:
+        proportions = page.locator("#alert-table-wrap").evaluate(
+            "el => [...el.querySelectorAll('thead th')].map(th => "
+            "th.getBoundingClientRect().width / el.querySelector('table').getBoundingClientRect().width)"
+        )
+        assert all(0.07 <= value <= 0.26 for value in proportions), proportions
+        fields = page.locator(".comparison-filters > :nth-child(-n+4)").evaluate_all(
+            "els => els.map(el => el.getBoundingClientRect().top)"
+        )
+        assert max(fields) - min(fields) <= 1, fields
+    else:
+        expect(page.locator("#alert-cards")).to_be_visible()
+        expect(page.locator("#alert-table-wrap")).to_be_hidden()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")

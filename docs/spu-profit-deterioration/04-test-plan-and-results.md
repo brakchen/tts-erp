@@ -8,6 +8,41 @@
 
 只读 source audit、mock browser、真实 SQL API、冷启动真实页面、构建和线上运行分别只证明其覆盖面。当前实现与部署必须分开；未获授权的生产 migration/restart/同步不在 agent 验证范围内。
 
+### 2026-10-27：现网 legacy 页面布局修复
+
+现场仍使用 legacy 模板与脚本。自动表格布局把大量宽度分给含长缺失原因的 ROI 列，
+其他列被挤压；全部来源限制默认展开，又把列表推到首屏以下。
+本次仅调整专属 CSS 和模板：筛选区按网格对齐、统计提前且等宽排列、来源限制使用原生
+`details` 展开、桌面表格固定列宽并允许长内容换行；窄屏继续使用原有完整指标卡片。
+不改变数据接口、盈利计算、源数据异常处理、权限或 React 页面启用范围。
+
+- 代码提交：`6767761e150702d528574ff2dd45f0264ee56f45`；源 master：
+  `362fce770a7e4b033d0afa01a5dcab0112f24570`。
+- `ruff check tests/browser/test_spu_deterioration_alert_page.py`：通过。
+- `bash scripts/test_isolated.sh browser tests/browser/test_spu_deterioration_alert_page.py`：
+  exit 0；独立 clone `tts_erp_test__schan_20261026155624_2816062_dd1f0acd` 已清理。
+  新增 390/1440/2560px 长缺失原因回归，核对列宽比例、筛选区对齐、统计位置、说明区键盘展开
+  与收起及整页不溢出；已有筛选、错误恢复、明细和键盘测试同时通过。
+- 已人工查看隔离模板在 390/1440/2560px 的当前截图；也在单独浏览器预览页替换候选 CSS 和
+  对应模板结构，检查现场长原因和来源限制。浏览器预览不代表线上文件已发布。
+- 首次 `bash scripts/test_baseline.sh` 报 2 项失败：
+  `test_0066_is_live_linear_head_with_admin_only_default`、
+  `test_existing_0070_probe_on_authorized_clone`。最小隔离重跑确认模板 revision 仍是 0069，
+  而代码 head 为 0070。通过唯一入口 `bash scripts/test_isolated.sh --refresh-template fast`
+  加上述两个完整 node ID 刷新模板并重跑，exit 0；源库只读导出 schema，模板与临时库按既有
+  隔离流程维护，未执行生产迁移。基线文件保持不变。最终集成提交仍须运行完整基线。
+- 最终集成提交 `0284f562607de3226f6e54f1beff92379eaeac88` 在干净临时 worktree 中运行
+  `bash scripts/test_baseline.sh --keep-log /tmp/codex-spu-layout-integration-pytest.log`，
+  exit 0，失败 0、新增稳定失败 0；之后才推送 master。未更新既有基线文件。
+- 用户明确批准只发布两个文件后，在当前运行目录
+  `/home/schan/tts-erp-releases/erp-master-01a16e3a` 从原发布 HEAD `d148d7a` 建立独立
+  `codex/spu-comparison-layout-live-20261027` 分支，提交并推送
+  `c8956f7bd91d13badd2226ef640adc13fa809567`。仅模板与 CSS 改变，两文件 Git blob 与
+  已验证代码提交完全一致；没有批量发布 master、生产迁移或服务重启。
+- 新加载的线上文档含原生说明展开区，CSS URL 为 `spu-profit-deterioration.css?v=3671acec`，
+  浏览器确认 `table-layout: fixed`，真实 71 条结果正常显示。候选截图与线上验证分别保留，
+  源数据缺失原因和实际日期继续按后台事实展示，本次不声称修复这些来源异常。
+
 ## 2. 验收矩阵（目标断言）
 
 | AC | 最小覆盖 | 所有者/场景 |
