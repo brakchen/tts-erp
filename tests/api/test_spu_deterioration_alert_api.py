@@ -647,7 +647,15 @@ def test_unresolved_order_parse_failures_keep_order_facts_unknown(
     assert item["currentNoOrderAdSpend"] is None
 
 
-@pytest.mark.parametrize("name", ["tiktok.after_sales", "tiktok.finance"])
+@pytest.mark.parametrize(
+    ("name", "issue_type"),
+    [
+        ("tiktok.after_sales", "PARSE_ERROR"),
+        ("tiktok.after_sales", "UNKNOWN_ORDER"),
+        ("tiktok.finance", "PARSE_ERROR"),
+        ("tiktok.finance", "STATEMENT_PAYMENT_ID_MISSING"),
+    ],
+)
 @pytest.mark.parametrize(
     "details",
     [
@@ -659,7 +667,7 @@ def test_unresolved_order_parse_failures_keep_order_facts_unknown(
     ],
 )
 def test_general_financial_sync_issues_preserve_canonical_comparison_values(
-    api_client, readonly_key, comparison_scope, db_engine, name, details
+    api_client, readonly_key, comparison_scope, db_engine, name, issue_type, details
 ):
     scope = comparison_scope
     before = get(api_client, readonly_key, scope).json()
@@ -667,7 +675,7 @@ def test_general_financial_sync_issues_preserve_canonical_comparison_values(
         session.add(
             SyncIssue(
                 job_name=name,
-                issue_type="PARSE_ERROR",
+                issue_type=issue_type,
                 external_id="TEST_COMPARE_GENERAL_FINANCIAL_ISSUE",
                 details=details,
                 detected_at=datetime.now(UTC) - timedelta(days=90),
@@ -682,7 +690,10 @@ def test_general_financial_sync_issues_preserve_canonical_comparison_values(
     for actual, expected in zip(body["items"], before["items"], strict=True):
         assert actual["spuPk"] == expected["spuPk"]
         for period in ("previous", "current"):
-            for field in ("Roi", "NetProfitCny", "OrderCount", "SpendCny", "NoOrderAdSpend", "RoiUnavailableReason"):
+            for field in (
+                "Roi", "NetProfitCny", "OrderCount", "SpendCny",
+                "NoOrderAdSpend", "RoiUnavailableReason",
+            ):
                 assert actual[period + field] == expected[period + field]
         assert actual["warnings"] == expected["warnings"]
     # Diagnostics remain a page-level disclosure, not a row-level veto.

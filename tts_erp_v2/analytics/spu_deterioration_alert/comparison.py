@@ -352,11 +352,7 @@ def read_comparison(
                     if product.id in unknown_refunds[label]
                     else []
                 )
-                problems = (
-                    order_problems[label]
-                    + spend_problems
-                    + refund_problems
-                )
+                problems = order_problems[label] + spend_problems + refund_problems
                 roi = metric.roi_real if not problems else None
                 item.update(
                     {
