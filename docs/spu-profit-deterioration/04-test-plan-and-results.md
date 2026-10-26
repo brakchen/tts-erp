@@ -31,7 +31,17 @@
   而代码 head 为 0070。通过唯一入口 `bash scripts/test_isolated.sh --refresh-template fast`
   加上述两个完整 node ID 刷新模板并重跑，exit 0；源库只读导出 schema，模板与临时库按既有
   隔离流程维护，未执行生产迁移。基线文件保持不变。最终集成提交仍须运行完整基线。
-- 发布验收与候选验证分开记录；本段不声称已上线。
+- 最终集成提交 `0284f562607de3226f6e54f1beff92379eaeac88` 在干净临时 worktree 中运行
+  `bash scripts/test_baseline.sh --keep-log /tmp/codex-spu-layout-integration-pytest.log`，
+  exit 0，失败 0、新增稳定失败 0；之后才推送 master。未更新既有基线文件。
+- 用户明确批准只发布两个文件后，在当前运行目录
+  `/home/schan/tts-erp-releases/erp-master-01a16e3a` 从原发布 HEAD `d148d7a` 建立独立
+  `codex/spu-comparison-layout-live-20261027` 分支，提交并推送
+  `c8956f7bd91d13badd2226ef640adc13fa809567`。仅模板与 CSS 改变，两文件 Git blob 与
+  已验证代码提交完全一致；没有批量发布 master、生产迁移或服务重启。
+- 新加载的线上文档含原生说明展开区，CSS URL 为 `spu-profit-deterioration.css?v=3671acec`，
+  浏览器确认 `table-layout: fixed`，真实 71 条结果正常显示。候选截图与线上验证分别保留，
+  源数据缺失原因和实际日期继续按后台事实展示，本次不声称修复这些来源异常。
 
 ## 2. 验收矩阵（目标断言）
 
