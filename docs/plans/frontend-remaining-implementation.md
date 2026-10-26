@@ -154,3 +154,13 @@
 - 用户随后明确接受当前 Chromium 拦截预检行为，且不需要另下载 Firefox。**不安装、下载或启用其他浏览器，不新增 browser 模式或系统依赖**；接收端真实自动 OPTIONS 不再作为本次单独验收门槛，但不伪称服务器已实际处理预检，真实 PUT、字节/hash、进度、取消、凭据边界及页面行为仍须验证。
 - 此决定后父级按新规范 scope 单独批准并执行一次 `c13871e` 的 root-complete 诊断，JUnit 1 failure / 0 error，未自动追加下一轮。971 个 tracked regular files 执行前后字节不变；自有 clone 独立 catalog 不存在，私有模板身份/head 仍为 `0070_monitor_health`。失败快照记录 `entry=1,bound=1,header_requested=1,header_read=0,accepted=0,continued=0`，在原 12 秒接收端暂停期限内未观察到全头读取返回或 PUT 接收。finally 释放成功，失败分类为有损 `OTHER`；计数与接收端快照先于 finally，不能据此推断之后的原子事件顺序或把该边界直接称作根因。没有改用不完整请求头、放宽校验、增加超时或再试第四轮；先只读调查同版本完整头 RPC 及可工作的控制请求路径。
 - 完整候选 baseline 仍保留 `81840fe` 的正常 RED。盈利/广告的真实读取覆盖、N2 六域、八页实际交互/有效媒体/双前缀三宽度逐图检查、精确 master/运行交付和非 ROI legacy 退役仍未完成；无生产迁移、重启、外部作业或发布。
+
+## 2026-10-26 金融读取与私有候选检查点
+
+- 广告/盈利真实接口新增文件采用一个 API 测试模块和一个自有 facts owner，不增加第二测试模块、fixture/连接/认证/proof 工厂。原 decorated clone 保持 root 与 `/tts` 两个应用 child、每个 prefix 五次登录；事实上下文在首个写入前进入 try/finally，真实提交后的故障发生于向调用方返回 Facts 之前，按精确意图恢复全部自有行、FK 顺序收尾并独立重读不存在。FX 沿用原 loader 的 snapshot ID 降序选择，不使用未来时间哨兵或模板空表假设。
+- 最终 API 631 行 `d5c0efe2…`、facts 500 行 `866e60c4…`，在 `11e13e4` 上的一次官方 wrapper **12 项全部通过**，无 failure/error/skip；972 个 tracked regular files 执行前后字节不变，自有 clone 独立 catalog 不存在，私有模板身份/head 精确保持 `0070_monitor_health`。最新独立 SPEC 和 fresh QUALITY 修复闭环均无 P0/P1/P2。源码已接入私有候选，不是 master 交付或生产激活。
+- 初次新旧 120 项组合为 118 GREEN/2 RED：新测试遗漏 seller 过滤，将全局 11 行错当单店 3 行；修正后最窄两项仍在 campaign 排序失败。唯一测试 oracle 已移除 Python 字典序，使用原 checked_session 的独立 SQL 核对数据库实际 collation、九键、NULL 及同向 updated_at/id 次序，没有修改标识符、数据库 locale 或后端排序。后续最窄两项通过；全部真实执行与首因保留，不称单轮当前 120 GREEN。
+- 审查补齐已退休字段拒绝、3/7 天不换 SPU 集合、非法 window/activity 的真实 422，以及四个绝对当地日期边界；删除 canonical fixture 绑定之后的三个临时导入别名，防止未来误注册第二应用 child。金额和订单 SQL oracle 证明的是读取接线与范围，不是独立金融算法验证；wire decimal 辅助谓词单独不构成完整两位小数政策证明。未修改生产 API、金额公式、权限、runner、schema 或两个 ROI 页面。
+- 作者早期 934 行超预算、三次 RED 调用中的两次未先报告重试及前两次无效 RED 均保留；不追溯授权、不把接线/KeyError 或后续父级执行前的函数名预检错误冒充产品失败。历史 598/615 字节及失败日志不改写，另加指针指向最新源码证据；所谓 Parent 指私有候选工作树，不是 master checkout。
+- 同期 N1 被动遥测已完成 fresh QUALITY 的安全复核，仍不是 native GREEN。独立因果审计拒绝把 `header_read=0` 快照称作已定位的上游终局根因。采购真实 UI 的只读计划还识别出 N1 guard 不接受页面使用的 canonical 字符串内部 PK；该兼容缺口须在唯一既有 guard 内另行精确授权修复，不能扩大到六个尚未准入域，也不能解释视频全头等待失败。未来候选组合必须保留父级最新 `315cdf10…` 隐私 helper，不回退到 fence 分支的旧 `33c62d12…` 副本。
+- 私有候选已同步 `origin/master=d148d7a`；主线增量仅为 monitor-health 运维脚本、其测试及文档，没有 alembic/frontend 原支持 delta。没有执行该生产迁移脚本或接手人工生产操作。当前完整基线尚待本次唯一正式执行；此前最新正常完整结果仍是 `81840fe` RED。无 master push、运行发布、服务重启或非 ROI legacy 删除。
