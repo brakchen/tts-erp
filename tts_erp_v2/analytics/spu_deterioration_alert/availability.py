@@ -227,14 +227,19 @@ def unknown_ad_products(
     )
 
 
-def source_issue_limitations(
+def unresolved_source_jobs(
     session: Session,
     *,
     shop: ChannelAccount,
     job_names: tuple[str, ...],
 ) -> list[str]:
-    """Unattributed issues conservatively affect every shop, not just one."""
-    limitations = []
+    """Report pending diagnostics; their presence alone is not a financial fact.
+
+    Unattributed issues remain visible to every shop. Callers decide whether
+    their domain facts actually depend on the missing input; a job-level issue
+    does not identify an affected SPU, order period or required money field.
+    """
+    jobs = []
     # PostgreSQL returns NULL for absent keys and non-object JSON. Treat these
     # as unattributed issues rather than loading blobs or calling dict.get().
     attributed_shop = SyncIssue.details["shop_id"].astext
@@ -250,10 +255,8 @@ def source_issue_limitations(
             .limit(1)
         )
         if issue_id is not None:
-            limitations.append(
-                f"{name} 存在未解决解析/关联问题（部分问题未归属店铺），相关事实不可确认。"
-            )
-    return limitations
+            jobs.append(name)
+    return jobs
 
 
 def order_limitations(
@@ -326,8 +329,9 @@ def order_limitations(
         limitations.append(
             "订单存在状态未知、日期、商品行、金额或 SPU 关联缺失，不能确认实际订单数/利润。"
         )
-    return limitations + source_issue_limitations(
-        session,
-        shop=shop,
-        job_names=("tiktok.orders",),
-    )
+    return limitations + [
+        f"{name} 存在未解决解析/关联问题（部分问题未归属店铺），相关事实不可确认。"
+        for name in unresolved_source_jobs(
+            session, shop=shop, job_names=("tiktok.orders",)
+        )
+    ]

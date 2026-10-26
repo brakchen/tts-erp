@@ -17,8 +17,8 @@ from tts_erp_v2.analytics.spu_deterioration_alert.availability import (
     ComparisonUnavailable,
     order_limitations,
     resolve_availability,
-    source_issue_limitations,
     unknown_ad_products,
+    unresolved_source_jobs,
 )
 from tts_erp_v2.analytics.spu_profitability import (
     ExactIdsSelection,
@@ -247,12 +247,20 @@ def read_comparison(
                 "3 天仅观察近期变化，易受少量订单和投放节奏影响，不代表持续改善或恶化。"
             )
         page_products = products[offset : offset + limit]
-        financial_problems = source_issue_limitations(
+        financial_jobs = unresolved_source_jobs(
             session,
             shop=shop,
             job_names=("tiktok.after_sales", "tiktok.finance"),
         )
-        warnings.extend(financial_problems)
+        # Reuse canonical profitability and its scoped fact checks below.
+        # Pending payout/case diagnostics do not prove that every SPU in both
+        # periods lacks required financial inputs (PRD R-002 / AC-007).
+        source_labels = {"tiktok.after_sales": "售后", "tiktok.finance": "结算"}
+        warnings.extend(
+            f"{source_labels[name]}同步有待核查记录。盈利按已入库事实及既有估算口径展示，"
+            "具体指标缺失会单独说明。"
+            for name in financial_jobs
+        )
         values: dict[str, dict[int, SpuProfitability]] = {}
         order_problems: dict[str, list[str]] = {}
         ad_problems: dict[str, list[str]] = {}
@@ -344,12 +352,7 @@ def read_comparison(
                     if product.id in unknown_refunds[label]
                     else []
                 )
-                problems = (
-                    order_problems[label]
-                    + spend_problems
-                    + financial_problems
-                    + refund_problems
-                )
+                problems = order_problems[label] + spend_problems + refund_problems
                 roi = metric.roi_real if not problems else None
                 item.update(
                     {

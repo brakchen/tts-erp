@@ -45,6 +45,22 @@
 
 ## 2. 验收矩阵（目标断言）
 
+### 2026-10-27：收敛售后/结算通用诊断的影响
+
+- RED：`bash scripts/test_isolated.sh api tests/api/test_spu_deterioration_alert_api.py
+  -k "general_financial_sync or missing_completed_refund_amount_masks"`，隔离运行 exit 1，
+  16 项失败。通用诊断清空原值、退款缺失影响扩散到另一期间均由目标断言复现。
+- 首次修复 GREEN：`bash scripts/test_isolated.sh fast
+  tests/api/test_spu_deterioration_alert_api.py tests/analytics/test_spu_deterioration_comparison.py`，
+  exit 0。真实数据库计算覆盖有效零值/负值、无单投放、必要退款金额缺失、已结算及零结算、
+  原经营日期归属和全范围订单去重；通用诊断只在页面级披露。
+- 后续补入现网出现的 `UNKNOWN_ORDER` / `STATEMENT_PAYMENT_ID_MISSING` 类型，分别验证
+  本店、其他店铺、未归属店铺、非对象 details 及历史记录；上述 API/计算层命令再次 exit 0。
+- 开发提交 `0fe0e72a` 运行 `bash scripts/test_baseline.sh --keep-log
+  /tmp/codex-spu-facts-baseline-pytest.log`，exit 0，失败 0、新增稳定失败 0。
+  最终交付分支与该提交的应用/测试内容一致，最终合并提交仍单独验证；未更新基线文件。
+- 这不是修复采集异常的声明，也不声称所有来源完整。现有诊断数据不作修改。
+
 | AC | 最小覆盖 | 所有者/场景 |
 | --- | --- | --- |
 | 001 | 默认唯一 7 天、可切 3 天、准确两段当地日期，无 1/全部 | API + browser |
