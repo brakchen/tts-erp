@@ -25,7 +25,13 @@
   与收起及整页不溢出；已有筛选、错误恢复、明细和键盘测试同时通过。
 - 已人工查看隔离模板在 390/1440/2560px 的当前截图；也在单独浏览器预览页替换候选 CSS 和
   对应模板结构，检查现场长原因和来源限制。浏览器预览不代表线上文件已发布。
-- 完整基线验证和发布结果在取得执行证据后补记；本段不声称已上线。
+- 首次 `bash scripts/test_baseline.sh` 报 2 项失败：
+  `test_0066_is_live_linear_head_with_admin_only_default`、
+  `test_existing_0070_probe_on_authorized_clone`。最小隔离重跑确认模板 revision 仍是 0069，
+  而代码 head 为 0070。通过唯一入口 `bash scripts/test_isolated.sh --refresh-template fast`
+  加上述两个完整 node ID 刷新模板并重跑，exit 0；源库只读导出 schema，模板与临时库按既有
+  隔离流程维护，未执行生产迁移。基线文件保持不变。最终集成提交仍须运行完整基线。
+- 发布验收与候选验证分开记录；本段不声称已上线。
 
 ## 2. 验收矩阵（目标断言）
 
