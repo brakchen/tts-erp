@@ -521,3 +521,46 @@ def test_cold_upload_url_response_task_correlation():
                 )
                 assert session.get(PublishWorkerHeartbeat, marker) is None
             engine.dispose()
+
+
+
+def test_remaining_request_canonical_wire_pk_string():
+    from tests.support.frontend_remaining_targets import remaining_request
+
+    targets = RemainingTargets(marker="TEST_manual_wire_pk")
+    path = "/v2/reporting/manual-costs"
+    body = {
+        "spu_id": "TEST_manual_wire_pk_shared",
+        "spu_pk": 47,
+        "unit_cost": "1.0001",
+        "currency": "USD",
+    }
+    integer_allowed = remaining_request(targets, "POST", path, {}, body)
+    assert integer_allowed
+    wire_body = {**body, "spu_pk": str(body["spu_pk"])}
+    string_allowed = remaining_request(targets, "POST", path, {}, wire_body)
+    assert string_allowed
+
+
+def test_cold_manual_cost_canonical_wire_pk_strings(manual_owned):
+    probe, marker, shops, products, _engine, _factory = manual_owned
+    gate = gate_for(
+        probe,
+        marker,
+        shop_pks=frozenset(shops),
+        product_pks=frozenset(products),
+    )
+    path = "/v2/reporting/manual-costs"
+    body = {
+        "spu_id": marker + "_shared",
+        "spu_pk": products[0],
+        "unit_cost": "1.0001",
+        "currency": "USD",
+    }
+    integer_path = gate.check_request("POST", probe.child.base + path, body)
+    integer_allowed = integer_path == path
+    assert integer_allowed
+    wire_body = {**body, "spu_pk": str(body["spu_pk"])}
+    string_path = gate.check_request("POST", probe.child.base + path, wire_body)
+    string_allowed = string_path == path
+    assert string_allowed
