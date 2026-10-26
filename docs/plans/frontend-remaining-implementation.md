@@ -175,3 +175,11 @@
 - 新父组合经一次官方 wrapper 实际 **139 项，0 failure/error/skip**（P2 browser 26、live-support 48、collaborators 34、N1 cold 12、父级视频 API 14、隐私单元 5）；976 个 tracked regular files 执行前后字节不变，自有 clone 独立 catalog 不存在，私有模板身份/head 仍精确 `0070_monitor_health`。该结果补上旧私有 133 未覆盖的父级隐私组合，不是重复执行完整 suite 或以推导数冒充结果。
 - 此新支持层改变了候选源码，仍需本次授权的唯一新完整 normal baseline；此前 `b750ea8` 的完整 GREEN 不被冒用为新源码结果。六个 N2 域仍拒绝；采购页面首次实际 DOM 之前须在本轮原 clone 内核全部 API 返回的自有 TikTok 店铺，而不仅最低 ID。视频全头等待根因仍未知，没有第四探针、Firefox、头校验豁免、传输替换、生产迁移/重启、master push 或 Native/媒体/视觉/运行验收声明。
 - 随后在实际 **`91542900e5507868117d50aac9a0fa9f8895468f`** 上执行上述唯一新 normal baseline：baseline exit 0，JUnit **3161 = 3146 passed + 14 skipped + 1 xfail，零 failure/error**；包含 N1 cold 12，前端 components adapter 实际通过（105.196 秒），不是跳过。相对 139 组合仅先增加此文档检查点，其余源码相同；本次 976 个 tracked regular files 执行前后字节完全不变，自有 clone catalog 不存在，私有模板身份/head 精确保持 `0070_monitor_health`。因此这是新支持层真实完整 GREEN，不再借用旧 `b750ea8` 结果；后续只有文档证据变化，不将此基线说成首个采购 Native、视频实际上传或最终交付验收。
+
+## 2026-10-26 采购首个原生检查点
+
+- 新 browser 用例 247 行 `9ddd3ea9…` 复用原 decorated clone、手工成本 facts/finally 与 checked Session、真实编译和登录、唯一 BrowserFence 的 nonce/attestation/liveness；没有新 fixture、transport、权限或财务 owner。全部 API 形状的 TikTok 店铺（ID 排序、limit 500）先与原 facts 实际三商品 PK／两店铺完整身份验证，外来店铺在任何 DOM 前停止；不按名字自导授权集合，不伪造 canary 店铺或改变默认选中策略。UI 仍由原组件提交 canonical 字符串内部 PK。
+- 管理草稿先修正上述真实归属缺口；后续导入样式稿误引用原模块不存在的符号，被父级静态拒收而未导入或执行。最终父级以原模块属性绑定两个 canonical fixture 并删除临时 module alias，所有函数和其余常量与已审稿相同，独立 SPEC／different QUALITY 闭环无 P0/P1/P2，项目与 pi-lens 两套 Ruff 均无发现。历史草稿和错误报告不覆写；静态与接线错误不称产品 RED。
+- 在实际源码 **`425d85a9fb9a2b21d6b9cc5dff8f21fa3822643d`** 上的一次官方隔离 browser `[root]`、1440 场景 **1 passed，0 failure/error/skip**（10.714 秒）：真实 operator 表单登录且 POST 恰一次，原 UI 编辑、逐行预览与确认，真实成本 POST 201 经原 fence 核验，独立 SQL 核对 Decimal/CNY/note/UTC/open interval，历史与刷新均读回服务端成本。977 个 tracked regular files 前后字节不变，自有 clone catalog 不存在，私有模板身份/head 精确保持 `0070_monitor_health`。
+- 父级逐图打开仅含自有 TEST 数据的 root／1440 PNG，显示人工成本 12.3400 CNY；原图在任何后续运行前独立归档，SHA `d690119a5056502b47c2c5aa79fe8719c9bebafacd71f344760f29d7f1a04d9e`。这只是该视口及正向链路证据，不代表完整三宽、UNKNOWN／角色／409／404、视频媒体或整个余页验收。源码已私有非强推并实际远端一致，未推 master 或激活运行版本。
+- 新模块沿原 fixture 产生 root 与 `/tts` 两项，都会进入 normal fast；旧 `9154290` 的完整 GREEN 只覆盖新增该模块之前的源码。新增用例的完整 DoD 须另行明确登记一次 normal baseline（包括这两个新 Native 参数及既有套件），不能把首次 root 的单例授权暗扩为 `/tts` 或重跑；本检查点尚不声明该新完整结果。
