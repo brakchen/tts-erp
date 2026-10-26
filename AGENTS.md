@@ -19,7 +19,7 @@
 - Tests: `tests/`.
 - Operational scripts: `scripts/`.
 - Architecture and active contracts: `docs/`.
-- Sole live task/lane registry: tower-do (`tower_do`, `tower_do_talk`, `tower_do_status`; see §8).
+- Sole live task/lane registry for non-Codex sessions: tower-do (`tower_do`, `tower_do_talk`, `tower_do_status`; see §8).
 - Stable lane lifecycle and board record format: `docs/guides/agent-git-workflow.md`. `docs/handoff/ACTIVE.md` is only a relocation notice; do not maintain live rows there.
 
 ## 3. Non-negotiable safety boundaries
@@ -162,7 +162,7 @@ Do not reimplement functionality that a suitable maintained dependency already p
 ## 7. Worktree, review, and completion rules
 
 - Every task starts in a dedicated branch/worktree created from current `origin/master`. Do not develop task code in the main master worktree; use it only for short registry updates, or use a clean temporary coordination worktree when foreign WIP is present.
-- Before the first task edit, register a lane record in the canonical board's `lane-registry` thread with the real Pi session UUID, board identity, branch/worktree and explicit file ownership. Read back the record and check all current lanes and child reservations; no ACTIVE edit or registry-only Git commit is required.
+- Before the first task edit, non-Codex sessions must register a lane record in the canonical board's `lane-registry` thread with the real Pi session UUID, board identity, branch/worktree and explicit file ownership. Read back the record and check all current lanes and child reservations; no ACTIVE edit or registry-only Git commit is required. Codex sessions may omit this board registration and its read-back; all other worktree, ownership, validation, commit, and push requirements still apply.
 - Track task decomposition, dependencies and progress on ordinary board tasks. Lane phases and file ownership live in the board lane records, not a second Markdown registry.
 - `draft`/`active`/`blocked` lanes reserve their declared files unless explicitly released. A `ready` branch is immutable and may be integrated by any session; session identity never blocks merge or cleanup.
 - Ready lanes merge in `readyAt` order by default. Before entering `ready`, merge current `origin/master`, resolve conflicts, validate, commit and push; record full lane HEAD, synchronized master SHA and evidence. If master advances at all, repeat synchronization and validation. Imported legacy ready claims require revalidation; task `completed` is not lane `ready`.
@@ -208,13 +208,15 @@ Definition of done:
 4. Update contracts and operational documentation affected by the change.
 5. Confirm no secrets, production data, unrelated WIP, or staged foreign files are included.
 6. Confirm the lane was synchronized with the master revision it integrated, then confirm the worktree and master are clean and the required branch/master pushes succeeded.
-7. Reconcile tower-do: post evidence and actual `changedFiles` in a task-thread message, complete verified work tasks, close the integrated lane record, leave honest blockers, and reply to relevant messages. `changedFiles` is not a native tool argument.
+7. For non-Codex sessions, reconcile tower-do: post evidence and actual `changedFiles` in a task-thread message, complete verified work tasks, close the integrated lane record, leave honest blockers, and reply to relevant messages. Codex sessions may omit these board updates. `changedFiles` is not a native tool argument.
 
 Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/guides/agent-git-workflow.md`.
 
 ## 8. 多会话 / 多 agent 协调（tower-do）
 
 本仓库已安装 Pi 扩展 `tower-do`。主仓协调会话共享同一实时板，其他 worktree 会话和子 agent 通过主仓 coordinator/parent 协调，记录任务、归属、依赖、留言和 findings。复杂开发任务默认优先在板上拆解；只要涉及多会话或多 agent 并行，就必须用板协调，避免撞文件、重复劳动和交接丢失。
+
+**Codex 例外：** 使用 Codex（包括 Codex 桌面端和 Codex Work）执行任务时，可以跳过 tower-do 的任务登记、lane-registry 登记、看板读取/认领/状态更新和完成回写。其他 Git worktree、文件归属、验证、安全和交付要求仍然适用；若实际需要多会话或多 agent 协作，仍须明确协调文件所有权与交接。
 
 **board 是唯一实时状态源，不再维护 `ACTIVE.md` 登记表。** 普通任务负责拆解与进度，常驻 `lane-registry` 任务的消息线程负责文件归属、branch/worktree 和 ready 队列。记录格式与完整生命周期见 `docs/guides/agent-git-workflow.md`。
 
@@ -228,7 +230,7 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/gui
 
 ### 8.2 开工前先拆解
 
-- 三步以上的开发任务应先上板拆解，再改文件。一个任务应对应一次可独立提交、验证或交接的结果；不要把整个大特性塞进一个模糊任务。
+- 对非 Codex 会话，三步以上的开发任务应先上板拆解，再改文件。一个任务应对应一次可独立提交、验证或交接的结果；不要把整个大特性塞进一个模糊任务。
 - `key` 使用稳定、简短的小写标识；`subject` 写祈使句；`description` 只写耐久任务陈述，临时日志和证据放留言或 finding。
 - 在 lane JSON 的 `scope` 和 `reservations` 中声明文件/glob、排除项、child 实际 UUID 与释放条件；这不是原生 task 参数。并行写域尽量不相交，同一文件同一时刻只允许一个 writer；发现冲突先联系 owner，扩展不会替你自动锁文件。
 - 有顺序关系的任务用 `dependsOn`；依赖未完成时不得把后继任务置为 `in_progress` 或 `completed`。等待外部动作或非任务标识时，用 `blocked` + `blockedBy` 明确写出等待对象。
@@ -236,12 +238,12 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/gui
 
 ### 8.3 认领、写板与完成纪律
 
-- 开始工作前先读 `tower_do_status`，然后把 `owner` 与 `status: in_progress` 在同一次写入中设置；不要修改其他 owner 的任务，应用 `tower_do_talk` 联系对方。
+- 非 Codex 会话开始工作前先读 `tower_do_status`，然后把 `owner` 与 `status: in_progress` 在同一次写入中设置；不要修改其他 owner 的任务，应用 `tower_do_talk` 联系对方。Codex 会话可跳过这些看板操作。
 - 每次 `tower_do` 写入都要携带最近一次读取或写入返回的 `baseRevision`。遇到 stale 拒绝时重新读板、合并同伴更新后再提交。
 - `tower_do` 是 upsert，不是整板替换：只列变化的 key，省略的任务和字段保持原值；删除须显式 `remove`。先读 board，stale 时重读再合并提交，不得重放整板覆盖同伴。lane 消息则是带前驱 ID 的完整记录，短 read/check/send/read-back 用 `/tmp/tts-erp-lane-registry.lock` 串行；分叉先停下协调，不能简单取最后一条。
 - owner 保护适用于任务所有字段。owner 自身在该任务上连续 6 小时无活动时，才可按工具契约接管未完成任务：第一次写入只改 `owner`，第二次再更新内容或状态。
 - 任务只有在实现和验证都完成后才能标记 `completed`；先在线程消息附证据和实际改动的仓库相对路径 `changedFiles`，再更新状态。失败、未验证或部分完成保持 `in_progress` 或诚实 `blocked`。
-- 离开、暂停或最终回复前再次读板并对账：自己的任务都有明确状态，相关留言已回复，认领的 finding 已完成、拒绝或附原因延期。
+- 非 Codex 会话离开、暂停或最终回复前再次读板并对账：自己的任务都有明确状态，相关留言已回复，认领的 finding 已完成、拒绝或附原因延期。Codex 会话可跳过看板对账。
 
 ### 8.4 多 agent 并行与交接
 
