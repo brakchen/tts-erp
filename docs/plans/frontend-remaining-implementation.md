@@ -165,3 +165,12 @@
 - 同期 N1 被动遥测已完成 fresh QUALITY 的安全复核，仍不是 native GREEN。独立因果审计拒绝把 `header_read=0` 快照称作已定位的上游终局根因。采购真实 UI 的只读计划还识别出 N1 guard 不接受页面使用的 canonical 字符串内部 PK；该兼容缺口须在唯一既有 guard 内另行精确授权修复，不能扩大到六个尚未准入域，也不能解释视频全头等待失败。未来候选组合必须保留父级最新 `315cdf10…` 隐私 helper，不回退到 fence 分支的旧 `33c62d12…` 副本。
 - 私有候选已同步 `origin/master=d148d7a`；主线增量仅为 monitor-health 运维脚本、其测试及文档，没有 alembic/frontend 原支持 delta。没有执行该生产迁移脚本或接手人工生产操作。此检查点接入时完整基线尚待唯一正式执行；此前最新正常完整结果是 `81840fe` RED。无 master push、运行发布、服务重启或非 ROI legacy 删除。
 - 随后在实际父候选 **`b750ea8e25f1502e86ce531b9488a0fd41a5343a`** 上，通过一次 `TTS_ERP_TEST_TEMPLATE_DB=tts_erp_test_monitor_health_template bash scripts/test_baseline.sh --keep-log …`：baseline exit 0、suite exit 0、基准/本轮/新增失败 ID 均为零。JUnit 3149 项中 **3134 passed、14 skipped、1 xfail，零 failure/error**；包含金融新 12、旧广告 12、旧盈利 96，以及采购 10、角色 6、视频 14、配置/用户 4、原余页 API 8 和登录 native 8。974 个 tracked regular files 执行前后字节完全不变，自有 run clone 独立 catalog 不存在，私有模板身份/head 仍精确 `0070_monitor_health`。当前普通候选完整基线已由此实际 GREEN 取代旧 RED 的“最新结果”位置，旧失败记录不改写；这不是一次名为 120 的组合重跑，更不是八页完整 native/视觉、最终 prospective master、生产同版本运行或 legacy 退役验收。
+
+## 2026-10-26 N1 支持层组合检查点
+
+- 采购 PK 兼容先在既有 schema 入口取得清晰字符串失败；真实 cold case 的整数控制先通过，字符串调用最终由原 `checked_session` 的 `ValueError/from None` 遮蔽 primary。仅源码推导与类型比较不匹配一致，不声称已从 traceback 直接重建 canonical 拒绝或发现原身份 owner 缺陷；原 owner 未解包或修改。
+- 同一个 `manual_pk_operand` 纯函数在原 schema 与同一行 SQL 目标匹配前共用，严格接受正 bigint 整数或 canonical ASCII 十进制字符串，不变更转发 body、金额、权限或独立目标集合授权。审查发现的 exact-str 偏离及 bool-equality 测试漏洞已最小修正；SPEC 与不同 reviewer 的 QUALITY 闭环后，私有 `658b7fd` 当前 208/392/618 行组合一次官方冷验实际 **133 项通过**。这是私有组合，不是父候选或 Native 证明。
+- 父级接纳前的依赖字节相同假设失败即停：N1 需要原 Live/Store 的既有固定元数据与受控接收扩展。两份源码与已审 N1 core `c4a4311` 完全相同；canary/accounts/binding/collaborator 两侧逐字节相同、所需发布符号完整。组合 SPEC 和 fresh QUALITY 同意精确支持集，文档原始比较 patch 却包含不应接纳的完整诊断 recipe，故实际只消费五个代码 blob，并单独使用经核对的 107 行有界文档，保留原 73 行前缀。
+- 实际父候选 **`c572c8187cb1ef51e8f4b8b29860d908928fc6e2`** 只接纳 Live、Store、Browser、Targets 和 cold 五份源码及上述文档，不整分支 merge/cherry，不带入未通过的观察器/诊断脚本或旧视频 `33c62d12…`。父级 API 698 行 `315cdf10…` 与隐私单元 67 行 `c0185bdb…` 保持原字节。
+- 新父组合经一次官方 wrapper 实际 **139 项，0 failure/error/skip**（P2 browser 26、live-support 48、collaborators 34、N1 cold 12、父级视频 API 14、隐私单元 5）；976 个 tracked regular files 执行前后字节不变，自有 clone 独立 catalog 不存在，私有模板身份/head 仍精确 `0070_monitor_health`。该结果补上旧私有 133 未覆盖的父级隐私组合，不是重复执行完整 suite 或以推导数冒充结果。
+- 此新支持层改变了候选源码，仍需本次授权的唯一新完整 normal baseline；此前 `b750ea8` 的完整 GREEN 不被冒用为新源码结果。六个 N2 域仍拒绝；采购页面首次实际 DOM 之前须在本轮原 clone 内核全部 API 返回的自有 TikTok 店铺，而不仅最低 ID。视频全头等待根因仍未知，没有第四探针、Firefox、头校验豁免、传输替换、生产迁移/重启、master push 或 Native/媒体/视觉/运行验收声明。
