@@ -6,7 +6,7 @@ import type { Detail } from './contracts';
 export interface CreateDraft { configKey: string; displayName: string; draftPayload: Record<string, unknown>; jsonSchema?: Record<string, unknown> }
 export default function CreateConfig({ disabled, errors, edited, invalid, create, preview, dirty }: {
   disabled: boolean; errors: Record<string, string>; edited: () => void; invalid: (message: string) => void;
-  create: (draft: CreateDraft) => Promise<Detail | undefined>; preview: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>; dirty: (value: boolean) => void;
+  create: (draft: CreateDraft) => Promise<Detail | undefined>; preview: (payload: Record<string, unknown>, retry: () => void) => Promise<Record<string, unknown> | undefined>; dirty: (value: boolean) => void;
 }) {
   const [key, setKey] = useState(''); const [name, setName] = useState(''); const [payload, setPayload] = useState('{}');
   const [schema, setSchema] = useState('{}'); const [custom, setCustom] = useState(false); const [previewing, setPreviewing] = useState(false);
@@ -17,7 +17,7 @@ export default function CreateConfig({ disabled, errors, edited, invalid, create
     if (disabled || flight.current) return;
     let data: Record<string, unknown>; try { data = parseObject(payload); } catch { invalid('初始内容必须是有效 JSON 对象'); return; }
     const current = revision.current; flight.current = true; setPreviewing(true);
-    try { const result = await preview(data); if (result && revision.current === current) { setSchema(stringifyRuntime(result, 2)); setMessage('校验规则预览已更新'); } }
+    try { const result = await preview(data, () => { void infer(); }); if (result && revision.current === current) { setSchema(stringifyRuntime(result, 2)); setMessage('校验规则预览已更新'); } }
     finally { flight.current = false; setPreviewing(false); }
   }
   async function submit() {

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { parse, stringify } from 'lossless-json';
 import type { PageProps } from '../../shared/contracts';
 import RuntimeConfigs from './index';
@@ -45,7 +46,7 @@ describe('runtime config guided workflow', () => {
     const f = api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{TEST invalid' } }); fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByText(/必须是有效 JSON 对象/); expect(text()).toHaveValue('{TEST invalid'); expect(f.mock.calls.some(([url]) => url.endsWith('/preview'))).toBe(false);
   });
   it('does not leave after a failed save and allows explicit discard', async () => {
-    api(async () => json({}, 422)); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{"TEST":true}' } }); fireEvent.click(screen.getByRole('button', { name: '返回配置概览' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: '暂存并离开' })); await screen.findByText(/HTTP 422/); expect(text()).toHaveValue('{"TEST":true}'); expect(screen.getByRole('dialog')).toBeVisible(); fireEvent.click(within(dialog).getByRole('button', { name: '放弃修改并离开' })); await screen.findByRole('button', { name: '继续编辑草稿' });
+    api(async () => json({}, 422)); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{"TEST":true}' } }); fireEvent.click(screen.getByRole('button', { name: '返回配置概览' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: '暂存并离开' })); await within(dialog).findByText(/HTTP 422/); expect(text()).toHaveValue('{"TEST":true}'); expect(screen.getByRole('dialog')).toBeVisible(); fireEvent.click(within(dialog).getByRole('button', { name: '放弃修改并离开' })); await screen.findByRole('button', { name: '继续编辑草稿' });
   });
   it('uses historical content as input rather than directly publishing', async () => {
     const f = api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await open(); fireEvent.click(screen.getByRole('button', { name: '查看发布历史' })); fireEvent.click(await screen.findByRole('button', { name: '使用 v1 内容' })); expect(text()).toHaveValue('{\n  "enabled": true\n}'); expect(writes(f)).toHaveLength(0); await review(); expect(f.mock.calls.find(([url]) => url.endsWith('/preview'))?.[1]?.body).toContain('"sourceRevisionVersion":1');
@@ -106,5 +107,129 @@ describe('runtime config guided workflow', () => {
     ['runtime_schema_invalid', '配置内容不符合校验规则'], ['runtime_secret_unavailable', '引用的凭证不存在'], ['runtime_business_invalid', '配置未通过业务规则校验'], ['runtime_source_rollout_invalid', '此历史版本带有已退役'], ['runtime_number_invalid', '配置包含无法存储的数字'],
   ])('shows controlled corrective feedback for %s', async (code, message) => {
     api(async () => json({ detail: { code, rawSecret: 'TEST_do_not_show' } }, 422)); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByText(new RegExp(message)); expect(screen.queryByText('TEST_do_not_show')).toBeNull(); expect(text()).toHaveValue('{\n  "enabled": false\n}');
+  });
+  it('locks leaving throughout historical validation and the following save', async () => {
+    let resolve!: (response: Response) => void;
+    const validation = new Promise<Response>((done) => { resolve = done; });
+    const f = api(async (url, init) => url.endsWith('/preview') ? validation : json({ ...initial, draftVersion: 4, draftPayload: (parse(String(init.body)) as { payload: unknown }).payload }));
+    render(<RuntimeConfigs bootstrap={bootstrap} />); await open();
+    fireEvent.click(screen.getByRole('button', { name: '查看发布历史' }));
+    fireEvent.click(await screen.findByRole('button', { name: '使用 v1 内容' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回配置概览' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '暂存并离开' }));
+    await waitFor(() => expect(f.mock.calls.some(([url]) => url.endsWith('/preview'))).toBe(true));
+    const discard = within(dialog).getByRole('button', { name: '放弃修改并离开' });
+    const locked = discard.hasAttribute('disabled');
+    fireEvent.click(discard);
+    await userEvent.keyboard('{Escape}');
+    const remainedOpen = screen.queryByRole('dialog') !== null;
+    await act(async () => resolve(json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: false, publishedText: '{"enabled":true}', candidateText: '{"enabled":true}', sourceRevisionVersion: 1 })));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(locked).toBe(true); expect(remainedOpen).toBe(true); expect(writes(f)).toHaveLength(1);
+    expect(writes(f)[0][0]).toMatch(/\/draft$/);
+  });
+  it('retries the failed detail request rather than refreshing the list', async () => {
+    let attempts = 0;
+    const f = api(undefined, (url) => url.endsWith('/items/test.flags') && ++attempts === 1 ? json({}, 503) : undefined);
+    render(<RuntimeConfigs bootstrap={bootstrap} />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看与修改 TEST 配置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '重试读取' }));
+    await screen.findByRole('button', { name: '继续编辑草稿' });
+    expect(attempts).toBe(2); expect(screen.queryByText(/读取或检查失败/)).toBeNull(); expect(writes(f)).toHaveLength(0);
+  });
+  it('retries schema inference and delivers its result to the creation form', async () => {
+    let attempts = 0;
+    const f = api(async () => ++attempts === 1 ? json({}, 503) : json({ jsonSchema: { type: 'object', title: 'TEST retry' } }));
+    render(<RuntimeConfigs bootstrap={bootstrap} />);
+    fireEvent.click(await screen.findByRole('button', { name: '新建配置' }));
+    fireEvent.click(screen.getByText('高级选项：校验规则 Schema'));
+    fireEvent.click(screen.getByRole('button', { name: '预览自动校验规则' }));
+    fireEvent.click(await screen.findByRole('button', { name: '重试读取' }));
+    await screen.findByText('校验规则预览已更新');
+    expect(screen.getByLabelText('新配置 Schema JSON 文本')).toHaveValue('{\n  "type": "object",\n  "title": "TEST retry"\n}');
+    expect(attempts).toBe(2); expect(writes(f)).toHaveLength(0);
+  });
+  it('retries history loading and clears retries when leaving that context', async () => {
+    let attempts = 0;
+    const f = api(undefined, (url) => url.endsWith('/revisions') && ++attempts % 2 === 1 ? json({}, 503) : undefined);
+    render(<RuntimeConfigs bootstrap={bootstrap} />); await open();
+    fireEvent.click(screen.getByRole('button', { name: '查看发布历史' }));
+    fireEvent.click(await screen.findByRole('button', { name: '重试读取' }));
+    await screen.findByRole('button', { name: '使用 v1 内容' });
+    expect(attempts).toBe(2);
+    fireEvent.click(screen.getByRole('button', { name: '返回配置概览' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看发布历史' }));
+    await screen.findByRole('button', { name: '重试读取' });
+    fireEvent.click(screen.getByRole('button', { name: '返回配置列表' }));
+    await screen.findByRole('button', { name: '新建配置' });
+    expect(screen.queryByRole('button', { name: '重试读取' })).toBeNull(); expect(writes(f)).toHaveLength(0);
+  });
+  it('retries publication review but invalidates that retry when its input changes', async () => {
+    let attempts = 0;
+    const f = api(async (_url, init) => ++attempts % 2 === 1 ? json({}, 503) : json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText: stringify((parse(String(init.body)) as { payload: unknown }).payload), sourceRevisionVersion: null }));
+    render(<RuntimeConfigs bootstrap={bootstrap} />); await edit();
+    fireEvent.click(screen.getByRole('button', { name: '检查并发布' }));
+    fireEvent.click(await screen.findByRole('button', { name: '重试读取' }));
+    await screen.findByRole('button', { name: '确认发布' });
+    fireEvent.click(screen.getByRole('button', { name: '返回修改' }));
+    fireEvent.click(screen.getByRole('button', { name: '检查并发布' }));
+    await screen.findByRole('button', { name: '重试读取' });
+    fireEvent.change(text(), { target: { value: '{"TEST_changed":true}' } });
+    expect(screen.queryByRole('button', { name: '重试读取' })).toBeNull(); expect(writes(f)).toHaveLength(0);
+  });
+  it('keeps the list after verifying an abandoned creation instead of reopening an unrelated config', async () => {
+    const f = api(async () => json({}, 500), (url) => url.endsWith('/items/test.new') ? json({ detail: 'runtime config not found' }, 404) : undefined);
+    render(<RuntimeConfigs bootstrap={bootstrap} />); await open();
+    fireEvent.click(screen.getByRole('button', { name: '返回配置列表' }));
+    fireEvent.click(await screen.findByRole('button', { name: '新建配置' }));
+    fireEvent.change(screen.getByLabelText('配置键'), { target: { value: 'test.new' } });
+    fireEvent.change(screen.getByLabelText('配置名称'), { target: { value: 'TEST new' } });
+    fireEvent.submit(screen.getByRole('form', { name: '创建配置' })); await screen.findByText(/提交结果未确认/);
+    fireEvent.click(screen.getByRole('button', { name: '返回配置列表' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '放弃修改并离开' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查询核对' }));
+    fireEvent.click(await screen.findByRole('button', { name: '我已核对，重新检查内容' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '新建配置' })).toBeEnabled());
+    expect(f.mock.calls.filter(([url]) => url.endsWith('/items/test.flags'))).toHaveLength(1);
+    expect(screen.queryByLabelText('配置内容 JSON 文本')).toBeNull();
+  });
+  it('shows canonical acknowledged content and preserves publication success when refresh fails', async () => {
+    const raw = '{"ratio":0.123456789012345678901}';
+    const canonical = '{\n  "ratio": 0.12345678901234568\n}';
+    let published = false; let failRefresh = true;
+    const f = api(async (url) => {
+      if (url.endsWith('/preview')) return json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText: canonical, sourceRevisionVersion: null });
+      published = true; return json({ configKey: initial.configKey, publishedVersion: 2 });
+    }, (url) => published && url.endsWith('/items/test.flags') ? failRefresh ? json({}, 503) : json({ ...initial, draftVersion: 4, publishedVersion: 2, hasDraft: false, draftPayload: null, publishedPayload: parse(canonical) }) : undefined);
+    render(<RuntimeConfigs bootstrap={bootstrap} />); await edit();
+    fireEvent.change(text(), { target: { value: raw } }); await review();
+    fireEvent.click(screen.getByRole('button', { name: '确认发布' }));
+    await screen.findByText(/发布已确认；请先重试/);
+    expect(screen.getByLabelText('当前生效内容 JSON 文本')).toHaveValue(canonical);
+    expect(screen.queryByText(/没有发出写入操作/)).toBeNull(); expect(screen.getByText(/已发布为 v2/)).toBeVisible();
+    failRefresh = false; fireEvent.click(screen.getByRole('button', { name: '重试读取' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '修改配置' })).toBeEnabled());
+    expect(screen.queryByText(/读取或检查失败|最新详情加载失败/)).toBeNull(); expect(writes(f)).toHaveLength(1);
+  });
+  it('allows uncertain save verification inside the leave dialog without losing input', async () => {
+    api(async () => json({}, 500)); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit();
+    fireEvent.change(text(), { target: { value: '{"TEST_retained":true}' } });
+    fireEvent.click(screen.getByRole('button', { name: '返回配置概览' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '暂存并离开' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: '查询核对' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: '我已核对，重新检查内容' }));
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '暂存并离开' })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole('button', { name: '继续编辑' }));
+    expect(text()).toHaveValue('{"TEST_retained":true}');
+  });
+  it.each(['[]', 'TEST invalid JSON'])('refuses malformed canonical candidate %s before enabling publication', async (candidateText) => {
+    const f = api(async () => json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText, sourceRevisionVersion: null }));
+    render(<RuntimeConfigs bootstrap={bootstrap} />); await edit();
+    fireEvent.click(screen.getByRole('button', { name: '检查并发布' }));
+    await screen.findByText(/读取或检查失败/);
+    expect(screen.queryByRole('button', { name: '确认发布' })).toBeNull(); expect(writes(f)).toHaveLength(0);
+    expect(text()).toHaveValue('{\n  "enabled": false\n}');
   });
 });

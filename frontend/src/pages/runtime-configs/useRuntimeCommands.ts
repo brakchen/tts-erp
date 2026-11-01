@@ -108,8 +108,8 @@ export function useRuntimeCommands(rootPath: string, canWrite: boolean) {
   }
   function edited() { setFailure((old) => old && Object.keys(old.fieldErrors).length ? { ...old, fieldErrors: {} } : old); }
   function invalid(message: string) { setFailure({ message, fieldErrors: {}, uncertain: false, retryAfter: 0 }); }
-  function reportRead(error: unknown) { const result = runtimeFailure(error); setFailure({ ...result, uncertain: false, message: result.uncertain ? '读取或检查失败，请手动重试；没有发出写入操作。' : result.message }); }
-  function clear() { if (!gate.current) { setFailure(undefined); setNotice(''); } }
+  function reportRead(error: unknown, failureMessage?: string) { const result = runtimeFailure(error); setFailure({ ...result, uncertain: false, message: result.uncertain ? failureMessage ?? '读取或检查失败，请手动重试。' : result.message }); }
+  function clear(keepNotice = false) { if (!gate.current) { setFailure(undefined); if (!keepNotice) setNotice(''); } }
   return { pending, blocked, failure, recovery, notice, read, run, verify, allowManual, edited, invalid, canRead, reportRead, clear,
     disabled: !canWrite || pending || blocked || recovery !== undefined };
 }

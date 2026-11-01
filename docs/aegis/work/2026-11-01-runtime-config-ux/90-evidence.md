@@ -1,5 +1,22 @@
 # 最终验证证据
 
+## 静态审查后的六项修复（2026-11-01）
+
+此前“独立代码复核无剩余实质问题”是首轮交付时的结论；用户要求再次静态审查后，发现暂存预检查期间可放弃但仍写入、读取重试目标错误、提交核对跳入旧配置、发布回填使用原始数字、保存错误位于弹窗外、已发布却提示没有写入六项遗漏。本节记录本轮新证据，不把之前的测试成功当成本轮修复证明。
+
+- 在 `4785576f` 原实现上，仅加入回归后，通过隔离组件入口观察到 8 处失败，日志 `/tmp/TEST_runtime_repair_red.log`；没有直接运行底层框架。
+- 修复集中在现有 reading / commands / 页面状态所有者：记录失败的只读操作；输入或视图变化时撤销旧重试；暂存并离开期间锁住按钮、Escape 和遮罩关闭；按原 attempt 匹配核对对象；回填已校验 `candidateText`；错误和核对入口只在当前活动交互区域呈现。旧的按当前视图猜测重试出口、原始输入回填和“没有发出写入操作”提示已移除，无兼容旁路或新增依赖。
+- 最终新增 10 个组件用例，另强化 1 个已有用例。覆盖延迟预检查与 Escape、详情/Schema/历史/发布检查重试、输入和导航使旧重试失效、放弃创建后在列表核对、规范化数字回填与只重试 GET、弹窗内校验失败和未知结果核对、异常候选响应在写入前拒绝。
+- `FRONTEND_TEST_FILTER=src/pages/runtime-configs/index.test.tsx bash scripts/test_isolated.sh frontend tests/frontend/test_components.py`：exit 0。最终选择日志 `/tmp/TEST_runtime_repair_focused.log`。失败响应及延迟场景是组件层控制的传输证据，不能称为真实网络故障或生产现场验收。
+- `npm run typecheck --prefix frontend`、`npm run build --prefix frontend`、`git diff --check`：通过。构建保留原有大编辑器 chunk 提示。
+- 本轮 baseline 的原生浏览器运行已生成新的运行配置截图；人工查看 390、1440、2560 宽度的检查页，确认长名称/配置键换行、差异符号和数字、完整内容排列及发布按钮可见。截图在该验证 checkout 的 `logs/TEST_runtime_config/screenshots/`；本机审阅副本在临时目录 `TEST_runtime_repair_screens/`。这些截图验证正常发布检查页，新增失败弹窗场景以组件回归为证据，没有宣称真实浏览器故障注入。
+- `bash scripts/test_baseline.sh --keep-log /tmp/TEST_runtime_repair_fast_raw.log`：全套只执行一次，原始 exit 1；唯一失败项为 `tests/frontend/test_components.py::test_frontend_components`，其内 43 个组件文件中 42 个通过，673 个用例中 672 个通过。运行配置文件通过；手工成本 `manual-costs server-total pagination > disables next on a full final all page at zero and nonzero offsets` 超过既有 5000ms 超时。完整日志 `/tmp/TEST_runtime_repair_baseline.log` 和上述 raw log；原始结果保留，没有声称全量首次零失败。
+- 按测试指南 §6 只复跑失败组件文件一次：`FRONTEND_TEST_FILTER=src/pages/manual-costs/index.test.tsx bash scripts/test_isolated.sh frontend tests/frontend/test_components.py`，exit 0；日志 `/tmp/TEST_runtime_repair_manual_costs_rerun.log` / `.exit`。据此归类为隔离复跑通过的偶发超时，本轮没有新增稳定失败。未修改手工成本、公共测试配置、超时或主干基线，也没有重跑整套 fast。其余完整基线选择（含运行配置的 6 个原生浏览器场景）没有失败。
+
+本轮 Linux 独占验证 checkout 为 `/home/schan/tts-erp/.worktrees/codex-runtime-config-repair-20261101`，基于 `4785576f75145370df26112e2c10c937107ffa7f`；环境体检通过，既有 PostgreSQL Docker 模式可用。最终 5 个应用/组件测试文件与本机 SHA256 完全一致，应用源码在 baseline 开始后保持不变。远端原主工作树和生产服务未操作。
+
+复杂度闭环：修改保留原页面、commands 和 reducer 的责任边界；失败操作的闭包替代按当前视图推断，没有并行重试出口、新依赖、后台任务或 API。弹窗和页面共享同一份反馈，只在活动区域渲染。主工作区和远端验证 checkout 保留供后续合入/复查，Git 提交及推送结果以实际收据为准。
+
 日期：2026-11-01（Asia/Shanghai）。本次交付为技术方案和源码开发，生产服务未部署或重启。
 
 ## 结果

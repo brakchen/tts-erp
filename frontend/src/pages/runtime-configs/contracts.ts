@@ -1,4 +1,5 @@
 import { isLosslessNumber, isSafeNumber } from 'lossless-json';
+import { parseObject } from './json';
 
 export interface Item {
   configKey: string; displayName: string; publishedVersion: number | null; hasDraft: boolean;
@@ -37,7 +38,8 @@ export function decodeReview(v: unknown, detail: Detail, source: number | null):
   const publishedVersion = o.publishedVersion === null ? null : version(o.publishedVersion);
   const sourceRevisionVersion = o.sourceRevisionVersion === null ? null : version(o.sourceRevisionVersion);
   if (o.configKey !== detail.configKey || draftVersion !== detail.draftVersion || publishedVersion !== detail.publishedVersion || sourceRevisionVersion !== source || typeof o.hasChanges !== 'boolean') fail();
-  return { configKey: detail.configKey, draftVersion, publishedVersion, sourceRevisionVersion, hasChanges: o.hasChanges as boolean, publishedText: nullableText(o.publishedText), candidateText: text(o.candidateText) };
+  const candidateText = text(o.candidateText); parseObject(candidateText);
+  return { configKey: detail.configKey, draftVersion, publishedVersion, sourceRevisionVersion, hasChanges: o.hasChanges as boolean, publishedText: nullableText(o.publishedText), candidateText };
 }
 export function decodeList<T>(v: unknown, decode: (v: unknown) => T): T[] {
   const o = object(v); if (!Array.isArray(o.items)) return fail(); return o.items.map(decode);
