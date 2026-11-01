@@ -17,6 +17,19 @@
 | [`../docs/guides/test-domains.md`](../guides/test-domains.md) | 测试按域切片 |
 | [`./analytics-sync.md`](./analytics-sync.md) | Chrome 扩展广告分析 ingest 协议 |
 
+## 本机虚拟机测试服务器（项目记忆）
+
+- 适用范围：用户于 2026-11-01 指定本机虚拟机 `192.168.47.129` 作为 tts-erp 服务运行和测试的测试服务器。
+- 连接方式：SSH 用户 `schan`；Windows 本机私钥路径为 `C:\Users\chen\Desktop\keys\192.168.47.130@schan.txt`。文件名中的 `.130` 不代表本次连接目标；连接地址使用 `.129`。私钥内容只保留在本机，不复制到仓库或日志。
+- 验证证据：2026-11-01 从 Windows 本机使用上述私钥以批处理模式 SSH 登录成功（退出码 `0`，远端返回 `SSH_LOGIN_OK`）；`id -un` 为 `schan`，`hostname` 为 `schan`，系统为 `Ubuntu 26.04 LTS`。
+- 使用方式：后续在该机准备服务运行和测试环境；数据库测试仍只允许从仓库根目录通过 `bash scripts/test_isolated.sh ...` 使用测试模板和临时克隆库，遵守 `AGENTS.md` 的数据库与生产安全边界。
+- 验证限度：本次仅确认 SSH 登录与系统身份，未部署、启动或重启服务，未验证 Python、PostgreSQL、MinIO、测试依赖或应用健康状态。下方旧部署示例中的 `192.168.47.130` 不是本次确认的测试服务器地址。
+- 失效条件：虚拟机重建、IP、SSH 用户或密钥发生变化，或用户另行指定测试服务器时，须重新验证登录并更新本条记录；登录失败时不得继续引用本次成功结果作为当前可用性证明。
+
+```powershell
+ssh -i 'C:\Users\chen\Desktop\keys\192.168.47.130@schan.txt' -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 schan@192.168.47.129
+```
+
 ## v2 进程托管
 
 v2 由 systemd user 单元托管（`~/.config/systemd/user/`，`Linger=yes`，开机自启）：
