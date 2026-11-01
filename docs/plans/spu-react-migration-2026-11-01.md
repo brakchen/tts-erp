@@ -139,3 +139,13 @@ FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh
 真实价格用例在 `df8f7e32` 经 `bash scripts/test_isolated.sh browser tests/browser/test_spu_price_stats_live.py::test_focused_spus_profile_matches_spu_roi_price_totals --tb=short` 单项复验通过。新预期为重点页不显示价格块/列，而 ROI 页面继续接受原有六个独立 oracle 金额及状态校验；额外用两个页面各自实际查询 URL 和已认证上下文请求真实隔离 API，逐一比较总价格统计及两行全部价格事实，保留同范围价格一致性覆盖。首次维护复验漏导入 `expect` 已补齐，最终复验退出 0。视频发布未修改，使用 `FRONTEND_TEST_FILTER=src/pages/video-publish/index.test.tsx bash scripts/test_isolated.sh frontend tests/frontend/test_components.py --tb=short` 单独复验退出 0，按测试指南归为顺序/负载偶发，未放宽权限断言。
 
 未再次执行整个 fast suite，未修改零失败基线；152 属于 `c2fb82c0` 的完整运行结果，不能写成最终版本仍有 152 个失败。专项复验关闭上述新增差异，不代表全站通过。原始日志、退出码和逐 ID 对比位于测试服务器 `/tmp/codex-spu-hide-prices-*`。
+
+### 用户纠正：筛选区不应大量留白（2026-11-01）
+
+用户指出 SPU ROI 顶部的次要筛选区过高且右侧空白过多。从 `origin/master 407d8865` 开始，`codex/compact-spu-filter-toolbar` 将共享两页中原先分别独占行的店铺、日期和预测样本，改为按内容宽度排列的可换行工具栏。刷新紧邻店铺，快捷日期紧邻日期输入，预测样本和“更多”保留；没有把这些控件折叠或删除，也没有改查询、权限、保存或 Retry-After 逻辑。页面专用少量布局样式复用现有控件，没有修改公共 shell、全站样式或组件库。
+
+初版 `f0a77ec5` 的工作区 11 项专项中 7 项通过，4 项桌面密度断言发现组内仍有额外换行。隔离 runner 内调试确认，百分比宽度与只有 flex-basis 的子项造成父组固有宽度不足；`9f7b6f79` 为店铺和日期标签提供明确宽度及窄屏最大宽度限制后，整个布局参数化函数的 375/1440/2560 × 两 profile 共 6 项复验通过，仍包含原有溢出、完整经营列、钻取及键盘返焦检查。控件底部对齐和超宽屏面板高度断言没有放宽。产品已合并为 `685cf8a0`。
+
+类型检查与构建退出 0，本机已激活 `build-a592f5d66eabe7c68db6`。实际 2560px 页面筛选区高度由 325.56px 降至 136.78px，控件同排；1440px 自动排成两行，高度 217.17px。375px 在两页分别以真实 29/100 行数据首屏载入后检查，筛选区自然换行且没有整页溢出；三种宽度截图均已目视检查。重点页的全部关注标签、直接取消入口和隐藏价格要求保留，SPU ROI 价格展示保留。实际页面只读核验，没有修改真实关注或店铺数据。
+
+在初版 `f0a77ec5` 执行一次 `bash scripts/test_baseline.sh --keep-log /tmp/codex-spu-compact-toolbar-baseline-pytest.log`，退出 1，共 **153 个失败 ID**。其中 149 个与此前逐项归因的剩余清单完全重合，另外 4 个全部是上述工作区函数的 1440/2560 × 两 profile 密度断言，已在 `9f7b6f79` 的 6 项参数化复验中关闭；没有其他新增失败 ID。未重跑整套 fast，未改写零失败基线。153 是初版的完整执行结果，不是修正版重新运行的失败数；专项通过不代表全站通过。原始日志、退出码及逐 ID 对比位于测试服务器 `/tmp/codex-spu-compact-toolbar-*`。
