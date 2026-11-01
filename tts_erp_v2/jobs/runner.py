@@ -131,31 +131,26 @@ def run_job(
         session.expunge(job)
     try:
         yield job
-    except BaseException as e:
-        # NOTE: we do NOT swallow. The caller's transaction will be
-        # rolled back by their own outer handler — but the error
-        # message is captured on the ORM object first.
-        with session.begin():
-            session.add(job)
-            finish_job(
-                session,
-                job,
-                status="failed",
-                error_message=f"{type(e).__name__}: {e}",
-            )
-            session.flush()
-            session.expunge(job)
-        log.exception("job %s failed", job_name)
-        raise
-    else:
-        # Caller already updated counters; only stamp terminal status
-        # if they haven't set it to failed/succeeded themselves.
         with session.begin():
             session.add(job)
             if job.status == "running":
                 finish_job(session, job, status="succeeded")
             session.flush()
             session.expunge(job)
+    except BaseException as error:
+        # Each business unit's begin context has already rolled back. Failure
+        # bookkeeping must never commit an unfinished unit or hide its error.
+        try:
+            with session.begin():
+                session.add(job)
+                finish_job(session, job, status="failed",
+                           error_message=f"{type(error).__name__}: {error}")
+                session.flush()
+                session.expunge(job)
+        except Exception:
+            log.exception("job %s failure audit could not be persisted", job_name)
+        log.exception("job %s failed", job_name)
+        raise
 
 
 # ---- raw_records + sync_issues -------------------------------------

@@ -8,6 +8,8 @@ from sqlalchemy import select
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.jobs.miaoshou.collect_box import sync_collect_box
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
@@ -51,7 +53,7 @@ def test_sync_collect_box_walks_pages(
 
     fake_client.install(side_effect)
 
-    result = sync_collect_box(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_collect_box, db_session, client=fake_client)
     db_session.commit()
 
     assert result["products_upserted"] >= 2
@@ -73,7 +75,7 @@ def test_sync_collect_box_empty_response(
             "data": {"collectBoxDetailList": [], "total": 0},
         }
     )
-    result = sync_collect_box(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_collect_box, db_session, client=fake_client)
     db_session.commit()
     assert result["products_upserted"] == 0
     assert result["items_seen"] == 0

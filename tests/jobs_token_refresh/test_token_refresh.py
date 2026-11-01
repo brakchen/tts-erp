@@ -18,6 +18,8 @@ from sqlalchemy import select, text
 from tts_erp_v2.db.models.integration import Credentials, SyncJob
 from tts_erp_v2.jobs.token_refresh import JOB_NAME, sync_token_refresh
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_token_refresh, pytest.mark.layer_integration]
 
 
@@ -79,7 +81,7 @@ class _FakeRefresher:
 def test_no_credentials_is_noop(db_session) -> None:
     _wipe_credentials(db_session)
     reg = _FakeRefresher()
-    result = sync_token_refresh(db_session, registry=reg)
+    result = invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     assert result["scanned"] == 0
     assert result["refreshed"] == 0
     assert result["skipped"] == 0
@@ -93,7 +95,7 @@ def test_already_fresh_skips_refresher(db_session) -> None:
     far_future = datetime.now(UTC) + timedelta(days=30)
     _make_credentials(db_session, expires_at=far_future)
     reg = _FakeRefresher()
-    result = sync_token_refresh(db_session, registry=reg)
+    result = invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     assert result["scanned"] == 0
     assert result["refreshed"] == 0
     assert reg.calls == []
@@ -111,7 +113,7 @@ def test_expiring_soon_invokes_refresher(db_session) -> None:
             "expires_at": new_expires,
         }
     )
-    result = sync_token_refresh(db_session, registry=reg)
+    result = invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     assert result["scanned"] >= 1
     assert result["refreshed"] >= 1
     assert reg.calls == [cred.external_account_id]
@@ -123,7 +125,7 @@ def test_refresher_failure_increments_issues(db_session) -> None:
     _make_credentials(db_session, expires_at=near_future)
     _make_credentials(db_session, expires_at=near_future, provider="miaoshou")
     reg = _FakeRefresher(raise_exc=RuntimeError("upstream 5xx"))
-    result = sync_token_refresh(db_session, registry=reg)
+    result = invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     assert result["scanned"] >= 1
     # The refresher was called and raised; at least one issue was recorded.
     assert result["issues"] >= 1
@@ -135,7 +137,7 @@ def test_sync_job_row_recorded(db_session) -> None:
     near_future = datetime.now(UTC) + timedelta(seconds=30)
     _make_credentials(db_session, expires_at=near_future)
     reg = _FakeRefresher()
-    sync_token_refresh(db_session, registry=reg)
+    invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     jobs = db_session.execute(select(SyncJob)).scalars().all()
     assert len(jobs) >= 1
     assert any(j.job_name == JOB_NAME for j in jobs)

@@ -45,6 +45,8 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.jobs.tiktok import finance as finance_job
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_finance, pytest.mark.layer_integration]
 
 
@@ -282,7 +284,7 @@ def test_finance_payouts_statements_transactions_components(db_session) -> None:
             }
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -354,7 +356,7 @@ def test_finance_zero_amount_component_written(db_session) -> None:
             }
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -412,7 +414,7 @@ def test_finance_statements_have_own_cursor(db_session) -> None:
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -479,7 +481,7 @@ def test_finance_statement_attaches_only_to_own_payout(db_session) -> None:
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -529,7 +531,7 @@ def test_finance_statement_without_payment_id_ingested_with_null_payout(db_sessi
         # 修复后即使 transactions 抓取失败，statement 本体也已在）。
         transactions_pages=[],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -584,7 +586,7 @@ def test_finance_upstream_failure_on_statements_raises(db_session) -> None:
         transactions_pages=[],
     )
     with pytest.raises(finance_job.UpstreamJobError):
-        run_with_sync_job(
+        invoke_seeded_job(run_with_sync_job,
             db_session,
             job_name="tiktok.finance",
             credential_id=account.credential_id,
@@ -637,7 +639,7 @@ def test_finance_upstream_failure_on_transactions_raises(db_session) -> None:
         ],
     )
     with pytest.raises(finance_job.UpstreamJobError):
-        run_with_sync_job(
+        invoke_seeded_job(run_with_sync_job,
             db_session,
             job_name="tiktok.finance",
             credential_id=account.credential_id,
@@ -715,7 +717,7 @@ def test_finance_late_statement_advances_independently(db_session) -> None:
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -765,7 +767,7 @@ def test_finance_late_statement_advances_independently(db_session) -> None:
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -818,7 +820,7 @@ def test_finance_statement_without_known_payout_raises_sync_issue(db_session) ->
         ],
         transactions_pages=[],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -872,7 +874,7 @@ def test_finance_old_legacy_cursor_name_not_written(db_session) -> None:
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -913,7 +915,7 @@ def test_finance_payout_nested_amount_currency_persisted(db_session) -> None:
         statements_pages=[],
         transactions_pages=[],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -962,7 +964,7 @@ def test_finance_transaction_order_pk_resolved(db_session) -> None:
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -1010,7 +1012,7 @@ def test_finance_transaction_unresolved_order_sync_issue(db_session) -> None:
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -1080,7 +1082,7 @@ def test_finance_components_full_breakdown_uppercase_codes(db_session) -> None:
             {"code": 0, "data": {"statement_transactions": [tx], "next_page_token": ""}}
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -1159,7 +1161,7 @@ def test_finance_transaction_time_from_order_create_time(db_session) -> None:
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -1220,7 +1222,7 @@ def test_finance_raw_records_deduped_and_hashed(db_session) -> None:
             ],
         )
 
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -1239,7 +1241,7 @@ def test_finance_raw_records_deduped_and_hashed(db_session) -> None:
         )
 
     # Tick 2: identical payloads re-fetched (payouts have no cursor yet).
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,
@@ -1282,7 +1284,7 @@ def test_finance_payout_cursor_falls_back_to_create_time(db_session) -> None:
         statements_pages=[],  # no statements — isolate the payouts cursor
         transactions_pages=[],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.finance",
         credential_id=account.credential_id,

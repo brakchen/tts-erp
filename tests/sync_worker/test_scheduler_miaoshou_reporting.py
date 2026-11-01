@@ -36,6 +36,8 @@ from tts_erp_v2.jobs import reporting as reporting_job
 from tts_erp_v2.sync_worker import scheduler
 from tts_erp_v2.sync_worker.scheduler import JOBS, JobSpec
 
+from tests._job_invocation import invoke_seeded_job
+
 # ─── Registry wiring ────────────────────────────────────────────────
 
 
@@ -217,7 +219,7 @@ def _seed_manual_cost_spu(db_session) -> ChannelProduct:
 
 def test_run_cost_snapshots_writes_seeded_spu(db_session):
     cp = _seed_manual_cost_spu(db_session)
-    out = reporting_job.run_cost_snapshots(db_session)
+    out = invoke_seeded_job(reporting_job.run_cost_snapshots, db_session)
     assert out["snapshots_written"] >= 1
     row = db_session.execute(
         select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
@@ -275,7 +277,7 @@ def test_run_cost_snapshots_source_price_fallback_via_offer(db_session):
     """SPU 主档行无成本但带 1688 offer → 经 offer 命中公共采集箱行价格 →
     写 SOURCE_PRICE 快照（估算兜底，非成交口径）。"""
     cp = _seed_source_price(db_session, "TEST_MS_RPT_SRC_O")
-    out = reporting_job.run_cost_snapshots(db_session)
+    out = invoke_seeded_job(reporting_job.run_cost_snapshots, db_session)
     assert out["snapshots_written"] >= 1
     row = db_session.execute(
         select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
@@ -290,7 +292,7 @@ def test_run_cost_snapshots_source_price_direct_on_master_row(db_session):
     cp = _seed_source_price(
         db_session, "TEST_MS_RPT_SRC_D", master_cost=Decimal("12.00")
     )
-    reporting_job.run_cost_snapshots(db_session)
+    invoke_seeded_job(reporting_job.run_cost_snapshots, db_session)
     row = db_session.execute(
         select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
     ).scalar_one()

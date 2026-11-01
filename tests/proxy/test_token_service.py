@@ -25,6 +25,8 @@ from typing import Any
 
 import pytest
 
+from tests._job_invocation import invoke_seeded_job
+
 # Force-load .env so TTS_ERP_DB_URL is set before any module under test.
 os.environ.setdefault(
     "TTS_ERP_FERNET_KEY",
@@ -270,7 +272,7 @@ def test_refresh_if_needed_calls_refresher_when_expired(
         expires_at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
     )
 
-    loaded = refresh_if_needed(
+    loaded = invoke_seeded_job(refresh_if_needed,
         db_session,
         provider="tiktok",
         external_account_id="shop_TEST_003",
@@ -316,7 +318,7 @@ def test_refresh_preserves_shop_cipher_when_refresher_omits_it(
         access_token="new_at",
         expires_at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
     )
-    loaded = refresh_if_needed(
+    loaded = invoke_seeded_job(refresh_if_needed,
         db_session,
         provider="tiktok",
         external_account_id="shop_TEST_004",
@@ -352,7 +354,7 @@ def test_refresh_if_needed_skips_when_fresh(db_session, fernet_key: str) -> None
     db_session.commit()
 
     refresher = _FakeRefresher()
-    loaded = refresh_if_needed(
+    loaded = invoke_seeded_job(refresh_if_needed,
         db_session,
         provider="tiktok",
         external_account_id="shop_TEST_004",
@@ -370,7 +372,7 @@ def test_refresh_if_needed_missing_row_returns_none(
 
     refresher = _FakeRefresher()
     assert (
-        refresh_if_needed(
+        invoke_seeded_job(refresh_if_needed,
             db_session,
             provider="tiktok",
             external_account_id="shop_TEST_zzz",

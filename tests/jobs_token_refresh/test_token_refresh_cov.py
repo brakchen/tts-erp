@@ -46,6 +46,8 @@ from tts_erp_v2.jobs.token_refresh import (
 )
 from tts_erp_v2.proxy.token_service import upsert_credentials
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_token_refresh, pytest.mark.layer_integration]
 
 
@@ -124,7 +126,7 @@ def test_sync_token_refresh_uses_default_registry_when_none_passed(
         expires_at=now + timedelta(seconds=30),  # due
     )
     # No registry → uses _default_registry().
-    out = sync_token_refresh(db_session)
+    out = invoke_seeded_job(sync_token_refresh, db_session)
     # The TEST_ row is processed: it's due (expiring soon), refresh_if_needed
     # calls the default-registry refresher, gets {"access_token": ""} →
     # counted as skipped + TOKEN_REFRESH_NO_TOKEN issue.
@@ -241,7 +243,7 @@ def test_sync_token_refresh_skips_when_row_vanishes_between_select_and_refresh(
 
     monkeypatch.setattr(tr_mod, "refresh_if_needed", fake_refresh)
     reg = _FakeRefresher()
-    out = sync_token_refresh(db_session, registry=reg)
+    out = invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     # The TEST_-prefixed row we created WAS scanned but classified as
     # skipped because refresh_if_needed returned None. We don't assert
     # absolute counts (prod rows may exist) — we assert that the
@@ -286,7 +288,7 @@ def test_sync_token_refresh_skips_fresh_row_via_short_circuit(
     monkeypatch.setattr(tr_mod, "refresh_if_needed", fake_refresh_if_needed)
 
     reg = _FakeRefresher()
-    sync_token_refresh(db_session, registry=reg)
+    invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     # Row counted as skipped: refresh_if_needed short-circuited without
     # calling the registry's wrapped refresher.
     assert eid not in reg.calls
@@ -308,7 +310,7 @@ def test_sync_token_refresh_emits_no_token_issue_when_refresher_returns_empty(
         expires_at=datetime.now(UTC) + timedelta(seconds=30),
     )
     reg = _FakeRefresher(default={"access_token": ""})  # empty token
-    out = sync_token_refresh(db_session, registry=reg)
+    out = invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     # TOKEN_REFRESH_NO_TOKEN issue emitted AT LEAST once (could be >1 if
     # other prod rows also have empty refresher results — but our TEST_
     # row is definitely one of them).
@@ -397,7 +399,7 @@ def test_sync_token_refresh_records_sync_job_with_providers_and_window_seconds(
         expires_at=datetime.now(UTC) + timedelta(seconds=30),
     )
     reg = _FakeRefresher()
-    sync_token_refresh(db_session, registry=reg)
+    invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     db_session.commit()
     job = db_session.execute(
         select(SyncJob)
@@ -426,7 +428,7 @@ def test_sync_token_refresh_records_failed_status_on_refresher_exception(
         expires_at=datetime.now(UTC) + timedelta(seconds=30),
     )
     reg = _FakeRefresher(raise_exc=RuntimeError("upstream 5xx"))
-    out = sync_token_refresh(db_session, registry=reg)
+    out = invoke_seeded_job(sync_token_refresh, db_session, registry=reg)
     issue = db_session.execute(
         select(SyncIssue)
         .where(

@@ -38,6 +38,8 @@ from tts_erp_v2.jobs.spu_deterioration_alert import (
     run_scheduled,
 )
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = pytest.mark.domain_sync
 
 
@@ -342,7 +344,7 @@ def test_run_scheduled_replaces_all_anchors_and_records_later_failure(
     monkeypatch.setattr(
         "tts_erp_v2.jobs.spu_deterioration_alert._record_failure", failure
     )
-    assert run_scheduled(session) == {"status": "failed"}
+    assert invoke_seeded_job(run_scheduled, session) == {"status": "failed"}
     assert replacement.call_count == 2
     failure.assert_called_once()
 
@@ -357,7 +359,7 @@ def test_failure_audit_redacts_read_and_write_exception_details(
         lambda _session: (_ for _ in ()).throw(RuntimeError(sentinel)),
     )
     with Session(db_engine) as session:
-        read_result = run_scheduled(session)
+        read_result = invoke_seeded_job(run_scheduled, session)
     assert read_result["status"] == "failed"
     assert sentinel not in str(read_result)
     assert sentinel not in caplog.text
@@ -379,7 +381,7 @@ def test_failure_audit_redacts_read_and_write_exception_details(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(sentinel)),
     )
     with Session(db_engine) as session:
-        write_result = run_scheduled(session)
+        write_result = invoke_seeded_job(run_scheduled, session)
     assert write_result["status"] == "failed"
     assert sentinel not in str(write_result)
     assert sentinel not in caplog.text
@@ -461,7 +463,7 @@ def test_commit_failure_rolls_back_snapshot_and_sanitizes_audit(
 
         monkeypatch.setattr(session, "commit", fail_first_commit)
         with caplog.at_level("ERROR"):
-            result = run_scheduled(session)
+            result = invoke_seeded_job(run_scheduled, session)
 
     assert result["status"] == "failed"
     assert result["phase"] == "finalize"
@@ -560,7 +562,7 @@ def test_read_phase_rollback_failure_is_sanitized(
 
         monkeypatch.setattr(session, "rollback", fail_transition_rollback)
         with caplog.at_level("ERROR"):
-            result = run_scheduled(session)
+            result = invoke_seeded_job(run_scheduled, session)
     try:
         assert rollback_calls >= 2
         assert result["status"] == "failed"
@@ -634,7 +636,7 @@ def test_prod_shaped_db_writes_anchor_without_operator_release(
         shop_pk = shop.id
     try:
         with Session(db_engine) as session:
-            result = run_scheduled(session)
+            result = invoke_seeded_job(run_scheduled, session)
         assert result["status"] == "success"
         assert result["rows"] > 0
         with Session(db_engine) as session:
@@ -688,7 +690,7 @@ def test_run_scheduled_materializes_and_replaces_idempotently(db_engine) -> None
         shop_pk = shop.id
     try:
         with Session(db_engine) as session:
-            first = run_scheduled(session)
+            first = invoke_seeded_job(run_scheduled, session)
             assert first["status"] == "success"
             first_count = session.scalar(
                 select(SpuDeteriorationAlert.id)
@@ -698,7 +700,7 @@ def test_run_scheduled_materializes_and_replaces_idempotently(db_engine) -> None
             )
             assert first_count is not None
         with Session(db_engine) as session:
-            second = run_scheduled(session)
+            second = invoke_seeded_job(run_scheduled, session)
             assert second["status"] == "success"
             rows = session.scalars(
                 select(SpuDeteriorationAlert).where(
@@ -795,7 +797,7 @@ def test_published_rollout_fails_closed_without_replacing_rows(db_engine) -> Non
         shop_pk, spu_pk, old_id = shop.id, spu.id, old_row.id
     try:
         with Session(db_engine) as session:
-            assert run_scheduled(session)["status"] == "failed"
+            assert invoke_seeded_job(run_scheduled, session)["status"] == "failed"
         with Session(db_engine) as session:
             retained = session.get(SpuDeteriorationAlert, old_id)
             assert retained is not None
@@ -1050,7 +1052,7 @@ def test_real_canonical_queries_batch_more_than_500_scope(
         fact_product_pks = {products[index].id for index in fact_indexes}
     try:
         with Session(db_engine) as session:
-            result = run_scheduled(session)
+            result = invoke_seeded_job(run_scheduled, session)
             assert result["status"] == "success"
         assert seen
         assert max(len(selected) for selected, _, _ in seen) <= 100

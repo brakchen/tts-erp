@@ -40,6 +40,8 @@ from tts_erp_v2.jobs.tiktok.orders import run as run_orders
 from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
 
 # ─── Test helpers ─────────────────────────────────────────────────
@@ -211,7 +213,7 @@ def test_orders_first_run_writes_raw_records_and_normalized_rows(
         ]
     )
 
-    sync_row, result = run_with_sync_job(
+    sync_row, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=account.credential_id,
@@ -351,7 +353,7 @@ def test_orders_line_without_quantity_defaults_to_one(db_session) -> None:
         ]
     )
 
-    sync_row, result = run_with_sync_job(
+    sync_row, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=account.credential_id,
@@ -448,7 +450,7 @@ def test_orders_line_links_spu_when_catalog_known(db_session) -> None:
         ]
     )
 
-    sync_row, result = run_with_sync_job(
+    sync_row, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=account.credential_id,
@@ -510,7 +512,7 @@ def test_orders_second_run_advances_watermark_only(db_session) -> None:
         ]
     )
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=account.credential_id,
@@ -556,7 +558,7 @@ def test_orders_re_upsert_is_idempotent(db_session) -> None:
     )
 
     # First run
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=account.credential_id,
@@ -585,7 +587,7 @@ def test_orders_re_upsert_is_idempotent(db_session) -> None:
     db_session.commit()
 
     # Second run on the same order
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=account.credential_id,
@@ -643,7 +645,7 @@ def test_orders_parse_failure_writes_sync_issue_continues(db_session) -> None:
         ]
     )
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=account.credential_id,
@@ -699,7 +701,7 @@ def test_orders_non_zero_upstream_code_fails_sync_job(db_session) -> None:
     )
 
     with pytest.raises(orders_job.UpstreamJobError):
-        run_with_sync_job(
+        invoke_seeded_job(run_with_sync_job,
             db_session,
             job_name="tiktok.orders",
             credential_id=account.credential_id,
@@ -740,7 +742,7 @@ def test_orders_empty_response_is_a_noop(db_session) -> None:
         ]
     )
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=account.credential_id,

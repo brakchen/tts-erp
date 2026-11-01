@@ -39,6 +39,8 @@ from tts_erp_v2.jobs.miaoshou._common import (
 )
 from tts_erp_v2.proxy.token_service import upsert_credentials
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
@@ -61,9 +63,9 @@ def test_resolve_miaoshou_context_returns_none_when_license_id_empty(
     """When neither the env var nor the ``license_id`` arg supplies a
     non-empty value, the function short-circuits to ``None`` (line 80-81)."""
     monkeypatch.setenv("MIAOSHOU_LICENSE_ID", "")
-    assert resolve_miaoshou_context(db_session) is None
-    assert resolve_miaoshou_context(db_session, license_id="") is None
-    assert resolve_miaoshou_context(db_session, license_id=None) is None
+    assert invoke_seeded_job(resolve_miaoshou_context, db_session) is None
+    assert invoke_seeded_job(resolve_miaoshou_context, db_session, license_id="") is None
+    assert invoke_seeded_job(resolve_miaoshou_context, db_session, license_id=None) is None
 
 
 def test_resolve_miaoshou_context_returns_none_when_credential_missing(
@@ -73,8 +75,8 @@ def test_resolve_miaoshou_context_returns_none_when_credential_missing(
     ``integration.credentials`` row exists, ``load_credentials`` returns
     ``None`` and the function short-circuits (line 83-85)."""
     monkeypatch.setenv("MIAOSHOU_LICENSE_ID", "TEST_missing_license")
-    assert resolve_miaoshou_context(db_session) is None
-    assert resolve_miaoshou_context(db_session, license_id="TEST_also_missing") is None
+    assert invoke_seeded_job(resolve_miaoshou_context, db_session) is None
+    assert invoke_seeded_job(resolve_miaoshou_context, db_session, license_id="TEST_also_missing") is None
 
 
 def test_resolve_miaoshou_context_returns_ctx_with_account_when_credential_present(
@@ -93,7 +95,7 @@ def test_resolve_miaoshou_context_returns_ctx_with_account_when_credential_prese
         plaintext_refresh_token=app_secret,
         plaintext_shop_cipher=None,
     )
-    ctx = resolve_miaoshou_context(db_session, license_id=eid)
+    ctx = invoke_seeded_job(resolve_miaoshou_context, db_session, license_id=eid)
     assert ctx is not None
     assert isinstance(ctx, MiaoshouContext)
     assert ctx.credentials.access_token == app_id
@@ -170,7 +172,7 @@ def test_miaoshou_client_factory_builds_real_client(
         plaintext_refresh_token=app_secret,
         plaintext_shop_cipher=None,
     )
-    ctx = resolve_miaoshou_context(db_session, license_id=eid)
+    ctx = invoke_seeded_job(resolve_miaoshou_context, db_session, license_id=eid)
     assert ctx is not None
     client = miaoshou_client_factory(ctx)
     # Type is from the lazy import; assert by attribute presence.
@@ -195,7 +197,7 @@ def test_miaoshou_client_factory_uses_default_timeout(
         plaintext_refresh_token=app_secret,
         plaintext_shop_cipher=None,
     )
-    ctx = resolve_miaoshou_context(db_session, license_id=eid)
+    ctx = invoke_seeded_job(resolve_miaoshou_context, db_session, license_id=eid)
     assert ctx is not None
     client = miaoshou_client_factory(ctx, timeout=15.0)
     assert client.timeout == 15.0
@@ -216,7 +218,7 @@ def test_miaoshou_client_factory_defaults_app_secret_when_refresh_token_none(
         plaintext_refresh_token=None,  # None → empty app_secret
         plaintext_shop_cipher=None,
     )
-    ctx = resolve_miaoshou_context(db_session, license_id=eid)
+    ctx = invoke_seeded_job(resolve_miaoshou_context, db_session, license_id=eid)
     assert ctx is not None
     assert ctx.credentials.refresh_token is None
     client = miaoshou_client_factory(ctx)
@@ -293,8 +295,8 @@ def test_resolve_miaoshou_context_reuses_existing_procurement_account(
         plaintext_refresh_token=app_secret,
         plaintext_shop_cipher=None,
     )
-    ctx1 = resolve_miaoshou_context(db_session, license_id=eid)
+    ctx1 = invoke_seeded_job(resolve_miaoshou_context, db_session, license_id=eid)
     assert ctx1 is not None
-    ctx2 = resolve_miaoshou_context(db_session, license_id=eid)
+    ctx2 = invoke_seeded_job(resolve_miaoshou_context, db_session, license_id=eid)
     assert ctx2 is not None
     assert ctx1.account_id == ctx2.account_id

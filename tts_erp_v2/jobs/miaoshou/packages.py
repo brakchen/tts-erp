@@ -845,39 +845,23 @@ def sync_package_detail(
         with session.begin():
             if package is None:
                 _record_issue(
-                    session,
-                    credential_id=ctx.credentials.id,
-                    issue_type="PACKAGE_DETAIL_MISSING",
-                    external_id=str(op_order_package_id),
+                    session, credential_id=ctx.credentials.id,
+                    issue_type="PACKAGE_DETAIL_MISSING", external_id=str(op_order_package_id),
                     details={"response_keys": list(payload.keys())[:20]},
                 )
-            job.rows_total = 0
-            job.rows_inserted = 0
-            job.rows_failed = 1
-            return {
-                "packages_upserted": 0,
-                "items_upserted": 0,
-                "gifts_upserted": 0,
-                "issues": 1,
-                "skipped": False,
-            }
-
-        package_count, item_count, gift_count, issues = _persist_package(
-            session,
-            package=package,
-            credential_id=ctx.credentials.id,
-            source_endpoint=DETAIL_ENDPOINT,
-        )
+                job.rows_total = job.rows_inserted = 0
+                job.rows_failed = 1
+                return {"packages_upserted": 0, "items_upserted": 0,
+                        "gifts_upserted": 0, "issues": 1, "skipped": False}
+            package_count, item_count, gift_count, issues = _persist_package(
+                session, package=package, credential_id=ctx.credentials.id,
+                source_endpoint=DETAIL_ENDPOINT,
+            )
         job.rows_total = 1
         job.rows_inserted = package_count + item_count + gift_count
         job.rows_failed = issues
-        return {
-            "packages_upserted": package_count,
-            "items_upserted": item_count,
-            "gifts_upserted": gift_count,
-            "issues": issues,
-            "skipped": False,
-        }
+        return {"packages_upserted": package_count, "items_upserted": item_count,
+                "gifts_upserted": gift_count, "issues": issues, "skipped": False}
 
 
 __all__ = [

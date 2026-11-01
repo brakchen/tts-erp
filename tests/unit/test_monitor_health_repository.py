@@ -14,6 +14,8 @@ from alembic.operations import Operations
 from sqlalchemy import Engine, delete, inspect, select
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = pytest.mark.layer_integration
 BASE = datetime(2026, 1, 1, tzinfo=UTC)
 MIGRATION = Path("alembic/versions/0070_monitor_health.py")
@@ -101,14 +103,14 @@ def test_notification_failure_retry_success_and_recovery(
         ingest(session, shops[0], "TEST_shop", "heartbeat", "running", now=BASE)
         session.commit()
         with pytest.raises(RuntimeError, match="TEST_send_failure"):
-            job.run(session, now=BASE + timedelta(seconds=180))
+            invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=180))
         session.rollback()
     monkeypatch.setattr(
         job, "send", lambda url, batches: calls.append(batches) or len(batches)
     )
     for time in (195, 210):
         with Session(health_schema) as session:
-            job.run(session, now=BASE + timedelta(seconds=time))
+            invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=time))
             session.commit()
     assert len(calls) == 2  # one failed attempt, one successful digest
     with Session(health_schema) as session:
@@ -121,9 +123,9 @@ def test_notification_failure_retry_success_and_recovery(
             now=BASE + timedelta(seconds=211),
         )
         session.commit()
-        job.run(session, now=BASE + timedelta(seconds=212))
+        invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=212))
         session.commit()
-        job.run(session, now=BASE + timedelta(seconds=213))
+        invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=213))
         session.commit()
     assert len(calls) == 3
     assert "heartbeat:recovery" in str(calls[-1])
@@ -154,7 +156,7 @@ def test_parallel_scans_no_duplicate_and_intake_not_overwritten(
 
     def scan():
         with Session(health_schema) as session:
-            job.run(session, now=BASE + timedelta(seconds=180))
+            invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=180))
             session.commit()
 
     def intake():
@@ -259,7 +261,7 @@ def test_200_valid_stopped_shops_all_notified_in_first_scan_before_180(monkeypat
     )
     session = cast(Session, SimpleNamespace(flush=lambda: None))
     started = monotonic()
-    result = job.run(session, now=datetime.fromtimestamp(165, UTC))
+    result = invoke_seeded_job(job.run, session, now=datetime.fromtimestamp(165, UTC))
     assert monotonic() - started <= 10
     assert 165 + monotonic() - started <= 180
     assert len(sent) == 4
@@ -270,7 +272,7 @@ def test_200_valid_stopped_shops_all_notified_in_first_scan_before_180(monkeypat
         sum(fault["notified"] for row in rows for fault in row.state["faults"].values())
         == 200
     )
-    job.run(session, now=datetime.fromtimestamp(180, UTC))
+    invoke_seeded_job(job.run, session, now=datetime.fromtimestamp(180, UTC))
     assert sum(len(lines) for lines in sent) == 200
 
 
@@ -293,7 +295,7 @@ def test_below_capacity_keeps_offline_delivery_budget(monkeypatch):
     monkeypatch.setattr(
         job, "send", lambda url, batches: sent.extend(batches) or len(batches)
     )
-    result = job.run(
+    result = invoke_seeded_job(job.run,
         cast(Session, SimpleNamespace(flush=lambda: None)),
         now=datetime.fromtimestamp(165, UTC),
     )
@@ -335,7 +337,7 @@ def test_actual_transport_timeout_never_acknowledges(monkeypatch):
         ),
     )
     with pytest.raises(RuntimeError, match="monitor health"):
-        job.run(
+        invoke_seeded_job(job.run,
             cast(Session, SimpleNamespace(flush=lambda: None)),
             now=datetime.fromtimestamp(180, UTC),
         )
@@ -382,7 +384,7 @@ def test_partial_chunk_failure_commits_only_accepted_prefix_and_retries_remainde
                 now=BASE + timedelta(seconds=i),
             )
         session.commit()
-        result = job.run(session, now=BASE + timedelta(seconds=165))
+        result = invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=165))
         assert result["sent"] == 1 and result["pending"] == 1 and result["degraded"]
         assert result["deadlineAtRisk"]
         assert result["deliveryError"] and shops[0] in calls[0]
@@ -393,10 +395,10 @@ def test_partial_chunk_failure_commits_only_accepted_prefix_and_retries_remainde
         assert rows[0] is not None and rows[1] is not None
         assert rows[0].state["faults"]["heartbeat"]["notified"]
         assert not rows[1].state["faults"]["heartbeat"]["notified"]
-        result = job.run(session, now=BASE + timedelta(seconds=166))
+        result = invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=166))
         session.commit()
         assert result["sent"] == 1 and result["pending"] == 0 and not result["degraded"]
-        job.run(session, now=BASE + timedelta(seconds=167))
+        invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=167))
         session.commit()
     assert len(calls) == 3 and shops[1] in calls[2] and shops[0] not in calls[2]
 
@@ -427,7 +429,7 @@ def test_persisted_recurrence_and_failed_recovery_delivery(
     with Session(health_schema) as session:
         report(session, "heartbeat", "running", 0)
         report(session, "heartbeat", "running", 179)
-        job.run(session, now=BASE + timedelta(seconds=180))
+        invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=180))
         session.commit()
         report(session, "scan", "progress", 181)
         report(session, "scan", "failed", 182)
@@ -438,19 +440,19 @@ def test_persisted_recurrence_and_failed_recovery_delivery(
     monkeypatch.setattr(job, "send", fail)
     with Session(health_schema) as session:
         with pytest.raises(RuntimeError, match="TEST_recovery"):
-            job.run(session, now=BASE + timedelta(seconds=183))
+            invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=183))
         session.rollback()
     monkeypatch.setattr(
         job, "send", lambda url, batches: sent.extend(batches) or len(batches)
     )
     with Session(health_schema) as session:
         report(session, "heartbeat", "running", 360)
-        job.run(session, now=BASE + timedelta(seconds=361))
+        invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=361))
         session.commit()
-        job.run(session, now=BASE + timedelta(seconds=362))
+        invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=362))
         session.commit()
         report(session, "scan", "progress", 363)
-        job.run(session, now=BASE + timedelta(seconds=364))
+        invoke_seeded_job(job.run, session, now=BASE + timedelta(seconds=364))
         session.commit()
     assert len(sent) == 3
     assert ["scan:recovery" in line for line in sent[1]] == [True, False]
@@ -478,7 +480,7 @@ def test_invalid_accepted_prefix_never_acknowledged(monkeypatch, accepted):
 
     monkeypatch.setattr(job, "send", invalid)
     with pytest.raises(RuntimeError, match="invalid accepted batch count"):
-        job.run(
+        invoke_seeded_job(job.run,
             cast(Session, SimpleNamespace(flush=lambda: None)),
             now=datetime.fromtimestamp(165, UTC),
         )

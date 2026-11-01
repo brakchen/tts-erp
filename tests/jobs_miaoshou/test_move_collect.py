@@ -32,6 +32,8 @@ from tts_erp_v2.db.models.integration import (
 )
 from tts_erp_v2.jobs.miaoshou.move_collect import sync_move_collect
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
@@ -115,7 +117,7 @@ def test_move_collect_walks_all_pages_through_rate_limit_retrys(
     )
     fake_client.install(side_effect)
 
-    result = sync_move_collect(
+    result = invoke_seeded_job(sync_move_collect,
         db_session,
         client=fake_client,
         max_retries=3,
@@ -165,7 +167,7 @@ def test_move_collect_writes_raw_records_per_task(
     max_raw_id = (
         db_session.execute(select(func.max(RawRecord.id))).scalar_one_or_none() or 0
     )
-    sync_move_collect(db_session, client=fake_client, max_retries=2)
+    invoke_seeded_job(sync_move_collect, db_session, client=fake_client, max_retries=2)
     db_session.commit()
 
     raw_rows = (
@@ -199,7 +201,7 @@ def test_move_collect_handles_empty_response(
 
     fake_client.install(side_effect)
 
-    result = sync_move_collect(db_session, client=fake_client, max_retries=2)
+    result = invoke_seeded_job(sync_move_collect, db_session, client=fake_client, max_retries=2)
     db_session.commit()
 
     assert result["tasks_seen"] == 0
@@ -236,7 +238,7 @@ def test_move_collect_skips_non_dict_items(
         }
 
     fake_client.install(side_effect)
-    result = sync_move_collect(db_session, client=fake_client, max_retries=2)
+    result = invoke_seeded_job(sync_move_collect, db_session, client=fake_client, max_retries=2)
     db_session.commit()
 
     assert result["tasks_seen"] == 3
@@ -260,7 +262,7 @@ def test_move_collect_status_filter(
     )
     fake_client.install(side_effect)
 
-    sync_move_collect(db_session, client=fake_client, status="success", max_retries=2)
+    invoke_seeded_job(sync_move_collect, db_session, client=fake_client, status="success", max_retries=2)
     db_session.commit()
 
     # The status filter must appear in the body sent to the upstream.

@@ -31,6 +31,8 @@ from tts_erp_v2.proxy.errors import (
 )
 from tts_erp_v2.proxy.tts_shop import client as tts_client_mod
 
+from tests._job_invocation import invoke_seeded_job
+
 # Credential field names — pulled out as module-level constants so ruff's
 # S105 false-positive (triggered on literal substrings "access_token" /
 # "refresh_token" / "page_token" appearing in expressions) only fires
@@ -230,7 +232,7 @@ def test_build_proxy_call_uses_token_bound_service_app_pair(
         return client
 
     monkeypatch.setattr(proxy_call, "_get_client", capture_client)
-    proxy_call.build_proxy_call(db_session, shop_id="TEST_TT_PROXY_DATABASE")
+    invoke_seeded_job(proxy_call.build_proxy_call, db_session, shop_id="TEST_TT_PROXY_DATABASE")
 
     assert captured["app_key"] == "TEST_DATABASE_APP_KEY"
     assert captured["app_secret"] == "TEST_DATABASE_APP_SECRET"
@@ -248,7 +250,7 @@ def test_get_lifts_all_body_keys_to_query(
     _seed_credentials(db_session)
     fake_client.script("GET", "/finance/202309/payments", {"code": 0, "data": {"payments": []}})
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
     proxy(
         "GET",
         "/finance/202309/payments",
@@ -293,7 +295,7 @@ def test_post_keeps_whitelist_keys_in_query_rest_in_body(
     _seed_credentials(db_session)
     fake_client.script("POST", "/order/202309/orders/search", {"code": 0, "data": {}})
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
     proxy(
         "POST",
         "/order/202309/orders/search",
@@ -372,7 +374,7 @@ def test_reactive_refresh_on_401_retries_once(
         fake_refresh_if_needed,
     )
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
     result = proxy("GET", "/finance/202309/payments", body={"payment_id": "PAY_001"})
 
     assert len(refresh_calls) == 1
@@ -430,7 +432,7 @@ def test_reactive_refresh_on_401_no_infinite_loop(
         fake_refresh_if_needed,
     )
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
 
     with pytest.raises(AuthenticationError):
         proxy("GET", "/finance/202309/payments", body={"payment_id": "PAY_001"})
@@ -470,7 +472,7 @@ def test_reactive_refresh_failure_propagates(
         refresh_raises,
     )
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
 
     with pytest.raises(AuthenticationError):
         proxy("GET", "/finance/202309/payments", body={"payment_id": "PAY_001"})
@@ -509,7 +511,7 @@ def test_non_auth_error_not_retried(
         fake_refresh,
     )
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
 
     with pytest.raises(UpstreamHttpError):
         proxy("GET", "/finance/202309/payments", body={"payment_id": "PAY_001"})

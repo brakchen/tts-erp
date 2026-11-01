@@ -29,6 +29,8 @@ from tts_erp_v2.jobs.tiktok import logistics as logistics_job
 from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_logistics, pytest.mark.layer_integration]
 
 
@@ -127,7 +129,7 @@ def test_logistics_writes_shipment_and_tracks_watermark(db_session) -> None:
             ),
         },
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
@@ -210,7 +212,7 @@ def test_logistics_synthesizes_package_id_from_order_id(db_session) -> None:
             ),
         },
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
@@ -235,7 +237,7 @@ def test_logistics_unknown_order_writes_sync_issue(db_session) -> None:
         package_id="PKG_GHOST",
     )
     proxy = FakeProxy()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
@@ -277,7 +279,7 @@ def test_logistics_fetch_events_disabled_skips_tracking(db_session) -> None:
         package_id="PKG2",
     )
     proxy = FakeProxy()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
@@ -332,7 +334,7 @@ def test_logistics_skips_orders_without_tracking_number(db_session) -> None:
             ),
         },
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
@@ -400,7 +402,7 @@ def test_logistics_excludes_terminal_status_orders(db_session) -> None:
             ),
         },
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
@@ -443,7 +445,7 @@ def test_logistics_classifies_delivered_status(db_session) -> None:
             ),
         },
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=account.credential_id,
@@ -475,7 +477,7 @@ def test_logistics_excludes_other_shops_orders(db_session) -> None:
         package_id="PKG_OTHER",
     )
     proxy = FakeProxy()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=own.credential_id,
@@ -521,7 +523,7 @@ def test_logistics_dedupes_duplicate_raw_records(db_session) -> None:
             package_id="PKG_DUP",
         )
     proxy = FakeProxy()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.logistics",
         credential_id=account.credential_id,

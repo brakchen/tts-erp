@@ -27,6 +27,8 @@ from tts_erp_v2.jobs.tiktok import products as products_job
 from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
 
 
@@ -114,7 +116,7 @@ def test_products_first_run_writes_products_and_variants(db_session) -> None:
         ]
     )
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.products",
         credential_id=account.credential_id,
@@ -177,7 +179,7 @@ def test_products_second_run_advances_watermark_only(db_session) -> None:
             }
         ]
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.products",
         credential_id=account.credential_id,
@@ -208,7 +210,7 @@ def test_products_parse_failure_writes_sync_issue(db_session) -> None:
             }
         ]
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.products",
         credential_id=account.credential_id,
@@ -344,7 +346,7 @@ def test_products_run_calls_image_fetcher_for_each_spu(db_session) -> None:
             "skus": [],
         }
 
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.products",
         credential_id=account.credential_id,
@@ -420,7 +422,7 @@ def test_products_run_logs_sync_issue_when_get_product_fails(
             "skus": [],
         }
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.products",
         credential_id=account.credential_id,
@@ -503,7 +505,7 @@ def test_products_sync_backfills_pre_existing_null_spu_lines(db_session) -> None
         ]
     )
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.products",
         credential_id=account.credential_id,

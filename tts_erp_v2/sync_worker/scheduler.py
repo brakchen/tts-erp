@@ -352,14 +352,12 @@ def get_job_control_values(session: Session) -> dict[str, str]:
 def _is_job_enabled_in_factory(
     session_factory: sessionmaker[Session], job_name: str
 ) -> bool:
-    session = session_factory()
     try:
-        return is_job_enabled(session, job_name)
+        with session_factory() as session, session.begin():
+            return is_job_enabled(session, job_name)
     except Exception:
         log.exception("[%s] could not read scheduler control; failing open", job_name)
         return True
-    finally:
-        session.close()
 
 
 def _enumerate_tiktok_shops(session: Session) -> list[str]:
@@ -509,11 +507,8 @@ def _enumerate_tiktok_shops_in_factory(
     session_factory: sessionmaker[Session],
 ) -> list[str]:
     """Open a session, enumerate, close. Used by ``_run_tiktok_job``."""
-    session = session_factory()
-    try:
+    with session_factory() as session, session.begin():
         return _enumerate_tiktok_shops(session)
-    finally:
-        session.close()
 
 
 def _record_failed_tick(
@@ -620,24 +615,18 @@ def _overdue_first_runs(
     unreadable history cannot distinguish "never ran" from "ran recently".
     """
     try:
-        session = session_factory()
-    except Exception:
-        return {}
-    try:
-        rows = session.execute(
-            select(SyncJob.job_name, func.max(SyncJob.finished_at))
-            .where(
-                SyncJob.status == "succeeded",
-                SyncJob.job_name.in_(list(JOBS)),
-            )
-            .group_by(SyncJob.job_name)
-        ).all()
+        with session_factory() as session, session.begin():
+            rows = session.execute(
+                select(SyncJob.job_name, func.max(SyncJob.finished_at))
+                .where(
+                    SyncJob.status == "succeeded",
+                    SyncJob.job_name.in_(list(JOBS)),
+                )
+                .group_by(SyncJob.job_name)
+            ).all()
     except Exception:
         log.debug("catch-up scheduling: sync_jobs history unavailable", exc_info=True)
         return {}
-    finally:
-        with suppress(Exception):
-            session.close()
 
     overdue: dict[str, datetime] = {}
     history = dict(rows)

@@ -20,6 +20,8 @@ from tts_erp_v2.jobs.tiktok import after_sales as after_sales_job
 from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_after_sales, pytest.mark.layer_integration]
 
 
@@ -174,7 +176,7 @@ def test_after_sales_writes_returns_and_cancellations(db_session) -> None:
             }
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -221,7 +223,7 @@ def test_after_sales_unknown_order_writes_sync_issue(db_session) -> None:
             {"code": 0, "data": {"cancellations": [], "next_page_token": ""}}
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -274,7 +276,7 @@ def test_after_sales_resolves_line_via_line_id(db_session) -> None:
             }
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -335,7 +337,7 @@ def test_after_sales_resolves_line_via_sku_id(db_session) -> None:
             }
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -385,7 +387,7 @@ def test_after_sales_unknown_line_when_sku_does_not_match(db_session) -> None:
             }
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -449,7 +451,7 @@ def test_after_sales_persists_case_level_refund_amount(db_session) -> None:
             }
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -487,7 +489,7 @@ def test_after_sales_persists_case_level_refund_amount_legacy_shape(db_session) 
             }
         ],
     )
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -525,7 +527,7 @@ def test_after_sales_bare_string_refund_does_not_crash(db_session) -> None:
             }
         ],
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -565,7 +567,7 @@ def test_after_sales_unknown_order_dedup_across_ticks(db_session) -> None:
         ],
     )
     # First tick
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,
@@ -574,7 +576,7 @@ def test_after_sales_unknown_order_dedup_across_ticks(db_session) -> None:
     )
     # Second tick (proxy pages already drained by the first run; both endpoints
     # fall back to empty-page defaults).
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.after_sales",
         credential_id=account.credential_id,

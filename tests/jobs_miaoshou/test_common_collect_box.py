@@ -11,6 +11,8 @@ from tts_erp_v2.db.models.integration import SyncIssue, SyncJob
 from tts_erp_v2.db.models.procurement import ProcurementProduct
 from tts_erp_v2.jobs.miaoshou.common_collect_box import sync_common_collect_box
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
@@ -91,7 +93,7 @@ def test_sync_common_collect_box_upserts_source_price_columns(
         ],
     )
 
-    result = sync_common_collect_box(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_common_collect_box, db_session, client=fake_client)
     db_session.commit()
 
     assert result["products_upserted"] == 2
@@ -141,7 +143,7 @@ def test_sync_common_collect_box_price_falls_back_to_min_sku(
             }
         ],
     )
-    sync_common_collect_box(db_session, client=fake_client)
+    invoke_seeded_job(sync_common_collect_box, db_session, client=fake_client)
     db_session.commit()
     p = db_session.execute(
         select(ProcurementProduct).where(
@@ -158,7 +160,7 @@ def test_sync_common_collect_box_empty_response(
     fake_client.install(
         lambda **_: {"result": "success", "data": {"detailList": [], "total": 0}}
     )
-    result = sync_common_collect_box(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_common_collect_box, db_session, client=fake_client)
     db_session.commit()
     assert result["products_upserted"] == 0
     assert result["items_seen"] == 0
@@ -179,7 +181,7 @@ def test_sync_common_collect_box_missing_id_records_issue(
             }
         ],
     )
-    result = sync_common_collect_box(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_common_collect_box, db_session, client=fake_client)
     db_session.commit()
     assert result["products_upserted"] == 1
     assert result["issues"] == 1
@@ -201,14 +203,14 @@ def test_sync_common_collect_box_idempotent_price_update(
         "data": {"detailList": [_box_payload("ccbd_1", price=30.0)], "total": 1},
     }
     _install_pages(fake_client, [page])
-    sync_common_collect_box(db_session, client=fake_client)
+    invoke_seeded_job(sync_common_collect_box, db_session, client=fake_client)
     db_session.commit()
     page2 = {
         "result": "success",
         "data": {"detailList": [_box_payload("ccbd_1", price=31.5)], "total": 1},
     }
     _install_pages(fake_client, [page2])
-    sync_common_collect_box(db_session, client=fake_client)
+    invoke_seeded_job(sync_common_collect_box, db_session, client=fake_client)
     db_session.commit()
 
     rows = db_session.execute(
@@ -235,7 +237,7 @@ def test_sync_common_collect_box_empty_source_list_tolerated(
         fake_client,
         [{"result": "success", "data": {"detailList": [item], "total": 1}}],
     )
-    result = sync_common_collect_box(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_common_collect_box, db_session, client=fake_client)
     db_session.commit()
     assert result["products_upserted"] == 1
     p = db_session.execute(

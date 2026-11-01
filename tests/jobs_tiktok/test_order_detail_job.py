@@ -30,6 +30,8 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.jobs.tiktok import order_detail
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_commerce, pytest.mark.layer_integration]
 
 
@@ -111,7 +113,7 @@ def test_detail_writes_raw_records_and_normalized_rows(db_session) -> None:
         }
     )
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -153,7 +155,7 @@ def test_detail_writes_raw_records_and_normalized_rows(db_session) -> None:
 def test_detail_writes_sync_issue_on_upstream_error(db_session) -> None:
     account = _make_account(db_session)
     proxy = FakeProxy(pages={})  # O1 will 404
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -175,7 +177,7 @@ def test_detail_writes_sync_issue_on_upstream_error(db_session) -> None:
 def test_detail_empty_order_ids_is_noop(db_session) -> None:
     account = _make_account(db_session)
     proxy = FakeProxy(pages={})
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -206,7 +208,7 @@ def test_detail_parse_failure_continues(db_session) -> None:
             },
         }
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -268,7 +270,7 @@ def test_detail_auto_mode_pulls_from_sync_issues(db_session) -> None:
             },
         }
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -319,7 +321,7 @@ def test_detail_auto_mode_dedups_order_id_across_line_issues(db_session) -> None
             },
         }
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -357,7 +359,7 @@ def test_detail_auto_mode_caps_at_batch_size(db_session) -> None:
             for i in range(AUTO_BATCH_SIZE + 5)
         }
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -388,7 +390,7 @@ def test_detail_auto_mode_failed_fetch_keeps_issue_open(db_session) -> None:
     account = _make_account(db_session)
     _seed_unresolved_issue(db_session, external_id="O_FAIL")
     proxy = FakeProxy(pages={})  # O_FAIL will 404
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -418,7 +420,7 @@ def test_detail_auto_mode_no_issues_is_noop(db_session) -> None:
     """No unresolved issues for this shop → JobResult with zero counters."""
     account = _make_account(db_session)
     proxy = FakeProxy(pages={})
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -446,7 +448,7 @@ def test_detail_explicit_order_ids_still_resolves(db_session) -> None:
             },
         }
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,
@@ -492,7 +494,7 @@ def test_detail_links_spu_when_catalog_known(db_session) -> None:
             }
         }
     )
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.order_detail",
         credential_id=account.credential_id,

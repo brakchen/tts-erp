@@ -25,6 +25,8 @@ from tts_erp_v2.jobs.miaoshou.packages import (
     sync_packages,
 )
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
@@ -100,7 +102,7 @@ def test_sync_packages_persists_only_to_miaoshou_schema(
     package = _package_payload()
     fake_client.install(lambda **_: _list_response(package))
 
-    result = sync_packages(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_packages, db_session, client=fake_client)
     db_session.commit()
 
     assert result == {
@@ -185,10 +187,10 @@ def test_sync_packages_is_idempotent_but_preserves_raw_history(
     package = _package_payload()
     fake_client.install(lambda **_: _list_response(package))
 
-    sync_packages(
+    invoke_seeded_job(sync_packages,
         db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
     )
-    sync_packages(
+    invoke_seeded_job(sync_packages,
         db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
     )
     db_session.commit()
@@ -225,7 +227,7 @@ def test_partial_payload_preserves_fields_and_absent_children(
 ) -> None:
     state = {"package": _package_payload()}
     fake_client.install(lambda **_: _list_response(state["package"]))
-    sync_packages(
+    invoke_seeded_job(sync_packages,
         db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
     )
 
@@ -236,7 +238,7 @@ def test_partial_payload_preserves_fields_and_absent_children(
             "gmtOrderModified": "2026-09-28 20:10:00",
         },
     }
-    sync_packages(
+    invoke_seeded_job(sync_packages,
         db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
     )
     db_session.commit()
@@ -264,7 +266,7 @@ def test_malformed_children_do_not_clear_snapshot_and_record_external_id(
 ) -> None:
     state = {"package": _package_payload()}
     fake_client.install(lambda **_: _list_response(state["package"]))
-    sync_packages(
+    invoke_seeded_job(sync_packages,
         db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
     )
     state["package"] = {
@@ -276,7 +278,7 @@ def test_malformed_children_do_not_clear_snapshot_and_record_external_id(
         "items": None,
         "giftItems": {"bad": "shape"},
     }
-    result = sync_packages(
+    result = invoke_seeded_job(sync_packages,
         db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
     )
     db_session.commit()
@@ -327,7 +329,7 @@ def test_explicit_empty_children_soft_remove_previous_rows(
 ) -> None:
     state = {"package": _package_payload()}
     fake_client.install(lambda **_: _list_response(state["package"]))
-    sync_packages(
+    invoke_seeded_job(sync_packages,
         db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
     )
     state["package"] = {
@@ -339,7 +341,7 @@ def test_explicit_empty_children_soft_remove_previous_rows(
         "items": [],
         "giftItems": [],
     }
-    sync_packages(
+    invoke_seeded_job(sync_packages,
         db_session, client=fake_client, gmt_modified_from="2026-09-28 20:00:00"
     )
     db_session.commit()
@@ -380,7 +382,7 @@ def test_missing_package_id_records_miaoshou_issue(
     package.pop("opOrderPackageId")
     fake_client.install(lambda **_: _list_response(package))
 
-    result = sync_packages(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_packages, db_session, client=fake_client)
     db_session.commit()
 
     assert result["packages_upserted"] == 0
@@ -406,7 +408,7 @@ def test_sync_package_detail_uses_detail_endpoint(
         }
     )
 
-    result = sync_package_detail(
+    result = invoke_seeded_job(sync_package_detail,
         db_session,
         client=fake_client,
         op_order_package_id="TEST_PACKAGE_1",
@@ -464,7 +466,7 @@ def test_incomplete_pagination_fails_before_advancing_cursor(
     )
 
     with pytest.raises(RuntimeError, match="pagination incomplete"):
-        sync_packages(db_session, client=fake_client)
+        invoke_seeded_job(sync_packages, db_session, client=fake_client)
 
     assert (
         db_session.execute(
@@ -481,7 +483,7 @@ def test_job_skips_without_miaoshou_schema(
 ) -> None:
     monkeypatch.setattr(packages_job, "_schema_ready", lambda _session: False)
 
-    result = sync_packages(db_session, client=fake_client)
+    result = invoke_seeded_job(sync_packages, db_session, client=fake_client)
     db_session.commit()
 
     assert result["skipped"] is True

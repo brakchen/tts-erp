@@ -50,6 +50,8 @@ from tts_erp_v2.jobs.token_refresh import (
 )
 from tts_erp_v2.proxy.token_service import upsert_credentials
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_sync, pytest.mark.layer_integration]
 
 
@@ -378,7 +380,7 @@ def test_sync_token_refresh_forwards_wide_skew_for_non_null_row(
 
         sess = session_factory()
         try:
-            result = sync_token_refresh(
+            result = invoke_seeded_job(sync_token_refresh,
                 sess,
                 registry=lambda *_x, **_xx:
                         lambda r: {"access_token": "x", "expires_at": soon},
@@ -442,7 +444,7 @@ def test_sync_token_refresh_uses_force_for_null_expiry_stale_row(
 
         sess = session_factory()
         try:
-            result = sync_token_refresh(
+            result = invoke_seeded_job(sync_token_refresh,
                 sess,
                 registry=lambda *_x, **_xx:
                         lambda r: {"access_token": "x"},
@@ -503,7 +505,7 @@ def test_sync_token_refresh_writes_noop_advisory_when_scan_picks_but_nothing_hap
 
         sess = session_factory()
         try:
-            result = sync_token_refresh(
+            result = invoke_seeded_job(sync_token_refresh,
                 sess,
                 registry=lambda *_x, **_xx: lambda _r: {"access_token": "x"},
                 providers=("tiktok",),
@@ -576,7 +578,7 @@ def test_sync_token_refresh_no_noop_advisory_when_refresh_succeeds(
             # The inner lambda takes the (provider, external_account_id)
             # pair that ``_instrument`` forwards from the wrapped
             # refresher — one positional arg would raise TypeError.
-            result = sync_token_refresh(
+            result = invoke_seeded_job(sync_token_refresh,
                 sess,
                 registry=lambda *_x, **_xx: lambda _p, _eid: {
                     "access_token": "ok"
@@ -622,7 +624,7 @@ def test_sync_token_refresh_no_noop_advisory_when_scan_empty(
     # Use a provider that has no rows in the test DB.
     sess = session_factory()
     try:
-        result = sync_token_refresh(
+        result = invoke_seeded_job(sync_token_refresh,
             sess,
             registry=lambda *_x, **_xx: lambda _r: {"access_token": "x"},
             providers=("not_a_real_provider",),

@@ -40,6 +40,8 @@ from tts_erp_v2.jobs.finance_fee_rate import (
     compute_shop_fee_rates,
 )
 
+from tests._job_invocation import invoke_seeded_job
+
 pytestmark = [pytest.mark.domain_finance, pytest.mark.layer_integration]
 
 _NOW = datetime(2026, 9, 29, 12, 0, 0, tzinfo=UTC)
@@ -179,7 +181,7 @@ def _bulk(
 
 def _compute_for(session, *shops: ChannelAccount, now: datetime = _NOW) -> dict:
     """只重算本测试拥有的店铺，绝不触碰共享测试库的非 TEST_ 行。"""
-    return compute_shop_fee_rates(
+    return invoke_seeded_job(compute_shop_fee_rates,
         session,
         now=now,
         shop_pks=tuple(shop.id for shop in shops),

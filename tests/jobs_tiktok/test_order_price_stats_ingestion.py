@@ -30,6 +30,8 @@ from tts_erp_v2.jobs.tiktok.order_prices import (
     upsert_price_observation,
 )
 
+from tests._job_invocation import invoke_seeded_job
+
 CAPTURED = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 
 
@@ -375,8 +377,8 @@ def test_search_and_detail_use_same_observation_fields(price_observation_schema,
 
     search_account = _make_account(db_session, "SEARCH")
     detail_account = _make_account(db_session, "DETAIL")
-    search_result = orders.run(db_session, proxy_call=_SearchProxy(_producer_payload("TEST_PRICE_SEARCH_ORDER", "TEST_PRICE_SEARCH_LINE")), shop_id=search_account.shop_id)
-    detail_result = order_detail.run(db_session, proxy_call=_DetailProxy(_producer_payload("TEST_PRICE_DETAIL_ORDER", "TEST_PRICE_DETAIL_LINE")), shop_id=detail_account.shop_id, order_ids=["TEST_PRICE_DETAIL_ORDER"])
+    search_result = invoke_seeded_job(orders.run, db_session, proxy_call=_SearchProxy(_producer_payload("TEST_PRICE_SEARCH_ORDER", "TEST_PRICE_SEARCH_LINE")), shop_id=search_account.shop_id)
+    detail_result = invoke_seeded_job(order_detail.run, db_session, proxy_call=_DetailProxy(_producer_payload("TEST_PRICE_DETAIL_ORDER", "TEST_PRICE_DETAIL_LINE")), shop_id=detail_account.shop_id, order_ids=["TEST_PRICE_DETAIL_ORDER"])
     assert search_result.rows_failed == 0
     assert detail_result.rows_failed == 0
     rows = db_session.execute(select(SalesOrderLinePriceObservation).order_by(SalesOrderLinePriceObservation.order_pk)).scalars().all()
@@ -395,7 +397,7 @@ def test_detail_mismatched_response_does_not_persist_or_resolve_retry(price_obse
     requested = "TEST_PRICE_REQUESTED_ORDER"
     db_session.add(SyncIssue(job_name=order_detail.JOB_NAME, issue_type="PARSE_ERROR", external_id=requested, details={"reason": "retry"}))
     db_session.flush()
-    result = order_detail.run(db_session, proxy_call=_DetailProxy(_producer_payload("TEST_PRICE_OTHER_ORDER", "TEST_PRICE_OTHER_LINE")), shop_id=account.shop_id, order_ids=[requested])
+    result = invoke_seeded_job(order_detail.run, db_session, proxy_call=_DetailProxy(_producer_payload("TEST_PRICE_OTHER_ORDER", "TEST_PRICE_OTHER_LINE")), shop_id=account.shop_id, order_ids=[requested])
     assert result.rows_failed == 1
     assert db_session.execute(
         select(SalesOrder).where(SalesOrder.order_id.in_([requested, "TEST_PRICE_OTHER_ORDER"]))
@@ -608,8 +610,8 @@ def test_older_search_payload_preserves_current_mutable_rows_and_observation(
     older["order_status"] = "CANCELLED"
     older["currency"] = "SGD"
     older["line_items"][0]["quantity"] = 9
-    orders.run(db_session, proxy_call=_SearchProxy(newer), shop_id=account.shop_id)
-    orders.run(db_session, proxy_call=_SearchProxy(older), shop_id=account.shop_id)
+    invoke_seeded_job(orders.run, db_session, proxy_call=_SearchProxy(newer), shop_id=account.shop_id)
+    invoke_seeded_job(orders.run, db_session, proxy_call=_SearchProxy(older), shop_id=account.shop_id)
     order = db_session.execute(
         select(SalesOrder).where(SalesOrder.shop_pk == account.id)
     ).scalar_one()
