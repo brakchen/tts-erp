@@ -1,182 +1,263 @@
 import PageIntro from '../../shared/PageIntro';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Input, Label, Modal, Table, TextField } from '@heroui/react';
-import { ApiError } from '../../shared/api/client';
+import { Alert, Button, Modal } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
-import { decodeDetail, decodeItem, decodeList, decodeRevision, decodeSecret, decodeSnapshot, record, type Detail, type Item, type Published, type Revision, type Secret } from './contracts';
+import { decodeDetail, decodeItem, decodeList, decodeReview, decodeRevision, decodeSecret, record, type Detail, type Item, type Revision, type Secret } from './contracts';
 import { parseObject, parseRuntime, stringifyRuntime } from './json';
-import JsonEditor from './JsonEditor';
 import CreateConfig, { type CreateDraft } from './CreateConfig';
 import SecretPanel from './SecretPanel';
+import ConfigList from './ConfigList';
+import ConfigWorkspace from './ConfigWorkspace';
+import PublishReview from './PublishReview';
+import RevisionHistory from './RevisionHistory';
+import { useConfigWorkflow, type View } from './useConfigWorkflow';
 import { useRuntimeCommands, type Attempt } from './useRuntimeCommands';
 
-interface Confirmation { attempt: Attempt; path: string; body?: string; title: string; message: string; success: string }
-interface ReadState<T> { data?: T; loading: boolean; error?: string }
-const errorMessage = (error: unknown) => error instanceof ApiError ? `读取失败（HTTP ${error.status}），请明确重试` : '读取失败，请明确重试';
-
+interface Confirmation { attempt: Attempt; path: string; title: string; message: string }
+interface ReadOptions { retry?: () => void; failureMessage?: string }
 export default function RuntimeConfigs({ bootstrap }: PageProps) {
   const writable = bootstrap.roleCapabilities?.readwrite === true;
   const commands = useRuntimeCommands(bootstrap.rootPath, writable);
-  const [items, setItems] = useState<ReadState<Item[]>>({ loading: true });
-  const [secrets, setSecrets] = useState<ReadState<Secret[]>>({ loading: writable });
-  const [detail, setDetail] = useState<Detail>();
-  const [published, setPublished] = useState<{ key: string; name: string; data?: Published }>();
-  const [history, setHistory] = useState<ReadState<Revision[]>>({ loading: false });
-  const [selectedError, setSelectedError] = useState(''); const [selecting, setSelecting] = useState(false);
-  const [payload, setPayload] = useState(''); const [savedPayload, setSavedPayload] = useState(''); const [comment, setComment] = useState('');
-  const [includeRetired, setIncludeRetired] = useState(false);
-  const [listsLoading, setListsLoading] = useState(true);
+  const [externalDirty, setExternalDirty] = useState(false);
+  const { state, dispatch, dirty } = useConfigWorkflow(externalDirty);
+  const [items, setItems] = useState<Item[]>([]);
+  const [secrets, setSecrets] = useState<Secret[]>([]);
+  const [history, setHistory] = useState<Revision[]>([]);
+  const [configRetired, setConfigRetired] = useState(false);
+  const [secretRetired, setSecretRetired] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirmation>();
-  const [snapshotNotice, setSnapshotNotice] = useState('');
-  const selectedRequest = useRef(0);
-  const selectedKey = useRef<string | undefined>(undefined);
-  const secretRequest = useRef(0);
-  const snapshot = useRef<{ etag?: string; items: Record<string, Published> } | undefined>(undefined);
-  const alive = useRef(true);
-  const listsFlight = useRef(false); const selectFlight = useRef(false); const previewFlight = useRef(false);
-  const [previewing, setPreviewing] = useState(false);
-  const disabled = commands.disabled || previewing || selecting;
-  const dirty = payload !== savedPayload;
+  const [leave, setLeave] = useState<() => void>();
+  const [conflict, setConflict] = useState(false);
+  const [readRetry, setReadRetry] = useState<() => void>();
+  const [savingToLeave, setSavingToLeave] = useState(false);
+  const [refreshRequired, setRefreshRequired] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
+  const alive = useRef(true); const readFlight = useRef(false);
+  const leaveFlight = useRef(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const firstView = useRef(true);
+  const disabled = commands.disabled || loading || refreshRequired;
+  const detail = state.detail;
+  const errors = commands.failure?.fieldErrors ?? {};
+  const leaveBusy = savingToLeave || commands.pending || loading;
+  const path = (key: string) => `/items/${encodeURIComponent(key)}`;
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => {
+    if (firstView.current) { firstView.current = false; return; }
+    heading.current?.focus();
+  }, [state.view, detail?.configKey]);
 
-  useEffect(() => { alive.current = true; return () => { alive.current = false; selectedRequest.current++; }; }, []);
-  async function loadLists(retired = includeRetired) {
-    if (!commands.canRead() || listsFlight.current) return;
-    listsFlight.current = true; setListsLoading(true);
-    setItems((old) => ({ ...old, loading: true, error: undefined }));
-    const suffix = writable && retired ? '?includeRetired=true' : '';
-    const list = commands.read<unknown>(`/items${suffix}`, {}, parseRuntime).then(({ data }) => {
-      const rows = decodeList(data, decodeItem); if (alive.current) setItems({ data: rows, loading: false });
-    }).catch((error: unknown) => { if (alive.current) setItems((old) => ({ ...old, loading: false, error: errorMessage(error) })); });
-    const secretList = writable ? loadSecrets(suffix) : Promise.resolve();
-    try { await Promise.all([list, secretList]); }
-    finally { listsFlight.current = false; if (alive.current) setListsLoading(false); }
-  }
-  async function loadSecrets(suffix = includeRetired ? '?includeRetired=true' : '') {
-    const request = ++secretRequest.current;
-    setSecrets((old) => ({ ...old, loading: true, error: undefined }));
-    try { const { data } = await commands.read<unknown>(`/secrets${suffix}`, {}, parseRuntime); const rows = decodeList(data, decodeSecret); if (alive.current && request === secretRequest.current) setSecrets({ data: rows, loading: false }); }
-    catch (error: unknown) { if (alive.current && request === secretRequest.current) setSecrets((old) => ({ ...old, loading: false, error: errorMessage(error) })); }
-  }
-  useEffect(() => { void loadLists(false); /* bootstrap lifetime is owned by the shared shell */ }, [bootstrap.rootPath, writable]);
-  async function readSnapshot() {
-    const cached = snapshot.current;
-    try {
-      const { data, headers } = await commands.read<unknown>('/snapshot', { headers: cached?.etag ? { 'If-None-Match': cached.etag } : {} }, parseRuntime);
-      const next = { items: decodeSnapshot(data), etag: headers.get('ETag') ?? undefined }; snapshot.current = next; return next.items;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 304 && cached?.etag) { setSnapshotNotice('已发布快照未变化（304）'); return cached.items; }
-      throw error;
-    }
-  }
-  function applyDetail(row: Detail, preserveComment = false) {
-    selectedKey.current = row.configKey;
-    setDetail(row); const text = stringifyRuntime(row.draftPayload ?? row.publishedPayload ?? {}, 2);
-    setPayload(text); setSavedPayload(text); setPublished(undefined); if (!preserveComment) setComment('');
-  }
-  async function loadHistory(key: string, request: number) {
-    const current = () => alive.current && request === selectedRequest.current && key === selectedKey.current;
-    if (!current()) return;
-    setHistory({ loading: true });
-    try { const { data } = await commands.read<unknown>(`/items/${encodeURIComponent(key)}/revisions`, {}, parseRuntime); const rows = decodeList(data, decodeRevision); if (current()) setHistory({ data: rows, loading: false }); }
-    catch (error: unknown) { if (current()) setHistory({ loading: false, error: errorMessage(error) }); }
-  }
-  async function openItem(row: Item, overwrite = false) {
-    if (!commands.canRead() || selectFlight.current || commands.pending) return;
-    if ((dirty || comment.length > 0) && detail && !overwrite) { commands.invalid('当前草稿或发布说明尚未提交。请先保存草稿并发布，或明确重新载入所选配置以放弃本地编辑。'); return; }
-    const request = ++selectedRequest.current; selectFlight.current = true; setSelecting(true); setSelectedError(''); setSnapshotNotice('');
-    try {
-      if (writable) {
-        const { data } = await commands.read<unknown>(`/items/${encodeURIComponent(row.configKey)}`, {}, parseRuntime); const result = decodeDetail(data, row.configKey);
-        if (alive.current && request === selectedRequest.current) { applyDetail(result); await loadHistory(row.configKey, request); }
-      } else {
-        const values = await readSnapshot(); const value = Object.hasOwn(values, row.configKey) ? values[row.configKey] : undefined;
-        if (alive.current && request === selectedRequest.current) { setPublished({ key: row.configKey, name: row.displayName, data: value }); setDetail(undefined); }
+  async function reading<T>(task: () => Promise<T>, options: ReadOptions = {}): Promise<T | undefined> {
+    if (readFlight.current || commands.pending || !commands.canRead()) return;
+    readFlight.current = true; setLoading(true); setReadRetry(undefined); commands.clear(true);
+    try { return await task(); }
+    catch (error) {
+      if (alive.current) {
+        commands.reportRead(error, options.failureMessage);
+        setReadRetry(() => options.retry ?? (() => { void reading(task, options); }));
       }
-    } catch (error: unknown) { if (alive.current && request === selectedRequest.current) setSelectedError(errorMessage(error)); }
-    finally { selectFlight.current = false; if (alive.current) setSelecting(false); }
+    }
+    finally { readFlight.current = false; if (alive.current) setLoading(false); }
   }
-  async function create(draft: CreateDraft) {
-    const result = await commands.run({ kind: 'create', key: draft.configKey }, '/items', 'POST', stringifyRuntime(draft), '配置创建已确认');
-    if (result && result !== true) { applyDetail(result); void loadLists(); void loadHistory(result.configKey, ++selectedRequest.current); return result; }
+  function edited() { setReadRetry(undefined); commands.edited(); }
+  async function loadList(retired = configRetired) {
+    await reading(async () => {
+      const { data } = await commands.read<unknown>(`/items${retired ? '?includeRetired=true' : ''}`, {}, parseRuntime);
+      const rows = decodeList(data, decodeItem); if (alive.current) setItems(rows);
+    });
+  }
+  useEffect(() => { if (writable) void loadList(false); }, [bootstrap.rootPath, writable]);
+
+  async function getDetail(key: string) {
+    const { data } = await commands.read<unknown>(path(key), {}, parseRuntime);
+    return decodeDetail(data, key);
+  }
+  async function openItem(item: Item) {
+    await reading(async () => { const result = await getDetail(item.configKey); if (alive.current) { setConflict(false); setRefreshRequired(false); dispatch({ type: 'open', detail: result }); } });
+  }
+  async function loadSecrets(retired = secretRetired) {
+    await reading(async () => {
+      const { data } = await commands.read<unknown>(`/secrets${retired ? '?includeRetired=true' : ''}`, {}, parseRuntime);
+      const rows = decodeList(data, decodeSecret); if (alive.current) setSecrets(rows);
+    });
+  }
+  function navigate(view: View) {
+    if (view === 'list' || view === 'create' || view === 'secrets') setRefreshRequired(false);
+    setReadRetry(undefined); commands.clear(); setExternalDirty(false); setConflict(false); dispatch({ type: 'view', view });
+    if (view === 'list') void loadList();
+    if (view === 'secrets') void loadSecrets();
+  }
+  function protect(action: () => void) {
+    if (commands.pending || loading) return;
+    if (dirty || externalDirty) setLeave(() => action); else action();
   }
   async function saveDraft() {
-    if (!detail || disabled || detail.retiredAt) return;
-    let parsed: Record<string, unknown>; try { parsed = parseObject(payload); } catch { commands.invalid('草稿配置必须是有效 JSON 对象'); return; }
-    const result = await commands.run({ kind: 'draft', key: detail.configKey }, `/items/${encodeURIComponent(detail.configKey)}/draft`, 'PUT', stringifyRuntime({ expectedDraftVersion: detail.draftVersion, payload: parsed }), '草稿保存已确认');
-    if (result && result !== true) { applyDetail(result, true); void loadLists(); }
+    if (!detail || disabled || detail.retiredAt || conflict) return false;
+    setReadRetry(undefined);
+    let payload: Record<string, unknown>;
+    try { payload = parseObject(state.text); } catch { commands.invalid('配置内容必须是有效 JSON 对象'); return false; }
+    if (state.source !== null) {
+      const valid = await reading(async () => {
+        try {
+          const { data } = await commands.read<unknown>(`${path(detail.configKey)}/preview`, { method: 'POST', body: stringifyRuntime({ expectedDraftVersion: detail.draftVersion, expectedPublishedVersion: detail.publishedVersion, payload, sourceRevisionVersion: state.source }) }, parseRuntime);
+          decodeReview(data, detail, state.source); return true;
+        } catch (error) { setConflict(isVersionConflict(error)); throw error; }
+      });
+      if (!valid) return false;
+    }
+    const result = await commands.run({ kind: 'draft', key: detail.configKey }, `${path(detail.configKey)}/draft`, 'PUT', stringifyRuntime({ expectedDraftVersion: detail.draftVersion, payload }), `草稿已保存，尚未发布；${detail.publishedVersion === null ? '当前尚无发布版本' : `当前仍使用 v${detail.publishedVersion}`}。`);
+    if (result && result !== true && 'draftVersion' in result) { dispatch({ type: 'saved', detail: result }); return true; }
+    return false;
   }
-  function confirmItem(kind: 'publish' | 'rollback' | 'retire' | 'restore', target?: number) {
-    if (!detail || disabled || (detail.retiredAt && kind !== 'restore')) return;
-    const body = kind === 'publish' || kind === 'rollback' ? stringifyRuntime({ expectedDraftVersion: detail.draftVersion, ...(kind === 'rollback' ? { targetVersion: target } : {}), comment: comment || null }) : undefined;
-    setConfirmation({ attempt: { kind, key: detail.configKey, target }, path: `/items/${encodeURIComponent(detail.configKey)}/${kind}`, body,
-      title: kind === 'publish' ? '确认发布新版本' : kind === 'rollback' ? `确认恢复 v${target}` : kind === 'retire' ? '确认归档配置' : '确认恢复配置',
-      message: kind === 'publish' ? '只发布服务器已保存草稿，生成不可变新版本。' : kind === 'rollback' ? '将历史内容复制并发布为更高新版本；不会覆盖历史记录。' : kind === 'retire' ? '归档后配置将不再出现在运行快照；历史保留。' : '恢复后原已发布版本将重新生效；服务器检查凭证引用。',
-      success: kind === 'publish' ? '发布已确认' : kind === 'rollback' ? '历史恢复已确认' : kind === 'retire' ? '配置归档已确认' : '配置恢复已确认' });
+  async function check() {
+    if (!detail || disabled || conflict) return;
+    let payload: Record<string, unknown>;
+    try { payload = parseObject(state.text); } catch { commands.invalid('配置内容必须是有效 JSON 对象'); return; }
+    const frozenText = state.text; commands.clear();
+    await reading(async () => {
+      try {
+        const { data } = await commands.read<unknown>(`${path(detail.configKey)}/preview`, { method: 'POST', body: stringifyRuntime({ expectedDraftVersion: detail.draftVersion, expectedPublishedVersion: detail.publishedVersion, payload, sourceRevisionVersion: state.source }) }, parseRuntime);
+        const review = decodeReview(data, detail, state.source);
+        if (alive.current) dispatch({ type: 'review', review, text: frozenText });
+      } catch (error) { setConflict(isVersionConflict(error)); throw error; }
+    });
   }
-  async function executeConfirmation() {
+  function isVersionConflict(error: unknown) {
+    return typeof error === 'object' && error !== null && 'status' in error && error.status === 409 && 'detail' in error && typeof error.detail === 'string' && /^(draft|published) version conflict;/.test(error.detail);
+  }
+  async function publish() {
+    const review = state.review;
+    if (!review || !detail || disabled || !review.hasChanges || state.reviewedText !== state.text) return;
+    const result = await commands.run({ kind: 'publish', key: detail.configKey }, `${path(detail.configKey)}/publish`, 'POST', stringifyRuntime({ expectedDraftVersion: review.draftVersion, expectedPublishedVersion: review.publishedVersion, payload: parseObject(state.reviewedText), sourceRevisionVersion: review.sourceRevisionVersion, comment: state.comment || null }), '发布已确认');
+    if (result && result !== true && 'publishedVersion' in result) {
+      // The acknowledged write remains successful even if the following GET fails.
+      const committed = { ...detail, publishedVersion: result.publishedVersion, publishedPayload: parseObject(review.candidateText), draftPayload: null, hasDraft: false };
+      setRefreshRequired(true);
+      dispatch({ type: 'open', detail: committed });
+      await reading(async () => { const latest = await getDetail(detail.configKey); if (alive.current) { setRefreshRequired(false); dispatch({ type: 'open', detail: latest }); } }, { failureMessage: `发布为 v${result.publishedVersion} 已确认，最新详情加载失败；请重试读取。` });
+    } else { dispatch({ type: 'invalidate' }); }
+  }
+  useEffect(() => {
+    if (commands.failure?.message.startsWith('版本已变化')) { setConflict(true); dispatch({ type: 'invalidate' }); }
+  }, [commands.failure]);
+
+  async function loadLatest() {
+    if (!detail) return;
+    await reading(async () => { const latest = await getDetail(detail.configKey); if (alive.current) dispatch({ type: 'latest', detail: latest }); });
+  }
+  async function loadHistory() {
+    if (!detail) return;
+    await reading(async () => {
+      const { data } = await commands.read<unknown>(`${path(detail.configKey)}/revisions`, {}, parseRuntime);
+      const rows = decodeList(data, decodeRevision); if (alive.current) { setHistory(rows); dispatch({ type: 'view', view: 'history' }); }
+    });
+  }
+  function useRevision(row: Revision) {
+    if (!detail) return;
+    setReadRetry(undefined);
+    // Historical content may need repair. Validate provenance before any save
+    // or publication, rather than blocking entry to the editor.
+    dispatch({ type: 'edit', text: stringifyRuntime(row.payload, 2), source: row.version });
+  }
+  async function create(draft: CreateDraft) {
+    setReadRetry(undefined);
+    const result = await commands.run({ kind: 'create', key: draft.configKey }, '/items', 'POST', stringifyRuntime(draft), '配置已创建，尚未发布。');
+    if (result && result !== true && 'draftVersion' in result) { setExternalDirty(false); dispatch({ type: 'open', detail: result, view: 'edit' }); return result; }
+  }
+  async function infer(payload: Record<string, unknown>, retry: () => void) {
+    return reading(async () => {
+      const { data } = await commands.read<unknown>('/schema/preview', { method: 'POST', body: stringifyRuntime({ payload }) }, parseRuntime);
+      if (!record(data) || !record(data.jsonSchema)) throw Error('Invalid schema response');
+      return data.jsonSchema;
+    }, { retry });
+  }
+  function confirmLifecycle(secret?: Secret) {
+    if (disabled) return;
+    if (secret) {
+      const restore = Boolean(secret.retiredAt);
+      setConfirmation({ attempt: { kind: restore ? 'secret-restore' : 'secret-retire', key: secret.name }, path: `/secrets/${encodeURIComponent(secret.name)}/${restore ? 'restore' : 'retire'}`, title: restore ? '恢复凭证' : '归档凭证', message: '凭证明文不会回读；归档必须通过服务端引用检查，保留加密记录。' });
+    } else if (detail) {
+      const restore = Boolean(detail.retiredAt);
+      setConfirmation({ attempt: { kind: restore ? 'restore' : 'retire', key: detail.configKey }, path: `${path(detail.configKey)}/${restore ? 'restore' : 'retire'}`, title: restore ? '重新启用配置' : '停用配置', message: restore ? `重新启用原发布版本${detail.publishedVersion === null ? '（此配置尚未发布）' : ` v${detail.publishedVersion}`}，不会发布草稿。服务器将检查凭证引用。` : '停用后不再出现在运行快照，历史记录保留。这不会停止正在运行的任务。' });
+    }
+  }
+  async function executeLifecycle() {
     const current = confirmation; if (!current || disabled) return;
-    const result = await commands.run(current.attempt, current.path, 'POST', current.body, current.success);
-    // Recovery must remain reachable outside the modal focus trap after a failed/unknown command.
-    setConfirmation(undefined);
-    if (result) { void loadLists(); if (detail && !current.attempt.kind.startsWith('secret-')) void openItem(detail, true); }
+    setReadRetry(undefined);
+    const result = await commands.run(current.attempt, current.path, 'POST', undefined, `${current.title}已确认`); setConfirmation(undefined);
+    if (result) { if (current.attempt.kind.startsWith('secret-')) void loadSecrets(); else if (detail) void openItem(detail); }
   }
-  async function preview(data: Record<string, unknown>) {
-    if (disabled || previewFlight.current) return;
-    previewFlight.current = true; setPreviewing(true);
+  async function allowManual() {
+    const attempt = commands.recovery?.attempt;
+    if (!attempt) return;
+    setReadRetry(undefined);
+    const sameConfig = detail?.configKey === attempt.key && attempt.kind !== 'create' && !attempt.kind.startsWith('secret-') && ['overview', 'edit', 'review', 'history'].includes(state.view);
+    if (sameConfig) {
+      await reading(async () => {
+        const latest = await getDetail(attempt.key);
+        if (alive.current) {
+          commands.allowManual(); setConflict(false);
+          if (state.view === 'edit' || state.view === 'review') { dispatch({ type: 'latest', detail: latest }); dispatch({ type: 'rebase' }); }
+          else dispatch({ type: 'open', detail: latest, view: state.view });
+        }
+      });
+    } else { commands.allowManual(); dispatch({ type: 'invalidate' }); }
+  }
+  async function saveAndLeave() {
+    const action = leave;
+    if (!action || leaveFlight.current || disabled || conflict) return;
+    leaveFlight.current = true; setSavingToLeave(true);
     try {
-      const { data: result } = await commands.read<unknown>('/schema/preview', { method: 'POST', body: stringifyRuntime({ payload: data }) }, parseRuntime);
-      if (!record(result) || !record(result.jsonSchema)) throw new Error('Schema 响应无效'); return result.jsonSchema;
-    } catch (error) { commands.invalid(errorMessage(error)); }
-    finally { previewFlight.current = false; setPreviewing(false); }
+      if (await saveDraft()) { dispatch({ type: 'discard' }); setLeave(undefined); action(); }
+    } finally { leaveFlight.current = false; if (alive.current) setSavingToLeave(false); }
   }
-  const errors = commands.failure?.fieldErrors ?? {};
-  return <div className="erp-page">
-    <PageIntro eyebrow="RUNTIME CONFIGURATION" title="让每次配置变更都有依据" description="查看已发布版本、编辑草稿，并在确认后发布或恢复历史。" />
-    <p>先保存草稿，再发布不可变版本。财务和业务规则由服务器校验；凭证仅以引用出现。</p>
-    {!writable && <p>当前只读；只能查看已发布快照，不能访问草稿、Schema 或凭证管理。</p>}
-    <div className="flex flex-wrap items-center gap-3"><Button variant="secondary" isDisabled={commands.blocked || listsLoading} onPress={() => { void loadLists(); }}>刷新配置列表</Button>
-      {writable && <label><input type="checkbox" checked={includeRetired} disabled={commands.blocked || listsLoading} onChange={(e) => { if (!commands.canRead() || listsFlight.current) return; setIncludeRetired(e.target.checked); void loadLists(e.target.checked); }} /> 包含已归档配置与凭证</label>}</div>
-    {commands.pending && <p role="status">提交中，请等待确认，不要重复操作…</p>}
-    {commands.blocked && <p role="status">服务端冷却中；读写都须等待完整 Retry-After，不会自动重试。</p>}
+  if (!writable) return <p>当前没有运行配置的读写权限，请联系管理员。</p>;
+  const editing = state.view === 'edit';
+  const viewTitles: Record<View, string> = { list: '配置列表', overview: '配置概览', edit: '修改配置', review: '检查发布', history: '发布历史', create: '新建配置', secrets: '凭证管理' };
+  // Render feedback in the active interaction surface, never behind a modal.
+  const feedback = <div className="space-y-3">
+    {loading && <p role="status">正在读取或检查，请稍候…</p>}{commands.pending && <p role="status">正在提交，请等待结果，不要重复操作…</p>}{commands.blocked && <p role="status">请求过于频繁，等待服务端冷却后可手动重试。</p>}
     {commands.notice && <p role="status">{commands.notice}</p>}
     {commands.failure && <Alert status="danger"><Alert.Content><Alert.Title>操作未完成</Alert.Title><Alert.Description>{commands.failure.message}</Alert.Description></Alert.Content></Alert>}
-    {commands.recovery && <section aria-label="提交结果核对" className="space-y-3"><p className="break-all">待核对：{commands.recovery.attempt.kind} / {commands.recovery.attempt.key}</p><p>不会自动重放。请先查询当前事实，再明确决定是否重新操作；草稿保留。</p>
-      <Button variant="secondary" isDisabled={commands.blocked || commands.recovery.phase === 'checking'} onPress={() => { void commands.verify(); }}>查询核对</Button>
-      {commands.recovery.summary && <p role="status">{commands.recovery.summary}</p>}
-      {commands.recovery.phase === 'checked' && <Button variant="secondary" isDisabled={commands.blocked} onPress={commands.allowManual}>我已核对，允许手动重新操作</Button>}
-    </section>}
-    {items.loading && <p role="status">加载配置列表…</p>}{items.error && <p role="alert">{items.error}</p>}
-    {items.data && <section className="erp-panel" aria-label="配置项"><h2 className="text-lg font-semibold">配置项</h2><Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="配置表格"><Table.Content aria-label="运行配置列表" className="min-w-[56rem] erp-table-content"><Table.Header className="erp-table-head">
-      <Table.Column className="erp-table-column" isRowHeader>配置键</Table.Column><Table.Column className="erp-table-column">名称</Table.Column><Table.Column className="erp-table-column">发布版本</Table.Column><Table.Column className="erp-table-column">草稿</Table.Column><Table.Column className="erp-table-column">更新时间</Table.Column><Table.Column className="erp-table-column">发布时间</Table.Column><Table.Column className="erp-table-column">归档时间</Table.Column><Table.Column className="erp-table-column">操作</Table.Column>
-    </Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'暂无运行配置'}</div>}>{items.data.map((row) => <Table.Row className="erp-table-row" key={row.configKey} id={row.configKey}>
-      <Table.Cell className="erp-table-cell"><code className="block w-40 break-all">{row.configKey}</code></Table.Cell><Table.Cell className="erp-table-cell"><span className="block w-48 break-all">{row.displayName}</span></Table.Cell><Table.Cell className="erp-table-cell">{row.publishedVersion === null ? '未发布' : `v${row.publishedVersion}`}</Table.Cell><Table.Cell className="erp-table-cell">{row.hasDraft ? '有草稿' : '无草稿'}</Table.Cell><Table.Cell className="erp-table-cell">{row.updatedAt}</Table.Cell><Table.Cell className="erp-table-cell">{row.publishedAt ?? '—'}</Table.Cell><Table.Cell className="erp-table-cell">{row.retiredAt ?? '有效'}</Table.Cell>
-      <Table.Cell className="erp-table-cell" focusMode="child"><Button className="erp-table-action" size="sm" variant="secondary" isDisabled={selecting || commands.blocked || commands.pending} aria-label={`打开 ${row.configKey}`} onPress={() => { void openItem(row); }}>打开</Button></Table.Cell>
-    </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table></section>}
-    {selecting && <p role="status">读取配置详情…</p>}{selectedError && <p role="alert">{selectedError}</p>}
-    {published && <section className="erp-panel space-y-3" aria-label="已发布配置"><h2 className="text-lg font-semibold break-all">{published.name} / {published.key}</h2>
-      {published.data ? <><p>已发布 v{published.data.version}</p><JsonEditor label="已发布配置" value={stringifyRuntime(published.data.payload, 2)} readOnly /></> : <p>该配置尚未发布或已归档；没有可用快照。</p>}
-      <Button variant="secondary" isDisabled={selecting || commands.blocked} onPress={() => { void openItem({ configKey: published.key, displayName: published.name } as Item); }}>刷新已发布快照</Button>{snapshotNotice && <p role="status">{snapshotNotice}</p>}
-    </section>}
-    {detail && <section aria-label="配置详情" className="erp-panel space-y-3"><h2 className="text-lg font-semibold break-all">{detail.displayName} / {detail.configKey}</h2><p>草稿版本 {detail.draftVersion}</p><p>{detail.publishedVersion === null ? '尚未发布' : `当前发布 v${detail.publishedVersion}`} · {detail.retiredAt ? '已归档' : '有效'}</p>
-      <Button variant="secondary" isDisabled={commands.blocked || commands.pending || selecting} onPress={() => { void openItem(detail, true); }}>重新载入所选配置（放弃本地编辑）</Button>
-      <JsonEditor label="Schema（创建后不可修改）" value={stringifyRuntime(detail.jsonSchema, 2)} readOnly />
-      <JsonEditor label="草稿配置" value={payload} readOnly={Boolean(detail.retiredAt)} disabled={commands.pending || selecting} onChange={(value) => { if (!selectFlight.current) { commands.edited(); setPayload(value); } }} />
-      {errors.payload && <p role="alert">{errors.payload}</p>}{errors.expectedDraftVersion && <p role="alert">{errors.expectedDraftVersion}</p>}
-      <TextField value={comment} isDisabled={commands.pending || selecting} isInvalid={Boolean(errors.comment)} onChange={(value) => { if (!selectFlight.current) { commands.edited(); setComment(value); } }}><Label>发布说明</Label><Input maxLength={2000} /></TextField>{errors.comment && <p role="alert">{errors.comment}</p>}
-      <div className="flex flex-wrap gap-3"><Button isDisabled={disabled || Boolean(detail.retiredAt)} onPress={() => { void saveDraft(); }}>保存草稿</Button><Button isDisabled={disabled || dirty || detail.draftPayload === null || Boolean(detail.retiredAt)} onPress={() => confirmItem('publish')}>发布新版本</Button><Button variant="secondary" isDisabled={disabled} onPress={() => confirmItem(detail.retiredAt ? 'restore' : 'retire')}>{detail.retiredAt ? '恢复配置' : '归档配置'}</Button></div>
-      {dirty && <p>存在未保存编辑；发布按钮仅在草稿保存后开放。</p>}
-      <section aria-label="发布历史" className="erp-panel space-y-3"><h3 className="font-semibold">发布历史</h3><p>历史恢复会直接发布为更高新版本。</p><Button variant="secondary" isDisabled={commands.blocked || history.loading || selecting} onPress={() => { if (!selectFlight.current) void loadHistory(detail.configKey, selectedRequest.current); }}>刷新发布历史</Button>
-        {history.loading && <p role="status">读取历史…</p>}{history.error && <p role="alert">{history.error}</p>}
-        {history.data && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="发布历史表格"><Table.Content aria-label="发布历史" className="min-w-[44rem] erp-table-content"><Table.Header className="erp-table-head"><Table.Column className="erp-table-column" isRowHeader>版本</Table.Column><Table.Column className="erp-table-column">说明</Table.Column><Table.Column className="erp-table-column">发布者</Table.Column><Table.Column className="erp-table-column">时间</Table.Column><Table.Column className="erp-table-column">内容与操作</Table.Column></Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'尚无发布历史'}</div>}>{history.data.map((row) => <Table.Row className="erp-table-row" key={row.version} id={row.version}><Table.Cell className="erp-table-cell">v{row.version}</Table.Cell><Table.Cell className="erp-table-cell"><span className="block w-48 break-all">{row.comment ?? '—'}</span></Table.Cell><Table.Cell className="erp-table-cell">{row.createdBy}</Table.Cell><Table.Cell className="erp-table-cell">{row.createdAt}</Table.Cell><Table.Cell className="erp-table-cell" focusMode="child"><details><summary>查看 v{row.version} 内容</summary><JsonEditor label={`历史 v${row.version}`} value={stringifyRuntime(row.payload, 2)} readOnly /></details><Button className="erp-table-action" variant="secondary" size="sm" isDisabled={disabled || Boolean(detail.retiredAt) || dirty} onPress={() => confirmItem('rollback', row.version)}>恢复 v{row.version} 为新版本</Button></Table.Cell></Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>}
-      </section>
-    </section>}
-    {writable && <><CreateConfig disabled={disabled} pending={commands.pending} replacesUnsavedDraft={dirty || comment.length > 0} errors={errors} edited={commands.edited} invalid={commands.invalid} create={create} preview={preview} />
-      {secrets.loading && <p role="status">加载凭证元数据…</p>}{secrets.error && <p role="alert">{secrets.error}</p>}
-      <SecretPanel secrets={secrets.data ?? []} disabled={disabled} pending={commands.pending} errors={errors} edited={commands.edited} invalid={commands.invalid} save={async (name, value) => {
-        const result = await commands.run({ kind: 'secret-save', key: name }, `/secrets/${encodeURIComponent(name)}`, 'PUT', stringifyRuntime({ value }), '凭证加密保存已确认'); if (result) void loadSecrets(); return Boolean(result);
-      }} lifecycle={(secret) => {
-        const kind = secret.retiredAt ? 'secret-restore' : 'secret-retire'; setConfirmation({ attempt: { kind, key: secret.name }, path: `/secrets/${encodeURIComponent(secret.name)}/${secret.retiredAt ? 'restore' : 'retire'}`, title: secret.retiredAt ? '确认恢复凭证' : '确认归档凭证', message: '凭证明文不会回读；归档必须通过服务器引用检查，历史加密记录保留。', success: secret.retiredAt ? '凭证恢复已确认' : '凭证归档已确认' });
-      }} /></>}
-    <Modal.Backdrop isOpen={confirmation !== undefined} isDismissable={!commands.pending} isKeyboardDismissDisabled={commands.pending} onOpenChange={(open) => { if (!open && !commands.pending) setConfirmation(undefined); }}><Modal.Container size="lg"><Modal.Dialog><Modal.CloseTrigger aria-label="关闭确认" isDisabled={commands.pending} /><Modal.Header><Modal.Heading>{confirmation?.title}</Modal.Heading></Modal.Header><Modal.Body className="space-y-3"><p className="break-all">{confirmation?.attempt.key}</p><p>{confirmation?.message}</p>{commands.failure && <p role="alert">{commands.failure.message}</p>}<div className="flex flex-wrap gap-3"><Button isDisabled={disabled} onPress={() => { void executeConfirmation(); }}>确认执行</Button><Button variant="secondary" isDisabled={commands.pending} onPress={() => setConfirmation(undefined)}>取消</Button></div></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+    {Object.entries(errors).map(([field, message]) => <p role="alert" key={field}>{message}</p>)}
+    {readRetry && <Button variant="secondary" isDisabled={commands.blocked || loading || commands.pending || savingToLeave} onPress={readRetry}>重试读取</Button>}
+    {refreshRequired && <p role="status">发布已确认；请先重试读取最新详情，再继续修改。</p>}
+    {commands.recovery && <section aria-label="提交结果核对" className="space-y-3"><p>提交结果尚未确认，不会自动重新提交。请先查询当前事实；你的输入已保留。</p><Button variant="secondary" isDisabled={commands.blocked || loading || savingToLeave || commands.recovery.phase === 'checking'} onPress={() => { setReadRetry(undefined); void commands.verify(); }}>查询核对</Button>{commands.recovery.summary && <p role="status" className="break-all">{commands.recovery.summary}</p>}{commands.recovery.phase === 'checked' && <Button variant="secondary" isDisabled={commands.blocked || loading || savingToLeave} onPress={() => { void allowManual(); }}>我已核对，重新检查内容</Button>}</section>}
+  </div>;
+  return <div className="erp-page">
+    <PageIntro eyebrow="RUNTIME CONFIGURATION" title="让每次配置变更都有依据" description="查看已发布版本、编辑草稿，并在确认后发布或恢复历史。" />
+    <h2 ref={heading} tabIndex={-1} className="text-lg font-semibold break-all">{detail && !['list', 'create', 'secrets'].includes(state.view) ? `${detail.displayName} / ${viewTitles[state.view]}` : viewTitles[state.view]}</h2>
+    {detail && (state.view === 'review' || state.view === 'history') && <code className="block break-all text-muted">{detail.configKey}</code>}
+    <div className="flex flex-wrap items-center gap-3">
+      {state.view === 'list' ? <><p className="min-w-0 flex-1">管理业务使用的配置；修改确认发布后才会生效。</p><Button variant="secondary" isDisabled={disabled} onPress={() => protect(() => navigate('secrets'))}>管理凭证</Button><Button isDisabled={disabled} onPress={() => protect(() => navigate('create'))}>新建配置</Button></> : <Button variant="secondary" isDisabled={commands.pending || loading} onPress={() => protect(() => navigate(editing || state.view === 'review' || state.view === 'history' ? 'overview' : 'list'))}>{editing || state.view === 'review' || state.view === 'history' ? '返回配置概览' : '返回配置列表'}</Button>}
+    </div>
+    {!leave && feedback}
+    {(state.view === 'list' || state.view === 'secrets') && <div className="flex flex-wrap gap-3 items-center"><Button variant="secondary" isDisabled={disabled} onPress={() => { if (state.view === 'list') void loadList(); else void loadSecrets(); }}>刷新{state.view === 'list' ? '配置列表' : '凭证列表'}</Button><label><input type="checkbox" checked={state.view === 'list' ? configRetired : secretRetired} disabled={disabled} onChange={(e) => { const value = e.target.checked; if (state.view === 'list') { setConfigRetired(value); void loadList(value); } else { setSecretRetired(value); void loadSecrets(value); } }} /> 显示已{state.view === 'list' ? '停用配置' : '归档凭证'}</label></div>}
+    {state.view === 'list' && <ConfigList items={items} disabled={disabled} open={(item) => { void openItem(item); }} />}
+    {detail && (state.view === 'overview' || editing) && <ConfigWorkspace detail={detail} editing={editing} text={state.text} disabled={disabled} dirty={dirty} latest={state.latest} conflict={conflict}
+      onText={(value) => { edited(); dispatch({ type: 'text', value }); }} edit={() => { setReadRetry(undefined); commands.clear(); dispatch({ type: 'edit' }); }} save={() => { void saveDraft(); }} check={() => { void check(); }} history={() => { void loadHistory(); }} lifecycle={() => protect(() => confirmLifecycle())}
+      loadLatest={() => { void loadLatest(); }} rebase={() => { setReadRetry(undefined); commands.clear(); setConflict(false); dispatch({ type: 'rebase' }); }} />}
+    {state.view === 'review' && state.review && <PublishReview review={state.review} comment={state.comment} disabled={disabled} changeComment={(value) => dispatch({ type: 'comment', value })} back={() => { setReadRetry(undefined); dispatch({ type: 'edit' }); }} publish={() => { void publish(); }} />}
+    {state.view === 'history' && <RevisionHistory rows={history} disabled={disabled} useRevision={useRevision} />}
+    {state.view === 'create' && <CreateConfig key={formVersion} disabled={disabled} errors={errors} edited={edited} invalid={commands.invalid} create={create} preview={infer} dirty={setExternalDirty} />}
+    {state.view === 'secrets' && <SecretPanel key={formVersion} secrets={secrets} disabled={disabled} errors={errors} edited={edited} invalid={commands.invalid} dirty={setExternalDirty} lifecycle={(secret) => protect(() => confirmLifecycle(secret))} save={async (name, value) => { setReadRetry(undefined); const result = await commands.run({ kind: 'secret-save', key: name }, `/secrets/${encodeURIComponent(name)}`, 'PUT', stringifyRuntime({ value }), '凭证加密保存已确认'); if (result) { setExternalDirty(false); void loadSecrets(); } return Boolean(result); }} />}
+    <Modal.Backdrop isOpen={Boolean(leave)} isDismissable={!leaveBusy} isKeyboardDismissDisabled={leaveBusy} onOpenChange={(open) => { if (!open && !leaveBusy && !leaveFlight.current) setLeave(undefined); }}>
+      <Modal.Container><Modal.Dialog><Modal.Header><Modal.Heading>有未保存的输入</Modal.Heading></Modal.Header><Modal.Body className="space-y-3">
+        <p>离开后这些本地输入将丢失。发布说明不会随草稿保存。</p>
+        {externalDirty && <p>新建表单或凭证明文不会作为普通配置草稿保存。</p>}
+        {leave && feedback}
+        {conflict && <p>版本已变化，请选择“继续编辑”，查看最新内容后重新检查。</p>}
+        <div className="flex flex-wrap gap-3">
+          {!externalDirty && detail && <Button isDisabled={disabled || leaveBusy || conflict} onPress={() => { void saveAndLeave(); }}>暂存并离开</Button>}
+          <Button variant="secondary" isDisabled={leaveBusy} onPress={() => {
+            if (leaveFlight.current || leaveBusy) return;
+            const action = leave; setLeave(undefined); setExternalDirty(false); setReadRetry(undefined); dispatch({ type: 'discard' }); setFormVersion((value) => value + 1); action?.();
+          }}>放弃修改并离开</Button>
+          <Button variant="secondary" isDisabled={leaveBusy} onPress={() => { if (!leaveFlight.current && !leaveBusy) setLeave(undefined); }}>继续编辑</Button>
+        </div>
+      </Modal.Body></Modal.Dialog></Modal.Container>
+    </Modal.Backdrop>
+    <Modal.Backdrop isOpen={Boolean(confirmation)} isDismissable={!commands.pending} isKeyboardDismissDisabled={commands.pending} onOpenChange={(open) => { if (!open && !commands.pending) setConfirmation(undefined); }}><Modal.Container><Modal.Dialog><Modal.Header><Modal.Heading>{confirmation?.title}</Modal.Heading></Modal.Header><Modal.Body className="space-y-3"><p className="break-all">{confirmation?.attempt.key}</p><p>{confirmation?.message}</p><Button isDisabled={disabled} onPress={() => { void executeLifecycle(); }}>确认执行</Button><Button variant="secondary" isDisabled={commands.pending} onPress={() => setConfirmation(undefined)}>取消</Button></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
   </div>;
 }

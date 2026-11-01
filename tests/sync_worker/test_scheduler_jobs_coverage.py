@@ -28,9 +28,8 @@ on every branch that wasn't already exercised.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import subprocess
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import text

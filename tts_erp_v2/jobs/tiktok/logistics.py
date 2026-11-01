@@ -28,6 +28,7 @@ Timestamps
 TikTok tracking events use **epoch milliseconds** (``update_time_millis``);
 we convert at the boundary to UTC ``datetime`` for storage (V3 §14).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -132,7 +133,9 @@ def _upsert_shipment(
     update_cols = {k: insert_values[k] for k in fields if k != "order_id"}
     update_cols["raw_record_id"] = raw_record_id
     session.execute(
-        pg_insert(Shipment).values(**insert_values).on_conflict_do_update(
+        pg_insert(Shipment)
+        .values(**insert_values)
+        .on_conflict_do_update(
             index_elements=["order_pk", "external_package_id"],
             set_=update_cols,
         )
@@ -148,10 +151,12 @@ def _upsert_shipment(
 
 def _upsert_event(session: Session, *, shipment_id: int, fields: dict) -> None:
     session.execute(
-        pg_insert(TrackingEvent).values(
+        pg_insert(TrackingEvent)
+        .values(
             shipment_id=shipment_id,
             **fields,
-        ).on_conflict_do_update(
+        )
+        .on_conflict_do_update(
             index_elements=["shipment_id", "external_event_key"],
             set_={k: fields[k] for k in fields if k != "external_event_key"},
         )
@@ -313,13 +318,9 @@ def run(
         )
     ).scalar_one_or_none()
     if account is None:
-        raise UpstreamJobError(
-            f"shops row missing for tiktok shop_id={shop_id!r}"
-        )
+        raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
 
-    watermark_ms = watermarks.get_cursor(
-        session, job_name=JOB_NAME, scope=cursor_scope
-    )
+    watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
     limit = page_size if page_size and page_size > 0 else TARGET_LIMIT
     targets = _select_tracking_targets(session, account_id=account.id, limit=limit)
 
@@ -468,11 +469,9 @@ def run(
             if max_update_ms is None or ms > max_update_ms:
                 max_update_ms = ms
 
-
     new_cursor_ms: int | None = None
     if max_update_ms is not None and (
-        watermark_ms is None
-        or max_update_ms > _safe_int(watermark_ms)
+        watermark_ms is None or max_update_ms > _safe_int(watermark_ms)
     ):
         watermarks.set_cursor(
             session,

@@ -47,7 +47,9 @@ def test_set_job_enabled_rejects_unknown_job(db_session) -> None:
         set_job_enabled(db_session, "unknown.job", False)
 
 
-def test_make_executor_skips_disabled_tiktok_job(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_make_executor_skips_disabled_tiktok_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = JobSpec(
         job_name="tiktok.orders",
         module_path="tts_erp_v2.jobs.tiktok.orders",
@@ -67,7 +69,9 @@ def test_make_executor_skips_disabled_tiktok_job(monkeypatch: pytest.MonkeyPatch
     assert spawned == []
 
 
-def test_make_executor_skips_disabled_system_job(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_make_executor_skips_disabled_system_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = JobSpec(
         job_name="reporting.profit_daily",
         module_path="tts_erp_v2.jobs.reporting",

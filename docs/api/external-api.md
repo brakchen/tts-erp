@@ -406,13 +406,16 @@ rollout columns keep their historical data and are not migrated or dropped.
 | `POST /v2/config/runtime/items` | readwrite | Creates a key, immutable JSON Schema and optional initial draft. |
 | `GET /v2/config/runtime/items/{config_key}` | readwrite | Editor detail including draft and published reference payloads. |
 | `PUT /v2/config/runtime/items/{config_key}/draft` | readwrite | Optimistic draft save; body contains `expectedDraftVersion` and `payload`. |
-| `POST /v2/config/runtime/items/{config_key}/publish` | readwrite | Publishes the current draft as a higher immutable version. Reference validation locks the referenced secrets so it serializes with secret retirement. |
+| `POST /v2/config/runtime/items/{config_key}/preview` | readwrite | Read-only candidate validation. Requires `expectedDraftVersion`, explicitly present nullable `expectedPublishedVersion`, object `payload`; optional `sourceRevisionVersion`. Returns version-bound `hasChanges`, canonical `publishedText` (nullable) / `candidateText`, source and key. Does not save a draft or create revisions. |
+| `POST /v2/config/runtime/items/{config_key}/publish` | readwrite | With `payload`, atomically validates and publishes that candidate; `expectedDraftVersion` and explicitly present nullable `expectedPublishedVersion` are required. Optional `sourceRevisionVersion` and `comment`. No intermediate draft commit. Without `payload`, preserves publishing the saved draft; an explicitly supplied published version is still checked. Row and reference locks serialize concurrent publication/secret retirement; stale versions and unchanged candidates return `409`. |
 | `GET /v2/config/runtime/items/{config_key}/revisions` | readwrite | Revision history. |
 | `POST /v2/config/runtime/items/{config_key}/rollback` | readwrite | Republishes a historical revision as a higher version. |
 | `POST /v2/config/runtime/items/{config_key}/{retire,restore}` | readwrite | Soft-retire or restore a key. Retired keys are absent from snapshots and cannot be edited/published. Restore is refused with `409` while the published payload references a secret that is retired or missing. |
 | `GET /v2/config/runtime/snapshot` | readwrite | Each active published default payload/version with ETag; no `subject` or `rolloutRuleIndex`, and secret references stay redacted. |
 | `GET /v2/config/runtime/secrets`, `PUT /v2/config/runtime/secrets/{name}` | readwrite | Fingerprint/reference metadata and encrypted write only; no secret plaintext read endpoint. `?includeRetired=true` includes archived metadata. |
 | `POST /v2/config/runtime/secrets/{name}/{retire,restore}` | readwrite | Soft-retire or restore a secret. Retirement is refused while an active config or draft references it. |
+
+Candidate preview/publication validation returns HTTP `422` with a controlled `detail.code`: `runtime_schema_invalid`, `runtime_business_invalid`, `runtime_secret_unavailable`, `runtime_source_rollout_invalid`, or `runtime_number_invalid`. Legacy saved-draft validation keeps string details. Retired rollout inputs are rejected; unrelated unknown publish metadata remains ignored for compatibility. Historical candidates validate original retained sidecars while allowing edits to obsolete payload content; HTTP never resolves secret plaintext. See the lifecycle document for request details and UI recovery behavior.
 
 ### Pages
 

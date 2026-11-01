@@ -1,4 +1,5 @@
 import { isLosslessNumber, isSafeNumber } from 'lossless-json';
+import { parseObject } from './json';
 
 export interface Item {
   configKey: string; displayName: string; publishedVersion: number | null; hasDraft: boolean;
@@ -8,6 +9,11 @@ export interface Detail extends Item { jsonSchema: Record<string, unknown>; draf
 export interface Revision { version: number; payload: Record<string, unknown>; comment: string | null; createdBy: string; createdAt: string }
 export interface Secret { name: string; ref: string; fingerprint: string; updatedAt: string; retiredAt: string | null }
 export interface Published { version: number; payload: Record<string, unknown> }
+export interface Review {
+  configKey: string; draftVersion: number; publishedVersion: number | null;
+  hasChanges: boolean; publishedText: string | null; candidateText: string;
+  sourceRevisionVersion: number | null;
+}
 export const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) && !isLosslessNumber(value);
 const fail = (): never => { throw new Error('运行配置响应格式不正确'); };
 const text = (v: unknown): string => typeof v === 'string' ? v : fail();
@@ -25,6 +31,15 @@ export function decodeItem(v: unknown): Item {
 export function decodeDetail(v: unknown, key?: string): Detail {
   const o = object(v); const item = decodeItem(o); if (key !== undefined && item.configKey !== key) fail();
   return { ...item, jsonSchema: object(o.jsonSchema), draftPayload: o.draftPayload === null ? null : object(o.draftPayload), draftVersion: version(o.draftVersion), publishedPayload: o.publishedPayload === null ? null : object(o.publishedPayload) };
+}
+export function decodeReview(v: unknown, detail: Detail, source: number | null): Review {
+  const o = object(v);
+  const draftVersion = version(o.draftVersion);
+  const publishedVersion = o.publishedVersion === null ? null : version(o.publishedVersion);
+  const sourceRevisionVersion = o.sourceRevisionVersion === null ? null : version(o.sourceRevisionVersion);
+  if (o.configKey !== detail.configKey || draftVersion !== detail.draftVersion || publishedVersion !== detail.publishedVersion || sourceRevisionVersion !== source || typeof o.hasChanges !== 'boolean') fail();
+  const candidateText = text(o.candidateText); parseObject(candidateText);
+  return { configKey: detail.configKey, draftVersion, publishedVersion, sourceRevisionVersion, hasChanges: o.hasChanges as boolean, publishedText: nullableText(o.publishedText), candidateText };
 }
 export function decodeList<T>(v: unknown, decode: (v: unknown) => T): T[] {
   const o = object(v); if (!Array.isArray(o.items)) return fail(); return o.items.map(decode);

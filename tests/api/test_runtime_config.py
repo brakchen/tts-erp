@@ -557,6 +557,85 @@ def test_alert_runtime_config_lifecycle_and_legacy_rollout_rejection(
         )
         assert legacy_rollback.status_code == 422, legacy_rollback.text
         assert "global deterioration alert" in legacy_rollback.text
+        # Loading history into the new review flow retains the same legacy guard,
+        # even if the operator has edited the candidate after loading it.
+        for operation in ("preview", "publish"):
+            rejected_history = api_client.post(
+                f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/{operation}",
+                headers=headers,
+                json={
+                    "expectedDraftVersion": legacy_detail.json()["draftVersion"],
+                    "expectedPublishedVersion": 4,
+                    "payload": updated,
+                    "sourceRevisionVersion": 4,
+                },
+            )
+            assert rejected_history.status_code == 422, rejected_history.text
+            assert rejected_history.json()["detail"] == {
+                "code": "runtime_source_rollout_invalid"
+            }
+            invalid_business = api_client.post(
+                f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/{operation}",
+                headers=headers,
+                json={
+                    "expectedDraftVersion": legacy_detail.json()["draftVersion"],
+                    "expectedPublishedVersion": 4,
+                    "payload": {**updated, "enabled": "TEST invalid boolean"},
+                },
+            )
+            assert invalid_business.status_code == 422, invalid_business.text
+            assert invalid_business.json()["detail"] == {
+                "code": "runtime_business_invalid"
+            }
+        unchanged = api_client.get(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}", headers=headers
+        )
+        assert unchanged.json() == legacy_detail.json()
+        # Old business content may predate current validation. The operator can
+        # repair it in the candidate; only its retained sidecar is provenance.
+        with Session(db_engine) as session:
+            old_revision = session.scalar(
+                select(RuntimeConfigRevision).where(
+                    RuntimeConfigRevision.config_key == ALERT_CONFIG_KEY,
+                    RuntimeConfigRevision.version == 2,
+                )
+            )
+            old_revision.payload = {**payload, "enabled": "TEST old invalid business"}
+            session.commit()
+        repaired_body = {
+            "expectedDraftVersion": legacy_detail.json()["draftVersion"],
+            "expectedPublishedVersion": 4,
+            "payload": updated,
+            "sourceRevisionVersion": 2,
+        }
+        repaired_preview = api_client.post(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/preview",
+            headers=headers,
+            json=repaired_body,
+        )
+        assert repaired_preview.status_code == 200, repaired_preview.text
+        repaired_publish = api_client.post(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/publish",
+            headers=headers,
+            json=repaired_body,
+        )
+        assert repaired_publish.status_code == 200, repaired_publish.text
+        assert repaired_publish.json()["publishedVersion"] == 5
+        repaired_detail = api_client.get(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}", headers=headers
+        )
+        # The old rollback endpoint still republishes its exact target and must
+        # continue to reject that target's invalid business content.
+        old_rollback = api_client.post(
+            f"/v2/config/runtime/items/{ALERT_CONFIG_KEY}/rollback",
+            headers=headers,
+            json={
+                "expectedDraftVersion": repaired_detail.json()["draftVersion"],
+                "targetVersion": 2,
+            },
+        )
+        assert old_rollback.status_code == 422, old_rollback.text
+        assert isinstance(old_rollback.json()["detail"], str)
     finally:
         _clear_alert_runtime_config(db_engine)
 
@@ -939,12 +1018,7 @@ def test_runtime_config_restore_rejects_a_retired_secret_reference(
 def test_runtime_config_write_models_reject_retired_rollout_fields(
     api_client, db_engine, readwrite_key
 ):
-    """Retired rollout inputs fail loudly on the two payload-bearing write models.
-
-    ``extra="forbid"`` is deliberately scoped to create and draft update: a
-    leftover ``draftRollout``/``rollout`` must surface as 422 instead of being
-    silently dropped, while the remaining runtime request models stay lenient.
-    """
+    """Retired rollout inputs fail loudly on payload and publish request models."""
     _clear_runtime_config(db_engine)
     headers = _headers(readwrite_key)
     config_key = "test_runtime.strict_extra"
@@ -1004,7 +1078,7 @@ def test_runtime_config_write_models_reject_retired_rollout_fields(
         )
         assert accepted_draft.status_code == 200, accepted_draft.text
 
-        # Other runtime request models are intentionally not strict.
+        # Publish now rejects retired rollout inputs in legacy mode too.
         published = api_client.post(
             f"/v2/config/runtime/items/{config_key}/publish",
             headers=headers,
@@ -1012,6 +1086,15 @@ def test_runtime_config_write_models_reject_retired_rollout_fields(
                 "expectedDraftVersion": accepted_draft.json()["draftVersion"],
                 "comment": "TEST strict extra",
                 "rollout": [{"name": "TEST_canary", "basisPoints": 10000}],
+            },
+        )
+        assert published.status_code == 422, published.text
+        published = api_client.post(
+            f"/v2/config/runtime/items/{config_key}/publish",
+            headers=headers,
+            json={
+                "expectedDraftVersion": accepted_draft.json()["draftVersion"],
+                "comment": "TEST strict extra",
             },
         )
         assert published.status_code == 200, published.text
