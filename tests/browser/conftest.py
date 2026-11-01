@@ -164,6 +164,8 @@ def _alert_payload() -> dict[str, Any]:
             "warnings": [],
             "basisCalculatedAt": _NOW,
             "drilldown": {
+                "startDate": "2026-09-27",
+                "endDate": "2026-10-03",
                 "pageUrl": (
                     f"/v2/pages/spu-roi?shop_pk=7&spu_ids=TEST_RENDER_COMPARE_{i}"
                     "&w_start=2026-09-27&w_end=2026-10-03"
@@ -197,7 +199,19 @@ def _alert_payload() -> dict[str, Any]:
                 "current": {"startDate": "2026-09-27", "endDate": "2026-10-03"},
                 "previous": {"startDate": "2026-09-20", "endDate": "2026-09-26"},
             },
-            "coverage": {"status": "limited"},
+            "coverage": {
+                "status": "limited",
+                "basis": "TEST_layout_fixture",
+                "sources": {},
+                "advertising": {
+                    "startDate": "2026-09-20",
+                    "endDate": "2026-10-03",
+                    "endpoint": "TEST_layout_fixture",
+                    "missingDates": [],
+                    "observedScopes": [],
+                },
+                "limitations": ["TEST 渲染夹具，不证明来源完整性。"],
+            },
             "warnings": ["渲染夹具，仅验证布局，不证明盈利或来源完整性。"],
             "activityBypassed": False,
             "scopeDescription": "固定近7天活动范围；保留无单投放",
@@ -357,7 +371,6 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
     """Render current owners; explicit pilot override is test-only, not a runtime flag."""
     from starlette.requests import Request
 
-    from tts_erp_v2.accounts.pages import PAGES
     from tts_erp_v2.api.v2 import frontend_pages
     from tts_erp_v2.api.v2.ad_daily import ad_daily_page
     from tts_erp_v2.api.v2.pages import (
@@ -385,22 +398,11 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
             response = frontend_pages.render_frontend_page(request, slug)
             name = ("tts-" if prefix else "") + slug
             (out / f"{name}.html").write_bytes(response.body)
-    for page in PAGES:
-        slug = page.page_id
-        if slug not in effective or slug in _PLAIN or slug in _SPU_PAGES:
-            continue
-        for prefix in ("", "/tts"):
-            request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}"})
-            response = frontend_pages.render_frontend_page(request, slug)
-            name = ("tts-" if prefix else "") + slug
-            (out / f"{name}.html").write_bytes(response.body)
-    if _ALERT_SLUG not in effective:
-        (out / f"{_ALERT_SLUG}.html").write_bytes(
-            _render_page(f"{_ALERT_SLUG}.html", current_page=_ALERT_SLUG).body
-        )
-    if "ad-daily" not in effective:
-        request = Request({"type": "http", "root_path": "", "path": "/v2/pages/ad-daily"})
-        (out / "ad-daily.html").write_bytes(ad_daily_page(request).body)
+    (out / f"{_ALERT_SLUG}.html").write_bytes(
+        _render_page(f"{_ALERT_SLUG}.html", current_page=_ALERT_SLUG).body
+    )
+    request = Request({"type": "http", "root_path": "", "path": "/v2/pages/ad-daily"})
+    (out / "ad-daily.html").write_bytes(ad_daily_page(request).body)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -487,9 +489,22 @@ def site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> 
 
 @pytest.fixture(scope="session")
 def frontend_site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> Iterator[str]:
+    from starlette.requests import Request
+
+    from tts_erp_v2.accounts.pages import PAGES
+    from tts_erp_v2.api.v2 import frontend_pages
+
     rendered = tmp_path_factory.mktemp("frontend-pilot-pages")
-    # Exercise the runtime's sole activation set; keep legacy collector wrappers compatible.
-    _render_pages(rendered)
+    # Current React acceptance uses the runtime renderer directly. Historical
+    # native-consumer fixtures in site_url are not React migration evidence.
+    for page in PAGES:
+        if page.page_id not in frontend_pages.MIGRATED_PAGE_IDS:
+            continue
+        for prefix in ("", "/tts"):
+            request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{page.page_id}"})
+            response = frontend_pages.render_frontend_page(request, page.page_id)
+            name = ("tts-" if prefix else "") + page.page_id
+            (rendered / f"{name}.html").write_bytes(response.body)
     with _serve_pages(rendered) as url:
         yield url
 

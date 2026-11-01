@@ -23,6 +23,9 @@ def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, wi
     page = frontend_browser_renderer.open(f"{prefix}/v2/pages/{slug}", width=width)
     page.get_by_role("heading", level=1, name=title, exact=True).wait_for(timeout=10_000)
     assert page.locator("#frontend-startup").count() == 0
+    if slug == "spu-profit-deterioration":
+        # Exercise populated comparison layout, not just its loading/error shell.
+        page.get_by_text("TEST_RENDER_COMPARE_0", exact=True).wait_for(timeout=10_000)
     if width < 1024:
         trigger = page.get_by_role("button", name="打开主导航")
         trigger.click()
