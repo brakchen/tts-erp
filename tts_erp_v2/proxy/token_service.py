@@ -394,10 +394,12 @@ def load_credentials(
     if the ciphertext was tampered with or the Fernet key changed.
     """
     row = session.execute(
-        select(Credentials).where(
+        select(Credentials)
+        .where(
             Credentials.provider == provider,
             Credentials.external_account_id == external_account_id,
         )
+        .execution_options(populate_existing=True)
     ).scalar_one_or_none()
     if row is None:
         return None
@@ -441,10 +443,12 @@ def refresh_if_needed(
     """
     with session.begin():
         row = session.execute(
-            select(Credentials).where(
+            select(Credentials)
+            .where(
                 Credentials.provider == provider,
                 Credentials.external_account_id == external_account_id,
             )
+            .execution_options(populate_existing=True)
         ).scalar_one_or_none()
         if row is None:
             return None
