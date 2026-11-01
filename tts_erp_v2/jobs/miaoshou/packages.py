@@ -653,15 +653,16 @@ def sync_packages(
     from tts_erp_v2.proxy.miaoshou.retry import PageResult, paginate_with_retry
 
     with run_job(session, job_name=JOB_NAME) as job:
-        if not _schema_ready(session):
-            result = _skipped_result()
-            finish_job(
-                session,
-                job,
-                status="skipped",
-                extra={"reason": "miaoshou schema migration not applied"},
-            )
-            return result
+        with session.begin():
+            if not _schema_ready(session):
+                result = _skipped_result()
+                finish_job(
+                    session,
+                    job,
+                    status="skipped",
+                    extra={"reason": "miaoshou schema migration not applied"},
+                )
+                return result
         ctx = resolve_miaoshou_context(session, license_id=license_id)
         if ctx is None:
             raise RuntimeError("no miaoshou credentials row; cannot construct context")
@@ -671,10 +672,11 @@ def sync_packages(
             client = miaoshou_client_factory(ctx)
 
         modified_from = gmt_modified_from
-        if modified_from is None:
-            modified_from = _load_modified_cursor(
-                session, credential_id=ctx.credentials.id
-            )
+        with session.begin():
+            if modified_from is None:
+                modified_from = _load_modified_cursor(
+                    session, credential_id=ctx.credentials.id
+                )
         rate_limit_retries = 0
         advertised_total_pages: int | None = None
         advertised_total_count: int | None = None
@@ -743,40 +745,42 @@ def sync_packages(
         issues = 0
         max_modified: datetime | None = None
         for package in packages:
-            if not isinstance(package, dict):
-                issues += 1
-                _record_issue(
+            with session.begin():
+                if not isinstance(package, dict):
+                    issues += 1
+                    _record_issue(
+                        session,
+                        credential_id=ctx.credentials.id,
+                        issue_type="PACKAGE_PARSE_FAILED",
+                        external_id=None,
+                        details={"package": repr(package)[:300]},
+                    )
+                    continue
+                package_count, item_count, gift_count, issue_count = _persist_package(
+                    session,
+                    package=package,
+                    credential_id=ctx.credentials.id,
+                    source_endpoint=SEARCH_ENDPOINT,
+                )
+                packages_upserted += package_count
+                items_upserted += item_count
+                gifts_upserted += gift_count
+                issues += issue_count
+                order_info = package.get("orderInfo")
+                if isinstance(order_info, dict):
+                    modified = _parse_datetime(order_info.get("gmtOrderModified"))
+                    if modified is not None and (
+                        max_modified is None or modified > max_modified
+                    ):
+                        max_modified = modified
+
+        with session.begin():
+            if not issues and max_modified is not None:
+                _save_modified_cursor(
                     session,
                     credential_id=ctx.credentials.id,
-                    issue_type="PACKAGE_PARSE_FAILED",
-                    external_id=None,
-                    details={"package": repr(package)[:300]},
+                    value=max_modified,
                 )
-                continue
-            package_count, item_count, gift_count, issue_count = _persist_package(
-                session,
-                package=package,
-                credential_id=ctx.credentials.id,
-                source_endpoint=SEARCH_ENDPOINT,
-            )
-            packages_upserted += package_count
-            items_upserted += item_count
-            gifts_upserted += gift_count
-            issues += issue_count
-            order_info = package.get("orderInfo")
-            if isinstance(order_info, dict):
-                modified = _parse_datetime(order_info.get("gmtOrderModified"))
-                if modified is not None and (
-                    max_modified is None or modified > max_modified
-                ):
-                    max_modified = modified
-
-        if max_modified is not None:
-            _save_modified_cursor(
-                session,
-                credential_id=ctx.credentials.id,
-                value=max_modified,
-            )
 
         job.rows_total = len(packages)
         job.rows_inserted = packages_upserted + items_upserted + gifts_upserted
@@ -811,20 +815,21 @@ def sync_package_detail(
 ) -> dict[str, Any]:
     """Fetch and persist one package via ``get_package_info``."""
     with run_job(session, job_name=DETAIL_JOB_NAME) as job:
-        if not _schema_ready(session):
-            finish_job(
-                session,
-                job,
-                status="skipped",
-                extra={"reason": "miaoshou schema migration not applied"},
-            )
-            return {
-                "packages_upserted": 0,
-                "items_upserted": 0,
-                "gifts_upserted": 0,
-                "issues": 0,
-                "skipped": True,
-            }
+        with session.begin():
+            if not _schema_ready(session):
+                finish_job(
+                    session,
+                    job,
+                    status="skipped",
+                    extra={"reason": "miaoshou schema migration not applied"},
+                )
+                return {
+                    "packages_upserted": 0,
+                    "items_upserted": 0,
+                    "gifts_upserted": 0,
+                    "issues": 0,
+                    "skipped": True,
+                }
         ctx = resolve_miaoshou_context(session, license_id=license_id)
         if ctx is None:
             raise RuntimeError("no miaoshou credentials row; cannot construct context")
@@ -837,31 +842,30 @@ def sync_package_detail(
             op_order_package_id=op_order_package_id,
         )
         package = _unwrap_detail(payload)
-        if package is None:
-            _record_issue(
+        with session.begin():
+            if package is None:
+                _record_issue(
+                    session,
+                    credential_id=ctx.credentials.id,
+                    issue_type="PACKAGE_DETAIL_MISSING",
+                    external_id=str(op_order_package_id),
+                    details={"response_keys": list(payload.keys())[:20]},
+                )
+                job.rows_total = job.rows_inserted = 0
+                job.rows_failed = 1
+                return {
+                    "packages_upserted": 0,
+                    "items_upserted": 0,
+                    "gifts_upserted": 0,
+                    "issues": 1,
+                    "skipped": False,
+                }
+            package_count, item_count, gift_count, issues = _persist_package(
                 session,
+                package=package,
                 credential_id=ctx.credentials.id,
-                issue_type="PACKAGE_DETAIL_MISSING",
-                external_id=str(op_order_package_id),
-                details={"response_keys": list(payload.keys())[:20]},
+                source_endpoint=DETAIL_ENDPOINT,
             )
-            job.rows_total = 0
-            job.rows_inserted = 0
-            job.rows_failed = 1
-            return {
-                "packages_upserted": 0,
-                "items_upserted": 0,
-                "gifts_upserted": 0,
-                "issues": 1,
-                "skipped": False,
-            }
-
-        package_count, item_count, gift_count, issues = _persist_package(
-            session,
-            package=package,
-            credential_id=ctx.credentials.id,
-            source_endpoint=DETAIL_ENDPOINT,
-        )
         job.rows_total = 1
         job.rows_inserted = package_count + item_count + gift_count
         job.rows_failed = issues

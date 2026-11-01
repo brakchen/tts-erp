@@ -72,6 +72,7 @@ FastAPI `build_app()` 工厂，中间件顺序：
 ### 3.2 sync_worker/scheduler.py
 
 APScheduler 调度器，JOBS 注册表在文件顶部 `NOTE`，以它为准，勿重复维护。
+任务事务、联网与失败边界见 [同步事务约束](sync-transaction-boundaries.md)。
 
 ### 3.3 db/models/
 

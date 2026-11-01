@@ -7,6 +7,7 @@ watermark cursor logic.
 
 Cursor: epoch ms in ``integration.sync_cursors`` (scope=shop_id).
 """
+
 from __future__ import annotations
 
 import logging
@@ -133,9 +134,8 @@ def _resolve_case_line_key(raw_line: dict) -> tuple[str | None, str | None]:
     ``sku_id`` is set, ``sales_order_line_key`` is ``None`` and the
     caller must resolve via ``external_variant_id_snapshot``.
     """
-    case_side_id = (
-        raw_line.get("cancel_line_item_id")
-        or raw_line.get("return_line_item_id")
+    case_side_id = raw_line.get("cancel_line_item_id") or raw_line.get(
+        "return_line_item_id"
     )
     order_side_id = (
         raw_line.get("order_line_item_id")
@@ -230,7 +230,9 @@ def _parse_case(case_type: str, raw: dict) -> dict:
         "case_type": _resolve_case_type(raw, case_type),
         "external_case_id": str(cid),
         "order_id": str(order_id) if order_id else None,
-        "status": raw.get("status") or raw.get("return_status") or raw.get("cancel_status"),
+        "status": raw.get("status")
+        or raw.get("return_status")
+        or raw.get("cancel_status"),
         # reason 字段名：returns 是 return_reason/return_reason_text，
         # cancellations 是 cancel_reason/cancel_reason_text（9 月 CANCEL
         # case reason 全 NULL 就是因为只读了不存在的 reason_code）。
@@ -251,7 +253,9 @@ def _parse_case(case_type: str, raw: dict) -> dict:
     }
 
 
-def _resolve_order_pk(session: Session, account_id: int, order_id: str | None) -> int | None:
+def _resolve_order_pk(
+    session: Session, account_id: int, order_id: str | None
+) -> int | None:
     if not order_id:
         return None
     return session.execute(
@@ -289,147 +293,157 @@ def _process_one_type(
     inserted = 0
     failed = 0
     for raw in raw_cases:
-        ext_case_id = str(
-            raw.get("id")
-            or raw.get("return_id")
-            or raw.get("cancel_id")
-            or "<unknown>"
-        )
-        try:
-            fields = _parse_case(case_type, raw)
-        except ParseError as exc:
-            failed += 1
-            ok_flags.append(False)
-            record_sync_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="PARSE_ERROR",
-                external_id=ext_case_id,
-                details={"error": str(exc), "case_type": case_type},
+        with session.begin():
+            ext_case_id = str(
+                raw.get("id")
+                or raw.get("return_id")
+                or raw.get("cancel_id")
+                or "<unknown>"
             )
-            continue
-
-        so_id = _resolve_order_pk(session, account_id, fields["order_id"])
-        if so_id is None:
-            # V3 §14 — surface unknown order as a sync_issue, not silent drop.
-            # ``record_sync_issue`` dedups on (job_name, issue_type,
-            # external_id, resolved_at IS NULL) so the same failing order
-            # does not accumulate a fresh row every 15-min tick.
-            record_sync_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="UNKNOWN_ORDER",
-                external_id=fields["external_case_id"],
-                details={"order_id": fields["order_id"]},
-            )
-            failed += 1
-            ok_flags.append(False)
-            continue
-
-        raw_row = RawRecord(
-            endpoint=endpoint,
-            external_id=fields["external_case_id"],
-            payload=raw,
-        )
-        session.add(raw_row)
-        session.flush()
-
-        insert_values = {
-            "shop_pk": account_id,
-            "order_pk": so_id,
-            **{k: v for k, v in fields.items() if k != "order_id"},
-            "raw_record_id": raw_row.id,
-        }
-        update_cols = {k: insert_values[k] for k in fields if k != "order_id"}
-        update_cols["raw_record_id"] = raw_row.id
-        session.execute(
-            pg_insert(Case).values(**insert_values).on_conflict_do_update(
-                index_elements=["shop_pk", "external_case_id"],
-                set_=update_cols,
-            )
-        )
-        case_row = session.execute(
-            select(Case).where(
-                Case.shop_pk == account_id,
-                Case.external_case_id == fields["external_case_id"],
-            )
-        ).scalar_one()
-
-        for raw_line in (
-            raw.get("return_line_items") or raw.get("cancel_line_items") or []
-        ):
-            external_case_line_id, order_line_key = _resolve_case_line_key(raw_line)
-            if external_case_line_id is None:
-                # Truly nothing usable on the line. Should be rare now
-                # that we accept sku_id as a last resort, but guard anyway.
+            try:
+                fields = _parse_case(case_type, raw)
+            except ParseError as exc:
+                failed += 1
+                ok_flags.append(False)
                 record_sync_issue(
                     session,
                     job_name=JOB_NAME,
                     issue_type="PARSE_ERROR",
-                    external_id=f"{fields['external_case_id']}:<line>",
-                    details={"error": "line_id missing"},
+                    external_id=ext_case_id,
+                    details={"error": str(exc), "case_type": case_type},
                 )
                 continue
-            line_values = {
-                "case_id": case_row.id,
-                "external_case_line_id": external_case_line_id,
-                "quantity": _to_decimal(raw_line.get("quantity")),
-                "refund_amount": _to_decimal(
-                    (raw_line.get("refund_amount") or {}).get("amount")
-                    or (raw_line.get("refund_amount") or {}).get("refund_total")
-                ),
-                "currency": (raw_line.get("refund_amount") or {}).get("currency"),
-                "should_replenish_stock": raw_line.get("restock"),
-            }
-            # Resolve sales_order_line_id (NOT NULL FK on case_lines).
-            # Two paths depending on which id the payload surfaced:
-            #   1. order_line_key set → lookup sales_order_lines.external_line_id
-            #      = order_line_key AND order_pk = so_id
-            #   2. order_line_key is None → the only id we have is a
-            #      sku_id, so look up via external_variant_id_snapshot.
-            if order_line_key is not None:
-                sol_id = session.execute(
-                    select(SalesOrderLine.id).where(
-                        SalesOrderLine.order_pk == so_id,
-                        SalesOrderLine.external_line_id == order_line_key,
-                    )
-                ).scalar_one_or_none()
-                lookup_path = "external_line_id"
-                lookup_value = order_line_key
-            else:
-                sol_id = session.execute(
-                    select(SalesOrderLine.id).where(
-                        SalesOrderLine.order_pk == so_id,
-                        SalesOrderLine.external_variant_id_snapshot == raw_line.get("sku_id"),
-                    )
-                ).scalar_one_or_none()
-                lookup_path = "external_variant_id_snapshot"
-                lookup_value = raw_line.get("sku_id")
-            if sol_id is None:
-                # The case's line references a sales_order_line that
-                # hasn't been synced yet — surface as a sync_issue and
-                # skip rather than crash the page.
+
+            so_id = _resolve_order_pk(session, account_id, fields["order_id"])
+            if so_id is None:
+                # V3 §14 — surface unknown order as a sync_issue, not silent drop.
+                # ``record_sync_issue`` dedups on (job_name, issue_type,
+                # external_id, resolved_at IS NULL) so the same failing order
+                # does not accumulate a fresh row every 15-min tick.
                 record_sync_issue(
                     session,
                     job_name=JOB_NAME,
-                    issue_type="UNKNOWN_LINE",
-                    external_id=f"{fields['external_case_id']}:{external_case_line_id}",
-                    details={
-                        "order_pk": so_id,
-                        "lookup_path": lookup_path,
-                        "lookup_value": str(lookup_value) if lookup_value is not None else None,
-                    },
+                    issue_type="UNKNOWN_ORDER",
+                    external_id=fields["external_case_id"],
+                    details={"order_id": fields["order_id"]},
                 )
+                failed += 1
+                ok_flags.append(False)
                 continue
-            line_values["sales_order_line_id"] = sol_id
+
+            raw_row = RawRecord(
+                endpoint=endpoint,
+                external_id=fields["external_case_id"],
+                payload=raw,
+            )
+            session.add(raw_row)
+            session.flush()
+
+            insert_values = {
+                "shop_pk": account_id,
+                "order_pk": so_id,
+                **{k: v for k, v in fields.items() if k != "order_id"},
+                "raw_record_id": raw_row.id,
+            }
+            update_cols = {k: insert_values[k] for k in fields if k != "order_id"}
+            update_cols["raw_record_id"] = raw_row.id
             session.execute(
-                pg_insert(CaseLine).values(**line_values).on_conflict_do_update(
-                    index_elements=["case_id", "external_case_line_id"],
-                    set_={k: line_values[k] for k in line_values if k != "case_id"},
+                pg_insert(Case)
+                .values(**insert_values)
+                .on_conflict_do_update(
+                    index_elements=["shop_pk", "external_case_id"],
+                    set_=update_cols,
                 )
             )
-        inserted += 1
-        ok_flags.append(True)
+            case_row = session.execute(
+                select(Case).where(
+                    Case.shop_pk == account_id,
+                    Case.external_case_id == fields["external_case_id"],
+                )
+            ).scalar_one()
+
+            for raw_line in (
+                raw.get("return_line_items") or raw.get("cancel_line_items") or []
+            ):
+                external_case_line_id, order_line_key = _resolve_case_line_key(raw_line)
+                if external_case_line_id is None:
+                    failed += 1
+                    # Truly nothing usable on the line. Should be rare now
+                    # that we accept sku_id as a last resort, but guard anyway.
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="PARSE_ERROR",
+                        external_id=f"{fields['external_case_id']}:<line>",
+                        details={"error": "line_id missing"},
+                    )
+                    continue
+                line_values = {
+                    "case_id": case_row.id,
+                    "external_case_line_id": external_case_line_id,
+                    "quantity": _to_decimal(raw_line.get("quantity")),
+                    "refund_amount": _to_decimal(
+                        (raw_line.get("refund_amount") or {}).get("amount")
+                        or (raw_line.get("refund_amount") or {}).get("refund_total")
+                    ),
+                    "currency": (raw_line.get("refund_amount") or {}).get("currency"),
+                    "should_replenish_stock": raw_line.get("restock"),
+                }
+                # Resolve sales_order_line_id (NOT NULL FK on case_lines).
+                # Two paths depending on which id the payload surfaced:
+                #   1. order_line_key set → lookup sales_order_lines.external_line_id
+                #      = order_line_key AND order_pk = so_id
+                #   2. order_line_key is None → the only id we have is a
+                #      sku_id, so look up via external_variant_id_snapshot.
+                if order_line_key is not None:
+                    sol_id = session.execute(
+                        select(SalesOrderLine.id).where(
+                            SalesOrderLine.order_pk == so_id,
+                            SalesOrderLine.external_line_id == order_line_key,
+                        )
+                    ).scalar_one_or_none()
+                    lookup_path = "external_line_id"
+                    lookup_value = order_line_key
+                else:
+                    sol_id = session.execute(
+                        select(SalesOrderLine.id).where(
+                            SalesOrderLine.order_pk == so_id,
+                            SalesOrderLine.external_variant_id_snapshot
+                            == raw_line.get("sku_id"),
+                        )
+                    ).scalar_one_or_none()
+                    lookup_path = "external_variant_id_snapshot"
+                    lookup_value = raw_line.get("sku_id")
+                if sol_id is None:
+                    failed += 1
+                    # The case's line references a sales_order_line that
+                    # hasn't been synced yet — surface as a sync_issue and
+                    # skip rather than crash the page.
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="UNKNOWN_LINE",
+                        external_id=f"{fields['external_case_id']}:{external_case_line_id}",
+                        details={
+                            "order_pk": so_id,
+                            "lookup_path": lookup_path,
+                            "lookup_value": str(lookup_value)
+                            if lookup_value is not None
+                            else None,
+                        },
+                    )
+                    continue
+                line_values["sales_order_line_id"] = sol_id
+                session.execute(
+                    pg_insert(CaseLine)
+                    .values(**line_values)
+                    .on_conflict_do_update(
+                        index_elements=["case_id", "external_case_line_id"],
+                        set_={k: line_values[k] for k in line_values if k != "case_id"},
+                    )
+                )
+            inserted += 1
+            ok_flags.append(True)
 
     return ok_flags, total, inserted, failed
 
@@ -445,20 +459,20 @@ def run(
     from tts_erp_v2.sync_worker import watermarks
 
     cursor_scope = scope or shop_id
-    account = session.execute(
-        select(ChannelAccount).where(
-            ChannelAccount.platform == "tiktok",
-            ChannelAccount.shop_id == shop_id,
-        )
-    ).scalar_one_or_none()
-    if account is None:
-        raise UpstreamJobError(
-            f"shops row missing for tiktok shop_id={shop_id!r}"
-        )
+    with session.begin():
+        account = session.execute(
+            select(ChannelAccount).where(
+                ChannelAccount.platform == "tiktok",
+                ChannelAccount.shop_id == shop_id,
+            )
+        ).scalar_one_or_none()
+        if account is None:
+            raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+        account_id = account.id
 
-    watermark_ms = watermarks.get_cursor(
-        session, job_name=JOB_NAME, scope=cursor_scope
-    )
+        watermark_ms = watermarks.get_cursor(
+            session, job_name=JOB_NAME, scope=cursor_scope
+        )
     base_body: dict[str, Any] = {"page_size": page_size}
     if watermark_ms:
         base_body["update_time_ge"] = _safe_int(watermark_ms) // 1000
@@ -471,7 +485,7 @@ def run(
     r_ok, r_total, r_ins, r_fail = _process_one_type(
         session,
         proxy_call=proxy_call,
-        account_id=account.id,
+        account_id=account_id,
         case_type="RETURN",
         endpoint=RETURNS_ENDPOINT,
         raw_cases=returns,
@@ -479,7 +493,7 @@ def run(
     c_ok, c_total, c_ins, c_fail = _process_one_type(
         session,
         proxy_call=proxy_call,
-        account_id=account.id,
+        account_id=account_id,
         case_type="CANCEL",
         endpoint=CANCELLATIONS_ENDPOINT,
         raw_cases=cancellations,
@@ -507,22 +521,25 @@ def run(
                 max_update_ms = ms
 
     new_cursor_ms: int | None = None
-    if max_update_ms is not None and inserted > 0 and (
-        watermark_ms is None
-        or max_update_ms > _safe_int(watermark_ms)
-    ):
-        watermarks.set_cursor(
-            session,
-            job_name=JOB_NAME,
-            scope=cursor_scope,
-            cursor_epoch_ms=max_update_ms,
-        )
-        new_cursor_ms = max_update_ms
+    with session.begin():
+        if (
+            not failed
+            and max_update_ms is not None
+            and inserted > 0
+            and (watermark_ms is None or max_update_ms > _safe_int(watermark_ms))
+        ):
+            watermarks.set_cursor(
+                session,
+                job_name=JOB_NAME,
+                scope=cursor_scope,
+                cursor_epoch_ms=max_update_ms,
+            )
+            new_cursor_ms = max_update_ms
 
-    # V3 §14.2（2026-09-28）：永久失败的 sync_issue 自动 resolve。
-    # 仅限本 job：超过 _AUTO_RESOLVE_AFTER_DAYS 天仍未恢复的，标 permanent
-    # 让 watermark 可以推过。dedup 表里单条不动但 resolved_at IS NOT NULL。
-    _auto_resolve_stale_issues(session, JOB_NAME, _AUTO_RESOLVE_AFTER_DAYS)
+        # V3 §14.2（2026-09-28）：永久失败的 sync_issue 自动 resolve。
+        # 仅限本 job：超过 _AUTO_RESOLVE_AFTER_DAYS 天仍未恢复的，标 permanent
+        # 让 watermark 可以推过。dedup 表里单条不动但 resolved_at IS NOT NULL。
+        _auto_resolve_stale_issues(session, JOB_NAME, _AUTO_RESOLVE_AFTER_DAYS)
 
     return JobResult(
         rows_total=total,
@@ -541,6 +558,7 @@ def _auto_resolve_stale_issues(session: Session, job_name: str, days: int) -> in
     JobResult 监控可见）。
     """
     from datetime import UTC, datetime, timedelta
+
     cutoff = datetime.now(UTC) - timedelta(days=days)
     try:
         rows = session.execute(

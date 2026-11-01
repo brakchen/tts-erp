@@ -210,18 +210,19 @@ def compute_shop_fee_rates(
     window_start = now - timedelta(days=lookback_days)
     calculated_on: date = now.date()
 
-    rows = (
-        session.execute(
-            _SQL_SHOP_FEE_RATE,
-            {
-                "window_start": window_start,
-                "window_end": window_end,
-                "shop_pks": list(shop_pks) if shop_pks is not None else None,
-            },
+    with session.begin():
+        rows = (
+            session.execute(
+                _SQL_SHOP_FEE_RATE,
+                {
+                    "window_start": window_start,
+                    "window_end": window_end,
+                    "shop_pks": list(shop_pks) if shop_pks is not None else None,
+                },
+            )
+            .mappings()
+            .all()
         )
-        .mappings()
-        .all()
-    )
 
     upserted = 0
     skipped = 0
@@ -284,22 +285,23 @@ def compute_shop_fee_rates(
             )
             continue
 
-        session.execute(
-            _SQL_UPSERT,
-            {
-                "shop_pk": shop_pk,
-                "calculated_on": calculated_on,
-                "lookback_days": lookback_days,
-                "fee_rate": rate,
-                "kept_order_count": kept_count,
-                "kept_line_gmv": _q(kept_gmv, _AMOUNT_Q),
-                "window_line_gmv": _q(window_gmv, _AMOUNT_Q),
-                "kept_share": kept_share,
-                "total_fee": _q(fee_total, _AMOUNT_Q),
-                "currency": currency,
-                "calculation_version": CALCULATION_VERSION,
-            },
-        )
+        with session.begin():
+            session.execute(
+                _SQL_UPSERT,
+                {
+                    "shop_pk": shop_pk,
+                    "calculated_on": calculated_on,
+                    "lookback_days": lookback_days,
+                    "fee_rate": rate,
+                    "kept_order_count": kept_count,
+                    "kept_line_gmv": _q(kept_gmv, _AMOUNT_Q),
+                    "window_line_gmv": _q(window_gmv, _AMOUNT_Q),
+                    "kept_share": kept_share,
+                    "total_fee": _q(fee_total, _AMOUNT_Q),
+                    "currency": currency,
+                    "calculation_version": CALCULATION_VERSION,
+                },
+            )
         upserted += 1
 
     return {

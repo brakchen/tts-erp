@@ -13,6 +13,7 @@ kept as a secondary fallback in reporting._source_cost_lookup).
 Single SQL pass; idempotent via IS DISTINCT FROM guard; no external API.
 Runs after common_collect_box (6h cadence aligned) so the offer data is fresh.
 """
+
 from __future__ import annotations
 
 import logging
@@ -60,7 +61,8 @@ _SQL_BACKFILL = text(
         source_max_unit_cost = lo.source_max_unit_cost,
         source_updated_at = now()
     FROM latest_offer lo
-    WHERE tk.external_product_id ~ '^[0-9]{15,20}$'
+    WHERE tk.id > :after_id AND tk.id <= :through_id
+      AND tk.external_product_id ~ '^[0-9]{15,20}$'
       AND tk.source_item_id = lo.source_item_id
       AND (
           tk.source_unit_cost IS DISTINCT FROM lo.source_unit_cost
@@ -82,13 +84,36 @@ def sync_source_cost_to_master(session: Session) -> dict[str, Any]:
 
     Returns a dict with counters: tk_rows_total / rows_updated / issues.
     SyncJob row (rows_total/inserted/failed) is set inside run_job.
-    Caller commits the session (matches other jobs in this directory).
+    Each bounded batch is committed by its ``session.begin()`` context.
     """
     with run_job(session, job_name=JOB_NAME) as job:
-        tk_rows_total = session.execute(_SQL_COUNT_TK_TOTAL).scalar() or 0
-        result = session.execute(_SQL_BACKFILL)
-        updated = result.fetchall()
-        rows_updated = len(updated)
+        with session.begin():
+            tk_rows_total = session.execute(_SQL_COUNT_TK_TOTAL).scalar() or 0
+        after_id = 0
+        rows_updated = 0
+        while True:
+            with session.begin():
+                ids = list(
+                    session.scalars(
+                        text(
+                            "SELECT id FROM procurement.procurement_products "
+                            "WHERE id > :after_id AND external_product_id ~ '^[0-9]{15,20}$' "
+                            "ORDER BY id LIMIT 100"
+                        ),
+                        {"after_id": after_id},
+                    )
+                )
+                if not ids:
+                    break
+                updated = session.execute(
+                    _SQL_BACKFILL,
+                    {
+                        "after_id": after_id,
+                        "through_id": ids[-1],
+                    },
+                ).fetchall()
+                rows_updated += len(updated)
+                after_id = ids[-1]
 
         job.rows_total = tk_rows_total
         job.rows_inserted = rows_updated

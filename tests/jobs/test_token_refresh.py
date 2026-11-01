@@ -39,10 +39,10 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from tests._job_invocation import credential_snapshot, invoke_seeded_job
 from tts_erp_v2.db.base import get_engine
 from tts_erp_v2.db.models import Credentials, SyncIssue
 from tts_erp_v2.jobs.token_refresh import (
-    PROVIDERS_DEFAULT,
     REFRESH_WINDOW,
     STALE_THRESHOLD,
     _query_due_credentials,
@@ -149,7 +149,7 @@ def _make_capture_registry() -> tuple[Any, list[dict]]:
     captures: list[dict] = []
 
     def registry(provider: str, external_account_id: str) -> Any:
-        def refresher(_p: str, _eid: str) -> dict:
+        def refresher(view) -> dict:
             return {
                 "access_token": "rotated_at_xyz",
                 "refresh_token": "rotated_rt_xyz",
@@ -167,7 +167,7 @@ def _make_capture_registry() -> tuple[Any, list[dict]]:
         # via ``monkeypatch``.
         captures.append({"provider": provider, "external_id": external_account_id})
         inner = registry(provider, external_account_id)
-        return inner(provider, external_account_id)
+        return inner(credential_snapshot(provider, external_account_id))
 
     # The job calls ``registry(provider, external_account_id)`` to
     # obtain a per-row refresher. So ``registry`` itself is the
@@ -180,9 +180,9 @@ def _make_capture_registry() -> tuple[Any, list[dict]]:
     class _Capture:
         def __call__(self, provider: str, external_account_id: str) -> Any:
             captures.append({"provider": provider, "external_id": external_account_id})
-            return refresher
+            return _Capture.refresher
 
-        def refresher(_p: str, _eid: str) -> dict:
+        def refresher(view) -> dict:
             return {
                 "access_token": "rotated_at_xyz",
                 "refresh_token": "rotated_rt_xyz",
@@ -338,7 +338,6 @@ def test_sync_token_refresh_forwards_wide_skew_for_non_null_row(
 
         import tts_erp_v2.proxy.token_service as ts_mod
 
-        original = ts_mod.refresh_if_needed
 
         def fake_refresh(
             session: Any,
@@ -378,7 +377,7 @@ def test_sync_token_refresh_forwards_wide_skew_for_non_null_row(
 
         sess = session_factory()
         try:
-            result = sync_token_refresh(
+            result = invoke_seeded_job(sync_token_refresh,
                 sess,
                 registry=lambda *_x, **_xx:
                         lambda r: {"access_token": "x", "expires_at": soon},
@@ -442,7 +441,7 @@ def test_sync_token_refresh_uses_force_for_null_expiry_stale_row(
 
         sess = session_factory()
         try:
-            result = sync_token_refresh(
+            result = invoke_seeded_job(sync_token_refresh,
                 sess,
                 registry=lambda *_x, **_xx:
                         lambda r: {"access_token": "x"},
@@ -503,7 +502,7 @@ def test_sync_token_refresh_writes_noop_advisory_when_scan_picks_but_nothing_hap
 
         sess = session_factory()
         try:
-            result = sync_token_refresh(
+            result = invoke_seeded_job(sync_token_refresh,
                 sess,
                 registry=lambda *_x, **_xx: lambda _r: {"access_token": "x"},
                 providers=("tiktok",),
@@ -564,7 +563,7 @@ def test_sync_token_refresh_no_noop_advisory_when_refresh_succeeds(
         ) -> Any:
             # Call the wrapped refresher so the instrumentation records
             # ``info['called']=True`` AND ``info['got_token']=True``.
-            refresher(provider, external_account_id)
+            refresher(credential_snapshot(provider, external_account_id))
             return object()
 
         import tts_erp_v2.jobs.token_refresh as tr_mod
@@ -576,9 +575,9 @@ def test_sync_token_refresh_no_noop_advisory_when_refresh_succeeds(
             # The inner lambda takes the (provider, external_account_id)
             # pair that ``_instrument`` forwards from the wrapped
             # refresher — one positional arg would raise TypeError.
-            result = sync_token_refresh(
+            result = invoke_seeded_job(sync_token_refresh,
                 sess,
-                registry=lambda *_x, **_xx: lambda _p, _eid: {
+                registry=lambda *_x, **_xx: lambda view: {
                     "access_token": "ok"
                 },
                 providers=("tiktok",),
@@ -622,7 +621,7 @@ def test_sync_token_refresh_no_noop_advisory_when_scan_empty(
     # Use a provider that has no rows in the test DB.
     sess = session_factory()
     try:
-        result = sync_token_refresh(
+        result = invoke_seeded_job(sync_token_refresh,
             sess,
             registry=lambda *_x, **_xx: lambda _r: {"access_token": "x"},
             providers=("not_a_real_provider",),

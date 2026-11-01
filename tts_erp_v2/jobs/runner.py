@@ -45,7 +45,7 @@ def start_job(
     credential_id: int | None = None,
     extra: dict | None = None,
 ) -> SyncJob:
-    """Insert a 'running' SyncJob row. Caller commits."""
+    """Insert a 'running' SyncJob row within the caller's begin context."""
     job = SyncJob(
         job_name=job_name,
         credential_id=credential_id,
@@ -97,7 +97,6 @@ def finish_job(
         merged = dict(job.extra or {})
         merged.update(extra)
         job.extra = merged
-    session.flush()
     return job
 
 
@@ -113,8 +112,9 @@ def run_job(
 
     On clean exit → status='succeeded'. On exception → status='failed'
     with the exception type+message written to ``error_message`` and
-    the exception re-raised (so the caller's commit/rollback logic
-    remains in charge).
+    the exception re-raised. Running and terminal audit records each use an
+    independent short transaction. The body owns bounded business transactions
+    and performs network work between them.
 
     Usage::
 
@@ -122,28 +122,43 @@ def run_job(
             ...
             job.extra = {"pages": 3}
     """
-    job = start_job(
-        session, job_name=job_name, credential_id=credential_id, extra=extra
-    )
+    # Lifecycle records must be visible while a tick is doing network I/O.
+    # Detach before commit: counter mutations must not autobegin a transaction
+    # or autoflush into the next business unit, including expire-on-commit users.
+    with session.begin():
+        job = start_job(
+            session, job_name=job_name, credential_id=credential_id, extra=extra
+        )
+        session.expunge(job)
     try:
         yield job
-    except BaseException as e:
-        # NOTE: we do NOT swallow. The caller's transaction will be
-        # rolled back by their own outer handler — but the error
-        # message is captured on the ORM object first.
-        finish_job(
-            session,
-            job,
-            status="failed",
-            error_message=f"{type(e).__name__}: {e}",
-        )
+        with session.begin():
+            session.add(job)
+            finish_job(
+                session,
+                job,
+                status="succeeded" if job.status == "running" else job.status,
+            )
+            session.flush()
+            session.expunge(job)
+    except BaseException as error:
+        # Each business unit's begin context has already rolled back. Failure
+        # bookkeeping must never commit an unfinished unit or hide its error.
+        try:
+            with session.begin():
+                session.add(job)
+                finish_job(
+                    session,
+                    job,
+                    status="failed",
+                    error_message=f"{type(error).__name__}: {error}",
+                )
+                session.flush()
+                session.expunge(job)
+        except Exception:
+            log.exception("job %s failure audit could not be persisted", job_name)
         log.exception("job %s failed", job_name)
         raise
-    else:
-        # Caller already updated counters; only stamp terminal status
-        # if they haven't set it to failed/succeeded themselves.
-        if job.status == "running":
-            finish_job(session, job, status="succeeded")
 
 
 # ---- raw_records + sync_issues -------------------------------------
@@ -161,7 +176,7 @@ def record_raw_payload(
 
     Hash is sha256 of the canonical (sorted-keys) JSON, which gives
     downstream jobs a cheap "have I seen this exact payload before?"
-    check. Callers must commit the session.
+    check. Caller includes this write in its entity transaction.
     """
     if isinstance(payload, (dict, list)):
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True)

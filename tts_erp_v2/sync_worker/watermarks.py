@@ -58,9 +58,8 @@ def set_cursor(
 ) -> None:
     """Upsert the cursor row for ``(job_name, scope)``.
 
-    Caller is responsible for ``session.commit()`` — kept consistent
-    with the rest of the codebase, which lets the caller batch the
-    cursor write with related business-row writes.
+    Caller owns the enclosing ``session.begin()`` context. Advance only
+    after all required business rows in the fetched window are durable.
 
     At least one of ``cursor_value`` / ``cursor_epoch_ms`` must be
     supplied; otherwise the row would carry no signal and there's no

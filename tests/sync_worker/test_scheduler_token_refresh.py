@@ -133,7 +133,7 @@ def test_run_token_refresh_writes_succeeded_sync_job(
 
     def fake_registry(*args: Any, **kwargs: Any) -> Any:
         def reg(provider: str, external_account_id: str) -> Any:
-            def refresher(_p: str, _eid: str) -> dict:
+            def refresher(view) -> dict:
                 return fake_payload
 
             return refresher
@@ -239,8 +239,7 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
 
         with run_job(session, job_name=test_job_name) as job:
             job.rows_total = 0
-        session.commit()
-        raise RuntimeError("simulated scheduler tick crash")
+            raise RuntimeError("simulated scheduler tick crash")
 
     monkeypatch.setattr(tr_mod, "sync_token_refresh", boom)
 
@@ -252,8 +251,8 @@ def test_run_token_refresh_writes_failed_sync_job_on_exception(
         entrypoint="sync_token_refresh",
         needs_token_registry=True,
     )
-    # Should NOT raise (scheduler swallows the exception).
-    _run_system_job(spec, session_factory)
+    with pytest.raises(RuntimeError, match="simulated scheduler tick crash"):
+        _run_system_job(spec, session_factory)
 
     # Verify a 'failed' sync_jobs row was written.
     sess = session_factory()
@@ -320,7 +319,7 @@ def test_run_token_refresh_wires_real_tiktok_refresher(
         called_with.append({"session_factory": session_factory})
 
         def reg(provider: str, external_account_id: str) -> Any:
-            def refresher(_p: str, _eid: str) -> dict:
+            def refresher(view) -> dict:
                 return {
                     "access_token": "rotated_at_xyz",
                     "refresh_token": "rotated_rt_xyz",

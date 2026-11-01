@@ -8,6 +8,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.db.models.procurement import (
     ProcurementAccount,
@@ -78,7 +79,7 @@ def test_backfills_tk_cost_from_offer(db_session):
     )
     db_session.flush()
 
-    sync_source_cost_to_master(db_session)
+    invoke_seeded_job(sync_source_cost_to_master, db_session)
     db_session.commit()
 
     db_session.refresh(tk)
@@ -115,7 +116,7 @@ def test_uses_latest_synced_offer(db_session):
     newer.synced_at = datetime(2026, 9, 1, tzinfo=UTC)
     db_session.flush()
 
-    sync_source_cost_to_master(db_session)
+    invoke_seeded_job(sync_source_cost_to_master, db_session)
     db_session.commit()
 
     db_session.refresh(tk)
@@ -141,7 +142,7 @@ def test_idempotent_no_op_when_cost_matches(db_session):
     )
     db_session.flush()
 
-    sync_source_cost_to_master(db_session)
+    invoke_seeded_job(sync_source_cost_to_master, db_session)
     db_session.commit()
 
 
@@ -163,7 +164,7 @@ def test_skips_tk_row_without_source_item_id(db_session):
     )
     db_session.flush()
 
-    sync_source_cost_to_master(db_session)
+    invoke_seeded_job(sync_source_cost_to_master, db_session)
     db_session.commit()
     db_session.refresh(tk)
     assert tk.source_unit_cost is None
@@ -187,7 +188,7 @@ def test_skips_tk_row_when_no_offer_match(db_session):
     )
     db_session.flush()
 
-    sync_source_cost_to_master(db_session)
+    invoke_seeded_job(sync_source_cost_to_master, db_session)
     db_session.commit()
     db_session.refresh(tk)
     assert tk.source_unit_cost is None
@@ -212,7 +213,7 @@ def test_only_tk_side_rows_targeted(db_session):
     )
     db_session.flush()
 
-    sync_source_cost_to_master(db_session)
+    invoke_seeded_job(sync_source_cost_to_master, db_session)
     db_session.commit()
     db_session.refresh(other)
     assert other.source_unit_cost is None  # not touched
@@ -242,7 +243,7 @@ def test_partial_update_when_only_min_max_differ(db_session):
     )
     db_session.flush()
 
-    sync_source_cost_to_master(db_session)
+    invoke_seeded_job(sync_source_cost_to_master, db_session)
     db_session.commit()
     db_session.refresh(tk)
     assert tk.source_unit_cost == Decimal("24.0")
@@ -268,7 +269,7 @@ def test_records_sync_job_success(db_session):
     )
     db_session.flush()
 
-    sync_source_cost_to_master(db_session)
+    invoke_seeded_job(sync_source_cost_to_master, db_session)
     db_session.commit()
 
     job = db_session.execute(

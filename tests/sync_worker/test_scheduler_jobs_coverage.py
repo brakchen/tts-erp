@@ -165,6 +165,7 @@ def test_build_scheduler_interval_trigger_uses_spec_seconds(
 def _make_history_factory(rows):
     """sessionmaker stand-in returning canned (job_name, finished_at) rows."""
     session = MagicMock(name="session")
+    session.__enter__.return_value = session
     session.execute.return_value.all.return_value = rows
     factory = MagicMock(name="session_factory", return_value=session)
     return factory
@@ -399,14 +400,12 @@ def _seed_credentials_for_enum(
         session.add(cred)
         session.flush()
         if with_shop_row:
-            session.add(
-                ChannelAccount(
-                    platform="tiktok",
-                    shop_id=external_id,
-                    credential_id=cred.id,
-                    status="active",
-                )
-            )
+            from tests._job_invocation import authorize_test_shop
+            account = ChannelAccount(platform="tiktok", shop_id=external_id,
+                                     credential_id=cred.id, status="active")
+            session.add(account)
+            session.flush()
+            authorize_test_shop(session, account.id, external_id)
         session.commit()
     finally:
         session.close()
@@ -472,6 +471,7 @@ def test_enumerate_tiktok_shops_filters_mocks_and_returns_sorted() -> None:
 def test_enumerate_tiktok_shops_returns_empty_on_db_error() -> None:
     """A blown session.execute → log + empty list (NOT propagate)."""
     session = MagicMock()
+    session.__enter__.return_value = session
     session.execute.side_effect = OperationalError("SELECT 1", {}, Exception("pg down"))
     # Should NOT raise.
     result = _enumerate_tiktok_shops(session)
@@ -658,6 +658,7 @@ def test_run_tiktok_job_runs_per_shop_and_closes_session(
     once with proxy_call + shop_id."""
     factory = MagicMock()
     session_mock = MagicMock()
+    session_mock.__enter__.return_value = session_mock
     factory.return_value = session_mock
     monkeypatch.setattr(
         scheduler, "_enumerate_tiktok_shops_in_factory", lambda _sf: ["S1", "S2"]
@@ -687,7 +688,7 @@ def test_run_tiktok_job_runs_per_shop_and_closes_session(
     assert proxy_calls == ["S1", "S2"]
     # Each session opened + closed exactly once per shop.
     assert factory.call_count == 2
-    assert session_mock.close.call_count == 2
+    assert session_mock.__exit__.call_count == 2
     # Inner module ran twice with the right kwargs.
     assert mod.run.call_count == 2
 
@@ -714,7 +715,8 @@ def test_run_tiktok_job_retries_once_then_gives_up(
         interval_seconds=600,
         is_tiktok=True,
     )
-    _run_tiktok_job(spec, factory)
+    with pytest.raises(RuntimeError, match="shop runs failed"):
+        _run_tiktok_job(spec, factory)
     # 2 attempts per shop → 2 calls.
     assert mod.run.call_count == 2
     # Session opened + closed for each attempt.
@@ -724,19 +726,20 @@ def test_run_tiktok_job_retries_once_then_gives_up(
 # ─── _run_system_job — additional branches ─────────────────────────
 
 
-def test_run_system_job_swallows_commit_error_after_success(
+def test_run_system_job_propagates_commit_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If commit() raises after a successful entrypoint, we log + rollback
     but do NOT re-raise (the entrypoint already succeeded; the row may
     be rolled back, but we shouldn't crash the scheduler)."""
     fake_mod = MagicMock()
-    fake_mod.fake_entry = MagicMock(return_value={"ok": True})
+    fake_mod.fake_entry = MagicMock(side_effect=RuntimeError("commit blew up"))
 
     def fake_import(name: str):
         return fake_mod
 
     session = MagicMock()
+    session.__enter__.return_value = session
     session.commit.side_effect = RuntimeError("commit blew up")
     factory = MagicMock(return_value=session)
 
@@ -755,8 +758,9 @@ def test_run_system_job_swallows_commit_error_after_success(
         is_tiktok=False,
         entrypoint="fake_entry",
     )
-    _run_system_job(spec, factory)  # must not raise
-    session.rollback.assert_called()
+    with pytest.raises(RuntimeError, match="commit blew up"):
+        _run_system_job(spec, factory)
+    session.rollback.assert_not_called()
     # Sentinel NOT invoked — commit error is not the same as entrypoint error.
     assert sentinel_calls == []
 
@@ -773,6 +777,7 @@ def test_run_system_job_swallows_rollback_error(
         return fake_mod
 
     session = MagicMock()
+    session.__enter__.return_value = session
     session.rollback.side_effect = RuntimeError("rollback blew up")
     factory = MagicMock(return_value=session)
     monkeypatch.setattr(scheduler.importlib, "import_module", fake_import)
@@ -790,8 +795,9 @@ def test_run_system_job_swallows_rollback_error(
         is_tiktok=False,
         entrypoint="fake_entry",
     )
-    _run_system_job(spec, factory)
-    assert sentinel_calls == ["tick raised: ValueError: inner boom"]
+    with pytest.raises(ValueError, match="inner boom"):
+        _run_system_job(spec, factory)
+    assert sentinel_calls == []
 
 
 def test_run_system_job_skips_registry_when_needs_token_registry_false(

@@ -27,6 +27,7 @@ budget, the job raises and ``run_job`` marks the SyncJob row
 ``failed``. Idempotency: re-running picks up where the previous
 run left off because ``ON CONFLICT DO UPDATE`` replaces in-place.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,8 +55,14 @@ MAX_PAGES = 50  # safety cap; production count is single-digit
 class _MiaoshouClientProto(Protocol):
     """Minimal protocol — the job only needs ``_call_erp``."""
 
-    def _call_erp(self, *, path: str, body: dict | None = None, query: dict | None = None,
-                  extra_headers: dict | None = None) -> dict[str, Any]: ...
+    def _call_erp(
+        self,
+        *,
+        path: str,
+        body: dict | None = None,
+        query: dict | None = None,
+        extra_headers: dict | None = None,
+    ) -> dict[str, Any]: ...
 
 
 def _fetch_shop_page(
@@ -105,7 +112,7 @@ def sync_shops(
     """Sync the miaoshou shop list.
 
     Args:
-        session: SQLAlchemy session (caller commits).
+        session: SQLAlchemy session without an active transaction.
         client: optional ``MiaoshouErpClient``-like object. If omitted,
             :func:`resolve_miaoshou_context` + the default factory are
             used.
@@ -143,90 +150,95 @@ def sync_shops(
                         client, platform=platform, site=site, page_no=page_no
                     )
                 except Exception as e:
-                    record_sync_issue(
-                        session,
-                        job_name=JOB_NAME,
-                        issue_type="SHOP_FETCH_FAILED",
-                        external_id=f"{platform}:{site}:{page_no}",
-                        details={
-                            "platform": platform,
-                            "site": site,
-                            "page_no": page_no,
-                            "error": f"{type(e).__name__}: {e}",
-                        },
-                    )
-                    issues += 1
-                    raise  # let run_job mark failed; caller decides retry
-
-                raw = record_raw_payload(
-                    session,
-                    endpoint=ENDPOINT,
-                    payload=payload,
-                    external_id=f"{platform}:{site}:{page_no}",
-                    credential_id=ctx.credentials.id if ctx else None,
-                )
-                raw_id = raw.id
-
-                data = payload.get("data") or {}
-                shop_list = data.get("shopList") or []
-                if not isinstance(shop_list, list):
-                    record_sync_issue(
-                        session,
-                        job_name=JOB_NAME,
-                        issue_type="SHOP_PARSE_FAILED",
-                        external_id=f"{platform}:{site}:{page_no}",
-                        details={
-                            "raw_record_id": raw_id,
-                            "reason": "data.shopList is not a list",
-                        },
-                    )
-                    issues += 1
-                    break  # malformed → stop paging this platform
-
-                page_no += 1
-                pages_walked += 1
-
-                if not shop_list:
-                    break  # natural end-of-data
-
-                for shop in shop_list:
-                    shops_seen += 1
-                    if not isinstance(shop, dict):
+                    with session.begin():
                         record_sync_issue(
                             session,
                             job_name=JOB_NAME,
-                            issue_type="SHOP_PARSE_FAILED",
-                            details={"raw_record_id": raw_id, "shop": repr(shop)[:300]},
-                        )
-                        issues += 1
-                        continue
-                    try:
-                        parsed = _parse_shop_row(shop)
-                        if not parsed["external_account_id"]:
-                            raise ValueError("missing shopId")
-                        ensure_procurement_account(
-                            session,
-                            credential_id=ctx.credentials.id if ctx else None,
-                            **parsed,
-                        )
-                        upserted += 1
-                    except Exception as e:  # noqa: BLE001
-                        record_sync_issue(
-                            session,
-                            job_name=JOB_NAME,
-                            issue_type="SHOP_PARSE_FAILED",
-                            external_id=str(shop.get("shopId")),
+                            issue_type="SHOP_FETCH_FAILED",
+                            external_id=f"{platform}:{site}:{page_no}",
                             details={
-                                "raw_record_id": raw_id,
+                                "platform": platform,
+                                "site": site,
+                                "page_no": page_no,
                                 "error": f"{type(e).__name__}: {e}",
                             },
                         )
-                        issues += 1
+                    issues += 1
+                    raise  # let run_job mark failed; caller decides retry
 
-                # Optional early termination when upstream advertises total.
-                total = data.get("total")
-                if isinstance(total, int) and total > 0 and shops_seen >= total:
-                    break
+                with session.begin():
+                    raw = record_raw_payload(
+                        session,
+                        endpoint=ENDPOINT,
+                        payload=payload,
+                        external_id=f"{platform}:{site}:{page_no}",
+                        credential_id=ctx.credentials.id if ctx else None,
+                    )
+                    raw_id = raw.id
+
+                    data = payload.get("data") or {}
+                    shop_list = data.get("shopList") or []
+                    if not isinstance(shop_list, list):
+                        record_sync_issue(
+                            session,
+                            job_name=JOB_NAME,
+                            issue_type="SHOP_PARSE_FAILED",
+                            external_id=f"{platform}:{site}:{page_no}",
+                            details={
+                                "raw_record_id": raw_id,
+                                "reason": "data.shopList is not a list",
+                            },
+                        )
+                        issues += 1
+                        break  # malformed → stop paging this platform
+
+                    page_no += 1
+                    pages_walked += 1
+
+                    if not shop_list:
+                        break  # natural end-of-data
+
+                    for shop in shop_list:
+                        shops_seen += 1
+                        if not isinstance(shop, dict):
+                            record_sync_issue(
+                                session,
+                                job_name=JOB_NAME,
+                                issue_type="SHOP_PARSE_FAILED",
+                                details={
+                                    "raw_record_id": raw_id,
+                                    "shop": repr(shop)[:300],
+                                },
+                            )
+                            issues += 1
+                            continue
+                        try:
+                            parsed = _parse_shop_row(shop)
+                            if not parsed["external_account_id"]:
+                                raise ValueError("missing shopId")
+                            ensure_procurement_account(
+                                session,
+                                credential_id=ctx.credentials.id if ctx else None,
+                                **parsed,
+                            )
+                            upserted += 1
+                        except Exception as e:  # noqa: BLE001
+                            record_sync_issue(
+                                session,
+                                job_name=JOB_NAME,
+                                issue_type="SHOP_PARSE_FAILED",
+                                external_id=str(shop.get("shopId")),
+                                details={
+                                    "raw_record_id": raw_id,
+                                    "error": f"{type(e).__name__}: {e}",
+                                },
+                            )
+                            issues += 1
+
+                    # Optional early termination when upstream advertises total.
+                    total = data.get("total")
+                    if isinstance(total, int) and total > 0 and shops_seen >= total:
+                        break
 
             total_pages_walked += pages_walked
 

@@ -30,6 +30,11 @@ def _failed_observations(state: dict) -> dict[str, float]:
 def _recover(state: dict, step: str, now: float) -> None:
     fault = state["faults"].get(step)
     if fault and fault["active"]:
+        dispatch = state.get("_dispatch", {})
+        if dispatch.get("notices", {}).get(f"{step}:fault") == fault["since"]:
+            # Delivery is outside the row lock. Retain recovery evidence until
+            # its owner knows whether the in-flight fault was accepted.
+            dispatch.setdefault("recovered", {})[step] = now
         if fault["notified"]:
             # One pending confirmed recovery is independent of the next current
             # fault. A recurrence must not erase it or inherit its delivered bit.

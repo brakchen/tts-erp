@@ -142,8 +142,8 @@ def _store_raw(
 ) -> RawRecord:
     """Insert a raw_records row and return the new ORM instance.
 
-    Caller is expected to be inside an outer transaction managed by
-    :func:`run_with_sync_job`; we commit only when the job commits.
+    Caller includes this write in the complete entity's ``session.begin()``
+    context; lifecycle bookkeeping does not commit business rows.
     """
     payload_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(
         "utf-8"
@@ -433,17 +433,21 @@ def run(
     from tts_erp_v2.sync_worker import watermarks
 
     cursor_scope = scope or shop_id
-    account = _ensure_channel_account(session, shop_id)
-    # 2026-09-06 修复(8-31 后新单 spu_pk 恒 NULL 根因):写行时按
-    # external_product_id_snapshot 预载同店目录,命中即填 spu_pk。
-    # 目录缺失的行仍保持 NULL(由 products job 同步后回填,见
-    # tts_erp_v2/jobs/tiktok/spu_link.py)。
-    spu_map = spu_link.spu_map_for_shop(session, shop_pk=account.id)
-    watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
+    with session.begin():
+        account = _ensure_channel_account(session, shop_id)
+        account_id = account.id
+        # 2026-09-06 修复(8-31 后新单 spu_pk 恒 NULL 根因):写行时按
+        # external_product_id_snapshot 预载同店目录,命中即填 spu_pk。
+        # 目录缺失的行仍保持 NULL(由 products job 同步后回填,见
+        # tts_erp_v2/jobs/tiktok/spu_link.py)。
+        spu_map = spu_link.spu_map_for_shop(session, shop_pk=account_id)
+        watermark_ms = watermarks.get_cursor(
+            session, job_name=JOB_NAME, scope=cursor_scope
+        )
 
-    base_body: dict[str, Any] = {"page_size": page_size}
-    if watermark_ms:
-        base_body["update_time_ge"] = _epoch_ms_to_seconds(_safe_int(watermark_ms))
+        base_body: dict[str, Any] = {"page_size": page_size}
+        if watermark_ms:
+            base_body["update_time_ge"] = _epoch_ms_to_seconds(_safe_int(watermark_ms))
 
     raw_orders = _walk_pages(proxy_call, base_body=base_body)
 
@@ -453,114 +457,122 @@ def run(
     max_update_time_ms: int | None = None
 
     for raw in raw_orders:
-        rows_total += 1
-        try:
-            fields = _parse_order_payload(raw)
-        # pi-lens-ignore: ast-grep:no-boolean-in-except
-        except ParseError as exc:
-            rows_failed += 1
-            _record_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="PARSE_ERROR",
-                external_id=str(raw.get("order_id") or "<unknown>"),
-                details={"error": str(exc), "raw": _safe_truncate(raw)},
-            )
-            continue
-
-        order_external_id = fields["order_id"]
-        raw_row = _store_raw(
-            session,
-            endpoint=ENDPOINT,
-            external_id=order_external_id,
-            payload=raw,
-        )
-
-        sales_order = _upsert_sales_order(
-            session,
-            shop_pk=account.id,
-            fields=fields,
-            raw_record_id=raw_row.id,
-        )
-        if incoming_order_is_stale(
-            fields.get("order_modify_time"), sales_order.order_modify_time
-        ):
-            _record_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="STALE_OBSERVATION_SKIPPED",
-                external_id=order_external_id,
-                details={"reason": "older_or_missing_source_version"},
-            )
-            continue
-
-        for raw_line in raw.get("line_items") or []:
+        with session.begin():
+            rows_total += 1
             try:
-                line_fields = _parse_line_payload(order_external_id, raw_line)
+                fields = _parse_order_payload(raw)
+            # pi-lens-ignore: ast-grep:no-boolean-in-except
             except ParseError as exc:
+                rows_failed += 1
                 _record_issue(
                     session,
                     job_name=JOB_NAME,
                     issue_type="PARSE_ERROR",
-                    external_id=f"{order_external_id}:{raw_line.get('line_id')}",
-                    details={
-                        "error": str(exc),
-                        "raw": _safe_truncate(raw_line),
-                        "order_external_id": order_external_id,
-                    },
+                    external_id=str(raw.get("order_id") or "<unknown>"),
+                    details={"error": str(exc), "raw": _safe_truncate(raw)},
                 )
                 continue
-            # 2026-09-06:目录命中即填 spu_pk(不覆盖已有关联);未命中
-            # 保持 NULL → products 同步后回填(spu_link.backfill)。
-            # snapshot 原始值可能是数字(JSON number),目录键恒 str
-            # (products.py 存 str(spu_id));归一化后再查,避免漏命中
-            snap_pid = line_fields.get("external_product_id_snapshot")
-            resolved = spu_link.link_line_spu_pk(
-                spu_map, product_snapshot=None if snap_pid is None else str(snap_pid)
-            )
-            if resolved is not None:
-                line_fields["spu_pk"] = resolved
-            _upsert_sales_order_line(
+
+            order_external_id = fields["order_id"]
+            raw_row = _store_raw(
                 session,
-                order_pk=sales_order.id,
-                fields=line_fields,
-                raw_record_id=raw_row.id,
-            )
-            persist_price_observation(
-                session,
-                raw_line=raw_line,
-                shop_pk=account.id,
-                order_pk=sales_order.id,
-                raw_record_id=raw_row.id,
-                source_endpoint="ORDER_SEARCH",
-                source_captured_at=raw_row.captured_at,
-                source_order_version_at=fields.get("order_modify_time"),
-                parent_status=fields.get("status"),
-                parent_currency=fields.get("currency"),
-                spu_pk=line_fields.get("spu_pk"),
+                endpoint=ENDPOINT,
+                external_id=order_external_id,
+                payload=raw,
             )
 
-        rows_inserted += 1
-        update_ms = fields.get("order_modify_time") and _safe_int(
-            fields["order_modify_time"].timestamp() * 1000
-        )
-        if update_ms and (max_update_time_ms is None or update_ms > max_update_time_ms):
-            max_update_time_ms = update_ms
+            sales_order = _upsert_sales_order(
+                session,
+                shop_pk=account_id,
+                fields=fields,
+                raw_record_id=raw_row.id,
+            )
+            if incoming_order_is_stale(
+                fields.get("order_modify_time"), sales_order.order_modify_time
+            ):
+                _record_issue(
+                    session,
+                    job_name=JOB_NAME,
+                    issue_type="STALE_OBSERVATION_SKIPPED",
+                    external_id=order_external_id,
+                    details={"reason": "older_or_missing_source_version"},
+                )
+                continue
+
+            for raw_line in raw.get("line_items") or []:
+                try:
+                    line_fields = _parse_line_payload(order_external_id, raw_line)
+                except ParseError as exc:
+                    rows_failed += 1
+                    _record_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="PARSE_ERROR",
+                        external_id=f"{order_external_id}:{raw_line.get('line_id')}",
+                        details={
+                            "error": str(exc),
+                            "raw": _safe_truncate(raw_line),
+                            "order_external_id": order_external_id,
+                        },
+                    )
+                    continue
+                # 2026-09-06:目录命中即填 spu_pk(不覆盖已有关联);未命中
+                # 保持 NULL → products 同步后回填(spu_link.backfill)。
+                # snapshot 原始值可能是数字(JSON number),目录键恒 str
+                # (products.py 存 str(spu_id));归一化后再查,避免漏命中
+                snap_pid = line_fields.get("external_product_id_snapshot")
+                resolved = spu_link.link_line_spu_pk(
+                    spu_map,
+                    product_snapshot=None if snap_pid is None else str(snap_pid),
+                )
+                if resolved is not None:
+                    line_fields["spu_pk"] = resolved
+                _upsert_sales_order_line(
+                    session,
+                    order_pk=sales_order.id,
+                    fields=line_fields,
+                    raw_record_id=raw_row.id,
+                )
+                persist_price_observation(
+                    session,
+                    raw_line=raw_line,
+                    shop_pk=account_id,
+                    order_pk=sales_order.id,
+                    raw_record_id=raw_row.id,
+                    source_endpoint="ORDER_SEARCH",
+                    source_captured_at=raw_row.captured_at,
+                    source_order_version_at=fields.get("order_modify_time"),
+                    parent_status=fields.get("status"),
+                    parent_currency=fields.get("currency"),
+                    spu_pk=line_fields.get("spu_pk"),
+                )
+
+            rows_inserted += 1
+            update_ms = fields.get("order_modify_time") and _safe_int(
+                fields["order_modify_time"].timestamp() * 1000
+            )
+            if update_ms and (
+                max_update_time_ms is None or update_ms > max_update_time_ms
+            ):
+                max_update_time_ms = update_ms
 
     # Advance the watermark only when we actually saw new data. An
     # empty-page run leaves the watermark untouched (otherwise we'd
     # spuriously reset it to 0).
     new_cursor_ms: int | None = None
-    if max_update_time_ms is not None and (
-        watermark_ms is None or max_update_time_ms > _safe_int(watermark_ms)
-    ):
-        watermarks.set_cursor(
-            session,
-            job_name=JOB_NAME,
-            scope=cursor_scope,
-            cursor_epoch_ms=max_update_time_ms,
-        )
-        new_cursor_ms = max_update_time_ms
+    with session.begin():
+        if (
+            not rows_failed
+            and max_update_time_ms is not None
+            and (watermark_ms is None or max_update_time_ms > _safe_int(watermark_ms))
+        ):
+            watermarks.set_cursor(
+                session,
+                job_name=JOB_NAME,
+                scope=cursor_scope,
+                cursor_epoch_ms=max_update_time_ms,
+            )
+            new_cursor_ms = max_update_time_ms
 
     return JobResult(
         rows_total=rows_total,

@@ -22,6 +22,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -83,7 +84,7 @@ def test_run_profit_daily_walks_today_and_yesterday(db_session) -> None:
     from tts_erp_v2.db.models.integration import SyncJob
 
     today = datetime.now(UTC).date()
-    out = run_profit_daily(db_session)
+    out = invoke_seeded_job(run_profit_daily, db_session)
 
     # Find the SyncJob for JOB_PROFIT_DAILY (limit to ours by status).
     job_row = db_session.execute(
@@ -143,7 +144,7 @@ def test_run_profit_daily_writes_row_for_paid_order_in_window(db_session) -> Non
     )
     db_session.flush()
 
-    out = run_profit_daily(db_session)
+    out = invoke_seeded_job(run_profit_daily, db_session)
     assert len(out["dates"]) == 2
     assert out["rows_written"] >= 1
     # The TEST order's row exists with our TEST spu_pk.
@@ -169,7 +170,7 @@ def test_run_profit_daily_sync_job_extra_counters_match_result_dict(
 ) -> None:
     """The SyncJob row's ``extra`` JSON ``rows`` field equals the
     ``rows_written`` field in the result dict (lines 105-106)."""
-    out = run_profit_daily(db_session)
+    out = invoke_seeded_job(run_profit_daily, db_session)
     from tts_erp_v2.db.models.integration import SyncJob
 
     job_row = db_session.execute(
@@ -216,7 +217,7 @@ def test_run_cost_snapshots_records_calculation_version_and_valid_from_in_extra(
         or 0
     )
 
-    out = run_cost_snapshots(db_session)
+    out = invoke_seeded_job(run_cost_snapshots, db_session)
     assert out["calculation_version"] == prev_max + 1
     assert "valid_from" in out or "calculation_version" in out
 
@@ -244,7 +245,7 @@ def test_run_cost_snapshots_no_active_spu_returns_zero(db_session, monkeypatch) 
     monkeypatch.setattr(
         reporting_job.cost_snapshots, "rebuild_snapshots", lambda *_args, **_kwargs: 0
     )
-    out = run_cost_snapshots(db_session)
+    out = invoke_seeded_job(run_cost_snapshots, db_session)
     assert out["snapshots_written"] == 0
 
     job_row = db_session.execute(
@@ -279,7 +280,7 @@ def test_run_cost_snapshots_uses_purchase_order_lookup(db_session) -> None:
         )
     )
     db_session.flush()
-    out = run_cost_snapshots(db_session)
+    out = invoke_seeded_job(run_cost_snapshots, db_session)
     assert out["snapshots_written"] >= 1
     # The TEST row's snapshot is MANUAL_ENTRY (since the purchase-order
     # lookup returns None for a TEST_ spu_pk with no link).

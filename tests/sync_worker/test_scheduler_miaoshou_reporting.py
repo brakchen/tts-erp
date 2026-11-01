@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -119,6 +120,7 @@ def test_system_job_commits_on_success(monkeypatch):
 
     _fake_module(monkeypatch, fake_entry)
     session = MagicMock()
+    session.__enter__.return_value = session
     factory = MagicMock(return_value=session)
     spec = JobSpec(
         job_name="reporting.profit_daily",
@@ -129,8 +131,8 @@ def test_system_job_commits_on_success(monkeypatch):
     )
     scheduler._run_system_job(spec, factory)
     assert called["n"] == 1
-    session.commit.assert_called_once()
-    session.close.assert_called_once()
+    session.commit.assert_not_called()
+    session.__exit__.assert_called_once()
 
 
 def test_system_job_writes_sentinel_on_exception(monkeypatch):
@@ -139,6 +141,7 @@ def test_system_job_writes_sentinel_on_exception(monkeypatch):
 
     _fake_module(monkeypatch, boom)
     session = MagicMock()
+    session.__enter__.return_value = session
     factory = MagicMock(return_value=session)
     sentinel_calls = []
     monkeypatch.setattr(
@@ -153,9 +156,11 @@ def test_system_job_writes_sentinel_on_exception(monkeypatch):
         is_tiktok=False,
         entrypoint="fake_entry",
     )
-    scheduler._run_system_job(spec, factory)  # must not raise
-    session.rollback.assert_called()
-    assert sentinel_calls == ["tick raised: RuntimeError: boom"]
+    with pytest.raises(RuntimeError, match="boom"):
+        scheduler._run_system_job(spec, factory)
+    session.rollback.assert_not_called()
+    session.__exit__.assert_called_once()
+    assert sentinel_calls == []
 
 
 def test_system_job_passes_registry_only_for_token_refresh(monkeypatch):
@@ -167,6 +172,7 @@ def test_system_job_passes_registry_only_for_token_refresh(monkeypatch):
 
     _fake_module(monkeypatch, fake_entry)
     session = MagicMock()
+    session.__enter__.return_value = session
     factory = MagicMock(return_value=session)
     fake_registry = MagicMock(return_value=object())
     monkeypatch.setattr(
@@ -217,7 +223,7 @@ def _seed_manual_cost_spu(db_session) -> ChannelProduct:
 
 def test_run_cost_snapshots_writes_seeded_spu(db_session):
     cp = _seed_manual_cost_spu(db_session)
-    out = reporting_job.run_cost_snapshots(db_session)
+    out = invoke_seeded_job(reporting_job.run_cost_snapshots, db_session)
     assert out["snapshots_written"] >= 1
     row = db_session.execute(
         select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
@@ -275,7 +281,7 @@ def test_run_cost_snapshots_source_price_fallback_via_offer(db_session):
     """SPU 主档行无成本但带 1688 offer → 经 offer 命中公共采集箱行价格 →
     写 SOURCE_PRICE 快照（估算兜底，非成交口径）。"""
     cp = _seed_source_price(db_session, "TEST_MS_RPT_SRC_O")
-    out = reporting_job.run_cost_snapshots(db_session)
+    out = invoke_seeded_job(reporting_job.run_cost_snapshots, db_session)
     assert out["snapshots_written"] >= 1
     row = db_session.execute(
         select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
@@ -290,7 +296,7 @@ def test_run_cost_snapshots_source_price_direct_on_master_row(db_session):
     cp = _seed_source_price(
         db_session, "TEST_MS_RPT_SRC_D", master_cost=Decimal("12.00")
     )
-    reporting_job.run_cost_snapshots(db_session)
+    invoke_seeded_job(reporting_job.run_cost_snapshots, db_session)
     row = db_session.execute(
         select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
     ).scalar_one()

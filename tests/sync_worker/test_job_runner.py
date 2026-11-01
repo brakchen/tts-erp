@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select, text
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import Credentials, SyncJob
 from tts_erp_v2.sync_worker.job_runner import (
     JobResult,
@@ -47,7 +48,7 @@ def test_run_with_sync_job_writes_succeeded_row(db_session) -> None:
     def _inner(session):
         return JobResult(rows_total=10, rows_inserted=8, rows_updated=2)
 
-    row, result = run_with_sync_job(
+    row, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         inner=_inner,
@@ -69,7 +70,7 @@ def test_run_with_sync_job_commits_row(db_session) -> None:
     def _inner(session):
         return JobResult(rows_total=1, rows_inserted=1)
 
-    row, _ = run_with_sync_job(
+    row, _ = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         inner=_inner,
@@ -92,7 +93,7 @@ def test_run_with_sync_job_passes_inner_kwargs(db_session) -> None:
         seen["scope"] = scope
         return JobResult(rows_total=1)
 
-    run_with_sync_job(
+    invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         inner=_inner,
@@ -112,7 +113,7 @@ def test_run_with_sync_job_accepts_credential_id(db_session) -> None:
     def _inner(session):
         return JobResult(rows_total=1)
 
-    row, _ = run_with_sync_job(
+    row, _ = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         credential_id=cred.id,
@@ -127,7 +128,7 @@ def test_run_with_sync_job_records_shop_id_extra(db_session) -> None:
     def _inner(session):
         return JobResult(rows_total=1)
 
-    row, _ = run_with_sync_job(
+    row, _ = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name="tiktok.orders",
         extra={"shop_id": "TEST_freshness_shop"},
@@ -147,7 +148,7 @@ def test_run_with_sync_job_marks_row_failed_on_exception(db_session) -> None:
         raise ValueError("kaboom")
 
     with pytest.raises(ValueError, match="kaboom"):
-        run_with_sync_job(
+        invoke_seeded_job(run_with_sync_job,
             db_session,
             job_name="tiktok.orders",
             credential_id=cred.id,
@@ -180,7 +181,7 @@ def test_run_with_sync_job_records_zero_counters_on_failure(
         raise RuntimeError("upstream down")
 
     with pytest.raises(RuntimeError):
-        run_with_sync_job(
+        invoke_seeded_job(run_with_sync_job,
             db_session,
             job_name="tiktok.orders",
             credential_id=cred.id,
@@ -209,10 +210,11 @@ def test_run_with_sync_job_records_failure_when_txn_aborted(db_session) -> None:
 
     def _boom(session):
         # Aborts the current transaction, exactly like a deadlock victim.
-        session.execute(text("SELECT * FROM integration.no_such_relation"))
+        with session.begin():
+            session.execute(text("SELECT * FROM integration.no_such_relation"))
 
     with pytest.raises(Exception):
-        run_with_sync_job(db_session, job_name="TEST_ABORTED_TXN", inner=_boom)
+        invoke_seeded_job(run_with_sync_job, db_session, job_name="TEST_ABORTED_TXN", inner=_boom)
 
     rows = db_session.execute(
         select(SyncJob).where(SyncJob.job_name == "TEST_ABORTED_TXN")

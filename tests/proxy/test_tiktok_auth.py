@@ -29,6 +29,8 @@ from typing import Any
 
 import pytest
 
+from tests._job_invocation import credential_snapshot
+
 # Constants for credential field names — pulled out so ruff's S105
 # false-positive (triggered on the literal substrings "access_token" /
 # "refresh_token" appearing in expressions) only fires once at the
@@ -238,7 +240,7 @@ def test_build_token_registry_miaoshou_returns_noop() -> None:
     registry = tiktok_auth.build_token_registry()
     refresher = registry("miaoshou", "TEST_LICENSE")
     assert callable(refresher)
-    out = refresher("miaoshou", "TEST_LICENSE")
+    out = refresher(credential_snapshot("miaoshou", "TEST_LICENSE"))
     # Empty access_token is the documented 'skip me' signal used by
     # refresh_if_needed — see jobs/token_refresh.py::_instrument.
     assert out == {AT_KEY: ""}
@@ -298,13 +300,18 @@ def test_build_token_registry_tiktok_invokes_refresh(
 
     sess = Sess()
     try:
+        from tts_erp_v2.db.models import ChannelAccount
+        account = ChannelAccount(platform="tiktok", shop_id=external_id)
+        sess.add(account)
+        sess.flush()
+        shop_pk = account.id
         upsert_tiktok_app_credentials(
             sess,
-            service_id=service_id,
+            shop_pk=shop_pk, service_id=service_id,
             app_key="TEST_TT_REGISTRY_APP_KEY",
             plaintext_app_secret="TEST_TT_REGISTRY_APP_SECRET",
         )
-        upsert_credentials(
+        credential = upsert_credentials(
             sess,
             provider="tiktok",
             external_account_id=external_id,
@@ -314,6 +321,7 @@ def test_build_token_registry_tiktok_invokes_refresh(
             expires_at=seed_exp,
             service_id=service_id,
         )
+        account.credential_id = credential.id
         sess.commit()
     finally:
         sess.close()
@@ -321,7 +329,10 @@ def test_build_token_registry_tiktok_invokes_refresh(
     try:
         registry = tiktok_auth.build_token_registry(session_factory=Sess)
         refresher = registry("tiktok", external_id)
-        out = refresher("tiktok", external_id)
+        from tts_erp_v2.proxy.token_service import load_credentials
+        with Sess() as reader:
+            view = load_credentials(reader, "tiktok", external_id)
+        out = refresher(view)
 
         assert out[AT_KEY] == "rotated_at_xyz"
         assert out[RT_KEY] == "rotated_rt_xyz"
@@ -337,9 +348,12 @@ def test_build_token_registry_tiktok_invokes_refresh(
             ).scalar_one_or_none()
             if row is not None:
                 cleanup.delete(row)
-            app_row = cleanup.get(TikTokAppCredential, service_id)
+            app_row = cleanup.scalar(select(TikTokAppCredential).where(TikTokAppCredential.shop_pk == shop_pk, TikTokAppCredential.service_id == service_id))
             if app_row is not None:
                 cleanup.delete(app_row)
+            shop = cleanup.get(ChannelAccount, shop_pk)
+            if shop is not None:
+                cleanup.delete(shop)
             cleanup.commit()
         finally:
             cleanup.close()

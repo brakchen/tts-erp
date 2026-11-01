@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -113,7 +114,7 @@ def test_first_mirror_sets_column_and_puts(db_session) -> None:
     dl = FakeDownloader()
     m = FakeMinio()
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name=mirror.JOB_NAME,
         inner=mirror.run,
@@ -136,14 +137,14 @@ def test_unchanged_url_is_skipped(db_session) -> None:
     spu_pk = _make_spu(db_session, account=account, spu_id="SPU1", url=URL_A)
     dl = FakeDownloader()
     m = FakeMinio()
-    mirror.run(db_session, downloader=dl, minio=m, spu_pks=[spu_pk])
+    invoke_seeded_job(mirror.run, db_session, downloader=dl, minio=m, spu_pks=[spu_pk])
     db_session.commit()
     assert len(m.puts) == 1
 
     # Same URL → derived key matches the stored column → no re-download.
     dl2 = FakeDownloader()
     m2 = FakeMinio()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name=mirror.JOB_NAME,
         inner=mirror.run,
@@ -160,7 +161,7 @@ def test_changed_url_remirrors_and_updates_column(db_session) -> None:
     spu_pk = _make_spu(db_session, account=account, spu_id="SPU1", url=URL_A)
     dl = FakeDownloader()
     m = FakeMinio()
-    mirror.run(db_session, downloader=dl, minio=m, spu_pks=[spu_pk])
+    invoke_seeded_job(mirror.run, db_session, downloader=dl, minio=m, spu_pks=[spu_pk])
     db_session.commit()
     old_key = m.puts[0][0]
 
@@ -173,7 +174,7 @@ def test_changed_url_remirrors_and_updates_column(db_session) -> None:
 
     dl2 = FakeDownloader()
     m2 = FakeMinio()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name=mirror.JOB_NAME,
         inner=mirror.run,
@@ -194,7 +195,7 @@ def test_failure_writes_sync_issue_keeps_old_value(db_session) -> None:
     dl = FakeDownloader(fail_url=URL_B)
     m = FakeMinio()
 
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name=mirror.JOB_NAME,
         inner=mirror.run,
@@ -226,7 +227,7 @@ def test_spu_without_main_image_is_skipped(db_session) -> None:
     spu_pk = _make_spu(db_session, account=account, spu_id="NOIMG", url=None)
     dl = FakeDownloader()
     m = FakeMinio()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name=mirror.JOB_NAME,
         inner=mirror.run,
@@ -258,7 +259,7 @@ def test_run_scheduled_writes_sync_jobs_row(db_session) -> None:
 
     mirror_mod.run = _fake_run
     try:
-        out = mirror.run_scheduled(db_session)
+        out = invoke_seeded_job(mirror.run_scheduled, db_session)
     finally:
         mirror_mod.run = real_run
     assert out == {"rows_total": 7, "rows_inserted": 5, "rows_failed": 2}
@@ -285,7 +286,7 @@ def test_record_sync_issue_dedupes_across_ticks(db_session) -> None:
     m = FakeMinio()
 
     for _ in range(2):  # two ticks against the same failing SPU
-        _, result = run_with_sync_job(
+        _, result = invoke_seeded_job(run_with_sync_job,
             db_session,
             job_name=mirror.JOB_NAME,
             inner=mirror.run,
@@ -316,7 +317,7 @@ def test_success_after_failure_resolves_open_issue(db_session) -> None:
     # Tick 1: fail (issue opens).
     dl_fail = FakeDownloader(fail_url=URL_A)
     m = FakeMinio()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name=mirror.JOB_NAME,
         inner=mirror.run,
@@ -327,7 +328,7 @@ def test_success_after_failure_resolves_open_issue(db_session) -> None:
     # Tick 2: same URL now succeeds.
     dl_ok = FakeDownloader()
     m2 = FakeMinio()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name=mirror.JOB_NAME,
         inner=mirror.run,
@@ -353,7 +354,7 @@ def test_empty_string_main_image_is_skipped(db_session) -> None:
     spu_pk = _make_spu(db_session, account=account, spu_id="EMPTYURL", url="")
     dl = FakeDownloader()
     m = FakeMinio()
-    _, result = run_with_sync_job(
+    _, result = invoke_seeded_job(run_with_sync_job,
         db_session,
         job_name=mirror.JOB_NAME,
         inner=mirror.run,

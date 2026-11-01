@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.miaoshou import (
     MiaoshouPurchaseOrderRawRecord,
@@ -175,7 +176,7 @@ def test_matched_store_writes_independent_purchase_price(
     shop_pk = _seed_store_match(db_session)
     order = _purchase_order()
     order["autoLoginToken"] = "TEST_secret_token"
-    result = job.sync_purchase_prices(
+    result = invoke_seeded_job(job.sync_purchase_prices,
         db_session,
         client=FakePurchaseClient([order]),
         external_account_id=credential.external_account_id,
@@ -201,7 +202,7 @@ def test_price_is_written_when_product_master_is_absent(
 ) -> None:
     credential = _seed_web_credential(db_session, fernet_key)
     shop_pk = _seed_store_match(db_session)
-    result = job.sync_purchase_prices(
+    result = invoke_seeded_job(job.sync_purchase_prices,
         db_session,
         client=FakePurchaseClient([_purchase_order()]),
         external_account_id=credential.external_account_id,
@@ -222,7 +223,7 @@ def test_unmatched_store_is_not_written_and_is_flagged(
     db_session, fernet_key: str
 ) -> None:
     credential = _seed_web_credential(db_session, fernet_key)
-    result = job.sync_purchase_prices(
+    result = invoke_seeded_job(job.sync_purchase_prices,
         db_session,
         client=FakePurchaseClient([_purchase_order()]),
         external_account_id=credential.external_account_id,
@@ -251,7 +252,7 @@ def test_identical_duplicate_purchase_rows_are_deduplicated(
 ) -> None:
     credential = _seed_web_credential(db_session, fernet_key)
     _seed_store_match(db_session)
-    result = job.sync_purchase_prices(
+    result = invoke_seeded_job(job.sync_purchase_prices,
         db_session,
         client=FakePurchaseClient([_purchase_order(), deepcopy(_purchase_order())]),
         external_account_id=credential.external_account_id,
@@ -266,7 +267,7 @@ def test_conflicting_duplicate_purchase_row_ids_are_rejected(
     duplicate = deepcopy(_purchase_order())
     duplicate["purchaseOrderSn"] = "TEST_PO_DUPLICATE"
     with pytest.raises(RuntimeError, match="conflicting row ids"):
-        job.sync_purchase_prices(
+        invoke_seeded_job(job.sync_purchase_prices,
             db_session,
             client=FakePurchaseClient([_purchase_order(), duplicate]),
             external_account_id=credential.external_account_id,
@@ -276,7 +277,7 @@ def test_conflicting_duplicate_purchase_row_ids_are_rejected(
 
 def test_missing_credentials_skips_without_network(db_session) -> None:
     client = FakePurchaseClient([_purchase_order()])
-    result = job.sync_purchase_prices(
+    result = invoke_seeded_job(job.sync_purchase_prices,
         db_session,
         client=client,
         external_account_id="TEST_NOT_CONFIGURED",
@@ -293,7 +294,7 @@ def test_pagination_missing_metadata_is_rejected(db_session, fernet_key: str) ->
             return {"result": "success"}
 
     with pytest.raises(RuntimeError, match="missing fields"):
-        job.sync_purchase_prices(
+        invoke_seeded_job(job.sync_purchase_prices,
             db_session,
             client=MissingMetadataClient(),
             external_account_id=credential.external_account_id,
@@ -307,7 +308,7 @@ def test_pagination_count_mismatch_fails_without_writes(
     credential = _seed_web_credential(db_session, fernet_key)
     client = FakePurchaseClient([_purchase_order()], advertised_total=2)
     with pytest.raises(RuntimeError, match="pagination incomplete"):
-        job.sync_purchase_prices(
+        invoke_seeded_job(job.sync_purchase_prices,
             db_session,
             client=client,
             external_account_id=credential.external_account_id,

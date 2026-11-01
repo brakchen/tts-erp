@@ -75,7 +75,7 @@ def sync_move_collect(
     """Sync the move-collect task list.
 
     Args:
-        session: SQLAlchemy session (caller commits).
+        session: SQLAlchemy session without an active transaction.
         client: optional ``MiaoshouErpClient``-like object. If omitted,
             the default factory is used.
         status: optional upstream ``filter.status`` (e.g. ``"success"``).
@@ -166,37 +166,38 @@ def sync_move_collect(
         issues = 0
 
         for task in items:
-            if not isinstance(task, dict):
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="MOVE_COLLECT_PARSE_FAILED",
-                    details={"task": repr(task)[:300]},
-                )
-                issues += 1
-                continue
-            task_id = task.get("moveCollectTaskDetailId")
-            task_id_str = str(task_id) if task_id is not None else None
-            try:
-                record_raw_payload(
-                    session,
-                    endpoint=ENDPOINT,
-                    payload=task,
-                    external_id=task_id_str,
-                    credential_id=ctx.credentials.id if ctx else None,
-                )
-            except Exception as e:  # noqa: BLE001
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="RAW_RECORD_FAILED",
-                    external_id=task_id_str,
-                    details={"error": f"{type(e).__name__}: {e}"},
-                )
-                issues += 1
-                continue
+            with session.begin():
+                if not isinstance(task, dict):
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="MOVE_COLLECT_PARSE_FAILED",
+                        details={"task": repr(task)[:300]},
+                    )
+                    issues += 1
+                    continue
+                task_id = task.get("moveCollectTaskDetailId")
+                task_id_str = str(task_id) if task_id is not None else None
+                try:
+                    record_raw_payload(
+                        session,
+                        endpoint=ENDPOINT,
+                        payload=task,
+                        external_id=task_id_str,
+                        credential_id=ctx.credentials.id if ctx else None,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="RAW_RECORD_FAILED",
+                        external_id=task_id_str,
+                        details={"error": f"{type(e).__name__}: {e}"},
+                    )
+                    issues += 1
+                    continue
 
-            tasks_recorded += 1
+                tasks_recorded += 1
 
         job.rows_total = len(items)
         job.rows_inserted = tasks_recorded

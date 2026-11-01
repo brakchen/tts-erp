@@ -19,6 +19,7 @@ Design notes
   external_account_id)``. The miaoshou-side external_account_id is
   the ``licenseId`` — stable across shop additions.
 """
+
 from __future__ import annotations
 
 import logging
@@ -78,16 +79,17 @@ def resolve_miaoshou_context(
     ext_id = (license_id or os.environ.get("MIAOSHOU_LICENSE_ID") or "").strip()
     if not ext_id:
         return None
-    view = load_credentials(session, MIAOSHOU_PROVIDER, ext_id)
-    if view is None:
-        return None
-    acct = ensure_procurement_account(
-        session,
-        provider=MIAOSHOU_PROVIDER,
-        external_account_id=ext_id,
-        account_name=ext_id,
-    )
-    return MiaoshouContext(credentials=view, account_id=acct.id)
+    with session.begin():
+        view = load_credentials(session, MIAOSHOU_PROVIDER, ext_id)
+        if view is None:
+            return None
+        acct = ensure_procurement_account(
+            session,
+            provider=MIAOSHOU_PROVIDER,
+            external_account_id=ext_id,
+            account_name=ext_id,
+        )
+        return MiaoshouContext(credentials=view, account_id=acct.id)
 
 
 def ensure_procurement_account(
@@ -101,8 +103,7 @@ def ensure_procurement_account(
 ) -> ProcurementAccount:
     """Idempotent upsert of a procurement account row.
 
-    Returns the row (caller commits). Safe to call from inside an
-    outer transaction; uses ``ON CONFLICT DO UPDATE`` so concurrent
+    Returns the row within the caller's short initialization transaction; uses ``ON CONFLICT DO UPDATE`` so concurrent
     jobs do not create duplicates.
     """
     values: dict[str, Any] = {

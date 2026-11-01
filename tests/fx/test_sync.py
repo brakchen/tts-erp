@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ExchangeRate,
     ExchangeRateSnapshot,
@@ -123,7 +124,7 @@ def test_first_fetch_inserts_snapshot_and_rate_rows(db_session) -> None:
         called.append((api_key, base_code))
         return _rates(next_update=T0 + timedelta(hours=20))
 
-    result = sync_fx_rates(
+    result = invoke_seeded_job(sync_fx_rates,
         db_session, api_key="k", base_code=BASE, fetcher=fetcher, now=T0
     )
 
@@ -172,7 +173,7 @@ def test_fetch_within_horizon_skips_network(db_session) -> None:
     def should_not_run(api_key: str, base_code: str) -> StandardRates:
         raise AssertionError("must not dial upstream inside the cache horizon")
 
-    result = sync_fx_rates(
+    result = invoke_seeded_job(sync_fx_rates,
         db_session,
         api_key="k",
         base_code=BASE,
@@ -191,7 +192,7 @@ def test_force_bypasses_horizon_and_inserts_new_snapshot(db_session) -> None:
     def fetcher(api_key: str, base_code: str) -> StandardRates:
         return _rates(upstream=new_upstream)
 
-    result = sync_fx_rates(
+    result = invoke_seeded_job(sync_fx_rates,
         db_session,
         api_key="k",
         base_code=BASE,
@@ -210,7 +211,7 @@ def test_same_upstream_timestamp_refreshes_in_place(db_session) -> None:
     def fetcher(api_key: str, base_code: str) -> StandardRates:
         return _rates(upstream=T0, next_update=T0 + timedelta(days=1))
 
-    result = sync_fx_rates(
+    result = invoke_seeded_job(sync_fx_rates,
         db_session,
         api_key="k",
         base_code=BASE,
@@ -231,7 +232,7 @@ def test_same_upstream_timestamp_refreshes_in_place(db_session) -> None:
 def test_missing_api_key_env_raises(db_session, monkeypatch) -> None:
     monkeypatch.delenv(ENV_API_KEY, raising=False)
     with pytest.raises(RuntimeError, match=ENV_API_KEY):
-        run_scheduled(db_session)
+        invoke_seeded_job(run_scheduled, db_session)
 
 
 def test_run_scheduled_happy_path_writes_succeeded_job(db_session, monkeypatch) -> None:
@@ -246,7 +247,7 @@ def test_run_scheduled_happy_path_writes_succeeded_job(db_session, monkeypatch) 
     monkeypatch.setattr(
         "tts_erp_v2.jobs.exchangerate.sync.fetch_standard_rates", fetcher
     )
-    result = run_scheduled(db_session)
+    result = invoke_seeded_job(run_scheduled, db_session)
 
     assert result["status"] == "fetched"
     assert result["base_code"] == BASE
@@ -280,7 +281,7 @@ def test_run_scheduled_quota_error_sets_cooldown_and_skips(
         "tts_erp_v2.jobs.exchangerate.sync.fetch_standard_rates", quota_error
     )
 
-    result = run_scheduled(db_session)
+    result = invoke_seeded_job(run_scheduled, db_session)
     assert result["status"] == "skipped"
     assert "quota-exceeded" in result["reason"]
 
@@ -312,7 +313,7 @@ def test_run_scheduled_quota_error_sets_cooldown_and_skips(
     assert issue.details["error_type"] == "quota-exceeded"
 
     # A second tick within the cooldown skips without dialing upstream.
-    result2 = run_scheduled(db_session)
+    result2 = invoke_seeded_job(run_scheduled, db_session)
     assert result2["status"] == "skipped"
     assert "cooldown" in result2["reason"]
 
@@ -330,7 +331,7 @@ def test_run_scheduled_non_quota_upstream_error_fails_loudly(
         "tts_erp_v2.jobs.exchangerate.sync.fetch_standard_rates", bad_payload
     )
     with pytest.raises(ExchangeRateAPIError):
-        run_scheduled(db_session)
+        invoke_seeded_job(run_scheduled, db_session)
 
     job = (
         db_session.execute(

@@ -11,32 +11,24 @@ The inner callable receives an *open* session and any keyword args
 the caller passes to :func:`run_job`. It returns a :class:`JobResult`
 whose counters are written to the sync_jobs row.
 
-If the inner callable raises, :func:`run_job`:
-
-* Marks the sync_jobs row status='failed' with the exception message.
-* If the transaction is already aborted (e.g. the job was chosen as a
-  PostgreSQL deadlock victim), rolls back first and records the failure
-  in a fresh transaction — otherwise the bookkeeping UPDATE itself
-  fails with ``InFailedSqlTransaction`` and the run vanishes.
-* Re-raises the ORIGINAL exception so the caller (scheduler / CLI)
-  can react.
-
-Note: ``session.commit()`` is called inside the helper. Callers should
-NOT commit again (the helper manages transaction boundaries).
+Lifecycle writes are independent short transactions owned by jobs.runner.
+The inner callable owns each business unit using ``with session.begin()``;
+network calls run between units. Failed units roll back before the independent
+failure audit. No failure path commits unfinished business writes.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-import logging
-
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models import SyncJob
+from tts_erp_v2.jobs.runner import run_job
 
 log = logging.getLogger("tts_erp_v2.sync_worker.job_runner")
 
@@ -65,7 +57,7 @@ def start_sync_job(
     The row's ``started_at`` defaults to server-side ``now()`` per the
     model definition. Caller is expected to commit via
     :func:`run_with_sync_job` — this helper does NOT commit on its own
-    so the lifecycle row + first business rows share one transaction.
+    within the caller's explicit transaction.
 
     ``extra`` is operator metadata (for example ``{"shop_id": ...}`` on
     TikTok fan-out). It is not a cursor and is not read by the job itself.
@@ -113,66 +105,17 @@ def run_with_sync_job(
 
     Returns the (sync_jobs row, inner result). On exception the sync_jobs
     row is marked 'failed' with the exception message; the exception is
-    re-raised. Commits happen on both the success and failure path so the
-    sync_jobs row is durable (operators MUST see the run record even when
-    the job crashed).
+    re-raised. The running and terminal records use independent begin contexts;
+    inner must leave no active transaction on either exit path.
     """
-    sync_row = start_sync_job(
-        session,
-        job_name=job_name,
-        credential_id=credential_id,
-        extra=extra,
-    )
-    try:
+    with run_job(
+        session, job_name=job_name, credential_id=credential_id, extra=extra
+    ) as sync_row:
         result = inner(session, **(inner_kwargs or {}))
-    except Exception as exc:
-        error_message = f"{type(exc).__name__}: {exc}"
-        try:
-            finish_sync_job(
-                session,
-                sync_row,
-                result=JobResult(),
-                status="failed",
-                error_message=error_message,
-            )
-            session.commit()
-        except Exception:
-            # The transaction is aborted — the classic case is a
-            # psycopg deadlock victim (40P01): every statement, including
-            # this bookkeeping UPDATE, fails with InFailedSqlTransaction.
-            # Without this fallback the run leaves NO sync_jobs row at all
-            # (the 'running' insert rolls back with the dead transaction)
-            # and the original error is masked by the bookkeeping error.
-            # Roll back to a clean transaction and record the failure
-            # fresh so operators still see the run.
-            log.warning(
-                "[%s] failure bookkeeping hit an aborted transaction; "
-                "re-recording in a fresh one",
-                job_name,
-                exc_info=True,
-            )
-            session.rollback()
-            try:
-                session.add(
-                    SyncJob(
-                        job_name=job_name,
-                        credential_id=credential_id,
-                        status="failed",
-                        error_message=error_message,
-                        finished_at=datetime.now(UTC),
-                        extra=extra,
-                    )
-                )
-                session.commit()
-            except Exception:
-                log.exception(
-                    "[%s] could not record failed sync_jobs row after rollback",
-                    job_name,
-                )
-                session.rollback()
-        raise
-    finish_sync_job(session, sync_row, result=result, status="succeeded")
-    session.commit()
+        sync_row.rows_total = result.rows_total
+        sync_row.rows_inserted = result.rows_inserted
+        sync_row.rows_updated = result.rows_updated
+        sync_row.rows_failed = result.rows_failed
     return sync_row, result
 
 

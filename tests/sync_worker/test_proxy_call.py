@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.proxy.errors import (
     AuthenticationError,
     UpstreamHttpError,
@@ -114,30 +115,29 @@ def _seed_credentials(db_session, *, external_id: str = "TEST_TT_PROXY") -> None
         expires_at=seed_exp,
         service_id="TEST_PROXY_SERVICE",
     )
+    from sqlalchemy import select
+
+    from tts_erp_v2.db.models import ChannelAccount, Credentials
+    from tts_erp_v2.proxy.token_service import upsert_tiktok_app_credentials
+    credential_id = db_session.scalar(select(Credentials.id).where(Credentials.external_account_id == external_id))
+    account = db_session.scalar(select(ChannelAccount).where(ChannelAccount.shop_id == external_id))
+    if account is None:
+        account = ChannelAccount(platform="tiktok", shop_id=external_id, credential_id=credential_id)
+        db_session.add(account)
+        db_session.flush()
+    upsert_tiktok_app_credentials(db_session, shop_pk=account.id, service_id="TEST_PROXY_SERVICE",
+                                  app_key="test_app_key_xyz", plaintext_app_secret="test_app_secret_xyz")
     db_session.commit()
 
 
-def _refreshed_view(provider: str, external_account_id: str):
-    """Build a CredentialsView representing the post-refresh state.
+def _refreshed_view(session, provider: str, external_account_id: str):
+    from dataclasses import replace
 
-    Uses variable indirection so the S105 false-positive on
-    credential-named kwargs doesn't fire.
-    """
-    from tts_erp_v2.proxy.token_service import CredentialsView
-
-    return CredentialsView(
-        id=0,
-        provider=provider,
-        external_account_id=external_account_id,
-        account_label=None,
-        access_token=REFRESHED_AT,
-        refresh_token=REFRESHED_RT,
-        shop_cipher=REFRESHED_SC,
-        expires_at=None,
-        granted_scopes=None,
-        service_id="TEST_PROXY_SERVICE",
-        extra=None,
-    )
+    from tts_erp_v2.proxy.token_service import load_credentials
+    with session.begin():
+        current = load_credentials(session, provider, external_account_id)
+    return replace(current, access_token=REFRESHED_AT, refresh_token=REFRESHED_RT,
+                   shop_cipher=REFRESHED_SC)
 
 
 # Module-level constants for the refreshed token values. Pulled out so
@@ -201,13 +201,18 @@ def test_build_proxy_call_uses_token_bound_service_app_pair(
     from tts_erp_v2.sync_worker import proxy_call
 
     service_id = "TEST_PROXY_DATABASE_SERVICE"
+    from tts_erp_v2.db.models import ChannelAccount
+    account = ChannelAccount(platform="tiktok", shop_id="TEST_TT_PROXY_DATABASE")
+    db_session.add(account)
+    db_session.flush()
     upsert_tiktok_app_credentials(
         db_session,
+        shop_pk=account.id,
         service_id=service_id,
         app_key="TEST_DATABASE_APP_KEY",
         plaintext_app_secret="TEST_DATABASE_APP_SECRET",
     )
-    upsert_credentials(
+    credential = upsert_credentials(
         db_session,
         provider="tiktok",
         external_account_id="TEST_TT_PROXY_DATABASE",
@@ -216,6 +221,7 @@ def test_build_proxy_call_uses_token_bound_service_app_pair(
         plaintext_shop_cipher="TEST_DATABASE_SHOP_CIPHER",
         service_id=service_id,
     )
+    account.credential_id = credential.id
     db_session.commit()
 
     captured: dict[str, str] = {}
@@ -230,7 +236,8 @@ def test_build_proxy_call_uses_token_bound_service_app_pair(
         return client
 
     monkeypatch.setattr(proxy_call, "_get_client", capture_client)
-    proxy_call.build_proxy_call(db_session, shop_id="TEST_TT_PROXY_DATABASE")
+    proxy = invoke_seeded_job(proxy_call.build_proxy_call, db_session, shop_id="TEST_TT_PROXY_DATABASE")
+    proxy("GET", "/finance/202309/payments")
 
     assert captured["app_key"] == "TEST_DATABASE_APP_KEY"
     assert captured["app_secret"] == "TEST_DATABASE_APP_SECRET"
@@ -248,7 +255,7 @@ def test_get_lifts_all_body_keys_to_query(
     _seed_credentials(db_session)
     fake_client.script("GET", "/finance/202309/payments", {"code": 0, "data": {"payments": []}})
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
     proxy(
         "GET",
         "/finance/202309/payments",
@@ -293,7 +300,7 @@ def test_post_keeps_whitelist_keys_in_query_rest_in_body(
     _seed_credentials(db_session)
     fake_client.script("POST", "/order/202309/orders/search", {"code": 0, "data": {}})
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
     proxy(
         "POST",
         "/order/202309/orders/search",
@@ -365,14 +372,14 @@ def test_reactive_refresh_on_401_retries_once(
         refresh_calls.append(
             {"provider": provider, "external_account_id": external_account_id, "force": force}
         )
-        return _refreshed_view(provider, external_account_id)
+        return _refreshed_view(session, provider, external_account_id)
 
     monkeypatch.setattr(
         "tts_erp_v2.sync_worker.proxy_call.refresh_if_needed",
         fake_refresh_if_needed,
     )
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
     result = proxy("GET", "/finance/202309/payments", body={"payment_id": "PAY_001"})
 
     assert len(refresh_calls) == 1
@@ -423,14 +430,14 @@ def test_reactive_refresh_on_401_no_infinite_loop(
         force: bool = False,
     ) -> Any:
         refresh_calls.append({"external_account_id": external_account_id, "force": force})
-        return _refreshed_view(provider, external_account_id)
+        return _refreshed_view(session, provider, external_account_id)
 
     monkeypatch.setattr(
         "tts_erp_v2.sync_worker.proxy_call.refresh_if_needed",
         fake_refresh_if_needed,
     )
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
 
     with pytest.raises(AuthenticationError):
         proxy("GET", "/finance/202309/payments", body={"payment_id": "PAY_001"})
@@ -470,7 +477,7 @@ def test_reactive_refresh_failure_propagates(
         refresh_raises,
     )
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
 
     with pytest.raises(AuthenticationError):
         proxy("GET", "/finance/202309/payments", body={"payment_id": "PAY_001"})
@@ -509,7 +516,7 @@ def test_non_auth_error_not_retried(
         fake_refresh,
     )
 
-    proxy = build_proxy_call(db_session, shop_id="TEST_TT_PROXY")
+    proxy = invoke_seeded_job(build_proxy_call, db_session, shop_id="TEST_TT_PROXY")
 
     with pytest.raises(UpstreamHttpError):
         proxy("GET", "/finance/202309/payments", body={"payment_id": "PAY_001"})

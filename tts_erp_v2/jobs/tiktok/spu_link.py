@@ -58,7 +58,9 @@ def link_line_spu_pk(
     return spu_map.get(product_snapshot)
 
 
-def backfill_null_line_spu_pk(session: Session, *, shop_pk: int | None = None) -> int:
+def backfill_null_line_spu_pk(
+    session: Session, *, shop_pk: int | None = None, line_ids: list[int] | None = None
+) -> int:
     """Link every NULL ``spu_pk`` line whose snapshot now exists in catalog.
 
     Idempotent（只碰 ``spu_pk IS NULL`` 行）。``shop_pk=None`` = 全库
@@ -78,7 +80,11 @@ def backfill_null_line_spu_pk(session: Session, *, shop_pk: int | None = None) -
             "AND EXISTS (SELECT 1 FROM commerce.sales_orders so "
             "            WHERE so.id = sl.order_pk AND so.shop_pk = cp.shop_pk)"
         )
-        result = session.execute(text(stmt_text), {"shop_pk": shop_pk})
+        params = {"shop_pk": shop_pk}
+        if line_ids is not None:
+            stmt_text += " AND sl.id = ANY(:line_ids)"
+            params["line_ids"] = line_ids
+        result = session.execute(text(stmt_text), params)
     else:
         stmt_text = (
             "UPDATE commerce.sales_order_lines sl "
@@ -89,5 +95,9 @@ def backfill_null_line_spu_pk(session: Session, *, shop_pk: int | None = None) -
             "AND EXISTS (SELECT 1 FROM commerce.sales_orders so "
             "            WHERE so.id = sl.order_pk AND so.shop_pk = cp.shop_pk)"
         )
-        result = session.execute(text(stmt_text))
+        params = {}
+        if line_ids is not None:
+            stmt_text += " AND sl.id = ANY(:line_ids)"
+            params["line_ids"] = line_ids
+        result = session.execute(text(stmt_text), params)
     return int(result.rowcount or 0)

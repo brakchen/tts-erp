@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
+import importlib.util
+import os
 from argparse import Namespace
 from datetime import UTC, datetime
 from decimal import Decimal
-import importlib.util
-import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
+from alembic import command
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.commerce import SalesOrderLinePriceObservation
 from tts_erp_v2.jobs.tiktok.order_detail import detail_response_matches_request
-from tts_erp_v2.jobs.tiktok.orders import incoming_order_is_stale
 from tts_erp_v2.jobs.tiktok.order_prices import (
     DEFAULT_ONE_PER_LINE,
     GIFT,
@@ -29,6 +29,7 @@ from tts_erp_v2.jobs.tiktok.order_prices import (
     normalize_price_line,
     upsert_price_observation,
 )
+from tts_erp_v2.jobs.tiktok.orders import incoming_order_is_stale
 
 CAPTURED = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 
@@ -375,8 +376,8 @@ def test_search_and_detail_use_same_observation_fields(price_observation_schema,
 
     search_account = _make_account(db_session, "SEARCH")
     detail_account = _make_account(db_session, "DETAIL")
-    search_result = orders.run(db_session, proxy_call=_SearchProxy(_producer_payload("TEST_PRICE_SEARCH_ORDER", "TEST_PRICE_SEARCH_LINE")), shop_id=search_account.shop_id)
-    detail_result = order_detail.run(db_session, proxy_call=_DetailProxy(_producer_payload("TEST_PRICE_DETAIL_ORDER", "TEST_PRICE_DETAIL_LINE")), shop_id=detail_account.shop_id, order_ids=["TEST_PRICE_DETAIL_ORDER"])
+    search_result = invoke_seeded_job(orders.run, db_session, proxy_call=_SearchProxy(_producer_payload("TEST_PRICE_SEARCH_ORDER", "TEST_PRICE_SEARCH_LINE")), shop_id=search_account.shop_id)
+    detail_result = invoke_seeded_job(order_detail.run, db_session, proxy_call=_DetailProxy(_producer_payload("TEST_PRICE_DETAIL_ORDER", "TEST_PRICE_DETAIL_LINE")), shop_id=detail_account.shop_id, order_ids=["TEST_PRICE_DETAIL_ORDER"])
     assert search_result.rows_failed == 0
     assert detail_result.rows_failed == 0
     rows = db_session.execute(select(SalesOrderLinePriceObservation).order_by(SalesOrderLinePriceObservation.order_pk)).scalars().all()
@@ -395,7 +396,7 @@ def test_detail_mismatched_response_does_not_persist_or_resolve_retry(price_obse
     requested = "TEST_PRICE_REQUESTED_ORDER"
     db_session.add(SyncIssue(job_name=order_detail.JOB_NAME, issue_type="PARSE_ERROR", external_id=requested, details={"reason": "retry"}))
     db_session.flush()
-    result = order_detail.run(db_session, proxy_call=_DetailProxy(_producer_payload("TEST_PRICE_OTHER_ORDER", "TEST_PRICE_OTHER_LINE")), shop_id=account.shop_id, order_ids=[requested])
+    result = invoke_seeded_job(order_detail.run, db_session, proxy_call=_DetailProxy(_producer_payload("TEST_PRICE_OTHER_ORDER", "TEST_PRICE_OTHER_LINE")), shop_id=account.shop_id, order_ids=[requested])
     assert result.rows_failed == 1
     assert db_session.execute(
         select(SalesOrder).where(SalesOrder.order_id.in_([requested, "TEST_PRICE_OTHER_ORDER"]))
@@ -413,7 +414,7 @@ def test_detail_mismatched_response_does_not_persist_or_resolve_retry(price_obse
 
 
 def test_backfill_dry_run_uses_lineage_and_writes_nothing(price_observation_schema, db_engine) -> None:
-    from tts_erp_v2.db.models import RawRecord, SyncIssue
+    from tts_erp_v2.db.models import SyncIssue
 
     with Session(db_engine) as session:
         account = _make_account(session, "DRYRUN")
@@ -608,8 +609,8 @@ def test_older_search_payload_preserves_current_mutable_rows_and_observation(
     older["order_status"] = "CANCELLED"
     older["currency"] = "SGD"
     older["line_items"][0]["quantity"] = 9
-    orders.run(db_session, proxy_call=_SearchProxy(newer), shop_id=account.shop_id)
-    orders.run(db_session, proxy_call=_SearchProxy(older), shop_id=account.shop_id)
+    invoke_seeded_job(orders.run, db_session, proxy_call=_SearchProxy(newer), shop_id=account.shop_id)
+    invoke_seeded_job(orders.run, db_session, proxy_call=_SearchProxy(older), shop_id=account.shop_id)
     order = db_session.execute(
         select(SalesOrder).where(SalesOrder.shop_pk == account.id)
     ).scalar_one()

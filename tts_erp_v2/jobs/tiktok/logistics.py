@@ -311,18 +311,22 @@ def run(
     from tts_erp_v2.sync_worker import watermarks
 
     cursor_scope = scope or shop_id
-    account = session.execute(
-        select(ChannelAccount).where(
-            ChannelAccount.platform == "tiktok",
-            ChannelAccount.shop_id == shop_id,
-        )
-    ).scalar_one_or_none()
-    if account is None:
-        raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+    with session.begin():
+        account = session.execute(
+            select(ChannelAccount).where(
+                ChannelAccount.platform == "tiktok",
+                ChannelAccount.shop_id == shop_id,
+            )
+        ).scalar_one_or_none()
+        if account is None:
+            raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+        account_id = account.id
 
-    watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
-    limit = page_size if page_size and page_size > 0 else TARGET_LIMIT
-    targets = _select_tracking_targets(session, account_id=account.id, limit=limit)
+        watermark_ms = watermarks.get_cursor(
+            session, job_name=JOB_NAME, scope=cursor_scope
+        )
+        limit = page_size if page_size and page_size > 0 else TARGET_LIMIT
+        targets = _select_tracking_targets(session, account_id=account_id, limit=limit)
 
     total = 0
     inserted = 0
@@ -330,27 +334,24 @@ def run(
     events_written = 0
     max_update_ms: int | None = None
 
-    # Phase 1 — resolve orders and fetch tracking payloads WITHOUT any
-    # business-table writes. The whole run shares one transaction
-    # (run_with_sync_job commits at the end), so doing the slow upstream
-    # HTTP calls before the first shipment upsert keeps the transaction
-    # free of sales_orders/fulfillment row locks for minutes at a time —
-    # that long lock window was the amplifier behind the production
-    # DeadlockDetected errors (2026-10-02/03).
+    # Phase 1: short target reads, then transaction-free HTTP. Phase 2 writes
+    # one complete shipment/events unit at a time, with no network row locks.
     plan: list[tuple[int, dict, list[dict]]] = []
     for target in targets:
         total += 1
         oid = target["order_id"]
-        so_id = _resolve_order_id(session, account.id, oid)
+        with session.begin():
+            so_id = _resolve_order_id(session, account_id, oid)
         if so_id is None:
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="UNKNOWN_ORDER",
-                    external_id=target["external_package_id"],
-                    details={"order_id": oid},
+            with session.begin():
+                session.add(
+                    SyncIssue(
+                        job_name=JOB_NAME,
+                        issue_type="UNKNOWN_ORDER",
+                        external_id=target["external_package_id"],
+                        details={"order_id": oid},
+                    )
                 )
-            )
             failed += 1
             continue
 
@@ -365,27 +366,31 @@ def run(
                 if resp.get("code") == 0:
                     raw_tracking = (resp.get("data") or {}).get("tracking") or []
                 else:
+                    failed += 1
+                    with session.begin():
+                        session.add(
+                            SyncIssue(
+                                job_name=JOB_NAME,
+                                issue_type="UPSTREAM_NONZERO",
+                                external_id=target["external_package_id"],
+                                details={
+                                    "error": f"code={resp.get('code')} "
+                                    f"msg={resp.get('message')!r}",
+                                    "section": "tracking",
+                                },
+                            )
+                        )
+                    continue
+            except UpstreamJobError as e:
+                with session.begin():
                     session.add(
                         SyncIssue(
                             job_name=JOB_NAME,
                             issue_type="UPSTREAM_NONZERO",
                             external_id=target["external_package_id"],
-                            details={
-                                "error": f"code={resp.get('code')} "
-                                f"msg={resp.get('message')!r}",
-                                "section": "tracking",
-                            },
+                            details={"error": str(e), "section": "tracking"},
                         )
                     )
-            except UpstreamJobError as e:
-                session.add(
-                    SyncIssue(
-                        job_name=JOB_NAME,
-                        issue_type="UPSTREAM_NONZERO",
-                        external_id=target["external_package_id"],
-                        details={"error": str(e), "section": "tracking"},
-                    )
-                )
                 failed += 1
                 continue
         plan.append((so_id, target, raw_tracking))
@@ -397,89 +402,94 @@ def run(
     plan.sort(key=lambda item: item[0])
 
     for so_id, target, raw_tracking in plan:
-        oid = target["order_id"]
-        event_times_ms: list[int] = []
-        action_codes: list[int | None] = []
+        with session.begin():
+            oid = target["order_id"]
+            event_times_ms: list[int] = []
+            action_codes: list[int | None] = []
 
-        raw_row = RawRecord(
-            endpoint=TRACKING_ENDPOINT_TEMPLATE.format(order_id=oid),
-            external_id=target["external_package_id"],
-            payload=raw_tracking,
-        )
-        session.add(raw_row)
-        session.flush()
+            raw_row = RawRecord(
+                endpoint=TRACKING_ENDPOINT_TEMPLATE.format(order_id=oid),
+                external_id=target["external_package_id"],
+                payload=raw_tracking,
+            )
+            session.add(raw_row)
+            session.flush()
 
-        s_fields = {
-            "external_package_id": target["external_package_id"],
-            "order_id": oid,
-            "tracking_number": target["tracking_number"],
-            "provider_id": target["provider_id"],
-            "provider_name": target["provider_name"],
-            "status": None,
-            "shipped_at": None,
-            "delivered_at": None,
-        }
-        shipment_id = _upsert_shipment(
-            session,
-            order_pk=so_id,
-            fields=s_fields,
-            raw_record_id=raw_row.id,
-        )
-
-        for raw_e in raw_tracking:
-            try:
-                e_fields = _parse_event(raw_e)
-            except ParseError as e:
-                session.add(
-                    SyncIssue(
-                        job_name=JOB_NAME,
-                        issue_type="PARSE_ERROR",
-                        external_id=f"{target['external_package_id']}:<event>",
-                        details={"error": str(e), "section": "tracking_events"},
-                    )
-                )
-                continue
-            _upsert_event(session, shipment_id=shipment_id, fields=e_fields)
-            events_written += 1
-            action_codes.append(e_fields.get("action_code"))
-            if e_fields.get("event_at") is not None:
-                event_times_ms.append(
-                    _safe_int(e_fields["event_at"].timestamp() * 1000)
-                )
-
-        # Derive + persist the shipment status from the events we just
-        # wrote (most-recent-event semantics are covered by the upsert).
-        status = _classify_status(action_codes)
-        if status is not None:
-            session.execute(
-                pg_insert(Shipment)
-                .values(
-                    order_pk=so_id,
-                    external_package_id=target["external_package_id"],
-                    status=status,
-                )
-                .on_conflict_do_update(
-                    index_elements=["order_pk", "external_package_id"],
-                    set_={"status": status},
-                )
+            s_fields = {
+                "external_package_id": target["external_package_id"],
+                "order_id": oid,
+                "tracking_number": target["tracking_number"],
+                "provider_id": target["provider_id"],
+                "provider_name": target["provider_name"],
+                "status": None,
+                "shipped_at": None,
+                "delivered_at": None,
+            }
+            shipment_id = _upsert_shipment(
+                session,
+                order_pk=so_id,
+                fields=s_fields,
+                raw_record_id=raw_row.id,
             )
 
-        inserted += 1
-        for ms in event_times_ms:
-            if max_update_ms is None or ms > max_update_ms:
-                max_update_ms = ms
+            for raw_e in raw_tracking:
+                try:
+                    e_fields = _parse_event(raw_e)
+                except ParseError as e:
+                    failed += 1
+                    session.add(
+                        SyncIssue(
+                            job_name=JOB_NAME,
+                            issue_type="PARSE_ERROR",
+                            external_id=f"{target['external_package_id']}:<event>",
+                            details={"error": str(e), "section": "tracking_events"},
+                        )
+                    )
+                    continue
+                _upsert_event(session, shipment_id=shipment_id, fields=e_fields)
+                events_written += 1
+                action_codes.append(e_fields.get("action_code"))
+                if e_fields.get("event_at") is not None:
+                    event_times_ms.append(
+                        _safe_int(e_fields["event_at"].timestamp() * 1000)
+                    )
+
+            # Derive + persist the shipment status from the events we just
+            # wrote (most-recent-event semantics are covered by the upsert).
+            status = _classify_status(action_codes)
+            if status is not None:
+                session.execute(
+                    pg_insert(Shipment)
+                    .values(
+                        order_pk=so_id,
+                        external_package_id=target["external_package_id"],
+                        status=status,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["order_pk", "external_package_id"],
+                        set_={"status": status},
+                    )
+                )
+
+            inserted += 1
+            for ms in event_times_ms:
+                if max_update_ms is None or ms > max_update_ms:
+                    max_update_ms = ms
 
     new_cursor_ms: int | None = None
-    if max_update_ms is not None and (
-        watermark_ms is None or max_update_ms > _safe_int(watermark_ms)
-    ):
-        watermarks.set_cursor(
-            session,
-            job_name=JOB_NAME,
-            scope=cursor_scope,
-            cursor_epoch_ms=max_update_ms,
-        )
-        new_cursor_ms = max_update_ms
+    with session.begin():
+        if (
+            not failed
+            and max_update_ms is not None
+            and (watermark_ms is None or max_update_ms > _safe_int(watermark_ms))
+        ):
+            watermarks.set_cursor(
+                session,
+                job_name=JOB_NAME,
+                scope=cursor_scope,
+                cursor_epoch_ms=max_update_ms,
+            )
+            new_cursor_ms = max_update_ms
 
     return JobResult(
         rows_total=total,

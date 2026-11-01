@@ -16,7 +16,7 @@ pytestmark = [pytest.mark.domain_reporting, pytest.mark.layer_integration]
 
 
 def _seed_shop(session: Session, suffix: str) -> int:
-    return int(
+    shop_pk = int(
         session.execute(
             text(
                 "INSERT INTO commerce.shops "
@@ -29,6 +29,10 @@ def _seed_shop(session: Session, suffix: str) -> int:
             },
         ).scalar_one()
     )
+
+    from tests._job_invocation import authorize_test_shop
+    authorize_test_shop(session, shop_pk, f"TEST_FOCUSED_MODULE_{suffix}")
+    return shop_pk
 
 
 def _seed_products(session: Session, shop_pk: int, count: int) -> tuple[str, ...]:

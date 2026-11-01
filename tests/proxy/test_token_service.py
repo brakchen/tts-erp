@@ -25,6 +25,8 @@ from typing import Any
 
 import pytest
 
+from tests._job_invocation import invoke_seeded_job
+
 # Force-load .env so TTS_ERP_DB_URL is set before any module under test.
 os.environ.setdefault(
     "TTS_ERP_FERNET_KEY",
@@ -46,8 +48,8 @@ class _FakeRefresher:
         self.defaults = default
         self.calls: list[tuple[str, str]] = []
 
-    def __call__(self, provider: str, external_account_id: str) -> dict:
-        self.calls.append((provider, external_account_id))
+    def __call__(self, view) -> dict:
+        self.calls.append((view.provider, view.external_account_id))
         return {"ok": True, **self.defaults}
 
 
@@ -103,22 +105,26 @@ def test_tiktok_app_credentials_round_trip(db_session, fernet_key: str) -> None:
     """App Secret is encrypted and resolved by service_id."""
     from sqlalchemy import select
 
+    from tts_erp_v2.db.models import ChannelAccount
     from tts_erp_v2.db.models.integration import TikTokAppCredential
     from tts_erp_v2.proxy.token_service import (
         resolve_tiktok_app_credentials,
         upsert_tiktok_app_credentials,
     )
-
+    account = ChannelAccount(platform="tiktok", shop_id="TEST_APP_ROUND_TRIP")
+    db_session.add(account)
+    db_session.flush()
+    shop_pk = account.id
     upsert_tiktok_app_credentials(
         db_session,
-        service_id="TEST_SERVICE_001",
+        shop_pk=shop_pk, service_id="TEST_SERVICE_001",
         app_key="TEST_APP_KEY_001",
         plaintext_app_secret="TEST_APP_SECRET_001",
     )
     db_session.commit()
 
     resolved = resolve_tiktok_app_credentials(
-        db_session, service_id="TEST_SERVICE_001"
+        db_session, shop_pk=shop_pk, service_id="TEST_SERVICE_001"
     )
     assert resolved.service_id == "TEST_SERVICE_001"
     assert resolved.app_key == "TEST_APP_KEY_001"
@@ -133,27 +139,16 @@ def test_tiktok_app_credentials_round_trip(db_session, fernet_key: str) -> None:
     assert persisted.app_secret_ciphertext != b"TEST_APP_SECRET_001"
 
 
-def test_tiktok_app_credentials_exact_env_fallback(
+def test_tiktok_app_credentials_rejects_environment_fallback(
     db_session, fernet_key: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tts_erp_v2.proxy.errors import SigningError
     from tts_erp_v2.proxy.token_service import resolve_tiktok_app_credentials
-
     monkeypatch.setenv("TIKTOK_SERVICE_ID", "TEST_ENV_SERVICE")
     monkeypatch.setenv("TIKTOK_APP_KEY", "TEST_ENV_KEY")
     monkeypatch.setenv("TIKTOK_APP_SECRET", "TEST_ENV_SECRET")
-
-    resolved = resolve_tiktok_app_credentials(
-        db_session, service_id="TEST_ENV_SERVICE"
-    )
-    assert resolved.app_key == "TEST_ENV_KEY"
-    assert resolved.app_secret == "TEST_ENV_SECRET"
-    assert resolved.source == "environment"
-
-    with pytest.raises(SigningError, match="TEST_OTHER_SERVICE"):
-        resolve_tiktok_app_credentials(
-            db_session, service_id="TEST_OTHER_SERVICE"
-        )
+    with pytest.raises(SigningError, match="Configure this shop"):
+        resolve_tiktok_app_credentials(db_session, shop_pk=-1, service_id="TEST_ENV_SERVICE")
 
 
 def test_upsert_and_load_credentials(db_session, fernet_key: str) -> None:
@@ -270,7 +265,7 @@ def test_refresh_if_needed_calls_refresher_when_expired(
         expires_at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
     )
 
-    loaded = refresh_if_needed(
+    loaded = invoke_seeded_job(refresh_if_needed,
         db_session,
         provider="tiktok",
         external_account_id="shop_TEST_003",
@@ -316,7 +311,7 @@ def test_refresh_preserves_shop_cipher_when_refresher_omits_it(
         access_token="new_at",
         expires_at=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
     )
-    loaded = refresh_if_needed(
+    loaded = invoke_seeded_job(refresh_if_needed,
         db_session,
         provider="tiktok",
         external_account_id="shop_TEST_004",
@@ -352,7 +347,7 @@ def test_refresh_if_needed_skips_when_fresh(db_session, fernet_key: str) -> None
     db_session.commit()
 
     refresher = _FakeRefresher()
-    loaded = refresh_if_needed(
+    loaded = invoke_seeded_job(refresh_if_needed,
         db_session,
         provider="tiktok",
         external_account_id="shop_TEST_004",
@@ -370,7 +365,7 @@ def test_refresh_if_needed_missing_row_returns_none(
 
     refresher = _FakeRefresher()
     assert (
-        refresh_if_needed(
+        invoke_seeded_job(refresh_if_needed,
             db_session,
             provider="tiktok",
             external_account_id="shop_TEST_zzz",
