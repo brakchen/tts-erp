@@ -164,7 +164,8 @@ def test_focused_explicit_add_and_remove_never_replace_the_collection(
     checkbox = page.locator('#focused-spu-select input[type="checkbox"]')
     expect(checkbox).to_have_count(3)
     target = page.locator('#focused-spu-select label').filter(has_text='TEST_FOCUS_C').get_by_role('checkbox')
-    target.check()
+    target.click()  # Controlled membership changes only after the PATCH receipt.
+    expect(target).to_be_checked()
     expect(page.locator('#spu-selection-count')).to_have_text('已关注 3 个')
     assert commands == [{'addSpuIds': ['TEST_FOCUS_C'], 'removeSpuIds': []}]
     assert selected == ['TEST_FOCUS_A', 'TEST_FOCUS_B', 'TEST_FOCUS_C']
