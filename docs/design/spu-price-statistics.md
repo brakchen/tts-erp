@@ -30,6 +30,8 @@
 
 ### 0.3 已批准结果（不可扩大）
 
+以下为原批准范围。**2026-11-01 用户更新展示要求：重点关注 SPU 页不再展示价格统计与采购价 / 销售价 / 实付价的六个表格列；SPU ROI 页继续展示。** 这是共享 React 页内的 profile 展示差异，不改变价格 API、计算、数据持久化或经营指标。
+
 1. 两个页面顶部各有一个 **Prices** summary box，位置紧跟现有 Projected box；三行依次为 Purchase、Original sale、Paid，左列 quantity-weighted mean、右列 quantity-weighted median。Purchase 采用当前 ROI effective CNY `unit_cost_used` 与 `cost_source`；`DEFAULT_K1=40 CNY` 必须显式显示为 estimated。
 2. 主 SPU 表新增三组 grouped columns：Purchase、Original sale、Paid；每组 Mean / Median 独立服务端排序。两页必须继续使用同一 page kernel 与 profile adapter，不复制计算。
 3. TikTok 价格 authority 只有 `line_items.original_price`（原价）和 `line_items.sale_price`（实付）；Miaoshou `originalPrice` / `discountedPrice` 只用于核验差异，永远不是缺字段回退或正式 observation。
