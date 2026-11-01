@@ -7,11 +7,10 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.integration import SyncIssue, SyncJob
 from tts_erp_v2.db.models.procurement import ProcurementProduct
 from tts_erp_v2.jobs.miaoshou.common_collect_box import sync_common_collect_box
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 

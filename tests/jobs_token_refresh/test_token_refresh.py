@@ -15,10 +15,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select, text
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.integration import Credentials, SyncJob
 from tts_erp_v2.jobs.token_refresh import JOB_NAME, sync_token_refresh
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_token_refresh, pytest.mark.layer_integration]
 
@@ -69,7 +68,8 @@ class _FakeRefresher:
         self.calls: list[str] = []
 
     def __call__(self, provider: str, external_account_id: str):
-        def refresher(p: str, eid: str) -> dict:
+        def refresher(view) -> dict:
+            eid = view.external_account_id
             self.calls.append(eid)
             if self.raise_exc is not None:
                 raise self.raise_exc

@@ -41,7 +41,7 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.proxy.errors import AuthenticationError
-from tts_erp_v2.proxy.tiktok_auth import resolve_tiktok_app_credentials_for_shop
+from tts_erp_v2.proxy.tiktok_auth import resolve_tiktok_app_credentials_for_view
 from tts_erp_v2.proxy.token_service import (
     CredentialsView,
     TikTokAppCredentials,
@@ -112,12 +112,11 @@ def _reactive_refresh(
     """
     from tts_erp_v2.proxy.tiktok_auth import refresh_tiktok_token
 
-    with session.begin():
-        current_rt = _current_refresh_token(session, shop_id)
-
-    def _refresher(_p: str, _eid: str) -> dict:
+    def _refresher(view: CredentialsView) -> dict:
+        if view.service_id != app_credentials.service_id:
+            raise AuthenticationError("TikTok authorization changed during refresh")
         return refresh_tiktok_token(
-            refresh_token=current_rt,
+            refresh_token=view.refresh_token or "",
             app_credentials=app_credentials,
         )
 
@@ -157,19 +156,6 @@ def _require_refreshed_view(
     return view
 
 
-def _current_refresh_token(session: Session, shop_id: str) -> str:
-    """Read the *current* plaintext refresh_token from the encrypted row.
-
-    Used by the refresher lambda in :func:`_reactive_refresh` so the
-    lambda stays a tiny inline callable rather than a closure that
-    captures `session`.
-    """
-    view = load_credentials(session, "tiktok", shop_id)
-    if view is None or not view.refresh_token:
-        return ""
-    return view.refresh_token
-
-
 def _get_client(app_key: str, app_secret: str, api_host: str) -> TiktokShopClient:
     secret_fingerprint = hashlib.sha256(app_secret.encode("utf-8")).hexdigest()
     cache_key = (app_key, secret_fingerprint, api_host)
@@ -192,26 +178,19 @@ def build_proxy_call(
     builds the matching signed client. It still reloads the shop's OAuth token
     on every call so out-of-band refresh cannot leave a stale access token.
     """
-    with session.begin():
-        app_credentials = resolve_tiktok_app_credentials_for_shop(
-            session,
-            shop_id=shop_id,
-        )
     api_host = os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
-    client = _get_client(
-        app_credentials.app_key,
-        app_credentials.app_secret,
-        api_host,
-    )
 
     def proxy_call(method: str, path: str, *, body: dict | None = None) -> dict:
         with session.begin():
             view = load_credentials(session, "tiktok", shop_id)
-        if view is None:
-            raise RuntimeError(
-                f"credentials row not found for provider=tiktok "
-                f"external_account_id={shop_id!r}; re-authorize via /callback"
-            )
+            if view is None:
+                raise RuntimeError(
+                    "TikTok credentials not found; re-authorize the shop"
+                )
+            app_credentials = resolve_tiktok_app_credentials_for_view(session, view)
+        client = _get_client(
+            app_credentials.app_key, app_credentials.app_secret, api_host
+        )
 
         # AGENTS.md §2.3: shop_cipher is always in the query string.
         extra_params: dict[str, str] = {"shop_cipher": view.shop_cipher or ""}

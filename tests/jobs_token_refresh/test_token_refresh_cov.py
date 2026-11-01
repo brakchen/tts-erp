@@ -33,6 +33,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import credential_snapshot, invoke_seeded_job
 from tts_erp_v2.db.models.integration import Credentials, SyncIssue, SyncJob
 from tts_erp_v2.jobs.token_refresh import (
     JOB_NAME,
@@ -45,8 +46,6 @@ from tts_erp_v2.jobs.token_refresh import (
     sync_token_refresh,
 )
 from tts_erp_v2.proxy.token_service import upsert_credentials
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_token_refresh, pytest.mark.layer_integration]
 
@@ -90,7 +89,9 @@ class _FakeRefresher:
         self.calls: list[tuple[str, str]] = []  # (provider, external_account_id)
 
     def __call__(self, provider: str, external_account_id: str):
-        def refresher(p: str, eid: str) -> dict:
+        def refresher(view) -> dict:
+            p = view.provider
+            eid = view.external_account_id
             self.calls.append((p, eid))
             if self.raise_exc is not None:
                 raise self.raise_exc
@@ -108,7 +109,7 @@ def test_default_registry_returns_no_op_with_empty_access_token() -> None:
     """
     registry = _default_registry()
     refresher = registry("tiktok", "TEST_extacct_default")
-    payload = refresher("tiktok", "TEST_extacct_default")
+    payload = refresher(credential_snapshot("tiktok", "TEST_extacct_default"))
     assert payload == {"access_token": ""}
 
 
@@ -340,17 +341,17 @@ def test_sync_token_refresh_emits_no_token_issue_when_refresher_returns_empty(
 
 
 def test_instrument_marks_called_and_got_token_for_full_payload() -> None:
-    wrapped, info = _instrument(lambda _p, _e: {"access_token": "abc"})
+    wrapped, info = _instrument(lambda view: {"access_token": "abc"})
     assert info == {"called": False, "got_token": False}
-    out = wrapped("tiktok", "TEST_extacct_inst")
+    out = wrapped(credential_snapshot("tiktok", "TEST_extacct_inst"))
     assert out == {"access_token": "abc"}
     assert info == {"called": True, "got_token": True}
 
 
 def test_instrument_marks_called_but_not_got_token_for_empty_payload() -> None:
     """Empty-string ``access_token`` → ``called=True, got_token=False``."""
-    wrapped, info = _instrument(lambda _p, _e: {"access_token": ""})
-    out = wrapped("tiktok", "TEST_extacct_inst")
+    wrapped, info = _instrument(lambda view: {"access_token": ""})
+    out = wrapped(credential_snapshot("tiktok", "TEST_extacct_inst"))
     assert out == {"access_token": ""}
     assert info == {"called": True, "got_token": False}
 
@@ -358,8 +359,8 @@ def test_instrument_marks_called_but_not_got_token_for_empty_payload() -> None:
 def test_instrument_marks_called_but_not_got_token_for_missing_key() -> None:
     """Refresher returned a dict but with NO ``access_token`` key →
     ``called=True, got_token=False``."""
-    wrapped, info = _instrument(lambda _p, _e: {"some_other_field": "x"})
-    out = wrapped("tiktok", "TEST_extacct_inst")
+    wrapped, info = _instrument(lambda view: {"some_other_field": "x"})
+    out = wrapped(credential_snapshot("tiktok", "TEST_extacct_inst"))
     assert out == {"some_other_field": "x"}
     assert info == {"called": True, "got_token": False}
 
@@ -368,18 +369,18 @@ def test_instrument_does_not_set_called_before_invocation() -> None:
     """Before the wrapped callable is invoked, ``info['called']`` remains
     ``False`` (default). This is what the sync_token_refresh classification
     depends on."""
-    _wrapped, info = _instrument(lambda _p, _e: {"access_token": "abc"})
+    _wrapped, info = _instrument(lambda view: {"access_token": "abc"})
     assert info == {"called": False, "got_token": False}
 
 
 def test_instrument_handles_non_dict_payload_as_not_got_token() -> None:
     """Non-dict return (e.g. None) → ``got_token=False`` but
     ``called=True`` (because the wrapped wrapper still ran)."""
-    def returns_none(_p: str, _e: str) -> Any:  # type: ignore[return-value]
+    def returns_none(view) -> Any:  # type: ignore[return-value]
         return None  # intentionally returns non-dict to test wrapper edge
 
     wrapped, info = _instrument(returns_none)
-    out = wrapped("tiktok", "TEST_extacct_inst")
+    out = wrapped(credential_snapshot("tiktok", "TEST_extacct_inst"))
     assert out is None
     assert info == {"called": True, "got_token": False}
 

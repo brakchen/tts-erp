@@ -22,6 +22,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -37,8 +38,6 @@ from tts_erp_v2.jobs.reporting import (
     run_cost_snapshots,
     run_profit_daily,
 )
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_reporting, pytest.mark.layer_integration]
 

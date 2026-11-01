@@ -30,7 +30,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -39,8 +38,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from tts_erp_v2.db.models import ChannelAccount
 from tts_erp_v2.commerce.shop_access import authorized_shop_clause
+from tts_erp_v2.db.models import ChannelAccount
 from tts_erp_v2.db.models.integration import SyncCursor, SyncJob
 from tts_erp_v2.sync_worker.job_runner import (
     run_with_sync_job,
@@ -441,9 +440,12 @@ def _run_tiktok_job_for_shop(
     for attempt in range(2):
         try:
             with session_factory() as session:
+
                 def inner(business_session: Session) -> object:
                     proxy_call = build_proxy_call(business_session, shop_id=shop_id)
-                    return mod.run(business_session, proxy_call=proxy_call, shop_id=shop_id)
+                    return mod.run(
+                        business_session, proxy_call=proxy_call, shop_id=shop_id
+                    )
 
                 _row, result = run_with_sync_job(
                     session,
@@ -453,15 +455,22 @@ def _run_tiktok_job_for_shop(
                 )
             log.info(
                 "[%s] shop=%s ok total=%d inserted=%d failed=%d",
-                spec.job_name, shop_id, result.rows_total,
-                result.rows_inserted, result.rows_failed,
+                spec.job_name,
+                shop_id,
+                result.rows_total,
+                result.rows_inserted,
+                result.rows_failed,
             )
             return
         except Exception:
             if attempt:
-                log.exception("[%s] shop=%s giving up after 2 attempts", spec.job_name, shop_id)
+                log.exception(
+                    "[%s] shop=%s giving up after 2 attempts", spec.job_name, shop_id
+                )
                 raise
-            log.warning("[%s] shop=%s retrying in 5s", spec.job_name, shop_id, exc_info=True)
+            log.warning(
+                "[%s] shop=%s retrying in 5s", spec.job_name, shop_id, exc_info=True
+            )
         # The failed session/transaction is closed BEFORE backoff.
         time.sleep(5)
 
@@ -528,13 +537,15 @@ def _record_failed_tick(
     from tts_erp_v2.db.models.integration import SyncJob as _SyncJob
 
     with session_factory() as session, session.begin():
-        session.add(_SyncJob(
-            job_name=spec.job_name,
-            status="failed",
-            started_at=datetime.now(UTC),
-            finished_at=datetime.now(UTC),
-            error_message=reason[:2000],
-        ))
+        session.add(
+            _SyncJob(
+                job_name=spec.job_name,
+                status="failed",
+                started_at=datetime.now(UTC),
+                finished_at=datetime.now(UTC),
+                error_message=reason[:2000],
+            )
+        )
 
 
 def _scheduled_child_command(job_name: str) -> list[str]:

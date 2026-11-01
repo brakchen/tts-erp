@@ -25,13 +25,12 @@ from typing import Any
 
 import pytest
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.proxy.errors import (
     AuthenticationError,
     UpstreamHttpError,
 )
 from tts_erp_v2.proxy.tts_shop import client as tts_client_mod
-
-from tests._job_invocation import invoke_seeded_job
 
 # Credential field names — pulled out as module-level constants so ruff's
 # S105 false-positive (triggered on literal substrings "access_token" /
@@ -116,6 +115,18 @@ def _seed_credentials(db_session, *, external_id: str = "TEST_TT_PROXY") -> None
         expires_at=seed_exp,
         service_id="TEST_PROXY_SERVICE",
     )
+    from sqlalchemy import select
+
+    from tts_erp_v2.db.models import ChannelAccount, Credentials
+    from tts_erp_v2.proxy.token_service import upsert_tiktok_app_credentials
+    credential_id = db_session.scalar(select(Credentials.id).where(Credentials.external_account_id == external_id))
+    account = db_session.scalar(select(ChannelAccount).where(ChannelAccount.shop_id == external_id))
+    if account is None:
+        account = ChannelAccount(platform="tiktok", shop_id=external_id, credential_id=credential_id)
+        db_session.add(account)
+        db_session.flush()
+    upsert_tiktok_app_credentials(db_session, shop_pk=account.id, service_id="TEST_PROXY_SERVICE",
+                                  app_key="test_app_key_xyz", plaintext_app_secret="test_app_secret_xyz")
     db_session.commit()
 
 
@@ -203,13 +214,18 @@ def test_build_proxy_call_uses_token_bound_service_app_pair(
     from tts_erp_v2.sync_worker import proxy_call
 
     service_id = "TEST_PROXY_DATABASE_SERVICE"
+    from tts_erp_v2.db.models import ChannelAccount
+    account = ChannelAccount(platform="tiktok", shop_id="TEST_TT_PROXY_DATABASE")
+    db_session.add(account)
+    db_session.flush()
     upsert_tiktok_app_credentials(
         db_session,
+        shop_pk=account.id,
         service_id=service_id,
         app_key="TEST_DATABASE_APP_KEY",
         plaintext_app_secret="TEST_DATABASE_APP_SECRET",
     )
-    upsert_credentials(
+    credential = upsert_credentials(
         db_session,
         provider="tiktok",
         external_account_id="TEST_TT_PROXY_DATABASE",
@@ -218,6 +234,7 @@ def test_build_proxy_call_uses_token_bound_service_app_pair(
         plaintext_shop_cipher="TEST_DATABASE_SHOP_CIPHER",
         service_id=service_id,
     )
+    account.credential_id = credential.id
     db_session.commit()
 
     captured: dict[str, str] = {}

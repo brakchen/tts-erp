@@ -27,6 +27,7 @@ budget, the job raises and ``run_job`` marks the SyncJob row
 ``failed``. Idempotency: re-running picks up where the previous
 run left off because ``ON CONFLICT DO UPDATE`` replaces in-place.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,8 +55,14 @@ MAX_PAGES = 50  # safety cap; production count is single-digit
 class _MiaoshouClientProto(Protocol):
     """Minimal protocol — the job only needs ``_call_erp``."""
 
-    def _call_erp(self, *, path: str, body: dict | None = None, query: dict | None = None,
-                  extra_headers: dict | None = None) -> dict[str, Any]: ...
+    def _call_erp(
+        self,
+        *,
+        path: str,
+        body: dict | None = None,
+        query: dict | None = None,
+        extra_headers: dict | None = None,
+    ) -> dict[str, Any]: ...
 
 
 def _fetch_shop_page(
@@ -143,18 +150,19 @@ def sync_shops(
                         client, platform=platform, site=site, page_no=page_no
                     )
                 except Exception as e:
-                    record_sync_issue(
-                        session,
-                        job_name=JOB_NAME,
-                        issue_type="SHOP_FETCH_FAILED",
-                        external_id=f"{platform}:{site}:{page_no}",
-                        details={
-                            "platform": platform,
-                            "site": site,
-                            "page_no": page_no,
-                            "error": f"{type(e).__name__}: {e}",
-                        },
-                    )
+                    with session.begin():
+                        record_sync_issue(
+                            session,
+                            job_name=JOB_NAME,
+                            issue_type="SHOP_FETCH_FAILED",
+                            external_id=f"{platform}:{site}:{page_no}",
+                            details={
+                                "platform": platform,
+                                "site": site,
+                                "page_no": page_no,
+                                "error": f"{type(e).__name__}: {e}",
+                            },
+                        )
                     issues += 1
                     raise  # let run_job mark failed; caller decides retry
 
@@ -197,7 +205,10 @@ def sync_shops(
                                 session,
                                 job_name=JOB_NAME,
                                 issue_type="SHOP_PARSE_FAILED",
-                                details={"raw_record_id": raw_id, "shop": repr(shop)[:300]},
+                                details={
+                                    "raw_record_id": raw_id,
+                                    "shop": repr(shop)[:300],
+                                },
                             )
                             issues += 1
                             continue

@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -35,8 +36,6 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.jobs import reporting as reporting_job
 from tts_erp_v2.sync_worker import scheduler
 from tts_erp_v2.sync_worker.scheduler import JOBS, JobSpec
-
-from tests._job_invocation import invoke_seeded_job
 
 # ─── Registry wiring ────────────────────────────────────────────────
 
@@ -121,6 +120,7 @@ def test_system_job_commits_on_success(monkeypatch):
 
     _fake_module(monkeypatch, fake_entry)
     session = MagicMock()
+    session.__enter__.return_value = session
     factory = MagicMock(return_value=session)
     spec = JobSpec(
         job_name="reporting.profit_daily",
@@ -131,8 +131,8 @@ def test_system_job_commits_on_success(monkeypatch):
     )
     scheduler._run_system_job(spec, factory)
     assert called["n"] == 1
-    session.commit.assert_called_once()
-    session.close.assert_called_once()
+    session.commit.assert_not_called()
+    session.__exit__.assert_called_once()
 
 
 def test_system_job_writes_sentinel_on_exception(monkeypatch):
@@ -141,6 +141,7 @@ def test_system_job_writes_sentinel_on_exception(monkeypatch):
 
     _fake_module(monkeypatch, boom)
     session = MagicMock()
+    session.__enter__.return_value = session
     factory = MagicMock(return_value=session)
     sentinel_calls = []
     monkeypatch.setattr(
@@ -155,9 +156,11 @@ def test_system_job_writes_sentinel_on_exception(monkeypatch):
         is_tiktok=False,
         entrypoint="fake_entry",
     )
-    scheduler._run_system_job(spec, factory)  # must not raise
-    session.rollback.assert_called()
-    assert sentinel_calls == ["tick raised: RuntimeError: boom"]
+    with pytest.raises(RuntimeError, match="boom"):
+        scheduler._run_system_job(spec, factory)
+    session.rollback.assert_not_called()
+    session.__exit__.assert_called_once()
+    assert sentinel_calls == []
 
 
 def test_system_job_passes_registry_only_for_token_refresh(monkeypatch):
@@ -169,6 +172,7 @@ def test_system_job_passes_registry_only_for_token_refresh(monkeypatch):
 
     _fake_module(monkeypatch, fake_entry)
     session = MagicMock()
+    session.__enter__.return_value = session
     factory = MagicMock(return_value=session)
     fake_registry = MagicMock(return_value=object())
     monkeypatch.setattr(

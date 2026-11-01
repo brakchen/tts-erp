@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from contextlib import suppress
 from datetime import date
 from typing import Any
 
@@ -39,7 +38,9 @@ _EXPECTED_ERRORS = (
 )
 
 
-def _record_failure(session: Session, *, phase: str, error_type: str) -> dict[str, Any]:
+def _record_failure(
+    session: Session, *, phase: str, error_type: str, job=None
+) -> dict[str, Any]:
     safe_error = f"{phase}:{error_type}"
     result = {
         "status": "failed",
@@ -50,7 +51,10 @@ def _record_failure(session: Session, *, phase: str, error_type: str) -> dict[st
     }
     try:
         with session.begin():
-            job = start_job(session, job_name=JOB_NAME)
+            if job is None:
+                job = start_job(session, job_name=JOB_NAME)
+            else:
+                session.add(job)
             job.extra = result
             finish_job(session, job, status="failed", rows_failed=1, extra=result)
     except _EXPECTED_ERRORS as exc:
@@ -60,22 +64,29 @@ def _record_failure(session: Session, *, phase: str, error_type: str) -> dict[st
 
 def run_scheduled(session: Session) -> dict[str, Any]:
     """Read facts in a repeatable-read snapshot, then atomically write anchors."""
+    with session.begin():
+        audit = start_job(session, job_name=JOB_NAME)
+        session.expunge(audit)
     try:
         with session.begin():
             if session.get_bind().dialect.name == "postgresql":
-                session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+                session.connection(
+                    execution_options={"isolation_level": "REPEATABLE READ"}
+                )
                 from sqlalchemy import text
+
                 session.execute(text("SET TRANSACTION READ ONLY"))
             anchors = build_materialized_rows(session)
     except _EXPECTED_ERRORS as exc:
         error_type = type(exc).__name__
         log.error("deterioration alert read failed error_type=%s", error_type)
-        return _record_failure(session, phase="read", error_type=error_type)
+        return _record_failure(session, phase="read", error_type=error_type, job=audit)
     if not anchors:
         result = {"status": "disabled", "anchorCount": 0, "rows": 0}
         try:
             with session.begin():
-                job = start_job(session, job_name=JOB_NAME)
+                session.add(audit)
+                job = audit
                 job.extra = result
                 finish_job(session, job, status="skipped", extra=result)
         except _EXPECTED_ERRORS as exc:
@@ -84,7 +95,9 @@ def run_scheduled(session: Session) -> dict[str, Any]:
                 "deterioration alert finalize failed phase=finalize error_type=%s",
                 error_type,
             )
-            return _record_failure(session, phase="finalize", error_type=error_type)
+            return _record_failure(
+                session, phase="finalize", error_type=error_type, job=audit
+            )
         return result
     try:
         row_count = 0
@@ -96,11 +109,12 @@ def run_scheduled(session: Session) -> dict[str, Any]:
         log.error(
             "deterioration alert write failed phase=write error_type=%s", error_type
         )
-        return _record_failure(session, phase="write", error_type=error_type)
+        return _record_failure(session, phase="write", error_type=error_type, job=audit)
 
     try:
         with session.begin():
-            job = start_job(session, job_name=JOB_NAME)
+            session.add(audit)
+            job = audit
             result = {
                 "status": "success",
                 "anchorCount": len(anchors),
@@ -123,4 +137,6 @@ def run_scheduled(session: Session) -> dict[str, Any]:
             "deterioration alert finalize failed phase=finalize error_type=%s",
             error_type,
         )
-        return _record_failure(session, phase="finalize", error_type=error_type)
+        return _record_failure(
+            session, phase="finalize", error_type=error_type, job=audit
+        )

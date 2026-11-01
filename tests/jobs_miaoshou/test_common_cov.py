@@ -27,6 +27,7 @@ import os
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.integration import Credentials
 from tts_erp_v2.db.models.procurement import ProcurementAccount
 from tts_erp_v2.jobs.miaoshou._common import (
@@ -38,8 +39,6 @@ from tts_erp_v2.jobs.miaoshou._common import (
     resolve_miaoshou_context,
 )
 from tts_erp_v2.proxy.token_service import upsert_credentials
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 

@@ -16,6 +16,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.monitor_health import MonitorHealth
+from tts_erp_v2.jobs.runner import run_job
 from tts_erp_v2.plugin.monitor_health.domain import (
     OFFLINE_SECONDS,
     SCAN_SECONDS,
@@ -49,6 +50,15 @@ def _line(row: MonitorHealth, notice: str) -> str:
 
 
 def run(session: Session, *, now: datetime | None = None) -> dict:
+    with run_job(session, job_name="plugin.monitor_health") as job:
+        result = _run(session, now=now)
+        job.rows_total = result["sent"] + result["pending"]
+        job.rows_inserted = result["sent"]
+        job.extra = result
+        return result
+
+
+def _run(session: Session, *, now: datetime | None = None) -> dict:
     timestamp = (now or datetime.now(UTC)).timestamp()
     owner = str(uuid4())
     pending: list[tuple[float, str, str, MonitorHealth]] = []
@@ -68,7 +78,9 @@ def run(session: Session, *, now: datetime | None = None) -> dict:
             if notices:
                 state["_dispatch"] = {
                     "owner": owner,
-                    "expires_at": timestamp + NOTIFICATION_BUDGET_SECONDS + SCAN_SECONDS,
+                    "expires_at": timestamp
+                    + NOTIFICATION_BUDGET_SECONDS
+                    + SCAN_SECONDS,
                     "notices": identities,
                     "recovered": {},
                 }
@@ -110,8 +122,14 @@ def run(session: Session, *, now: datetime | None = None) -> dict:
         if not 0 <= accepted <= len(batches):
             raise RuntimeError("monitor health invalid accepted batch count")
     _complete(
-        session, owner=owner, pending=pending,
-        delivered={(row.shop_id, notice) for batch in members[:accepted] for row, notice in batch},
+        session,
+        owner=owner,
+        pending=pending,
+        delivered={
+            (row.shop_id, notice)
+            for batch in members[:accepted]
+            for row, notice in batch
+        },
     )
     delivered = sum(len(batch) for batch in members[:accepted])
     deadline_at_risk = any(
@@ -141,7 +159,9 @@ def run(session: Session, *, now: datetime | None = None) -> dict:
 
 
 def _complete(
-    session: Session, *, owner: str,
+    session: Session,
+    *,
+    owner: str,
     pending: list[tuple[float, str, str, MonitorHealth]],
     delivered: set[tuple[str, str]],
 ) -> None:
@@ -150,7 +170,9 @@ def _complete(
         by_shop.setdefault(shop_id, []).append((since, notice))
     for shop_id, notices in by_shop.items():
         with session.begin():
-            row = session.get(MonitorHealth, shop_id, with_for_update=True, populate_existing=True)
+            row = session.get(
+                MonitorHealth, shop_id, with_for_update=True, populate_existing=True
+            )
             if row is None:
                 continue
             state = deepcopy(row.state)

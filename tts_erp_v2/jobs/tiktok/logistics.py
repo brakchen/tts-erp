@@ -322,7 +322,9 @@ def run(
             raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
         account_id = account.id
 
-        watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
+        watermark_ms = watermarks.get_cursor(
+            session, job_name=JOB_NAME, scope=cursor_scope
+        )
         limit = page_size if page_size and page_size > 0 else TARGET_LIMIT
         targets = _select_tracking_targets(session, account_id=account_id, limit=limit)
 
@@ -478,8 +480,10 @@ def run(
 
     new_cursor_ms: int | None = None
     with session.begin():
-        if max_update_ms is not None and (
-            watermark_ms is None or max_update_ms > _safe_int(watermark_ms)
+        if (
+            not failed
+            and max_update_ms is not None
+            and (watermark_ms is None or max_update_ms > _safe_int(watermark_ms))
         ):
             watermarks.set_cursor(
                 session,

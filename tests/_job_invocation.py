@@ -22,3 +22,22 @@ def invoke_seeded_job(
 ) -> Result:
     session.commit()
     return function(session, *args, **kwargs)
+
+
+def credential_snapshot(provider: str, external_account_id: str):
+    """Immutable dummy view for callback-contract tests without persistence."""
+    from tts_erp_v2.proxy.token_service import CredentialsView
+
+    return CredentialsView(
+        id=0,
+        provider=provider,
+        external_account_id=external_account_id,
+        account_label=None,
+        access_token="TEST_ACCESS",
+        refresh_token="TEST_REFRESH",
+        shop_cipher="TEST_CIPHER",
+        expires_at=None,
+        granted_scopes=None,
+        service_id="TEST_SERVICE",
+        extra=None,
+    )

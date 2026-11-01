@@ -25,14 +25,13 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import func, select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.integration import (
     RawRecord,
     SyncIssue,
     SyncJob,
 )
 from tts_erp_v2.jobs.miaoshou.move_collect import sync_move_collect
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 

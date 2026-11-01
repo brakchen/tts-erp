@@ -55,6 +55,7 @@ Failure mode contract
 * Unexpected exception → ``run_job`` marks SyncJob ``failed``,
   re-raises.
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,12 +63,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.integration import Credentials
 from tts_erp_v2.jobs.runner import record_sync_issue, run_job
 from tts_erp_v2.proxy.token_service import (
     DEFAULT_REFRESH_SKEW,
+    CredentialsView,
     RefresherFn,
     refresh_if_needed,
 )
@@ -108,13 +111,15 @@ def _default_registry() -> RefresherRegistry:
 
     class _NoOp:
         def __call__(self, provider: str, external_account_id: str) -> RefresherFn:
-            def _refresher(p: str, eid: str) -> dict[str, Any]:
+            def _refresher(view: CredentialsView) -> dict[str, Any]:
                 log.warning(
                     "token_refresh: no refresher registered for provider=%s "
                     "external_account_id=%s; leaving token unchanged",
-                    provider, external_account_id,
+                    provider,
+                    external_account_id,
                 )
                 return {"access_token": ""}  # empty → refresh_if_needed skips
+
             return _refresher
 
     return _NoOp()
@@ -248,15 +253,21 @@ def sync_token_refresh(
                     refresher=wrapped,
                     **refresh_kwargs,
                 )
+            except SQLAlchemyError:
+                raise
             except Exception as e:  # noqa: BLE001
                 import traceback
+
                 with session.begin():
                     record_sync_issue(
                         session,
                         job_name=JOB_NAME,
                         issue_type="TOKEN_REFRESH_FAILED",
                         external_id=f"{row.provider}:{row.external_account_id}",
-                        details={"error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()},
+                        details={
+                            "error": f"{type(e).__name__}: {e}",
+                            "traceback": traceback.format_exc(),
+                        },
                     )
                 issues += 1
                 failed += 1
@@ -309,12 +320,7 @@ def sync_token_refresh(
         #     so this branch is skipped). Therefore reaching here
         #     means each row's ``is_expired`` returned False despite the
         #     scan saying due — the legacy bug. Surface it loudly.
-        if (
-            len(rows) > 0
-            and refreshed == 0
-            and failed == 0
-            and issues == 0
-        ):
+        if len(rows) > 0 and refreshed == 0 and failed == 0 and issues == 0:
             details_payload = {
                 "scanned_rows": [
                     {
@@ -380,9 +386,9 @@ def _instrument(
     """
     info: dict[str, bool] = {"called": False, "got_token": False}
 
-    def wrapped(provider: str, external_account_id: str) -> dict[str, Any]:
+    def wrapped(view: CredentialsView) -> dict[str, Any]:
         info["called"] = True
-        result = refresher(provider, external_account_id)
+        result = refresher(view)
         if isinstance(result, dict) and result.get("access_token"):
             info["got_token"] = True
         return result

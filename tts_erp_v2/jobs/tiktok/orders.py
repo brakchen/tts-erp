@@ -441,7 +441,9 @@ def run(
         # 目录缺失的行仍保持 NULL(由 products job 同步后回填,见
         # tts_erp_v2/jobs/tiktok/spu_link.py)。
         spu_map = spu_link.spu_map_for_shop(session, shop_pk=account_id)
-        watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
+        watermark_ms = watermarks.get_cursor(
+            session, job_name=JOB_NAME, scope=cursor_scope
+        )
 
         base_body: dict[str, Any] = {"page_size": page_size}
         if watermark_ms:
@@ -501,6 +503,7 @@ def run(
                 try:
                     line_fields = _parse_line_payload(order_external_id, raw_line)
                 except ParseError as exc:
+                    rows_failed += 1
                     _record_issue(
                         session,
                         job_name=JOB_NAME,
@@ -519,7 +522,8 @@ def run(
                 # (products.py 存 str(spu_id));归一化后再查,避免漏命中
                 snap_pid = line_fields.get("external_product_id_snapshot")
                 resolved = spu_link.link_line_spu_pk(
-                    spu_map, product_snapshot=None if snap_pid is None else str(snap_pid)
+                    spu_map,
+                    product_snapshot=None if snap_pid is None else str(snap_pid),
                 )
                 if resolved is not None:
                     line_fields["spu_pk"] = resolved
@@ -547,7 +551,9 @@ def run(
             update_ms = fields.get("order_modify_time") and _safe_int(
                 fields["order_modify_time"].timestamp() * 1000
             )
-            if update_ms and (max_update_time_ms is None or update_ms > max_update_time_ms):
+            if update_ms and (
+                max_update_time_ms is None or update_ms > max_update_time_ms
+            ):
                 max_update_time_ms = update_ms
 
     # Advance the watermark only when we actually saw new data. An
@@ -555,8 +561,10 @@ def run(
     # spuriously reset it to 0).
     new_cursor_ms: int | None = None
     with session.begin():
-        if max_update_time_ms is not None and (
-            watermark_ms is None or max_update_time_ms > _safe_int(watermark_ms)
+        if (
+            not rows_failed
+            and max_update_time_ms is not None
+            and (watermark_ms is None or max_update_time_ms > _safe_int(watermark_ms))
         ):
             watermarks.set_cursor(
                 session,

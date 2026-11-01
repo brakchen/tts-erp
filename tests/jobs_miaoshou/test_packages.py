@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import func, select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.fulfillment import Shipment
 from tts_erp_v2.db.models.integration import RawRecord, SyncCursor
 from tts_erp_v2.db.models.miaoshou import (
@@ -24,8 +25,6 @@ from tts_erp_v2.jobs.miaoshou.packages import (
     sync_package_detail,
     sync_packages,
 )
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 

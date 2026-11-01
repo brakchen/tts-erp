@@ -7,6 +7,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, text
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     Case,
     CaseLine,
@@ -19,8 +20,6 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.jobs.tiktok import after_sales as after_sales_job
 from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_after_sales, pytest.mark.layer_integration]
 

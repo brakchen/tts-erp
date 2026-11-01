@@ -23,6 +23,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ChannelAccount,
     Credentials,
@@ -39,8 +40,6 @@ from tts_erp_v2.jobs.finance_fee_rate import (
     MIN_ELIGIBLE_ORDER_COUNT,
     compute_shop_fee_rates,
 )
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_finance, pytest.mark.layer_integration]
 

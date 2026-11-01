@@ -8,6 +8,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.db.models.procurement import (
     ProcurementAccount,
@@ -16,8 +17,6 @@ from tts_erp_v2.db.models.procurement import (
 from tts_erp_v2.jobs.miaoshou.sync_source_cost_to_master import (
     sync_source_cost_to_master,
 )
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 

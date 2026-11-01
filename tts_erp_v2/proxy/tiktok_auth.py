@@ -44,9 +44,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.db.models.commerce import ChannelAccount
-
 from tts_erp_v2.proxy.errors import SigningError, UpstreamHttpError
 from tts_erp_v2.proxy.token_service import (
+    CredentialsView,
     TikTokAppCredentials,
     load_credentials,
     resolve_tiktok_app_credentials,
@@ -158,8 +158,7 @@ def _http_app_pair(
     if app_credentials is None:
         return _resolve_app_credentials()
     auth_host = (
-        os.environ.get("TIKTOK_AUTH_HOST", "").strip()
-        or DEFAULT_TIKTOK_AUTH_HOST
+        os.environ.get("TIKTOK_AUTH_HOST", "").strip() or DEFAULT_TIKTOK_AUTH_HOST
     )
     return app_credentials.app_key, app_credentials.app_secret, auth_host
 
@@ -170,19 +169,33 @@ def resolve_tiktok_app_credentials_for_shop(
     shop_id: str,
 ) -> TikTokAppCredentials:
     """Resolve this shop's own App pair that issued its current token."""
-    account = session.execute(select(ChannelAccount).where(
-        ChannelAccount.platform == "tiktok", ChannelAccount.shop_id == shop_id,
-    )).scalar_one_or_none()
     view = load_credentials(session, "tiktok", shop_id)
-    if account is None or view is None or account.credential_id != view.id:
+    if view is None:
         raise SigningError("The shop has no linked TikTok authorization")
-    if not view.service_id:
-        raise SigningError("This shop's token has no issuing Service ID; authorize it again")
+    return resolve_tiktok_app_credentials_for_view(session, view)
+
+
+def resolve_tiktok_app_credentials_for_view(
+    session: Session,
+    view: CredentialsView,
+) -> TikTokAppCredentials:
+    """Resolve the App for exactly the token snapshot used for an HTTP call."""
+    account_id = session.scalar(
+        select(ChannelAccount.id).where(
+            ChannelAccount.platform == "tiktok",
+            ChannelAccount.shop_id == view.external_account_id,
+            ChannelAccount.credential_id == view.id,
+        )
+    )
+    if account_id is None or not view.service_id:
+        raise SigningError("The shop has no linked TikTok authorization")
     app = resolve_tiktok_app_credentials(
-        session, shop_pk=account.id, service_id=view.service_id,
+        session, shop_pk=account_id, service_id=view.service_id
     )
     authorized_revision = (view.extra or {}).get("app_revision")
-    if authorized_revision is not None and str(authorized_revision) != str(app.revision):
+    if authorized_revision is not None and str(authorized_revision) != str(
+        app.revision
+    ):
         raise SigningError("This shop's App configuration changed; authorize it again")
     return app
 
@@ -492,9 +505,7 @@ def build_authorize_url(
             f"scheme={parsed.scheme!r} (host={authorize_host[:120]!r})"
         )
 
-    qs = urllib.parse.urlencode(
-        {"service_id": resolved_service_id, "state": state}
-    )
+    qs = urllib.parse.urlencode({"service_id": resolved_service_id, "state": state})
     return f"{authorize_host.rstrip('/')}{AUTHORIZE_PATH}?{qs}"
 
 
@@ -652,37 +663,25 @@ def _tiktok_refresher(
         if provider != "tiktok":
             # Miaoshou + anything else: return a no-op refresher that
             # the caller treats as 'skip me' (empty access_token).
-            def _noop(p: str, eid: str) -> dict[str, Any]:
+            def _noop(view: CredentialsView) -> dict[str, Any]:
                 log.warning(
-                    "token_refresh: no refresher for provider=%s eid=%s; "
-                    "leaving token unchanged",
-                    p,
-                    eid,
+                    "token_refresh: no refresher for provider=%s eid=%s",
+                    view.provider,
+                    view.external_account_id,
                 )
                 return {"access_token": ""}
 
             return _noop
 
-        def _refresher(p: str, eid: str) -> dict[str, Any]:
-            # Read the current refresh_token from the encrypted row.
-            session = session_factory()
-            try:
-                view = load_credentials(session, p, eid)
-                if view is None or not view.refresh_token:
-                    log.warning(
-                        "token_refresh: tiktok eid=%s has no refresh_token; skipping",
-                        eid,
-                    )
-                    return {"access_token": ""}
-                current_rt = view.refresh_token
-                app_credentials = resolve_tiktok_app_credentials_for_shop(
-                    session,
-                    shop_id=eid,
-                )
-            finally:
-                session.close()
+        def _refresher(view: CredentialsView) -> dict[str, Any]:
+            if not view.refresh_token:
+                return {"access_token": ""}
+            with session_factory() as session, session.begin():
+                app_credentials = resolve_tiktok_app_credentials_for_view(session, view)
+                if app_credentials.service_id != view.service_id:
+                    raise SigningError("TikTok authorization changed during refresh")
             return refresh_tiktok_token(
-                refresh_token=current_rt,
+                refresh_token=view.refresh_token,
                 app_credentials=app_credentials,
             )
 

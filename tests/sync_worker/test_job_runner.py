@@ -19,13 +19,12 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select, text
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import Credentials, SyncJob
 from tts_erp_v2.sync_worker.job_runner import (
     JobResult,
     run_with_sync_job,
 )
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_sync, pytest.mark.layer_integration]
 
@@ -211,7 +210,8 @@ def test_run_with_sync_job_records_failure_when_txn_aborted(db_session) -> None:
 
     def _boom(session):
         # Aborts the current transaction, exactly like a deadlock victim.
-        session.execute(text("SELECT * FROM integration.no_such_relation"))
+        with session.begin():
+            session.execute(text("SELECT * FROM integration.no_such_relation"))
 
     with pytest.raises(Exception):
         invoke_seeded_job(run_with_sync_job, db_session, job_name="TEST_ABORTED_TXN", inner=_boom)

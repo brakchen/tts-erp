@@ -45,6 +45,7 @@ def test_health_trigger_has_no_random_delay_but_preserves_other_jobs():
 def test_system_dispatch_commits_partial_delivery_acknowledgements(monkeypatch):
     assert JOB in scheduler.JOBS
     session = MagicMock()
+    session.__enter__.return_value = session
     factory = MagicMock(return_value=session)
     entrypoint = MagicMock(
         return_value={"sent": 1, "pending": 1, "degraded": True, "deliveryError": True}
@@ -54,6 +55,6 @@ def test_system_dispatch_commits_partial_delivery_acknowledgements(monkeypatch):
     scheduler._run_system_job(scheduler.JOBS[JOB], factory)
     importer.assert_called_once_with(MODULE)
     entrypoint.assert_called_once_with(session)
-    session.commit.assert_called_once_with()
+    session.commit.assert_not_called()
     session.rollback.assert_not_called()
-    session.close.assert_called_once_with()
+    session.__exit__.assert_called_once()

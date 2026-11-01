@@ -770,7 +770,9 @@ def sync_purchase_prices(
         shop_issues = 0
         for observation in latest.values():
             with session.begin():
-                shop_pk, resolution_status = _resolve_database_shop(session, observation)
+                shop_pk, resolution_status = _resolve_database_shop(
+                    session, observation
+                )
                 if shop_pk is not None:
                     matched_shops += 1
                     _resolve_shop_issues(

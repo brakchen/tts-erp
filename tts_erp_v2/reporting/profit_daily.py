@@ -67,9 +67,7 @@ from tts_erp_v2.db.models import (
 log = logging.getLogger("tts_erp_v2.reporting.profit_daily")
 
 
-def _latest_snapshot(
-    session: Session, spu_pk: int
-) -> ProductCostSnapshot | None:
+def _latest_snapshot(session: Session, spu_pk: int) -> ProductCostSnapshot | None:
     """Newest effective snapshot for a SPU (valid_to IS NULL, max
     valid_from)."""
     return session.execute(
@@ -132,7 +130,13 @@ def _record_currency_mismatch(
     )
 
 
-def rebuild(session: Session, *, profit_date: date, spu_pks: list[int] | None = None, calculation_version: int | None = None) -> list[ProductProfitDaily]:
+def rebuild(
+    session: Session,
+    *,
+    profit_date: date,
+    spu_pks: list[int] | None = None,
+    calculation_version: int | None = None,
+) -> list[ProductProfitDaily]:
     """Rebuild the profit rows for ``profit_date``. Returns the rows
     written in this run."""
     if calculation_version is None:

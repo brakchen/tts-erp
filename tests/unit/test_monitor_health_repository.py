@@ -221,6 +221,33 @@ def test_arrival_order_not_lock_or_commit_order(health_schema, shops):
         assert row and row.state["enabled"] and row.shop_name == "TEST_new"
 
 
+class _MemoryJobSession:
+    def __init__(self, rows):
+        self.rows = {row.shop_id: row for row in rows}
+
+    def begin(self):
+        from contextlib import nullcontext
+        return nullcontext()
+
+    def commit(self):
+        pass
+
+    def add(self, row):
+        pass
+
+    def flush(self):
+        pass
+
+    def __contains__(self, row):
+        return False
+
+    def expunge(self, row):
+        pass
+
+    def get(self, model, identity, **kwargs):
+        return self.rows.get(identity)
+
+
 def test_200_valid_stopped_shops_all_notified_in_first_scan_before_180(monkeypatch):
     import json
     from time import monotonic
@@ -259,7 +286,7 @@ def test_200_valid_stopped_shops_all_notified_in_first_scan_before_180(monkeypat
             url, batches, transport=httpx.MockTransport(handle)
         ),
     )
-    session = cast(Session, SimpleNamespace(flush=lambda: None))
+    session = cast(Session, _MemoryJobSession(rows))
     started = monotonic()
     result = invoke_seeded_job(job.run, session, now=datetime.fromtimestamp(165, UTC))
     assert monotonic() - started <= 10
@@ -296,7 +323,7 @@ def test_below_capacity_keeps_offline_delivery_budget(monkeypatch):
         job, "send", lambda url, batches: sent.extend(batches) or len(batches)
     )
     result = invoke_seeded_job(job.run,
-        cast(Session, SimpleNamespace(flush=lambda: None)),
+        cast(Session, _MemoryJobSession(rows)),
         now=datetime.fromtimestamp(165, UTC),
     )
     assert result["sent"] == 1 and not result["pending"]
@@ -338,7 +365,7 @@ def test_actual_transport_timeout_never_acknowledges(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="monitor health"):
         invoke_seeded_job(job.run,
-            cast(Session, SimpleNamespace(flush=lambda: None)),
+            cast(Session, _MemoryJobSession(rows)),
             now=datetime.fromtimestamp(180, UTC),
         )
     assert all(not fault["notified"] for fault in rows[0].state["faults"].values())
@@ -481,7 +508,7 @@ def test_invalid_accepted_prefix_never_acknowledged(monkeypatch, accepted):
     monkeypatch.setattr(job, "send", invalid)
     with pytest.raises(RuntimeError, match="invalid accepted batch count"):
         invoke_seeded_job(job.run,
-            cast(Session, SimpleNamespace(flush=lambda: None)),
+            cast(Session, _MemoryJobSession([row])),
             now=datetime.fromtimestamp(165, UTC),
         )
     assert not row.state["faults"]["heartbeat"]["notified"]

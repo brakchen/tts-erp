@@ -17,6 +17,7 @@ from sqlalchemy import delete, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.analytics.spu_deterioration_alert.config import (
     ALERT_CONFIG_KEY,
     SEED_FALLBACK_CONFIG,
@@ -37,8 +38,6 @@ from tts_erp_v2.jobs.spu_deterioration_alert import (
     materialize_alerts,
     run_scheduled,
 )
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = pytest.mark.domain_sync
 

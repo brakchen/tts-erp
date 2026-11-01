@@ -37,6 +37,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models import (
@@ -44,6 +45,8 @@ from tts_erp_v2.db.models import (
     ChannelProduct,
     ChannelProductVariant,
     RawRecord,
+    SalesOrder,
+    SalesOrderLine,
     SyncIssue,
 )
 from tts_erp_v2.jobs.tiktok import spu_link
@@ -200,6 +203,7 @@ def _build_default_image_fetcher(proxy_call: ProxyCall) -> ImageFetcher:
         if response.get("code") != 0 or not isinstance(response.get("data"), dict):
             raise ImageFetchError("Get Product returned an invalid response")
         return response["data"]
+
     return fetch
 
 
@@ -276,7 +280,9 @@ def run(
         if image_fetcher is None:
             image_fetcher = _build_default_image_fetcher(proxy_call)
 
-        watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
+        watermark_ms = watermarks.get_cursor(
+            session, job_name=JOB_NAME, scope=cursor_scope
+        )
 
         base_body: dict[str, Any] = {"page_size": page_size}
         if watermark_ms:
@@ -295,7 +301,11 @@ def run(
     for raw in products:
         product_id = str(raw.get("product_id") or raw.get("id") or "<unknown>")
         try:
-            details[product_id] = image_fetcher(shop_pk=account_id, product_id=product_id)
+            details[product_id] = image_fetcher(
+                shop_pk=account_id, product_id=product_id
+            )
+        except SQLAlchemyError:
+            raise
         except Exception as exc:
             image_errors[product_id] = exc
 
@@ -361,7 +371,9 @@ def run(
             # when the detail fetch failed.
             search_skus = raw.get("skus") or raw.get("variants") or []
             detail_skus = (
-                (full_product or {}).get("skus") if isinstance(full_product, dict) else None
+                (full_product or {}).get("skus")
+                if isinstance(full_product, dict)
+                else None
             )
             # Match by variant ID; if detail didn't carry a particular SKU,
             # we still write it from search data (no image in that case).
@@ -405,14 +417,38 @@ def run(
 
     # 2026-09-06:订单行若先于产品目录落地(spu_pk NULL),产品同步完
     # 成后回填补关联(幂等;只碰 NULL 行)。根因与收敛路径见 spu_link 模块。
+    linked = 0
+    after_line_id = 0
+    while True:
+        with session.begin():
+            ids = list(
+                session.scalars(
+                    select(SalesOrderLine.id)
+                    .join(SalesOrder, SalesOrder.id == SalesOrderLine.order_pk)
+                    .where(
+                        SalesOrder.shop_pk == account_id,
+                        SalesOrderLine.spu_pk.is_(None),
+                        SalesOrderLine.id > after_line_id,
+                    )
+                    .order_by(SalesOrderLine.id)
+                    .limit(100)
+                )
+            )
+            if not ids:
+                break
+            linked += spu_link.backfill_null_line_spu_pk(
+                session, shop_pk=account_id, line_ids=ids
+            )
+            after_line_id = ids[-1]
+    if linked:
+        sys.stderr.write(f"[tiktok.products] linked {linked} order lines to SPUs\n")
     with session.begin():
-        linked = spu_link.backfill_null_line_spu_pk(session, shop_pk=account_id)
-        if linked:
-            sys.stderr.write(f"[tiktok.products] linked {linked} order lines to SPUs\n")
-
         new_cursor_ms: int | None = None
-        if max_update_ms is not None and (
-            watermark_ms is None or max_update_ms > _safe_int(watermark_ms)
+        if (
+            not rows_failed
+            and not rows_image_fetch_failed
+            and max_update_ms is not None
+            and (watermark_ms is None or max_update_ms > _safe_int(watermark_ms))
         ):
             watermarks.set_cursor(
                 session,

@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ChannelAccount,
     Credentials,
@@ -28,8 +29,6 @@ from tts_erp_v2.db.models import (
 from tts_erp_v2.jobs.tiktok import logistics as logistics_job
 from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_logistics, pytest.mark.layer_integration]
 

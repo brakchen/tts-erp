@@ -13,6 +13,7 @@ kept as a secondary fallback in reporting._source_cost_lookup).
 Single SQL pass; idempotent via IS DISTINCT FROM guard; no external API.
 Runs after common_collect_box (6h cadence aligned) so the offer data is fresh.
 """
+
 from __future__ import annotations
 
 import logging
@@ -92,16 +93,25 @@ def sync_source_cost_to_master(session: Session) -> dict[str, Any]:
         rows_updated = 0
         while True:
             with session.begin():
-                ids = list(session.scalars(text(
-                    "SELECT id FROM procurement.procurement_products "
-                    "WHERE id > :after_id AND external_product_id ~ '^[0-9]{15,20}$' "
-                    "ORDER BY id LIMIT 100"
-                ), {"after_id": after_id}))
+                ids = list(
+                    session.scalars(
+                        text(
+                            "SELECT id FROM procurement.procurement_products "
+                            "WHERE id > :after_id AND external_product_id ~ '^[0-9]{15,20}$' "
+                            "ORDER BY id LIMIT 100"
+                        ),
+                        {"after_id": after_id},
+                    )
+                )
                 if not ids:
                     break
-                updated = session.execute(_SQL_BACKFILL, {
-                    "after_id": after_id, "through_id": ids[-1],
-                }).fetchall()
+                updated = session.execute(
+                    _SQL_BACKFILL,
+                    {
+                        "after_id": after_id,
+                        "through_id": ids[-1],
+                    },
+                ).fetchall()
                 rows_updated += len(updated)
                 after_id = ids[-1]
 

@@ -133,8 +133,11 @@ def run_job(
         yield job
         with session.begin():
             session.add(job)
-            if job.status == "running":
-                finish_job(session, job, status="succeeded")
+            finish_job(
+                session,
+                job,
+                status="succeeded" if job.status == "running" else job.status,
+            )
             session.flush()
             session.expunge(job)
     except BaseException as error:
@@ -143,8 +146,12 @@ def run_job(
         try:
             with session.begin():
                 session.add(job)
-                finish_job(session, job, status="failed",
-                           error_message=f"{type(error).__name__}: {error}")
+                finish_job(
+                    session,
+                    job,
+                    status="failed",
+                    error_message=f"{type(error).__name__}: {error}",
+                )
                 session.flush()
                 session.expunge(job)
         except Exception:

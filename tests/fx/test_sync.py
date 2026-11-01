@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models import (
     ExchangeRate,
     ExchangeRateSnapshot,
@@ -40,8 +41,6 @@ from tts_erp_v2.proxy.exchangerate import (
     ExchangeRateAPIError,
     StandardRates,
 )
-
-from tests._job_invocation import invoke_seeded_job
 
 T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 RATES = {"USD": "1", "CNY": "7.1", "EUR": "0.9"}

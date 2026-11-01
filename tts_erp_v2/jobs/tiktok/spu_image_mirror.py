@@ -169,8 +169,11 @@ def run(
             rows_failed += 1
             with session.begin():
                 record_sync_issue(
-                    session, job_name=JOB_NAME, issue_type="MIRROR_DOWNLOAD_FAILED",
-                    external_id=spu_id, details={"url": url, "error": str(exc)},
+                    session,
+                    job_name=JOB_NAME,
+                    issue_type="MIRROR_DOWNLOAD_FAILED",
+                    external_id=spu_id,
+                    details={"url": url, "error": str(exc)},
                 )
             continue
         with session.begin():
@@ -178,7 +181,9 @@ def run(
             # Never advertise the old mirror as the new product image.
             updated = session.execute(
                 update(ChannelProduct)
-                .where(ChannelProduct.id == spu_pk, ChannelProduct.main_image_url == url)
+                .where(
+                    ChannelProduct.id == spu_pk, ChannelProduct.main_image_url == url
+                )
                 .values(mirror_object_key=key)
             ).rowcount
             if updated:
@@ -201,13 +206,17 @@ def _resolve_open_issues(session: Session, spu_id: str) -> int:
     """
     from datetime import UTC, datetime
 
-    rows = session.execute(
-        select(SyncIssue)
-        .where(SyncIssue.job_name == JOB_NAME)
-        .where(SyncIssue.issue_type == "MIRROR_DOWNLOAD_FAILED")
-        .where(SyncIssue.external_id == str(spu_id))
-        .where(SyncIssue.resolved_at.is_(None))
-    ).scalars().all()
+    rows = (
+        session.execute(
+            select(SyncIssue)
+            .where(SyncIssue.job_name == JOB_NAME)
+            .where(SyncIssue.issue_type == "MIRROR_DOWNLOAD_FAILED")
+            .where(SyncIssue.external_id == str(spu_id))
+            .where(SyncIssue.resolved_at.is_(None))
+        )
+        .scalars()
+        .all()
+    )
     now = datetime.now(UTC)
     for row in rows:
         row.resolved_at = now

@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
+import importlib.util
+import os
 from argparse import Namespace
 from datetime import UTC, datetime
 from decimal import Decimal
-import importlib.util
-import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
+from alembic import command
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.commerce import SalesOrderLinePriceObservation
 from tts_erp_v2.jobs.tiktok.order_detail import detail_response_matches_request
-from tts_erp_v2.jobs.tiktok.orders import incoming_order_is_stale
 from tts_erp_v2.jobs.tiktok.order_prices import (
     DEFAULT_ONE_PER_LINE,
     GIFT,
@@ -29,8 +29,7 @@ from tts_erp_v2.jobs.tiktok.order_prices import (
     normalize_price_line,
     upsert_price_observation,
 )
-
-from tests._job_invocation import invoke_seeded_job
+from tts_erp_v2.jobs.tiktok.orders import incoming_order_is_stale
 
 CAPTURED = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 
@@ -415,7 +414,7 @@ def test_detail_mismatched_response_does_not_persist_or_resolve_retry(price_obse
 
 
 def test_backfill_dry_run_uses_lineage_and_writes_nothing(price_observation_schema, db_engine) -> None:
-    from tts_erp_v2.db.models import RawRecord, SyncIssue
+    from tts_erp_v2.db.models import SyncIssue
 
     with Session(db_engine) as session:
         account = _make_account(session, "DRYRUN")

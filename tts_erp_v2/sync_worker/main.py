@@ -207,9 +207,11 @@ def _run_one_job(name: str) -> int:
     try:
         if spec.is_tiktok:
             from tts_erp_v2.sync_worker.scheduler import _run_tiktok_job
+
             _run_tiktok_job(spec, session_factory)
         else:
             from tts_erp_v2.sync_worker.scheduler import _run_system_job
+
             _run_system_job(spec, session_factory)
     except Exception:
         logging.getLogger(__name__).exception("[%s] one-shot run failed", name)
@@ -260,9 +262,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="tts-erp v2 sync worker (no subcommand → daemon mode)",
     )
     sub = parser.add_subparsers(dest="subcommand")
-    sub.add_parser(
-        "daemon", help="start the BlockingScheduler and block (default)"
-    )
+    sub.add_parser("daemon", help="start the BlockingScheduler and block (default)")
     sub.add_parser("list", help="print the JOBS registry and exit")
     run_parser = sub.add_parser("run", help="one-shot run of the named job")
     run_parser.add_argument("job_name")

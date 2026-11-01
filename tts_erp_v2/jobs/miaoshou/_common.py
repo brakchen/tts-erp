@@ -19,6 +19,7 @@ Design notes
   external_account_id)``. The miaoshou-side external_account_id is
   the ``licenseId`` — stable across shop additions.
 """
+
 from __future__ import annotations
 
 import logging

@@ -151,7 +151,9 @@ def sync_fx_rates(
         existing = session.execute(
             select(ExchangeRateSnapshot)
             .where(ExchangeRateSnapshot.base_code == code)
-            .where(ExchangeRateSnapshot.upstream_last_update == rates.upstream_last_update)
+            .where(
+                ExchangeRateSnapshot.upstream_last_update == rates.upstream_last_update
+            )
             .order_by(ExchangeRateSnapshot.id.desc())
             .limit(1)
         ).scalar_one_or_none()
@@ -212,16 +214,16 @@ def run_scheduled(session: Session) -> dict[str, Any]:
     Reads the sync-worker env (``EXCHANGERATE_API_KEY`` etc.), wraps the
     pass in the shared ``sync_jobs`` lifecycle and returns counters.
     """
-    api_key = (os.environ.get(ENV_API_KEY) or "").strip()
-    if not api_key:
-        raise RuntimeError(
-            f"{ENV_API_KEY} is not set — add it to .env (the "
-            "tts-erp-sync.service EnvironmentFile) before enabling fx.sync"
-        )
-    base_code = (os.environ.get(ENV_BASE_CODE) or "USD").strip().upper() or "USD"
-    force = (os.environ.get(ENV_FORCE) or "").strip() == "1"
-
     with run_job(session, job_name=JOB_NAME) as job:
+        api_key = (os.environ.get(ENV_API_KEY) or "").strip()
+        if not api_key:
+            raise RuntimeError(
+                f"{ENV_API_KEY} is not set — add it to .env (the "
+                "tts-erp-sync.service EnvironmentFile) before enabling fx.sync"
+            )
+        base_code = (os.environ.get(ENV_BASE_CODE) or "USD").strip().upper() or "USD"
+        force = (os.environ.get(ENV_FORCE) or "").strip() == "1"
+
         try:
             result = sync_fx_rates(
                 session, api_key=api_key, base_code=base_code, force=force

@@ -27,12 +27,11 @@ NOT commit again (the helper manages transaction boundaries).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-
-import logging
 
 from sqlalchemy.orm import Session
 

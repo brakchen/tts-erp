@@ -5,10 +5,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
+from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.integration import SyncJob
 from tts_erp_v2.jobs.miaoshou.collect_box import sync_collect_box
-
-from tests._job_invocation import invoke_seeded_job
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 

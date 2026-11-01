@@ -40,6 +40,7 @@ from tts_erp_v2.db.models import (
 )
 from tts_erp_v2.jobs.runner import record_sync_issue
 from tts_erp_v2.jobs.tiktok import spu_link
+from tts_erp_v2.jobs.tiktok.order_prices import persist_price_observation
 from tts_erp_v2.jobs.tiktok.orders import (
     ParseError,
     ProxyCall,
@@ -51,7 +52,6 @@ from tts_erp_v2.jobs.tiktok.orders import (
     _upsert_sales_order,
     incoming_order_is_stale,
 )
-from tts_erp_v2.jobs.tiktok.order_prices import persist_price_observation
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 JOB_NAME = "tiktok.order_detail"
@@ -69,7 +69,9 @@ AUTO_ISSUE_TYPES: tuple[str, ...] = ("PARSE_ERROR", "UNKNOWN_ORDER", "UNKNOWN_LI
 AUTO_BATCH_SIZE: int = 50
 
 
-def detail_response_matches_request(requested_order_id: str, response_order_id: str) -> bool:
+def detail_response_matches_request(
+    requested_order_id: str, response_order_id: str
+) -> bool:
     return requested_order_id == response_order_id
 
 
@@ -302,7 +304,8 @@ def run(
                 # (products.py 存 str(spu_id));归一化后再查,避免漏命中
                 snap_pid = line_fields.get("external_product_id_snapshot")
                 resolved = spu_link.link_line_spu_pk(
-                    spu_map, product_snapshot=None if snap_pid is None else str(snap_pid)
+                    spu_map,
+                    product_snapshot=None if snap_pid is None else str(snap_pid),
                 )
                 if resolved is not None:
                     line_fields["spu_pk"] = resolved

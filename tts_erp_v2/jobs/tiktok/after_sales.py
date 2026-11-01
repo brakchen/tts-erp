@@ -7,6 +7,7 @@ watermark cursor logic.
 
 Cursor: epoch ms in ``integration.sync_cursors`` (scope=shop_id).
 """
+
 from __future__ import annotations
 
 import logging
@@ -133,9 +134,8 @@ def _resolve_case_line_key(raw_line: dict) -> tuple[str | None, str | None]:
     ``sku_id`` is set, ``sales_order_line_key`` is ``None`` and the
     caller must resolve via ``external_variant_id_snapshot``.
     """
-    case_side_id = (
-        raw_line.get("cancel_line_item_id")
-        or raw_line.get("return_line_item_id")
+    case_side_id = raw_line.get("cancel_line_item_id") or raw_line.get(
+        "return_line_item_id"
     )
     order_side_id = (
         raw_line.get("order_line_item_id")
@@ -230,7 +230,9 @@ def _parse_case(case_type: str, raw: dict) -> dict:
         "case_type": _resolve_case_type(raw, case_type),
         "external_case_id": str(cid),
         "order_id": str(order_id) if order_id else None,
-        "status": raw.get("status") or raw.get("return_status") or raw.get("cancel_status"),
+        "status": raw.get("status")
+        or raw.get("return_status")
+        or raw.get("cancel_status"),
         # reason 字段名：returns 是 return_reason/return_reason_text，
         # cancellations 是 cancel_reason/cancel_reason_text（9 月 CANCEL
         # case reason 全 NULL 就是因为只读了不存在的 reason_code）。
@@ -251,7 +253,9 @@ def _parse_case(case_type: str, raw: dict) -> dict:
     }
 
 
-def _resolve_order_pk(session: Session, account_id: int, order_id: str | None) -> int | None:
+def _resolve_order_pk(
+    session: Session, account_id: int, order_id: str | None
+) -> int | None:
     if not order_id:
         return None
     return session.execute(
@@ -344,7 +348,9 @@ def _process_one_type(
             update_cols = {k: insert_values[k] for k in fields if k != "order_id"}
             update_cols["raw_record_id"] = raw_row.id
             session.execute(
-                pg_insert(Case).values(**insert_values).on_conflict_do_update(
+                pg_insert(Case)
+                .values(**insert_values)
+                .on_conflict_do_update(
                     index_elements=["shop_pk", "external_case_id"],
                     set_=update_cols,
                 )
@@ -401,7 +407,8 @@ def _process_one_type(
                     sol_id = session.execute(
                         select(SalesOrderLine.id).where(
                             SalesOrderLine.order_pk == so_id,
-                            SalesOrderLine.external_variant_id_snapshot == raw_line.get("sku_id"),
+                            SalesOrderLine.external_variant_id_snapshot
+                            == raw_line.get("sku_id"),
                         )
                     ).scalar_one_or_none()
                     lookup_path = "external_variant_id_snapshot"
@@ -418,13 +425,17 @@ def _process_one_type(
                         details={
                             "order_pk": so_id,
                             "lookup_path": lookup_path,
-                            "lookup_value": str(lookup_value) if lookup_value is not None else None,
+                            "lookup_value": str(lookup_value)
+                            if lookup_value is not None
+                            else None,
                         },
                     )
                     continue
                 line_values["sales_order_line_id"] = sol_id
                 session.execute(
-                    pg_insert(CaseLine).values(**line_values).on_conflict_do_update(
+                    pg_insert(CaseLine)
+                    .values(**line_values)
+                    .on_conflict_do_update(
                         index_elements=["case_id", "external_case_line_id"],
                         set_={k: line_values[k] for k in line_values if k != "case_id"},
                     )
@@ -454,9 +465,7 @@ def run(
             )
         ).scalar_one_or_none()
         if account is None:
-            raise UpstreamJobError(
-                f"shops row missing for tiktok shop_id={shop_id!r}"
-            )
+            raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
         account_id = account.id
 
         watermark_ms = watermarks.get_cursor(
@@ -511,9 +520,11 @@ def run(
 
     new_cursor_ms: int | None = None
     with session.begin():
-        if max_update_ms is not None and inserted > 0 and (
-            watermark_ms is None
-            or max_update_ms > _safe_int(watermark_ms)
+        if (
+            not failed
+            and max_update_ms is not None
+            and inserted > 0
+            and (watermark_ms is None or max_update_ms > _safe_int(watermark_ms))
         ):
             watermarks.set_cursor(
                 session,
@@ -545,6 +556,7 @@ def _auto_resolve_stale_issues(session: Session, job_name: str, days: int) -> in
     JobResult 监控可见）。
     """
     from datetime import UTC, datetime, timedelta
+
     cutoff = datetime.now(UTC) - timedelta(days=days)
     try:
         rows = session.execute(
