@@ -203,7 +203,9 @@ def test_price_tooltip_survives_lazy_drill_cycles(frontend_browser_renderer, mon
         page.get_by_role("dialog", name="采购价统计口径").wait_for(state="visible")
         page.get_by_role("button", name="关闭价格说明").click()
         page.get_by_role("dialog", name="采购价统计口径").wait_for(state="hidden")
-        button.focus()
+        # Role hiding may precede Presence teardown. Wait for the real FocusScope
+        # return before keyboard reopening instead of forcing focus during exit.
+        expect(button).to_be_focused()
         page.keyboard.press("Enter")
         page.get_by_role("dialog", name="采购价统计口径").wait_for(state="visible")
         page.keyboard.press("Escape")
