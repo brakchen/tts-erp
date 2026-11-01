@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Input, Label, TextArea, TextField } from '@heroui/react';
+import { Button, Input, Label, Tag, TagGroup, TextArea, TextField } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
@@ -107,8 +107,16 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
   const options = [...new Map([...selected, ...choices].map((item) => [item.spu_id, item])).values()];
   return <section aria-label={focused ? '重点关注 SPU' : 'SPU 范围'} className="erp-panel space-y-3">
     <div className="flex flex-wrap items-center gap-3"><h2 className="erp-section-heading">{focused ? '重点关注 SPU' : 'SPU 范围'}</h2><span id="spu-selection-count">{focused ? '已关注' : '已选择'} {focused ? savedCount ?? '—' : draft.length} 个</span>{focused && <span>修改后实时保存</span>}</div>
-    <div className="erp-spu-selection-search"><TextField value={query} onChange={setQuery} isDisabled={disabled}><Label>按 SPU ID / 标题搜索</Label><Input fullWidth /></TextField><Button variant="secondary" isDisabled={disabled} onPress={() => setBatchOpen(!batchOpen)} aria-expanded={batchOpen}>批量粘贴</Button></div>
-    {selected.length > 0 && <details open={selected.length <= 6}><summary>{focused ? '当前关注清单' : '当前已选商品'} · {selected.length} 个</summary><ul className="max-h-48 space-y-2 overflow-y-auto">{selected.map((item) => <li key={item.spu_id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">{item.title ?? item.spu_id} · {item.spu_id}</span><Button size="sm" variant="secondary" aria-label={`移除 SPU ${item.spu_id}`} isDisabled={disabled} onPress={() => { void change(draft.filter((id) => id !== item.spu_id)); }}>移除</Button></li>)}</ul></details>}
+    <div className="erp-spu-selection-search"><TextField value={query} onChange={setQuery} isDisabled={disabled}><Label>按 SPU ID / 标题搜索</Label>
+      <div id="spu-selection-field" className="erp-spu-selection-field" role="group" aria-label="SPU 搜索与已选标签">
+        {selected.length > 0 && <TagGroup aria-label={focused ? '已关注 SPU 标签' : '已选 SPU 标签'} disabledKeys={disabled ? draft : []} onRemove={(keys) => { void change(draft.filter((id) => !keys.has(id))); }} size="sm">
+          <TagGroup.List>{selected.map((item) => <Tag key={item.spu_id} id={item.spu_id} textValue={`${item.spu_id} ${item.title ?? ''}`}>
+            <span className="min-w-0 break-all" title={item.title ?? item.spu_id}>{item.spu_id}</span><Tag.RemoveButton aria-label={`移除 SPU ${item.spu_id}`} isDisabled={disabled} />
+          </Tag>)}</TagGroup.List>
+        </TagGroup>}
+        <Input fullWidth className="erp-spu-query-input" placeholder="输入 SPU ID 或标题继续添加" />
+      </div>
+    </TextField><Button variant="secondary" isDisabled={disabled} onPress={() => setBatchOpen(!batchOpen)} aria-expanded={batchOpen}>批量粘贴</Button></div>
     <fieldset id={focused ? 'focused-spu-select' : 'filter-spu-ids'} aria-label={focused ? '重点关注 SPU 多选' : '批量选择 SPU'} disabled={disabled} className="space-y-2"><legend>{query ? '搜索结果 · 勾选添加，取消勾选仅移除此项' : '输入关键词搜索，或批量粘贴 SPU ID'}</legend><div className="max-h-48 space-y-2 overflow-y-auto">{options.filter((item) => query.trim() || !draft.includes(item.spu_id)).map((item) => <label className="flex items-start gap-2" key={item.spu_id}><input type="checkbox" checked={draft.includes(item.spu_id)} onChange={(event) => { void change(event.target.checked ? [...draft, item.spu_id] : draft.filter((id) => id !== item.spu_id)); }} /><span className="min-w-0 break-all">{item.spu_id} · {item.title ?? '无标题'} · {item.status ?? '未知状态'}</span></label>)}</div></fieldset>
     {batchOpen && <div className="space-y-2"><TextField value={paste} onChange={setPaste} isDisabled={disabled}><Label>粘贴 SPU ID（逗号、空格或换行分隔）</Label><TextArea fullWidth rows={3} /></TextField><Button isDisabled={disabled || !paste.trim()} onPress={() => { void resolvePaste(); }}>解析并添加</Button></div>}
     {!focused && <div className="flex flex-wrap items-center gap-2"><Button id="btn-spu-apply" isDisabled={disabled} onPress={() => onApply(draft)}>查询</Button><Button id="btn-spu-clear" variant="secondary" isDisabled={!shopPk || loading || cooldown || needsCheck || blocked} onPress={() => { cancelResolution(); setDraft([]); setPaste(''); setNotice(''); onApply([]); }}>清空</Button><span>选择后点击查询应用；空范围表示店铺全部 SPU。</span></div>}

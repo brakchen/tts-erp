@@ -5,7 +5,11 @@
 .erp-profit-dates > label { flex: 0 1 190px; }
 .erp-profit-projection { width: 140px; }
 .erp-spu-selection-search { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
-.erp-spu-selection-search > :first-child { width: min(100%, 480px); }
+.erp-spu-selection-search > :first-child { width: min(100%, 480px); flex: 1 1 480px; min-width: 0; }
+.erp-spu-selection-field { min-width: 0; padding: 8px; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); }
+.erp-spu-selection-field:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.erp-spu-selection-field [data-slot=tag] { max-width: 100%; height: auto; min-height: 32px; }
+.erp-spu-selection-field .erp-spu-query-input { border: 0; box-shadow: none; background: transparent; }
 .erp-profit-freshness { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--muted); font-size: 12px; }
 .erp-profit-freshness > span { min-width: 0; overflow-wrap: anywhere; }
 .erp-profit-freshness [data-severity=crit] { color: var(--danger); }

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Page from './index';
 import type { FrontendBootstrap } from '../../shared/contracts';
@@ -61,6 +61,30 @@ it('adding one focused search result never implicitly removes existing subscript
   expect(patch.init?.headers && new Headers(patch.init.headers).get('X-Requested-With')).toBe('tts-erp');
   expect(screen.getByRole('button', { name: '移除 SPU TEST_OLD' })).toBeInTheDocument();
 });
+it('shows every focused SPU inside the search field and removes only the clicked tag after saving', async () => {
+  stored = Array.from({ length: 29 }, (_, i) => ({ spuId: `TEST_TAG_${i}`, title: `TEST 商品 ${i}` }));
+  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  await screen.findByRole('button', { name: '移除 SPU TEST_TAG_28' });
+  const field = screen.getByRole('group', { name: 'SPU 搜索与已选标签' });
+  expect(within(field).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(29);
+  expect(field).toContainElement(screen.getByLabelText('按 SPU ID / 标题搜索'));
+  expect(field.querySelector('details')).toBeNull();
+  fireEvent.click(within(field).getByRole('button', { name: '移除 SPU TEST_TAG_12' }));
+  await waitFor(() => expect(within(field).queryByRole('button', { name: '移除 SPU TEST_TAG_12' })).toBeNull());
+  expect(within(field).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(28);
+  const writes = calls.filter((call) => call.init?.method === 'PATCH');
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0].init?.body))).toEqual({ addSpuIds: [], removeSpuIds: ['TEST_TAG_12'] });
+  expect(stored.map((item) => item.spuId)).toEqual(Array.from({ length: 29 }, (_, i) => `TEST_TAG_${i}`).filter((id) => id !== 'TEST_TAG_12'));
+});
+it('shows focused tags in the search field without allowing readonly removal', async () => {
+  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus', roleCapabilities: { readwrite: false, admin: false } }} />);
+  const remove = await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
+  expect(screen.getByRole('group', { name: 'SPU 搜索与已选标签' })).toContainElement(remove);
+  expect(remove).toBeDisabled();
+  fireEvent.click(remove);
+  expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(0);
+});
 it('a failed focused mutation preserves selection and requires reading facts before another write', async () => {
   patchFailure = 500; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   const remove = await screen.findByRole('button', { name: '移除 SPU TEST_OLD' }); fireEvent.click(remove);
@@ -119,7 +143,7 @@ it('removing a focused item on the last page resets offset before refreshing the
   await screen.findByText('TEST_RESULT');
   fireEvent.click(screen.getByRole('button', { name: '下一页' }));
   await screen.findByText('第 2 页 · 共 2 页');
-  fireEvent.click(screen.getByText('当前关注清单 · 101 个'));
+  expect(within(screen.getByRole('group', { name: 'SPU 搜索与已选标签' })).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(101);
   fireEvent.click(screen.getByRole('button', { name: '移除 SPU TEST_PAGE_0' }));
   await screen.findByText('第 1 页 · 共 1 页');
   await screen.findByText('TEST_RESULT');
