@@ -22,7 +22,7 @@ async function mount(bootstrap = props.bootstrap) {
 }
 async function openRegister(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText(shop.shop_id);
-  await user.click(screen.getByRole('button', { name: '手工补录', exact: true }));
+  await user.click(screen.getByRole('button', { name: '手工补录' }));
   return screen.getByRole('dialog');
 }
 async function fillRegister(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
@@ -30,7 +30,7 @@ async function fillRegister(user: ReturnType<typeof userEvent.setup>, dialog: HT
 }
 async function openApp(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText(shop.shop_id);
-  await user.click(screen.getByRole('button', { name: '配置 App', exact: true }));
+  await user.click(screen.getByRole('button', { name: '配置 App' }));
   return screen.getByRole('dialog');
 }
 async function fillApp(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement, secret = 'TEST_secret') {
@@ -45,7 +45,7 @@ describe('shops content', () => {
   it.each([undefined, { readwrite: false, admin: false }, { readwrite: false, admin: true }])('fails closed on missing/readonly hints without inventing a hierarchy %#', async (roleCapabilities) => {
     const fetcher = api(async () => { throw new Error('TEST no commands expected'); });
     await mount({ ...props.bootstrap, roleCapabilities }); await screen.findByText(shop.shop_id);
-    for (const name of ['手工补录', '编辑信息', '配置 App', '获取授权链接']) expect(screen.getByRole('button', { name, exact: true })).toBeDisabled();
+    for (const name of ['手工补录', '编辑信息', '配置 App', '获取授权链接']) expect(screen.getByRole('button', { name })).toBeDisabled();
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -122,7 +122,7 @@ describe('shops content', () => {
 
   it.each(['2026-10-24', ''])('edits only the opening date by internal PK, including explicit clear-to-null %s', async (openedDate) => {
     const commands: Command[] = []; api(async (url, init) => { commands.push({ url, init }); return json({ shop: { ...shop, opened_date: openedDate || null } }); });
-    const user = userEvent.setup(); await mount(); await screen.findByText(shop.shop_id); await user.click(screen.getByRole('button', { name: '编辑信息', exact: true }));
+    const user = userEvent.setup(); await mount(); await screen.findByText(shop.shop_id); await user.click(screen.getByRole('button', { name: '编辑信息' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).queryByRole('textbox', { name: '店铺名称' })).toBeNull();
     expect(within(dialog).queryByRole('textbox', { name: '区域' })).toBeNull();
@@ -137,7 +137,7 @@ describe('shops content', () => {
     const commands: Command[] = []; api(async (url, init) => { commands.push({ url, init }); return json({ authorize_url: 'https://services.tiktokshop.com/open/authorize?state=TEST_one', state_expires_at: '2026-10-24T20:00:00+00:00' }); });
     const user = userEvent.setup(); const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     await mount(); await screen.findByText(shop.shop_id); expect(commands).toHaveLength(0);
-    await user.click(screen.getByRole('button', { name: '获取授权链接', exact: true }));
+    await user.click(screen.getByRole('button', { name: '获取授权链接' }));
     const dialog = await screen.findByRole('dialog');
     const link = within(dialog).getByRole('link', { name: '打开授权页面' });
     expect(link).toHaveAttribute('href', 'https://services.tiktokshop.com/open/authorize?state=TEST_one');
@@ -153,7 +153,7 @@ describe('shops content', () => {
     api(async () => json({}, 403)); const user = userEvent.setup(); await mount(); let dialog = await openApp(user);
     expect(within(dialog).getByText(/配置仅用于当前店铺/)).toBeVisible();
     await user.type(within(dialog).getByLabelText('App Secret', { exact: true }), 'TEST_cancel');
-    await user.click(within(dialog).getByRole('button', { name: '取消', exact: true }));
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
     expect(window.confirm).toHaveBeenCalledWith('放弃本次尚未保存的修改？');
     dialog = await openApp(user); expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('');
   });
@@ -162,7 +162,7 @@ describe('shops content', () => {
     let commands = 0; api(async () => { commands++; return json({}, 429, { 'Retry-After': '600' }); });
     const user = userEvent.setup(); const view = await mount(); const dialog = await openApp(user); await fillApp(user, dialog);
     await user.click(save(dialog)); await within(dialog).findByText(/HTTP 429/);
-    expect(save(dialog)).toBeDisabled(); expect(within(dialog).getByRole('button', { name: '取消', exact: true })).toBeEnabled();
+    expect(save(dialog)).toBeDisabled(); expect(within(dialog).getByRole('button', { name: '取消' })).toBeEnabled();
     expect(within(dialog).getByLabelText('App Secret', { exact: true })).toBeEnabled();
     expect(commands).toBe(1); view.unmount();
   });
@@ -171,7 +171,7 @@ describe('shops content', () => {
     let commands = 0; api(async () => { commands++; return json({ created: true, shop }); });
     const user = userEvent.setup(); const view = await mount(); const dialog = await openRegister(user);
     const { default: Shops } = await import(modulePath); view.rerender(<Shops bootstrap={{ ...props.bootstrap, roleCapabilities: undefined }} />);
-    expect(save(dialog)).toBeDisabled(); expect(within(dialog).getByRole('button', { name: '取消', exact: true })).toBeEnabled(); expect(commands).toBe(0);
+    expect(save(dialog)).toBeDisabled(); expect(within(dialog).getByRole('button', { name: '取消' })).toBeEnabled(); expect(commands).toBe(0);
   });
 
   it('clears correlated App pair errors when the draft returns to keeping the existing pair', async () => {
@@ -214,7 +214,7 @@ describe('shops content', () => {
     expect(name).toHaveValue('TEST_retained'); expect(within(dialog).getByText('查询当前记录不能证明原请求的提交结果。')).toBeVisible();
     expect(fetcher.mock.calls.some(([url]) => url.includes('&q=' + shop.shop_id))).toBe(true); expect(writes).toBe(1);
     const retry = within(dialog).getByRole('button', { name: '核对后重新保存' }); expect(retry).toBeEnabled();
-    await user.click(retry); await within(dialog).findByRole('button', { name: '保存', exact: true }); expect(writes).toBe(2); expect(name).toHaveValue('TEST_retained');
+    await user.click(retry); await within(dialog).findByRole('button', { name: '保存' }); expect(writes).toBe(2); expect(name).toHaveValue('TEST_retained');
   });
 
   it.each(['wrong-identity', 'wrong-shop', 'malformed', 'denied'])('keeps uncertain App resubmission blocked after a %s verification GET', async (mode) => {
@@ -254,7 +254,7 @@ describe('shops content', () => {
       writes++; return json({ created: true, shop });
     }));
     const user = userEvent.setup(); const view = await mount();
-    await user.click(screen.getByRole('button', { name: '手工补录', exact: true })); const dialog = screen.getByRole('dialog');
+    await user.click(screen.getByRole('button', { name: '手工补录' })); const dialog = screen.getByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('店铺 ID', { exact: true }), { target: { value: shop.shop_id } });
     vi.useFakeTimers(); await act(async () => { releaseList(json({}, 429, { 'Retry-After': '600' })); });
     fireEvent.submit(within(dialog).getByRole('form', { name: '店铺表单' })); await act(async () => {});
@@ -271,7 +271,7 @@ describe('shops content', () => {
       if (url.includes('/commerce/channel-accounts?')) { reads++; return reads === 1 ? new Promise<Response>((resolve) => { releaseList = resolve; }) : json([shop]); }
       writes++; return json({}, 500);
     }));
-    const user = userEvent.setup(); const view = await mount(); await user.click(screen.getByRole('button', { name: '手工补录', exact: true }));
+    const user = userEvent.setup(); const view = await mount(); await user.click(screen.getByRole('button', { name: '手工补录' }));
     const dialog = screen.getByRole('dialog'); fireEvent.change(within(dialog).getByLabelText('店铺 ID', { exact: true }), { target: { value: shop.shop_id } });
     vi.useFakeTimers(); await act(async () => { releaseList(json({}, 429, { 'Retry-After': '600' })); });
     fireEvent.submit(within(dialog).getByRole('form', { name: '店铺表单' })); await act(async () => {});
@@ -289,11 +289,11 @@ describe('shops content', () => {
       checks++; return json(shop);
     });
     const user = userEvent.setup(); await mount(); await screen.findByText(shop.shop_id);
-    await user.click(screen.getByRole('button', { name: '获取授权链接', exact: true })); await screen.findByText(/结果未确认/);
-    expect(screen.getByRole('button', { name: '获取授权链接', exact: true })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '获取授权链接' })); await screen.findByText(/结果未确认/);
+    expect(screen.getByRole('button', { name: '获取授权链接' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: '读取当前记录核对' })); await screen.findByText(/已读取当前记录/);
     expect(screen.getByText('重新获取会生成新的授权链接。')).toBeVisible(); expect(mints).toBe(1); expect(checks).toBe(1);
-    await user.click(screen.getByRole('button', { name: '获取授权链接', exact: true }));
+    await user.click(screen.getByRole('button', { name: '获取授权链接' }));
     await screen.findByRole('link', { name: '打开授权页面' }); expect(mints).toBe(2);
   });
 });

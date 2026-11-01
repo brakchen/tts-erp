@@ -34,8 +34,9 @@ export function Metrics({ values, metrics = currentMetrics, prefix = '', meta = 
 }
 export function Summary({ data }: { data: Overview }) {
   const projection = optionalRecord(data.meta.projection); const status: Record<string, string> = { available: '可预测', no_unsettled_orders: '无未结算订单', insufficient_sample: '样本不足' };
+  const profitStatus: Record<string, string> = { profit: '盈利', loss: '亏损', break_even: '持平', unavailable: '不可用' };
   return <section id="summaries" className="erp-panel space-y-4" aria-label="经营汇总" aria-live="polite">
-    <div className="flex flex-wrap items-center gap-3"><h2 className="erp-section-heading">当前经营结果</h2><span>金额 CNY · {text(data.totals.profit_status)}</span></div>
+    <div className="flex flex-wrap items-center gap-3"><h2 className="erp-section-heading">当前经营结果</h2><span>金额 CNY · {profitStatus[String(data.totals.profit_status)] ?? text(data.totals.profit_status)}</span></div>
     <Metrics values={data.totals} meta={data.meta} metrics={currentMetrics.filter((item) => ['spend', 'effective_sales', 'net_profit', 'roi_real'].includes(item[1]))} />
     <details><summary>订单、退款与 ROI 指标</summary><Metrics values={data.totals} meta={data.meta} metrics={currentMetrics.filter((item) => !['spend', 'effective_sales', 'net_profit', 'roi_real'].includes(item[1]))} /></details>
     <details id="projection-basis-card"><summary className="op-counter-group-label">预测依据与预计结果 · <span className="op-projection-window">预测样本窗口：<span id="projection-sample-window">{text(projection.sample_start)} ~ {text(projection.sample_end)}</span></span></summary>
