@@ -2148,10 +2148,17 @@ def test_projection_sample_keeps_selected_spus_when_one_has_no_window_activity(
         "projection_lookback_days": 90,
     }
     query_count = 0
+    auth_query_count = 0
 
-    def count_query(*_args) -> None:
-        nonlocal query_count
+    def count_query(_conn, _cursor, statement, *_args) -> None:
+        nonlocal query_count, auth_query_count
         query_count += 1
+        if (
+            statement.lstrip().startswith("SELECT 1 FROM commerce.shops s WHERE s.id = ")
+            and "shop_credential" in statement
+            and "shop_app" in statement
+        ):
+            auth_query_count += 1
 
     event.listen(db_engine, "before_cursor_execute", count_query)
     try:
@@ -2160,10 +2167,10 @@ def test_projection_sample_keeps_selected_spus_when_one_has_no_window_activity(
         ).json()
     finally:
         event.remove(db_engine, "before_cursor_execute", count_query)
-    # 31 = 30 个既有语句 + 价格观察表的 to_regclass capability 探测一条
-    # （`_price_stats._SQL_PRICE_OBSERVATION_TABLE_EXISTS`，与 _implementation.py
-    # 的既有探测约定一致）；预算仍用于拦住按 date/SPU 重查的回归。
-    assert query_count <= 31
+    # b8a64dc5 在时区和目录读取各加一条固定授权 SELECT，独立限制以拦住授权 N+1。
+    # 其他所有 SQL 保留原 31 条预算（30 条既有语句 + 一条价格观察表 capability 探测）。
+    assert auth_query_count <= 2, (query_count, auth_query_count)
+    assert query_count - auth_query_count <= 31, (query_count, auth_query_count)
     narrowed = api_client.get(
         "/v2/analytics/spu-roi",
         headers=headers,
