@@ -1,9 +1,12 @@
-.erp-profit-controls { display: grid; gap: 16px; }
+.erp-profit-controls { display: grid; gap: 10px; padding: 16px 20px; }
+.erp-profit-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; min-width: 0; }
+.erp-profit-toolbar > * { min-width: 0; max-width: 100%; }
 .erp-profit-controls label { display: grid; min-width: 0; gap: 8px; color: var(--ink-soft); font-size: 12px; }
 .erp-profit-controls label:has(input[type=checkbox]) { display: flex; align-items: center; }
 .erp-profit-scope-row, .erp-profit-dates { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
-.erp-profit-dates > label { flex: 0 1 190px; }
-.erp-profit-projection { width: 140px; }
+.erp-profit-scope-row .erp-shop-picker { width: 300px; max-width: 100%; }
+.erp-profit-dates > label { width: 156px; flex: 0 1 156px; }
+.erp-profit-projection { width: 100px; }
 .erp-spu-selection-search { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
 .erp-spu-selection-search > :first-child { width: min(100%, 480px); flex: 1 1 480px; min-width: 0; }
 .erp-spu-selection-field { min-width: 0; padding: 8px; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); }
@@ -43,7 +46,8 @@
 .erp-profit-pagination select { width: auto; }
 [data-page-profile] summary { cursor: pointer; color: var(--ink-soft); }
 @media (max-width: 767px) {
-  .erp-profit-dates > label { flex: 1 1 140px; }
+  .erp-profit-dates { width: 100%; }
+  .erp-profit-dates > label { flex: 1 1 128px; }
   .erp-profit-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .erp-profit-metrics dd { font-size: 19px; }
   .erp-profit-drill { padding: 6px; }

@@ -41,6 +41,19 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
     page = frontend_browser_renderer.open(f'/v2/pages/{profile}?shop_pk=7', width=width, height=900)
     _wait_rows(page)
     assert page.locator('.tabulator-row').count() >= 3
+    filters = page.get_by_role('region', name='店铺与经营范围').bounding_box()
+    assert filters
+    if width == 2560:
+        assert filters['height'] <= 160, filters
+        controls = [page.locator(selector).bounding_box() for selector in (
+            '#shop-switcher', '#filter-w-start', '#filter-w-end',
+            '#filter-projection-lookback-days', '#btn-toolbar-more',
+        )]
+        assert all(controls)
+        bottoms = [box['y'] + box['height'] for box in controls]
+        assert max(bottoms) - min(bottoms) <= 2, controls
+    elif width == 1440:
+        assert filters['height'] <= 230, filters
     report = overflow_report(page)
     assert report['scrollWidth'] <= report['clientWidth'] + 1, report
     assert not report['offenders'], report
