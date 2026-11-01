@@ -46,7 +46,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, ap
   useEffect(() => {
     if (!shopPk || !query.trim() || performance.now() < notBefore.current) return;
     const controller = new AbortController(); const timer = setTimeout(() => {
-      const params = new URLSearchParams({ shop_pk: shopPk, q: query, limit: '25' });
+      const params = new URLSearchParams({ shop_pk: shopPk, q: query, limit: '50' });
       void withinRequestLifetime(controller, (signal) => requestJson<unknown>(root, `${optionsPath}?${params}`, { signal }, parseIdentityJson)).then(({ data }) => {
         const result = decodeOptions(data); if (!controller.signal.aborted) setChoices((old) => [...new Map([...old.filter((item) => draft.includes(item.spu_id)), ...result].map((item) => [item.spu_id, item])).values()]);
       }).catch((error: unknown) => { if (!controller.signal.aborted) { hold(error); setNotice(error instanceof Error ? error.message : '商品搜索失败'); } });
