@@ -29,6 +29,17 @@ def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, wi
     if slug == "users":
         tabs = page.get_by_role("tablist", name="管理页签")
         assert tabs.bounding_box()["width"] <= 400
+        assert page.get_by_role("tab", name="角色权限").evaluate("""el => {
+            const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+                if (!node.textContent.trim()) continue;
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                if (range.getClientRects().length > 1) return false;
+            }
+            return true;
+        }""")
     if slug == "shops" and width == 2560:
         assert page.get_by_role("form", name="店铺筛选").bounding_box()["width"] < 1100
     if width < 1024:
