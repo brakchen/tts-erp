@@ -114,7 +114,7 @@ export default function Dashboard({ bootstrap }: PageProps) {
     <PageIntro eyebrow="OPERATIONS OVERVIEW" title="经营全局，一目了然" description="查看店铺数据覆盖、同步状态与常用工作入口。" />
     <Card><Card.Header><Card.Title render={(props) => <h2 {...props} />} className="text-base font-semibold">快速导航</Card.Title><Card.Description>按当前权限显示常用入口</Card.Description></Card.Header><Card.Content>
       <nav aria-label="快速导航" className="grid grid-cols-2 gap-3 lg:flex lg:flex-wrap">
-        {bootstrap.navigation.filter((item) => quickPageIds.has(item.id)).map((item) => <a key={item.id} href={href(item)} className={buttonVariants({ variant: 'secondary' })}>
+        {bootstrap.navigation.filter((item) => quickPageIds.has(item.id)).map((item) => <a key={item.id} href={href(item)} className={buttonVariants({ variant: 'secondary', className: 'w-full lg:w-auto' })}>
           <span>{item.label}</span><span aria-hidden="true">→</span>
         </a>)}
       </nav>

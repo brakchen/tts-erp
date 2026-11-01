@@ -357,6 +357,7 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
     """Render current owners; explicit pilot override is test-only, not a runtime flag."""
     from starlette.requests import Request
 
+    from tts_erp_v2.accounts.pages import PAGES
     from tts_erp_v2.api.v2 import frontend_pages
     from tts_erp_v2.api.v2.ad_daily import ad_daily_page
     from tts_erp_v2.api.v2.pages import (
@@ -384,11 +385,22 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
             response = frontend_pages.render_frontend_page(request, slug)
             name = ("tts-" if prefix else "") + slug
             (out / f"{name}.html").write_bytes(response.body)
-    (out / f"{_ALERT_SLUG}.html").write_bytes(
-        _render_page(f"{_ALERT_SLUG}.html", current_page=_ALERT_SLUG).body
-    )
-    request = Request({"type": "http", "root_path": "", "path": "/v2/pages/ad-daily"})
-    (out / "ad-daily.html").write_bytes(ad_daily_page(request).body)
+    for page in PAGES:
+        slug = page.page_id
+        if slug not in effective or slug in _PLAIN or slug in _SPU_PAGES:
+            continue
+        for prefix in ("", "/tts"):
+            request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}"})
+            response = frontend_pages.render_frontend_page(request, slug)
+            name = ("tts-" if prefix else "") + slug
+            (out / f"{name}.html").write_bytes(response.body)
+    if _ALERT_SLUG not in effective:
+        (out / f"{_ALERT_SLUG}.html").write_bytes(
+            _render_page(f"{_ALERT_SLUG}.html", current_page=_ALERT_SLUG).body
+        )
+    if "ad-daily" not in effective:
+        request = Request({"type": "http", "root_path": "", "path": "/v2/pages/ad-daily"})
+        (out / "ad-daily.html").write_bytes(ad_daily_page(request).body)
 
 
 class _Handler(BaseHTTPRequestHandler):
