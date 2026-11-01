@@ -146,7 +146,7 @@ export default function Users({ bootstrap }: PageProps) {
     {!canManage && <p>当前仅浏览；维护需要 admin 权限，以服务端判定为准。</p>}
     {command.notice && <p role="status">{command.notice}</p>}{command.pending && <p role="status">提交中，请勿重复操作…</p>}{command.cooldown && <p role="status">服务端冷却中，请等待指定时间后手动重试，不会自动请求。</p>}
     {!isOpen && recovery}{!isOpen && unresolved && <Button onPress={() => setOpen(true)}>返回未确认的操作</Button>}
-    <Tabs defaultSelectedKey="users"><Tabs.ListContainer><Tabs.List aria-label="管理页签" className="w-fit max-w-full"><Tabs.Tab id="users">用户<Tabs.Indicator /></Tabs.Tab><Tabs.Tab id="roles">角色权限<Tabs.Indicator /></Tabs.Tab></Tabs.List></Tabs.ListContainer>
+    <Tabs defaultSelectedKey="users"><Tabs.ListContainer className="w-fit max-w-full"><Tabs.List aria-label="管理页签"><Tabs.Tab id="users">用户<Tabs.Indicator /></Tabs.Tab><Tabs.Tab id="roles">角色权限<Tabs.Indicator /></Tabs.Tab></Tabs.List></Tabs.ListContainer>
       <Tabs.Panel id="users" className="space-y-4"><div className="flex flex-wrap items-end gap-3">
         <TextField value={keyword} onChange={setKeyword}><Label>搜索用户名 / 显示名</Label><Input /></TextField>
         <Select value={status || 'all'} onChange={(key) => setStatus(key === 'all' ? '' : String(key))}><Label>用户状态</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="all">全部状态</ListBox.Item><ListBox.Item id="active">启用</ListBox.Item><ListBox.Item id="disabled">停用</ListBox.Item></ListBox></Select.Popover></Select>
