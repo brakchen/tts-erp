@@ -40,120 +40,93 @@ def _seed_shop_and_products(db_engine):
 
 
 def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
+    """Focused editing remains immediate; selection UI now belongs to React."""
     root = Path(__file__).resolve().parents[2]
-    focused = (root / "tts_erp_v2/static/js/focused-spus.js").read_text()
-    assert 'label.htmlFor = "focused-spu-select"' in focused
-    assert "new TomSelectClass(selectElement" in focused
-    assert "summaries.parentNode.insertBefore(slot, summaries)" in focused
-    assert '"mx-lg-4"' in focused
-    assert "maxItems: null" in focused
-    assert "onItemAdd:" in focused
-    assert "onItemRemove:" in focused
-    assert "resolvePastedIds" in focused
-    assert 'analyticsParams: () => ({ scope: "focused" })' in focused
-    assert "addSpuIds: addIds" in focused
-    assert "removeSpuIds: removeIds" in focused
-    assert '"X-Requested-With": "tts-erp"' in focused
-    assert "context.setSelectionQueryable(true)" in focused
-    assert "return { queryable: true, count: total }" in focused
-    assert "编辑关注 SPU" not in focused
-    assert "保存修改" not in focused
+    selection = (root / "frontend/src/pages/spu-profitability/Selection.tsx").read_text(encoding="utf-8")
+    query = (root / "frontend/src/pages/spu-profitability/query.ts").read_text(encoding="utf-8")
+    page = (root / "frontend/src/pages/spu-profitability/index.tsx").read_text(encoding="utf-8")
+
+    assert 'id={focused ? \'focused-spu-select\' : \'filter-spu-ids\'}' in selection
+    assert 'type="checkbox"' in selection
+    assert "addSpuIds: add" in selection and "removeSpuIds: remove" in selection
+    assert "/v2/reporting/focused-spus/" in selection and "method: 'PATCH'" in selection
+    assert "resolvePaste" in selection and "parseIds(paste)" in selection
+    assert "focused && !canWrite" in selection
+    assert "修改后实时保存" in selection and "已实时保存" in selection
+    assert "{!focused &&" in selection and 'id="btn-spu-apply"' in selection
+    assert "focusedCallback.current(total)" in selection
+    assert "focusedCount !== null" in page
+    assert "params.set('scope', 'focused')" in query
+    assert "TomSelect" not in selection
+    assert "编辑关注 SPU" not in selection and "保存修改" not in selection
 
 
-def test_focused_spus_page_uses_shared_profitability_kernel(
-    api_client,
-    readonly_key,
-):
+def test_focused_spus_page_uses_shared_profitability_kernel(api_client, readonly_key):
+    from tests.api.test_frontend_pages import _bootstrap
+
     response = api_client.get(
         "/v2/pages/focused-spus",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert response.status_code == 200
-    assert "重点关注 SPU" in response.text
-    assert 'href="../../v2/pages/focused-spus"' in response.text
-    assert 'title="重点关注 SPU"' in response.text
-    assert 'data-page-profile="focused-spus"' in response.text
-    assert "static/css/spu-roi.css?v=" in response.text
-    assert "static/css/focused-spus.css?v=" in response.text
-    assert "static/js/focused-spus.js?v=" in response.text
-    assert "static/js/spu-profitability-page.js?v=" in response.text
-    assert 'id="selection-slot"' in response.text
-    assert "__PROFILE_" not in response.text
-    assert "__JSV_" not in response.text
-
-
-def test_focused_spus_page_keeps_the_full_roi_dashboard(
-    api_client,
-    readonly_key,
-):
-    headers = {"Authorization": f"Bearer {readonly_key}"}
-    standard = api_client.get("/v2/pages/spu-roi", headers=headers)
-    focused = api_client.get("/v2/pages/focused-spus", headers=headers)
-    assert standard.status_code == focused.status_code == 200
-    shared_hooks = (
-        "summaries",
-        "sum-total-orders",
-        "sum-spend",
-        "sum-orders",
-        "sum-sales",
-        "sum-refund-count",
-        "sum-loss-qty",
-        "sum-cancel-count",
-        "sum-net-profit",
-        "sum-roi",
-        "sum-projection-status",
-        "sum-projection-completed-basis-orders",
-        "sum-projection-completed-loss-orders",
-        "sum-projection-full-loss-rate",
-        "sum-unresolved-orders",
-        "sum-delivered-unsettled-orders",
-        "sum-full-loss-exposure-unsettled-orders",
-        "sum-projected-future-loss-qty",
-        "sum-projected-net-revenue",
-        "sum-projected-net-profit",
-        "sum-projected-roi",
-        "sum-projected-breakeven-roi",
-        "sum-projected-ad-roi",
-        "sum-projected-ad-breakeven-roi",
-        "fee-card",
-        "rows",
-        "tpl-drilldown-panel",
-        "filter-limit",
-        "pager-pages",
-    )
-    for hook in shared_hooks:
-        marker = f'id="{hook}"'
-        assert marker in standard.text
-        assert marker in focused.text
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "private, no-store"
+    bootstrap = _bootstrap(response.text)
+    assert bootstrap["pageId"] == "focused-spus"
+    assert bootstrap["roleCapabilities"] == {"readwrite": False, "admin": False}
+    active = [item for item in bootstrap["navigation"] if item["id"] == "focused-spus"]
+    assert len(active) == 1
+    assert active[0]["label"] == "重点关注 SPU"
+    assert active[0]["href"] == bootstrap["rootPath"] + "/v2/pages/focused-spus"
+    assert 'id="frontend-root"' in response.text
+    assert "/static/frontend/" in response.text
+    for legacy in ("focused-spus.js", "focused-spus.css", "spu-profitability-page.js", "spu-roi.css"):
+        assert legacy not in response.text
 
     root = Path(__file__).resolve().parents[2]
-    standard_profile = (root / "tts_erp_v2/static/js/spu-roi.js").read_text()
-    focused_profile = (root / "tts_erp_v2/static/js/focused-spus.js").read_text()
-    for hook in shared_hooks:
-        if not hook.startswith(
-            (
-                "sum-projection",
-                "sum-unresolved",
-                "sum-delivered",
-                "sum-full-loss-exposure",
-                "sum-projected",
-            )
-        ):
-            continue
-        marker = f'"{hook}"'
-        assert marker in standard_profile
-        assert marker in focused_profile
+    loader = (root / "frontend/src/app/page-loader.ts").read_text(encoding="utf-8")
+    for page_id in ("spu-roi", "focused-spus"):
+        assert f"'{page_id}': () => import('../pages/spu-profitability')" in loader
 
-    # 运营不需要在页首重复展示待确认件数；后端字段和 SPU 诊断明细保留。
-    assert '"sum-unresolved-qty"' not in standard_profile
-    assert '"sum-unresolved-qty"' not in focused_profile
-    assert '"sum-projected-terminal-loss-qty"' not in standard_profile
-    assert '"sum-projected-terminal-loss-qty"' not in focused_profile
-    assert 'id="sum-projected-terminal-loss-qty"' not in standard.text
-    assert 'id="sum-projected-terminal-loss-qty"' not in focused.text
-    # 未结算已送达指标在模板和两个页面 profile 中都必须启用。
-    assert '"sum-delivered-unsettled-orders"' in standard_profile
-    assert '"sum-delivered-unsettled-orders"' in focused_profile
+
+def test_focused_spus_page_keeps_the_full_roi_dashboard(api_client, readonly_key):
+    from tests.api.test_frontend_pages import _bootstrap
+
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    for page_id in ("spu-roi", "focused-spus"):
+        response = api_client.get(f"/v2/pages/{page_id}", headers=headers)
+        assert response.status_code == 200
+        assert _bootstrap(response.text)["pageId"] == page_id
+
+    root = Path(__file__).resolve().parents[2]
+    directory = root / "frontend/src/pages/spu-profitability"
+    summary = (directory / "Summary.tsx").read_text(encoding="utf-8")
+    page = (directory / "index.tsx").read_text(encoding="utf-8")
+    table = (directory / "ProfitabilityTable.tsx").read_text(encoding="utf-8")
+    drill = (directory / "DrillDetails.tsx").read_text(encoding="utf-8")
+    expected = (
+        "sum-total-orders", "sum-spend", "sum-orders", "sum-sales",
+        "sum-refund-count", "sum-refund-rate", "sum-loss-qty", "sum-loss-rate",
+        "sum-cancel-count", "sum-cancel-rate", "sum-net-profit", "sum-roi",
+        "sum-roi-breakeven", "sum-roi-ad-actual", "sum-roi-ad",
+        "sum-projection-completed-basis-orders", "sum-projection-completed-loss-orders",
+        "sum-projection-full-loss-rate", "sum-unresolved-orders",
+        "sum-delivered-unsettled-orders", "sum-full-loss-exposure-unsettled-orders",
+        "sum-projected-future-loss-qty", "sum-projected-net-revenue",
+        "sum-projected-net-profit", "sum-projected-roi", "sum-projected-breakeven-roi",
+        "sum-projected-ad-roi", "sum-projected-ad-breakeven-roi",
+    )
+    for hook in expected:
+        assert f"'{hook}'" in summary, hook
+    for hook in ("summaries", "sum-projection-status", "fee-card"):
+        assert f'id="{hook}"' in summary
+    for component in ("<Summary ", "<FeeFacts ", "<PriceSummary ", "<ProfitabilityTable ", "<DrillDetails "):
+        assert component in page
+    assert 'id="rows"' in table and 'id="filter-limit"' in page
+    assert 'aria-label="SPU ROI 分页"' in page
+    assert "<Metrics values={row}" in drill
+    for retired in ("sum-unresolved-qty", "sum-projected-terminal-loss-qty"):
+        assert retired not in summary and retired not in page
 
 
 def test_focused_spus_auth_and_camel_case_contract(

@@ -19,12 +19,9 @@ import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
-_KERNEL = (
+_TABLE = (
     Path(__file__).resolve().parents[2]
-    / "tts_erp_v2"
-    / "static"
-    / "js"
-    / "spu-profitability-page.js"
+    / "frontend/src/pages/spu-profitability/ProfitabilityTable.tsx"
 )
 
 # 数字降序 63,50,9,8,6；字符串降序 9,8,63,6,50。两组必须能区分。
@@ -32,8 +29,8 @@ _ORDER_COUNTS = (9, 8, 63, 50, 6)
 
 
 def test_profitability_kernel_uses_remote_sort_mode() -> None:
-    src = _KERNEL.read_text(encoding="utf-8")
-    assert 'sortMode: "remote"' in src
+    src = _TABLE.read_text(encoding="utf-8")
+    assert "sortMode: 'remote'" in src
 
 
 def _item(base: dict[str, Any], index: int, total_orders: int) -> dict[str, Any]:
@@ -57,7 +54,7 @@ def _ordered_items(base: dict[str, Any], query: str) -> list[dict[str, Any]]:
     return sorted(items, key=lambda row: int(row["total_orders"]), reverse=reverse)
 
 
-def _open_page(browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str) -> Any:
+def _open_page(frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str) -> Any:
     original = cast(Callable[..., Any], browser_conftest._mock_payload)
 
     def mock_payload(request_path: str, query: str = "") -> Any:
@@ -72,7 +69,7 @@ def _open_page(browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str
         return original(request_path, query)
 
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
-    page = browser_renderer.open(path)
+    page = frontend_browser_renderer.open(path)
     shop_button = page.locator("#shop-modal-list button").first
     if shop_button.is_visible():
         shop_button.click()
@@ -89,9 +86,9 @@ def _visible_total_orders(page: Any) -> list[int]:
 
 @pytest.mark.parametrize("path", ("/v2/pages/focused-spus", "/v2/pages/spu-roi"))
 def test_total_orders_header_keeps_numeric_server_order(
-    browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str
+    frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:
-    page = _open_page(browser_renderer, monkeypatch, path)
+    page = _open_page(frontend_browser_renderer, monkeypatch, path)
     # Replay load(): clearData → setSort → replaceData(server numeric desc).
     # Local string sorter (empty-table findSorter) rewrites 63,50,9 into 9,8,63.
     page.evaluate(
