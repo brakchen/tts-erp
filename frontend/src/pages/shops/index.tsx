@@ -203,7 +203,7 @@ export default function Shops({ bootstrap }: PageProps) {
       <p className="erp-table-meta">已登记 {list.total ?? '—'} 家店铺 · 未授权店铺仅在此页展示</p>
       <div className="flex gap-3"><Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>刷新店铺</Button><Button isDisabled={blocked('register')} onPress={() => open('register')}>手工补录</Button></div>
     </div>
-    <form className="erp-panel flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); updateFilter('q', search); }}>
+    <form aria-label="店铺筛选" className="erp-filters" onSubmit={(event) => { event.preventDefault(); updateFilter('q', search); }}>
       <label className="flex flex-col gap-2 text-sm"><span>店铺搜索</span><input className={filterClass} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="店铺名称 / ID / 编码" /></label>
       <label className="flex flex-col gap-2 text-sm"><span>发现来源</span><select className={filterClass} value={filters.source} onChange={(event) => updateFilter('source', event.target.value)}><option value="">全部来源</option><option value="ads-data-sync">Ads 插件</option><option value="monitor">Monitor 插件</option></select></label>
       <label className="flex flex-col gap-2 text-sm"><span>App 配置</span><select className={filterClass} value={filters.app_state} onChange={(event) => updateFilter('app_state', event.target.value)}><option value="">全部配置</option><option value="configured">已配置</option><option value="unconfigured">未配置</option></select></label>

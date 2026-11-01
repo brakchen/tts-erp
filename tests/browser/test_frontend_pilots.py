@@ -29,6 +29,8 @@ def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, wi
     if slug == "users":
         tabs = page.get_by_role("tablist", name="管理页签")
         assert tabs.bounding_box()["width"] <= 400
+    if slug == "shops" and width == 2560:
+        assert page.get_by_role("form", name="店铺筛选").bounding_box()["width"] < 1100
     if width < 1024:
         trigger = page.get_by_role("button", name="打开主导航")
         trigger.click()
