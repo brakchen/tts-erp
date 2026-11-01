@@ -4,6 +4,24 @@
 
 ## 1. Goal / Architecture / Tech Stack
 
+### 2026-10-27 业务偏差修复切片
+
+TaskStartSnapshot：`origin/master=962f14b6a822bb08c93cafd12b3e6163d36530e8`，独立
+`codex/spu-comparison-facts` worktree，初始干净。Decision: code-change；仅修正
+比较读取层把售后/结算通用同步诊断当作全表盈利否决条件的职责错误。
+ArchitectureReviewRequired=yes（事实与诊断边界）；TDD Route=strict。
+复用现有 SQLAlchemy 查询、统一盈利计算和按 SPU/期间判断退款金额缺失的出口；不新增依赖、
+盈利公式或日志推算财务结果的映射器。旧的全局财务否决职责退休，诊断查询保留为页面级披露；
+实际订单/广告/退款事实检查及日期上限保持原有所有者。
+
+顺序：先用真实 SQL API 回归证明通用异常会清空原值及无关期间，再移除比较层的全局财务
+否决并验证具体缺失仍受限，最后跑完整基线、同步提交和最终集成验证。
+源诊断记录只读，不清理或标记解决；生产迁移、同步及重启未获授权。
+最终交付分支 `codex/spu-comparison-facts-final` 从新 master
+`7e3dfdc5ecfd50506bbf1a235d9892a229a81061` 同步收拢修复（新增仅 README、运维文档及
+monitor 子模块指针；应用/测试树未变）；原
+`codex/spu-comparison-facts` 保留 RED/GREEN 的开发证据，应用与测试内容保持一致。
+
 在现有 `/v2/pages/spu-profit-deterioration` 上实现 R-001～006、AC-001～023：7 天主参考、3 天辅助，显示两期盈利、订单和广告消耗，保留无单投放及旧结果，服务端限制可选日期，支持查证和失败恢复。不得恢复阈值、严重程度、历史确认或策略建议。
 
 Python/FastAPI/SQLAlchemy/PostgreSQL 保持不变。本页仍为现有模板与脚本，不借修复批量迁移 React 或复制全站骨架。计算复用 `analytics.spu_profitability`，不修改统一盈利公式。新对比编排位于 `analytics.spu_deterioration_alert` 既有领域边界，HTTP 仅校验、授权和序列化，浏览器只呈现与计算明确命名的展示差异。

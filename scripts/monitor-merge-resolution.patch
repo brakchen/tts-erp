@@ -1,0 +1,150 @@
+diff --git a/entrypoints/background.ts b/entrypoints/background.ts
+--- a/entrypoints/background.ts
++++ b/entrypoints/background.ts
+@@ -1,4 +1,5 @@
+ import { defineBackground } from "wxt/sandbox";
++import { syncBoundShop, SHOP_DISCOVERY_ALARM } from "../src/extension/shop-discovery";
+ import { createHealthRuntime, createHealthCloseDrainObservation, HEALTH_ALARM, validateHealthConnection, type HealthCloseObservation, type HealthCloseParticipation } from "../src/extension/health-runtime";
+ import { createAutoTabBindingController, type AutoTab, type AutoTabBindingGuard } from "../src/extension/auto-tab-binding";
+ import {
+@@ -363,6 +364,7 @@
+ export async function bootstrap(): Promise<void> {
+   const startupGeneration = runtimeGeneration;
+   void healthRuntime.bootstrap();
++  void syncBoundShop();
+   const state = await discardLegacyAutoCloseFailures();
+   if (!state.settings.monitorEnabled) {
+     await chrome.alarms.clear(AUTO_BINDING_ALARM);
+@@ -440,6 +442,9 @@
+       return toggleAdTabBinding();
+     case "manual_refresh":
+       return manualRefresh();
++    case "sync_shop_metadata":
++      await syncBoundShop(true);
++      return getState();
+     case "save_settings":
+       return enqueueSettingsSave(message.payload, message.configurationImportRevision);
+     case "save_campaign_threshold":
+@@ -686,6 +691,7 @@
+   }, healthConnectionChanged ? configurationImportRevision ?? 0 : undefined);
+   if (healthConnectionChanged) await healthRuntime.bootstrap();
+   else await healthRuntime.refreshContext();
++  if (healthConnectionChanged) void syncBoundShop(true);
+   if (resolveAutoCloseQueryRecentDays(next) !== resolveAutoCloseQueryRecentDays(current.settings)) {
+     invalidateRuntimeContext();
+     await setCampaigns([]);
+@@ -846,6 +852,7 @@
+       ...(previousScopeKey !== updatedScopeKey ? { pendingAutoCloseFailures: {}, settings: { shopName: updatedBinding.shopName } } : {}) };
+   });
+   if (!accepted || acceptedCaptureGeneration !== runtimeGeneration) return getState();
++  void syncBoundShop();
+   if (
+     updatedScopeKey &&
+     (updatedScopeKey !== previousScopeKey || !state.shopCredentials?.[updatedScopeKey])
+@@ -1075,6 +1082,7 @@
+       } };
+   });
+   if (!committed) throw new Error("广告页绑定已取消");
++  void syncBoundShop();
+   await addLog("tab_binding_created", "TikTok 广告页 Tab 已绑定", {
+     trigger,
+     boundTab: describeTabBinding(binding)
+@@ -1163,6 +1171,7 @@
+         } };
+     });
+     if (!committed || clearGeneration !== runtimeGeneration) return;
++    void syncBoundShop();
+     await addLog("tab_binding_cleared", "广告页 Tab 绑定已清除，监控已暂停", {
+       reason,
+       trigger,
+@@ -1294,6 +1303,10 @@
+ }
+ 
+ export async function handleRuntimeAlarm(alarm: chrome.alarms.Alarm): Promise<void> {
++  if (alarm.name === SHOP_DISCOVERY_ALARM) {
++    await syncBoundShop();
++    return;
++  }
+   if (alarm.name === HEALTH_ALARM) {
+     await healthRuntime.onAlarm();
+     return;
+diff --git a/src/extension/messages.ts b/src/extension/messages.ts
+--- a/src/extension/messages.ts
++++ b/src/extension/messages.ts
+@@ -40,6 +40,7 @@
+   | { type: "set_monitor_enabled"; enabled: boolean }
+   | { type: "toggle_ad_tab_binding" }
+   | { type: "manual_refresh" }
++  | { type: "sync_shop_metadata" }
+   | { type: "save_settings"; payload: Partial<StoredSettingsInput>; configurationImportRevision?: number }
+   | {
+       type: "save_campaign_threshold";
+diff --git a/entrypoints/popup/health-settings.tsx b/entrypoints/popup/health-settings.tsx
+--- a/entrypoints/popup/health-settings.tsx
++++ b/entrypoints/popup/health-settings.tsx
+@@ -2,6 +2,7 @@
+ import type { RuntimeMessage } from "../../src/extension/messages";
+ import type { Settings } from "../../src/extension/storage";
+ import { healthPermissionOrigin } from "../../src/extension/health-runtime";
++import { getShopDiscoveryStatus, SHOP_DISCOVERY_STORAGE_KEY, type ShopDiscoveryState } from "../../src/extension/shop-discovery";
+ 
+ type SaveMessage = Extract<RuntimeMessage, { type: "save_settings" }>;
+ export function HealthSettings({ settings, revision, onSave }: {
+@@ -13,6 +14,8 @@
+   const [key, setKey] = useState(settings.healthApiKey ?? "");
+   const [busy, setBusy] = useState(false);
+   const [message, setMessage] = useState("");
++  const [discovery, setDiscovery] = useState<ShopDiscoveryState>();
++  const [syncingShop, setSyncingShop] = useState(false);
+   const generation = useRef(0);
+   const importedRevision = useRef(revision);
+   useEffect(() => {
+@@ -26,6 +29,32 @@
+     setMessage("");
+   }, [settings.healthServerUrl, settings.healthApiKey, revision]);
+   useEffect(() => () => { generation.current++; }, []);
++  useEffect(() => {
++    let active = true;
++    let sequence = 0;
++    const reload = () => {
++      const current = ++sequence;
++      setDiscovery(undefined);
++      void getShopDiscoveryStatus().then((value) => {
++        if (active && current === sequence) setDiscovery(value);
++      });
++    };
++    reload();
++    const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
++      if (area === "local" && (changes[SHOP_DISCOVERY_STORAGE_KEY] || changes.boundAdTab || changes.settings)) reload();
++    };
++    chrome.storage.onChanged.addListener(listener);
++    return () => { active = false; chrome.storage.onChanged.removeListener(listener); };
++  }, []);
++
++  async function syncShop() {
++    setSyncingShop(true);
++    try {
++      const response = await chrome.runtime.sendMessage({ type: "sync_shop_metadata" } satisfies RuntimeMessage);
++      if (!response?.ok) setMessage(response?.error ?? "店铺资料同步失败，请重试");
++    } catch { setMessage("店铺资料同步失败，请重试"); }
++    finally { setSyncingShop(false); }
++  }
+ 
+   async function save() {
+     const serverUrl = url.trim();
+@@ -68,6 +97,14 @@
+     {settings.scanIntervalMaxSeconds > 180 && <p className="security-note">扫描最大间隔超过 180 秒，服务端可能在正常等待期间判断业务进度过期。请按实际需要调整扫描间隔；心跳不会冒充业务进度。</p>}
+     <div className="form-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => void save()}>{busy ? "正在保存健康连接…" : "保存健康连接"}</button></div>
+     <div role="status" aria-live="polite">{message}</div>
++    <div className="security-note" role="status" aria-live="polite">
++      店铺资料：{discovery?.status === "synced" ? `已同步 · ${discovery.sellerId} · ${new Date(discovery.lastSyncedAt!).toLocaleString()}`
++        : discovery?.message ?? (discovery?.status === "pending" ? "正在同步" : "绑定店铺后自动同步")}
++      {discovery?.status === "error" && discovery.nextAttemptAt
++        ? ` · 下次重试 ${new Date(discovery.nextAttemptAt).toLocaleString()}` : ""}
++    </div>
++    <div className="form-actions"><button type="button" disabled={syncingShop || busy} onClick={() => void syncShop()}>
++      {syncingShop ? "正在同步店铺资料…" : "重新同步店铺资料"}
++    </button></div>
+   </section>;
+ }
+-

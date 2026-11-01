@@ -622,17 +622,14 @@ def test_null_ad_cost_is_unknown_not_zero(
     assert get(api_client, readonly_key, scope).status_code == 503
 
 
-@pytest.mark.parametrize(
-    "name", ["tiktok.orders", "tiktok.after_sales", "tiktok.finance"]
-)
-def test_unresolved_parse_failures_do_not_masquerade_as_complete_financial_facts(
-    api_client, readonly_key, comparison_scope, db_engine, name
+def test_unresolved_order_parse_failures_keep_order_facts_unknown(
+    api_client, readonly_key, comparison_scope, db_engine
 ):
     scope = comparison_scope
     with Session(db_engine) as session:
         session.add(
             SyncIssue(
-                job_name=name,
+                job_name="tiktok.orders",
                 issue_type="PARSE_ERROR",
                 external_id="TEST_COMPARE_ISSUE",
                 details={"shop_id": "TEST_COMPARE_SHOP"},
@@ -646,12 +643,64 @@ def test_unresolved_parse_failures_do_not_masquerade_as_complete_financial_facts
     assert item["currentNetProfitCny"] is None
     assert item["currentRoiUnavailableReason"]
     assert Decimal(item["currentSpendCny"]) == 49
-    if name == "tiktok.orders":
-        assert item["currentOrderCount"] is None
-        assert item["currentNoOrderAdSpend"] is None
+    assert item["currentOrderCount"] is None
+    assert item["currentNoOrderAdSpend"] is None
+
+
+@pytest.mark.parametrize(
+    ("name", "issue_type"),
+    [
+        ("tiktok.after_sales", "PARSE_ERROR"),
+        ("tiktok.after_sales", "UNKNOWN_ORDER"),
+        ("tiktok.finance", "PARSE_ERROR"),
+        ("tiktok.finance", "STATEMENT_PAYMENT_ID_MISSING"),
+    ],
+)
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"shop_id": "TEST_COMPARE_SHOP"},
+        {"shop_id": "TEST_OTHER_SHOP"},
+        {"section": "payouts"},
+        None,
+        ["TEST_BAD_DETAILS"],
+    ],
+)
+def test_general_financial_sync_issues_preserve_canonical_comparison_values(
+    api_client, readonly_key, comparison_scope, db_engine, name, issue_type, details
+):
+    scope = comparison_scope
+    before = get(api_client, readonly_key, scope).json()
+    with Session(db_engine) as session:
+        session.add(
+            SyncIssue(
+                job_name=name,
+                issue_type=issue_type,
+                external_id="TEST_COMPARE_GENERAL_FINANCIAL_ISSUE",
+                details=details,
+                detected_at=datetime.now(UTC) - timedelta(days=90),
+            )
+        )
+        session.commit()
+    response = get(api_client, readonly_key, scope)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["totals"] == before["totals"]
+    assert body["total"] == before["total"]
+    for actual, expected in zip(body["items"], before["items"], strict=True):
+        assert actual["spuPk"] == expected["spuPk"]
+        for period in ("previous", "current"):
+            for field in (
+                "Roi", "NetProfitCny", "OrderCount", "SpendCny",
+                "NoOrderAdSpend", "RoiUnavailableReason",
+            ):
+                assert actual[period + field] == expected[period + field]
+        assert actual["warnings"] == expected["warnings"]
+    # Diagnostics remain a page-level disclosure, not a row-level veto.
+    if isinstance(details, dict) and details.get("shop_id") == "TEST_OTHER_SHOP":
+        assert body["meta"]["warnings"] == before["meta"]["warnings"]
     else:
-        assert item["currentOrderCount"] == 0
-        assert item["currentNoOrderAdSpend"] is True
+        assert any("待核查" in warning for warning in body["meta"]["warnings"])
 
 
 @pytest.mark.parametrize(
@@ -1054,6 +1103,16 @@ def test_missing_completed_refund_amount_masks_only_affected_profitability(
         status=status,
         case_type=case_type,
     )
+    with Session(db_engine) as session:
+        session.add(
+            SyncIssue(
+                job_name="tiktok.after_sales",
+                issue_type="PARSE_ERROR",
+                external_id="TEST_COMPARE_REFUND_SYNC_NOTE",
+                details=None,
+            )
+        )
+        session.commit()
     response = get(api_client, readonly_key, scope, activity="all")
     assert response.status_code == 200, response.text
     body = response.json()
