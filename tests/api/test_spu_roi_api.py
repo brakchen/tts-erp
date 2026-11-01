@@ -3980,8 +3980,9 @@ def test_spu_roi_page_remembers_filters_and_enhances_date_range():
     assert "new Intl.DateTimeFormat('en-CA', { timeZone" in query
     assert "shop.region" in page and "shiftDay(today, -1)" in page
     assert "query.datesTouched" in page and "wStart: yesterday, wEnd: yesterday" in page
-    assert 'type="date"' in page and "data-date-preset={value}" in page
-    assert "yesterday?.endsWith('-01')" in page
+    assert 'type="date"' in page and "data-date-preset={id}" in page
+    assert "datePresets(today)" in page
+    assert "option.start !== month.start || option.end !== month.end" in query
     assert "截止日包含当天" in page and "清空一端表示不限该端" in page
     assert "无法确定报表时区" in page and "!unknownZone" in page
     assert "flatpickr" not in page + query and "bootstrap-datepicker" not in page + query
@@ -4261,7 +4262,10 @@ def test_spu_roi_pagination_uses_bootstrap_page_navigation():
     assert "offset: query.offset + query.limit" in pagination
     assert "query.offset === 0" in pagination
     assert "query.offset + query.limit >= data.total" in pagination
-    assert "query.offset / query.limit" in pagination and "data.total / query.limit" in pagination
+    assert "query.offset / query.limit" in page and "data.total / query.limit" in page
+    assert "pageSequence(currentPage, pages)" in pagination
+    assert 'aria-label="跳转页"' in pagination
+    assert "Number.isSafeInteger(page)" in pagination and "page <= pages" in pagination
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
@@ -4925,10 +4929,10 @@ def test_spu_roi_v9_drill_orders_full_loss_flag(api_client, readonly_key, db_eng
 def test_spu_roi_all_date_preset_clears_both_bounds():
     page = _react_profitability_source("index.tsx")
     preset = page.split("function preset(", 1)[1].split("const closeDrill", 1)[0]
-    assert "value === 'all' ? ''" in preset
-    assert "const last = value === 'all' ? '' : end" in preset
-    assert "setDateStart(start); setDateEnd(last); commitDates(start, last)" in preset
+    assert "setDateStart(start); setDateEnd(end); commitDates(start, end)" in preset
     query = _react_profitability_source("query.ts")
+    assert "id: 'all', label: '不限', start: '', end: ''" in query
+    assert "onPress={() => preset(start, end)}" in page
     assert "if (q.wStart) params.set('w_start', q.wStart)" in query
     assert "if (q.wEnd) params.set('w_end', q.wEnd)" in query
 

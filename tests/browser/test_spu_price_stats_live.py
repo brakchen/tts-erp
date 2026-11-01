@@ -284,7 +284,7 @@ def test_price_header_sorts_on_server_and_reorders_rows(
     header = page.price_header("priceStats.purchase.mean")
     header.focus()
     page.page.keyboard.press("Enter")  # 表头 tabindex=0 + Enter（无障碍路径）
-    page.wait_sort_note("purchasePriceMean ↑")
+    page.wait_sort_note("平均值 ↑")
     page.wait_row_order((SPU_A1, SPU_A2))
     assert header.get_attribute("aria-sort") == "ascending"
     assert page.wait_request(
@@ -294,7 +294,7 @@ def test_price_header_sorts_on_server_and_reorders_rows(
 
     header.focus()
     page.page.keyboard.press("Enter")
-    page.wait_sort_note("purchasePriceMean ↓")
+    page.wait_sort_note("平均值 ↓")
     page.wait_row_order((SPU_A2, SPU_A1))
     assert header.get_attribute("aria-sort") == "descending"
     assert page.wait_request(
