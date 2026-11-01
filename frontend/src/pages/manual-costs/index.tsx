@@ -176,16 +176,15 @@ export default function ManualCosts({ bootstrap }: PageProps) {
   </section>;
   return <div className="erp-page">
     <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="把商品成本，管理清楚" description="按店铺核对货源价与人工成本，编辑草稿后确认提交。" />
-    <div className="erp-scope">
+    <section className="erp-panel erp-filter-workspace" aria-label="采购范围与筛选">
+    <div className="erp-toolbar">
+    <div className="erp-filter-row">
       <label className="erp-shop-picker">当前店铺<select className="erp-select" aria-label="当前店铺" value={shopId} disabled={pending || !shops?.length} onChange={(event) => changeScope(() => setShopId(event.target.value))}>{shops?.map((shop) => <option key={shop.id} value={shop.id}>{shop.account_name ?? shop.shop_id} · {shop.shop_id} · #{shop.id}</option>)}</select></label>
       <Button variant="secondary" isDisabled={cooldown || pending} onPress={() => { setShopRefresh((value) => value + 1); setRefresh((value) => value + 1); }}>刷新店铺与列表</Button>
     </div>
-    {!shops && !shopError && <p role="status">加载店铺中…</p>}{shops?.length === 0 && <p>暂无可选店铺</p>}
-    {shopError && <Alert status="danger"><Alert.Content><Alert.Title>店铺读取失败</Alert.Title><Alert.Description>{shopError}</Alert.Description></Alert.Content></Alert>}
-    {!canWrite && <p>当前仅浏览；写入需要 readwrite，以服务端判定为准。</p>}{denied && <p role="alert">服务端拒绝写入（HTTP 403）；草稿保留，编辑不会解除权限限制。</p>}
-    {cooldown && <p role="status">服务端冷却中：读取、核对及提交均需等待完整 Retry-After；到期后仍须手动操作。</p>}
     <div aria-label="工作台视图" className="erp-tabs">{([['all', '全部 SPU'], ['missing', '缺成本候选'], ['recent', '最近提交']] as const).map(([value, label]) => <Button key={value} variant={view === value ? 'primary' : 'ghost'} aria-pressed={view === value} isDisabled={pending} onPress={() => changeScope(() => setView(value))}>{label}</Button>)}</div>
-    <form aria-label="工作台筛选" className="erp-filters flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); changeScope(() => setQuery(searchInput)); }}>
+    </div>
+    <form aria-label="工作台筛选" className="erp-filter-row" onSubmit={(event) => { event.preventDefault(); changeScope(() => setQuery(searchInput)); }}>
       {view !== 'missing' && <><label>搜索<Input aria-label="按 SPU 或标题搜索" maxLength={200} value={searchInput} disabled={pending} onChange={(event) => setSearchInput(event.target.value)} /></label><Button type="submit" isDisabled={pending || cooldown}>搜索</Button></>}
       <label>每页行数<select className="erp-select" aria-label="每页行数" value={limit} disabled={pending} onChange={(event) => changeScope(() => setLimit(Number(event.target.value)))}>{[25, 50, 100].map((value) => <option key={value}>{value}</option>)}</select></label>
       {view === 'all' && <>
@@ -198,6 +197,11 @@ export default function ManualCosts({ bootstrap }: PageProps) {
       {view === 'missing' && <label><input type="checkbox" checked={onlyPhoto} disabled={pending} onChange={(event) => setOnlyPhoto(event.target.checked)} />仅显示本页 missing_photo 候选（展示筛选）</label>}
       <Button variant="secondary" isDisabled={cooldown || pending || !shopId} onPress={() => setRefresh((value) => value + 1)}>刷新当前列表</Button>
     </form>
+    {!shops && !shopError && <p role="status">加载店铺中…</p>}{shops?.length === 0 && <p>暂无可选店铺</p>}
+    {shopError && <Alert status="danger"><Alert.Content><Alert.Title>店铺读取失败</Alert.Title><Alert.Description>{shopError}</Alert.Description></Alert.Content></Alert>}
+    {!canWrite && <p>当前仅浏览；写入需要 readwrite，以服务端判定为准。</p>}{denied && <p role="alert">服务端拒绝写入（HTTP 403）；草稿保留，编辑不会解除权限限制。</p>}
+    {cooldown && <p role="status">服务端冷却中：读取、核对及提交均需等待完整 Retry-After；到期后仍须手动操作。</p>}
+    </section>
     {view === 'missing' ? <p>服务端缺图总数：{currentList.totalPhoto ?? '未知'}。缺成本接口不支持搜索或总候选数；缺图筛选仅作用于当前页，翻页仍按服务器原页。</p> : <p>服务端总数：{currentList.total ?? '未知'} · 偏移 {offset}；筛选和排序均由服务端执行。</p>}
     {savedDrafts.length > 0 && <section className="erp-panel" aria-label="保留草稿"><h2>保留草稿（切换店铺、视图、分页或关闭编辑不会丢失）</h2><ul>{savedDrafts.map((draft) => <li key={draft.target.id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">店铺 #{draft.target.shop_pk} · PK {draft.target.id} · {draft.target.title ?? draft.target.spu_id}</span><Button size="sm" variant="secondary" isDisabled={pending} onPress={() => setEditor(draft.target.id)}>继续编辑 PK {draft.target.id}</Button><Button size="sm" variant="secondary" isDisabled={pending || recovery?.attempt.target.id === draft.target.id} onPress={() => undo(draft.target.id)}>撤销草稿 PK {draft.target.id}</Button></li>)}</ul><p>批量提交只包含当前页显示的已编辑行，不会扩大到其他页或其他店铺。</p></section>}
     {recoveryPanel}

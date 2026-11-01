@@ -2,10 +2,10 @@ import { Button } from '@heroui/react';
 import type { Attempt, Detail, Task, Target } from './contracts';
 
 export const shown = (value: string | number | boolean | null | undefined) => value == null ? '—' : String(value);
-export function Facts({ items }: { items: [string, string | number | boolean | null | undefined][] }) {
-  return <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[max-content_minmax(0,1fr)]">{items.map(([label, value]) => <div key={label} className="contents"><dt className="font-medium">{label}</dt><dd className="min-w-0 whitespace-pre-wrap break-all">{shown(value)}</dd></div>)}</dl>;
+export function Facts({ items, compact = false }: { items: [string, string | number | boolean | null | undefined][]; compact?: boolean }) {
+  return <dl className={`grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[max-content_minmax(0,1fr)] ${compact ? 'lg:grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(0,1fr)]' : ''}`}>{items.map(([label, value]) => <div key={label} className="contents"><dt className="font-medium">{label}</dt><dd className="min-w-0 whitespace-pre-wrap break-all">{shown(value)}</dd></div>)}</dl>;
 }
-export function TargetFacts({ target }: { target: Target }) { return <Facts items={[
+export function TargetFacts({ target, compact = false }: { target: Target; compact?: boolean }) { return <Facts compact={compact} items={[
   ['App', target.appName], ['包名', target.appPackage], ['设备（掩码）', target.deviceSerialMasked], ['相册', target.album],
 ]} />; }
 export function Identity({ value, label, copy }: { value: string | null; label: string; copy: (value: string) => void }) {

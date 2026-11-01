@@ -153,7 +153,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
 
   return <div className="erp-page">
     <PageIntro eyebrow="SYNCHRONIZATION" title="让数据按计划到达" description="查看同步任务、执行记录与周期调度，按需手动触发。" />
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">任务清单</h2>
+    <div className="erp-toolbar"><h2 className="text-xl font-semibold">任务清单</h2>
       <Button variant="secondary" isDisabled={!canRead || loading || pending || cooldown || recovery?.phase === 'checking'} onPress={refreshJobs}>刷新任务</Button></div>
     <p>立即执行权限：readwrite / admin；启停周期调度需要 admin。停用周期调度不影响立即执行，权限以服务端判定为准。</p>
     {!canRead && <p role="alert">需要 readwrite 或 admin 才能读取任务管理数据。</p>}

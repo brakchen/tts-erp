@@ -191,11 +191,11 @@ export default function InterceptConfigs({ bootstrap }: PageProps) {
       <Button variant="secondary" isDisabled={readBlocked || list.loading} onPress={() => setRefresh((value) => value + 1)}>刷新配置</Button>
     </form>
     <p>域名按服务端精确筛选。保留旧版 search 参数；当前接口未实现搜索，不保证搜索条件生效。排序沿用服务端 ID 倒序。</p>
-    <div className="flex flex-wrap gap-3"><Button isDisabled={disabled} onPress={() => open({ kind: 'create' })}>新增配置</Button><Button variant="secondary" isDisabled={disabled} onPress={() => open({ kind: 'import' })}>导入配置</Button><Button variant="secondary" isDisabled={readBlocked || exporting} onPress={() => { void exportConfigs(); }}>{exporting ? '导出中…' : '导出全部配置'}</Button></div>
+    <div className="erp-toolbar"><Button isDisabled={disabled} onPress={() => open({ kind: 'create' })}>新增配置</Button><Button variant="secondary" isDisabled={disabled} onPress={() => open({ kind: 'import' })}>导入配置</Button><Button variant="secondary" isDisabled={readBlocked || exporting} onPress={() => { void exportConfigs(); }}>{exporting ? '导出中…' : '导出全部配置'}</Button>
+    <p role="status">{list.total === undefined ? '共 — 条' : `共 ${list.total} 条`} · 已选 {selectedRows.length} 条</p>
+    <div className="erp-toolbar">{(Object.keys(actions) as BatchAction[]).map((action) => <Button key={action} variant={action === 'delete' ? 'danger' : 'secondary'} isDisabled={disabled || !selectedRows.length} onPress={() => open({ kind: 'batch', action, rows: [...selectedRows] })}>批量{actions[action]}</Button>)}</div></div>
     {!dialog && savedForm && <div className="flex flex-wrap gap-3"><p>有未完成配置草稿，切换配置不会覆盖输入。</p><Button variant="secondary" isDisabled={pending} onPress={() => setDialog(savedForm.target)}>恢复配置草稿</Button><Button variant="danger" isDisabled={pending || needsCheck} onPress={() => setSavedForm(undefined)}>放弃配置草稿</Button></div>}
     {!canWrite && <p>配置列表、详情、导出及变更均需 readwrite 权限和服务端授权；当前权限提示不允许变更。</p>}
-    <p role="status">{list.total === undefined ? '共 — 条' : `共 ${list.total} 条`} · 已选 {selectedRows.length} 条</p>
-    <div className="flex flex-wrap gap-3">{(Object.keys(actions) as BatchAction[]).map((action) => <Button key={action} variant={action === 'delete' ? 'danger' : 'secondary'} isDisabled={disabled || !selectedRows.length} onPress={() => open({ kind: 'batch', action, rows: [...selectedRows] })}>批量{actions[action]}</Button>)}</div>
     {pending && <p role="status">提交中，请等待确认…</p>}{commandBlocked && <p role="status">提交冷却中；请等待服务端指定时间，届时仅允许明确重试。</p>}{readBlocked && <p role="status">读取冷却中；等待结束后请明确查询，不会自动重试。</p>}
     {notice && <p role="status">{notice}</p>}{!dialog && <>{alert}{check}</>}
     {list.loading && <p role="status">加载配置中…</p>}{list.error && <Alert status="danger"><Alert.Content><Alert.Title>列表不可用</Alert.Title><Alert.Description>{list.error}</Alert.Description><Button isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>重试列表</Button></Alert.Content></Alert>}

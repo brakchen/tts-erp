@@ -87,8 +87,7 @@ export default function AdDaily({ bootstrap }: PageProps) {
   return <div className="erp-page">
     <PageIntro eyebrow="ADVERTISING INSIGHTS" title="看清每一份广告投入" description="按账户、日期与商品筛选，结合服务端汇总评估广告表现。" />
     <p>检查插件采集的原始广告事实。金额保持 TikTok 广告源币种 USD，不套用盈利看板汇率。</p>
-    <Filters draft={draft} setDraft={(next) => { setDraft(next); setValidation(''); }} options={options} disabled={disabled} validation={validation} onApply={apply} onReset={() => { if (!disabled) { setValidation(''); setQuery({ ...readQuery(''), sort: query.sort, order: query.order }); } }} />
-    <Button variant="secondary" isDisabled={disabled} onPress={() => { if (!disabled) setRefresh((value) => value + 1); }}>刷新数据</Button>
+    <Filters draft={draft} setDraft={(next) => { setDraft(next); setValidation(''); }} options={options} disabled={disabled} validation={validation} onApply={apply} onReset={() => { if (!disabled) { setValidation(''); setQuery({ ...readQuery(''), sort: query.sort, order: query.order }); } }} onRefresh={() => { if (!disabled) setRefresh((value) => value + 1); }} />
     {optionsError && <p role="alert">{optionsError}</p>}
     {error && <p role="alert">{error}</p>}
     {blocked && <p role="status">服务端等待期内，读取暂不可用。等待结束后请手动重试。</p>}
