@@ -42,6 +42,7 @@
 - 最后一次共享样式调整后，控制台及涉及共享筛选布局的选定浏览器检查 54 项通过。
 - 当前 React 文档入口专项及已有日期下钻测试 25 项通过；补齐对比载荷字段、增加真实结果可见性断言后，当前 React 对比布局与历史原生结果态共 8 项通过。
 - 用户页签补修后，375/1440/2560 与直接路径、`/tts` 路径共 6 项通过，包含页签宽度不超过 400px 的检查。
+- 店铺筛选补修后，店铺/用户两页的上述组合共 12 项通过，同时要求 2560px 下店铺筛选框宽度小于 1100px。
 - 本机 `npm --prefix frontend run typecheck`、构建及完整资产打包通过；资产格式由已有打包器校验后原子切换。
 
 `frontend_site_url` 现在直接通过生产 React renderer 为权威 PAGES 生成两种前缀文档；历史 `site_url` 的原生比较页渲染行为保留，不把它当成 React 迁移证据。共享比较载荷补齐 drilldown 日期和 coverage 结构，新增断言要求显示 `TEST_RENDER_COMPARE_0`，避免仅在加载/错误外壳上通过布局验收。
@@ -50,10 +51,10 @@
 
 按要求只在初始代码 `16b3be3f` 执行一次 `bash scripts/test_baseline.sh --keep-log /tmp/codex-page-density-baseline-pytest.log`，退出 1，观察到 165 个失败 ID。逐 ID 与上轮记录的 119 个 API / 30 个浏览器既有失败比对，149 个全部一致，其余恰为上述已修复并复验通过的 16 个，没有其他差异。提交中的零失败 baseline 没有改写；不能把此次结果描述成全量通过。149 项历史债务仍见 `docs/testing/baseline-failure-investigation-2026-11-01.md`。
 
-复验日志位于测试服务器 `/tmp/codex-page-density-{components,browser-rerun,final-layout,fixture-final,populated,users-final}.{log,exit}`，对应退出状态均为 0。未再运行整个 fast suite。
+复验日志位于测试服务器 `/tmp/codex-page-density-{components,browser-rerun,final-layout,fixture-final,populated,users-final,management-final}.{log,exit}`，对应退出状态均为 0。未再运行整个 fast suite。
 
 ### 实际页面证据与边界
 
-本机完整候选 `build-aac8e1b4396723d42fe0` 保存了 13 页 2560px、其余 12 页 1440/375px 的 `*-final-*.png` 与尺寸 JSON；用户页签补修的独立候选为 `build-bc7b38d48f3f9aa91c54`，随后更新本机并单独复核三种宽度。共享样式及其他 12 页代码在两个候选之间相同。检查整页宽度、控件换行及面板尺寸，表格列继续在各自滚动区域保留。
+本机候选 `build-aac8e1b4396723d42fe0` 保存了 13 页 2560px、其中 12 页 1440/375px 的 `*-final-*.png` 与尺寸 JSON。最后店铺/用户补修包为 `build-115efdaeb76a137f0bbe`；本机更新后，两页单独复核三种宽度，保存为 `*-verified-*.png`，不把早期截图中拉满的旧页签/店铺筛选框当作最终结果。其他 11 页与共享样式在两个候选之间相同。检查整页宽度、控件换行及面板尺寸，表格列继续在各自滚动区域保留。
 
 真实页面只读访问，未触发创建、发布或删除。快速切页时部分接口曾返回 429；真实比较页仍等待后台返回最新日期，所以其完整结果布局的证据来自上述当前 React 的完整夹具。截图不能证明生产数据完整性、写入成功或全量基线通过。
