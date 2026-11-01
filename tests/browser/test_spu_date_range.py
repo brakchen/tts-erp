@@ -16,7 +16,7 @@ import conftest as browser_conftest
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
 
-def _open_spu_roi(browser_renderer: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+def _open_spu_roi(frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     original = cast(Callable[..., Any], browser_conftest._mock_payload)
 
     def mock_payload(request_path: str, query: str = "") -> Any:
@@ -28,7 +28,7 @@ def _open_spu_roi(browser_renderer: Any, monkeypatch: pytest.MonkeyPatch) -> Any
         return original(request_path, query)
 
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
-    page = browser_renderer.open("/v2/pages/spu-roi")
+    page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
     if shop_button.is_visible():
         shop_button.click()
@@ -38,37 +38,37 @@ def _open_spu_roi(browser_renderer: Any, monkeypatch: pytest.MonkeyPatch) -> Any
 
 
 def test_inverted_range_keeps_the_date_just_typed(
-    browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+    frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    page = _open_spu_roi(browser_renderer, monkeypatch)
+    page = _open_spu_roi(frontend_browser_renderer, monkeypatch)
     page.evaluate(
         """() => {
           const start = document.querySelector('#filter-w-start');
           const end = document.querySelector('#filter-w-end');
-          end.value = '2026-10-21';
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(end, '2026-10-21');
           end.dispatchEvent(new Event('change', {bubbles: true}));
-          start.value = '2026-11-01';
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(start, '2026-11-01');
           start.dispatchEvent(new Event('change', {bubbles: true}));
         }"""
     )
     assert page.locator("#filter-w-start").input_value() == "2026-11-01"
     assert page.locator("#filter-w-end").input_value() == "2026-10-21"
-    assert "起始日期不能晚于截止日期" in page.locator("#rows").inner_text()
+    assert page.get_by_role("alert").filter(has_text="起始日期不能晚于截止日期").is_visible()
 
 
 def test_empty_change_while_focused_does_not_commit_clear(
-    browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+    frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    page = _open_spu_roi(browser_renderer, monkeypatch)
+    page = _open_spu_roi(frontend_browser_renderer, monkeypatch)
     requests: list[str] = []
     page.on("request", lambda request: requests.append(request.url))
     page.evaluate(
         """() => {
           const start = document.querySelector('#filter-w-start');
           const end = document.querySelector('#filter-w-end');
-          end.value = '2026-10-21';
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(end, '2026-10-21');
           end.dispatchEvent(new Event('change', {bubbles: true}));
-          start.value = '2026-09-01';
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(start, '2026-09-01');
           start.dispatchEvent(new Event('change', {bubbles: true}));
         }"""
     )
@@ -78,7 +78,7 @@ def test_empty_change_while_focused_does_not_commit_clear(
         """() => {
           const start = document.querySelector('#filter-w-start');
           start.focus();
-          start.value = '';
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(start, '');
           start.dispatchEvent(new Event('change', {bubbles: true}));
         }"""
     )

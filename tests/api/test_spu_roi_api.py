@@ -3440,24 +3440,41 @@ def test_spu_roi_ad_window_single_side_only(api_client, readonly_key, db_engine)
     assert item_both["spend"] == cny4_from_usd("50")
 
 
-def test_spu_roi_sort_binding_is_declarative_and_delegated() -> None:
-    """公共 kernel 从 COLUMN_DEFS.sortField 自动绑定（Tabulator 表头 → 服务端排序），
-    不再维护易漏列的前端白名单。"""
-    from pathlib import Path
 
-    js_path = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    )
-    src = js_path.read_text(encoding="utf-8")
-    assert "var SORTABLE" not in src
-    assert "var COLUMN_DEFS = [" in src
-    assert "headerSort: Boolean(def.sortField)" in src
-    assert 'state.table.on("dataSorting"' in src
-    assert "supportsSortField" in src
+def _react_profitability_source(name: str):
+    from pathlib import Path
+    return (Path(__file__).resolve().parents[2] / "frontend/src/pages/spu-profitability" / name).read_text(encoding="utf-8")
+
+def _react_profitability_metrics(name: str):
+    source = _react_profitability_source("Summary.tsx")
+    match = re.search(rf"\bconst\s+{re.escape(name)}\b[^=]*=\s*\[(.*?)\n\];", source, re.DOTALL)
+    assert match is not None, f"Missing shared metric declaration: {name}"
+    return re.findall(r"\['([^']+)',\s*'([^']+)',\s*'([^']+)'", match[1])
+
+def _spu_react_document(api_client, readonly_key):
+    from tests.api.test_frontend_pages import _bootstrap
+    response = api_client.get("/v2/pages/spu-roi", headers={"Authorization": f"Bearer {readonly_key}"})
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "private, no-store"
+    bootstrap = _bootstrap(response.text)
+    assert bootstrap["pageId"] == "spu-roi"
+    assert bootstrap["roleCapabilities"] == {"readwrite": False, "admin": False}
+    assert 'id="frontend-root"' in response.text and "/static/frontend/" in response.text
+    return response.text, bootstrap
+
+
+def test_spu_roi_sort_binding_is_declarative_and_delegated():
+    """Tabulator's declared metric fields drive the backend remote-sort callback."""
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    query = _react_profitability_source("query.ts")
+    page = _react_profitability_source("index.tsx")
+    assert "export const columns = [" in table and "columns.map(([title, field])" in table
+    assert "headerSort: true" in table and "sortMode: 'remote'" in table
+    assert "instance.on('dataSorting'" in table and "state.current.onSort(field, direction)" in table
+    assert "onSort={(sort, order) => update({ sort, order })}" in page
+    assert "sort: q.sort, order: q.order" in query
+    assert "priceStats." in table and "priceGroups.map" in table
 
 
 def test_spu_roi_totals_roi_real_native_reconciliation(
@@ -3911,12 +3928,7 @@ def test_spu_roi_fee_rate_override_meta(api_client, readonly_key, db_engine):
 
 
 def test_spu_roi_page_returns_html(api_client, readonly_key):
-    r = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    assert r.headers["content-type"].startswith("text/html"), r.headers
+    _spu_react_document(api_client, readonly_key)
 
 
 def test_spu_roi_page_requires_auth(api_client):
@@ -3924,498 +3936,195 @@ def test_spu_roi_page_requires_auth(api_client):
 
 
 def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
-    """§7.1 header 店铺切换 + 工具条日期筛选:页面 HTML 含对应控件 id。
-
-    店铺切换器在 header 区(#shop-switcher),非工具栏;shop_pk 必选(URL 参数);
-    无"全部店铺"选项;shop_pk 缺失/无效时弹店铺选择弹窗(2026-09-28 用户拍板:
-    弹窗选店铺,不再 toast + 60s 倒计时强跳首页)。
-    """
-    r = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
-    # 店铺切换器在 header(非工具栏),由 JS 从 channel-accounts 拉取填充
-    assert 'id="shop-switcher"' in body
-    # shop_pk 必选:无"全部店铺"占位项
-    assert "全部店铺" not in body
-    # 店铺选择弹窗(shop_pk 缺失/无效时弹出,点选店铺后写回 URL 并加载;
-    # 不再有倒计时强跳 dashboard 的 toast)
-    assert 'id="ops-shop-modal"' in body
-    assert 'id="shop-modal-list"' in body
-    assert 'role="dialog"' in body
-    assert "请选择店铺" in body
-    assert 'id="ops-toast"' not in body
-    assert 'id="toast-countdown"' not in body
-    # Bootstrap 5 标签式 SPU 多选：真实 select multiple 由自托管 Tom Select
-    # Bootstrap 主题增强；查询/清空显式应用，避免每次选择都重算大盘。
-    assert 'id="filter-spu-ids"' in body
-    assert 'class="form-select"' in body
-    assert " multiple " in body
-    assert 'id="btn-spu-apply"' in body
-    assert 'id="btn-spu-clear"' in body
-    # SPU 输入、已选计数与操作按钮仍在同一个容器里；说明收进 title。
-    assert 'id="selection-slot"' in body
-    assert 'class="op-tool-row op-spu-filter"' in body
-    assert "支持搜索或批量粘贴" in body
-    assert 'id="toolbar-more"' in body
-    assert 'id="btn-toolbar-more"' in body
-    assert 'id="btn-refresh"' not in body
-    assert "tom-select.bootstrap5.min.css" in body
-    assert "tom-select.complete.min.js" in body
-    assert 'id="filter-q"' not in body
-    # 日期范围输入(空 = 不限 → w_start/w_end 不传 = 全历史)
-    assert 'id="filter-w-start"' in body
-    assert 'id="filter-w-end"' in body
-    assert 'type="date"' in body
-    # 分页是表格底部的单一操作区；工具栏不再放“每页”选择器。
-    assert body.count('id="filter-limit"') == 1
-    assert body.index('id="filter-limit"') > body.index('id="rows"')
-    assert 'id="pager-pages"' in body
-    assert 'class="pagination mb-0 op-pagination"' in body
-    assert 'aria-label="页码导航"' in body
-    # 含无活动 hover 问号解释(? 悬停出现,data-tip 委托)
-    assert "含无活动" in body
-    assert 'class="op-hint"' in body
-    assert "没有投放也没出单" in body
-    # 概览 10 格: sum-refund / sum-loss 仍存在;M13b 已迁钻取面板
-    assert "sum-refund" in body
-    assert "sum-loss" in body
-    assert "REFUND_ONLY" in body
-    # 无内联事件处理器(既有 shell 约束)
-    for forbidden in ("onchange=", "onclick="):
-        assert forbidden not in body, f"inline handler found: {forbidden}"
+    """React owns shop/date inputs and one adjacent SPU apply/clear group."""
+    body, _ = _spu_react_document(api_client, readonly_key)
+    page = _react_profitability_source("index.tsx")
+    selection = _react_profitability_source("Selection.tsx")
+    for hook in ("shop-switcher", "shop-modal-list", "filter-w-start", "filter-w-end", "filter-projection-lookback-days", "filter-include-all", "btn-toolbar-more"):
+        assert f'id="{hook}"' in page, hook
+    assert "/v2/commerce/channel-accounts?platform=tiktok" in page
+    assert "Boolean(shops.data && !shop)" in page and "请选择店铺" in page
+    assert "onPress={() => changeShop(row.id)}" in page
+    assert "全部店铺" not in page
+    for retired in ("ops-toast", "toast-countdown", "REDIRECT_COUNTDOWN_SEC"):
+        assert retired not in page
+    assert 'type="date"' in page and 'aria-label="快捷日期范围"' in page
+    assert "起始日期不能晚于截止日期" in page
+    assert page.index('id="filter-w-start"') < page.index("<Selection ")
+    for hook in ("filter-spu-ids", "spu-selection-count", "btn-spu-apply", "btn-spu-clear"):
+        assert hook in selection
+    assert "/v2/commerce/channel-product-options" in selection
+    assert "批量粘贴" in selection and "onApply(draft)" in selection and "onApply([])" in selection
+    assert page.count('id="filter-limit"') == 1
+    assert page.index('id="filter-limit"') > page.index("<ProfitabilityTable ")
+    assert 'aria-label="SPU ROI 分页"' in page
+    assert "tom-select" not in body and "bootstrap.min" not in body
+    for forbidden in ("onchange=", "onclick=", "onsubmit="):
+        assert forbidden not in body
 
 
 def test_spu_roi_page_remembers_filters_and_enhances_date_range():
-    """标准 ROI 页记住常用筛选，并用 Bootstrap 组合控件增强原生日期输入。"""
-    from pathlib import Path
-
-    static_dir = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
-    profile_js = (static_dir / "js" / "spu-roi.js").read_text(encoding="utf-8")
-    kernel_js = (static_dir / "js" / "spu-profitability-page.js").read_text(
-        encoding="utf-8"
-    )
-    css = (static_dir / "css" / "spu-roi.css").read_text(encoding="utf-8")
-
-    # 仅标准 ROI profile 启用本地偏好与日期增强；共享内核不会污染其他页面。
-    assert 'storageKey: "tts-erp:spu-roi:preferences:v1"' in profile_js
-    assert "dateRangeControl" in profile_js
-    assert "window.localStorage.getItem" in kernel_js
-    assert "window.localStorage.setItem" in kernel_js
-    assert "restorePagePreferences();" in kernel_js
-    assert "persistPagePreferences();" in kernel_js
-    assert "var preferredPk = urlPk || state.shopPk;" in kernel_js
-    assert "var datesValid =" in kernel_js
-    assert "savedStart <= savedEnd" in kernel_js
-    for field in (
-        "shopPk: state.shopPk || null",
-        "wStart: state.wStart",
-        "wEnd: state.wEnd",
-        "datesTouched: state.datesTouched",
-        "includeAll: state.includeAll",
-        "limit: state.limit",
-        "sort: state.sort",
-        "order: state.order",
-    ):
-        assert field in kernel_js
-
-    # Bootstrap 5 本身不附带 datepicker；保留原生 type=date，并在运行时组合
-    # 官方 input-group / btn-group / btn 组件，避免引入新的第三方日期库。
-    assert "reportingTimeZone" not in profile_js
-    assert 'defaultRange: "t-1"' in profile_js
-    assert 'new Intl.DateTimeFormat("en-CA"' in kernel_js
-    for region, time_zone in {
-        "VN": "Asia/Ho_Chi_Minh",
-        "TH": "Asia/Bangkok",
-        "SG": "Asia/Singapore",
-        "MY": "Asia/Kuala_Lumpur",
-        "PH": "Asia/Manila",
-        "CN": "Asia/Shanghai",
-        "JP": "Asia/Tokyo",
-        "KR": "Asia/Seoul",
-        "GB": "Europe/London",
-    }.items():
-        assert f'{region}: "{time_zone}"' in kernel_js
-    assert "state.shopsByPk = new Map" in kernel_js
-    assert "shop.region.trim().toUpperCase()" in kernel_js
-    assert "state.reportingTimeZone = shopReportingTimeZone(shop)" in kernel_js
-    assert "function reportingEndDate(now)" in kernel_js
-    assert "shiftDateValue(today, -1)" in kernel_js
-    assert 'state.datesTouched || dateConfig.defaultRange !== "t-1"' in kernel_js
-    assert "state.wStart = yesterday" in kernel_js
-    assert "state.wEnd = yesterday" in kernel_js
-    assert "applyShopReportingContext" in kernel_js
-    assert "applyDefaultDateRange();" in kernel_js
-    assert "无法确定报表时区" in kernel_js
-    assert "requiresShopReportingTimeZone() && !state.reportingTimeZone" in kernel_js
-    assert 'if (preset === "all") return { start: "", end: "" }' in kernel_js
-    assert 'class: "input-group input-group-sm op-date-input-group"' in kernel_js
-    assert 'class: "btn-group btn-group-sm op-date-presets"' in kernel_js
-    assert 'data-date-preset' in kernel_js
-    # 月初至 T-1 与某个滚动天数完全相同时只保留“本月”，避免两个按钮
-    # 同时激活。
-    assert "preferredDatePresetButtons" in kernel_js
-    assert 'priority: preset === "month" ? 2 : 1' in kernel_js
-    assert "button.hidden = duplicate" in kernel_js
-    assert "!duplicate &&" in kernel_js
-    assert "截止日包含当天" in kernel_js
-    assert "快捷范围均截止 T-1" in kernel_js
-    assert "按店铺地区 ${state.shopRegion}" in kernel_js
-    assert "“不限”只取消起始日" in kernel_js
-    assert '"aria-describedby": "date-range-help"' in kernel_js
-    assert ".op-date-range" in css
-    assert "flatpickr" not in profile_js + kernel_js
-    assert "bootstrap-datepicker" not in profile_js + kernel_js
+    """URL dates precede local preferences; native date controls use the shop day."""
+    query = _react_profitability_source("query.ts")
+    page = _react_profitability_source("index.tsx")
+    assert "tts-erp:" in query and ":preferences:v1" in query
+    assert "localStorage.getItem(preferenceKey(profile))" in query
+    assert "localStorage.setItem(preferenceKey(profile)" in query
+    assert "params.has('shop_pk')" in query and "params.has('w_start')" in query
+    assert "explicitDates ?" in query and "saved.datesTouched === true && datesValid" in query
+    assert "text(saved.wStart) <= text(saved.wEnd)" in query
+    for field in ("shopPk", "wStart", "wEnd", "datesTouched", "includeAll", "limit", "sort", "order"):
+        assert field in query.split("export function persistQuery", 1)[1]
+    for region, zone in {"VN": "Asia/Ho_Chi_Minh", "TH": "Asia/Bangkok", "SG": "Asia/Singapore", "MY": "Asia/Kuala_Lumpur", "PH": "Asia/Manila", "CN": "Asia/Shanghai", "JP": "Asia/Tokyo", "KR": "Asia/Seoul", "GB": "Europe/London"}.items():
+        assert f"{region}: '{zone}'" in query
+    assert "new Intl.DateTimeFormat('en-CA', { timeZone" in query
+    assert "shop.region" in page and "shiftDay(today, -1)" in page
+    assert "query.datesTouched" in page and "wStart: yesterday, wEnd: yesterday" in page
+    assert 'type="date"' in page and "data-date-preset={value}" in page
+    assert "yesterday?.endsWith('-01')" in page
+    assert "截止日包含当天" in page and "清空一端表示不限该端" in page
+    assert "无法确定报表时区" in page and "!unknownZone" in page
+    assert "flatpickr" not in page + query and "bootstrap-datepicker" not in page + query
 
 
 def test_spu_roi_page_shell_contract(api_client, readonly_key):
-    """页面 HTML shell:标题、静态资源相对路径、warm-paper token。"""
-    r = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
-    assert "SPU 实际 ROI" in body, "missing page title"
-    assert "../../static/vendor/bootstrap.min.css" in body, "missing bootstrap link"
-    assert "../../static/js/spu-roi.js" in body, "missing spu-roi.js link"
-    # 前缀安全(2026-08-31 回归):无根绝对路径资源引用
-    assert 'href="/' not in body
-    assert 'src="/' not in body
-    # warm-paper 令牌已统一到共享 tokens.css；spu-roi.css 只保留 --bs-* 桥接
+    """Manifest documents delegate navigation and session actions to shared AppShell."""
     from pathlib import Path
-
-    css_dir = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static" / "css"
-    tokens = (css_dir / "tokens.css").read_text(encoding="utf-8")
-    css = (css_dir / "spu-roi.css").read_text(encoding="utf-8")
-    # 设计令牌的唯一来源是 tokens.css
-    assert "--paper:" in tokens
-    assert "--accent:" in tokens
-    assert "--mono:" in tokens
-    # spu-roi.css 不得重建令牌，只消费它们 + 保留 Bootstrap 桥接
-    assert "--bs-border-radius: 0" in css
-    assert "--paper:" not in css, "spu-roi.css must consume tokens.css, not redefine --paper"
-    # 无外链字体
-    assert "fonts.googleapis.com" not in body
-    assert "fonts.gstatic.com" not in body
-    # 无内联事件处理器
-    for forbidden in ("onclick=", "onsubmit=", "onchange="):
-        assert forbidden not in body, f"inline handler found: {forbidden}"
+    body, bootstrap = _spu_react_document(api_client, readonly_key)
+    root = Path(__file__).resolve().parents[2]
+    styles = (root / "frontend/src/styles.css").read_text(encoding="utf-8")
+    main = (root / "frontend/src/main.tsx").read_text(encoding="utf-8")
+    page = _react_profitability_source("index.tsx")
+    active = [item for item in bootstrap["navigation"] if item["id"] == "spu-roi"]
+    assert len(active) == 1 and active[0]["href"] == bootstrap["rootPath"] + "/v2/pages/spu-roi"
+    assert "static/css/tokens.css" in styles and "static/css/navigation.css" in styles
+    assert main.count("<AppShell ") == 1 and "<SessionActions " in main
+    assert "<AppShell" not in page and "SessionActions" not in page
+    assert "spu-profitability-page.js" not in body and "spu-roi.js" not in body
+    for external in ("fonts.googleapis.com", "fonts.gstatic.com"):
+        assert external not in body
+    for handler in ("onclick=", "onsubmit=", "onchange="):
+        assert handler not in body
 
 
-def test_spu_roi_page_cache_busts_css_and_js_from_their_own_content(
-    api_client, readonly_key
-):
-    """CSS-only 发布必须生成新 URL，不能继续复用 spu-roi.js 的旧 hash。"""
-    import hashlib
-    from pathlib import Path
-
-    response = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = response.text
-    static_dir = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
-    css_version = hashlib.sha256(
-        (static_dir / "css" / "spu-roi.css").read_bytes()
-    ).hexdigest()[:8]
-    js_version = hashlib.sha256(
-        (static_dir / "js" / "spu-roi.js").read_bytes()
-    ).hexdigest()[:8]
-    kernel_version = hashlib.sha256(
-        (static_dir / "js" / "spu-profitability-page.js").read_bytes()
-    ).hexdigest()[:8]
-
-    assert f"../../static/css/spu-roi.css?v={css_version}" in body
-    assert f"../../static/js/spu-roi.js?v={js_version}" in body
-    assert (
-        f"../../static/js/spu-profitability-page.js?v={kernel_version}" in body
-    )
+def test_spu_roi_page_cache_busts_css_and_js_from_their_own_content(api_client, readonly_key):
+    """Selected release and Vite manifest own script and stylesheet identities."""
+    from tts_erp_v2.api.v2 import frontend_pages
+    body, bootstrap = _spu_react_document(api_client, readonly_key)
+    release_id = bootstrap["releaseId"]
+    assert release_id != "dev", "Canonical acceptance uses the compiled release"
+    directory = frontend_pages._FRONTEND_DIR / release_id
+    manifest = json.loads((directory / ".vite/manifest.json").read_text(encoding="utf-8"))
+    prefix = f'{bootstrap["rootPath"]}/static/frontend/{release_id}/'
+    entry = manifest["src/main.tsx"]
+    assert f'src="{prefix}{entry["file"]}"' in body
+    pending, seen, css = ["src/main.tsx"], set(), set()
+    while pending:
+        key = pending.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        record = manifest[key]
+        css.update(record.get("css", []))
+        pending.extend(record.get("imports", []))
+    assert css, "The production entry must include its shared stylesheet"
+    for filename in css:
+        assert (directory / filename).is_file()
+        assert f'href="{prefix}{filename}"' in body
+    assert "?v=" not in body
 
 
 def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key):
-    """整页响应式布局由 Bootstrap 栅格/工具类驱动，不再手写断点隐藏列。"""
-    from pathlib import Path
-
-    r = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
-    for fragment in (
-        "op-context-toolbar mx-3 mx-lg-4 mt-3",
-        "row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4",
-        "op-tool-row",
-        "op-table-panel mx-3 mx-lg-4",
-        "op-tabulator",
-        "nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs",
-    ):
-        assert fragment in body, f"缺 Bootstrap 响应式结构: {fragment}"
-
-    css_path = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "spu-roi.css"
-    )
-    css = css_path.read_text(encoding="utf-8")
-    assert "@media (max-width" not in css
-    assert "@media (min-width" not in css
+    """HeroUI/shared workspace own responsive layout; business columns do not vanish."""
+    body, _ = _spu_react_document(api_client, readonly_key)
+    page = _react_profitability_source("index.tsx")
+    css = _react_profitability_source("profitability.css")
+    details = _react_profitability_source("DrillDetails.tsx")
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    assert "erp-page" in page and "erp-panel" in page
+    assert "flex flex-wrap" in page and "@media (max-width: 767px)" in css
+    assert "minmax(0, 1fr)" in css and 'className="erp-table-scroll"' in details
+    assert "frozen: true" in table and "variableHeight: true" in table
     assert "nth-child(" not in css
-
-    js_path = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    )
-    src = js_path.read_text(encoding="utf-8")
-    # 明细大盘指标网格与页首整体大盘同栅格（op-counter-* 分组卡片），
-    # 不再自定义 row-cols 断点列数。
-    assert "row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4" in src
-    assert "op-counter-group-label" in src
-    assert "content.classList.add(" in src
-    for table_class in ("table-sm", "table-hover", "align-middle", "op-tab-table"):
-        assert f'"{table_class}"' in src
-    assert 'class: "table-responsive"' in src
+    assert "bootstrap.min" not in body and "row-cols-" not in page + details
+    assert "column.hide()" in table and "key?.startsWith('priceStats.')" in table
 
 
-def test_spu_roi_hidden_state_overrides_bootstrap_display_utilities(
-    api_client, readonly_key
-):
-    """hidden 必须稳定隐藏弹窗，不能被 Bootstrap d-flex !important 覆盖。"""
-    import re
-    from pathlib import Path
-
-    response = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = response.text
-    modal_tag = re.search(r'<div id="ops-shop-modal"[^>]+>', body)
-    assert modal_tag is not None
-    assert " d-flex" not in modal_tag.group(0)
-
-    css = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "spu-roi.css"
-    ).read_text(encoding="utf-8")
-    assert re.search(
-        r"\[hidden\]\s*\{[^}]*display:\s*none\s*!important",
-        css,
-        flags=re.DOTALL,
-    )
-    assert re.search(
-        r"\.op-shop-modal:not\(\[hidden\]\)\s*\{[^}]*display:\s*flex",
-        css,
-        flags=re.DOTALL,
-    )
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    assert "modal.hidden = false" in js
-    assert "modal.hidden = true" in js
-    assert "content.classList.add(" in js
-    assert 'content.className =\n            "table table-sm' not in js
+def test_spu_roi_hidden_state_overrides_bootstrap_display_utilities(api_client, readonly_key):
+    """HeroUI owns modal visibility; hidden price/fee panels have no display override."""
+    body, _ = _spu_react_document(api_client, readonly_key)
+    page = _react_profitability_source("index.tsx")
+    summary = _react_profitability_source("Summary.tsx")
+    css = _react_profitability_source("profitability.css")
+    assert "<Modal.Backdrop isOpen={Boolean(shops.data && !shop)}" in page
+    assert "<Modal.Backdrop isOpen={Boolean(image)}" in page
+    assert "hidden={supported !== true}" in summary
+    assert "hidden={dismissed || !fee.source}" in summary
+    assert "d-flex" not in body + page
+    for selector in ("#price-summary", "#fee-card"):
+        assert not re.search(re.escape(selector) + r"\s*\{[^}]*display:", css, re.DOTALL)
 
 
-def test_spu_roi_mobile_sticky_product_cells_use_opaque_backgrounds() -> None:
-    """sticky 商品列必须不透明，避免横向滚动后的百分比/金额透出重叠。"""
-    import re
-    from pathlib import Path
-
-    css = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "spu-roi.css"
-    ).read_text(encoding="utf-8")
-
-    def rule(selector: str) -> str:
+def test_spu_roi_mobile_sticky_product_cells_use_opaque_backgrounds():
+    css = _react_profitability_source("profitability.css")
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    for selector in (".erp-profit-grid .tabulator-row .tabulator-cell.tabulator-frozen", ".erp-profit-grid .tabulator-row.erp-profit-loss .tabulator-cell.tabulator-frozen"):
         match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
         assert match is not None, selector
-        return match.group(1)
-
-    base_sticky = rule(".op-tabulator .tabulator-row .tabulator-cell.tabulator-frozen")
-    loss_sticky = rule(
-        ".op-tabulator .tabulator-row.row-bad .tabulator-cell.tabulator-frozen"
-    )
-    assert "background: var(--surface)" in base_sticky
-    assert "background: var(--surface)" in loss_sticky
-    assert "inset 3px 0 var(--danger)" in loss_sticky
-    assert "rgba(" not in loss_sticky
-    assert "transparent" not in loss_sticky
-
-    product_meta = rule(".td-spu-meta")
-    product_id = rule(".td-spu")
-    assert "overflow: hidden" in product_meta
-    assert "overflow: hidden" in product_id
-    assert "text-overflow: ellipsis" in product_id
+        assert "background: var(--surface)" in match[1]
+        assert "transparent" not in match[1] and "rgba(" not in match[1]
+    assert "inset 3px 0 var(--danger)" in css
+    assert "frozen: true" in table and "ResizeObserver" in table
+    assert ".erp-profit-detail-trigger" in css and "overflow-wrap: anywhere" in css
 
 
-def test_spu_roi_dashboard_metrics_are_never_truncated() -> None:
-    """大盘标签和数值必须完整显示，不能用 ellipsis 隐藏业务数据。"""
-    import re
-    from pathlib import Path
-
-    css = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "spu-roi.css"
-    ).read_text(encoding="utf-8")
-
-    for selector in (".op-counter-label", ".op-counter-num"):
+def test_spu_roi_dashboard_metrics_are_never_truncated():
+    css = _react_profitability_source("profitability.css")
+    for selector in (".erp-profit-metrics dt", ".erp-profit-metrics dd"):
         match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
         assert match is not None, selector
-        declarations = match.group(1)
-        assert "overflow: hidden" not in declarations
-        assert "text-overflow: ellipsis" not in declarations
-        assert "white-space: nowrap" not in declarations
-        assert "white-space: normal" in declarations
-        assert "overflow-wrap: anywhere" in declarations
+        assert "overflow: hidden" not in match[1]
+        assert "text-overflow: ellipsis" not in match[1]
+        assert "white-space: nowrap" not in match[1]
+    values = re.search(r"\.erp-profit-metrics dd\s*\{([^}]*)\}", css)
+    assert values is not None and "overflow-wrap: anywhere" in values[1]
+    assert "minmax(0, 1fr)" in css
 
 
-def test_spu_roi_drill_summary_matches_actual_dashboard_metrics() -> None:
-    """每个 SPU 展开的明细大盘必须与页首整体大盘同组同指标（预测内容除外）。"""
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    summary = src.split("function renderProfitSummary", 1)[1].split(
-        "function renderProfitTab", 1
-    )[0]
-
-    expected_metrics = {
-        "总单量": "it.total_orders",
-        "广告消耗": "it.spend",
-        "有效单量": "it.effective_order_count",
-        "有效销售": "it.effective_sales",
-        "退款数": "it.refund_order_count",
-        "退款率": "it.refund_rate",
-        "全损量": "it.full_loss_order_count",
-        "全损率": "it.full_loss_rate",
-        "国内取消量": "it.domestic_cancelled_order_count",
-        "国内取消率": "it.cancel_rate",
-        "净利润": "it.net_profit",
-        "实际ROI": "it.roi_real",
-        "实际保本ROI": "it.roi_breakeven",
-        "广告系统实际ROI": "it.ad_system_actual_roi",
-        "广告系统保本ROI": "it.ad_system_breakeven_roi",
-    }
-    for label, field in expected_metrics.items():
-        assert label in summary
-        assert field in summary
-
-    for legacy_label in ("CPA", "单位成本", "已结算单", "全损件数", "净收入"):
-        assert f'cell("{legacy_label}"' not in summary
-    assert "row-cols-xxl-4" in summary
-
-    # 与页首整体大盘同样的分组：总览/有效/退款/全损/国内取消/利润/ROI（无预测组）。
-    for group_label in ("总览", "有效", "退款", "全损", "国内取消", "利润", "ROI"):
-        assert f'group("{group_label}"' in summary
-    # 分组卡片样式与页首一致（op-counter-*）。
-    assert "op-counter-group-label" in summary
-    assert "op-counter-item" in summary
-    assert "op-counter-num" in summary
-    # 口径提示复用页首同一份 data-tip（summaryHint ← #sum-*），两处口径不漂移。
-    assert "function summaryHint" in src
-    for sum_id in (
-        "sum-total-orders",
-        "sum-spend",
-        "sum-orders",
-        "sum-sales",
-        "sum-refund-count",
-        "sum-refund-rate",
-        "sum-loss-qty",
-        "sum-loss-rate",
-        "sum-cancel-count",
-        "sum-cancel-rate",
-        "sum-net-profit",
-        "sum-roi",
-        "sum-roi-breakeven",
-        "sum-roi-ad-actual",
-        "sum-roi-ad",
-    ):
-        assert f'summaryHint("{sum_id}")' in summary
+def test_spu_roi_drill_summary_matches_actual_dashboard_metrics():
+    """Totals and row details share current-metric definitions and explanations."""
+    expected = {"总单量": "total_orders", "广告消耗": "spend", "有效单量": "effective_order_count", "有效销售": "effective_sales", "退款数": "refund_order_count", "退款率": "refund_rate", "全损量": "full_loss_order_count", "全损率": "full_loss_rate", "国内取消量": "domestic_cancelled_order_count", "国内取消率": "cancel_rate", "净利润": "net_profit", "实际ROI": "roi_real", "实际保本ROI": "roi_breakeven", "广告系统实际ROI": "ad_system_actual_roi", "广告系统保本ROI": "ad_system_breakeven_roi"}
+    assert {label: field for label, field, _ in _react_profitability_metrics("currentMetrics")} == expected
+    summary = _react_profitability_source("Summary.tsx")
+    details = _react_profitability_source("DrillDetails.tsx")
+    assert "metrics = currentMetrics" in summary
+    assert "<Metrics values={data.totals}" in summary and "<Metrics values={row} meta={meta}" in details
+    assert "metrics={projectedMetrics}" not in details
+    assert "presentation.summary_hints" in summary and "metricHints[field]" in summary
+    assert "查看" in summary and "口径" in summary and "aria-label=" in summary
 
 
-def test_spu_roi_pnl_cogs_rows_show_qty_times_unit_cost() -> None:
-    """货本行必须显示「件数 × 单价 = 金额」，不能只给裸金额（2026-10-03 用户拍板）。"""
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    pnl = js.split("function renderProfitTab", 1)[1].split(
-        "function renderDrillTabBody", 1
-    )[0]
-
-    # 表达式样式：N 件 × 单价 = 金额
-    assert '" 件 × "' in pnl
-    # 件数与单价均取后端行字段，前端只格式化不重算
-    assert "it.units_sold" in pnl
-    assert "it.unit_cost_used" in pnl
-    assert "it.full_loss_cancelled_qty" in pnl
-    # 货本两行都套用表达式
-    assert "costExpr(it.units_sold, cogsSold)" in pnl
-    assert "costExpr(it.full_loss_cancelled_qty, cogsFlc)" in pnl
-    # 缺件数/单价时回退裸金额，不显示 undefined
-    assert "fmtMoney(val)" in pnl
+def test_spu_roi_pnl_cogs_rows_show_qty_times_unit_cost():
+    details = _react_profitability_source("DrillDetails.tsx")
+    assert "货本 · 售出件" in details and "货本 · 全损取消件" in details
+    assert "件 × " in details
+    assert "displayValue(row.units_sold)" in details and "displayValue(row.full_loss_cancelled_qty)" in details
+    assert "displayValue(row.unit_cost_used)" in details
+    assert "row.units_sold != null && row.unit_cost_used != null" in details
+    assert "row.full_loss_cancelled_qty != null && row.unit_cost_used != null" in details
+    assert "displayValue(row[field])" in details
+    assert "* row.unit_cost_used" not in details
 
 
-def test_spu_roi_settlements_tab_uses_chinese_headers_and_status() -> None:
-    """结算钻取表头必须中文化（SETTLEMENT/statement 不得直出）并带订单状态列。"""
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    tab = js.split('if (tab === "settlements")', 1)[1].split(
-        'if (tab === "orders")', 1
-    )[0]
-
-    # 中文表头 + 口径提示
-    assert "结算金额(CNY)" in tab
-    assert "对账单时间" in tab
-    assert "订单状态" in tab
-    # 「分摊比」易被误读成“分摊多少钱给平台”（2026-10-03 用户拍板），改名后旧名不得回归
-    assert "本 SPU 占单比" in tab
-    assert "分摊比" not in tab
-    assert "与「给平台分摊多少钱」无关" in tab
-    assert "本 SPU 行金额 ÷ 整单金额" in tab
-    # 原始枚举/字段名不得再作为表头直出
-    assert 'el("th", null, "SETTLEMENT")' not in tab
-    assert 'el("th", null, "statement")' not in tab
-    # 订单状态列走 enum-map 翻译；0 元流水必须标注
-    assert 'tr("order_status", s.status)' in tab
-    assert "已取消/冲销" in tab
-    assert "无入账" in tab
+def test_spu_roi_settlements_tab_uses_chinese_headers_and_status():
+    details = _react_profitability_source("DrillDetails.tsx")
+    for label in ("结算金额 CNY", "对账单时间", "订单状态", "本 SPU 占单比"):
+        assert label in details
+    assert "本 SPU 行金额 ÷ 整单金额" in details and "与给平台分摊多少钱无关" in details
+    assert "分摊比" not in details
+    assert "tr('order_status', item.status)" in details
+    assert "已取消 / 冲销" in details and "无入账" in details
+    assert "displayPercent(item.share_ratio)" in details
 
 
 def test_spu_roi_zero_net_settlement_with_refund_stays_settled(
@@ -4483,441 +4192,138 @@ def test_spu_roi_zero_net_settlement_with_refund_stays_settled(
     assert rows[0]["is_settled"] is True
 
 
-def test_spu_roi_cost_and_refund_warnings_use_distinct_badges() -> None:
-    """缺成本与高退款必须用可直接辨认的不同标识，不能共用 ⚠。"""
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    row_markup = src.split("function productCellFormatter", 1)[1].split(
-        "function moneyCell", 1
-    )[0]
-
-    assert 'class="warn-default"' in row_markup
-    assert ">缺成本</span>" in row_markup
-    assert 'class="warn-rr"' in row_markup
-    assert ">高退款</span>" in row_markup
-    assert ">⚠</span>" not in row_markup
+def test_spu_roi_cost_and_refund_warnings_use_distinct_badges():
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    assert "row.uses_default_unit_cost === true, '缺成本'" in table
+    assert "row.refund_rate_alert === true, '高退款'" in table
+    assert "default_cost_alert_message" in table and "refund_rate_alert_message" in table
+    assert "span.textContent = textValue" in table
+    assert "'⚠'" not in table and '"⚠"' not in table
 
 
 def test_spu_roi_js_targets_dashboard_hooks():
-    """共享盈利 kernel 必须渲染表格与结余带。"""
-    from pathlib import Path
-
-    js_path = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    )
-    src = js_path.read_text(encoding="utf-8")
-    # 必须消费 /v2/analytics/spu-roi(带 PREFIX 推导)
-    assert "/v2/analytics/spu-roi" in src
-    assert "PREFIX" in src
-    assert "unwrap" in src
-    assert "401" in src  # 401 → login 跳转
-    assert "roi_breakeven" in src
-    assert "uses_default_unit_cost" in src  # 后端业务状态驱动“缺成本”标识
-    assert "DEFAULT_K1" not in src
-    assert '"¥"' not in src  # 2026-09-29 反馈：金额前缀去掉，纯数字
-    # 2026-10-02 用户反馈页脚口径文字无用：整块删除，cost_assumption 不再上屏（meta 契约不变）
-    assert "meta.cost_assumption" not in src
-    # Bootstrap 多选由 Tom Select 驱动，精确 scope 通过独立 spu_ids 参数提交。
-    assert 'window["TomSelect"]' in src
-    assert "/v2/commerce/channel-product-options" in src
-    assert "spu_ids" in src
-    assert "clipboardData" in src
-    assert 'replace(/，/g, ",")' in src
-    # 回归:手动删空草稿后，只要已应用 SPU scope 仍非空，「清空」必须可用；
-    # 「查询」由草稿/已应用集合差异驱动，且删除/清空事件都刷新按钮状态。
-    assert "hasAppliedSpuScope = state.spuIds.length > 0" in src
-    assert "(!selected.length && !hasAppliedSpuScope && !pendingCount)" in src
-    assert "onItemRemove: updateSpuSelectionUi" in src
-    assert "onClear: updateSpuSelectionUi" in src
-    # 批量粘贴可被清空/换店取消，且并发校验也要占用 100 条配额。
-    assert "spuSelectionVersion" in src
-    assert "pendingSpuIds" in src
-    assert "cancelPendingSpuResolutions" in src
-    assert "controller.abort()" in src
-    # 主表请求始终以最新筛选条件为准，已应用 scope 可由 URL 恢复。
-    assert "loadVersion" in src
-    assert "loadController" in src
-    assert "setSpuIdsInUrl(state.spuIds)" in src
-    assert "restoreSpuScopeFromUrl" in src
-    # 页首在未结算订单后动态插入已送达子集，避免与运行配置 lane 争写 HTML 模板。
-    assert "ensureDeliveredUnsettledSummary" in src
-    assert 'id: "sum-delivered-unsettled-orders"' in src
-    assert "totals.delivered_unsettled_order_count" in src
+    page = _react_profitability_source("index.tsx")
+    selection = _react_profitability_source("Selection.tsx")
+    query = _react_profitability_source("query.ts")
+    read = _react_profitability_source("useRead.ts")
+    summary = _react_profitability_source("Summary.tsx")
+    assert "/v2/analytics/spu-roi?" in page and "useRead(root, path" in page
+    assert "requestJson<unknown>(root, path" in read and "parseIdentityJson" in read
+    assert "decodeOverview" in page and "DEFAULT_K1" not in page + summary
+    assert "/v2/commerce/channel-product-options" in selection
+    assert "params.set('spu_ids', q.spuIds.join(','))" in query
+    assert "replaceAll('，', ',')" in query
+    assert "resolvePaste" in selection and "scope?.signal.aborted" in selection
+    assert "controller.abort()" in selection and "controller.abort()" in read
+    assert "onApply([])" in selection and "onApply(draft)" in selection
+    assert "url.searchParams.set('spu_ids'" in page and "url.searchParams.delete('spu_ids')" in page
+    assert "params.get('spu_ids')" in query
+    assert "'delivered_unsettled_order_count', 'sum-delivered-unsettled-orders'" in summary
+    for removed in ("meta.cost_assumption", '"¥"', "TomSelect"):
+        assert removed not in page + summary + selection
 
 
-def test_spu_roi_projection_render_tolerates_stale_html_shell() -> None:
-    """New static JS must not crash while an old API process still serves HTML.
-
-    StaticFiles reads the new bundle immediately, while the HTML template in
-    ``pages.py`` remains in process memory until the API restarts. During that
-    deployment window projection hooks can be absent, but existing dashboard
-    data must continue rendering.
-    """
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    helper = src.split("function setTextIfPresent", 1)[1].split(
-        "function loginUrl", 1
-    )[0]
-    projection_render = src.split("// 预测由后端", 1)[1].split(
-        "var rubricLabel", 1
-    )[0]
-
-    assert "if (target) target.textContent = value" in helper
-    for hook in (
-        "#sum-projection-status",
-        "#sum-projection-completed-basis-orders",
-        "#sum-projected-net-profit",
-        "#sum-projected-roi",
-    ):
-        assert re.search(
-            rf'setTextIfPresent\(\s*"{re.escape(hook)}"', projection_render
-        )
-        assert f'$("{hook}").textContent' not in projection_render
+def test_spu_roi_projection_render_tolerates_stale_html_shell():
+    """React creates projection nodes; absent values no longer depend on legacy hooks."""
+    summary = _react_profitability_source("Summary.tsx")
+    contracts = _react_profitability_source("contracts.ts")
+    assert "value == null || value === '' ? '—'" in summary
+    assert "optionalRecord(data.meta.projection)" in summary
+    assert "status[String(data.totals.projection_status)] ?? text(data.totals.projection_status)" in summary
+    assert "values[field]" in summary and "id={prefix + id}" in summary
+    assert "document.querySelector" not in summary and "getElementById" not in summary
+    assert "value === null || value === undefined || value === '' ? '—'" in contracts
 
 
 def test_spu_roi_filter_actions_keep_a_stable_mobile_layout():
-    """SPU 选择器宽度与两个操作按钮的触控高度不能随断点退化。"""
-    from pathlib import Path
-
-    css_path = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "spu-roi.css"
-    )
-    css = css_path.read_text(encoding="utf-8")
-    assert ".op-toolbar .ts-wrapper" in css
-    assert ".op-spu-filter" in css
-    assert ".op-spu-selection-count" in css
-    assert "width: 100%;" in css
-    assert "#btn-spu-clear" in css
-    assert "#btn-spu-apply" in css
-    assert "min-height: 38px;" in css
-    assert "@media (max-width" not in css  # Bootstrap 栅格负责断点布局
+    selection = _react_profitability_source("Selection.tsx")
+    css = _react_profitability_source("profitability.css")
+    assert 'className="erp-spu-selection-search"' in selection
+    assert ".erp-spu-selection-search" in css and "width: min(100%, 480px)" in css
+    assert "flex-wrap: wrap" in css
+    actions = selection.split('id="btn-spu-apply"', 1)[1].split("</div>", 1)[0]
+    assert 'id="btn-spu-clear"' in actions and "onApply([])" in actions
+    assert "onApply(draft)" in actions
+    assert 'id="spu-selection-count"' in selection
+    assert "min-w-0" in selection and "break-all" in selection
+    assert "按 Ctrl" not in selection
 
 
 def test_spu_roi_pagination_uses_bootstrap_page_navigation():
-    """页码、上一页/下一页和每页选择均由表格底部的 Bootstrap 分页区管理。"""
-    from pathlib import Path
-
-    js_path = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    )
-    js = js_path.read_text(encoding="utf-8")
-    assert "function pagerSequence" in js
-    assert "function renderPager" in js
-    assert '$("#pager-pages").addEventListener("click"' in js
-    assert '$("#btn-prev")' not in js
-    assert '$("#btn-next")' not in js
+    """One HeroUI action group owns page count, page size and previous/next."""
+    page = _react_profitability_source("index.tsx")
+    pagination = page.split('<nav className="erp-profit-pagination"', 1)[1].split("</nav>", 1)[0]
+    assert 'aria-label="SPU ROI 分页"' in pagination
+    assert pagination.count('id="filter-limit"') == 1
+    assert 'id="pager-label"' in pagination
+    assert "上一页" in pagination and "下一页" in pagination
+    assert "offset: Math.max(0, query.offset - query.limit)" in pagination
+    assert "offset: query.offset + query.limit" in pagination
+    assert "query.offset === 0" in pagination
+    assert "query.offset + query.limit >= data.total" in pagination
+    assert "query.offset / query.limit" in pagination and "data.total / query.limit" in pagination
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
-    """§7.1 结余带:15 格指标完整，并按同类指标相邻排列。"""
-    from pathlib import Path
-
-    r = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
-    summary_ids = (
-        "sum-total-orders",
-        "sum-spend",
-        "sum-orders",
-        "sum-sales",
-        "sum-refund-count",
-        "sum-refund-rate",
-        "sum-loss-qty",
-        "sum-loss-rate",
-        "sum-cancel-count",
-        "sum-cancel-rate",
-        "sum-net-profit",
-        "sum-roi",
-        "sum-roi-breakeven",
-        "sum-roi-ad-actual",
-        "sum-roi-ad",
-        "sum-projection-status",
-        "sum-projection-completed-basis-orders",
-        "sum-projection-completed-loss-orders",
-        "sum-projection-full-loss-rate",
-        "sum-unresolved-orders",
-        "sum-delivered-unsettled-orders",
-        "sum-full-loss-exposure-unsettled-orders",
-        "sum-projected-future-loss-qty",
-        "sum-projected-net-revenue",
-        "sum-projected-net-profit",
-        "sum-projected-roi",
-        "sum-projected-breakeven-roi",
-        "sum-projected-ad-roi",
-        "sum-projected-ad-breakeven-roi",
-    )
-    summary_positions = []
-    for cell_id in summary_ids:
-        marker = f'id="{cell_id}"'
-        assert marker in body, f"结余带缺 {cell_id} 格"
-        summary_positions.append(body.index(marker))
-    assert summary_positions == sorted(summary_positions), "结余带同类指标顺序被打乱"
-    # 不再展示 SPU 个数
-    assert 'id="sum-n"' not in body
-    assert "总单量" in body
-    assert "净利润" in body
-    assert "全损量" in body
-    assert "退款数" in body
-    assert "已完结订单全损率" in body
-    assert "预计拒收金额率" not in body
-    assert "已完结样本单" in body
-    assert "已完结全损单" in body
-    assert "未结算已送达订单" in body
-    assert "待完结风险订单" in body
-    assert "预计未来新增全损件" in body
-    assert "预计终局全损件" not in body
-    assert "预计ROI" in body
-    assert "预计保本ROI" in body
-    assert "预计广告系统ROI" in body
-    assert "预计广告系统保本ROI" in body
-    assert "预计财务ROI" not in body
-    # 表头 tooltip 文案随列定义迁入 JS kernel（Tabulator 迁移）。
-    kernel_js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in kernel_js
-    assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in kernel_js
-    assert "TODO: 广告系统保本ROI 公式待定" not in body
-    # 主表指标名与大盘 v10 口径一致，广告系统两个 ROI 紧随广告消耗展示。
-    column_block = kernel_js.split("var COLUMN_DEFS = [", 1)[1].split("];", 1)[0]
-    main_th_labels = re.findall(r'title: "([^"]+)"', column_block)
-    for col_label in (
-        "商品",
-        "广告消耗",
-        "广告系统实际ROI",
-        "广告系统保本ROI",
-        "有效销售",
-        "总单量",
-        "有效单量",
-        "取消率%",
-        "全损率%",
-        "净利润",
-    ):
-        assert col_label in main_th_labels, f"主表缺列 {col_label}"
-    assert main_th_labels.index("有效销售") < main_th_labels.index(
-        "总单量"
-    ) < main_th_labels.index("有效单量"), "总单量应位于有效销售和有效单量之间"
-    # D8 删除:原 13 列里只在 th 表头出现过的标签
-    for removed in (
-        "销售$",
-        "有效销售$",
-        "退货$",
-        "退货率%",
-        "全损退款$",
-        "实际ROI",
-        "保本ROI",
-    ):
-        assert removed not in main_th_labels, f"D8 已删:th 表头残留 {removed}"
-    # D8 删除 ⚙ 列开关组
-    for toggle in (
-        "col-toggle-adref",
-        "col-toggle-structure",
-        "col-toggle-refundsplit",
-        "col-toggle-cancel",
-        "col-toggle-fee",
-    ):
-        assert toggle not in body
-    # M13b 已迁钻取面板利润构成 tab(D4 B 切 38301 全损口径)
-    assert "M13b" in body
-    # 钻取面板存在(D7 行内 accordion)
-    assert "op-drill" in body
-    assert "tpl-drilldown-panel" in body
-    # 每个概览格都有 ? 口径悬停
-    summary_start = body.index('id="summaries"')
-    summary_html = body[summary_start : body.index("</section>", summary_start)]
-    assert summary_html.count('class="op-hint"') == len(summary_ids)
-    # 共享 kernel 必须填充新格
-    js_src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    assert '("#sum-total-orders")' in js_src
-    assert "fmtInt(totals.total_orders || 0)" in js_src
-    assert '("#sum-loss-qty")' in js_src
-    assert '("#sum-refund-count")' in js_src
-    assert '("#sum-cancel-count")' in js_src
-    assert '("#sum-net-profit")' in js_src
-    assert "fmtMoney(totals.net_profit)" in js_src
-    assert 'totals.profit_status === "loss"' in js_src
-    # 行级格式化由 CELL_FORMATTERS 映射驱动（Tabulator 迁移）：
-    # 列字段 → fmt* 函数的对应关系是唯一事实源。
-    assert "effective_sales: moneyCell" in js_src
-    assert "total_orders: intCell" in js_src
-    assert "effective_order_count: intCell" in js_src
-    assert "ad_system_actual_roi: ratioCell" in js_src
-    assert "function breakevenRoiCell" in js_src
-    assert 'it.ad_system_breakeven_roi_status === "estimated_known_costs"' in js_src
-    assert '("#sum-roi-breakeven")' in js_src
-    assert '("#sum-roi-ad-actual")' in js_src
-    assert "totals.ad_system_actual_roi" in js_src
-    assert '("#sum-roi-ad")' in js_src
-    assert 'roiAdStatus === "estimated_known_costs"' in js_src
-    assert '"#sum-projection-status"' in js_src
-    assert "totals.projection_status" in js_src
-    assert "totals.projection_completed_basis_order_count" in js_src
-    assert "totals.projection_completed_full_loss_order_count" in js_src
-    assert "totals.completed_full_loss_rate" in js_src
-    assert "totals.full_loss_exposure_unsettled_order_count" in js_src
-    assert "totals.projected_net_profit" in js_src
-    assert "totals.projected_roi_real" in js_src
-    assert "totals.projected_ad_system_actual_roi" in js_src
-    assert "totals.projected_ad_system_breakeven_roi" in js_src
-    assert "formula_pending" not in js_src
+    """All current/projected bindings and metric explanations survive visual folding."""
+    _spu_react_document(api_client, readonly_key)
+    current = _react_profitability_metrics("currentMetrics")
+    projected = _react_profitability_metrics("projectedMetrics")
+    assert [hook for _, _, hook in current] == [
+        "sum-total-orders", "sum-spend", "sum-orders", "sum-sales",
+        "sum-refund-count", "sum-refund-rate", "sum-loss-qty", "sum-loss-rate",
+        "sum-cancel-count", "sum-cancel-rate", "sum-net-profit", "sum-roi",
+        "sum-roi-breakeven", "sum-roi-ad-actual", "sum-roi-ad",
+    ]
+    assert [hook for _, _, hook in projected] == [
+        "sum-projection-completed-basis-orders", "sum-projection-completed-loss-orders",
+        "sum-projection-full-loss-rate", "sum-unresolved-orders",
+        "sum-delivered-unsettled-orders", "sum-full-loss-exposure-unsettled-orders",
+        "sum-projected-future-loss-qty", "sum-projected-net-revenue",
+        "sum-projected-net-profit", "sum-projected-roi", "sum-projected-breakeven-roi",
+        "sum-projected-ad-roi", "sum-projected-ad-breakeven-roi",
+    ]
+    summary = _react_profitability_source("Summary.tsx")
+    hints = summary.split("export const metricHints", 1)[1].split("export function Metrics", 1)[0]
+    hint_fields = set(re.findall(r"\b([a-z_]+):\s*'", hints))
+    assert {field for _, field, _ in current + projected} | {"projection_status"} <= hint_fields
+    assert "查看" in summary and "口径" in summary and "aria-label=" in summary
+    assert "metricHints[field]" in summary and "presentation.summary_hints" in summary
+    assert "<Modal.Backdrop isOpen={Boolean(hint)}" in summary
+    assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in summary
+    assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in summary
+    assert 'id="sum-projection-status"' in summary
+    assert "metrics={projectedMetrics}" in summary and "<details" in summary
+    assert "ad_system_breakeven_roi_status === 'estimated_known_costs'" in summary
+    for retired in ("sum-n", "sum-projected-terminal-loss-qty", "预计拒收金额率", "预计财务ROI"):
+        assert f"'{retired}'" not in summary and f'id="{retired}"' not in summary
 
 
-def test_spu_roi_drill_summary_excludes_projection_metrics() -> None:
-    """2026-10-03 拍板：明细大盘与整体大盘保持一致，但预测内容不展示。"""
-    from pathlib import Path
-
-    repo = Path(__file__).resolve().parents[2]
-    src = (
-        repo / "tts_erp_v2" / "static" / "js" / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    summary = src.split("function renderProfitSummary", 1)[1].split(
-        "function renderProfitTab", 1
-    )[0]
-
-    for field in (
-        "it.projection_status",
-        "it.projection_completed_basis_order_count",
-        "it.projection_completed_full_loss_order_count",
-        "it.projection_terminal_full_loss_order_count",
-        "it.completed_full_loss_rate",
-        "it.unsettled_order_count",
-        "it.unresolved_unsettled_order_count",
-        "it.unresolved_unsettled_qty",
-        "it.unresolved_unsettled_sales",
-        "it.full_loss_exposure_unsettled_sales",
-        "it.confirmed_unsettled_refund_amount",
-        "it.confirmed_full_loss_exposure_refund_amount",
-        "it.confirmed_unsettled_full_loss_order_count",
-        "it.confirmed_unsettled_full_loss_qty",
-        "it.projected_future_refund_amount",
-        "it.projected_future_full_loss_order_count",
-        "it.projected_future_full_loss_qty",
-        "it.projected_full_loss_cost",
-        "it.projected_unsettled_net",
-        "it.projected_net_revenue",
-        "it.projected_net_profit",
-        "it.projected_roi_real",
-        "it.projected_roi_breakeven",
-        "it.projected_ad_system_actual_roi",
-        "it.projected_ad_system_breakeven_roi",
-        "it.projected_nc_prime",
-        "it.projected_cogs_kept",
-    ):
-        assert field not in summary
-    for label in (
-        "预测状态",
-        "已完结样本订单",
-        "已完结全损订单",
-        "其中终局物流全损订单",
-        "已完结订单全损率",
-        "未结算订单",
-        "待确认未结算订单",
-        "待确认未结算件",
-        "待确认未结算销售",
-        "未送达风险销售",
-        "已确认未结算退款",
-        "已确认风险池退款",
-        "已确认未结算全损单",
-        "已确认未结算全损件",
-        "预计未来新增退款",
-        "预计未来新增全损单",
-        "预计未来新增全损件",
-        "预计全损成本",
-        "预计未结算净收入",
-        "预计净收入",
-        "预计净利润",
-        "预计ROI",
-        "预计保本ROI",
-        "预计广告系统ROI",
-        "预计广告系统保本ROI",
-        "预计NC′",
-        "预计保留货本",
-        "预计拒收金额率",
-        "预计终局全损件",
-        "预计财务ROI",
-    ):
-        assert f'cell("{label}"' not in summary
-    for group_label in ("预测依据", "未结算预测对象", "预计"):
-        assert f'group("{group_label}"' not in summary
-
-    # 页首整体大盘保留预测内容（本次只收窄明细大盘，整体大盘不变）。
-    page_html = (
-        repo / "tts_erp_v2" / "templates" / "pages" / "spu-profitability.html"
-    ).read_text(encoding="utf-8")
-    assert 'id="sum-projection-status"' in page_html
-    assert 'id="sum-projected-net-profit"' in page_html
+def test_spu_roi_drill_summary_excludes_projection_metrics():
+    current = _react_profitability_metrics("currentMetrics")
+    projected = _react_profitability_metrics("projectedMetrics")
+    current_fields = {field for _, field, _ in current}
+    projected_fields = {field for _, field, _ in projected}
+    assert current_fields.isdisjoint(projected_fields)
+    assert not any(field.startswith("projection") or field.startswith("projected") for field in current_fields)
+    details = _react_profitability_source("DrillDetails.tsx")
+    assert "<Metrics values={row}" in details
+    assert "metrics={projectedMetrics}" not in details and "projection_status" not in details
+    summary = _react_profitability_source("Summary.tsx")
+    assert 'id="sum-projection-status"' in summary
+    assert "'sum-projected-net-profit'" in summary and "metrics={projectedMetrics}" in summary
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
-    """主表无列开关；有效销售/有效单量排序字段与实际展示口径一致。"""
-    r = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
-    assert "col-toggle-" not in body
-    assert "data-colgroup=" not in body
-    assert "data-cg=" not in body
-    # 表头已迁入 JS COLUMN_DEFS（Tabulator），sortField 是唯一声明。
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    sortable = re.findall(r'sortField: "([a-z0-9_]+)"', js)
-    assert set(sortable) == {
-        "spend",
-        "ad_system_actual_roi",
-        "ad_system_breakeven_roi",
-        "effective_sales",
-        "total_orders",
-        "effective_order_count",
-        "cancel_rate",
-        "full_loss_rate",
-        "net_profit",
-    }, f"主表可点列异常: {sortable}"
+    body, _ = _spu_react_document(api_client, readonly_key)
+    page = _react_profitability_source("index.tsx")
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    for retired in ("col-toggle-", "data-colgroup=", "data-cg="):
+        assert retired not in body + page + table
+    block = table.split("export const columns = [", 1)[1].split("] as const", 1)[0]
+    fields = re.findall(r"\['[^']+', '([^']+)'\]", block)
+    assert fields == ["spend", "ad_system_actual_roi", "ad_system_breakeven_roi", "effective_sales", "total_orders", "effective_order_count", "cancel_rate", "full_loss_rate", "net_profit"]
+    assert "columns.map(([title, field])" in table
 
 
 def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
@@ -4931,17 +4337,19 @@ def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200
-    # 可点列头已迁入 JS COLUMN_DEFS（Tabulator）；sortField ⊆ 端点 sort 白名单。
+    # Current columns have one React adapter owner; keep real endpoint numeric checks.
     from pathlib import Path
 
-    js = (
+    source = (
         Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
+        / "frontend/src/pages/spu-profitability/ProfitabilityTable.tsx"
     ).read_text(encoding="utf-8")
-    fields = re.findall(r'sortField: "([a-z0-9_]+)"', js)
+    definitions = source.split("export const columns = [", 1)[1].split("] as const", 1)[0]
+    fields = re.findall(r"\['[^']+', '([a-z0-9_]+)'\]", definitions)
+    assert set(fields) == {
+        "spend", "ad_system_actual_roi", "ad_system_breakeven_roi", "effective_sales",
+        "total_orders", "effective_order_count", "cancel_rate", "full_loss_rate", "net_profit",
+    }
     assert fields
     with Session(db_engine) as sess:
         _seed(sess, _seed_scenario_a)
@@ -4975,123 +4383,55 @@ def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
 
 
 def test_spu_roi_js_review_fixes_present():
-    """review 修复守卫:操作员身份 / 无投放 / 标色常量 / 服务端 ROI。"""
-    from pathlib import Path
-
-    js_path = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    )
-    src = js_path.read_text(encoding="utf-8")
-    # Account identity and sign-out have one owner in the shared header.
-    assert "function loadMe" not in src
-    assert "#ops-identity" not in src
-    assert "btn-logout" not in src
-    # 标色业务状态由后端返回，页面不得保存阈值或重算状态。
-    assert "ROI_HARD_LOSS = 1.0" not in src
-    assert "PASS_LINE = 1.5" not in src
-    assert "REFUND_RATE_ALERT" not in src
-    assert 'it.refund_rate_alert === true' in src
-    assert 'it.has_unsettled_orders === true' in src
-    assert 'it.profit_status === "loss"' in src
-    # 「无投放」说明属于页面筛选器 tooltip，由 shell contract 覆盖；JS 不复制文案。
-    # D8 删除列开关 + 信息列字段
-    assert "op-th col-hidden" not in src
-    assert "td.col-hidden" not in src
-    # D7/D6 钻取面板:accordion + tab 懒加载（Tabulator rowClick 驱动）
-    assert "openDrillPanel" in src
-    assert "rowClick" in src
-    assert "fetchDrillTab" in src
-    assert "tpl-drilldown-panel" in src
-    # 排序字段来自 COLUMN_DEFS.sortField，公共 kernel 不复制具体字段白名单。
-    assert "DEFAULT_SORT" in src
-    assert "supportsSortField" in src
-    assert "sortField" in src
-    assert '"asc"' in src
-    # finding 2:结余带直接消费 totals.roi_real,页面不反推 ROI
-    assert "totals.roi_real" in src
-    # 2026-09-06:日期框按数据真实跨度回填(meta.window.coverage_*)只读一次
-    assert "coverage_first_day" in src
-    assert "datesTouched" in src
+    page = _react_profitability_source("index.tsx")
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    details = _react_profitability_source("DrillDetails.tsx")
+    summary = _react_profitability_source("Summary.tsx")
+    for foreign in ("loadMe", "ops-identity", "btn-logout", "ROI_HARD_LOSS", "PASS_LINE", "REFUND_RATE_ALERT"):
+        assert foreign not in page + table + details + summary
+    assert "row.refund_rate_alert === true" in table
+    assert "row.has_unsettled_orders === true" in table and "row.profit_status === 'loss'" in table
+    assert "instance.on('rowClick'" in table and "createPortal(<DrillDetails" in page
+    assert "if (tab === 'pnl') return" in details
+    assert "cache.get(key)" in details and "requestJson<unknown>(root, path" in details
+    assert "values[field]" in summary and "'roi_real', 'sum-roi'" in summary
+    assert "coverage_first_day" in page and "query.datesTouched" in page
 
 
-def test_spu_roi_frontend_only_displays_backend_profitability() -> None:
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    assert "Number(it.unsettled_net" in src
-    assert "Number(it.cogs_sold" in src
-    assert "Number(it.cogs_full_loss_cancelled" in src
-    assert "netRevenue - settledNet" not in src
-    assert "* unitCost" not in src
-    assert 'err.code === "FX_RATE_UNAVAILABLE"' in src
-    assert 'renderError("汇率数据缺失，无法计算结果", true)' in src
-    assert "summaries.hidden = true" in src
-    assert "pager.hidden = true" in src
-    assert "footnotes" not in src  # 页脚区块已删（2026-10-02）
-    assert 'roiAdStatus === "estimated_known_costs"' in src
-    assert "ad_system_max_ad_spend" not in src  # 前端不重算，只展示后端 ROI
-    assert 'meta.currency.display) || "CNY"' not in src
-    assert "全表" not in src
-    assert "fx.as_of_at" in src
-    assert "0.308" not in src
-    assert "盈利 v10" not in src
-    assert "未退款订单" not in src
-    assert "占窗口 GMV" not in src
-    assert 'shop_estimate: "实测"' in src
-    assert "settledCount > 0" not in src
-    assert "state.meta.presentation" in src
+def test_spu_roi_frontend_only_displays_backend_profitability():
+    page = _react_profitability_source("index.tsx")
+    details = _react_profitability_source("DrillDetails.tsx")
+    summary = _react_profitability_source("Summary.tsx")
+    read = _react_profitability_source("useRead.ts")
+    contracts = _react_profitability_source("contracts.ts")
+    source = page + details + summary
+    assert "totals: record(r.totals), meta: record(r.meta)" in contracts
+    assert "values[field]" in summary and "displayValue(row[field])" in details
+    assert "error.code === 'FX_RATE_UNAVAILABLE'" in read
+    assert "汇率数据缺失，无法计算结果" in read
+    assert "setState({ key, error: message, loading: false" in read
+    assert "{data && <>" in page
+    assert "ad_system_breakeven_roi_status === 'estimated_known_costs'" in summary
+    assert "optionalRecord(meta.fx).as_of_at" in page
+    assert "shop_estimate: '实测'" in summary
+    assert "presentation.pnl_hints" in details
+    for financial_formula in ("netRevenue - settledNet", "* unitCost", "* row.unit_cost_used", "ad_system_max_ad_spend", "0.308", "DEFAULT_K1", "ROI_HARD_LOSS", "settledCount > 0"):
+        assert financial_formula not in source
 
 
 def test_spu_roi_js_shop_switch_listener_before_early_return():
-    """2026-09-28 回归守卫:loadShops() 的 change listener 必须绑定在 early return 之前。
-
-    bug 原貌:URL 无 shop_pk(或 shop_pk 无效)时 loadShops() 先
-    showToast + return null,后面的 sel.addEventListener("change", …) 永远
-    执行不到 → 用户首次访问选店铺无任何反应。
-    契约:change 绑定的源码位置必须早于所有 showShopModal + return null 分支。
-    """
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    bind_idx = src.find('sel.addEventListener("change"')
-    # 注意要用调用点('showShopModal(shops, "")')作标记,不能用函数名——
-    # 定义 function showShopModal(shops, note) 在 loadShops 之前,会先命中
-    early_return_idx = src.find('showShopModal(shops, "")')
-    assert bind_idx != -1, "spu-roi.js 找不到店铺切换 change listener"
-    assert early_return_idx != -1, "spu-roi.js 找不到 shop_pk 缺失/无效的弹窗分支"
-    assert bind_idx < early_return_idx, (
-        "change listener 必须绑定在 early return 之前,否则 URL 无 shop_pk 时选店铺不生效"
-    )
-    # 首次选中时若 enumMap 还没拉(loadEnumMap 被 pk=null 跳过),change 里要补拉
-    assert "loadEnumMap().then(() => load())" in src
-    # 2026-09-28 用户拍板:shop_pk 缺失/无效 → 弹窗选店铺,
-    # 不再 toast + 60s 倒计时强跳首页
-    assert "showShopModal" in src
-    assert "REDIRECT_COUNTDOWN_SEC" not in src
-    assert "秒后自动返回首页" not in src
-    # 2026-09-28 review P2: loadShops 拉取店铺失败(非 401)弹错并提供重试,
-    # 不能静默吞错导致页面卡在加载中。
-    assert "店铺列表加载失败，请检查网络后重试" in src
-    assert "重试" in src
-    # 2026-09-28 review P2: shop_pk 无效时下拉复位 sel.value = "",
-    # 避免视觉上默认显示第一个店铺造成误导
-    assert 'sel.value = ""' in src
+    """Both picker surfaces work while no valid shop has been selected."""
+    page = _react_profitability_source("index.tsx")
+    assert "value={shop?.id ?? ''}" in page
+    assert "onChange={(event) => changeShop(event.target.value)}" in page
+    assert "Boolean(shops.data && !shop)" in page and "onPress={() => changeShop(row.id)}" in page
+    assert "url.searchParams.set('shop_pk', id)" in page and "url.searchParams.delete('spu_ids')" in page
+    assert "shopPk: id, spuIds: []" in page and "query.datesTouched" in page
+    assert "'/v2/config/enum-map'" in page
+    assert "shopRevision" in page and "重试店铺列表" in page
+    assert "shops.loading || shops.blocked" in page
+    for obsolete in ("REDIRECT_COUNTDOWN_SEC", "秒后自动返回首页", "showToast"):
+        assert obsolete not in page
 
 
 # ─── 在线汇率接入(D1 落地 2026-09-06)─────────────────────────────────
@@ -5215,66 +4555,29 @@ def test_spu_roi_rejects_malformed_fx_snapshot_as_unavailable(
 
 
 def test_spu_roi_page_drilldown_template_present(api_client, readonly_key):
-    """D7(2026-09-07):页面含 #tpl-drilldown-panel 模板 + 5 tab + 摘要/正文 region。"""
-    r = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
-    assert 'id="tpl-drilldown-panel"' in body
-    for tab in ("pnl", "orders", "settlements", "cases", "ads"):
-        assert f'data-tab="{tab}"' in body, f"D7 缺 tab {tab}"
-    assert 'data-region="summary"' in body
-    assert 'data-region="body"' in body
-    assert 'data-banner="warn"' in body
+    """React owns one inline detail component and five lazy evidence panels."""
+    _spu_react_document(api_client, readonly_key)
+    page = _react_profitability_source("index.tsx")
+    details = _react_profitability_source("DrillDetails.tsx")
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    assert "createPortal(<DrillDetails" in page and "row.getElement().after(detail)" in table
+    for tab, label in (("pnl", "利润构成"), ("orders", "订单·物流"), ("settlements", "结算"), ("cases", "售后"), ("ads", "广告")):
+        assert f"['{tab}', '{label}']" in details
+    assert "<Tabs.List " in details and "<Tabs.Panel " in details
+    assert "has_unsettled_orders === true" in details
+    assert "presentation.unsettled_alert_message" in details and "onPress={onClose}" in details
 
 
 def test_spu_roi_page_no_old_columns(api_client, readonly_key):
-    """主表无旧隐藏列或通用 ROI 列；保留广告系统两个 ROI 与 7 个经营指标。"""
-    r = api_client.get(
-        "/v2/pages/spu-roi",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
-    # 表头已迁入 JS COLUMN_DEFS（Tabulator）；从 kernel 解析列名。
-    from pathlib import Path
-
-    kernel_js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    column_block = kernel_js.split("var COLUMN_DEFS = [", 1)[1].split("];", 1)[0]
-    main_th_labels = re.findall(r'title: "([^"]+)"', column_block)
-    for forbidden in (
-        "实际ROI",
-        "保本ROI",
-        "销售$",
-        "有效销售$",
-        "退货$",
-        "取消单量",
-        "退货率%",
-        "全损退款$",
-        "关联广告数",
-    ):
-        assert forbidden not in main_th_labels, f"D8 已删:th 表头残留 {forbidden}"
-    for col in (
-        "商品",
-        "广告消耗",
-        "广告系统实际ROI",
-        "广告系统保本ROI",
-        "有效销售",
-        "总单量",
-        "有效单量",
-        "取消率%",
-        "全损率%",
-        "净利润",
-    ):
-        assert col in main_th_labels, f"主表缺列 {col}"
-    assert "op-th col-hidden" not in body
-    assert "td.col-hidden" not in body
+    _spu_react_document(api_client, readonly_key)
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    block = table.split("export const columns = [", 1)[1].split("] as const", 1)[0]
+    labels = re.findall(r"\['([^']+)', '[^']+'\]", block)
+    assert labels == ["广告消耗", "广告系统实际ROI", "广告系统保本ROI", "有效销售", "总单量", "有效单量", "取消率%", "全损率%", "净利润"]
+    assert "title: '商品', field: 'spu_id'" in table
+    for retired in ("实际ROI", "保本ROI", "销售$", "有效销售$", "退货$", "取消单量", "退货率%", "全损退款$", "关联广告数"):
+        assert retired not in labels
+    assert "col-hidden" not in table
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -5619,73 +4922,45 @@ def test_spu_roi_v9_drill_orders_full_loss_flag(api_client, readonly_key, db_eng
     assert by_id["TEST_ORDER_V9_3"]["arrived_overseas"] is False
 
 
-def test_spu_roi_all_date_preset_clears_both_bounds() -> None:
-    """「不限」日期预设必须真正不传 w_start/w_end,而不是留下截止日。"""
+def test_spu_roi_all_date_preset_clears_both_bounds():
+    page = _react_profitability_source("index.tsx")
+    preset = page.split("function preset(", 1)[1].split("const closeDrill", 1)[0]
+    assert "value === 'all' ? ''" in preset
+    assert "const last = value === 'all' ? '' : end" in preset
+    assert "setDateStart(start); setDateEnd(last); commitDates(start, last)" in preset
+    query = _react_profitability_source("query.ts")
+    assert "if (q.wStart) params.set('w_start', q.wStart)" in query
+    assert "if (q.wEnd) params.set('w_end', q.wEnd)" in query
+
+
+def test_spu_roi_tabulator_row_bad_class_is_toggled_not_only_added():
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    formatter = table.split("rowFormatter:", 1)[1].split("}); table.current", 1)[0]
+    assert "classList.toggle('erp-profit-loss', row.getData().profit_status === 'loss')" in formatter
+    assert "classList.add('erp-profit-loss')" not in formatter
+
+
+def test_spu_roi_tabulator_fills_container_width():
+    table = _react_profitability_source("ProfitabilityTable.tsx")
+    options = table.split("new Tabulator(element, {", 1)[1].split("}); table.current", 1)[0]
+    assert "layout: 'fitColumns'" in options and "layout: 'fitData'" not in options
+    assert "frozen: true" in options and "widthShrink: 0" in options
+    assert "ResizeObserver" in table and "updateColumnDefinition('spu_id'" in table
+
+
+def test_spu_roi_table_wrap_content_insets_match_toolbar():
+    """Scope, selection, metrics and table share the same application content owner."""
     from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    assert 'if (preset === "all") return { start: "", end: "" };' in src
-
-
-def test_spu_roi_tabulator_row_bad_class_is_toggled_not_only_added() -> None:
-    """Tabulator may reuse row DOM; healthy rows must remove stale loss styling."""
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    row_formatter = src.split("rowFormatter: (row) =>", 1)[1].split("},", 1)[0]
-    assert '.classList.toggle("row-bad",' in row_formatter
-    assert '.classList.add("row-bad")' not in row_formatter
-
-
-def test_spu_roi_tabulator_fills_container_width() -> None:
-    """fitData 只按内容定宽，宽屏下表体右侧留大片空白；必须用 fitColumns 铺满。"""
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
-    ).read_text(encoding="utf-8")
-    table_options = src.split("new Tabulator(host, {", 1)[1].split("});", 1)[0]
-    assert 'layout: "fitColumns"' in table_options
-    # 商品列标题长，铺满时多分余量；其余列保持默认 widthGrow。
-    assert 'widthGrow: def.columnId === "product" ? 3 : 1' in src
-
-
-def test_spu_roi_table_wrap_content_insets_match_toolbar() -> None:
-    """The table card and other content regions share Bootstrap horizontal margins."""
-    import re
-    from pathlib import Path
-
     root = Path(__file__).resolve().parents[2]
-    template = (
-        root / "tts_erp_v2" / "templates" / "pages" / "spu-profitability.html"
-    ).read_text(encoding="utf-8")
-    assert 'class="op-table-panel mx-3 mx-lg-4"' in template
-    assert 'class="op-toolbar mx-3 mx-lg-4 px-3 px-lg-4 py-3"' in template
-    assert 'class="op-table-wrap"' in template
-
-    css = (root / "tts_erp_v2" / "static" / "css" / "spu-roi.css").read_text(
-        encoding="utf-8"
-    )
-    match = re.search(r"\.op-table-wrap\s*\{([^}]*)\}", css)
-    assert match is not None, "缺 .op-table-wrap 规则"
-    declarations = match.group(1)
-    # 通栏白底与 .op-toolbar/.op-counter 一致；否则内缩后两侧露出台账底色。
-    assert "background: var(--surface)" in declarations
-    assert "overflow-x: auto" in declarations
-    assert "@media" not in declarations
+    page = _react_profitability_source("index.tsx")
+    css = _react_profitability_source("profitability.css")
+    workspace = (root / "frontend/src/app/workspace.css").read_text(encoding="utf-8")
+    assert 'className="erp-page"' in page
+    assert 'className="erp-panel erp-profit-controls"' in page
+    assert 'className="erp-panel min-w-0 space-y-4"' in page
+    assert "<Selection " in page and "<Summary " in page
+    assert ".erp-main" in workspace and ".erp-panel" in workspace
+    assert "padding: 24px" in workspace and "background: var(--surface)" in workspace
+    assert "margin-inline" not in css and "margin-left" not in css
+    assert ".erp-profit-grid" in css and "max-width: 100%" in css
+    assert "max-width: 100%" in (root / "frontend/src/shared/tables.css").read_text(encoding="utf-8")

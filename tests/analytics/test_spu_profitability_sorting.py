@@ -8,34 +8,20 @@ from tts_erp_v2.analytics.spu_profitability import SortField, SpuProfitability
 
 
 def _profitability_columns() -> list[dict[str, str | None]]:
-    """Parse COLUMN_DEFS — the single source of truth for the table.
-
-    Tabulator migration (feat/spu-table-tabulator): the header row no longer
-    lives in the HTML template; columns are declared in JS and the kernel
-    binds server-side sorting from ``sortField``.
-    """
+    """Parse the React table's sole current-metric declaration."""
     source = (
         Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "spu-profitability-page.js"
+        / "frontend/src/pages/spu-profitability/ProfitabilityTable.tsx"
     ).read_text(encoding="utf-8")
-    columns: list[dict[str, str | None]] = []
-    for match in re.finditer(
-        r'\{\s*columnId: "([^"]+)",\s*field: "([^"]+)",\s*title: "([^"]+)",'
-        r'\s*sortField: ("([^"]+)"|null)',
-        source,
-    ):
-        columns.append(
-            {
-                "columnId": match.group(1),
-                "field": match.group(2),
-                "title": match.group(3),
-                "sortField": match.group(5),
-            }
-        )
-    assert columns, "COLUMN_DEFS not found in spu-profitability-page.js"
+    definitions = source.split("export const columns = [", 1)[1].split("] as const", 1)[0]
+    columns: list[dict[str, str | None]] = [
+        {"columnId": "product", "field": "spu_id", "title": "商品", "sortField": None}
+    ]
+    columns.extend(
+        {"columnId": field, "field": field, "title": title, "sortField": field}
+        for title, field in re.findall(r"\['([^']+)', '([a-z0-9_]+)'\]", definitions)
+    )
+    assert len(columns) > 1, "Current React metric columns were not found"
     return columns
 
 
@@ -60,12 +46,12 @@ def test_all_current_profitability_metrics_are_sortable() -> None:
     assert by_column == {
         "product": None,
         "spend": "spend",
-        "ad-actual-roi": "ad_system_actual_roi",
-        "ad-breakeven-roi": "ad_system_breakeven_roi",
-        "effective-sales": "effective_sales",
-        "total-orders": "total_orders",
-        "effective-orders": "effective_order_count",
-        "cancel-rate": "cancel_rate",
-        "full-loss-rate": "full_loss_rate",
-        "net-profit": "net_profit",
+        "ad_system_actual_roi": "ad_system_actual_roi",
+        "ad_system_breakeven_roi": "ad_system_breakeven_roi",
+        "effective_sales": "effective_sales",
+        "total_orders": "total_orders",
+        "effective_order_count": "effective_order_count",
+        "cancel_rate": "cancel_rate",
+        "full_loss_rate": "full_loss_rate",
+        "net_profit": "net_profit",
     }

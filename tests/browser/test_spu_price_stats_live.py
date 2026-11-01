@@ -284,7 +284,7 @@ def test_price_header_sorts_on_server_and_reorders_rows(
     header = page.price_header("priceStats.purchase.mean")
     header.focus()
     page.page.keyboard.press("Enter")  # 表头 tabindex=0 + Enter（无障碍路径）
-    page.wait_sort_note("平均值 ↑")
+    page.wait_sort_note("purchasePriceMean ↑")
     page.wait_row_order((SPU_A1, SPU_A2))
     assert header.get_attribute("aria-sort") == "ascending"
     assert page.wait_request(
@@ -294,7 +294,7 @@ def test_price_header_sorts_on_server_and_reorders_rows(
 
     header.focus()
     page.page.keyboard.press("Enter")
-    page.wait_sort_note("平均值 ↓")
+    page.wait_sort_note("purchasePriceMean ↓")
     page.wait_row_order((SPU_A2, SPU_A1))
     assert header.get_attribute("aria-sort") == "descending"
     assert page.wait_request(
@@ -397,16 +397,16 @@ def test_price_tooltip_keyboard_opens_and_closes_with_real_basis(
     button = page.price_tip("purchase")
     button.focus()
     page.page.keyboard.press("Enter")
-    assert button.get_attribute("aria-expanded") == "true"
+    page.page.get_by_role("dialog", name="采购价统计口径").wait_for(state="visible")
     text = page.page.locator("#ops-tip").inner_text()
     assert "来源：ROI 当前有效成本" in text
     assert "TikTok" not in text  # 采购价权威是成本基准，不是 TikTok line item
-    assert "覆盖：complete，10/10 件" in text
+    assert "覆盖：完整·10/10件" in "".join(text.split())
     assert f"汇率快照：{price_scene.fx_snapshot_id}" in text
     assert "计算时间：20" in text
 
     page.page.keyboard.press("Escape")
-    assert button.get_attribute("aria-expanded") == "false"
+    page.page.get_by_role("dialog", name="采购价统计口径").wait_for(state="hidden")
     assert page.page.evaluate(
         "document.activeElement === document.querySelector('[data-price-tip=\"purchase\"]')"
     )
@@ -416,9 +416,9 @@ def test_price_tooltip_keyboard_opens_and_closes_with_real_basis(
     page.page.keyboard.press("Enter")
     original_text = page.page.locator("#ops-tip").inner_text()
     assert "来源：TikTok line_items.original_price" in original_text
-    assert "覆盖：complete，10/10 件" in original_text
+    assert "覆盖：完整·10/10件" in "".join(original_text.split())
     page.page.keyboard.press("Escape")
-    assert original.get_attribute("aria-expanded") == "false"
+    page.page.get_by_role("dialog", name="销售价统计口径").wait_for(state="hidden")
 
 
 # ─── 6. 失败态与重试 ────────────────────────────────────────────────
@@ -435,7 +435,7 @@ def test_failed_price_request_shows_error_then_retry_recovers(
 
     page.fail_spu_roi("E2E 注入故障")
     page.set_window(DAY_D1, DAY_D1)
-    page.wait_summary_status("加载失败 · E2E 注入故障")
+    page.wait_summary_status("加载失败 · HTTP 500")
     assert set(page.price_cells().values()) == {"—"}
     assert page.retry_link().is_visible()
 

@@ -750,19 +750,29 @@ def live_api_server(db_url: str) -> Iterator[LiveApi]:
 # ─── 真实浏览器 ──────────────────────────────────────────────────────
 
 
+# The React summary presents coverage in three visible cells rather than repeating
+# it in the status heading. Assemble only those DOM texts for the existing oracle.
+_SUMMARY_TEXT_JS = """() => {
+  const status = document.getElementById('price-summary-status')?.textContent.trim() || '';
+  if (status !== '已加载') return status;
+  const entries = [['purchase', '采购价'], ['originalSale', '销售价'], ['paid', '实付价']];
+  return status + ' · ' + entries.map(([key, label]) =>
+    label + '：' + (document.getElementById('price-status-' + key)?.textContent.trim() || '')
+  ).join('；');
+}"""
+
 _PRICE_STATE_JS = """(expected) => {
   for (const key of Object.keys(expected.cells)) {
     const el = document.getElementById('price-' + key.replace('.', '-'));
     if (!el || el.textContent.trim() !== expected.cells[key]) return false;
   }
-  const status = document.getElementById('price-summary-status');
-  return Boolean(status) && status.textContent.includes(expected.summary);
-}"""
+  const summary = (SUMMARY)();
+  return summary.includes(expected.summary);
+}""".replace('SUMMARY', _SUMMARY_TEXT_JS)
 
-_SUMMARY_STATUS_JS = """(fragment) => {
-  const el = document.getElementById('price-summary-status');
-  return Boolean(el) && el.textContent.includes(fragment);
-}"""
+_SUMMARY_STATUS_JS = """(fragment) => (SUMMARY)().includes(fragment)""".replace(
+    'SUMMARY', _SUMMARY_TEXT_JS
+)
 
 _SORT_NOTE_JS = """(fragment) => {
   const el = document.getElementById('sort-note');
@@ -823,20 +833,10 @@ _ROW_CELL_JS = """([spuId, field]) => {
   return cell ? cell.textContent.trim() : null;
 }"""
 
-_SET_WINDOW_VALUES_JS = """(values) => {
-  document.querySelector('#filter-w-start').value = values.start;
-  document.querySelector('#filter-w-end').value = values.end;
-}"""
-
-_DISPATCH_CHANGE_JS = """(which) => {
-  const el = document.querySelector(which === 'start' ? '#filter-w-start' : '#filter-w-end');
-  el.dispatchEvent(new Event('change', {bubbles: true}));
-}"""
-
 _MOBILE_LAYOUT_JS = """() => ({
   documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-  tableOverflow: document.querySelector('.op-table-wrap').scrollWidth
-    > document.querySelector('.op-table-wrap').clientWidth,
+  tableOverflow: document.querySelector('.tabulator-tableholder').scrollWidth
+    > document.querySelector('.tabulator-tableholder').clientWidth,
   productFrozen: Boolean(document.querySelector('.tabulator-cell.tabulator-frozen')),
 })"""
 
@@ -883,11 +883,12 @@ class LivePage:
         的那个字段（两个方向里至多一个非法）。
         """
         previous_end = self.page.locator("#filter-w-end").input_value()
-        self.page.evaluate(_SET_WINDOW_VALUES_JS, {"start": start, "end": end})
         illegal_if_start_first = bool(start and previous_end and start > previous_end)
         order = ("end", "start") if illegal_if_start_first else ("start", "end")
         for which in order:
-            self.page.evaluate(_DISPATCH_CHANGE_JS, which)
+            field = self.page.locator("#filter-w-start" if which == "start" else "#filter-w-end")
+            field.fill(start if which == "start" else end)
+            field.blur()  # An empty focused date is committed only after blur.
 
     def apply_all_history_preset(self) -> None:
         self.page.locator('[data-date-preset="all"]').click()
@@ -927,7 +928,7 @@ class LivePage:
         return self.page.evaluate(_PRICE_CELLS_JS)
 
     def summary_status(self) -> str:
-        return self.page.locator("#price-summary-status").inner_text()
+        return str(self.page.evaluate(_SUMMARY_TEXT_JS))
 
     def auth_identity(self) -> str | None:
         """页面自己的 `GET /v2/auth/me`：已登录返回用户名，否则 None。
