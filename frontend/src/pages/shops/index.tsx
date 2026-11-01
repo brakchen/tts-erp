@@ -199,7 +199,7 @@ export default function Shops({ bootstrap }: PageProps) {
   const filterClass = 'min-h-10 rounded-lg border border-[var(--rule)] bg-[var(--paper)] px-3 text-sm';
   return <div className="erp-page">
     <PageIntro eyebrow="SHOP CONNECTIONS" title="店铺接入管理" description="从插件发现到 App 配置与授权，在这里完成每家店铺的接入。" />
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="erp-toolbar">
       <p className="erp-table-meta">已登记 {list.total ?? '—'} 家店铺 · 未授权店铺仅在此页展示</p>
       <div className="flex gap-3"><Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>刷新店铺</Button><Button isDisabled={blocked('register')} onPress={() => open('register')}>手工补录</Button></div>
     </div>

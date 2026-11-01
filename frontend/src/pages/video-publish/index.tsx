@@ -86,18 +86,19 @@ function VideoPublishContent({ bootstrap }: PageProps) {
     {command.failure && <Alert status="danger"><Alert.Content><Alert.Title>操作未完成</Alert.Title><Alert.Description>{command.failure.message}</Alert.Description></Alert.Content></Alert>}
     {command.cooldown && <p role="status">请等待完整 Retry-After；读取、编辑或刷新不会缩短写入冷却，期满也不会自动重试。</p>}
     {command.needsCheck && <p role="status">原操作结果待核对。先使用对应操作的「查询当前事实」或「核对上传任务」，再由你明确决定是否重试。</p>}
-    <UploadWorkbench key={bootstrap.rootPath} root={bootstrap.rootPath} config={config.data} canTaskWrite={canTaskWrite} command={command} resume={resume} onResumeAccepted={() => setResume(undefined)} onChanged={() => setRevision((value) => value + 1)} />
-    {operation?.root === bootstrap.rootPath && <TaskOperations operation={operation} command={command} canWrite={canTaskWrite} onClose={() => setOperation(undefined)} onChanged={() => setRevision((value) => value + 1)} onResume={(task) => { setResume(task); }} />}
-    <div className="flex flex-wrap items-center gap-3"><label className="flex flex-wrap items-center gap-2">自动刷新<select className="erp-select" aria-label="自动刷新" value={auto ? 'on' : 'off'} onChange={(event) => toggleAuto(event.target.value)}><option value="on">开（每 5 秒）</option><option value="off">关</option></select></label>
+    <div className="flex flex-wrap items-center gap-3"><label className="flex flex-wrap items-center gap-2">自动刷新<select className="erp-select erp-select-inline" aria-label="自动刷新" value={auto ? 'on' : 'off'} onChange={(event) => toggleAuto(event.target.value)}><option value="on">开（每 5 秒）</option><option value="off">关</option></select></label>
       <Button variant="secondary" isDisabled={blocked} onPress={() => setRevision((value) => value + 1)}>立即刷新</Button>
       <span>上一响应结束后计时；隐藏页面暂停。</span>
     </div>
     {blocked && <p role="status">读取冷却中；等待完整 Retry-After 后可明确刷新，不会自动重试。</p>}
     {notice && <p role="status">{notice}</p>}
     {!canTaskWrite && <p>任务写操作需要服务端提供的 readwrite 能力提示；仍可读取详情，接口会再次验证权限。创建条件与任务允许操作分别由服务端判定。</p>}
+    <div className="grid min-w-0 items-start gap-4 2xl:grid-cols-2">
+    <UploadWorkbench key={bootstrap.rootPath} root={bootstrap.rootPath} config={config.data} canTaskWrite={canTaskWrite} command={command} resume={resume} onResumeAccepted={() => setResume(undefined)} onChanged={() => setRevision((value) => value + 1)} />
+    <div className="grid min-w-0 gap-4">
     <section aria-label="发布配置" className="erp-panel space-y-3"><h2 className="text-xl font-semibold">发布配置与服务端能力</h2>
       {config.loading && !config.data && <p role="status">加载配置中…</p>}<ReadError name="配置" error={config.error} />
-      {config.data && <><TargetFacts target={config.data.target} /><Facts items={[
+      {config.data && <><TargetFacts target={config.data.target} compact /><Facts compact items={[
         ['允许内容类型', config.data.acceptedContentTypes.join('、')], ['允许扩展名', config.data.acceptedExtensions.join('、')], ['视频上限（字节）', config.data.maxVideoBytes], ['文案上限（字符）', config.data.maxCaptionCharacters], ['上传票据 TTL（秒）', config.data.uploadUrlTtlSeconds],
         ['Worker 状态', config.data.worker.status], ['最近心跳', config.data.worker.lastHeartbeatAt], ['设备状态', config.data.device.status], ['设备说明', config.data.device.message],
         ['Artemis profile', config.data.artemis.profile], ['核验等级', config.data.artemis.verificationLevel], ['Worker poll（秒）', config.data.workerTiming.pollSeconds], ['Worker lease（秒）', config.data.workerTiming.leaseSeconds], ['Worker heartbeat（秒）', config.data.workerTiming.heartbeatSeconds],
@@ -118,8 +119,11 @@ function VideoPublishContent({ bootstrap }: PageProps) {
         </article>)}
       </>}
     </section>
+    </div>
+    </div>
+    {operation?.root === bootstrap.rootPath && <TaskOperations operation={operation} command={command} canWrite={canTaskWrite} onClose={() => setOperation(undefined)} onChanged={() => setRevision((value) => value + 1)} onResume={(task) => { setResume(task); }} />}
     <section aria-label="任务记录" className="erp-panel min-w-0 space-y-3"><h2 className="text-xl font-semibold">队列与任务记录</h2>
-      <label>任务状态 <select className="erp-select" aria-label="任务状态" value={filter} onChange={(event) => chooseFilter(event.target.value)}>{filters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label>任务状态 <select className="erp-select erp-select-inline" aria-label="任务状态" value={filter} onChange={(event) => chooseFilter(event.target.value)}>{filters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       {history.loading && !history.data && <p role="status">加载任务记录中…</p>}<ReadError name="任务记录" error={history.error} />
       {history.data && <><PollFacts poll={history.data.pollState} /><p>本页返回条数（非业务总数）：{history.data.totalApprox} · 服务器时间：{history.data.serverTime} · 上次成功核对：{history.checkedAt}</p>
         <p>表格区域可横向滚动，保留全部业务列；顺序沿用服务端。</p>

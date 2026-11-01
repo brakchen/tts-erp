@@ -53,20 +53,21 @@ export default function InterceptStats({ bootstrap }: PageProps) {
   const stats = state.data;
   return <div className="erp-page">
     <PageIntro eyebrow="COLLECTION ANALYTICS" title="了解采集链路的运行状况" description="查看请求趋势与分布，识别错误和异常变化。" />
-    <Button isDisabled={state.blocked} onPress={() => setRefresh((value) => value + 1)}>刷新统计</Button>
-    <p>最近 7 天，每日按 UTC 分组。今日请求是 UTC 今日总数，不受最近 7 天范围限制。</p>
+    <div className="erp-toolbar"><Button isDisabled={state.blocked} onPress={() => setRefresh((value) => value + 1)}>刷新统计</Button>
+    <p>最近 7 天，每日按 UTC 分组。今日请求是 UTC 今日总数，不受最近 7 天范围限制。</p></div>
     {state.loading && <p role="status">加载统计中…</p>}
     {state.error && <Alert status="danger"><Alert.Content><Alert.Title>统计不可用</Alert.Title><Alert.Description>{state.error}</Alert.Description><Button isDisabled={state.blocked} onPress={() => setRefresh((value) => value + 1)}>重试统计</Button></Alert.Content></Alert>}
     {stats && <>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{([
         ['总请求数', stats.total_requests], ['白名单命中', stats.whitelisted_requests], ['今日请求（UTC）', stats.today_requests], ['错误请求', stats.error_requests],
       ] as const).map(([label, value]) => <section key={label} aria-label={label} className="erp-metric"><h2>{label}</h2><p>{number(value)}</p></section>)}</div>
-      <section className="erp-panel min-w-0 space-y-2"><h2>每日请求（UTC）</h2>{stats.daily.length > 0 ? <DailyChart rows={stats.daily} /> : <p>暂无每日数据</p>}
-        <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label="数据表格横向滚动区域" tabIndex={0}><Table.Content className="erp-table-content" aria-label="每日请求（UTC）"><Table.Header className="erp-table-head"><Table.Column className="erp-table-column" isRowHeader>日期（UTC）</Table.Column><Table.Column className="erp-table-column">请求数</Table.Column></Table.Header>
+      <section className="erp-panel min-w-0 space-y-3"><h2>每日请求（UTC）</h2><div className="grid min-w-0 items-start gap-4 xl:grid-cols-2"><div className="min-w-0">{stats.daily.length > 0 ? <DailyChart rows={stats.daily} /> : <p>暂无每日数据</p>}</div>
+        <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label="数据表格横向滚动区域" tabIndex={0}><Table.Content className="erp-table-content erp-compact-table" aria-label="每日请求（UTC）"><Table.Header className="erp-table-head"><Table.Column className="erp-table-column" isRowHeader>日期（UTC）</Table.Column><Table.Column className="erp-table-column">请求数</Table.Column></Table.Header>
           <Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'暂无每日记录'}</div>}>{stats.daily.map((row) => <Table.Row className="erp-table-row" key={row.date} id={row.date}><Table.Cell className="erp-table-cell">{row.date}</Table.Cell><Table.Cell className="erp-table-cell">{number(row.count)}</Table.Cell></Table.Row>)}</Table.Body>
         </Table.Content></Table.ScrollContainer></Table>
+        </div>
       </section>
-      <div className="grid min-w-0 gap-4 lg:grid-cols-3"><DistributionTable title="域名" rows={stats.by_host} /><DistributionTable title="方法" rows={stats.by_method} /><DistributionTable title="状态码" rows={stats.by_status} /></div>
+      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-3"><DistributionTable title="域名" rows={stats.by_host} /><DistributionTable title="方法" rows={stats.by_method} /><DistributionTable title="状态码" rows={stats.by_status} /></div>
     </>}
   </div>;
 }

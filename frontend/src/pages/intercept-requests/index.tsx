@@ -107,7 +107,7 @@ export default function InterceptRequests({ bootstrap }: PageProps) {
     }}>
       {([{ key: 'endpoint_host', label: '域名' }, { key: 'endpoint_path', label: '路径' }, { key: 'status', label: '状态码' },
         { key: 'from', label: '起始', type: 'date' }, { key: 'to', label: '截止', type: 'date' }] as const).map((field) =>
-        <TextField key={field.key} value={draft[field.key]} onChange={(value) => setDraft((previous) => ({ ...previous, [field.key]: value }))}>
+        <TextField className={`erp-field ${field.key === 'status' ? 'erp-field-short' : 'type' in field ? 'erp-field-date' : 'erp-field-search'}`} key={field.key} value={draft[field.key]} onChange={(value) => setDraft((previous) => ({ ...previous, [field.key]: value }))}>
           <Label>{field.label}</Label><Input type={'type' in field ? field.type : 'text'} />
         </TextField>)}
       <Select selectedKey={draft.is_whitelisted || 'all'} onSelectionChange={(key) => setDraft((previous) => ({ ...previous, is_whitelisted: key === 'all' ? '' : String(key) }))}>

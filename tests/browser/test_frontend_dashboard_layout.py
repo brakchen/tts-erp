@@ -44,9 +44,12 @@ def test_dashboard_has_readable_visual_hierarchy(frontend_browser_renderer, pref
     observed = {"rows": len(rows), "valueFont": value_size, "hintFont": hint_size,
                 "minimumTargetHeight": min(box["height"] for box in boxes), "parent": parent_layout}
     print("TEST dashboard layout:", json.dumps(observed))
-    assert len(rows) <= (3 if width < 1024 else 2), observed
+    assert len(rows) <= (3 if width < 1024 else 1), observed
     assert all(box["height"] >= 36 for box in boxes), observed
-    assert all(box["width"] >= parent_layout["columnWidth"] * 0.95 for box in boxes), observed
+    if width < 1024:
+        assert all(box["width"] >= parent_layout["columnWidth"] * 0.95 for box in boxes), observed
+    else:
+        assert max(box["width"] for box in boxes) <= 240, observed
     assert value_size >= hint_size * 1.6, observed
     links[0].focus()
     page.keyboard.press("Tab")

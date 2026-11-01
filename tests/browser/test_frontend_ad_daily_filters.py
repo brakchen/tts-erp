@@ -20,7 +20,7 @@ def test_ad_filters_fit_and_align(frontend_browser_renderer, width):
     ]]
     boxes = [control.bounding_box() for control in controls]
     assert all(box is not None for box in boxes)
-    columns = 1 if width == 375 else 2 if width == 900 else 3
+    columns = 1 if width == 375 else 2 if width == 900 else 6 if width == 2560 else 3
     assert len({round(box["x"]) for box in boxes}) == columns
     assert max(box["width"] for box in boxes) - min(box["width"] for box in boxes) < 2
     assert all(43 <= box["height"] <= 45 for box in boxes)

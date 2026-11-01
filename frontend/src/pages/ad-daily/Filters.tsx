@@ -3,8 +3,8 @@ import type { Options } from './contracts';
 import { readQuery, type Query } from './query';
 import './filters.css';
 
-export default function Filters({ draft, setDraft, options, disabled, validation, onApply, onReset }: {
-  draft: Query; setDraft: (query: Query) => void; options?: Options; disabled: boolean; validation: string; onApply: () => void; onReset: () => void;
+export default function Filters({ draft, setDraft, options, disabled, validation, onApply, onReset, onRefresh }: {
+  draft: Query; setDraft: (query: Query) => void; options?: Options; disabled: boolean; validation: string; onApply: () => void; onReset: () => void; onRefresh?: () => void;
 }) {
   const advertisers = options?.advertisers.filter((item) => !draft.seller_id || item.seller_id === draft.seller_id) ?? [];
   return <form aria-label="广告筛选" className="erp-panel ad-filters" noValidate onSubmit={(event) => { event.preventDefault(); if (!disabled) onApply(); }}>
@@ -42,6 +42,7 @@ export default function Filters({ draft, setDraft, options, disabled, validation
         <div className="ad-filters-actions">
           <Button type="button" variant="secondary" isDisabled={disabled} onPress={() => { if (disabled) return; setDraft({ ...readQuery(''), sort: draft.sort, order: draft.order }); onReset(); }}>重置筛选</Button>
           <Button type="submit" isDisabled={disabled}>应用筛选</Button>
+          {onRefresh && <Button type="button" variant="secondary" isDisabled={disabled} onPress={() => { if (!disabled) onRefresh(); }}>刷新数据</Button>}
         </div>
       </footer>
     </fieldset>

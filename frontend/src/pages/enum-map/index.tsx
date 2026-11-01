@@ -131,15 +131,16 @@ export default function EnumMap({ bootstrap }: PageProps) {
   </section>;
   return <div className="erp-page">
     <PageIntro eyebrow="DATA MAPPING" title="让业务数据使用同一种语言" description="集中查看来源字段与标准枚举的映射，确认后维护生效配置。" />
-    <div className="flex flex-wrap gap-3"><Button isDisabled={disabled} onPress={() => open({ kind: 'add', enum_type: activeType })}>新增映射</Button><Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>刷新映射</Button></div>
+    <section className="erp-filters" aria-label="映射范围与操作">
+      <Select value={activeType} onChange={(key) => { if (typeof key === 'string') setCategory(key); }} className="erp-field">
+        <Label>分类</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{categories.map((type) => <ListBox.Item key={type} id={type} textValue={categoryName(type)}>{categoryName(type)}</ListBox.Item>)}</ListBox></Select.Popover>
+      </Select>
+      <Button isDisabled={disabled} onPress={() => open({ kind: 'add', enum_type: activeType })}>新增映射</Button><Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>刷新映射</Button>
+    </section>
     {!canManage && <p>当前仅浏览；维护需要 admin 权限，以服务端判定为准。</p>}
     {pending && <p role="status">提交中，请等待确认…</p>}{cooldown && <p role="status">请等待服务端指定时间后再提交；仍可修改或取消草稿，不会自动重试。</p>}
     {notice && <p role="status">{notice}</p>}{!dialog && <>{alert}{check}</>}
     {list.loading && <p role="status">加载映射中…</p>}{list.error && <Alert status="danger"><Alert.Content><Alert.Title>列表不可用</Alert.Title><Alert.Description>{list.error}</Alert.Description><Button isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>重试映射</Button></Alert.Content></Alert>}
-    {/* Public v3 Select API, not v2 selectedKeys: https://heroui.com/en/docs/react/components/select */}
-    <Select value={activeType} onChange={(key) => { if (typeof key === 'string') setCategory(key); }} className="max-w-full">
-      <Label>分类</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{categories.map((type) => <ListBox.Item key={type} id={type} textValue={categoryName(type)}>{categoryName(type)}</ListBox.Item>)}</ListBox></Select.Popover>
-    </Select>
     {list.rows && <><p>显示顺序沿用服务端；字段较多时可在表格区域横向滚动。</p><Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="枚举表格"><Table.Content aria-label="枚举映射" className="min-w-[44rem] erp-table-content"><Table.Header className="erp-table-head">
       <Table.Column className="erp-table-column" isRowHeader>英文值</Table.Column><Table.Column className="erp-table-column">中文标签</Table.Column><Table.Column className="erp-table-column">排序</Table.Column>{canManage && <Table.Column className="erp-table-column">操作</Table.Column>}
     </Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'该分类暂无映射'}</div>}>{list.rows.filter((row) => row.enum_type === activeType).map((row) => <Table.Row className="erp-table-row" key={row.id} id={row.id}>
