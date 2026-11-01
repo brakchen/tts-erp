@@ -63,6 +63,8 @@ it('adding one focused search result never implicitly removes existing subscript
 });
 it('shows every focused SPU inside the search field and removes only the clicked tag after saving', async () => {
   stored = Array.from({ length: 29 }, (_, i) => ({ spuId: `TEST_TAG_${i}`, title: `TEST 商品 ${i}` }));
+  const fetcher = vi.mocked(fetch); const original = fetcher.getMockImplementation()!; let finish!: () => void;
+  fetcher.mockImplementation((input, init) => init?.method === 'PATCH' ? new Promise<Response>((resolve) => { finish = () => { void original(input, init).then(resolve); }; }) : original(input, init));
   render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByRole('button', { name: '移除 SPU TEST_TAG_28' });
   const field = screen.getByRole('group', { name: 'SPU 搜索与已选标签' });
@@ -70,6 +72,10 @@ it('shows every focused SPU inside the search field and removes only the clicked
   expect(field).toContainElement(screen.getByLabelText('按 SPU ID / 标题搜索'));
   expect(field.querySelector('details')).toBeNull();
   fireEvent.click(within(field).getByRole('button', { name: '移除 SPU TEST_TAG_12' }));
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  expect(within(field).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(29);
+  expect(within(field).getByRole('button', { name: '移除 SPU TEST_TAG_12' })).toBeDisabled();
+  await act(async () => { finish(); });
   await waitFor(() => expect(within(field).queryByRole('button', { name: '移除 SPU TEST_TAG_12' })).toBeNull());
   expect(within(field).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(28);
   const writes = calls.filter((call) => call.init?.method === 'PATCH');

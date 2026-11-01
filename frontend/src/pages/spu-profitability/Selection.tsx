@@ -110,8 +110,8 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
     <div className="erp-spu-selection-search"><TextField value={query} onChange={setQuery} isDisabled={disabled}><Label>按 SPU ID / 标题搜索</Label>
       <div id="spu-selection-field" className="erp-spu-selection-field" role="group" aria-label="SPU 搜索与已选标签">
         {selected.length > 0 && <TagGroup aria-label={focused ? '已关注 SPU 标签' : '已选 SPU 标签'} disabledKeys={disabled ? draft : []} onRemove={(keys) => { void change(draft.filter((id) => !keys.has(id))); }} size="sm">
-          <TagGroup.List>{selected.map((item) => <Tag key={item.spu_id} id={item.spu_id} textValue={`${item.spu_id} ${item.title ?? ''}`}>
-            <span className="min-w-0 break-all" title={item.title ?? item.spu_id}>{item.spu_id}</span><Tag.RemoveButton aria-label={`移除 SPU ${item.spu_id}`} isDisabled={disabled} />
+          <TagGroup.List>{selected.map((item) => <Tag key={item.spu_id} id={item.spu_id} aria-label={item.spu_id} aria-description={item.title ?? undefined} textValue={`${item.spu_id} ${item.title ?? ''}`}>
+            <span className="min-w-0 break-all" title={item.title ?? item.spu_id}>{item.spu_id}</span><Tag.RemoveButton aria-label="移除 SPU" isDisabled={disabled} />
           </Tag>)}</TagGroup.List>
         </TagGroup>}
         <Input fullWidth className="erp-spu-query-input" placeholder="输入 SPU ID 或标题继续添加" />
