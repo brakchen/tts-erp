@@ -77,13 +77,6 @@ def test_page_font_stacks_come_only_from_tokens(browser_renderer, token_font_sta
     """页面上每一段文字的 computed font-family 必须是 tokens 的三套栈之一。"""
     page = browser_renderer.open(page_path(slug))
     allowed = token_font_stacks
-    if page.locator("#frontend-bootstrap").count():
-        # Use the rendered document's tokens; retained legacy artifacts use old skin CSS.
-        native = page.evaluate(
-            "() => ['--font-sans','--font-mono'].map(name => getComputedStyle(document.documentElement).getPropertyValue(name).trim())"
-        )
-        assert all(native), "native design-system font tokens must be present"
-        allowed = {normalize_stack(stack) for stack in native}
     stray = sorted({s for s in font_stacks(page) if normalize_stack(s) not in allowed})
     assert not stray, (
         f"{slug} 出现 tokens 之外的字体栈（vendor / 内联旁路，需 var(--sans|mono|serif)）: "
