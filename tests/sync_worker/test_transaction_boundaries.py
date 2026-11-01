@@ -283,3 +283,122 @@ def test_token_commit_failure_reaches_one_shot_exit_code(db_engine, monkeypatch)
             .order_by(SyncJob.id.desc())
         )
         assert latest.status == "failed"
+
+
+@pytest.mark.parametrize(
+    "module_name,entrypoint",
+    [
+        ("shops", "sync_shops"),
+        ("collect_box", "sync_collect_box"),
+        ("common_collect_box", "sync_common_collect_box"),
+        ("move_collect", "sync_move_collect"),
+        ("packages", "sync_packages"),
+    ],
+)
+def test_miaoshou_network_releases_shared_account_lock(
+    db_engine, module_name, entrypoint
+):
+    from sqlalchemy import text
+
+    from tts_erp_v2.proxy.token_service import upsert_credentials
+
+    module = importlib.import_module(f"tts_erp_v2.jobs.miaoshou.{module_name}")
+    name = f"TEST_MIAOSHOU_SHORT_{module_name}"
+    calls = []
+    with Session(db_engine) as session:
+        with session.begin():
+            upsert_credentials(
+                session,
+                provider="miaoshou",
+                external_account_id=name,
+                plaintext_access_token="TEST_LICENSE",
+                plaintext_refresh_token="TEST_SECRET",
+            )
+
+        class Client:
+            def _call_erp(self, **kwargs):
+                assert not session.in_transaction()
+                # Another connection can acquire the SAME account lock while
+                # the simulated network request is in progress.
+                with Session(db_engine) as observer, observer.begin():
+                    assert (
+                        observer.scalar(
+                            text(
+                                "SELECT id FROM procurement.procurement_accounts "
+                                "WHERE external_account_id=:name FOR UPDATE NOWAIT"
+                            ),
+                            {"name": name},
+                        )
+                        is not None
+                    )
+                calls.append(kwargs)
+                return {"result": "success", "data": {}}
+
+        getattr(module, entrypoint)(session, client=Client(), license_id=name)
+        assert calls
+        assert not session.in_transaction()
+
+
+def test_miaoshou_purchase_http_has_no_active_transaction(db_engine):
+    from tts_erp_v2.jobs.miaoshou.purchase_price_clean import sync_purchase_prices
+    from tts_erp_v2.proxy.token_service import upsert_credentials
+
+    name = "TEST_PURCHASE_HTTP_TRANSACTION"
+    with Session(db_engine) as session:
+        with session.begin():
+            upsert_credentials(
+                session,
+                provider="miaoshou_web",
+                external_account_id=name,
+                plaintext_access_token="TEST_COOKIE",
+                plaintext_refresh_token="TEST_HEADER",
+            )
+
+        class Client:
+            def search_page(self, *, page, page_size):
+                assert not session.in_transaction()
+                return {"list": [], "total": 0, "page": page, "pageSize": page_size}
+
+        result = sync_purchase_prices(
+            session, client=Client(), external_account_id=name
+        )
+        assert not result["skipped"]
+        assert not session.in_transaction()
+
+
+def test_image_download_and_upload_run_outside_transactions(db_engine):
+    from tts_erp_v2.db.models import ChannelProduct
+    from tts_erp_v2.jobs.tiktok.spu_image_mirror import run
+
+    name = "TEST_MIRROR_HTTP_TRANSACTION"
+    calls = []
+    with Session(db_engine, expire_on_commit=False) as session:
+        with session.begin():
+            account = ChannelAccount(platform="tiktok", shop_id=name)
+            session.add(account)
+            session.flush()
+            product = ChannelProduct(
+                shop_pk=account.id,
+                spu_id=name,
+                main_image_url="https://example.test/TEST_image.jpg",
+            )
+            session.add(product)
+            session.flush()
+            spu_pk = product.id
+
+        def download(url):
+            assert not session.in_transaction()
+            calls.append("download")
+            return b"TEST_IMAGE", "image/jpeg"
+
+        class Store:
+            def ensure_bucket(self):
+                assert not session.in_transaction()
+
+            def put_bytes(self, *args):
+                assert not session.in_transaction()
+                calls.append("upload")
+
+        run(session, spu_pks=[spu_pk], downloader=download, minio=Store())
+        assert calls == ["download", "upload"]
+        assert not session.in_transaction()
