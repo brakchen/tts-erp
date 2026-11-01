@@ -13,5 +13,11 @@
 - 干净 master 对照：独立 worktree `/home/schan/tts-erp/.worktrees/codex-sync-master-reference-01a1962b` 固定 ea779d91，无业务改动；所有执行仍经 isolated runner。观察到的 289 个 API 失败选集全部复现（`/tmp/tts-sync-master-api-failing.xml`）；34 个非 API/browser 失败全部复现（`/tmp/tts-sync-master-other-failing.xml`）；49 个 browser 失败全部复现（`/tmp/tts-sync-master-browser-failing.xml`，870.266 秒）。集合比较：lane=372、master=372、lane-only=0、master-only=0。365 项首行错误文本相同，其余含不同测试自增 ID 或前端测试输出片段。
 - 最终 6520dc31 回调类型/注释调整后的窄验证：`bash scripts/test_isolated.sh fast tests/proxy/test_tiktok_auth.py tests/sync_worker/test_proxy_call.py --tb=short --junitxml=/tmp/tts-sync-short-final-contract.xml`，16 passed，exit 0。
 - 复杂度：统一既有生命周期 owner，退休执行器手动提交/回滚路径，复用 SQLAlchemy 原生上下文，无新增依赖。测试种子 helper 仅处理现有 SAVEPOINT fixture；生产代码不增加自动提交适配层。必要的一致性读快照和原子 anchor 替换保留；monitor lease 远端确认前崩溃仍可能重发，见架构契约。
-- 完成边界：事务修复实现与专项证据成立；全仓 DoD 未通过，分支不进入 ready、不合入 master。置信度 B（任务边界）；全仓发布就绪未证明。
+- 前轮交付边界：事务修复实现与专项证据成立；当时全仓 DoD 未通过，分支未合入。后续用户明确要求合并，结果见下方集成记录。置信度 B（任务边界）；全仓发布就绪未证明。
 - 环境和交付：Linux 现有 Python 3.13 venv / PostgreSQL / Playwright；没有声称运行 Python 3.14 测试。业务提交 6520dc31 已推送，后续仅本工作记录；origin/master 仍为 ea779d91。两个服务器测试 worktree 与 `/tmp/tts-sync-*` 日志保留用于复查；没有活动测试进程，runner 已清理每次临时数据库。
+
+## 用户要求合并后的集成记录
+
+- 目标 master 未推进，仍为 ea779d91；持有 `/tmp/tts-erp-master-merge.lock`，在本任务干净临时工作树生成 `--no-ff` 合并提交 `1b1ae17708eeb6b3ac8ff90d06bd46e7da580eda`，第二 parent 为 f5eed6fd；文件树与任务分支完全一致。
+- 对该精确提交运行 `PYTEST_ADDOPTS='--junitxml=/tmp/tts-sync-merge-baseline.xml' bash scripts/test_baseline.sh --keep-log /tmp/tts-sync-merge-baseline-suite.log`：3272 cases，2885 passed，372 failures，15 skipped，1675.139 秒；机械退出码 1。全部 482 个任务相关用例通过；与前轮失败集合比较，新增 0、减少 0。完整 JUnit/原始日志/集合比较 JSON 均保留在服务器 `/tmp/tts-sync-merge-*`。
+- 用户在已披露既有失败后明确指示合并，按此指示非强制推送 `HEAD:master` 成功，并从远端读回相同 SHA；没有改写提交基线。该结论是合并完成及零额外失败，不代表全仓测试通过或生产部署完成。后续交付记录仅修改本工作目录文档，不重新触发业务测试。
