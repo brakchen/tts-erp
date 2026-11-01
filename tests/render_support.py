@@ -16,8 +16,10 @@ live e2e 层（`tests/e2e/`，需 :9877）共用这里的 JS 片段与 Renderer�
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 # 全站 13 个页面 slug（与 tts_erp_v2.accounts.pages.PAGES 一一对应）
 PAGE_SLUGS = [
@@ -165,6 +167,27 @@ class Renderer:
         if request.method == "POST" and path.endswith(READ_ONLY_POST_SUFFIXES):
             return
         self.write_requests.append(f"{request.method} {request.url}")
+
+    def fulfill_focused_mutation(
+        self, route: Any, body: dict[str, Any], *, status: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        """Acknowledge only an intercepted, inert focused PATCH in canned UI tests.
+
+        Fulfillment is mandatory before removing the write from the read-only
+        guard. Live/key-bearing renderers and unrelated paths remain forbidden.
+        """
+        request = route.request
+        parsed = urlsplit(request.url)
+        assert self._key is None and parsed.hostname in {"127.0.0.1", "localhost"}
+        assert request.url.startswith(self._base + "/")
+        assert request.method == "PATCH"
+        assert re.fullmatch(r"(?:/tts)?/v2/reporting/focused-spus/[1-9]\d*", parsed.path)
+        route.fulfill(status=status, content_type="application/json",
+                      body=json.dumps(body), headers=headers or {})
+        recorded = f"{request.method} {request.url}"
+        assert recorded in self.write_requests, recorded
+        self.write_requests.remove(recorded)
 
     def assert_read_only(self) -> None:
         assert not self.write_requests, (
