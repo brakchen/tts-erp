@@ -164,6 +164,8 @@ def _alert_payload() -> dict[str, Any]:
             "warnings": [],
             "basisCalculatedAt": _NOW,
             "drilldown": {
+                "startDate": "2026-09-27",
+                "endDate": "2026-10-03",
                 "pageUrl": (
                     f"/v2/pages/spu-roi?shop_pk=7&spu_ids=TEST_RENDER_COMPARE_{i}"
                     "&w_start=2026-09-27&w_end=2026-10-03"
@@ -197,7 +199,19 @@ def _alert_payload() -> dict[str, Any]:
                 "current": {"startDate": "2026-09-27", "endDate": "2026-10-03"},
                 "previous": {"startDate": "2026-09-20", "endDate": "2026-09-26"},
             },
-            "coverage": {"status": "limited"},
+            "coverage": {
+                "status": "limited",
+                "basis": "TEST_layout_fixture",
+                "sources": {},
+                "advertising": {
+                    "startDate": "2026-09-20",
+                    "endDate": "2026-10-03",
+                    "endpoint": "TEST_layout_fixture",
+                    "missingDates": [],
+                    "observedScopes": [],
+                },
+                "limitations": ["TEST 渲染夹具，不证明来源完整性。"],
+            },
             "warnings": ["渲染夹具，仅验证布局，不证明盈利或来源完整性。"],
             "activityBypassed": False,
             "scopeDescription": "固定近7天活动范围；保留无单投放",
