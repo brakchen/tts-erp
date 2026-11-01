@@ -177,7 +177,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
   return <div className="erp-page">
     <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="把商品成本，管理清楚" description="按店铺核对货源价与人工成本，编辑草稿后确认提交。" />
     <section className="erp-panel erp-filter-workspace" aria-label="采购范围与筛选">
-    <div className="erp-toolbar">
+    <div className="erp-filter-row">
     <div className="erp-filter-row">
       <label className="erp-shop-picker">当前店铺<select className="erp-select" aria-label="当前店铺" value={shopId} disabled={pending || !shops?.length} onChange={(event) => changeScope(() => setShopId(event.target.value))}>{shops?.map((shop) => <option key={shop.id} value={shop.id}>{shop.account_name ?? shop.shop_id} · {shop.shop_id} · #{shop.id}</option>)}</select></label>
       <Button variant="secondary" isDisabled={cooldown || pending} onPress={() => { setShopRefresh((value) => value + 1); setRefresh((value) => value + 1); }}>刷新店铺与列表</Button>
