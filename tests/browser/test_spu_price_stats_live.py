@@ -224,7 +224,9 @@ def test_spu_roi_price_summary_and_columns_render_real_weighted_stats(
 def test_focused_spus_profile_matches_spu_roi_price_totals(
     live: LiveBrowser, price_scene: PriceScene
 ) -> None:
-    """两页对同一店铺/窗口的价格口径一致（全历史：spu-roi「不限」 vs focused 默认）。"""
+    """重点页隐藏价格 UI，服务端价格仍与同店铺/窗口的 ROI 口径一致。"""
+    from playwright.sync_api import expect
+
     shop = price_scene.shop_a
     expected = shop.stats((DAY_D1, DAY_D2))
     assert expected.cells() == {
@@ -241,21 +243,28 @@ def test_focused_spus_profile_matches_spu_roi_price_totals(
     roi.wait_price_state(expected.cells(), expected.summary_status())
 
     focused = live.open(focused_spus_path(shop.pk))
-    focused.wait_price_state(expected.cells(), expected.summary_status())
-
-    assert focused.price_cells() == roi.price_cells()
-    assert focused.summary_status() == roi.summary_status()
-    for field in PRICE_FIELDS:
-        assert focused.price_field_count(field) == 1, field
-
     roi.wait_rows((SPU_A1, SPU_A2))
     focused.wait_rows((SPU_A1, SPU_A2))
-    for spu_id in (SPU_A1, SPU_A2):
-        for field in ("priceStats.purchase.median", "priceStats.paid.mean"):
-            assert focused.row_cell(spu_id, field) == roi.row_cell(spu_id, field), (
-                spu_id,
-                field,
-            )
+    expect(focused.page.locator("#price-summary")).to_have_count(0)
+    for field in PRICE_FIELDS:
+        expect(focused.price_header(field)).to_be_hidden()
+    for title in PRICE_GROUP_TITLES:
+        assert title not in focused.header_text()
+
+    # Hiding the UI must not remove or alter server price facts. Reuse each
+    # page's actual scoped URL and authenticated context against the live API.
+    payloads = []
+    for view in (roi, focused):
+        response = view.context.request.get(view.spu_roi_requests()[-1])
+        assert response.status == 200
+        payloads.append(response.json())
+    assert payloads[0]["totals"]["priceStats"] == payloads[1]["totals"]["priceStats"]
+    row_prices = [
+        {item["spu_id"]: item["priceStats"] for item in payload["items"]}
+        for payload in payloads
+    ]
+    assert set(row_prices[0]) == set(row_prices[1]) == {SPU_A1, SPU_A2}
+    assert row_prices[0] == row_prices[1]
 
 
 # ─── 2. 排序（服务端重取 + 行序真实变化 + 键盘可达）──────────────────
