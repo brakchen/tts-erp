@@ -104,3 +104,24 @@ FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh
 ### 后续用户指示：先合并，再排查
 
 上述为原交付时状态。用户随后明确指示“先合并 master，然后排查为什么会有313个失败项”，覆盖此前先通过基线再合并的顺序要求。已在整合锁下用独立工作树创建并推送合并提交 `7335af492dc5039b61f2726d03b2a9f0ead8d9ee`，未部署或重启生产服务。失败记录和基线保持原样，未宣称测试通过；后续归因见 [313项基线差异排查](../testing/baseline-failure-investigation-2026-11-01.md)。
+
+### 用户纠正：恢复搜索框内的关注标签（2026-11-01）
+
+用户明确指出，将已关注 SPU 移到折叠的“当前关注清单”改变了原交互。本次恢复所有已关注 SPU 在同一搜索框内以标签展示，每项保留可直接取消的 ×；输入关键词继续添加，批量粘贴仍在输入旁。两 profile 复用现有 HeroUI 3.2.6 / MIT TagGroup，不再另设折叠的已选清单。商品标题作为标签提示和辅助描述，标识仍按字符串完整展示。
+
+取消沿用原有 `change()` 的显式增删提交，不替换整个关注集合。等待写入回执期间标签保留且移除入口禁用；只读、失败后事实读回、跨店铺冷却与 Retry-After 保护仍由原 handler 负责。本次没有金融、权限、接口或数据库变更。
+
+代码冻结提交 `ce47567b`，分支 `codex/restore-focused-spu-tags`，已合并为 `46e2f3c0`。服务器独立工作树执行：
+
+| 验证 | 结果与边界 |
+| --- | --- |
+| `FRONTEND_TEST_FILTER=src/pages/spu-profitability bash scripts/test_isolated.sh frontend tests/frontend/test_components.py --tb=short` | 退出 0；含 29 项均在搜索框内、保存中保持标签、确认后仅移除目标、只读禁止取消，以及既有失败恢复测试 |
+| `bash scripts/test_isolated.sh browser tests/browser/test_spu_react_workspace.py --tb=short` | 11 项通过；含 1003 项完整分页读取及框内展示、单项 PATCH、写入失败读回和只读保护 |
+| 本机 `npm --prefix frontend run typecheck`、`npm --prefix frontend run build` | 均退出 0；现有打包脚本生成 `build-0eca2d17c3e009751ab8` |
+| 本机实际页面只读验收 | 当前 29 项全部在框内，29 个 × 与搜索输入同框；2560px 与 375px 无整页横向溢出。未操作真实关注数据 |
+
+本机运行目录已更新并激活上述前端包，刷新页面即可见。独立只读 review 未发现新 P1/P2 问题。
+
+完整基线仅在初版 `dd2f6f78` 执行一次 `bash scripts/test_baseline.sh --keep-log /tmp/codex-spu-tags-baseline-pytest.log`，退出 1，共 **153 个失败 ID**：与前次逐项复验的 149 个剩余失败完全重合，另有本次 4 个差异（组件 adapter 及本浏览器文件的分页、单项增删、失败读回三个 case）。这 4 项的失败详情均为初版标签的可访问名称重复，导致原有精确按钮选择器无法匹配；组件 adapter 内具体失败为 `a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs`。`ce47567b` 改用原生标签与移除按钮的名称关联后，上述两份专项复验全部通过，未放宽精确按钮查询或原有业务断言。
+
+未重跑整个 fast suite，未更新零失败基线。153 是初版实际运行结果，不能写成最终修正版仍有 153 项失败；149 是本次基线与此前失败清单的交集，不是对 `ce47567b` 的另一次完整执行结果。原始日志、退出码和清单对比保留于测试服务器 `/tmp/codex-spu-tags-baseline*`，既有失败的归因仍见前述报告。专项通过不代表全站测试通过。
