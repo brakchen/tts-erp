@@ -360,7 +360,7 @@ class _SpuProfitabilityPageConfig:
 
 
 @router.get("/spu-roi", response_class=HTMLResponse)
-def spu_roi_page() -> HTMLResponse:
+def spu_roi_page(request: Request) -> HTMLResponse:
   """SPU 实际 ROI 看板(账页式,§7 of docs/archive/spu-real-roi-dashboard.md)。
 
   HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
@@ -368,27 +368,13 @@ def spu_roi_page() -> HTMLResponse:
   布局 = Bootstrap 5.3.8 栅格/工具类 + 手机端适配(见 shell 头注释),行为在
   static/js/spu-roi.js。
   """
-  return _render_spu_profitability_page(
-    _SpuProfitabilityPageConfig(
-      slug="spu-roi",
-      title="SPU 实际 ROI",
-      profile_id="standard-roi",
-      entrypoint_js="spu-roi.js",
-    )
-  )
+  return frontend_pages.render_frontend_page(request, "spu-roi")
 
 
 @router.get("/focused-spus", response_class=HTMLResponse)
-def focused_spus_page() -> HTMLResponse:
+def focused_spus_page(request: Request) -> HTMLResponse:
   """Persistent shop-scoped focused SPUs rendered by the shared page kernel."""
-  return _render_spu_profitability_page(
-    _SpuProfitabilityPageConfig(
-      slug="focused-spus",
-      title="重点关注 SPU",
-      profile_id="focused-spus",
-      entrypoint_js="focused-spus.js",
-    )
-  )
+  return frontend_pages.render_frontend_page(request, "focused-spus")
 
 
 @router.get("/spu-profit-deterioration", response_class=HTMLResponse)

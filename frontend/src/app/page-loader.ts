@@ -3,6 +3,8 @@ import type { PageProps } from '../shared/contracts';
 
 const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> }>> = {
   dashboard: () => import('../pages/dashboard'),
+  'spu-roi': () => import('../pages/spu-profitability'),
+  'focused-spus': () => import('../pages/spu-profitability'),
   'intercept-requests': () => import('../pages/intercept-requests'),
   'intercept-stats': () => import('../pages/intercept-stats'),
   shops: () => import('../pages/shops'),

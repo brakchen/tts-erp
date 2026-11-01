@@ -1,0 +1,44 @@
+.erp-profit-controls { display: grid; gap: 16px; }
+.erp-profit-controls label { display: grid; min-width: 0; gap: 8px; color: var(--ink-soft); font-size: 12px; }
+.erp-profit-controls label:has(input[type=checkbox]) { display: flex; align-items: center; }
+.erp-profit-scope-row, .erp-profit-dates { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.erp-profit-dates > label { flex: 0 1 190px; }
+.erp-profit-projection { width: 140px; }
+.erp-spu-selection-search { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.erp-spu-selection-search > :first-child { width: min(100%, 480px); }
+.erp-profit-freshness { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--muted); font-size: 12px; }
+.erp-profit-freshness > span { min-width: 0; overflow-wrap: anywhere; }
+.erp-profit-freshness [data-severity=crit] { color: var(--danger); }
+.erp-profit-freshness [data-severity=warn] { color: var(--warn); }
+.erp-profit-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 16px; padding-block: 16px; }
+.erp-profit-metrics > div { min-width: 0; border-left: 2px solid var(--rule); padding-left: 14px; }
+.erp-profit-metrics dt { color: var(--muted); font-size: 12px; }
+.erp-profit-metrics dd { margin-top: 6px; font-size: 22px; font-weight: 600; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.erp-price-summary-table th, .erp-price-summary-table td { padding: 12px; border-bottom: 1px solid var(--rule); }
+.erp-price-summary-table { min-width: 400px; }
+.erp-profit-grid { min-width: 0; max-width: 100%; border: 1px solid var(--rule); border-radius: 12px; font-family: var(--sans); font-size: 13px; }
+.erp-profit-grid.tabulator, .erp-profit-grid .tabulator-tableholder { background: var(--surface); }
+.erp-profit-grid .tabulator-header, .erp-profit-grid .tabulator-col { background: var(--table-heading); color: var(--ink-soft); }
+.erp-profit-grid .tabulator-row { background: var(--surface); color: var(--ink); }
+.erp-profit-grid .tabulator-cell { padding: 14px; border-right-color: var(--rule); }
+.erp-profit-grid .tabulator-col-content { padding: 12px; }
+.erp-profit-grid .tabulator-row.erp-profit-loss { color: var(--danger); }
+.erp-profit-product { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.erp-profit-product img { object-fit: contain; }
+.erp-profit-product > button { flex: 0 0 48px; }
+.erp-profit-detail-trigger { display: block; white-space: normal; text-align: start; color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.erp-profit-no-image { flex: 0 0 48px; color: var(--muted); font-size: 11px; }
+.erp-profit-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.erp-profit-flags span { border: 1px solid var(--rule); border-radius: 4px; padding: 1px 4px; font-size: 11px; }
+.erp-profit-drill { position: sticky; left: 0; white-space: normal; padding: 12px; min-width: 0; max-width: 100%; background: var(--paper); }
+.erp-profit-drill .erp-panel { border-radius: 10px; }
+.erp-profit-evidence { min-width: 680px; }
+.erp-profit-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; font-size: 12px; }
+.erp-profit-pagination select { width: auto; }
+[data-page-profile] summary { cursor: pointer; color: var(--ink-soft); }
+@media (max-width: 767px) {
+  .erp-profit-dates > label { flex: 1 1 140px; }
+  .erp-profit-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .erp-profit-metrics dd { font-size: 19px; }
+  .erp-profit-drill { padding: 6px; }
+}
