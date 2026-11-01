@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import delete, event, select, text
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.db.constants import PAID_SALES_ORDER_STATUSES
 from tts_erp_v2.db.models import (
     AdDaily,
@@ -45,6 +46,7 @@ def comparison_scope(db_engine):
         )
         session.add(shop)
         session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
         products = [
             ChannelProduct(
                 shop_pk=shop.id, spu_id=f"TEST_COMPARE_{n}", status="ACTIVATE"
@@ -200,6 +202,115 @@ def get(api_client, readonly_key, scope, **params):
             "x-request-id": "TEST_COMPARE_REQ",
         },
     )
+
+
+@pytest.mark.parametrize("active_rw", [False, True], ids=["fresh", "read-write"])
+def test_http_comparison_preserves_session_snapshot_boundary(
+    api_client, readonly_key, comparison_scope, db_engine, monkeypatch, caplog, active_rw
+):
+    from tts_erp_v2.api.deps import get_session
+
+    observed = {}
+    created = []
+    ended = []
+
+    def record_created(_session, transaction):
+        created.append(transaction)
+
+    def record_ended(_session, transaction):
+        ended.append(transaction)
+
+    def request_session():
+        with Session(db_engine) as session:
+            assert not session.in_transaction()
+            if active_rw:
+                session.execute(text("SELECT 1"))
+                assert (
+                    session.execute(text("SHOW transaction_read_only")).scalar_one()
+                    == "off"
+                )
+            observed["initial"] = session.get_transaction()
+            event.listen(session, "after_transaction_create", record_created)
+            event.listen(session, "after_transaction_end", record_ended)
+            try:
+                yield session
+            finally:
+                observed["final"] = session.get_transaction()
+                # Only request work is counted; dependency teardown owns rollback.
+                event.remove(session, "after_transaction_create", record_created)
+                event.remove(session, "after_transaction_end", record_ended)
+                session.rollback()
+
+    with monkeypatch.context() as patch:
+        patch.setitem(api_client.app.dependency_overrides, get_session, request_session)
+        with caplog.at_level(
+            "WARNING", logger="tts_erp_v2.api.v2.spu_deterioration_alert"
+        ):
+            response = get(api_client, readonly_key, comparison_scope)
+
+    assert ended == []  # No commit, rollback or restart inside the route.
+    if active_rw:
+        assert response.status_code == 503, response.text
+        assert response.json() == {
+            "detail": {
+                "message": "盈利事实读取不可用，请重试。",
+                "requestId": "TEST_COMPARE_REQ",
+            }
+        }
+        assert "error_type=SnapshotIsolationUnavailable" in caplog.text
+        assert observed["initial"] is not None
+        assert observed["final"] is observed["initial"]
+        assert created == []
+    else:
+        assert response.status_code == 200, response.text
+        assert observed["initial"] is None
+        assert len(created) == 1
+        assert observed["final"] is created[0]
+        body = response.json()
+        assert body["totals"] == {
+            "analysisSpuCount": 4,
+            "previousOrderCount": 1,
+            "currentOrderCount": 1,
+            "unavailableReason": None,
+        }
+        item = next(
+            item
+            for item in body["items"]
+            if item["spuPk"] == comparison_scope["products"][3]
+        )
+        assert Decimal(item["currentSpendCny"]) == 49
+        assert Decimal(item["currentNetProfitCny"]) == -49
+        assert Decimal(item["currentRoi"]) == 0
+        assert all(
+            item["basisCalculatedAt"] == body["meta"]["calculatedAt"]
+            for item in body["items"]
+        )
+
+
+@pytest.mark.parametrize("bad_filter", [False, True])
+def test_http_comparison_unauthorized_shop_precedes_filter_validation(
+    api_client, readonly_key, db_engine, bad_filter
+):
+    with Session(db_engine) as session:
+        shop = ChannelAccount(
+            platform="tiktok", shop_id="TEST_COMPARE_UNAUTHORIZED", region="VN"
+        )
+        session.add(shop)
+        session.flush()
+        bare_shop_pk = shop.id
+        missing_shop_pk = (
+            session.execute(
+                select(ChannelAccount.id).order_by(ChannelAccount.id.desc()).limit(1)
+            ).scalar_one()
+            + 1
+        )
+        session.commit()
+
+    for shop_pk in (bare_shop_pk, missing_shop_pk):
+        params = {"severity": "retired"} if bad_filter else {}
+        response = get(api_client, readonly_key, {"shop": shop_pk}, **params)
+        assert response.status_code == 404, response.text
+        assert response.json() == {"detail": "Shop is not authorized"}
 
 
 def test_v3_canonical_values_scope_distinct_totals_and_drilldown(
