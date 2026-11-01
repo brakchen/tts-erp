@@ -225,6 +225,8 @@ def test_focused_spus_profile_matches_spu_roi_price_totals(
     live: LiveBrowser, price_scene: PriceScene
 ) -> None:
     """重点页隐藏价格 UI，服务端价格仍与同店铺/窗口的 ROI 口径一致。"""
+    from playwright.sync_api import expect
+
     shop = price_scene.shop_a
     expected = shop.stats((DAY_D1, DAY_D2))
     assert expected.cells() == {
