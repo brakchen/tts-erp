@@ -21,6 +21,8 @@
 .erp-profit-grid .tabulator-header, .erp-profit-grid .tabulator-col { background: var(--table-heading); color: var(--ink-soft); }
 .erp-profit-grid .tabulator-row { background: var(--surface); color: var(--ink); }
 .erp-profit-grid .tabulator-cell { padding: 14px; border-right-color: var(--rule); }
+.erp-profit-grid .tabulator-row .tabulator-cell.tabulator-frozen { background: var(--surface); }
+.erp-profit-grid .tabulator-row.erp-profit-loss .tabulator-cell.tabulator-frozen { background: var(--surface); box-shadow: inset 3px 0 var(--danger); }
 .erp-profit-grid .tabulator-col-content { padding: 12px; }
 .erp-profit-grid .tabulator-row.erp-profit-loss { color: var(--danger); }
 .erp-profit-product { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -41,4 +43,7 @@
   .erp-profit-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .erp-profit-metrics dd { font-size: 19px; }
   .erp-profit-drill { padding: 6px; }
+  .erp-profit-product { gap: 6px; }
+  .erp-profit-product img { width: 32px; height: 32px; }
+  .erp-profit-product > button, .erp-profit-no-image { flex-basis: 32px; }
 }

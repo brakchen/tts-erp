@@ -2,9 +2,11 @@
 
 > **文档状态：当前实现契约（30/90 独立预测已交付）；可用于维护和验收。**
 >
+> **2026-11-01 页面所有者更新：** 两页现已迁移到 `frontend/src/pages/spu-profitability/`，共用 React、HeroUI 与 AppShell。本文旧模板、Bootstrap/Tom Select、全局 kernel 的实现描述由 [React 迁移记录](../plans/spu-react-migration-2026-11-01.md) 的页面所有权和布局章节取代；HTTP/领域/业务契约不变。维护页面请从该 React 目录开始，不能恢复旧整页 mount。
+>
 > 本文是页面、HTTP adapter、领域 module、查询和部署的技术事实；业务口径、公式、日期边界、字段业务含义和验收口径的唯一权威仍是 [`../business/spu-profitability.md`](../business/spu-profitability.md)。本文只引用该文，不复制公式。30/90 独立预测、basis metadata 和竞态保护是当前代码行为；v9 兼容字段仍单独标注。
 >
-> 代码基线：`tts_erp_v2.analytics.spu_profitability`、`tts_erp_v2.analytics.spu_roi`、`tts_erp_v2/templates/pages/spu-profitability.html`、`static/js/spu-profitability-page.js`，以及当前测试。所有路径均相对仓库根。
+> 代码基线：`tts_erp_v2.analytics.spu_profitability`、`tts_erp_v2.analytics.spu_roi`、`frontend/src/pages/spu-profitability/`，以及当前测试。所有路径均相对仓库根。
 
 ## 1. 权威边界、目标与非目标
 
@@ -14,7 +16,7 @@
 | --- | --- | --- |
 | 指标概念、计算公式、退款/全损/预测口径、日期业务边界 | `docs/business/spu-profitability.md` | 只引用章节，不重新定义 |
 | HTTP 参数、响应字段、状态码和 wire 精度 | 本文当前契约；兼容细节以 `tts_erp_v2/api/v2` 实现为准 | 逐项列出当前兼容 wire 与产品读取规则 |
-| 页面结构、控件和交互 | `spu-profitability.html`、`spu-profitability-page.js`、CSS | 按源码描述 |
+| 页面结构、控件和交互 | `frontend/src/pages/spu-profitability/` | React 拥有筛选/请求/汇总/明细，Tabulator 仅拥有空 ref 中表体 |
 | 深模块接口、查询流程和依赖方向 | `analytics/spu_profitability/` | 约束实现位置 |
 | 历史公式、旧页面设计和迁移记录 | `docs/archive/` | 不作为现行依据 |
 

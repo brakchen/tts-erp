@@ -1,7 +1,8 @@
 # ERP frontend
 
-React/TypeScript/Vite/free HeroUI, progressively serving the existing FastAPI page URLs. P0/P1 covers
-`dashboard` and `intercept-requests`; the remaining ERP pages still use their existing renderers.
+React/TypeScript/Vite/free HeroUI serving the existing FastAPI page URLs. All 15 registered ERP
+business pages and the anonymous login now use the shared frontend renderer. Source integration
+and a built package do not by themselves mean this version has been deployed to production.
 
 ## Install, build and test
 
@@ -33,14 +34,14 @@ Do not edit production `.env`, open wildcard CORS, or expose keys through `VITE_
 
 ## Artifacts and ownership
 
-All 13 React business pages share the workspace shell, `PageIntro`, and `app/workspace.css` layout
+All 15 React business pages share the workspace shell, `PageIntro`, and `app/workspace.css` layout
 classes. The shared palette is imported from `tts_erp_v2/static/css/tokens.css`, also consumed by
-the retained `focused-spus` and `spu-roi` pages. The desktop navigation is dark green; surfaces,
+the shared `focused-spus` and `spu-roi` profitability module. The desktop navigation is dark green; surfaces,
 filter panels, tables, and responsive content spacing use the same light theme. Component
 interaction and state styling remain owned by HeroUI. No API or financial calculation is moved
 into the presentation layer.
 
-All 20 frontend tables use `shared/tables.css` through HeroUI's public slot `className` props
+HeroUI and semantic frontend tables use `shared/tables.css` through public slot `className` props
 or equivalent semantic native-table markup. The flat secondary variant avoids nested card
 surfaces; scroll regions remain keyboard-focusable, row controls retain their accessible names,
 and all original sort, expand, write-permission and recovery handlers are preserved.
@@ -65,11 +66,13 @@ assets fail explicitly rather than falling back to legacy HTML. Native HeroUI st
 there is no Bootstrap/legacy JS in migrated documents. See the approved standard and P0/P1 checkpoint:
 
 Navigation visuals (brand, groups, menu rows, active indicator and global header) are owned by
-`tts_erp_v2/static/css/navigation.css`, imported by React and linked by the retained SPU shell.
-`focused-spus` and `spu-roi` retain their business-page scripts while using these same navigation
-slots, server-owned menu permissions, 1024px navigation breakpoint, and `sidebar-collapsed`
-preference. Desktop collapse hides the sidebar on both runtimes; the expand control stays in the
-header. Changes to navigation styles belong in this shared file, not page-specific stylesheets.
+`tts_erp_v2/static/css/navigation.css`, imported once by React. Both profitability URLs load
+`src/pages/spu-profitability/`, including profile defaults, exact/persistent SPU scopes, all
+current and projected metrics, nested price statistics and five evidence views. React owns
+filters, requests and detail content; the existing self-hosted Tabulator 6.3.1 MIT instance
+owns only its empty ref container, preserving frozen columns and server sorting. It does not
+mount the retired whole-page kernel. Dates and scope controls precede summaries; detailed
+metrics remain available through disclosures. See the [SPU migration record](../docs/plans/spu-react-migration-2026-11-01.md).
 
 - [Frontend standard](../docs/guides/frontend-development.md)
 - [Migration design](../docs/plans/frontend-progressive-migration.md)
