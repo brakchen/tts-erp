@@ -42,7 +42,7 @@ try {
   });
   import.meta.hot?.dispose(() => { disposeUnauthorized(); root.unmount(); });
   document.title = `${title} · tts-erp`;
-  root.render(<RenderBoundary><AppShell bootstrap={bootstrap} title={title} actions={publicLogin ? undefined : <SessionActions rootPath={bootstrap.rootPath} />}>
+  root.render(<RenderBoundary><AppShell bootstrap={bootstrap} title={title} layout={publicLogin ? 'fullscreen' : 'workspace'} actions={publicLogin ? undefined : <SessionActions rootPath={bootstrap.rootPath} />}>
     <Suspense fallback={<div role="status" className="flex items-center gap-3"><Spinner />加载页面…</div>}>
       <Page bootstrap={bootstrap} />
     </Suspense>

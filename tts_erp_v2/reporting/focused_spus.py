@@ -12,6 +12,7 @@ from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause
 
 _MAX_PATCH_IDS = 500
 _MAX_SPU_ID_LENGTH = 128
@@ -90,7 +91,9 @@ class FocusedSpuPatchResult:
     removed_spu_ids: tuple[str, ...]
 
 
-_SQL_SHOP_EXISTS = text("SELECT 1 FROM commerce.shops WHERE id = :shop_pk")
+_SQL_SHOP_EXISTS = text(
+    "SELECT 1 FROM commerce.shops WHERE id = :shop_pk AND " + authorized_shop_clause()
+)
 _SQL_PRODUCT_IDS = text(
     "SELECT spu_id FROM commerce.products_spu "
     "WHERE shop_pk = :shop_pk AND spu_id = ANY(CAST(:spu_ids AS text[]))"

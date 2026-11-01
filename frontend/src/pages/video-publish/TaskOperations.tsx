@@ -83,7 +83,7 @@ export default function TaskOperations({ operation, command, canWrite, onClose, 
     }
   }
   const label = actionLabels[action] ?? action;
-  return <section aria-label="任务操作与核对" className="space-y-3 rounded-lg border border-default p-4">
+  return <section aria-label="任务操作与核对" className="erp-panel space-y-3 rounded-lg border border-default p-4">
     <h2 className="text-xl font-semibold">{label}</h2><Facts items={[[ '捕获任务 ID', original.taskId ], ['原 rowVersion', original.rowVersion], ['当前核对版本', facts?.rowVersion], ['原文件', original.filename]]} />
     <p className="whitespace-pre-wrap break-all">{evidence(original, action)}</p>
     {action === 'confirm_published' && <p>请先人工确认作品已发布。此按钮是唯一成功确认入口；确认人与时间由服务器记录，确认后不能撤销。</p>}

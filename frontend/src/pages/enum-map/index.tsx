@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Label, ListBox, Modal, Select, Table } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
@@ -128,7 +129,8 @@ export default function EnumMap({ bootstrap }: PageProps) {
     <p>不会自动重放原命令；核对后是否重新提交由你明确决定。</p>
     {recovery.snapshot && <p className="break-all">当前公开值：{recovery.snapshot.enum_type} / {recovery.snapshot.enum_value} · {recovery.snapshot.label_zh} · 排序 {recovery.snapshot.sort_order}</p>}
   </section>;
-  return <div className="space-y-4">
+  return <div className="erp-page">
+    <PageIntro eyebrow="DATA MAPPING" title="让业务数据使用同一种语言" description="集中查看来源字段与标准枚举的映射，确认后维护生效配置。" />
     <div className="flex flex-wrap gap-3"><Button isDisabled={disabled} onPress={() => open({ kind: 'add', enum_type: activeType })}>新增映射</Button><Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>刷新映射</Button></div>
     {!canManage && <p>当前仅浏览；维护需要 admin 权限，以服务端判定为准。</p>}
     {pending && <p role="status">提交中，请等待确认…</p>}{cooldown && <p role="status">请等待服务端指定时间后再提交；仍可修改或取消草稿，不会自动重试。</p>}
@@ -138,11 +140,11 @@ export default function EnumMap({ bootstrap }: PageProps) {
     <Select value={activeType} onChange={(key) => { if (typeof key === 'string') setCategory(key); }} className="max-w-full">
       <Label>分类</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{categories.map((type) => <ListBox.Item key={type} id={type} textValue={categoryName(type)}>{categoryName(type)}</ListBox.Item>)}</ListBox></Select.Popover>
     </Select>
-    {list.rows && <><p>显示顺序沿用服务端；字段较多时可在表格区域横向滚动。</p><Table><Table.ScrollContainer role="region" aria-label="枚举表格"><Table.Content aria-label="枚举映射" className="min-w-[44rem]"><Table.Header>
-      <Table.Column isRowHeader>英文值</Table.Column><Table.Column>中文标签</Table.Column><Table.Column>排序</Table.Column>{canManage && <Table.Column>操作</Table.Column>}
-    </Table.Header><Table.Body renderEmptyState={() => '该分类暂无映射'}>{list.rows.filter((row) => row.enum_type === activeType).map((row) => <Table.Row key={row.id} id={row.id}>
-      <Table.Cell><span className="block w-48 break-all">{row.enum_value}</span></Table.Cell><Table.Cell><span className="block w-56 break-all">{row.label_zh}</span></Table.Cell><Table.Cell>{row.sort_order}</Table.Cell>
-      {canManage && <Table.Cell focusMode="child"><div className="flex flex-wrap gap-2"><Button size="sm" isDisabled={disabled} onPress={() => open({ kind: 'edit', enum_type: row.enum_type, row })}>编辑映射</Button><Button size="sm" variant="danger" isDisabled={disabled} onPress={() => open({ kind: 'delete', enum_type: row.enum_type, row })}>删除映射</Button></div></Table.Cell>}
+    {list.rows && <><p>显示顺序沿用服务端；字段较多时可在表格区域横向滚动。</p><Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="枚举表格"><Table.Content aria-label="枚举映射" className="min-w-[44rem] erp-table-content"><Table.Header className="erp-table-head">
+      <Table.Column className="erp-table-column" isRowHeader>英文值</Table.Column><Table.Column className="erp-table-column">中文标签</Table.Column><Table.Column className="erp-table-column">排序</Table.Column>{canManage && <Table.Column className="erp-table-column">操作</Table.Column>}
+    </Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'该分类暂无映射'}</div>}>{list.rows.filter((row) => row.enum_type === activeType).map((row) => <Table.Row className="erp-table-row" key={row.id} id={row.id}>
+      <Table.Cell className="erp-table-cell"><span className="block w-48 break-all">{row.enum_value}</span></Table.Cell><Table.Cell className="erp-table-cell"><span className="block w-56 break-all">{row.label_zh}</span></Table.Cell><Table.Cell className="erp-table-cell">{row.sort_order}</Table.Cell>
+      {canManage && <Table.Cell className="erp-table-cell" focusMode="child"><div className="flex flex-wrap gap-2 erp-table-actions"><Button className="erp-table-action" variant="secondary" size="sm" isDisabled={disabled} onPress={() => open({ kind: 'edit', enum_type: row.enum_type, row })}>编辑映射</Button><Button className="erp-table-action" size="sm" variant="danger" isDisabled={disabled} onPress={() => open({ kind: 'delete', enum_type: row.enum_type, row })}>删除映射</Button></div></Table.Cell>}
     </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table></>}
     <Modal.Backdrop isOpen={dialog !== undefined} isDismissable={!pending} isKeyboardDismissDisabled={pending} onOpenChange={(isOpen) => { if (!isOpen) close(); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭枚举表单" isDisabled={pending} /><Modal.Header><Modal.Heading>{dialog?.kind === 'delete' ? '确认删除映射' : dialog?.kind === 'edit' ? '编辑映射' : '新增映射'}</Modal.Heading></Modal.Header>

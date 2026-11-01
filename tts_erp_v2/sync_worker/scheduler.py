@@ -36,11 +36,12 @@ from datetime import UTC, datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import exists, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from tts_erp_v2.db.models import ChannelAccount
-from tts_erp_v2.db.models.integration import Credentials, SyncCursor, SyncJob
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause
+from tts_erp_v2.db.models.integration import SyncCursor, SyncJob
 from tts_erp_v2.sync_worker.job_runner import (
     run_with_sync_job,
 )
@@ -362,17 +363,11 @@ def _is_job_enabled_in_factory(
 
 
 def _enumerate_tiktok_shops(session: Session) -> list[str]:
-    """Return every ``provider='tiktok'`` credential that owns a shop row.
+    """Return TikTok shops with their own linked credential and App config.
 
-    Primary filter (2026-09-05): only credentials with a matching row in
-    ``commerce.shops`` (``platform='tiktok'`` + ``shop_id ==
-    external_account_id``) are returned. A credential alone is just an
-    OAuth token — the ``commerce.shops`` row is what marks a shop as
-    ready to sync, and every job hard-fails on shop-less credentials
-    (``orders._ensure_channel_account`` raises ``UpstreamJobError``).
-    Filtering at enumeration time means a stray OAuth-test credential
-    (any prefix) can never make every tiktok job burn ~10s per tick on
-    retries, regardless of how it is named.
+    Plugin discovery alone cannot enable API jobs. Eligibility requires the
+    shop's credential_id, external ID, selected Service and owned App pair to
+    match; an unrelated historical token with the same shop ID is insufficient.
 
     Secondary guard: :data:`NON_PRODUCTION_SHOP_PREFIXES`` (``MOCK_*`` /
     ``TEST_*``) are still excluded even if a shop row exists, so a
@@ -386,17 +381,12 @@ def _enumerate_tiktok_shops(session: Session) -> list[str]:
     """
     try:
         rows = session.execute(
-            select(Credentials.external_account_id)
+            select(ChannelAccount.shop_id)
             .where(
-                Credentials.provider == "tiktok",
-                exists(
-                    select(ChannelAccount.shop_id).where(
-                        ChannelAccount.platform == "tiktok",
-                        ChannelAccount.shop_id == Credentials.external_account_id,
-                    )
-                ),
+                ChannelAccount.platform == "tiktok",
+                text(authorized_shop_clause()),
             )
-            .order_by(Credentials.external_account_id)
+            .order_by(ChannelAccount.shop_id)
         ).all()
     except Exception:
         log.exception("_enumerate_tiktok_shops failed; returning empty list")

@@ -14,11 +14,22 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ShopPluginSourceOut(BaseModel):
+    source: str
+    last_received_at: datetime | None = None
+    observed_at: datetime | None = None
+    plugin_version: str | None = None
+
+
 class ChannelAccountOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     platform: str
     shop_id: str
+    shop_code: str | None = None
+    discovered_at: datetime | None = None
+    plugin_sources: list[ShopPluginSourceOut] = Field(default_factory=list)
+    auth_state: str = "unauthorized"
     account_name: str | None = None
     region: str | None = None
     seller_type: str | None = None
@@ -28,7 +39,7 @@ class ChannelAccountOut(BaseModel):
     # TikTok Partner Center service_id（2026-09-28 补上读面：shops 页面
     # 元信息编辑 / 授权链接生成需要它；additive 字段，不破坏外部契约）
     service_id: str | None = None
-    # True when a database pair or exact legacy environment fallback exists;
+    # True when this shop has its own matching database App pair;
     # never exposes App Key/App Secret plaintext.
     app_credentials_configured: bool = False
     synced_at: datetime | None = None

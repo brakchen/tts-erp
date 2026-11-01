@@ -467,6 +467,9 @@
   window.ttsErpPageProfile = {
     id: "focused-spus",
     pagePath: "/v2/pages/focused-spus",
+    preferences: {
+      storageKey: "tts-erp:focused-spus:preferences:v1",
+    },
     defaults: {
       includeAll: true,
       limit: 100,

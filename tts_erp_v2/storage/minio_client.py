@@ -166,9 +166,12 @@ def _read_config() -> _Config:
             "MINIO_PRESIGN_EXPIRY_SECONDS must be an integer (got "
             f"{required['MINIO_PRESIGN_EXPIRY_SECONDS']!r})."
         ) from e
-    if expiry_seconds <= 0:
+    # MinIO's get_presigned_url accepts 1 second through 7 days. Validate
+    # here so invalid settings remain configuration errors, including when
+    # an optional catalogue thumbnail requests the first signed URL.
+    if not 1 <= expiry_seconds <= 604800:
         raise MinioConfigError(
-            f"MINIO_PRESIGN_EXPIRY_SECONDS must be > 0 (got {expiry_seconds})."
+            "MINIO_PRESIGN_EXPIRY_SECONDS must be between 1 and 604800."
         )
     base = os.environ.get("MINIO_PUBLIC_BASE_URL", "").strip()
     public_host = os.environ.get("MINIO_PUBLIC_HOST", "").strip() or None
@@ -229,13 +232,18 @@ class MinioClient:
     def from_env(cls) -> MinioClient:
         """Read required env vars and construct the SDK client."""
         cfg = _read_config()
-        sdk = Minio(
-            cfg.endpoint,
-            access_key=cfg.access_key,
-            secret_key=cfg.secret_key,
-            secure=cfg.secure,
-            region=cfg.region,
-        )
+        try:
+            sdk = Minio(
+                cfg.endpoint,
+                access_key=cfg.access_key,
+                secret_key=cfg.secret_key,
+                secure=cfg.secure,
+                region=cfg.region,
+            )
+        except ValueError as error:
+            # SDK endpoint/region validation is part of environment config,
+            # not a failure of the product/cost query that consumes an image.
+            raise MinioConfigError("Invalid MinIO client configuration.") from error
         return cls(sdk, config=cfg)
 
     def with_bucket(self, bucket: str) -> MinioClient:

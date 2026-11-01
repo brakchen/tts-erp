@@ -162,7 +162,7 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     } catch (error: unknown) { if (mounted.current && readController.current === controller && revision === draftRevision.current) { command.hold(error); setMessage('续传事实读取失败或动作已变化；当前草稿未覆盖，请刷新核对。'); } }
     finally { if (mounted.current && readController.current === controller) { readController.current = undefined; setChecking(false); } }
   }
-  return <section aria-label="新建发布任务" className="space-y-3 rounded-lg border border-default p-4">
+  return <section aria-label="新建发布任务" className="erp-panel space-y-3 rounded-lg border border-default p-4">
     <h2 className="text-xl font-semibold">新建发布任务 / 继续上传</h2>
     <p>上传前确认完整文案与设备；二进制完成后须明确确认入队。任务可能立即开始，以服务端允许操作为准。</p>
     {resume && <div className="space-y-2"><p>待续传：{resume.taskId} · {resume.filename}。接受将替换当前本地文件与文案，请先保留需要的草稿。</p><Button isDisabled={locked || checking || command.needsCheck || command.cooldown} onPress={() => { void acceptResume(); }}>确认替换草稿并续传此任务</Button><Button variant="secondary" onPress={onResumeAccepted}>保留当前草稿</Button></div>}
@@ -174,7 +174,7 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     {captured && caption !== captured.caption && <p>本地草稿与原请求不同；重试使用确认对话框中展示的原始文案，不覆盖你的草稿。</p>}
     <p>{Array.from(caption).length} / {config?.maxCaptionCharacters ?? '加载中'} 字符 · 文件上限 {config?.maxVideoBytes ?? '加载中'} 字节</p>
     {command.failure?.fieldErrors.caption && <p role="alert">{command.failure.fieldErrors.caption}</p>}
-    <label>目标设备<select aria-label="创建目标设备" value={device} disabled={locked || Boolean(task)} onChange={(event) => { setDevice(event.target.value); selectedDevice.current = devices.find((row) => row.serial === event.target.value); edit(); }}><option value="">默认 · {config?.target.deviceSerialMasked ?? '未配置'}</option>{device && !devices.some((row) => row.serial === device) && <option value={device}>{selectedDevice.current?.serialMasked ?? '当前选择'}（本次列表未返回；提交时由服务端校验）</option>}{devices.map((row) => <option key={row.serial} value={row.serial}>{row.serialMasked} · {row.model || row.product} · {row.state}{row.isBusy ? ' · 忙' : ''}{row.isEmulator ? ' · 模拟器' : ''}</option>)}</select></label>
+    <label>目标设备<select className="erp-select" aria-label="创建目标设备" value={device} disabled={locked || Boolean(task)} onChange={(event) => { setDevice(event.target.value); selectedDevice.current = devices.find((row) => row.serial === event.target.value); edit(); }}><option value="">默认 · {config?.target.deviceSerialMasked ?? '未配置'}</option>{device && !devices.some((row) => row.serial === device) && <option value={device}>{selectedDevice.current?.serialMasked ?? '当前选择'}（本次列表未返回；提交时由服务端校验）</option>}{devices.map((row) => <option key={row.serial} value={row.serial}>{row.serialMasked} · {row.model || row.product} · {row.state}{row.isBusy ? ' · 忙' : ''}{row.isEmulator ? ' · 模拟器' : ''}</option>)}</select></label>
     <Button variant="secondary" isDisabled={checking || command.cooldown} onPress={() => { void loadDevices(); }}>加载设备列表</Button>{deviceNotice && <p role="status">{deviceNotice}</p>}
     {!canWrite && <p>{task ? '继续上传与确认入队需要 readwrite 能力提示，以服务端校验为准。' : config?.writeBlockReason ?? '服务端创建条件尚不可用。'}</p>}
     {task && <Facts items={[[ '上传任务 ID', task.taskId ], ['上传 rowVersion', task.rowVersion], ['当前服务端阶段', task.stageLabel], ['原 clientRequestId', task.clientRequestId]]} />}

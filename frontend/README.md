@@ -33,6 +33,25 @@ Do not edit production `.env`, open wildcard CORS, or expose keys through `VITE_
 
 ## Artifacts and ownership
 
+All 13 React business pages share the workspace shell, `PageIntro`, and `app/workspace.css` layout
+classes. The shared palette is imported from `tts_erp_v2/static/css/tokens.css`, also consumed by
+the retained `focused-spus` and `spu-roi` pages. The desktop navigation is dark green; surfaces,
+filter panels, tables, and responsive content spacing use the same light theme. Component
+interaction and state styling remain owned by HeroUI. No API or financial calculation is moved
+into the presentation layer.
+
+All 20 frontend tables use `shared/tables.css` through HeroUI's public slot `className` props
+or equivalent semantic native-table markup. The flat secondary variant avoids nested card
+surfaces; scroll regions remain keyboard-focusable, row controls retain their accessible names,
+and all original sort, expand, write-permission and recovery handlers are preserved.
+
+The anonymous login uses the shared `AppShell` fullscreen layout, retaining one header and main
+landmark without the business-page header spacing or content-width limit. Its brand panel and
+scoped styles live in `src/pages/login/`; below 768px the composition becomes one column and
+decorative content is reduced. HeroUI owns input, button, validation and focus behavior, including
+the native `InputGroup` password toggle. Login requests, canonical return paths, throttling and
+explicit session recovery continue to use the existing authentication contract.
+
 `build_frontend.sh` typechecks, builds `frontend/dist`, then packages all Vite outputs (including
 `.vite/manifest.json` and `.vite/license.md`) into the ignored `tts_erp_v2/static/frontend/<releaseId>/`.
 The content-addressed ID and `static/frontend/release.json` select one coherent package. Older release
@@ -44,6 +63,13 @@ Bootstrap IDs: `frontend-bootstrap` / `frontend-root`. `AppShell` is shared, nav
 from the server, and page modules own content only. Preserve the single backend migration set; missing
 assets fail explicitly rather than falling back to legacy HTML. Native HeroUI styling is imported once;
 there is no Bootstrap/legacy JS in migrated documents. See the approved standard and P0/P1 checkpoint:
+
+Navigation visuals (brand, groups, menu rows, active indicator and global header) are owned by
+`tts_erp_v2/static/css/navigation.css`, imported by React and linked by the retained SPU shell.
+`focused-spus` and `spu-roi` retain their business-page scripts while using these same navigation
+slots, server-owned menu permissions, 1024px navigation breakpoint, and `sidebar-collapsed`
+preference. Desktop collapse hides the sidebar on both runtimes; the expand control stays in the
+header. Changes to navigation styles belong in this shared file, not page-specific stylesheets.
 
 - [Frontend standard](../docs/guides/frontend-development.md)
 - [Migration design](../docs/plans/frontend-progressive-migration.md)

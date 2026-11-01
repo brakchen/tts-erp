@@ -1,15 +1,24 @@
-import { useId } from 'react';
-import { Input } from '@heroui/react';
+import { Description, FieldError, Input, Label, TextArea, TextField } from '@heroui/react';
 import type { Fields } from './contracts';
 
 export default function CostFields({ fields, errors, disabled, onChange }: { fields: Fields; errors: Record<string, string>; disabled: boolean; onChange: (key: keyof Fields, value: string) => void }) {
-  const id = useId();
-  return <div className="space-y-3">{([
-    ['unit_cost', '单位成本'], ['currency', '货币'], ['note', '备注'], ['valid_from', '生效时间'],
-  ] as const).map(([key, label]) => <div key={key} className="space-y-1">
-    <label htmlFor={`${id}-${key}`}>{label}</label>
-    <Input id={`${id}-${key}`} value={fields[key]} disabled={disabled} aria-invalid={Boolean(errors[key])} aria-describedby={errors[key] ? `${id}-${key}-error` : undefined}
-      onChange={(event) => onChange(key, event.target.value)} />
-    {errors[key] && <p id={`${id}-${key}-error`}>{errors[key]}</p>}
-  </div>)}<p>金额按输入字符串提交，由服务端校验；货币不换算。生效时间可留空使用服务端当前 UTC；填写时须为带 Z 或明确偏移的 ISO 时间，例如 2026-10-24T12:00:00+07:00。</p></div>;
+  return <div className="grid min-w-0 gap-5 sm:grid-cols-2">
+    <TextField className="min-w-0" name="unit_cost" value={fields.unit_cost} onChange={(value) => onChange('unit_cost', value)} isDisabled={disabled} isInvalid={Boolean(errors.unit_cost)} validationBehavior="aria">
+      <Label>单位成本</Label>
+      <Input fullWidth inputMode="decimal" placeholder="例如 25.0000" className="min-h-11" />
+      <Description>按输入金额保存，保留原始精度。</Description><FieldError>{errors.unit_cost}</FieldError>
+    </TextField>
+    <TextField className="min-w-0" name="currency" value={fields.currency} onChange={(value) => onChange('currency', value)} isDisabled={disabled} isInvalid={Boolean(errors.currency)} validationBehavior="aria">
+      <Label>货币</Label>
+      <Input fullWidth placeholder="例如 CNY" className="min-h-11" />
+      <Description>与成本金额对应，不进行货币换算。</Description><FieldError>{errors.currency}</FieldError>
+    </TextField>
+    <TextField className="min-w-0 sm:col-span-2" name="note" value={fields.note} onChange={(value) => onChange('note', value)} isDisabled={disabled} isInvalid={Boolean(errors.note)} validationBehavior="aria">
+      <Label>备注</Label><TextArea fullWidth rows={3} placeholder="选填，记录成本调整的原因" /><FieldError>{errors.note}</FieldError>
+    </TextField>
+    <TextField className="min-w-0 sm:col-span-2" name="valid_from" value={fields.valid_from} onChange={(value) => onChange('valid_from', value)} isDisabled={disabled} isInvalid={Boolean(errors.valid_from)} validationBehavior="aria">
+      <Label>生效时间</Label><Input fullWidth placeholder="留空即使用保存时的服务端时间" className="min-h-11" />
+      <Description>选填，留空使用服务端当前 UTC。指定时间需带时区，例如 2026-10-24T12:00:00+07:00。</Description><FieldError>{errors.valid_from}</FieldError>
+    </TextField>
+  </div>;
 }

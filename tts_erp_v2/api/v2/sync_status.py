@@ -29,13 +29,14 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import exists, func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import SessionDep, require_role_at_least
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
 from tts_erp_v2.db.models import ChannelAccount
-from tts_erp_v2.db.models.integration import Credentials, SyncCursor, SyncJob
+from tts_erp_v2.db.models.integration import SyncCursor, SyncJob
 from tts_erp_v2.db.models.plugin import AdDaily, AdToday
 from tts_erp_v2.sync_worker.scheduler import (
     CONTROL_DISABLED,
@@ -137,12 +138,7 @@ def _list_tiktok_shops(session: Session) -> list[SyncJobShopOut]:
         )
         .where(
             ChannelAccount.platform == "tiktok",
-            exists(
-                select(Credentials.id).where(
-                    Credentials.provider == "tiktok",
-                    Credentials.external_account_id == ChannelAccount.shop_id,
-                )
-            ),
+            text(authorized_shop_clause()),
         )
         .order_by(ChannelAccount.shop_id)
     ).all()
@@ -509,6 +505,7 @@ def sync_freshness(
     shop_pk: int = Query(..., ge=1),
 ) -> SyncFreshnessOut:
     """当前店铺四类数据的最近同步时间。只读，零上游外呼。"""
+    require_authorized_shop(session, shop_pk=shop_pk)
     shop = session.execute(
         select(ChannelAccount).where(
             ChannelAccount.id == shop_pk,

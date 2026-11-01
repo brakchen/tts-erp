@@ -72,17 +72,20 @@ class Credentials(Base):
 
 # ─── tiktok_app_credentials ───────────────────────────────────────────
 class TikTokAppCredential(Base):
-    """TikTok Partner App credentials keyed by Partner Center service_id.
-
-    ``app_key`` is an identifier and remains queryable. ``app_secret`` is
-    always Fernet-encrypted through :mod:`tts_erp_v2.proxy.token_service`.
-    Multiple shops may share one service_id/application pair.
-    """
+    """Encrypted App configuration owned by one shop and Service ID."""
 
     __tablename__ = "tiktok_app_credentials"
-    __table_args__ = ({"schema": "integration"},)
+    __table_args__ = (
+        UniqueConstraint("shop_pk", "service_id", name="uq_tiktok_shop_app_service"),
+        {"schema": "integration"},
+    )
 
-    service_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    shop_pk: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commerce.shops.id", ondelete="CASCADE"), nullable=True
+    )
+    service_id: Mapped[str] = mapped_column(Text, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     app_key: Mapped[str] = mapped_column(Text, nullable=False)
     app_secret_ciphertext: Mapped[bytes] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

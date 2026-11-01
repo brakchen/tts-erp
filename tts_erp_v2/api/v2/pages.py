@@ -86,257 +86,77 @@ _CSS_DIR = _STATIC_DIR / "css"
 # Bootstrap 5 utilities + a shared responsive navigation shell.
 
 _SIDEBAR_CSS = """
-    /* Shared sidebar shell: injected after each page's own styles on purpose. */
-    body {
-      --sidebar-width: 220px;
-      --sidebar-rail-width: 64px;
-      --sidebar-paper: var(--paper, var(--bg, #F4EFE4));
-      --sidebar-paper-deep: var(--paper-deep, var(--card, #EAE3D2));
-      --sidebar-ink: var(--ink, var(--text, #1B1814));
-      --sidebar-ink-soft: var(--ink-soft, var(--muted, #4A4239));
-      --sidebar-rule: var(--rule, var(--border, #C9BFA8));
-      --sidebar-rule-soft: var(--rule-soft, var(--border, #DDD4BF));
-      --sidebar-accent: var(--accent, #B8390E);
-      --sidebar-accent-deep: var(--accent-deep, var(--accent, #8F2C09));
-      --sidebar-muted: var(--muted, #6E6657);
-      --sidebar-mono: var(--mono, ui-monospace, monospace);
-      margin-left: var(--sidebar-width);
-      transition: margin-left 180ms ease;
-    }
-    body.sidebar-collapsed { margin-left: var(--sidebar-rail-width); }
+    /* Shared navigation visuals live in navigation.css, also imported by React. */
+    body { --sidebar-width: 248px; margin-left: var(--sidebar-width); }
+    body.sidebar-collapsed { margin-left: 0; }
     body.sidebar-mobile-open { overflow: hidden; }
-    .op-home-link { display: none; }
-
-    #sidebar.sidebar {
-      width: var(--sidebar-width);
-      background: var(--sidebar-paper-deep);
-      color: var(--sidebar-ink);
-      z-index: 105;
-      box-shadow: 1px 0 0 var(--sidebar-rule);
-      transition: width 180ms ease, transform 180ms ease;
+    #sidebar.sidebar { position: fixed; inset: 0 auto 0 0; z-index: 30; max-height: 100dvh; overflow-y: auto; }
+    #sidebar-overlay { position: fixed; inset: 0; z-index: 40; background: #172f2980; }
+    #sidebar-overlay[aria-hidden="true"] { display: none; }
+    .erp-legacy-toggle[aria-expanded="false"] .sidebar-collapse-chevron { transform: translateX(24px) scaleX(-1); }
+    @media (min-width: 1024px) {
+      #sidebar.sidebar.is-collapsed, #sidebar-toggle, #sidebar-close, #sidebar-overlay { display: none; }
     }
-    #sidebar .sidebar-brand {
-      min-height: 58px;
-      color: var(--sidebar-ink);
-      letter-spacing: 0.04em;
-    }
-    #sidebar .sidebar-brand-mark { color: var(--sidebar-accent); }
-    #sidebar .sidebar-nav { scrollbar-width: thin; }
-    #sidebar .sidebar-section-title {
-      color: var(--sidebar-muted) !important;
-      font-family: var(--sidebar-mono);
-      font-size: 10px;
-      letter-spacing: 0.18em;
-    }
-    #sidebar .nav-link {
-      position: relative;
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      min-height: 38px;
-      margin: 2px 8px;
-      padding: 7px 10px !important;
-      border: 1px solid transparent;
-      color: var(--sidebar-ink-soft);
-      line-height: 1.25;
-      white-space: nowrap;
-      transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
-    }
-    #sidebar .nav-link:hover {
-      color: var(--sidebar-ink);
-      background: color-mix(in srgb, var(--sidebar-paper) 74%, transparent);
-      border-color: var(--sidebar-rule-soft);
-    }
-    #sidebar .nav-link:focus-visible,
-    .sidebar-collapse-btn:focus-visible,
-    .sidebar-mobile-toggle:focus-visible {
-      outline: 2px solid var(--sidebar-accent);
-      outline-offset: 2px;
-    }
-    #sidebar .nav-link.active {
-      color: var(--sidebar-accent-deep);
-      background: var(--sidebar-paper);
-      border-color: var(--sidebar-rule);
-      box-shadow: inset 3px 0 0 var(--sidebar-accent);
-      font-weight: 600;
-    }
-    #sidebar .sidebar-nav-icon {
-      display: inline-grid;
-      place-items: center;
-      width: 22px;
-      min-width: 22px;
-      height: 22px;
-      border: 1px solid var(--sidebar-rule);
-      color: var(--sidebar-muted);
-      font-family: var(--sidebar-mono);
-      font-size: 11px;
-      line-height: 1;
-    }
-    #sidebar .nav-link.active .sidebar-nav-icon {
-      border-color: var(--sidebar-accent);
-      color: var(--sidebar-accent);
-    }
-    #sidebar .sidebar-footer { background: var(--sidebar-paper-deep); }
-    .sidebar-collapse-btn {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      width: 100%;
-      padding: 7px 10px;
-      border: 1px solid var(--sidebar-rule);
-      border-radius: 0;
-      background: transparent;
-      color: var(--sidebar-muted);
-      cursor: pointer;
-      text-align: left;
-    }
-    .sidebar-collapse-btn:hover {
-      color: var(--sidebar-accent);
-      border-color: var(--sidebar-accent);
-      background: var(--sidebar-paper);
-    }
-    .sidebar-collapse-icon {
-      display: inline-grid;
-      place-items: center;
-      width: 20px;
-      min-width: 20px;
-      font-family: var(--sidebar-mono);
-    }
-    .sidebar-mobile-toggle {
-      z-index: 110;
-      border-radius: 0;
-      background: var(--sidebar-paper-deep);
-      color: var(--sidebar-ink);
-    }
-    #sidebar-overlay {
-      z-index: 102;
-      background: rgba(27, 24, 20, 0.52);
-      backdrop-filter: blur(1px);
-    }
-
-    /* Collapsed desktop rail. Labels hide, but distinct icons keep it usable. */
-    #sidebar.sidebar.is-collapsed { width: var(--sidebar-rail-width); }
-    #sidebar.is-collapsed .sidebar-brand { justify-content: center; padding-inline: 0 !important; }
-    #sidebar.is-collapsed .sidebar-brand-text,
-    #sidebar.is-collapsed .sidebar-section-title,
-    #sidebar.is-collapsed .sidebar-label { display: none; }
-    #sidebar.is-collapsed .sidebar-nav { padding-top: 8px !important; }
-    #sidebar.is-collapsed .nav-link {
-      justify-content: center;
-      min-height: 42px;
-      margin-inline: 7px;
-      padding-inline: 0 !important;
-    }
-    #sidebar.is-collapsed .nav-link.active {
-      box-shadow: inset 0 -2px 0 var(--sidebar-accent);
-    }
-    #sidebar.is-collapsed .sidebar-footer { padding: 8px !important; }
-    #sidebar.is-collapsed .sidebar-collapse-btn { justify-content: center; padding-inline: 0; }
-    #sidebar.is-collapsed .sidebar-collapse-text { display: none; }
-
-    @media (max-width: 991.98px) {
-      body,
-      body.sidebar-collapsed { margin-left: 0; }
-      #sidebar.sidebar,
-      #sidebar.sidebar.is-collapsed {
-        width: min(280px, calc(100vw - 48px));
-        transform: translateX(-100%);
-        box-shadow: 8px 0 24px rgba(27, 24, 20, 0.18);
-      }
+    @media (max-width: 1023.98px) {
+      body, body.sidebar-collapsed { margin-left: 0; }
+      #sidebar.sidebar { z-index: 50; width: min(248px, calc(100vw - 48px)); transform: translateX(-100%); }
       #sidebar.sidebar.is-open { transform: translateX(0); }
-      #sidebar.is-collapsed .sidebar-brand { justify-content: flex-start; padding-inline: 1rem !important; }
-      #sidebar.is-collapsed .sidebar-brand-text,
-      #sidebar.is-collapsed .sidebar-section-title,
-      #sidebar.is-collapsed .sidebar-label { display: block; }
-      #sidebar.is-collapsed .sidebar-nav { padding-top: 0.5rem !important; }
-      #sidebar.is-collapsed .nav-link {
-        justify-content: flex-start;
-        min-height: 38px;
-        margin-inline: 8px;
-        padding: 7px 10px !important;
-      }
-      #sidebar.is-collapsed .nav-link.active { box-shadow: inset 3px 0 0 var(--sidebar-accent); }
-      .sidebar-collapse-btn { display: none !important; }
-      .op-header { padding-left: 56px; }
-    }
-    @media (min-width: 992px) {
-      #sidebar-overlay { display: none !important; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      body,
-      #sidebar.sidebar { transition: none; }
+      #sidebar-collapse { display: none; }
+      #sidebar-close { position: absolute; top: 8px; right: 8px; color: var(--navigation-foreground); }
     }
 """
 
 
 def _sidebar_html(current_page: str) -> str:
-  """Return the shared sidebar with the current page marked as active.
-
-  侧边栏按会话用户的页面权限过滤（设计 §7.1）：``user_pages_var`` 为
-  None（API key / auth off）时全量显示；否则只列出有权限点的页面。
-  权限点清单与渲染共用 ``accounts.pages.PAGES`` 注册表（唯一来源）。
-  """
+  """Use the same brand, menu slots and visual owner as the React workspace."""
   allowed = user_pages_var.get()
-  pages = [
-    (p.page_id, p.icon, p.label, p.group)
-    for p in PAGES
-    if allowed is None or p.permission_code in allowed
-  ]
-  links = []
-  current_group = None
-  for page_id, icon, label, group in pages:
-    if group != "__group__" and group != current_group:
-      current_group = group
-      links.append(
-        '<div class="sidebar-section-title text-uppercase fw-semibold px-3 pt-3 pb-1">'
-        f"{group}</div>"
-      )
-    active = " active" if page_id == current_page else ""
-    aria_current = ' aria-current="page"' if page_id == current_page else ""
-    links.append(
-      f'<a href="../../v2/pages/{page_id}" class="nav-link{active}"'
-      f' title="{label}"{aria_current}>'
-      f'<span class="sidebar-nav-icon" aria-hidden="true">{icon}</span>'
-      f'<span class="sidebar-label">{label}</span></a>'
+  pages = [page for page in PAGES if allowed is None or page.permission_code in allowed]
+  groups: dict[str, list[str]] = {}
+  for page in pages:
+    active = ' aria-current="page"' if page.page_id == current_page else ''
+    groups.setdefault(page.group, []).append(
+      f'<li><a href="../../v2/pages/{escape(page.page_id)}" class="erp-nav-link"'
+      f' title="{escape(page.label)}"{active}>'
+      '<span class="erp-nav-indicator" aria-hidden="true"></span>'
+      f'<span>{escape(page.label)}</span></a></li>'
     )
-  nav_html = "\n      ".join(links)
+  navigation = ''.join(
+    '<section class="erp-nav-section">'
+    f'<h2 class="erp-nav-group">{escape(group)}</h2>'
+    f'<ul class="erp-nav-list">{"".join(links)}</ul></section>'
+    for group, links in groups.items()
+  )
+  current = next((page for page in pages if page.page_id == current_page), None)
+  title = escape(current.label) if current else '运营工作台'
+  context = f' / {escape(current.group)}' if current else ''
   user_label = user_label_var.get()
-  user_html = ""
-  if user_label:
-    label = escape(user_label)
-    user_html = (
-      '<div class="d-flex align-items-center justify-content-between gap-2 pb-2 mb-2 border-bottom">'
-      f'<span class="small text-truncate" title="{label}">{label}</span>'
-      '<button type="button" id="sidebar-logout" class="btn btn-sm flex-shrink-0">登出</button>'
-      "</div>"
-    )
-  return f"""<button type="button"
-    class="sidebar-mobile-toggle btn btn-sm d-lg-none position-fixed top-0 start-0 mt-2 ms-2"
-    id="sidebar-toggle" aria-label="打开主导航" aria-controls="sidebar" aria-expanded="false">☰</button>
-  <div class="d-none position-fixed top-0 start-0 w-100 h-100"
-    id="sidebar-overlay" aria-hidden="true"></div>
-  <nav class="sidebar d-flex flex-column position-fixed top-0 start-0 h-100 border-end"
-    id="sidebar" aria-label="主导航">
-
-    <a href="../../v2/pages/dashboard"
-      class="sidebar-brand d-flex align-items-center gap-2 p-3 border-bottom text-decoration-none">
-      <span class="sidebar-brand-mark" aria-hidden="true">◆</span>
-      <span class="sidebar-brand-text fw-semibold">tts-erp</span>
-    </a>
-
-    <div class="sidebar-nav flex-grow-1 py-2 overflow-auto">
-      {nav_html}
+  session = (
+    '<div class="erp-session-actions">'
+    f'<span>{escape(user_label)}</span>'
+    '<button type="button" id="sidebar-logout">退出登录</button></div>'
+  ) if user_label else ''
+  icon = (
+    '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    ' stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'
+    '<rect x="3" y="4" width="18" height="16" rx="2" />'
+    '<path d="M9 4v16" /><path class="sidebar-collapse-chevron" d="m16 9-3 3 3 3" /></svg>'
+  )
+  return f"""<nav class="sidebar erp-sidebar" id="sidebar" aria-label="主导航">
+    <button type="button" id="sidebar-close" class="erp-navigation-toggle erp-legacy-toggle" aria-label="关闭主导航"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m6 6 12 12M6 18 18 6" /></svg></button>
+    <div class="erp-brand" aria-label="TTS ERP">
+      <svg aria-hidden="true" width="30" height="30" viewBox="0 0 34 34" fill="none"><path d="M5 8h24M17 8v21M5 17h7M24 17h5" stroke="currentColor" stroke-width="3.5" /></svg>
+      <span>tts<span class="erp-brand-suffix"> / erp</span></span>
     </div>
-
-    <div class="sidebar-footer px-3 py-2 border-top">
-      {user_html}
-      <button type="button" class="sidebar-collapse-btn"
-        id="sidebar-collapse" aria-label="折叠侧边栏" aria-controls="sidebar" aria-expanded="true">
-        <span class="sidebar-collapse-icon" aria-hidden="true">«</span>
-        <span class="sidebar-collapse-text small">折叠</span>
-      </button>
-    </div>
-  </nav>"""
+    <div class="erp-navigation">{navigation}</div>
+    <p class="erp-sidebar-note">SHOP OPERATIONS</p>
+  </nav>
+  <div id="sidebar-overlay" aria-hidden="true"></div>
+  <header class="erp-header">
+    <button type="button" id="sidebar-collapse" class="erp-navigation-toggle erp-legacy-toggle" aria-label="折叠侧边栏" title="折叠侧边栏" aria-controls="sidebar" aria-expanded="true">{icon}</button>
+    <button type="button" id="sidebar-toggle" class="erp-navigation-toggle erp-legacy-toggle" aria-label="打开主导航" title="打开主导航" aria-controls="sidebar" aria-expanded="false">{icon}</button>
+    <div class="erp-header-titles"><p class="erp-header-context">运营工作台{context}</p><h1 class="erp-header-title">{title}</h1></div>
+    {session}
+  </header>"""
 
 
 _SIDEBAR_TOGGLE_JS = """
@@ -345,7 +165,8 @@ _SIDEBAR_TOGGLE_JS = """
   var sb = document.getElementById('sidebar');
   var ov = document.getElementById('sidebar-overlay');
   var collapseBtn = document.getElementById('sidebar-collapse');
-  var desktopQuery = window.matchMedia('(min-width: 992px)');
+  var closeBtn = document.getElementById('sidebar-close');
+  var desktopQuery = window.matchMedia('(min-width: 1024px)');
   if (!btn || !sb || !ov) return;
 
   function readCollapsed() {
@@ -357,14 +178,11 @@ _SIDEBAR_TOGGLE_JS = """
     sb.classList.toggle('is-collapsed', collapsed);
     document.body.classList.toggle('sidebar-collapsed', collapsed);
     if (collapseBtn) {
-      var icon = collapseBtn.querySelector('.sidebar-collapse-icon');
-      var text = collapseBtn.querySelector('.sidebar-collapse-text');
-      if (icon) icon.textContent = collapsed ? '»' : '«';
-      if (text) text.textContent = collapsed ? '展开' : '折叠';
       collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       collapseBtn.setAttribute('aria-label', collapsed ? '展开侧边栏' : '折叠侧边栏');
       collapseBtn.title = collapsed ? '展开侧边栏' : '折叠侧边栏';
     }
+    setMobileOpen(sb.classList.contains('is-open'), false);
     if (persist) {
       try { localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0'); }
       catch (_) { /* Storage can be unavailable in privacy mode. */ }
@@ -374,14 +192,14 @@ _SIDEBAR_TOGGLE_JS = """
   function setMobileOpen(open, restoreFocus) {
     var shouldOpen = open && !desktopQuery.matches;
     sb.classList.toggle('is-open', shouldOpen);
-    ov.classList.toggle('d-none', !shouldOpen);
-    var hidden = !desktopQuery.matches && !shouldOpen;
+    var hidden = desktopQuery.matches ? sb.classList.contains('is-collapsed') : !shouldOpen;
     sb.toggleAttribute('inert', hidden);
     if (hidden) sb.setAttribute('aria-hidden', 'true');
     else sb.removeAttribute('aria-hidden');
     ov.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
     btn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
     btn.setAttribute('aria-label', shouldOpen ? '关闭主导航' : '打开主导航');
+    btn.title = shouldOpen ? '关闭主导航' : '打开主导航';
     document.body.classList.toggle('sidebar-mobile-open', shouldOpen);
     if (!shouldOpen && restoreFocus) btn.focus();
   }
@@ -389,11 +207,20 @@ _SIDEBAR_TOGGLE_JS = """
   setMobileOpen(false, false);
   btn.addEventListener('click', function() {
     setMobileOpen(!sb.classList.contains('is-open'), false);
+    if (sb.classList.contains('is-open') && closeBtn) closeBtn.focus();
   });
+  if (closeBtn) closeBtn.addEventListener('click', function() { setMobileOpen(false, true); });
   ov.addEventListener('click', function() { setMobileOpen(false, true); });
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape' && sb.classList.contains('is-open')) {
       setMobileOpen(false, true);
+    }
+    if (e.key === 'Tab' && sb.classList.contains('is-open')) {
+      var items = sb.querySelectorAll('button, a[href]');
+      var first = items[0];
+      var last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
   });
 
@@ -461,7 +288,10 @@ def _sidebar(current_page: str = "") -> _TrustedHtml:
 
 def _sidebar_css(current_page: str = "") -> _TrustedHtml:
   """Jinja global: sidebar CSS, empty without a page slug."""
-  return _TrustedHtml(_SIDEBAR_CSS) if current_page else _TrustedHtml("")
+  return _TrustedHtml(
+    '@import url("../../static/css/navigation.css?v='
+    + _css_version("navigation.css") + '");\n' + _SIDEBAR_CSS
+  ) if current_page else _TrustedHtml("")
 
 
 _TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -509,7 +339,7 @@ def shops_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   两段式：注册表单 / 已注册列表（GET /v2/commerce/channel-accounts）。
   已迁移行为在 frontend/src/pages/shops/；写入端点 POST /v2/admin/shops/register 要 readwrite
   会话（readonly 会话降级只读展示）。注：「待注册候选」section 已于
-  2026-09-29 用户拍板下线；后端 GET /v2/admin/shops/unregistered 端点保留。
+  2026-10-31：候选端点移除；插件直接登记 commerce.shops 元数据。
   """
   if "shops" in frontend_pages.MIGRATED_PAGE_IDS:
     if request is None:

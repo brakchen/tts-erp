@@ -1,2 +1,6 @@
 @import "tailwindcss";
 @import "@heroui/styles";
+@import "../../tts_erp_v2/static/css/tokens.css";
+@import "../../tts_erp_v2/static/css/navigation.css";
+@import "./app/workspace.css";
+@import "./shared/tables.css";

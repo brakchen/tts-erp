@@ -1,9 +1,20 @@
-import { Button, Drawer, Link } from '@heroui/react';
+import { Button, Drawer, Link, Tooltip, buttonVariants } from '@heroui/react';
 import { useEffect, useId, useState } from 'react';
 import type { AppShellProps, FrontendBootstrap } from '../shared/contracts';
+import AppBrand from './AppBrand';
 
 const desktopQuery = '(min-width: 1024px)';
 const collapsedPreference = 'sidebar-collapsed';
+
+function NavigationIcon({ collapsed = false }: { collapsed?: boolean }) {
+  return (
+    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
+      <path d={collapsed ? 'm13 9 3 3-3 3' : 'm16 9-3 3 3 3'} />
+    </svg>
+  );
+}
 
 function readCollapsedPreference(): boolean {
   try {
@@ -22,20 +33,20 @@ function Navigation({ bootstrap, onNavigate }: { bootstrap: FrontendBootstrap; o
   }
 
   return (
-    <nav aria-label="主导航" className="min-w-0 space-y-4">
+    <nav aria-label="主导航" className="erp-navigation">
       {Array.from(groups, ([group, items]) => (
-        <section key={group} className="min-w-0 space-y-1">
-          {group && <h2 className="px-3 text-sm font-medium text-muted break-words">{group}</h2>}
-          <ul className="space-y-1">
+        <section key={group} className="erp-nav-section">
+          {group && <h2 className="erp-nav-group break-words">{group}</h2>}
+          <ul className="erp-nav-list">
             {items.map((item) => (
               <li key={item.id} className="min-w-0">
                 <Link
                   href={item.href}
                   aria-current={item.id === bootstrap.pageId ? 'page' : undefined}
                   onPress={onNavigate}
-                  className={`w-full rounded px-3 py-2 whitespace-normal break-words ${item.id === bootstrap.pageId ? 'bg-default font-semibold' : ''}`}
+                  className="erp-nav-link whitespace-normal break-words"
                 >
-                  <span className="min-w-0 break-words">{item.label}</span>
+                  <span className="erp-nav-indicator" aria-hidden="true" /><span className="min-w-0 break-words">{item.label}</span>
                 </Link>
               </li>
             ))}
@@ -47,8 +58,10 @@ function Navigation({ bootstrap, onNavigate }: { bootstrap: FrontendBootstrap; o
 }
 
 /** Shared MPA layout; the server owns menu visibility and all navigation destinations. */
-export default function AppShell({ bootstrap, title, description, actions, children }: AppShellProps) {
-  const hasNavigation = bootstrap.navigation.length > 0;
+export default function AppShell({ bootstrap, title, description, actions, children, layout = 'workspace' }: AppShellProps) {
+  const fullscreen = layout === 'fullscreen';
+  const activeNavigation = bootstrap.navigation.find((item) => item.id === bootstrap.pageId);
+  const hasNavigation = !fullscreen && bootstrap.navigation.length > 0;
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(desktopQuery).matches);
   const [collapsed, setCollapsed] = useState(readCollapsedPreference);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -77,29 +90,35 @@ export default function AppShell({ bootstrap, title, description, actions, child
   }
 
   return (
-    <div className="flex min-h-dvh min-w-0">
+    <div className="erp-shell flex min-h-dvh min-w-0">
       {hasNavigation && isDesktop && !collapsed && (
-        <aside id={navigationId} className="sticky top-0 max-h-dvh w-64 shrink-0 overflow-y-auto border-r border-separator p-4">
+        <aside id={navigationId} className="erp-sidebar sticky top-0 max-h-dvh shrink-0 overflow-y-auto">
+          <AppBrand />
           <Navigation bootstrap={bootstrap} />
+          <p className="erp-sidebar-note">SHOP OPERATIONS</p>
         </aside>
       )}
       <div className="min-w-0 flex-1">
-        <header className="flex min-w-0 flex-wrap items-start gap-4 border-b border-separator p-4 lg:p-6">
+        <header className={fullscreen ? 'sr-only' : 'erp-header min-w-0'}>
           {hasNavigation && (isDesktop ? (
-            <Button variant="secondary" aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'} aria-expanded={!collapsed} aria-controls={collapsed ? undefined : navigationId} onPress={toggleCollapsed}>
-              {collapsed ? '展开侧边栏' : '折叠侧边栏'}
-            </Button>
+            <Tooltip delay={400}>
+              <Button isIconOnly variant="ghost" className="erp-navigation-toggle" aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'} aria-expanded={!collapsed} aria-controls={collapsed ? undefined : navigationId} onPress={toggleCollapsed}>
+                <NavigationIcon collapsed={collapsed} />
+              </Button>
+              <Tooltip.Content placement="bottom">{collapsed ? '展开侧边栏' : '折叠侧边栏'}</Tooltip.Content>
+            </Tooltip>
           ) : (
             <Drawer.Root isOpen={mobileOpen} onOpenChange={setMobileOpen}>
-              <Drawer.Trigger aria-label="打开主导航">菜单</Drawer.Trigger>
+              <Drawer.Trigger className={buttonVariants({ variant: 'ghost', isIconOnly: true, className: 'erp-navigation-toggle' })} aria-label="打开主导航"><NavigationIcon collapsed /></Drawer.Trigger>
               <Drawer.Backdrop>
-                <Drawer.Content placement="left" className="max-w-full">
+                <Drawer.Content placement="left" className="erp-drawer max-w-full">
                   <Drawer.Dialog>
                     <Drawer.Header>
                       <Drawer.Heading>主导航</Drawer.Heading>
                       <Drawer.CloseTrigger aria-label="关闭主导航" />
                     </Drawer.Header>
                     <Drawer.Body>
+                      <AppBrand />
                       <Navigation bootstrap={bootstrap} onNavigate={() => setMobileOpen(false)} />
                     </Drawer.Body>
                   </Drawer.Dialog>
@@ -107,13 +126,14 @@ export default function AppShell({ bootstrap, title, description, actions, child
               </Drawer.Backdrop>
             </Drawer.Root>
           ))}
-          <div className="min-w-0 flex-1">
-            <h1 className="text-2xl font-semibold break-words">{title}</h1>
+          <div className="erp-header-titles">
+            {!fullscreen && <p className="erp-header-context">运营工作台{activeNavigation?.group ? ` / ${activeNavigation.group}` : ''}</p>}
+            <h1 className="erp-header-title break-words">{title}</h1>
             {description && <p className="text-muted break-words">{description}</p>}
           </div>
-          {actions && <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>}
+          {!fullscreen && actions && <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>}
         </header>
-        <main className="mx-auto w-full min-w-0 max-w-screen-2xl overflow-x-auto p-4 lg:p-6">{children}</main>
+        <main className={fullscreen ? 'min-h-dvh min-w-0' : 'erp-main'}>{children}</main>
       </div>
     </div>
   );

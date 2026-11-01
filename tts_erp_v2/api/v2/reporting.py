@@ -24,9 +24,15 @@ from tts_erp_v2.api.schemas import (
     ProfitDailyOut,
 )
 from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
-from tts_erp_v2.storage.minio_client import MinioClient
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
+from tts_erp_v2.storage.minio_client import MinioClient, MinioConfigError
 
 router = APIRouter(prefix="/v2/reporting", tags=["reporting"])
+
+_AUTHORIZED_SHOPS = "SELECT id FROM commerce.shops WHERE " + authorized_shop_clause()
+_AUTHORIZED_PRODUCTS = (
+    "SELECT id FROM commerce.products_spu WHERE shop_pk IN (" + _AUTHORIZED_SHOPS + ")"
+)
 
 
 # --- SQL constants (module-level, no interpolation) -----------------------
@@ -39,7 +45,7 @@ SQL_COST_SNAPSHOTS = (
     # PG cannot infer its type and refuses to plan the query. Explicit CASTs
     # pin the parameter types to the column types (channel_id bigint,
     # method text) so the WHERE evaluates cleanly with either bound value.
-    "WHERE (CAST(:channel_id AS bigint) IS NULL "
+    "WHERE spu_pk IN (" + _AUTHORIZED_PRODUCTS + ") AND (CAST(:channel_id AS bigint) IS NULL "
     "OR spu_pk = :channel_id) "
     "AND (CAST(:method AS text) IS NULL OR cost_method = :method) "
     "ORDER BY calculated_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
@@ -62,7 +68,7 @@ SQL_PROFIT_DAILY = (
     "       estimated_gross_profit AS profit, "
     "       currency "
     "FROM reporting.product_profit_daily "
-    "WHERE (CAST(:channel_id AS bigint) IS NULL "
+    "WHERE spu_pk IN (" + _AUTHORIZED_PRODUCTS + ") AND (CAST(:channel_id AS bigint) IS NULL "
     "OR spu_pk = CAST(:channel_id AS bigint)) "
     "AND (CAST(:on_date AS date) IS NULL "
     "OR profit_date = CAST(:on_date AS date)) "
@@ -70,17 +76,17 @@ SQL_PROFIT_DAILY = (
 )
 SQL_COVERAGE_REPORT = (
     "SELECT "
-    "(SELECT COUNT(*) FROM commerce.products_spu) AS total_spus, "
+    "(SELECT COUNT(*) FROM commerce.products_spu WHERE id IN (" + _AUTHORIZED_PRODUCTS + ")) AS total_spus, "
     # (2026-09-01) status is free-text — TikTok sync stores 'ACTIVATE'
     # (uppercase) but tests / docs / earlier code expected lowercase
     # 'active'. Use ILIKE so the aggregate matches either case.
     "(SELECT COUNT(*) FROM commerce.products_spu "
-    "WHERE status ILIKE 'activate') AS active_spus, "
+    "WHERE status ILIKE 'activate' AND id IN (" + _AUTHORIZED_PRODUCTS + ")) AS active_spus, "
     "(SELECT COUNT(DISTINCT spu_pk) "
     "FROM reporting.product_cost_snapshots "
-    "WHERE valid_to IS NULL) AS costed_spus, "
+    "WHERE valid_to IS NULL AND spu_pk IN (" + _AUTHORIZED_PRODUCTS + ")) AS costed_spus, "
     "(SELECT COUNT(*) FROM commerce.products_spu cp "
-    "WHERE cp.status ILIKE 'activate' "
+    "WHERE cp.status ILIKE 'activate' AND cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
     "AND NOT EXISTS ("
     "  SELECT 1 FROM procurement.manual_product_costs m "
     "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
@@ -89,10 +95,10 @@ SQL_COVERAGE_REPORT = (
     "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL"
     ")) AS missing_cost_spus, "
     "(SELECT COALESCE(MAX(calculation_version), 1) "
-    "FROM reporting.product_cost_snapshots) AS calculation_version"
+    "FROM reporting.product_cost_snapshots WHERE spu_pk IN (" + _AUTHORIZED_PRODUCTS + ")) AS calculation_version"
 )
 SQL_RESOLVE_CHANNEL_PRODUCT = (
-    "SELECT id FROM commerce.products_spu WHERE spu_id = :ext_id "
+    "SELECT id FROM commerce.products_spu WHERE spu_id = :ext_id AND shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
     "AND (CAST(:spu_pk AS bigint) IS NULL OR id = CAST(:spu_pk AS bigint)) "
     "LIMIT 2"
 )
@@ -142,7 +148,7 @@ SQL_LIST_MANUAL_COSTS = (
     "       cp.spu_id, cp.shop_pk, cp.title "
     "FROM ranked r "
     "JOIN commerce.products_spu cp ON cp.id = r.spu_pk "
-    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "WHERE cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:q AS text) IS NULL "
     "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
     "     OR COALESCE(cp.title, '') ILIKE '%' || CAST(:q AS text) || '%') "
@@ -152,7 +158,7 @@ SQL_LIST_MANUAL_COSTS = (
 SQL_COUNT_MANUAL_COSTS = (
     "SELECT COUNT(*) AS n FROM procurement.manual_product_costs m "
     "JOIN commerce.products_spu cp ON cp.id = m.spu_pk "
-    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "WHERE cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:q AS text) IS NULL "
     "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
     "     OR COALESCE(cp.title, '') ILIKE '%' || CAST(:q AS text) || '%')"
@@ -169,7 +175,7 @@ SQL_LIST_MISSING_COST_PRODUCTS = (
     # manual, purchase-order, or source-price cost. Manual rows are checked
     # separately so a new submission disappears before the next rebuild.
     "FROM commerce.products_spu cp "
-    "WHERE cp.status ILIKE 'activate' "
+    "WHERE cp.status ILIKE 'activate' AND cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
     "AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND NOT EXISTS ("
     "  SELECT 1 FROM procurement.manual_product_costs m "
@@ -183,7 +189,7 @@ SQL_TOTAL_MISSING_PHOTO = (
     "SELECT COUNT(*) AS n FROM ("
     "  SELECT cp.id "
     "  FROM commerce.products_spu cp "
-    "  WHERE cp.status ILIKE 'activate' "
+    "  WHERE cp.status ILIKE 'activate' AND cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
     "  AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "  AND NOT EXISTS ("
     "    SELECT 1 FROM procurement.manual_product_costs m "
@@ -230,7 +236,12 @@ def _resolve_mirror_url(mirror_object_key: str | None) -> str | None:
         return None
     global _minio_client_singleton
     if _minio_client_singleton is None:
-        _minio_client_singleton = MinioClient.from_env()
+        try:
+            _minio_client_singleton = MinioClient.from_env()
+        except MinioConfigError:
+            # Optional mirror URLs cannot block the candidate/cost read model.
+            # Unknown errors and upload configuration failures still propagate.
+            return None
     client = _minio_client_singleton
     public_url = client.public_url_or_none(mirror_object_key)
     if public_url is not None:
@@ -365,6 +376,8 @@ def list_missing_cost_products(
     the response spans all shops (legacy behaviour, used by the global
     test_auth_login.py probe).
     """
+    if shop_pk is not None:
+        require_authorized_shop(sess, shop_pk=shop_pk)
     items_rows = sess.execute(
         _STMT_LIST_MISSING_COST_PRODUCTS,
         {"acct_id": shop_pk, "limit": limit, "offset": offset},
@@ -413,6 +426,8 @@ def list_manual_costs(
 
     ``shop_pk`` scopes to one shop; omit for all shops.
     """
+    if shop_pk is not None:
+        require_authorized_shop(sess, shop_pk=shop_pk)
     params = {
         "acct_id": shop_pk,
         "q": q.strip() if q and q.strip() else None,

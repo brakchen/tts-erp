@@ -8,8 +8,9 @@ from decimal import Decimal
 from hashlib import sha256
 from typing import Any, NamedTuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause
 
 from tts_erp_v2.analytics.spu_deterioration_alert.config import (
     ALERT_CONFIG_KEY,
@@ -163,6 +164,7 @@ def build_materialized_rows(
             session.execute(
                 select(ChannelAccount).where(
                     ChannelAccount.platform == "tiktok",
+                    text(authorized_shop_clause()),
                     or_(
                         ChannelAccount.status.is_(None),
                         ChannelAccount.status.notin_(("disabled", "deleted")),

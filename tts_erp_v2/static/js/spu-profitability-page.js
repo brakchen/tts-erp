@@ -749,43 +749,7 @@
     return ch && ch[label] ? ch[label] : label;
   }
 
-  // ---------- 顶部操作员(/v2/auth/me → {authenticated, role}) ----------
-  function loadMe() {
-    return fetch(`${PREFIX}/v2/auth/me`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((me) => {
-        var el = $("#ops-identity");
-        if (!el) return;
-        if (me && me.authenticated === true) {
-          // /v2/auth/me 只回 {authenticated, role};操作员身份 = role 文本
-          var role = esc(me.role || "readonly");
-          html(
-            el,
-            `当前操作员：<code>${role}</code> · <a href="#" id="btn-logout">退出</a>`,
-          );
-          var lo = $("#btn-logout");
-          if (lo) {
-            // logout 是 POST(console.js 家族是 <a> 占位);POST 成功后
-            // 回登录页(next=当前页),登录后自动回本页
-            lo.addEventListener("click", (e) => {
-              e.preventDefault();
-              fetch(`${PREFIX}/v2/auth/logout`, {
-                method: "POST",
-                credentials: "include",
-              })
-                .catch(() => {})
-                .then(() => {
-                  // pi-lens-ignore: no-open-redirect-js
-                  window.location.href = loginUrl();
-                });
-            });
-          }
-        } else {
-          html(el, `<a href="${loginUrl()}">登录</a>`);
-        }
-      })
-      .catch(() => {});
-  }
+  // Session identity and sign-out are owned by the shared workspace header.
 
   // ---------- 数据同步时间（广告 / 订单 / 物流 / 妙手） ----------
   var FRESHNESS_KEYS = ["ads", "orders", "logistics", "miaoshou"];
@@ -960,10 +924,14 @@
       it.status === "ACTIVATE" || !it.status
         ? ""
         : `<span class="spu-status is-down">${esc(it.status)}</span>`;
+    var lossFlag = it.profit_status === "loss" ? '<span class="spu-loss">亏损</span>' : "";
+    var flags = lossFlag + warnUnsettled + (warnDefault ? warnCost : "") + warnRr + status;
     return (
       `<span class="td-spu-cell">${img}<span class="td-spu-meta">` +
-      `<span class="td-spu">${esc(it.spu_id)}</span>` +
-      `<span class="td-title" data-tip="${esc(it.title || "")}">${warnUnsettled}${warnDefault ? warnCost : ""}${warnRr}${esc(it.title || "")}${status}</span></span></span>`
+      `<span class="td-title" data-tip="${esc(it.title || "")}">${esc(it.title || it.spu_id)}</span>` +
+      `<span class="td-spu" title="${esc(it.spu_id)}">${esc(it.spu_id)}</span>` +
+      (flags ? `<span class="td-product-flags">${flags}</span>` : "") +
+      `</span></span>`
     );
   }
 
@@ -1062,7 +1030,7 @@
       headerTooltip: def.metric + "价格统计（服务端排序）",
       headerHozAlign: "right",
       hozAlign: "right",
-      minWidth: 104,
+      minWidth: 120,
       widthGrow: 1,
       formatter: priceCell,
     };
@@ -1082,16 +1050,13 @@
         headerHozAlign: "left",
         hozAlign: "left",
         frozen: true,
-        minWidth: 170,
+        minWidth: 280,
+        width: 300,
+        widthShrink: 0,
+        variableHeight: true,
         widthGrow: def.columnId === "product" ? 3 : 1,
         formatter: CELL_FORMATTERS[product.field],
       },
-      ...PRICE_GROUPS.map((group) => ({
-        title: group.title,
-        headerSort: false,
-        headerHozAlign: "center",
-        columns: group.defs.map(priceColumn),
-      })),
       ...COLUMN_DEFS.slice(1).map((def) => ({
         title: def.title,
         field: def.field,
@@ -1100,15 +1065,22 @@
         headerTooltip: def.tip || undefined,
         headerHozAlign: "right",
         hozAlign: "right",
-        minWidth: 120,
+        minWidth: 148,
         widthGrow: 1,
         formatter: CELL_FORMATTERS[def.field],
+      })),
+      ...PRICE_GROUPS.map((group) => ({
+        title: group.title,
+        headerSort: false,
+        headerHozAlign: "center",
+        columns: group.defs.map(priceColumn),
       })),
     ];
     // 默认排序可能是不对应任何列的字段（如 roi_real）：无列可标时跳过 initialSort。
     var initialDef = TABLE_LEAF_DEFS.find((d) => d.sortField === state.sort);
     state.table = new Tabulator(host, {
       columns: columns,
+      columnDefaults: { headerWordWrap: true, vertAlign: "middle" },
       // 默认 fitData 只按内容定宽，宽屏下表体右侧留大片空白（表头/行背景
       // 都是全宽，唯独单元格列不铺满）。fitColumns 使列宽铺满容器。
       layout: "fitColumns",
@@ -3218,7 +3190,6 @@
     wireTooltips(); // 悬停说明气泡(data-tip 委托,含重渲染后的新行)
     wirePriceTooltips();
     wireZoom(); // 主图点击放大(委托)
-    loadMe();
     // 店铺必选:先加载店铺,再加载数据;loadShops 内部处理 shop_pk 校验 + 选择弹窗
     loadShops().then((pk) => {
       if (pk) loadEnumMap().then(() => load());

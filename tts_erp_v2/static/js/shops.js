@@ -10,8 +10,7 @@
  * 只读展示已注册列表，表单区提示需要 admin 登录。
  * 2026-09-28：已注册列表「操作」列新增「获取授权链接」按钮（复用
  * OAuth authorize 端点；有 service_id 的店铺会带上它，callback 后回填）。
- * 2026-09-29：移除「待注册候选」section（GET /v2/admin/shops/unregistered
- * 后端端点保留，不在页面调用）；注册成功后只刷新已注册列表。
+ * 2026-10-31：店铺管理由 React 接管，插件直接登记元数据，无候选列表端点。
  */
 (() => {
   var PREFIX = location.pathname.replace(/\/v2\/pages\/.*$/, "");

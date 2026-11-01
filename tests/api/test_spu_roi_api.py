@@ -4143,10 +4143,10 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
     )
     body = r.text
     for fragment in (
-        "container-fluid px-3 px-lg-4 py-3 op-main",
+        "op-context-toolbar mx-3 mx-lg-4 mt-3",
         "row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4",
         "op-tool-row",
-        "col-12 col-lg-auto",
+        "op-table-panel mx-3 mx-lg-4",
         "op-tabulator",
         "nav nav-tabs flex-nowrap overflow-x-auto op-drill-tabs",
     ):
@@ -4251,8 +4251,9 @@ def test_spu_roi_mobile_sticky_product_cells_use_opaque_backgrounds() -> None:
     loss_sticky = rule(
         ".op-tabulator .tabulator-row.row-bad .tabulator-cell.tabulator-frozen"
     )
-    assert "background: var(--paper)" in base_sticky
-    assert "background: var(--paper-danger)" in loss_sticky
+    assert "background: var(--surface)" in base_sticky
+    assert "background: var(--surface)" in loss_sticky
+    assert "inset 3px 0 var(--danger)" in loss_sticky
     assert "rgba(" not in loss_sticky
     assert "transparent" not in loss_sticky
 
@@ -4985,8 +4986,10 @@ def test_spu_roi_js_review_fixes_present():
         / "spu-profitability-page.js"
     )
     src = js_path.read_text(encoding="utf-8")
-    # finding 6:loadMe 用 authenticated===true 守卫(而非不存在的 key_prefix)
-    assert "authenticated === true" in src
+    # Account identity and sign-out have one owner in the shared header.
+    assert "function loadMe" not in src
+    assert "#ops-identity" not in src
+    assert "btn-logout" not in src
     # 标色业务状态由后端返回，页面不得保存阈值或重算状态。
     assert "ROI_HARD_LOSS = 1.0" not in src
     assert "PASS_LINE = 1.5" not in src
@@ -5664,13 +5667,7 @@ def test_spu_roi_tabulator_fills_container_width() -> None:
 
 
 def test_spu_roi_table_wrap_content_insets_match_toolbar() -> None:
-    """主表列必须与上方筛选面板/大盘/分页同一条左右边界。
-
-    #toolbar、#summaries、.op-pager 的内容都由 `px-3 px-lg-4` 内缩（lg 断点
-    22.5px），而 `.op-table-wrap` 曾经没有内缩：主表列比筛选面板左右外凸，
-    用户反馈「表格没对齐」。内缩必须由 Bootstrap 工具类提供（spu-roi.css 禁止
-    手写断点，见 test_spu_roi_page_uses_bootstrap_responsive_layout）。
-    """
+    """The table card and other content regions share Bootstrap horizontal margins."""
     import re
     from pathlib import Path
 
@@ -5678,7 +5675,9 @@ def test_spu_roi_table_wrap_content_insets_match_toolbar() -> None:
     template = (
         root / "tts_erp_v2" / "templates" / "pages" / "spu-profitability.html"
     ).read_text(encoding="utf-8")
-    assert 'class="op-table-wrap px-3 px-lg-4"' in template
+    assert 'class="op-table-panel mx-3 mx-lg-4"' in template
+    assert 'class="op-toolbar mx-3 mx-lg-4 px-3 px-lg-4 py-3"' in template
+    assert 'class="op-table-wrap"' in template
 
     css = (root / "tts_erp_v2" / "static" / "css" / "spu-roi.css").read_text(
         encoding="utf-8"
@@ -5687,6 +5686,6 @@ def test_spu_roi_table_wrap_content_insets_match_toolbar() -> None:
     assert match is not None, "缺 .op-table-wrap 规则"
     declarations = match.group(1)
     # 通栏白底与 .op-toolbar/.op-counter 一致；否则内缩后两侧露出台账底色。
-    assert "background: var(--paper)" in declarations
-    assert "border-bottom: 1px solid var(--rule)" in declarations
+    assert "background: var(--surface)" in declarations
+    assert "overflow-x: auto" in declarations
     assert "@media" not in declarations

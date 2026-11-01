@@ -19,8 +19,8 @@ from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
-from pydantic import BaseModel, Field, SecretStr, field_validator
-from sqlalchemy import text
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -51,6 +51,12 @@ from tts_erp_v2.sync_worker.scheduler import (
     run_scheduled_job_once,
     set_job_enabled,
 )
+
+from tts_erp_v2.api.schemas import ChannelAccountOut
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause
+from tts_erp_v2.commerce.shop_metadata import plugin_sources, upsert_shop_metadata
+from tts_erp_v2.db.models.commerce import ChannelAccount
+from tts_erp_v2.db.models.integration import Credentials
 
 router = APIRouter()
 
@@ -410,7 +416,7 @@ def purge_plugin_data(
     dry_run = not confirm
     executed = confirm and (not is_prod or allow_prod_env or (allow_prod and dev_env))
 
-    from sqlalchemy import text
+    from sqlalchemy import select, text
 
     from tts_erp_v2.db.base import get_engine
 
@@ -457,32 +463,8 @@ def purge_plugin_data(
     }
 
 
-# ─── Manual shop registration (plugin-only shops) ─────────────────────
-#
-# Background: shops synced via the Chrome extension have no TikTok API
-# credential, so the OAuth callback (the only other writer of
-# ``commerce.shops``) never creates a row for them — and every
-# ``LEFT JOIN commerce.shops`` (spu-roi shop filter etc.) misses them.
-# These endpoints let an operator register such a shop MANUALLY:
-# the row is created with ``credential_id = NULL`` and ``status = 'active'``
-# —— 注册即完整店铺，没有「待授权」中间态。
-#
-# 2026-09-11（PLUGIN_ARCH_CLEANUP）：原先还有 ``data_source`` 枚举列标记
-# 同步方式，现已删除 —— 「是否走 API 同步」已可由 ``credential_id IS NOT NULL``
-# 完整推出，且 api/plugin 数据已按 schema 物理隔离（`plugin.*` / `commerce.*`
-# 等），无需来源判定。插件广告 dump 没有 server-side 替代路径，不再拦截。
-#
-# Invariants:
-#   * registration NEVER touches ``credential_id`` / ``status`` of an
-#     existing row — if the shop later obtains API access, the OAuth
-#     callback's ``on_conflict_do_update`` backfills ``credential_id``.
-#   * data sync does NOT depend on registration: the plugin dumps
-#     endpoints write plugin.* regardless.
-#   * registration only affects query-time association.
-
-# Non-production shop-id prefixes that must never be registered (mirrors
-# sync_worker/scheduler.py::NON_PRODUCTION_SHOP_PREFIXES — a registered
-# shop is one step closer to being dialed upstream).
+# Shop metadata is created by manual registration or bound-plugin discovery.
+# API access still requires this shop's explicitly linked OAuth credential.
 _NON_REGISTERABLE_PREFIXES = ("TEST_", "MOCK_")
 
 
@@ -539,18 +521,8 @@ class ShopRegisterBody(BaseModel):
         return stripped or None
 
 
-class ShopOut(BaseModel):
-    id: int
-    platform: str
-    shop_id: str
-    account_name: str | None = None
-    region: str | None = None
-    seller_type: str | None = None
-    status: str | None = None
-    credential_id: int | None = None
-    service_id: str | None = None
-    app_credentials_configured: bool = False
-    opened_date: date | None = None
+class ShopOut(ChannelAccountOut):
+    pass
 
 
 class ShopRegisterResponse(BaseModel):
@@ -558,361 +530,129 @@ class ShopRegisterResponse(BaseModel):
     shop: ShopOut
 
 
-# INSERT: new plugin-only shop. ON CONFLICT: backfill still-NULL display
-# fields ONLY (COALESCE(existing, excluded)) — credential_id / status /
-# account_name of an existing row are never overwritten.
-# xmax = 0 distinguishes the inserted row from a conflict-updated one.
-_SQL_REGISTER_SHOP = text(
-    "INSERT INTO commerce.shops "
-    "(platform, shop_id, account_name, region, seller_type, status, "
-    " opened_date, service_id) "
-    "VALUES (:platform, :shop_id, :account_name, :region, :seller_type, "
-    "        'active', :opened_date, :service_id) "
-    "ON CONFLICT (platform, shop_id) DO UPDATE SET "
-    "  account_name = COALESCE(shops.account_name, EXCLUDED.account_name), "
-    "  region = COALESCE(shops.region, EXCLUDED.region), "
-    "  seller_type = COALESCE(shops.seller_type, EXCLUDED.seller_type), "
-    "  opened_date = COALESCE(shops.opened_date, EXCLUDED.opened_date), "
-    "  service_id = COALESCE(shops.service_id, EXCLUDED.service_id) "
-    "RETURNING id, platform, shop_id, account_name, region, seller_type, "
-    "          status, credential_id, service_id, opened_date, "
-    "          (xmax = 0) AS inserted"
-)
-
-
 def _validated_plaintext_app_secret(
-    *,
-    service_id: str | None,
-    app_key: str | None,
-    app_secret: SecretStr | None,
+    *, service_id: str | None, app_key: str | None, app_secret: SecretStr | None,
 ) -> str | None:
-    """Validate the secret pair without echoing plaintext in 422 responses."""
     plaintext = app_secret.get_secret_value() if app_secret is not None else None
     if (app_key is None) != (plaintext is None):
-        raise HTTPException(
-            status_code=422,
-            detail="app_key and app_secret must be provided together",
-        )
-    if plaintext is None:
-        return None
-    if not plaintext or len(plaintext) > 512:
-        raise HTTPException(status_code=422, detail="app_secret length is invalid")
-    if service_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="service_id is required with app_key/app_secret",
-        )
+        raise HTTPException(422, "app_key and app_secret must be provided together")
+    if plaintext is not None:
+        if not plaintext or len(plaintext) > 512:
+            raise HTTPException(422, "app_secret length is invalid")
+        if not service_id:
+            raise HTTPException(422, "service_id is required with App credentials")
     return plaintext
 
 
-def _app_credentials_configured(
-    session: Session,
-    *,
-    service_id: str | None,
-) -> bool:
-    if service_id is None:
+def _app_credentials_configured(session: Session, *, shop_pk: int, service_id: str | None) -> bool:
+    if not service_id:
         return False
     try:
-        resolve_tiktok_app_credentials(session, service_id=service_id)
+        resolve_tiktok_app_credentials(session, shop_pk=shop_pk, service_id=service_id)
     except SigningError:
         return False
     return True
 
 
 def _configure_or_validate_app_credentials(
-    session: Session,
-    *,
-    service_id: str | None,
-    app_key: str | None,
-    app_secret: str | None,
+    session: Session, *, shop_pk: int, service_id: str | None,
+    app_key: str | None, app_secret: str | None,
 ) -> bool:
-    """Write a supplied pair or verify that service_id already resolves."""
-    if service_id is None:
+    if not service_id:
         return False
     if app_key is not None and app_secret is not None:
-        upsert_tiktok_app_credentials(
-            session,
-            service_id=service_id,
-            app_key=app_key,
-            plaintext_app_secret=app_secret,
-        )
+        upsert_tiktok_app_credentials(session, shop_pk=shop_pk, service_id=service_id,
+                                     app_key=app_key, plaintext_app_secret=app_secret)
         return True
-    if not _app_credentials_configured(session, service_id=service_id):
-        try:
-            resolve_tiktok_app_credentials(session, service_id=service_id)
-        except SigningError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not _app_credentials_configured(session, shop_pk=shop_pk, service_id=service_id):
+        raise HTTPException(409, "configure this shop's App Key and App Secret first")
     return True
 
 
-@router.post(
-    "/shops/register",
-    response_model=ShopRegisterResponse,
-    summary="人工注册店铺（插件同步店铺补登记，readwrite+）",
-)
-def register_shop(request: Request, body: ShopRegisterBody) -> ShopRegisterResponse:
-    """Register a shop and optionally configure its service App pair.
+def _shop_out(session: Session, shop: ChannelAccount) -> ShopOut:
+    configured = _app_credentials_configured(session, shop_pk=shop.id, service_id=shop.service_id)
+    credential = session.get(Credentials, shop.credential_id) if shop.credential_id else None
+    auth_state = "unauthorized"
+    if credential:
+        authorized = session.execute(
+            text("SELECT " + authorized_shop_clause() + " FROM commerce.shops WHERE id = :id"),
+            {"id": shop.id},
+        ).scalar()
+        if authorized:
+            auth_state = "authorized"
+        elif credential.provider == "tiktok" and credential.external_account_id == shop.shop_id:
+            auth_state = "reauthorize"
+        else:
+            auth_state = "unknown"
+    return ShopOut(
+        id=shop.id, platform=shop.platform, shop_id=shop.shop_id,
+        account_name=shop.account_name, region=shop.region, shop_code=shop.shop_code,
+        discovered_at=shop.discovered_at, plugin_sources=plugin_sources(shop.plugin_metadata),
+        seller_type=shop.seller_type, status=shop.status,
+        credential_id=shop.credential_id, service_id=shop.service_id,
+        app_credentials_configured=configured, opened_date=shop.opened_date,
+        synced_at=shop.synced_at, updated_at=shop.updated_at, auth_state=auth_state,
+    )
 
-    App Key/App Secret writes are readwrite and share the same transaction as
-    the shop/service_id write. Secret is only stored encrypted, never returned.
-    """
+
+@router.post("/shops/register", response_model=ShopRegisterResponse)
+def register_shop(request: Request, body: ShopRegisterBody) -> ShopRegisterResponse:
     require_role_at_least(request, "readwrite")
     require_cookie_csrf(request)
-    plaintext_app_secret = _validated_plaintext_app_secret(
-        service_id=body.service_id,
-        app_key=body.app_key,
-        app_secret=body.app_secret,
-    )
-
+    plaintext = _validated_plaintext_app_secret(service_id=body.service_id,
+        app_key=body.app_key, app_secret=body.app_secret)
     from tts_erp_v2.db.base import get_engine
-
-    engine = get_engine()
-    with Session(engine) as session, session.begin():
-        row = session.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
-            _SQL_REGISTER_SHOP,
-            {
-                "platform": body.platform,
-                "shop_id": body.shop_id,
-                "account_name": body.account_name,
-                "region": body.region,
-                "seller_type": body.seller_type,
-                "opened_date": body.opened_date,
-                "service_id": body.service_id,
-            },
-        ).one()
-        if body.app_key is not None and row.service_id != body.service_id:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "shop already uses a different service_id; update the shop "
-                    "explicitly before rotating App credentials"
-                ),
-            )
+    with Session(get_engine()) as session, session.begin():
+        shop, created = upsert_shop_metadata(session, shop_id=body.shop_id,
+            account_name=body.account_name, region=body.region,
+            seller_type=body.seller_type, opened_date=body.opened_date,
+            service_id=body.service_id)
+        if body.app_key is not None and shop.service_id != body.service_id:
+            raise HTTPException(409, "shop already uses another service_id; update its App configuration explicitly")
         if body.service_id is not None or body.app_key is not None:
-            app_credentials_configured = _configure_or_validate_app_credentials(
-                session,
-                service_id=row.service_id,
-                app_key=body.app_key,
-                app_secret=plaintext_app_secret,
-            )
-        else:
-            app_credentials_configured = _app_credentials_configured(
-                session,
-                service_id=row.service_id,
-            )
-    return ShopRegisterResponse(
-        created=bool(row.inserted),
-        shop=ShopOut(
-            id=row.id,
-            platform=row.platform,
-            shop_id=row.shop_id,
-            account_name=row.account_name,
-            region=row.region,
-            seller_type=row.seller_type,
-            status=row.status,
-            credential_id=row.credential_id,
-            service_id=row.service_id,
-            app_credentials_configured=app_credentials_configured,
-            opened_date=row.opened_date,
-        ),
-    )
-
-
-# ─── Update shop metadata ─────────────────────────────────────────
-
-_SQL_UPDATE_SHOP = text(
-    "UPDATE commerce.shops "
-    "SET account_name = COALESCE(:account_name, account_name), "
-    "    region = COALESCE(:region, region), "
-    "    opened_date = COALESCE(:opened_date, opened_date), "
-    "    service_id = COALESCE(:service_id, service_id), "
-    "    updated_at = now() "
-    "WHERE id = :shop_pk "
-    "RETURNING id, platform, shop_id, account_name, region, seller_type, "
-    "          status, credential_id, service_id, opened_date"
-)
+            _configure_or_validate_app_credentials(session, shop_pk=shop.id,
+                service_id=shop.service_id, app_key=body.app_key, app_secret=plaintext)
+        result = ShopRegisterResponse(created=created, shop=_shop_out(session, shop))
+    return result
 
 
 class ShopUpdateBody(BaseModel):
-    """PATCH body for ``/v2/admin/shops/{shop_pk}``.
-
-    All fields are optional; ``null``/缺省 = 保持原值（COALESCE 语义，
-    与 register 的 backfill-only 不同 —— PATCH 会覆盖已有非空值）。
-    """
-
-    account_name: str | None = Field(
-        default=None,
-        max_length=200,
-        description="店铺名称。设为 null 不修改。",
-    )
-    region: str | None = Field(
-        default=None,
-        max_length=16,
-        description="国家/地区代码（如 VN）。设为 null 不修改。",
-    )
-    opened_date: date | None = Field(
-        default=None,
-        description="开店时间（天级，YYYY-MM-DD）。设为 null 不修改。",
-    )
-    service_id: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=64,
-        description="TikTok Partner Center service_id。设为 null 不修改。",
-    )
-    app_key: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=128,
-        repr=False,
-        description="配套 App Key；与 app_secret 同时提交（readwrite+）。",
-    )
-    app_secret: SecretStr | None = Field(
-        default=None,
-        repr=False,
-        description="配套 App Secret；只加密存储，不返回（readwrite+）。",
-    )
+    model_config = ConfigDict(extra="forbid")
+    opened_date: date | None = None
+    service_id: str | None = Field(default=None, min_length=1, max_length=64)
+    app_key: str | None = Field(default=None, min_length=1, max_length=128, repr=False)
+    app_secret: SecretStr | None = Field(default=None, repr=False)
 
     @field_validator("service_id", "app_key")
     @classmethod
-    def _strip_optional_value(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        stripped = v.strip()
-        return stripped or None
+    def strip_value(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
 
 
 class ShopUpdateResponse(BaseModel):
     shop: ShopOut
 
 
-@router.patch(
-    "/shops/{shop_pk}",
-    response_model=ShopUpdateResponse,
-    summary="更新店铺元信息（名称/区域/开店日期/service_id，readwrite+）",
-)
-def update_shop(
-    request: Request, shop_pk: int, body: ShopUpdateBody
-) -> ShopUpdateResponse:
-    """Update shop metadata and optionally rotate its service App pair.
-
-    App Key/App Secret writes are readwrite and are committed atomically with
-    the service_id change. A service_id-only change is accepted only when the
-    target pair already resolves from the encrypted table or exact legacy env
-    fallback.
-    """
+@router.patch("/shops/{shop_pk}", response_model=ShopUpdateResponse)
+def update_shop(request: Request, shop_pk: int, body: ShopUpdateBody) -> ShopUpdateResponse:
+    """Edit opening date or this shop's App; shop name and region are immutable."""
     require_role_at_least(request, "readwrite")
     require_cookie_csrf(request)
-    plaintext_app_secret = _validated_plaintext_app_secret(
-        service_id=body.service_id,
-        app_key=body.app_key,
-        app_secret=body.app_secret,
-    )
-
     from tts_erp_v2.db.base import get_engine
-
-    engine = get_engine()
-    with Session(engine) as session, session.begin():
-        row = session.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, bound params only
-            _SQL_UPDATE_SHOP,
-            {
-                "shop_pk": shop_pk,
-                "account_name": body.account_name,
-                "region": body.region,
-                "opened_date": body.opened_date,
-                "service_id": body.service_id,
-            },
-        ).one_or_none()
-        if row is None:
-            raise HTTPException(status_code=404, detail=f"shop {shop_pk} not found")
-        if body.app_key is not None and row.service_id is None:
-            raise HTTPException(
-                status_code=409,
-                detail="shop must have service_id before App credentials can be saved",
-            )
+    with Session(get_engine()) as session, session.begin():
+        shop = session.scalar(select(ChannelAccount).where(ChannelAccount.id == shop_pk).with_for_update())
+        if shop is None:
+            raise HTTPException(404, "shop not found")
+        service_id = body.service_id if body.service_id is not None else shop.service_id
+        plaintext = _validated_plaintext_app_secret(service_id=service_id,
+            app_key=body.app_key, app_secret=body.app_secret)
+        if "opened_date" in body.model_fields_set:
+            shop.opened_date = body.opened_date
         if body.service_id is not None or body.app_key is not None:
-            app_credentials_configured = _configure_or_validate_app_credentials(
-                session,
-                service_id=row.service_id,
-                app_key=body.app_key,
-                app_secret=plaintext_app_secret,
-            )
-        else:
-            app_credentials_configured = _app_credentials_configured(
-                session,
-                service_id=row.service_id,
-            )
-    return ShopUpdateResponse(
-        shop=ShopOut(
-            id=row.id,
-            platform=row.platform,
-            shop_id=row.shop_id,
-            account_name=row.account_name,
-            region=row.region,
-            seller_type=row.seller_type,
-            status=row.status,
-            credential_id=row.credential_id,
-            service_id=row.service_id,
-            app_credentials_configured=app_credentials_configured,
-            opened_date=row.opened_date,
-        ),
-    )
-
-
-# Shop ids seen in plugin-synced data but with no commerce.shops row.
-# Sources: analytics seller_id (ad_today/ad_daily/plugin_logs)。plugin 业务表
-# 的 shop_id 在订单 INSERT 时已校验过（FK → commerce.shops.shop_id），所以不再
-# 从 raw_log / 业务表枚举未注册店铺（2026-09-17 raw_log 表已 drop）。
-_SQL_UNREGISTERED_SHOPS = text(
-    "SELECT shop_id, source FROM ("
-    "  SELECT seller_id AS shop_id, 'analytics' AS source FROM plugin.ad_today GROUP BY seller_id"
-    "  UNION"
-    "  SELECT seller_id, 'analytics' FROM plugin.ad_daily GROUP BY seller_id"
-    "  UNION"
-    "  SELECT seller_id, 'analytics' FROM plugin.plugin_logs GROUP BY seller_id"
-    ") seen "
-    "WHERE NOT EXISTS ("
-    "  SELECT 1 FROM commerce.shops s "
-    "  WHERE s.platform = 'tiktok' AND s.shop_id = seen.shop_id"
-    ") "
-    "ORDER BY shop_id"
-)
-
-
-class UnregisteredShop(BaseModel):
-    shop_id: str
-    sources: list[str]
-
-
-class UnregisteredShopsResponse(BaseModel):
-    candidates: list[UnregisteredShop]
-
-
-@router.get(
-    "/shops/unregistered",
-    response_model=UnregisteredShopsResponse,
-    summary="列出插件数据里出现但未注册的店铺（readwrite+）",
-)
-def list_unregistered_shops(request: Request) -> UnregisteredShopsResponse:
-    """Shop ids present in plugin-synced tables (plugin / analytics)
-    but missing from ``commerce.shops`` — the candidate list for the
-    manual registration page.
-    """
-    require_role_at_least(request, "readwrite")
-
-    from tts_erp_v2.db.base import get_engine
-
-    engine = get_engine()
-    with engine.connect() as conn:
-        rows = conn.execute(  # pi-lens-ignore: python-sql-injection — module-level constant SQL, no params
-            _SQL_UNREGISTERED_SHOPS
-        ).all()
-    sources_by_shop: dict[str, set[str]] = {}
-    for r in rows:
-        sources_by_shop.setdefault(r.shop_id, set()).add(r.source)
-    return UnregisteredShopsResponse(
-        candidates=[
-            UnregisteredShop(shop_id=sid, sources=sorted(srcs))
-            for sid, srcs in sorted(sources_by_shop.items())
-        ]
-    )
+            _configure_or_validate_app_credentials(session, shop_pk=shop.id,
+                service_id=service_id, app_key=body.app_key, app_secret=plaintext)
+            shop.service_id = service_id
+        shop.updated_at = datetime.now(UTC)
+        session.flush()
+        result = ShopUpdateResponse(shop=_shop_out(session, shop))
+    return result

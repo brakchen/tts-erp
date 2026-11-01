@@ -1,4 +1,6 @@
-/* tokens.css — 暖纸编辑体设计令牌（canonical）
+/* tokens.css — 全站设计令牌（canonical）
+ * 2026-10-30：用户批准统一为墨绿导航、浅色纸面与白色内容面板；
+ * React/HeroUI 与保留的旧看板共同消费本文件。以下保留旧方案的历史背景。
  *
  * 全站唯一的 :root 令牌来源。页面模板与页面级 CSS **不得再定义 :root 令牌**；
  * 需要不同密度/语义时，覆盖使用令牌的具体规则，而不是另起一套令牌名。
@@ -16,22 +18,22 @@
 
 :root {
   /* ── 纸面（背景层次） ─────────────────────────────── */
-  --paper: #F4EFE4;
-  --paper-deep: #EAE3D2;
+  --paper: #F5F5F0;
+  --paper-deep: #E9EEE7;
 
   /* ── 墨（文字层次） ───────────────────────────────── */
-  --ink: #1B1814;
-  --ink-soft: #4A4239;
-  --muted: #6E6657;
+  --ink: #22382F;
+  --ink-soft: #435B4D;
+  --muted: #657368;
 
   /* ── 界线（分割线/描边） ──────────────────────────── */
-  --rule: #C9BFA8;
-  --rule-soft: #DDD4BF;
+  --rule: #D7E0D6;
+  --rule-soft: #E7ECE4;
 
   /* ── 语义色 ───────────────────────────────────────── */
-  /* --accent 陶土橙是暖纸编辑体的识别色；--accent-deep 用于 hover/pressed */
-  --accent: #B8390E;
-  --accent-deep: #8F2C09;
+  /* 统一墨绿主色；深色用于导航和强调区域。 */
+  --accent: #214F43;
+  --accent-deep: #173F36;
   --ok: #2F6B3E;
   --warn: #8A6D1A;
   --danger: #8C1A1A;
@@ -43,13 +45,45 @@
    * Fallback 这类异族字体，出现「同一页中英文字体不配」的观感（2026-10-04
    * feature/ui-font-unify lane 用 CDP getPlatformFontsForNode 实测各页命中字体后补齐）。 */
   --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, 'Liberation Mono', ui-monospace, 'Noto Sans Mono CJK SC', monospace;
-  --sans: 'Inter', 'Noto Sans SC', 'Noto Sans CJK SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sans: 'Avenir Next', 'Trebuchet MS', 'Noto Sans SC', 'Noto Sans CJK SC', 'Source Han Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --serif: 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Iowan Old Style', 'Apple Garamond', Georgia, ui-serif, serif;
 
   /* ── 形状 ─────────────────────────────────────────── */
-  /* 暖纸编辑体是直角体系：全站圆角为 0。个别控件（如 toast 的 4px）需在
-   * 自己的规则里显式覆盖，不要改这个基准值。 */
-  --radius: 0;
+  /* 原生组件保留自身形状规则，共享默认采用克制的小圆角。 */
+  --radius: 0.625rem;
+
+  /* Shared HeroUI / legacy semantic bridge. The palette has one owner. */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --surface: #FFFFFF;
+  --surface-foreground: var(--ink);
+  --default: #E9EEE7;
+  --default-foreground: var(--ink-soft);
+  --accent-foreground: #FFFFFF;
+  --field-background: #FFFFFF;
+  --field-foreground: var(--ink);
+  --field-border: var(--rule);
+  --field-border-width: 1px;
+  --border-width-field: 1px;
+  --border: var(--rule);
+  --separator: var(--rule-soft);
+  --focus: var(--accent);
+  --navigation-background: var(--accent-deep);
+  --navigation-foreground: #D4E0D5;
+  --navigation-muted: #B5C8BB;
+  --navigation-active: #D8E6A2;
+  --table-heading: #EFF3ED;
+  --table-hover: #F2F6EF;
+  --table-line: #E4EAE0;
+  --paper-danger: color-mix(in srgb, var(--danger) 6%, var(--surface));
+  --paper-soft: var(--table-hover);
+  --bs-body-bg: var(--paper);
+  --bs-body-color: var(--ink);
+  --bs-border-color: var(--rule);
+  --bs-border-radius: var(--radius);
+  --bs-link-color: var(--accent);
+  --bs-link-hover-color: var(--accent-deep);
+  --bs-focus-ring-color: color-mix(in srgb, var(--accent) 22%, transparent);
 
   /* ── Bootstrap 字体变量桥接 ──────────────────────── */
   /* vendor reboot 的 `code / kbd / pre` 吃 --bs-font-monospace，不桥接就会命中

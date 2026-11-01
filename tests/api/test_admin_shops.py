@@ -1,7 +1,7 @@
 """Tests for the manual shop-registration admin endpoints.
 
 Pins the contract for ``POST /v2/admin/shops/register`` and
-``GET /v2/admin/shops/unregistered`` (feature/shop-registration lane):
+Shop registration and metadata (legacy candidate endpoint retired):
 
   - admin/readwrite registers a plugin-only shop into ``commerce.shops``
     with ``credential_id = NULL`` and ``status = 'active'`` — the row
@@ -15,7 +15,6 @@ Pins the contract for ``POST /v2/admin/shops/register`` and
   - a registered-but-credential-less shop is NOT enumerated by the sync
     worker; adding a credential flips it into the API-sync set
     (the plugin → API upgrade path)
-  - ``unregistered`` lists shop ids seen in plugin / analytics
     plugin data that have no ``commerce.shops`` row
   - role matrix: readwrite+; readonly → 403, anonymous → 401
 """
@@ -261,78 +260,6 @@ def test_registered_shop_not_synced_until_credential(api_client, admin_key):
         assert SHOP_A not in shops
     finally:
         sess.close()
-
-
-# ─── GET /v2/admin/shops/unregistered ──────────────────────────────────
-
-
-def _insert_ad_daily(db_engine, seller_id: str) -> None:
-    with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO plugin.ad_daily "
-                "(seller_id, advertiser_id, campaign_id, product_id, "
-                " endpoint, day) "
-                "VALUES (:sid, 'adv1', 'c1', 'p1', "
-                "'/api/v1.0/qsc/reports/integrated/get/', '2026-09-10') "
-                "ON CONFLICT DO NOTHING"
-            ).bindparams(sid=seller_id)
-        )
-
-
-def test_unregistered_lists_analytics_source_only(api_client, admin_key, db_engine):
-    """Phase 3 之后 (2026-09-17)：raw_log 表已 drop，plugin 域 source 移除。
-    /v2/admin/shops/unregistered 现在只从广告结构化表和 plugin_logs 枚举未注册店铺。
-    """
-    _insert_ad_daily(db_engine, SHOP_B)
-
-    r = api_client.get(
-        "/v2/admin/shops/unregistered",
-        headers={"Authorization": f"Bearer {admin_key}"},
-    )
-    assert r.status_code == 200, r.text
-    candidates = {c["shop_id"]: c for c in r.json()["candidates"]}
-    assert SHOP_B in candidates
-    assert "analytics" in candidates[SHOP_B]["sources"]
-    # plugin source 已下线（Phase 3 drop plugin.raw_log）
-    assert "plugin" not in {src for c in candidates.values() for src in c["sources"]}
-
-
-def test_unregistered_excludes_registered_shops(api_client, admin_key, db_engine):
-    _register(api_client, admin_key)
-
-    r = api_client.get(
-        "/v2/admin/shops/unregistered",
-        headers={"Authorization": f"Bearer {admin_key}"},
-    )
-    assert r.status_code == 200, r.text
-    ids = {c["shop_id"] for c in r.json()["candidates"]}
-    # Phase 3 之后 SHOP_A 仅在 raw_log 里才有；raw_log drop 后它根本不会进入
-    # unregistered 候选列表（不需要走 _register 豁免路径）
-    assert SHOP_A not in ids
-
-
-def test_unregistered_role_matrix(api_client, readwrite_key, readonly_key):
-    """readwrite 可查候选列表；readonly → 403。"""
-    r = api_client.get(
-        "/v2/admin/shops/unregistered",
-        headers={"Authorization": f"Bearer {readwrite_key}"},
-    )
-    assert r.status_code == 200, r.text
-    assert "candidates" in r.json()
-
-    r = api_client.get(
-        "/v2/admin/shops/unregistered",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 403, (
-        f"readonly should be 403, got {r.status_code}: {r.text}"
-    )
-
-
-def test_unregistered_anonymous_is_401(api_client):
-    r = api_client.get("/v2/admin/shops/unregistered")
-    assert r.status_code == 401
 
 
 # ─── PATCH /v2/admin/shops/{shop_pk} ─────────────────────────────────

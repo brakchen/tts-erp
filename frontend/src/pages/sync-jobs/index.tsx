@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Label, ListBox, Modal, Select, Table } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
@@ -150,7 +151,8 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     setRefresh((n) => n + 1);
   }
 
-  return <div className="space-y-4">
+  return <div className="erp-page">
+    <PageIntro eyebrow="SYNCHRONIZATION" title="让数据按计划到达" description="查看同步任务、执行记录与周期调度，按需手动触发。" />
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">任务清单</h2>
       <Button variant="secondary" isDisabled={!canRead || loading || pending || cooldown || recovery?.phase === 'checking'} onPress={refreshJobs}>刷新任务</Button></div>
     <p>立即执行权限：readwrite / admin；启停周期调度需要 admin。停用周期调度不影响立即执行，权限以服务端判定为准。</p>
@@ -160,7 +162,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     {pending && <p role="status">提交中，请勿重复操作…</p>}{notice && <p role="status">{notice}</p>}
     {failure && <div role="alert"><p>{failure.message}</p>{Object.values(failure.fieldErrors).map((text) => <p key={text}>{text}</p>)}</div>}
     {cooldown && <p role="status">服务端指定冷却中，读取和提交均暂停；到期不会自动重试。</p>}
-    {recovery && <section aria-label="命令核对" className="space-y-2">
+    {recovery && <section aria-label="命令核对" className="erp-panel space-y-2">
       <p className="break-all">原操作：{recovery.attempt.job_name} · {recovery.attempt.kind === 'enabled' ? (recovery.attempt.enabled ? '启用' : '停用') : `执行 / ${recovery.attempt.shop_id ?? '全部店铺或系统级'}`}</p>
       <Button isDisabled={cooldown || loading || recovery.phase === 'checking' || !canRead} onPress={() => { void verify(); }}>查询核对</Button>
       {recovery.phase === 'checking' && <p role="status">核对中…</p>}
@@ -168,18 +170,18 @@ export default function SyncJobs({ bootstrap }: PageProps) {
       {recovery.phase === 'checked' && <><p role="status">已读取当前公开任务状态；不能证明原命令是否生效。重新执行可能重复上游同步，请明确决定。</p><Button isDisabled={loading || pending || cooldown || denied || !canRead || (recovery.attempt.kind === 'enabled' && !canAdmin)} onPress={retry}>核对后明确重试原操作</Button></>}
     </section>}
     {canRead && data && <><p>服务端时间：{displayTime(data.server_time)}。健康级别与落后周期均沿用服务端结果；列表保持服务端顺序。</p>
-      <Table><Table.ScrollContainer role="region" aria-label="任务表格"><Table.Content aria-label="定时任务" className="min-w-[75rem]"><Table.Header>
-        <Table.Column isRowHeader>任务</Table.Column><Table.Column>周期</Table.Column><Table.Column>范围</Table.Column><Table.Column>状态</Table.Column><Table.Column>上次运行</Table.Column><Table.Column>周期调度</Table.Column><Table.Column>立即执行</Table.Column>
-      </Table.Header><Table.Body renderEmptyState={() => '暂无注册任务'}>{data.jobs.map((job) => <Table.Row key={job.job_name} id={job.job_name}>
-        <Table.Cell><div className="w-52 break-all"><p className="font-semibold">{job.job_name}</p><p>{job.module_path} · {job.entrypoint}</p></div></Table.Cell>
-        <Table.Cell>{job.interval_seconds} 秒</Table.Cell><Table.Cell><p>{job.is_tiktok ? 'TikTok 店铺' : '系统级'}</p><p>{job.scope_type}</p></Table.Cell>
-        <Table.Cell><p>{job.last_status.severity}</p><p>{job.last_status.last_status ?? '从未运行'}</p><p>落后周期：{job.last_status.cycles_late ?? '—'}</p><p>间隔秒数：{job.last_status.lag_seconds ?? '—'}</p>{job.last_status.last_error !== null && <p>存在运行错误；详情暂不公开</p>}</Table.Cell>
-        <Table.Cell><p>开始：{displayTime(job.last_status.last_run_at)}</p><p>结束：{displayTime(job.last_status.last_finished_at)}</p><p>下次预计：{displayTime(job.last_status.next_expected_at)}</p></Table.Cell>
-        <Table.Cell focusMode="child"><p>{job.enabled ? '已启用' : '已停用'}</p><Button size="sm" isDisabled={blocked || !canAdmin} aria-label={`${job.enabled ? '停用' : '启用'} ${job.job_name} 周期调度`} onPress={() => { void submit({ kind: 'enabled', job_name: job.job_name, enabled: !job.enabled }); }}>{job.enabled ? '停用' : '启用'}</Button></Table.Cell>
-        <Table.Cell focusMode="child"><div className="w-64 space-y-2">{job.is_tiktok && <Select aria-label={`执行店铺 ${job.job_name}`} value={selection[job.job_name] || 'all'} isDisabled={blocked} onChange={(key) => {
+      <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="任务表格"><Table.Content aria-label="定时任务" className="min-w-[75rem] erp-table-content"><Table.Header className="erp-table-head">
+        <Table.Column className="erp-table-column" isRowHeader>任务</Table.Column><Table.Column className="erp-table-column">周期</Table.Column><Table.Column className="erp-table-column">范围</Table.Column><Table.Column className="erp-table-column">状态</Table.Column><Table.Column className="erp-table-column">上次运行</Table.Column><Table.Column className="erp-table-column">周期调度</Table.Column><Table.Column className="erp-table-column">立即执行</Table.Column>
+      </Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'暂无注册任务'}</div>}>{data.jobs.map((job) => <Table.Row className="erp-table-row" key={job.job_name} id={job.job_name}>
+        <Table.Cell className="erp-table-cell"><div className="w-52 break-all"><p className="font-semibold">{job.job_name}</p><p>{job.module_path} · {job.entrypoint}</p></div></Table.Cell>
+        <Table.Cell className="erp-table-cell">{job.interval_seconds} 秒</Table.Cell><Table.Cell className="erp-table-cell"><p>{job.is_tiktok ? 'TikTok 店铺' : '系统级'}</p><p>{job.scope_type}</p></Table.Cell>
+        <Table.Cell className="erp-table-cell"><p>{job.last_status.severity}</p><p>{job.last_status.last_status ?? '从未运行'}</p><p>落后周期：{job.last_status.cycles_late ?? '—'}</p><p>间隔秒数：{job.last_status.lag_seconds ?? '—'}</p>{job.last_status.last_error !== null && <p>存在运行错误；详情暂不公开</p>}</Table.Cell>
+        <Table.Cell className="erp-table-cell"><p>开始：{displayTime(job.last_status.last_run_at)}</p><p>结束：{displayTime(job.last_status.last_finished_at)}</p><p>下次预计：{displayTime(job.last_status.next_expected_at)}</p></Table.Cell>
+        <Table.Cell className="erp-table-cell" focusMode="child"><p>{job.enabled ? '已启用' : '已停用'}</p><Button className="erp-table-action" variant="secondary" size="sm" isDisabled={blocked || !canAdmin} aria-label={`${job.enabled ? '停用' : '启用'} ${job.job_name} 周期调度`} onPress={() => { void submit({ kind: 'enabled', job_name: job.job_name, enabled: !job.enabled }); }}>{job.enabled ? '停用' : '启用'}</Button></Table.Cell>
+        <Table.Cell className="erp-table-cell" focusMode="child"><div className="w-64 space-y-2">{job.is_tiktok && <Select aria-label={`执行店铺 ${job.job_name}`} value={selection[job.job_name] || 'all'} isDisabled={blocked} onChange={(key) => {
           if (typeof key === 'string') { setSelection((s) => ({ ...s, [job.job_name]: key === 'all' ? '' : key })); setScopeReset(false); setFailure((f) => f && Object.keys(f.fieldErrors).length ? { ...f, fieldErrors: {} } : f); }
         }}><Label>执行店铺</Label><Select.Trigger aria-label={`执行店铺 ${job.job_name}`}><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="all" textValue="全部授权店铺">全部授权店铺</ListBox.Item>{data.tiktok_shops.map((s) => <ListBox.Item key={s.shop_id} id={s.shop_id} textValue={`${s.account_name ?? '未命名'} · ${s.shop_id}`}>{s.account_name ?? '未命名'} · {s.shop_id}{s.status === null ? '' : ` · ${s.status}`}</ListBox.Item>)}</ListBox></Select.Popover></Select>}
-        <Button size="sm" isDisabled={blocked} aria-label={`执行 ${job.job_name}`} onPress={() => trigger(job)}>执行</Button></div></Table.Cell>
+        <Button className="erp-table-action" variant="secondary" size="sm" isDisabled={blocked} aria-label={`执行 ${job.job_name}`} onPress={() => trigger(job)}>执行</Button></div></Table.Cell>
       </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table></>}
     <Modal.Backdrop isOpen={confirmation !== undefined} onOpenChange={(open) => { if (!open) setConfirmation(undefined); }}><Modal.Container><Modal.Dialog>
       <Modal.Header><Modal.Heading>确认全店铺执行</Modal.Heading></Modal.Header><Modal.Body><p className="break-all">将立即执行 {confirmation?.job_name} 的全部授权店铺，可能触发多店铺上游同步，确定继续吗？</p></Modal.Body>

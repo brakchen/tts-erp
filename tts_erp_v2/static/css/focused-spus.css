@@ -1,5 +1,5 @@
 [data-page-profile="focused-spus"] .focused-spu-inline {
-  background: color-mix(in srgb, var(--paper, #fffdf8) 88%, transparent);
+  background: var(--surface);
 }
 
 [data-page-profile="focused-spus"] .focused-spu-inline-header {
@@ -31,16 +31,16 @@
 }
 
 [data-page-profile="focused-spus"] .focused-spu-inline .ts-control {
-  background: var(--paper, #fffdf8);
-  border-color: var(--rule, #d8cdbd);
+  background: var(--surface);
+  border-color: var(--rule);
   min-height: 2.75rem;
 }
 
 [data-page-profile="focused-spus"] .focused-spu-inline .ts-control > .item {
-  background: color-mix(in srgb, var(--accent, #87612d) 11%, white);
-  border: 1px solid color-mix(in srgb, var(--accent, #87612d) 32%, white);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--surface));
   border-radius: var(--radius);
-  color: var(--ink, #29251f);
+  color: var(--ink);
 }
 
 [data-page-profile="focused-spus"] .focused-spu-inline .ts-wrapper.disabled {

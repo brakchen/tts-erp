@@ -205,6 +205,9 @@ def get_product(
 
     Full contract: see `docs/api/tiktok-shop-get-product.md`.
     """
+    from tts_erp_v2.commerce.shop_access import require_authorized_shop
+
+    require_authorized_shop(sess, shop_pk=shop_pk)
     try:
         return products_api.get_product(
             session=sess,

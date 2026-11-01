@@ -40,6 +40,7 @@ _READWRITE_EXACT = {
 }
 
 _READWRITE_PREFIXES = (
+    "/v2/plugin/shops/",
     "/v2/intercept/configs",
     "/v2/intercept/sync",
 )

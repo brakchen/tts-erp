@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Input } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
@@ -112,16 +113,17 @@ export default function SpuProfitDeterioration({ bootstrap }: PageProps) {
   const selectClass = 'w-full rounded-lg border p-2 bg-surface text-foreground';
   const dirty = applied !== undefined && ['shop', 'spus', 'window', 'activity', 'anchor', 'limit'].some((key) => draft[key as keyof Query] !== applied[key as keyof Query]);
   const dateMax = bound?.shop === draft.shop ? bound.date : undefined;
-  return <div className="min-w-0 space-y-6">
+  return <div className="erp-page">
+    <PageIntro eyebrow="PROFIT MONITORING" title="及时发现利润的变化" description="选择店铺和分析日期，对比商品表现，查看服务端分析结果。" />
     <p>SPU 盈利表现对比：7 天主参考，3 天观察近期变化；不做阈值告警或投放建议。</p>
-    <form aria-label="对比范围" className="space-y-4" onSubmit={(event) => { event.preventDefault(); apply(); }}>
+    <form aria-label="对比范围" className="erp-panel space-y-4" onSubmit={(event) => { event.preventDefault(); apply(); }}>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <label className="min-w-0">店铺<select className={selectClass} aria-label="店铺" value={draft.shop} onChange={(event) => update({ ...draft, shop: event.target.value })}><option value="">选择店铺</option>{draft.shop && !shops?.some((s) => String(s.id) === draft.shop) && <option value={draft.shop}>请求的店铺 {draft.shop}（待确认）</option>}{shops?.map((s) => <option key={String(s.id)} value={String(s.id)}>{s.account_name || s.shop_id || String(s.id)}</option>)}</select></label>
+        <label className="min-w-0">店铺<select className={`erp-select ${selectClass}`} aria-label="店铺" value={draft.shop} onChange={(event) => update({ ...draft, shop: event.target.value })}><option value="">选择店铺</option>{draft.shop && !shops?.some((s) => String(s.id) === draft.shop) && <option value={draft.shop}>请求的店铺 {draft.shop}（待确认）</option>}{shops?.map((s) => <option key={String(s.id)} value={String(s.id)}>{s.account_name || s.shop_id || String(s.id)}</option>)}</select></label>
         <label className="min-w-0">精确 SPU 内部编号<Input aria-label="精确 SPU 内部编号" placeholder="留空使用活动范围；如 1001,1002" value={draft.spus} onChange={(event) => update({ ...draft, spus: event.target.value })} /></label>
-        <label className="min-w-0">比较窗口<select className={selectClass} aria-label="比较窗口" value={draft.window} onChange={(event) => update({ ...draft, window: event.target.value })}>{!['7', '3'].includes(draft.window) && <option value={draft.window}>{draft.window}（无效）</option>}<option value="7">7 天主参考</option><option value="3">3 天近期变化</option></select></label>
+        <label className="min-w-0">比较窗口<select className={`erp-select ${selectClass}`} aria-label="比较窗口" value={draft.window} onChange={(event) => update({ ...draft, window: event.target.value })}>{!['7', '3'].includes(draft.window) && <option value={draft.window}>{draft.window}（无效）</option>}<option value="7">7 天主参考</option><option value="3">3 天近期变化</option></select></label>
         <label className="min-w-0">截至日（店铺当地日）<Input aria-label="截至日（店铺当地日）" type={!draft.anchor || validDate(draft.anchor) ? 'date' : 'text'} max={dateMax} value={draft.anchor} onChange={(event) => update({ ...draft, anchor: event.target.value })} /></label>
-        <label className="min-w-0">活动范围<select className={selectClass} aria-label="活动范围" value={draft.activity} onChange={(event) => update({ ...draft, activity: event.target.value })}>{!['recent', 'all'].includes(draft.activity) && <option value={draft.activity}>{draft.activity}（无效）</option>}<option value="recent">固定近 7 天活动范围（保留无单投放）</option><option value="all">全部本店 SPU 调查</option></select></label>
-        <label className="min-w-0">每页条数<select className={selectClass} aria-label="每页条数" value={draft.limit} onChange={(event) => update({ ...draft, limit: event.target.value })}>{!['50','100','200'].includes(draft.limit) && <option value={draft.limit}>{draft.limit}</option>}{['50','100','200'].map((v) => <option key={v}>{v}</option>)}</select></label>
+        <label className="min-w-0">活动范围<select className={`erp-select ${selectClass}`} aria-label="活动范围" value={draft.activity} onChange={(event) => update({ ...draft, activity: event.target.value })}>{!['recent', 'all'].includes(draft.activity) && <option value={draft.activity}>{draft.activity}（无效）</option>}<option value="recent">固定近 7 天活动范围（保留无单投放）</option><option value="all">全部本店 SPU 调查</option></select></label>
+        <label className="min-w-0">每页条数<select className={`erp-select ${selectClass}`} aria-label="每页条数" value={draft.limit} onChange={(event) => update({ ...draft, limit: event.target.value })}>{!['50','100','200'].includes(draft.limit) && <option value={draft.limit}>{draft.limit}</option>}{['50','100','200'].map((v) => <option key={v}>{v}</option>)}</select></label>
       </div>
       <div className="flex flex-wrap gap-3"><Button type="submit" isDisabled={blocked}>应用筛选</Button><Button variant="secondary" isDisabled={blocked} onPress={() => { const next = readQuery(''); update(next); commit(next); }}>重置筛选</Button><Button variant="secondary" isDisabled={blocked || loading} onPress={() => { if (!blocked) setRefresh((v) => v + 1); }}>刷新 / 重试</Button></div>
     </form>
@@ -132,7 +134,7 @@ export default function SpuProfitDeterioration({ bootstrap }: PageProps) {
     {loading && <p role="status">正在加载当前范围…</p>}
     {!loading && !data && <p>当前条件未取得可用结果；不展示旧条件数据。</p>}
     {data && applied && <>
-      <section aria-label="已应用对比范围" className="space-y-2">
+      <section aria-label="已应用对比范围" className="erp-panel space-y-2">
         <p>{data.meta.scopeDescription}{data.meta.activityBypassed ? '；精确调查：活动排除不生效。' : ''}</p>
         <p>店铺 {data.meta.shopPk} · {data.meta.windowDays} 天 · 截至日 {data.meta.anchorDate}</p>
         <p>本期 {data.meta.periods.current.startDate} 至 {data.meta.periods.current.endDate}；上期 {data.meta.periods.previous.startDate} 至 {data.meta.periods.previous.endDate}（含首尾，{data.meta.reportingTimezone}）</p>
@@ -147,7 +149,7 @@ export default function SpuProfitDeterioration({ bootstrap }: PageProps) {
       </section>
       <CoverageDetails coverage={data.meta.coverage} />
       {data.items.length > 0 ? <ComparisonTable root={bootstrap.rootPath} data={data} /> : <p role="status">当前条件无匹配 SPU，请调整范围或日期；不代表全店正常或无风险。</p>}
-      <nav aria-label="对比分页" className="flex flex-wrap items-center gap-3">
+      <nav aria-label="对比分页" className="erp-pagination">
         <Button variant="secondary" isDisabled={blocked || loading || Number(applied.offset) === 0} onPress={() => page(Math.max(0, Number(applied.offset) - Number(applied.limit)))}>上一页</Button>
         <span>第 {Math.floor(Number(applied.offset) / Number(applied.limit)) + 1} 页 · {data.total} 条对比记录（不是订单数）</span>
         <Button variant="secondary" isDisabled={blocked || loading || Number(applied.offset) + Number(applied.limit) >= data.total} onPress={() => page(Number(applied.offset) + Number(applied.limit))}>下一页</Button>

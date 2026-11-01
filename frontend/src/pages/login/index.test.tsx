@@ -17,6 +17,23 @@ function submit() { fireEvent.submit(screen.getByRole('form', { name: '登录表
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('login content', () => {
+  it('toggles password visibility without submitting, changing the draft or probing the session', async () => {
+    const fetcher = mockApi(async () => json({ ok: true, ...identity }));
+    render(<Login bootstrap={bootstrap} />);
+    await fill();
+    const password = screen.getByLabelText('密码', { exact: true });
+    const user = userEvent.setup();
+    expect(password).toHaveAttribute('type', 'password');
+    await user.click(screen.getByRole('button', { name: '显示密码' }));
+    expect(password).toHaveAttribute('type', 'text');
+    expect(password).toHaveValue('TEST_password');
+    expect(screen.getByRole('button', { name: '隐藏密码' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: '隐藏密码' }));
+    expect(password).toHaveAttribute('type', 'password');
+    expect(password).toHaveValue('TEST_password');
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(leaveLogin).not.toHaveBeenCalled();
+  });
   it.each(['', '/tts'])('does no initial probe and submits once with shared same-origin marker and exact canonical next at root %s', async (rootPath) => {
     let release!: (value: Response) => void;
     const fetcher = mockApi(() => new Promise((resolve) => { release = resolve; }));

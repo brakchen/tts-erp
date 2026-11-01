@@ -310,6 +310,15 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 | `GET /v2/commerce/sales-orders/{order_pk}` | — | one order (internal id, **not** the TikTok `order_id`); 404 if unknown |
 | `GET /v2/commerce/sales-orders/{order_pk}/lines` | — | order lines: `{id, order_pk, external_line_id, spu_pk, sku_pk, quantity, unit_price}` |
 
+商品列表、商品详情和缺成本候选中的 `image_url` 为可选展示地址。没有镜像或当前部署缺少
+MinIO 配置时返回 `null`，商品、成本和分页查询继续正常返回；上传接口仍要求完整的
+MinIO 配置。`image_url=null` 不能用于推断缺图事实，候选的 `missing_photo` 仍由服务端
+源数据判断。数据库及其他未预期错误不会转换成空列表。
+
+Invalid MinIO endpoint settings and signing expiry outside 1–604800 seconds are also
+configuration errors: optional image URLs become `null`, while upload operations still
+require valid storage settings. Other query and processing errors remain failures.
+
 ### Reporting (`/v2/reporting/*`)
 
 | Endpoint | Role | Query params / body |
@@ -454,9 +463,10 @@ page:users"}`。API key 凭证（admin 档）也可调用，不受页面权限�
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `POST /v2/admin/shops/register` | **readwrite** | 人工注册店铺。body 可含 `service_id/app_key/app_secret`；App Key/Secret 必须成对且 service_id 必填，同一事务写入 `integration.tiktok_app_credentials`，Secret 只加密存储、不返回。注册幂等。 |
-| `GET /v2/admin/shops/unregistered` | **readwrite** | 列出在 `plugin.*` 插件数据里出现、但 `commerce.shops` 无行的 shop_id → `{candidates: [{shop_id, sources}]}`；注册页的候选清单。 |
-| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 更新店铺元信息或原子配置 `service_id/app_key/app_secret`。App pair 按 service_id 共享并加密；App Key/Secret 必须成对。只改 service_id 时目标 App pair 必须已存在（否则 409），防止生成必然失败的授权链接。`credential_id`/`status` 不可修改。 |
+| `POST /v2/admin/shops/register` | **readwrite** | 手工补录元数据；可配置本店 Service ID、App Key/Secret，秘密加密保存。未授权店铺仅在管理视图出现。 |
+| `POST /v2/plugin/shops/discover` | **readwrite** | 登记当前绑定店铺；`sellerId` 即 `shop_id`，唯一键 upsert，仅补齐空名称/区域；需对应 seller scope。 |
+| `GET /v2/plugin/shops/{shop_id}` | **readwrite** | 返回本店插件采集所需元数据；允许未授权店铺，需对应 seller scope。 |
+| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 修改开店日期或本店 App 配置；名称和区域只读。App Key/Secret 成对更新；空白保留，Service 变更需有本店完整配置。 |
 
 ### TikTok video publishing (`/v2/video-publish/*`)
 
@@ -1097,3 +1107,11 @@ proxies), `GET /orders/{id}/*`, `GET /finance/*`, `POST /sync/*`,
 `POST /cancellations/search`, `GET /miaoshou/{domain}/{method}`,
 `POST /miaoshou/callback/*` (dispatcher code remains in
 `miaoshou/callbacks/` but no route is mounted in the v2 app).
+
+### 店铺接入管理
+
+`GET /v2/commerce/channel-accounts?view=management` 展示全部登记店铺；默认列表及业务查询仅展示已授权店铺。管理列表支持 `q/source/app_state/auth_state/limit/offset`，总数见 `X-Total-Count`。
+
+`GET /v2/oauth/tiktok/authorize?shop_pk=...&format=json` 为指定店铺生成一次性链接。回调只接受唯一且匹配目标的店铺，并检查本店 App 配置版本；成功后自动进入下一轮定时同步。
+
+数据库升级到 `0072_shop_app_credentials` 后启用新版本。旧配置保留为未归属记录，每店复制独立配置；不会在运行时借用其他店铺的密钥。历史候选补录使用 `python scripts/backfill_discovered_shops.py` 预览，确认后加 `--apply`。

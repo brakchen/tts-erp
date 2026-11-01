@@ -161,3 +161,8 @@ curl -sS -H "X-API-Key: $KEY" \
 
 The three together cover both forward and reverse lookup patterns
 without forcing callers to dump the table.
+
+
+## 店铺接入管理更新（2026-10-31）
+
+该业务查询入口仅返回已授权店铺；未授权店铺返回 404。插件在授权前读取本店元数据请使用 `GET /v2/plugin/shops/{shop_id}`，需要 readwrite 及对应 seller scope。店铺管理列表/详情使用 `view=management` 查看全部登记记录。名称、区域不再通过 PATCH 编辑，由插件重新同步补齐空值。

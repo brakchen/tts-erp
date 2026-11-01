@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
@@ -83,7 +84,8 @@ export default function AdDaily({ bootstrap }: PageProps) {
     const next: Query = { ...query, sort, order: query.sort === sort ? query.order === 'asc' ? 'desc' : 'asc' : naturalOrder(sort), offset: 0 };
     setQuery(next); setDraft((draft) => ({ ...draft, sort: next.sort, order: next.order }));
   }
-  return <div className="min-w-0 space-y-6">
+  return <div className="erp-page">
+    <PageIntro eyebrow="ADVERTISING INSIGHTS" title="看清每一份广告投入" description="按账户、日期与商品筛选，结合服务端汇总评估广告表现。" />
     <p>检查插件采集的原始广告事实。金额保持 TikTok 广告源币种 USD，不套用盈利看板汇率。</p>
     <p aria-label="数据日期范围">数据日期范围：{options ? options.min_day && options.max_day ? `${options.min_day} — ${options.max_day}` : '暂无广告日数据' : '—'}</p>
     <Filters draft={draft} setDraft={(next) => { setDraft(next); setValidation(''); }} options={options} disabled={disabled} onApply={apply} onReset={() => { if (!disabled) { setValidation(''); setQuery({ ...readQuery(''), sort: query.sort, order: query.order }); } }} />
@@ -94,7 +96,7 @@ export default function AdDaily({ bootstrap }: PageProps) {
     {blocked && <p role="status">服务端等待期内，读取暂不可用。等待结束后请手动重试。</p>}
     {loading && <p role="status">正在读取广告明细…</p>}
     {data && <>
-      <section aria-label="全部筛选结果汇总" className="space-y-3 rounded-xl border p-4">
+      <section aria-label="全部筛选结果汇总" className="erp-panel space-y-3 rounded-xl border p-4">
         <h2 className="text-lg font-semibold">全部筛选结果汇总</h2><p>服务端汇总全部匹配行，不仅是当前页；源币种 USD。</p>
         <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">{[
           ['记录行数', displayDecimal(data.summary.row_count)], ['消耗 USD', displayDecimal(data.summary.spend)],
@@ -103,7 +105,7 @@ export default function AdDaily({ bootstrap }: PageProps) {
       </section>
       <AdTable items={data.items} query={query} disabled={disabled} onSort={sort} />
       {data.items.length === 0 && <p role="status">暂无广告日数据</p>}
-      <nav aria-label="广告明细分页" className="flex flex-wrap items-center gap-3">
+      <nav aria-label="广告明细分页" className="erp-pagination">
         <Button variant="secondary" isDisabled={disabled || query.offset === 0} onPress={() => setQuery((q) => ({ ...q, offset: Math.max(0, q.offset - q.limit) }))}>上一页</Button>
         <span>{data.total === 0 || data.items.length === 0 ? 0 : query.offset + 1}–{data.items.length === 0 ? 0 : query.offset + data.items.length} / {displayDecimal(data.total)} 行</span>
         <Button variant="secondary" isDisabled={disabled || query.offset + query.limit >= data.total} onPress={() => setQuery((q) => ({ ...q, offset: q.offset + q.limit }))}>下一页</Button>

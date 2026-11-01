@@ -16,31 +16,31 @@ function Row({ item }: { item: AdRow }) {
   const [expanded, setExpanded] = useState(false);
   const detailId = `ad-detail-${item.id}`;
   return <Fragment>
-    <tr className="border-b align-top">
-      <td className="p-3 whitespace-nowrap">{item.day ?? '—'}</td>
-      <td className="p-3"><strong>{item.shop_name ?? item.seller_id}</strong><div className="break-all">shop {item.seller_id}</div><div className="break-all">adv {item.advertiser_id}</div></td>
-      <td className="p-3"><CopyId value={item.campaign_id} kind="计划" /></td>
-      <td className="p-3"><strong>{item.product_title}</strong><CopyId value={item.product_id} kind="商品" /></td>
-      <td className="p-3 text-right whitespace-nowrap">{displayDecimal(item.mixed_real_cost)}</td>
-      <td className="p-3 text-right">{displayDecimal(item.onsite_roi2_shopping_sku)}</td>
-      <td className="p-3 text-right whitespace-nowrap">{displayDecimal(item.onsite_roi2_shopping_value)}</td>
-      <td className="p-3 text-right whitespace-nowrap">{displayRoi(item.onsite_mixed_real_roi2_shopping)}</td>
-      <td className="p-3">{item.updated_at ?? '—'}</td>
-      <td className="p-3"><Button size="sm" variant="secondary" aria-expanded={expanded} aria-controls={detailId} aria-label={`更多详情 ${item.campaign_id}`} onPress={() => setExpanded(!expanded)}>{expanded ? '收起' : '更多'}</Button></td>
+    <tr className="border-b align-top erp-table-row">
+      <td className="p-3 whitespace-nowrap erp-table-cell">{item.day ?? '—'}</td>
+      <td className="p-3 erp-table-cell"><strong>{item.shop_name ?? item.seller_id}</strong><div className="break-all">shop {item.seller_id}</div><div className="break-all">adv {item.advertiser_id}</div></td>
+      <td className="p-3 erp-table-cell"><CopyId value={item.campaign_id} kind="计划" /></td>
+      <td className="p-3 erp-table-cell"><strong>{item.product_title}</strong><CopyId value={item.product_id} kind="商品" /></td>
+      <td className="p-3 text-right whitespace-nowrap erp-table-cell erp-table-number">{displayDecimal(item.mixed_real_cost)}</td>
+      <td className="p-3 text-right erp-table-cell erp-table-number">{displayDecimal(item.onsite_roi2_shopping_sku)}</td>
+      <td className="p-3 text-right whitespace-nowrap erp-table-cell erp-table-number">{displayDecimal(item.onsite_roi2_shopping_value)}</td>
+      <td className="p-3 text-right whitespace-nowrap erp-table-cell erp-table-number">{displayRoi(item.onsite_mixed_real_roi2_shopping)}</td>
+      <td className="p-3 erp-table-cell">{item.updated_at ?? '—'}</td>
+      <td className="p-3 erp-table-cell"><Button className="erp-table-action" size="sm" variant="secondary" aria-expanded={expanded} aria-controls={detailId} aria-label={`更多详情 ${item.campaign_id}`} onPress={() => setExpanded(!expanded)}>{expanded ? '收起' : '更多'}</Button></td>
     </tr>
-    {expanded && <tr><td colSpan={10} className="p-4"><section id={detailId} aria-label={`记录详情 ${item.campaign_id}`} className="space-y-3">
+    {expanded && <tr className="erp-table-row"><td colSpan={10} className="p-4 erp-table-cell"><section id={detailId} aria-label={`记录详情 ${item.campaign_id}`} className="erp-panel space-y-3">
       <dl className="grid gap-2 sm:grid-cols-2"><div><dt>数据接口</dt><dd className="break-all">{item.endpoint}</dd></div><div><dt>记录 ID</dt><dd>{item.id}</dd></div><div><dt>首次写入</dt><dd>{item.created_at ?? '—'}</dd></div><div><dt>最近更新</dt><dd>{item.updated_at ?? '—'}</dd></div></dl>
       <h3 className="font-semibold">额外采集指标</h3><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(item.metrics_extra, null, 2)}</pre>
     </section></td></tr>}
   </Fragment>;
 }
 export default function AdTable({ items, query, disabled, onSort }: { items: AdRow[]; query: Query; disabled: boolean; onSort: (sort: Sort) => void }) {
-  return <div className="max-w-full overflow-x-auto" role="region" aria-label="广告明细表格滚动区域" tabIndex={0}>
-    <table aria-label="广告日明细" className="w-full text-sm">
-      <thead><tr>{sorts.map((key, index) => <th key={key} scope="col" className="p-3 text-left whitespace-nowrap" aria-sort={query.sort === key ? query.order === 'asc' ? 'ascending' : 'descending' : 'none'}>
-        <Button size="sm" variant="ghost" isDisabled={disabled} aria-label={`排序：${columnLabels[index]}`} onPress={() => onSort(key)}>{columnLabels[index]}{query.sort === key ? query.order === 'asc' ? ' ↑' : ' ↓' : ''}</Button>
-      </th>)}<th scope="col">详情</th></tr></thead>
-      <tbody>{items.map((item) => <Row key={item.id} item={item} />)}</tbody>
+  return <div className="erp-table erp-table-scroll" role="region" aria-label="广告明细表格滚动区域" tabIndex={0}>
+    <table aria-label="广告日明细" className="w-full text-sm erp-table-content">
+      <thead className="erp-table-head"><tr className="erp-table-row">{sorts.map((key, index) => <th key={key} scope="col" className="p-3 text-left whitespace-nowrap erp-table-column" aria-sort={query.sort === key ? query.order === 'asc' ? 'ascending' : 'descending' : 'none'}>
+        <Button className="erp-table-action" size="sm" variant="ghost" isDisabled={disabled} aria-label={`排序：${columnLabels[index]}`} onPress={() => onSort(key)}>{columnLabels[index]}{query.sort === key ? query.order === 'asc' ? ' ↑' : ' ↓' : ''}</Button>
+      </th>)}<th className="erp-table-column" scope="col">详情</th></tr></thead>
+      <tbody className="erp-table-body">{items.map((item) => <Row key={item.id} item={item} />)}</tbody>
     </table>
   </div>;
 }

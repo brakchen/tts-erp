@@ -1,29 +1,8 @@
-"""/v2/oauth/tiktok/* — TikTok Shop seller authorization (new-shop onboarding).
+"""Targeted TikTok Shop authorization and public callback.
 
-The front half of the OAuth lifecycle that v1's standalone
-``oauth-receiver`` used to own (its ``/authorize`` + ``/callback``);
-v2 retires that service, so the redirect target moves here.
-
-Routes:
-- ``GET /v2/oauth/tiktok/authorize`` — readwrite or above. Mints a
-  single-use CSRF ``state`` and returns the TikTok authorization link.
-  Open the link in a browser, sign in as the seller, approve.
-- ``GET /v2/oauth/tiktok/callback`` — **public** (TikTok redirects the
-  seller's browser here with ``?code=...&state=...``). Validates state,
-  exchanges the auth_code, and bootstraps the ``integration.credentials``
-  + ``commerce.shops`` rows. Renders an HTML result page by default;
-  pass ``?format=json`` for machine-readable output.
-
-The Redirect URL registered in Partner Center must point at the public
-form of ``/callback`` with the external prefix, no port — e.g.
-``http://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`` (nginx only
-proxies ``/tts/*`` to :9877; the prefix comes from
-``TTS_ERP_EXTERNAL_PREFIX``, currently ``/tts``).
-
-Contract + setup: ``docs/api/tiktok-shop-oauth.md``. Orchestration
-logic lives in :mod:`tts_erp_v2.proxy.tiktok_oauth` (kept router-free
-so it is unit-testable without HTTP); outbound token calls live in
-:mod:`tts_erp_v2.proxy.tiktok_auth`.
+The operator starts with an existing shop_pk and its own App configuration.
+A successful callback updates only that shop; the worker picks it up on its
+next normal scheduling tick.
 """
 
 from __future__ import annotations
@@ -42,11 +21,15 @@ from fastapi import (
     status,
 )
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.encoders import jsonable_encoder
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from tts_erp_v2.db.models.commerce import ChannelAccount
 
 from tts_erp_v2.api.deps import get_session, require_role_at_least
 from tts_erp_v2.proxy.errors import ProxyError, SigningError, UpstreamHttpError
-from tts_erp_v2.proxy.tiktok_auth import build_authorize_url, resolve_service_id
+from tts_erp_v2.proxy.tiktok_auth import build_authorize_url
 from tts_erp_v2.proxy.tiktok_oauth import (
     OAuthFlowError,
     complete_tiktok_authorization,
@@ -118,7 +101,7 @@ def _err_page(title: str, detail: str) -> HTMLResponse:
 def _json(*, ok: bool, http_status: int, **fields: Any) -> JSONResponse:
     return JSONResponse(
         status_code=http_status,
-        content={"ok": ok, **fields},
+        content=jsonable_encoder({"ok": ok, **fields}),
     )
 
 
@@ -133,44 +116,33 @@ def authorize(
         default=None,
         description="(display hint only) where the operator should land after the flow.",
     ),
-    service_id: str | None = Query(
-        default=None,
-        description="TikTok Partner Center service_id (App & Service 页面)。"
-            "选填；不传时 fallback 到环境变量 TIKTOK_SERVICE_ID。",
-    ),
+    shop_pk: int = Query(..., gt=0),
 ):
-    """Mint a single-use CSRF state and build the TikTok authorization link.
-
-    **Readwrite or above.** Returns the ``authorize_url`` to open in a
-    browser (as the seller) plus the raw ``state`` for diagnostics.
-    Generating the link is harmless (no upstream call, no destructive
-    DB write — just a single-use CSRF row); only the resulting callback
-    mutates ``integration.credentials`` + ``commerce.shops``, and that
-    surface stays under the public OAuth handshake.
-
-    ``service_id`` 选填：不传时 fallback 到环境变量
-    ``TIKTOK_SERVICE_ID``。解析后的有效值始终写入 OAuthState.extra；生成
-    链接前必须存在与该 service_id 配套的 App Key/App Secret。
-    """
+    """Create a single-use authorization link for this shop's own App."""
     require_role_at_least(request, "readwrite")
+    account = sess.execute(select(ChannelAccount).where(
+        ChannelAccount.id == shop_pk, ChannelAccount.platform == "tiktok",
+    )).scalar_one_or_none()
+    if account is None:
+        raise HTTPException(404, "Shop not found")
+    if not account.service_id:
+        raise HTTPException(422, "Configure this shop's Service ID and App credentials first")
+    service_id = account.service_id
+    shop_id = account.shop_id
     try:
-        effective_service_id = resolve_service_id(service_id)
-        resolve_tiktok_app_credentials(
-            sess,
-            service_id=effective_service_id,
+        app = resolve_tiktok_app_credentials(
+            sess, shop_pk=account.id, service_id=service_id,
         )
-        raw_state, expires_at = register_state(
-            sess,
-            extra={"service_id": effective_service_id},
-        )
-        authorize_url = build_authorize_url(
-            state=raw_state,
-            service_id=effective_service_id,
-        )
+        raw_state, expires_at = register_state(sess, extra={
+            "expected_shop_pk": account.id,
+            "expected_shop_id": shop_id,
+            "service_id": service_id,
+            "app_revision": app.revision,
+            "created_by": request.scope.get("api_key_hash"),
+        })
+        authorize_url = build_authorize_url(state=raw_state, service_id=service_id)
     except SigningError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
-        ) from exc
+        raise HTTPException(422, str(exc)) from exc
 
     log.info(
         "oauth authorize: state registered for redirect=%s expires=%s",
@@ -179,6 +151,8 @@ def authorize(
     )
     payload = {
         "authorize_url": authorize_url,
+        "shop_id": shop_id,
+        "service_id": service_id,
         "state": raw_state,
         "state_expires_at": expires_at.isoformat(),
         "hint": (

@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Input, Label, ListBox, Modal, Select, Table, TextField } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
@@ -94,8 +95,9 @@ export default function InterceptRequests({ bootstrap }: PageProps) {
 
   const total = list.data?.total;
   const request = detail.data;
-  return <div className="space-y-4">
-    <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => {
+  return <div className="erp-page">
+    <PageIntro eyebrow="REQUEST EXPLORER" title="追踪每一次采集请求" description="筛选请求记录，查看响应与处理详情，定位采集问题。" />
+    <form className="erp-filters flex flex-wrap items-end gap-3" onSubmit={(event) => {
       event.preventDefault();
       if (list.retryBlocked) return;
       setFilters(Object.fromEntries(Object.entries(draft).map(([key, value]) => [key, value.trim()])) as Filters);
@@ -121,13 +123,13 @@ export default function InterceptRequests({ bootstrap }: PageProps) {
     <p aria-live="polite">{total == null ? '共 — 条' : `共 ${total} 条`}</p>
     {list.loading && <p role="status">加载中…</p>}
     {list.error && <Alert status="danger"><Alert.Content><Alert.Title>加载记录失败</Alert.Title><Alert.Description>{list.error}</Alert.Description><Button isDisabled={list.retryBlocked} onPress={() => setRefresh((value) => value + 1)}>重试列表</Button></Alert.Content></Alert>}
-    {list.data && <Table><Table.ScrollContainer><Table.Content aria-label="拦截记录">
-      <Table.Header>{['时间', '方法', '域名', '路径', '状态', '耗时', '白名单', '详情'].map((label, index) => <Table.Column key={label} isRowHeader={index === 0}>{label}</Table.Column>)}</Table.Header>
-      <Table.Body renderEmptyState={() => '暂无记录'}>{list.data.requests.map((item) => <Table.Row key={item.request_id} id={item.request_id} onAction={() => { setDetail({ loading: true }); setSelected(item.request_id); }}>
-        <Table.Cell>{formatTime(item.captured_at)}</Table.Cell><Table.Cell>{item.method}</Table.Cell>
-        <Table.Cell><span className="break-all">{item.endpoint_host}</span></Table.Cell><Table.Cell><span className="break-all">{item.endpoint_path}</span></Table.Cell>
-        <Table.Cell>{item.response_status ?? '—'}</Table.Cell><Table.Cell>{item.duration_ms == null ? '—' : `${item.duration_ms}ms`}</Table.Cell>
-        <Table.Cell>{item.is_whitelisted ? '是' : '否'}</Table.Cell><Table.Cell focusMode="child"><Button size="sm" onPress={() => { setDetail({ loading: true }); setSelected(item.request_id); }}>查看详情</Button></Table.Cell>
+    {list.data && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label="数据表格横向滚动区域" tabIndex={0}><Table.Content className="erp-table-content" aria-label="拦截记录">
+      <Table.Header className="erp-table-head">{['时间', '方法', '域名', '路径', '状态', '耗时', '白名单', '详情'].map((label, index) => <Table.Column className="erp-table-column" key={label} isRowHeader={index === 0}>{label}</Table.Column>)}</Table.Header>
+      <Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'暂无记录'}</div>}>{list.data.requests.map((item) => <Table.Row className="erp-table-row" key={item.request_id} id={item.request_id} onAction={() => { setDetail({ loading: true }); setSelected(item.request_id); }}>
+        <Table.Cell className="erp-table-cell">{formatTime(item.captured_at)}</Table.Cell><Table.Cell className="erp-table-cell">{item.method}</Table.Cell>
+        <Table.Cell className="erp-table-cell"><span className="break-all">{item.endpoint_host}</span></Table.Cell><Table.Cell className="erp-table-cell"><span className="break-all">{item.endpoint_path}</span></Table.Cell>
+        <Table.Cell className="erp-table-cell">{item.response_status ?? '—'}</Table.Cell><Table.Cell className="erp-table-cell">{item.duration_ms == null ? '—' : `${item.duration_ms}ms`}</Table.Cell>
+        <Table.Cell className="erp-table-cell">{item.is_whitelisted ? '是' : '否'}</Table.Cell><Table.Cell className="erp-table-cell" focusMode="child"><Button className="erp-table-action" variant="secondary" size="sm" onPress={() => { setDetail({ loading: true }); setSelected(item.request_id); }}>查看详情</Button></Table.Cell>
       </Table.Row>)}</Table.Body>
     </Table.Content></Table.ScrollContainer></Table>}
     <div className="flex flex-wrap items-center gap-4">

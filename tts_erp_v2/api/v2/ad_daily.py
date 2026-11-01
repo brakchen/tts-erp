@@ -19,14 +19,21 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
 from tts_erp_v2.api.v2 import frontend_pages
 from tts_erp_v2.api.v2.pages import _sidebar as _shared_sidebar
 from tts_erp_v2.api.v2.pages import _sidebar_css as _shared_sidebar_css
 
 router = APIRouter(tags=["ad-daily"])
 
-_FILTER_SQL = """
-WHERE (CAST(:seller_id AS text) IS NULL OR d.seller_id = :seller_id)
+_AUTHORIZED_SELLER = (
+    "EXISTS (SELECT 1 FROM commerce.shops visible_shop "
+    "WHERE visible_shop.platform = 'tiktok' AND visible_shop.shop_id = d.seller_id AND "
+    + authorized_shop_clause("visible_shop") + ")"
+)
+
+_FILTER_SQL = "WHERE " + _AUTHORIZED_SELLER + """
+  AND (CAST(:seller_id AS text) IS NULL OR d.seller_id = :seller_id)
   AND (CAST(:advertiser_id AS text) IS NULL OR d.advertiser_id = :advertiser_id)
   AND (CAST(:endpoint AS text) IS NULL OR d.endpoint = :endpoint)
   AND (CAST(:day_from AS date) IS NULL OR d.day >= :day_from)
@@ -145,6 +152,7 @@ SELECT
 FROM plugin.ad_daily AS d
 LEFT JOIN commerce.shops AS s
   ON s.platform = 'tiktok' AND s.shop_id = d.seller_id
+WHERE """ + _AUTHORIZED_SELLER + """
 GROUP BY d.seller_id
 ORDER BY COALESCE(MAX(s.account_name), d.seller_id), d.seller_id
 """
@@ -154,6 +162,7 @@ _STMT_OPTION_ADVERTISERS = text(
     """
 SELECT d.seller_id, d.advertiser_id, COUNT(*) AS row_count
 FROM plugin.ad_daily AS d
+WHERE """ + _AUTHORIZED_SELLER + """
 GROUP BY d.seller_id, d.advertiser_id
 ORDER BY d.seller_id, d.advertiser_id
 """
@@ -163,6 +172,7 @@ _STMT_OPTION_ENDPOINTS = text(
     """
 SELECT d.endpoint, COUNT(*) AS row_count
 FROM plugin.ad_daily AS d
+WHERE """ + _AUTHORIZED_SELLER + """
 GROUP BY d.endpoint
 ORDER BY d.endpoint
 """
@@ -171,7 +181,8 @@ ORDER BY d.endpoint
 _STMT_OPTION_RANGE = text(
     """
 SELECT MIN(day) AS min_day, MAX(day) AS max_day
-FROM plugin.ad_daily
+FROM plugin.ad_daily AS d
+WHERE """ + _AUTHORIZED_SELLER + """
 """
 )
 
@@ -313,6 +324,8 @@ def list_ad_daily(
     """
     if day_from is not None and day_to is not None and day_from > day_to:
         raise HTTPException(status_code=422, detail="day_from must be <= day_to")
+    if seller_id is not None:
+        require_authorized_shop(sess, shop_id=seller_id)
 
     params = _filters(
         seller_id=seller_id,

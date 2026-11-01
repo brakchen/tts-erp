@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
 
 from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     FormulaInput,
@@ -1367,6 +1368,7 @@ def _shop_reporting_timezone(
         return UTC
 
     if shop_pk is not None:
+        require_authorized_shop(sess, shop_pk=shop_pk)
         row = sess.execute(
             text("SELECT region FROM commerce.shops WHERE id = :shop_pk"),
             {"shop_pk": shop_pk},
@@ -1375,7 +1377,8 @@ def _shop_reporting_timezone(
         row = sess.execute(
             text(
                 "SELECT s.region FROM commerce.products_spu p "
-                "JOIN commerce.shops s ON s.id = p.shop_pk WHERE p.id = :spu_pk"
+                "JOIN commerce.shops s ON s.id = p.shop_pk WHERE p.id = :spu_pk AND "
+                + authorized_shop_clause("s")
             ),
             {"spu_pk": only_spu_pk},
         ).first()
@@ -1435,7 +1438,10 @@ def _ad_window_dates(
 
 def _spu_pk_exists(sess: Session, spu_pk: int) -> bool:
     row = sess.execute(
-        text("SELECT 1 FROM commerce.products_spu WHERE id = :pk"),
+        text(
+            "SELECT 1 FROM commerce.products_spu p JOIN commerce.shops s ON s.id = p.shop_pk "
+            "WHERE p.id = :pk AND " + authorized_shop_clause("s")
+        ),
         {"pk": spu_pk},
     ).first()
     return row is not None

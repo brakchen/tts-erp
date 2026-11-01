@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause
 
 from tts_erp_v2.api.deps import (
     get_session,
@@ -115,7 +116,8 @@ class ImageOut(BaseModel):
 
 
 SQL_VERIFY_ACCOUNT = (
-    "SELECT id FROM commerce.shops WHERE id = :acct"
+    "SELECT id FROM commerce.shops WHERE id = :acct AND "
+    + authorized_shop_clause()
 )
 SQL_VERIFY_PRODUCT = (
     "SELECT id FROM commerce.products_spu "
@@ -133,7 +135,8 @@ SQL_INSERT_IMAGE = (
 SQL_GET_IMAGE_FOR_CONFIRM = (
     "SELECT id, shop_pk, spu_pk, object_key, "
     "       filename, content_type, size_bytes, status, deleted_at "
-    "FROM procurement.spu_images WHERE id = :id"
+    "FROM procurement.spu_images WHERE id = :id AND shop_pk IN ("
+    "SELECT id FROM commerce.shops WHERE " + authorized_shop_clause() + ")"
 )
 SQL_MARK_READY = (
     "UPDATE procurement.spu_images "
@@ -151,14 +154,16 @@ SQL_LIST_READY_IMAGES = (
     "       si.uploaded_at, si.uploaded_by_prefix "
     "FROM procurement.spu_images si "
     "JOIN commerce.products_spu cp ON cp.id = si.spu_pk "
-    "WHERE si.deleted_at IS NULL "
+    "WHERE si.deleted_at IS NULL AND cp.shop_pk IN ("
+    "SELECT id FROM commerce.shops WHERE " + authorized_shop_clause() + ") "
     "AND si.status = 'ready' "
     "AND (CAST(:cp_id AS bigint) IS NULL OR si.spu_pk = :cp_id) "
     "ORDER BY si.uploaded_at DESC LIMIT :limit OFFSET :offset"
 )
 SQL_SOFT_DELETE = (
     "UPDATE procurement.spu_images SET deleted_at = now() "
-    "WHERE id = :id AND deleted_at IS NULL RETURNING object_key"
+    "WHERE id = :id AND deleted_at IS NULL AND shop_pk IN ("
+    "SELECT id FROM commerce.shops WHERE " + authorized_shop_clause() + ") RETURNING object_key"
 )
 
 

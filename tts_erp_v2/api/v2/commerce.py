@@ -13,14 +13,15 @@ values from request inputs flow only through the params dict.
 
 from __future__ import annotations
 
-import os
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
+from tts_erp_v2.commerce.shop_metadata import plugin_sources
 from tts_erp_v2.api.query_params import parse_spu_ids
 from tts_erp_v2.api.schemas import (
     ChannelAccountOut,
@@ -30,7 +31,7 @@ from tts_erp_v2.api.schemas import (
     SalesOrderLineOut,
     SalesOrderOut,
 )
-from tts_erp_v2.storage.minio_client import MinioClient
+from tts_erp_v2.storage.minio_client import MinioClient, MinioConfigError
 
 router = APIRouter(prefix="/v2/commerce", tags=["commerce"])
 
@@ -49,7 +50,13 @@ def _resolve_mirror_url(mirror_object_key: str | None) -> str | None:
         return None
     global _minio_client_singleton
     if _minio_client_singleton is None:
-        _minio_client_singleton = MinioClient.from_env()
+        try:
+            _minio_client_singleton = MinioClient.from_env()
+        except MinioConfigError:
+            # Images are optional in this read DTO. A local analytics-only
+            # deployment must still return catalogue/cost facts without MinIO.
+            # Uploads keep their strict configuration contract.
+            return None
     client = _minio_client_singleton
     public_url = client.public_url_or_none(mirror_object_key)
     if public_url is not None:
@@ -59,37 +66,49 @@ def _resolve_mirror_url(mirror_object_key: str | None) -> str | None:
 
 
 # --- SQL constants (no interpolation) ------------------------------------
+_APP_CONFIGURED = (
+    "EXISTS (SELECT 1 FROM integration.tiktok_app_credentials tac "
+    "WHERE tac.shop_pk = commerce.shops.id AND tac.service_id = commerce.shops.service_id)"
+)
+_AUTH_STATE = (
+    "CASE WHEN credential_id IS NULL THEN 'unauthorized' "
+    "WHEN " + authorized_shop_clause() + " THEN 'authorized' "
+    "WHEN EXISTS (SELECT 1 FROM integration.credentials c WHERE c.id = credential_id "
+    "AND c.provider = 'tiktok' AND c.external_account_id = commerce.shops.shop_id) "
+    "THEN 'reauthorize' ELSE 'unknown' END"
+)
+_CHANNEL_FIELDS = (
+    "id, platform, shop_id, account_name, region, shop_code, discovered_at, plugin_metadata, "
+    "seller_type, status, synced_at, opened_date, credential_id, service_id, "
+    + _APP_CONFIGURED + " AS app_credentials_configured, " + _AUTH_STATE + " AS auth_state "
+)
+_CHANNEL_FILTERS = (
+    "(CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text)) "
+    "AND (CAST(:management AS boolean) OR " + authorized_shop_clause() + ") "
+    "AND (CAST(:q AS text) IS NULL OR shop_id ILIKE '%' || :q || '%' "
+    "OR COALESCE(account_name, '') ILIKE '%' || :q || '%' "
+    "OR COALESCE(shop_code, '') ILIKE '%' || :q || '%') "
+    "AND (CAST(:source AS text) IS NULL OR (plugin_metadata -> 'plugins') ? CAST(:source AS text)) "
+    "AND (CAST(:app_state AS text) IS NULL OR "
+    "(CASE WHEN " + _APP_CONFIGURED + " THEN 'configured' ELSE 'unconfigured' END) = :app_state) "
+    "AND (CAST(:auth_state AS text) IS NULL OR (" + _AUTH_STATE + ") = :auth_state)"
+)
 SQL_LIST_CHANNEL_ACCOUNTS = (
-    "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date, credential_id, service_id, "
-    "EXISTS (SELECT 1 FROM integration.tiktok_app_credentials tac "
-    "        WHERE tac.service_id = commerce.shops.service_id) "
-    "  AS app_credentials_configured "
-    "FROM commerce.shops "
-    "WHERE (CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text)) "
-    "ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
+    "SELECT " + _CHANNEL_FIELDS + "FROM commerce.shops WHERE " + _CHANNEL_FILTERS +
+    " ORDER BY id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
-SQL_COUNT_CHANNEL_ACCOUNTS = (
-    "SELECT COUNT(*) AS n FROM commerce.shops "
-    "WHERE (CAST(:platform AS text) IS NULL OR platform = CAST(:platform AS text))"
-)
-SQL_GET_CHANNEL_ACCOUNT = (
-    "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date, credential_id, service_id, "
-    "EXISTS (SELECT 1 FROM integration.tiktok_app_credentials tac "
-    "        WHERE tac.service_id = commerce.shops.service_id) "
-    "  AS app_credentials_configured "
-    "FROM commerce.shops "
-    "WHERE id = :id"
-)
+SQL_COUNT_CHANNEL_ACCOUNTS = "SELECT COUNT(*) AS n FROM commerce.shops WHERE " + _CHANNEL_FILTERS
+SQL_GET_CHANNEL_ACCOUNT = "SELECT " + _CHANNEL_FIELDS + "FROM commerce.shops WHERE id = :id"
 SQL_GET_CHANNEL_ACCOUNT_BY_EXTERNAL = (
-    "SELECT id, platform, shop_id, account_name, region, "
-    "seller_type, status, synced_at, opened_date, credential_id, service_id, "
-    "EXISTS (SELECT 1 FROM integration.tiktok_app_credentials tac "
-    "        WHERE tac.service_id = commerce.shops.service_id) "
-    "  AS app_credentials_configured "
-    "FROM commerce.shops "
-    "WHERE platform = :platform AND shop_id = :ext"
+    "SELECT " + _CHANNEL_FIELDS + "FROM commerce.shops WHERE platform = :platform AND shop_id = :ext"
+)
+_PRODUCT_SHOP_AUTH = (
+    "EXISTS (SELECT 1 FROM commerce.shops eligible_shop WHERE eligible_shop.id = cp.shop_pk AND "
+    + authorized_shop_clause("eligible_shop") + ")"
+)
+_ORDER_SHOP_AUTH = (
+    "EXISTS (SELECT 1 FROM commerce.shops eligible_shop WHERE eligible_shop.id = commerce.sales_orders.shop_pk AND "
+    + authorized_shop_clause("eligible_shop") + ")"
 )
 SQL_LIST_CHANNEL_PRODUCTS = (
     "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
@@ -106,7 +125,7 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
-    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "WHERE " + _PRODUCT_SHOP_AUTH + " AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
     "AND (CAST(:q AS text) IS NULL "
     "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
@@ -127,7 +146,7 @@ SQL_COUNT_CHANNEL_PRODUCTS = (
     "SELECT COUNT(*) AS n FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
-    "WHERE (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
+    "WHERE " + _PRODUCT_SHOP_AUTH + " AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
     "AND (CAST(:q AS text) IS NULL "
     "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
@@ -221,18 +240,19 @@ SQL_GET_CHANNEL_PRODUCT = (
     "FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
-    "WHERE cp.id = :id"
+    "WHERE cp.id = :id AND " + _PRODUCT_SHOP_AUTH
 )
 SQL_LIST_CHANNEL_VARIANTS = (
     "SELECT id, spu_pk, sku_id, seller_sku, "
     "variant_name FROM commerce.products_sku "
-    "WHERE spu_pk = :id ORDER BY id"
+    "WHERE spu_pk = :id AND EXISTS (SELECT 1 FROM commerce.products_spu cp "
+    "WHERE cp.id = commerce.products_sku.spu_pk AND " + _PRODUCT_SHOP_AUTH + ") ORDER BY id"
 )
 SQL_LIST_SALES_ORDERS = (
     "SELECT id, shop_pk, order_id, status, currency, "
     "payment_amount, total_amount, order_time, order_modify_time, "
     "paid_at FROM commerce.sales_orders "
-    "WHERE (CAST(:acct_id AS bigint) IS NULL OR shop_pk = CAST(:acct_id AS bigint)) "
+    "WHERE " + _ORDER_SHOP_AUTH + " AND (CAST(:acct_id AS bigint) IS NULL OR shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text)) "
     "ORDER BY order_modify_time DESC NULLS LAST "
     "LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
@@ -240,12 +260,14 @@ SQL_LIST_SALES_ORDERS = (
 SQL_GET_SALES_ORDER = (
     "SELECT id, shop_pk, order_id, status, currency, "
     "payment_amount, total_amount, order_time, order_modify_time, "
-    "paid_at FROM commerce.sales_orders WHERE id = :id"
+    "paid_at FROM commerce.sales_orders WHERE id = :id AND " + _ORDER_SHOP_AUTH
 )
 SQL_LIST_ORDER_LINES = (
     "SELECT id, order_pk, external_line_id, spu_pk, "
     "sku_pk, quantity, unit_price "
-    "FROM commerce.sales_order_lines WHERE order_pk = :id ORDER BY id"
+    "FROM commerce.sales_order_lines WHERE order_pk = :id "
+    "AND EXISTS (SELECT 1 FROM commerce.sales_orders WHERE commerce.sales_orders.id = order_pk AND "
+    + _ORDER_SHOP_AUTH + ") ORDER BY id"
 )
 SQL_ACCOUNT_ORDER_STATS = (
     "SELECT COUNT(DISTINCT id) AS n, "
@@ -295,28 +317,14 @@ _STMT_ACCOUNT_ORDER_STATS = text(SQL_ACCOUNT_ORDER_STATS)
 
 
 def _row_to_channel_account(row: Any) -> ChannelAccountOut:
-    env_service_id = os.environ.get("TIKTOK_SERVICE_ID", "").strip()
-    env_configured = bool(
-        env_service_id
-        and row.service_id in (None, env_service_id)
-        and os.environ.get("TIKTOK_APP_KEY", "").strip()
-        and os.environ.get("TIKTOK_APP_SECRET", "").strip()
-    )
     return ChannelAccountOut(
-        id=row.id,
-        platform=row.platform,
-        shop_id=row.shop_id,
-        account_name=row.account_name,
-        region=row.region,
-        seller_type=row.seller_type,
-        status=row.status,
-        synced_at=row.synced_at,
-        opened_date=row.opened_date,
-        credential_id=row.credential_id,
-        service_id=row.service_id,
-        app_credentials_configured=(
-            bool(row.app_credentials_configured) or env_configured
-        ),
+        id=row.id, platform=row.platform, shop_id=row.shop_id,
+        account_name=row.account_name, region=row.region, seller_type=row.seller_type,
+        status=row.status, synced_at=row.synced_at, opened_date=row.opened_date,
+        credential_id=row.credential_id, service_id=row.service_id,
+        app_credentials_configured=bool(row.app_credentials_configured),
+        shop_code=row.shop_code, discovered_at=row.discovered_at,
+        plugin_sources=plugin_sources(row.plugin_metadata), auth_state=row.auth_state,
     )
 
 
@@ -392,17 +400,19 @@ def list_shops(
     platform: str | None = Query(default=None, max_length=32),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
+    view: Literal["management"] | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=200),
+    source: Literal["ads-data-sync", "monitor"] | None = Query(default=None),
+    app_state: Literal["configured", "unconfigured"] | None = Query(default=None),
+    auth_state: Literal["unauthorized", "authorized", "reauthorize", "unknown"] | None = Query(default=None),
+    response: Response = None,
 ) -> list[ChannelAccountOut]:
-    params = {"platform": platform}
+    params = {"platform": platform, "management": view == "management", "q": q or None,
+              "source": source, "app_state": app_state, "auth_state": auth_state}
     if response is not None:
         total = _q(_STMT_COUNT_CHANNEL_ACCOUNTS, params, sess).scalar()
         response.headers["X-Total-Count"] = str(_safe_int(total))
-    rows = _q(
-        _STMT_LIST_CHANNEL_ACCOUNTS,
-        {**params, "limit": limit, "offset": offset},
-        sess,
-    ).all()
+    rows = _q(_STMT_LIST_CHANNEL_ACCOUNTS, {**params, "limit": limit, "offset": offset}, sess).all()
     return [_row_to_channel_account(r) for r in rows]
 
 
@@ -492,6 +502,7 @@ def get_channel_account_by_external(
             status.HTTP_404_NOT_FOUND,
             f"channel account not found for platform={platform!r} shop_id={shop_id!r}",
         )
+    require_authorized_shop(sess, shop_pk=row.id)
     _require_tiktok_region(row, platform=platform, shop_id=shop_id)
     return _row_to_channel_account(row)
 
@@ -500,10 +511,13 @@ def get_channel_account_by_external(
 def get_channel_account(
     shop_pk: int,
     sess: Session = Depends(get_session),
+    view: Literal["management"] | None = Query(default=None),
 ) -> ChannelAccountOut:
     row = _q(_STMT_GET_CHANNEL_ACCOUNT, {"id": shop_pk}, sess).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "channel account not found")
+    if view != "management":
+        require_authorized_shop(sess, shop_pk=shop_pk)
     return _row_to_channel_account(row)
 
 
@@ -555,6 +569,8 @@ def list_products_spu(
     offset: int = Query(default=0, ge=0),
     response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> list[ChannelProductOut]:
+    if shop_pk is not None:
+        require_authorized_shop(sess, shop_pk=shop_pk)
     key = _sort_key(sort, order)
     params = {
         "acct_id": shop_pk,
@@ -597,7 +613,7 @@ def list_channel_product_options(
     limit: int = Query(default=50, ge=1, le=100),
 ) -> list[ChannelProductOptionOut]:
     """Return bounded SPU labels for the ROI Bootstrap multi-select."""
-
+    require_authorized_shop(sess, shop_pk=shop_pk)
     try:
         parsed_spu_ids = parse_spu_ids(spu_ids)
     except ValueError as exc:
@@ -664,6 +680,8 @@ def list_sales_orders(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[SalesOrderOut]:
+    if shop_pk is not None:
+        require_authorized_shop(sess, shop_pk=shop_pk)
     rows = _q(
         _STMT_LIST_SALES_ORDERS,
         {
@@ -723,6 +741,7 @@ def channel_account_order_stats(
 
     Returns 0/0 when no orders exist (the COALESCE handles NULL from SUM).
     """
+    require_authorized_shop(sess, shop_pk=shop_pk)
     row = _q(_STMT_ACCOUNT_ORDER_STATS, {"id": shop_pk}, sess).one()
     return {
         "shop_pk": shop_pk,

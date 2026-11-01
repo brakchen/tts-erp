@@ -29,6 +29,8 @@ export interface PageProps {
 
 export interface AppShellProps extends PageProps {
   title: string;
+  /** Fullscreen content still uses the shared landmarks, without the workspace chrome. */
+  layout?: 'workspace' | 'fullscreen';
   description?: string;
   actions?: ReactNode;
   children: ReactNode;

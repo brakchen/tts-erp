@@ -58,7 +58,10 @@ def list_spu_profit_deterioration(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Any:
+    from tts_erp_v2.commerce.shop_access import require_authorized_shop
+
     require_role_at_least(request, "readonly")
+    require_authorized_shop(session, shop_pk=shop_pk)
     rid = request_id(request)
 
     def invalid(message: str) -> HTTPException:

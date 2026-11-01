@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Link, Table } from '@heroui/react';
 import { buttonVariants } from '@heroui/styles';
@@ -109,7 +110,8 @@ export default function Dashboard({ bootstrap }: PageProps) {
     { label: '已注册店铺总数', value: total, hint: '已登记的店铺数量', pageId: 'shops' },
   ];
   const sortedJobs = sync.data?.jobs.slice().sort((a, b) => (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) || a.job_name.localeCompare(b.job_name));
-  return <div className="space-y-6">
+  return <div className="erp-page">
+    <PageIntro eyebrow="OPERATIONS OVERVIEW" title="经营全局，一目了然" description="查看店铺数据覆盖、同步状态与常用工作入口。" />
     <Card><Card.Header><Card.Title render={(props) => <h2 {...props} />} className="text-base font-semibold">快速导航</Card.Title><Card.Description>按当前权限显示常用入口</Card.Description></Card.Header><Card.Content>
       <nav aria-label="快速导航" className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         {bootstrap.navigation.filter((item) => quickPageIds.has(item.id)).map((item) => <a key={item.id} href={href(item)} className={buttonVariants({ variant: 'secondary', className: 'w-full justify-between' })}>
@@ -135,11 +137,11 @@ export default function Dashboard({ bootstrap }: PageProps) {
       {navigation('shops') && <a href={href(navigation('shops')!)} className={buttonVariants({ variant: 'tertiary', size: 'sm' })}>管理店铺</a>}
     </Card.Header><Card.Content>
       <ReadFeedback state={shops} label="店铺" />
-      {shops.data && (shops.data.items.length === 0 ? <p>暂无店铺</p> : <Table><Table.ScrollContainer><Table.Content aria-label="已注册店铺" className="min-w-[40rem]">
-        <Table.Header><Table.Column isRowHeader>店铺</Table.Column><Table.Column>店铺 ID</Table.Column><Table.Column>地区</Table.Column><Table.Column>平台</Table.Column></Table.Header>
-        <Table.Body>{shops.data.items.map((shop) => <Table.Row key={shop.id} id={shop.id}>
-          <Table.Cell><span className="block max-w-72 break-words font-medium">{shop.account_name || '(未命名)'}</span></Table.Cell>
-          <Table.Cell><span className="font-mono text-sm tabular-nums">{shop.shop_id}</span></Table.Cell><Table.Cell>{shop.region || '?'}</Table.Cell><Table.Cell>{shop.platform}</Table.Cell>
+      {shops.data && (shops.data.items.length === 0 ? <p>暂无店铺</p> : <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label="数据表格横向滚动区域" tabIndex={0}><Table.Content aria-label="已注册店铺" className="min-w-[40rem] erp-table-content">
+        <Table.Header className="erp-table-head"><Table.Column className="erp-table-column" isRowHeader>店铺</Table.Column><Table.Column className="erp-table-column">店铺 ID</Table.Column><Table.Column className="erp-table-column">地区</Table.Column><Table.Column className="erp-table-column">平台</Table.Column></Table.Header>
+        <Table.Body className="erp-table-body">{shops.data.items.map((shop) => <Table.Row className="erp-table-row" key={shop.id} id={shop.id}>
+          <Table.Cell className="erp-table-cell"><span className="block max-w-72 break-words font-medium">{shop.account_name || '(未命名)'}</span></Table.Cell>
+          <Table.Cell className="erp-table-cell"><span className="font-mono text-sm tabular-nums">{shop.shop_id}</span></Table.Cell><Table.Cell className="erp-table-cell">{shop.region || '?'}</Table.Cell><Table.Cell className="erp-table-cell">{shop.platform}</Table.Cell>
         </Table.Row>)}</Table.Body>
       </Table.Content></Table.ScrollContainer></Table>)}
     </Card.Content></Card>
@@ -152,11 +154,11 @@ export default function Dashboard({ bootstrap }: PageProps) {
     </Card.Content></Card>
     <Card><Card.Header><Card.Title render={(props) => <h2 {...props} />} className="text-base font-semibold">数据同步状态</Card.Title><Card.Description>{sync.data ? `刷新于 ${formatTime(sync.data.server_time)}` : '—'}</Card.Description></Card.Header><Card.Content>
       <ReadFeedback state={sync} label="同步状态" />
-      {sortedJobs && <Table><Table.ScrollContainer><Table.Content aria-label="数据同步状态" className="min-w-[56rem]">
-        <Table.Header>{['健康', '作业', '周期', '最近一次同步', '预计下次同步', '状态'].map((label) => <Table.Column key={label} isRowHeader={label === '作业'}>{label}</Table.Column>)}</Table.Header>
-        <Table.Body renderEmptyState={() => '暂无周期作业'}>{sortedJobs.map((job) => <Table.Row key={job.job_name} id={job.job_name}>
-          <Table.Cell>{severityLabels[job.severity] ?? severityLabels.unknown}</Table.Cell><Table.Cell>{job.job_name}</Table.Cell><Table.Cell>{formatInterval(job.interval_seconds)}</Table.Cell>
-          <Table.Cell>{formatTime(job.last_run_at)}</Table.Cell><Table.Cell>{formatTime(job.next_expected_at)}</Table.Cell><Table.Cell>
+      {sortedJobs && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label="数据表格横向滚动区域" tabIndex={0}><Table.Content aria-label="数据同步状态" className="min-w-[56rem] erp-table-content">
+        <Table.Header className="erp-table-head">{['健康', '作业', '周期', '最近一次同步', '预计下次同步', '状态'].map((label) => <Table.Column className="erp-table-column" key={label} isRowHeader={label === '作业'}>{label}</Table.Column>)}</Table.Header>
+        <Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'暂无周期作业'}</div>}>{sortedJobs.map((job) => <Table.Row className="erp-table-row" key={job.job_name} id={job.job_name}>
+          <Table.Cell className="erp-table-cell">{severityLabels[job.severity] ?? severityLabels.unknown}</Table.Cell><Table.Cell className="erp-table-cell">{job.job_name}</Table.Cell><Table.Cell className="erp-table-cell">{formatInterval(job.interval_seconds)}</Table.Cell>
+          <Table.Cell className="erp-table-cell">{formatTime(job.last_run_at)}</Table.Cell><Table.Cell className="erp-table-cell">{formatTime(job.next_expected_at)}</Table.Cell><Table.Cell className="erp-table-cell">
             <span>{job.last_status == null ? '从未运行' : statusLabels[job.last_status] ?? job.last_status}</span>
             {(job.severity === 'crit' || job.severity === 'warn') && job.cycles_late != null && <p>落后 {job.cycles_late.toFixed(1)} 周期</p>}
             {job.last_error && <p className="break-all">{job.last_error}</p>}

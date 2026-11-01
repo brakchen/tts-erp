@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Table } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
@@ -23,10 +24,10 @@ function decode(value: unknown): Stats {
 }
 const number = (value: number) => value.toLocaleString('en-US');
 function DistributionTable({ title, rows }: { title: string; rows: Distribution[] }) {
-  return <section className="min-w-0 space-y-2"><h2>{title}分布</h2><Table><Table.ScrollContainer><Table.Content aria-label={`${title}分布`}>
-    <Table.Header><Table.Column isRowHeader>{title}</Table.Column><Table.Column>请求数</Table.Column><Table.Column>占比（服务端）</Table.Column></Table.Header>
-    <Table.Body renderEmptyState={() => `暂无${title}数据`}>{rows.map((row, index) => <Table.Row key={index} id={index}>
-      <Table.Cell><span className="break-all">{row.label}</span></Table.Cell><Table.Cell>{number(row.count)}</Table.Cell><Table.Cell>{row.percentage}%</Table.Cell>
+  return <section className="erp-panel min-w-0 space-y-2"><h2>{title}分布</h2><Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label="数据表格横向滚动区域" tabIndex={0}><Table.Content className="erp-table-content" aria-label={`${title}分布`}>
+    <Table.Header className="erp-table-head"><Table.Column className="erp-table-column" isRowHeader>{title}</Table.Column><Table.Column className="erp-table-column erp-table-number">请求数</Table.Column><Table.Column className="erp-table-column erp-table-number">占比（服务端）</Table.Column></Table.Header>
+    <Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{`暂无${title}数据`}</div>}>{rows.map((row, index) => <Table.Row className="erp-table-row" key={index} id={index}>
+      <Table.Cell className="erp-table-cell"><span className="break-all">{row.label}</span></Table.Cell><Table.Cell className="erp-table-cell erp-table-number">{number(row.count)}</Table.Cell><Table.Cell className="erp-table-cell erp-table-number">{row.percentage}%</Table.Cell>
     </Table.Row>)}</Table.Body>
   </Table.Content></Table.ScrollContainer></Table></section>;
 }
@@ -50,7 +51,8 @@ export default function InterceptStats({ bootstrap }: PageProps) {
     return () => { current = false; controller.abort(); stopDelay?.(); };
   }, [bootstrap.rootPath, refresh]);
   const stats = state.data;
-  return <div className="space-y-4">
+  return <div className="erp-page">
+    <PageIntro eyebrow="COLLECTION ANALYTICS" title="了解采集链路的运行状况" description="查看请求趋势与分布，识别错误和异常变化。" />
     <Button isDisabled={state.blocked} onPress={() => setRefresh((value) => value + 1)}>刷新统计</Button>
     <p>最近 7 天，每日按 UTC 分组。今日请求是 UTC 今日总数，不受最近 7 天范围限制。</p>
     {state.loading && <p role="status">加载统计中…</p>}
@@ -58,10 +60,10 @@ export default function InterceptStats({ bootstrap }: PageProps) {
     {stats && <>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{([
         ['总请求数', stats.total_requests], ['白名单命中', stats.whitelisted_requests], ['今日请求（UTC）', stats.today_requests], ['错误请求', stats.error_requests],
-      ] as const).map(([label, value]) => <section key={label} aria-label={label} className="rounded-xl border border-border p-4"><h2>{label}</h2><p>{number(value)}</p></section>)}</div>
-      <section className="min-w-0 space-y-2"><h2>每日请求（UTC）</h2>{stats.daily.length > 0 ? <DailyChart rows={stats.daily} /> : <p>暂无每日数据</p>}
-        <Table><Table.ScrollContainer><Table.Content aria-label="每日请求（UTC）"><Table.Header><Table.Column isRowHeader>日期（UTC）</Table.Column><Table.Column>请求数</Table.Column></Table.Header>
-          <Table.Body renderEmptyState={() => '暂无每日记录'}>{stats.daily.map((row) => <Table.Row key={row.date} id={row.date}><Table.Cell>{row.date}</Table.Cell><Table.Cell>{number(row.count)}</Table.Cell></Table.Row>)}</Table.Body>
+      ] as const).map(([label, value]) => <section key={label} aria-label={label} className="erp-metric"><h2>{label}</h2><p>{number(value)}</p></section>)}</div>
+      <section className="erp-panel min-w-0 space-y-2"><h2>每日请求（UTC）</h2>{stats.daily.length > 0 ? <DailyChart rows={stats.daily} /> : <p>暂无每日数据</p>}
+        <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label="数据表格横向滚动区域" tabIndex={0}><Table.Content className="erp-table-content" aria-label="每日请求（UTC）"><Table.Header className="erp-table-head"><Table.Column className="erp-table-column" isRowHeader>日期（UTC）</Table.Column><Table.Column className="erp-table-column">请求数</Table.Column></Table.Header>
+          <Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'暂无每日记录'}</div>}>{stats.daily.map((row) => <Table.Row className="erp-table-row" key={row.date} id={row.date}><Table.Cell className="erp-table-cell">{row.date}</Table.Cell><Table.Cell className="erp-table-cell">{number(row.count)}</Table.Cell></Table.Row>)}</Table.Body>
         </Table.Content></Table.ScrollContainer></Table>
       </section>
       <div className="grid min-w-0 gap-4 lg:grid-cols-3"><DistributionTable title="域名" rows={stats.by_host} /><DistributionTable title="方法" rows={stats.by_method} /><DistributionTable title="状态码" rows={stats.by_status} /></div>

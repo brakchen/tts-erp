@@ -125,108 +125,73 @@ def mask_secret(secret: str) -> str:
 
 @dataclass(frozen=True)
 class TikTokAppCredentials:
-    """Decrypted TikTok Partner App pair resolved by ``service_id``."""
+    """A decrypted App pair owned by a single shop."""
 
     service_id: str
     app_key: str
     app_secret: str
     source: str
+    revision: int = 1
 
 
 def upsert_tiktok_app_credentials(
     session: Session,
     *,
+    shop_pk: int,
     service_id: str,
     app_key: str,
     plaintext_app_secret: str,
 ) -> TikTokAppCredential:
-    """Atomically insert or rotate one service_id's App Key/Secret pair.
-
-    The App Secret is encrypted before any SQL is emitted.  The returned ORM
-    row never carries plaintext secret material; callers must commit.
-    """
+    """Insert or rotate this shop's pair; callers own the transaction."""
     service_id = service_id.strip()
     app_key = app_key.strip()
-    if not service_id:
-        raise SigningError("service_id is required")
-    if not app_key:
-        raise SigningError("app_key is required")
-    if not plaintext_app_secret:
-        raise SigningError("app_secret is required")
-
+    if not service_id or not app_key or not plaintext_app_secret:
+        raise SigningError("Service ID, App Key and App Secret are required")
     values = {
+        "shop_pk": shop_pk,
         "service_id": service_id,
         "app_key": app_key,
         "app_secret_ciphertext": encrypt(plaintext_app_secret),
         "updated_at": datetime.now(UTC),
     }
     insert_stmt = pg_insert(TikTokAppCredential).values(**values)
-    session.execute(
-        insert_stmt.on_conflict_do_update(
-            index_elements=["service_id"],
-            set_={
-                "app_key": values["app_key"],
-                "app_secret_ciphertext": values["app_secret_ciphertext"],
-                "updated_at": values["updated_at"],
-            },
-        )
-    )
-    return session.execute(
-        select(TikTokAppCredential).where(
-            TikTokAppCredential.service_id == service_id
-        )
-    ).scalar_one()
+    session.execute(insert_stmt.on_conflict_do_update(
+        index_elements=["shop_pk", "service_id"],
+        set_={
+            "app_key": values["app_key"],
+            "app_secret_ciphertext": values["app_secret_ciphertext"],
+            "revision": TikTokAppCredential.revision + 1,
+            "updated_at": values["updated_at"],
+        },
+    ))
+    return session.execute(select(TikTokAppCredential).where(
+        TikTokAppCredential.shop_pk == shop_pk,
+        TikTokAppCredential.service_id == service_id,
+    ).execution_options(populate_existing=True)).scalar_one()
 
 
 def resolve_tiktok_app_credentials(
     session: Session,
     *,
+    shop_pk: int,
     service_id: str,
 ) -> TikTokAppCredentials:
-    """Resolve one Partner App pair by service_id without exposing storage.
-
-    Database configuration wins.  The process-global environment pair remains
-    a narrow compatibility adapter only for the exact ``TIKTOK_SERVICE_ID``;
-    an arbitrary service_id can never silently borrow another app's secret.
-    """
-    service_id = service_id.strip()
-    if not service_id:
-        raise SigningError("service_id is required to resolve TikTok App credentials")
-
-    row = session.execute(
-        select(TikTokAppCredential).where(
-            TikTokAppCredential.service_id == service_id
-        )
-    ).scalar_one_or_none()
-    if row is not None:
-        app_secret = decrypt(row.app_secret_ciphertext)
-        if not row.app_key or not app_secret:
-            raise SigningError(
-                f"TikTok App credentials are incomplete for service_id={service_id!r}"
-            )
-        return TikTokAppCredentials(
-            service_id=service_id,
-            app_key=row.app_key,
-            app_secret=app_secret,
-            source="database",
-        )
-
-    env_service_id = os.environ.get("TIKTOK_SERVICE_ID", "").strip()
-    if service_id == env_service_id:
-        app_key = os.environ.get("TIKTOK_APP_KEY", "").strip()
-        app_secret = os.environ.get("TIKTOK_APP_SECRET", "").strip()
-        if app_key and app_secret:
-            return TikTokAppCredentials(
-                service_id=service_id,
-                app_key=app_key,
-                app_secret=app_secret,
-                source="environment",
-            )
-
-    raise SigningError(
-        "TikTok App credentials are not configured for "
-        f"service_id={service_id!r}; save the matching App Key/App Secret "
-        "on the shop before authorizing"
+    """Resolve only this shop's configuration, without a global fallback."""
+    row = session.execute(select(TikTokAppCredential).where(
+        TikTokAppCredential.shop_pk == shop_pk,
+        TikTokAppCredential.service_id == service_id,
+    ).execution_options(populate_existing=True)).scalar_one_or_none()
+    if row is None:
+        raise SigningError("Configure this shop's Service ID, App Key and App Secret first")
+    app_secret = decrypt(row.app_secret_ciphertext)
+    if not row.app_key or not app_secret:
+        raise SigningError("This shop's App configuration is incomplete")
+    return TikTokAppCredentials(
+        service_id=service_id,
+        app_key=row.app_key,
+        app_secret=app_secret,
+        source="database",
+        revision=row.revision,
     )
 
 

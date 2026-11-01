@@ -25,6 +25,25 @@
 
 /* ── 基础层 ───────────────────────────────────────────── */
 
+/* Legacy navigation aliases are owned here, alongside the shared palette.
+ * Scope them on navigation and its outside mobile trigger so body styles cannot recolor them.
+ * Layout/toggle behavior remains owned by the shared renderer.
+ */
+body > #sidebar.sidebar,
+body > .sidebar-mobile-toggle {
+  --sidebar-paper: var(--navigation-background);
+  --sidebar-paper-deep: var(--navigation-background);
+  --sidebar-ink: var(--navigation-foreground);
+  --sidebar-ink-soft: var(--navigation-foreground);
+  --sidebar-rule: color-mix(in srgb, white 15%, transparent);
+  --sidebar-rule-soft: color-mix(in srgb, white 10%, transparent);
+  --sidebar-accent: var(--navigation-active);
+  --sidebar-accent-deep: var(--navigation-active);
+  --sidebar-muted: var(--navigation-muted);
+  --sidebar-mono: var(--mono);
+  --bs-border-color: var(--sidebar-rule);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -75,7 +94,7 @@ html .uplot { font-family: var(--sans); }
   color: var(--muted);
 }
 .op-title {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-weight: 600;
   font-size: 26px;
   margin: 0;
@@ -99,7 +118,11 @@ html .uplot { font-family: var(--sans); }
 
 /* ── 主体容器 ─────────────────────────────────────────── */
 
-.page-main { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+.page-main { max-width: 1680px; margin: 0 auto; padding: 28px 32px 48px; }
+
+.op-workspace-intro h2 { margin: 8px 0; font-family: var(--sans); font-size: clamp(22px, 2vw, 29px); font-weight: 600; letter-spacing: -.8px; }
+.op-workspace-intro > p { max-width: 720px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.9; }
+.op-workspace-intro > .op-workspace-eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: 1.8px; }
 
 .section-title {
   font-family: var(--mono);
@@ -117,9 +140,10 @@ html .uplot { font-family: var(--sans); }
   border-collapse: collapse;
   font-family: var(--sans);
   font-size: 14px;
-  background: var(--paper);
+  background: var(--surface);
 }
 .op-th {
+  background: var(--table-heading);
   text-align: left;
   font-family: var(--mono);
   font-size: 12px;
@@ -132,11 +156,11 @@ html .uplot { font-family: var(--sans); }
   white-space: nowrap;
 }
 .op-table td {
-  padding: 14px 12px;
-  border-bottom: 1px solid var(--rule-soft);
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--table-line);
   vertical-align: middle;
 }
-.op-table tbody tr:hover { background: var(--paper-deep); }
+.op-table tbody tr:hover { background: var(--table-hover); }
 
 .op-empty, .op-error {
   text-align: center;
@@ -196,20 +220,19 @@ html .uplot { font-family: var(--sans); }
 /* 暖纸编辑体按钮：主按钮墨底纸字（hover 转陶土橙），次按钮描边透明底。 */
 
 .btn-primary {
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--sans);
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0;
   padding: 8px 16px;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--accent-foreground);
   border: 0;
   cursor: pointer;
   border-radius: var(--radius);
   transition: background 120ms ease;
 }
-.btn-primary:hover { background: var(--accent); }
+.btn-primary:hover { background: var(--accent-deep); }
 .btn-primary:disabled { background: var(--rule); color: var(--paper); cursor: not-allowed; }
 
 .btn-secondary {

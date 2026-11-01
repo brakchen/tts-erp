@@ -1,0 +1,30 @@
+/* HeroUI 3 public slot className API; no private selectors or component forks.
+ * Source: https://heroui.com/en/docs/react/components/table (MIT, 3.2.6).
+ * Native detail tables share the same explicit classes and semantic table markup.
+ */
+.erp-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+.erp-table-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.erp-table-content { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; color: var(--ink); }
+.erp-table-head { background: var(--table-heading); }
+.erp-table-column { height: 48px; padding: 13px 18px; background: var(--table-heading); color: var(--ink-soft); border-bottom: 1px solid var(--rule); border-radius: 0; font-size: 12px; font-weight: 600; line-height: 1.6; text-align: start; white-space: nowrap; }
+.erp-table-row { background: var(--surface); }
+.erp-table-cell { height: 64px; padding: 16px 18px; background: var(--surface); color: var(--ink); border-bottom: 1px solid var(--table-line); border-radius: 0; font-size: 14px; line-height: 1.7; vertical-align: middle; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.erp-table-row:last-child .erp-table-cell { border-bottom: 0; }
+.erp-table-row:hover .erp-table-cell { background: var(--table-hover); }
+.erp-table-row:focus-within .erp-table-cell { background: var(--table-hover); }
+.erp-table-row-heading { font-weight: 500; text-align: start; }
+.erp-table-number { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.erp-table-id { font-family: var(--mono); font-size: 12px; line-height: 1.8; color: var(--muted); overflow-wrap: anywhere; }
+.erp-table-primary { color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.7; }
+.erp-table-meta { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.erp-table-date { color: var(--ink-soft); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.erp-table-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 180px; }
+.erp-table-action { min-height: 34px; padding-inline: 10px; border-radius: 8px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.erp-table-empty { min-height: 120px; display: grid; place-items: center; padding: 32px 24px; color: var(--muted); font-size: 13px; text-align: center; }
+.erp-table-status { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--rule); border-radius: 6px; color: var(--ink-soft); background: var(--table-heading); font-size: 12px; line-height: 1.6; white-space: nowrap; }
+.erp-table-status--active { color: var(--accent); background: var(--table-hover); }
+.erp-table-detail { background: var(--paper); }
+@media (max-width: 767px) {
+  .erp-table-column { padding: 12px 14px; }
+  .erp-table-cell { padding: 14px; }
+}

@@ -329,11 +329,6 @@ function mockJson(url) {
       total: 2,
     });
 
-  if (u.endsWith("/v2/admin/shops/unregistered"))
-    return ok({
-      items: [{ shop_id: "S1", shop_name: "未注册店", region: "VN" }],
-      total: 1,
-    });
   if (/\/v2\/admin\/shops\/[^/]+$/.test(u))
     return ok({
       shop: {

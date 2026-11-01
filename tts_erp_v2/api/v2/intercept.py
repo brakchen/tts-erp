@@ -28,6 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session, require_destructive_guard
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause
 
 # ─── Config ───────────────────────────────────────────────────────────
 
@@ -824,6 +825,17 @@ def _distribution_payload(
     return payload
 
 
+_VISIBLE_CAPTURE = (
+    "(seller_id IS NULL OR seller_id IN (SELECT s.shop_id FROM commerce.shops s "
+    "WHERE s.platform = 'tiktok' AND " + authorized_shop_clause("s") + "))"
+)
+
+
+def _capture_query(sql: str):
+    """Apply the same shop visibility to the list, details and aggregate reads."""
+    return text(sql.replace("WHERE ", "WHERE " + _VISIBLE_CAPTURE + " AND ", 1))
+
+
 @router.get("/requests/stats")
 def get_requests_stats(
     request: Request,
@@ -841,7 +853,7 @@ def get_requests_stats(
 
     # 总请求数
     total = db.execute(
-        text(
+        _capture_query(
             "SELECT COUNT(*) FROM plugin.intercepted_requests WHERE captured_at >= :from_date AND captured_at <= :to_date"
         ),
         {"from_date": from_date, "to_date": to_date},
@@ -849,7 +861,7 @@ def get_requests_stats(
 
     # 白名单请求数
     whitelisted = db.execute(
-        text(
+        _capture_query(
             "SELECT COUNT(*) FROM plugin.intercepted_requests WHERE is_whitelisted = true AND captured_at >= :from_date AND captured_at <= :to_date"
         ),
         {"from_date": from_date, "to_date": to_date},
@@ -858,7 +870,7 @@ def get_requests_stats(
     # 今日请求数
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     today_count = db.execute(
-        text(
+        _capture_query(
             "SELECT COUNT(*) FROM plugin.intercepted_requests WHERE captured_at >= :today"
         ),
         {"today": today},
@@ -866,7 +878,7 @@ def get_requests_stats(
 
     # 错误请求数
     errors = db.execute(
-        text(
+        _capture_query(
             "SELECT COUNT(*) FROM plugin.intercepted_requests WHERE error_type IS NOT NULL AND captured_at >= :from_date AND captured_at <= :to_date"
         ),
         {"from_date": from_date, "to_date": to_date},
@@ -874,7 +886,7 @@ def get_requests_stats(
 
     # 按域名分布
     by_host = db.execute(
-        text(
+        _capture_query(
             """
             SELECT endpoint_host, COUNT(*) as count
             FROM plugin.intercepted_requests
@@ -889,7 +901,7 @@ def get_requests_stats(
 
     # 按方法分布
     by_method = db.execute(
-        text(
+        _capture_query(
             """
             SELECT method, COUNT(*) as count
             FROM plugin.intercepted_requests
@@ -903,7 +915,7 @@ def get_requests_stats(
 
     # 按状态码分布
     by_status = db.execute(
-        text(
+        _capture_query(
             """
             SELECT response_status, COUNT(*) as count
             FROM plugin.intercepted_requests
@@ -917,7 +929,7 @@ def get_requests_stats(
     ).fetchall()
 
     daily = db.execute(
-        text(
+        _capture_query(
             """
             SELECT DATE(captured_at AT TIME ZONE 'UTC') AS day, COUNT(*) AS count
             FROM plugin.intercepted_requests
@@ -1012,12 +1024,12 @@ def list_requests(
 
     query += " ORDER BY captured_at DESC LIMIT :limit OFFSET :offset"
 
-    result = db.execute(text(query), params)
+    result = db.execute(_capture_query(query), params)
     requests = [dict(row._mapping) for row in result]
 
     # 获取总数
     count_query = query.replace("SELECT *", "SELECT COUNT(*)").split("ORDER BY")[0]
-    total = db.execute(text(count_query), params).scalar()
+    total = db.execute(_capture_query(count_query), params).scalar()
 
     # 转换 JSON 字段
     for req in requests:
@@ -1045,7 +1057,7 @@ def get_request(
 ) -> Response:
     """查询单条记录"""
     result = db.execute(
-        text("SELECT * FROM plugin.intercepted_requests WHERE request_id = :request_id"),
+        _capture_query("SELECT * FROM plugin.intercepted_requests WHERE request_id = :request_id"),
         {"request_id": request_id},
     )
     row = result.first()

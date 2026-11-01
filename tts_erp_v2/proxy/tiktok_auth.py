@@ -40,7 +40,10 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
+from tts_erp_v2.db.models.commerce import ChannelAccount
 
 from tts_erp_v2.proxy.errors import SigningError, UpstreamHttpError
 from tts_erp_v2.proxy.token_service import (
@@ -166,26 +169,22 @@ def resolve_tiktok_app_credentials_for_shop(
     *,
     shop_id: str,
 ) -> TikTokAppCredentials:
-    """Resolve the app pair that issued a shop's current OAuth token.
-
-    New OAuth callbacks persist ``integration.credentials.service_id``. A
-    NULL binding is a legacy token and may use only the exact environment
-    ``TIKTOK_SERVICE_ID`` pair until the seller reauthorizes. Mutable
-    ``commerce.shops.service_id`` is deliberately not consulted because it
-    represents the next authorization target, not token provenance.
-    """
+    """Resolve this shop's own App pair that issued its current token."""
+    account = session.execute(select(ChannelAccount).where(
+        ChannelAccount.platform == "tiktok", ChannelAccount.shop_id == shop_id,
+    )).scalar_one_or_none()
     view = load_credentials(session, "tiktok", shop_id)
-    if view is None:
-        raise SigningError(
-            f"credentials row not found for tiktok shop_id={shop_id!r}"
-        )
-    service_id = view.service_id or os.environ.get("TIKTOK_SERVICE_ID", "").strip()
-    if not service_id:
-        raise SigningError(
-            f"tiktok shop_id={shop_id!r} token has no issuing service_id; "
-            "reauthorize the shop or configure the legacy TIKTOK_SERVICE_ID"
-        )
-    return resolve_tiktok_app_credentials(session, service_id=service_id)
+    if account is None or view is None or account.credential_id != view.id:
+        raise SigningError("The shop has no linked TikTok authorization")
+    if not view.service_id:
+        raise SigningError("This shop's token has no issuing Service ID; authorize it again")
+    app = resolve_tiktok_app_credentials(
+        session, shop_pk=account.id, service_id=view.service_id,
+    )
+    authorized_revision = (view.extra or {}).get("app_revision")
+    if authorized_revision is not None and str(authorized_revision) != str(app.revision):
+        raise SigningError("This shop's App configuration changed; authorize it again")
+    return app
 
 
 def refresh_tiktok_token(

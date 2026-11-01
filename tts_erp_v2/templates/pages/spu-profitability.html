@@ -27,40 +27,28 @@
 </head>
 <body>
   {{ sidebar(current_page) }}
-  <header class="op-header">
-    <div class="container-fluid px-3 px-lg-4 py-3 op-main">
-      <div class="row g-3 align-items-center">
-        <div class="col-auto">
-          </div>
-        <div class="col">
-          <div class="op-eyebrow mb-1">TikTok Shop · Analytics</div>
-          <h1 class="op-title mb-0">{{ title }}</h1>
-        </div>
-        <div class="col-12 col-lg-auto">
-          <div class="op-header-meta align-items-sm-end">
-            <div class="op-header-tools justify-content-sm-end">
-              <label class="op-shop mb-0" for="shop-switcher">
-                <span>店铺</span>
-                <select id="shop-switcher" name="shop_pk" class="form-select form-select-sm op-shop-select" aria-label="当前店铺"></select>
-              </label>
-              <span class="op-identity" id="ops-identity"></span>
-            </div>
-            <div class="op-freshness align-items-sm-end" id="data-freshness" aria-live="polite">
-              <ul class="op-freshness-times justify-content-sm-end" aria-label="数据同步时间">
-                <li data-source="ads" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">广告</span><time class="op-freshness-time">—</time></li>
-                <li data-source="orders" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">订单</span><time class="op-freshness-time">—</time></li>
-                <li data-source="logistics" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">物流</span><time class="op-freshness-time">—</time></li>
-                <li data-source="miaoshou" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">妙手</span><time class="op-freshness-time">—</time></li>
-                <li data-source="fx" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">汇率</span><time class="op-freshness-time">—</time></li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </header>
-
   <main class="container-fluid px-0 op-main" data-page-profile="{{ profile_id }}">
+    <section class="op-workspace-intro px-3 px-lg-4 pt-4 pb-2">
+      <p class="op-workspace-eyebrow">PRODUCT PERFORMANCE</p>
+      <h2>{{ '关注重点商品，把握经营变化' if profile_id == 'focused-spus' else '让商品的投入与回报清晰可见' }}</h2>
+      <p>按店铺和日期查看商品表现，结合订单、成本与广告数据核对经营结果。</p>
+    </section>
+    <section class="op-context-toolbar mx-3 mx-lg-4 mt-3" aria-label="店铺与数据更新">
+      <label class="op-shop" for="shop-switcher">
+        <span>当前店铺</span>
+        <select id="shop-switcher" name="shop_pk" class="form-select op-shop-select" aria-label="当前店铺"></select>
+      </label>
+      <div class="op-freshness" id="data-freshness" aria-live="polite">
+        <span class="op-context-label">数据更新</span>
+        <ul class="op-freshness-times" aria-label="最近数据同步时间">
+          <li data-source="ads" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">广告</span><time class="op-freshness-time">—</time></li>
+          <li data-source="orders" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">订单</span><time class="op-freshness-time">—</time></li>
+          <li data-source="logistics" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">物流</span><time class="op-freshness-time">—</time></li>
+          <li data-source="miaoshou" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">妙手</span><time class="op-freshness-time">—</time></li>
+          <li data-source="fx" data-severity="unknown"><span class="op-freshness-dot" aria-hidden="true"></span><span class="op-freshness-label">汇率</span><time class="op-freshness-time">—</time></li>
+        </ul>
+      </div>
+    </section>
     <!-- 本次计算实际使用的佣金费率。正常是纸色事实条；回退基线才标红。右侧 ✕ 关闭后本次不再弹出。 -->
     <section class="op-fee-bar mx-3 mx-lg-4 mt-3 mb-0" id="fee-card" hidden data-source="" aria-live="polite">
       <span class="op-fee-source" id="fee-card-source">—</span>
@@ -203,7 +191,7 @@
     </section>
 
     <!-- 工具栏:原生 select multiple 由 Tom Select Bootstrap 5 主题增强；不自研多选组件。 -->
-    <section class="op-toolbar px-3 px-lg-4 py-3" id="toolbar">
+    <section class="op-toolbar mx-3 mx-lg-4 px-3 px-lg-4 py-3" id="toolbar">
       <div class="op-tool-row op-spu-filter" id="selection-slot">
         <div class="op-spu-filter__header">
           <label class="op-tool-kicker mb-0" for="filter-spu-ids">SPU</label>
@@ -246,12 +234,17 @@
       </div>
     </section>
 
-    <div class="op-table-meta px-3 px-lg-4">
+    <section class="op-table-panel mx-3 mx-lg-4" aria-label="商品经营明细">
+    <div class="op-table-meta">
+      <div class="op-table-heading">
+        <h2>商品经营明细</h2>
+        <p>点击商品行查看详情，横向滚动查看更多指标。</p>
+      </div>
       <span class="op-sortable-note" id="sort-note">默认排序：实际 ROI ↑（最亏在前）</span>
     </div>
 
     <!-- 主表 9 指标与大盘 v10 同口径：广告消耗 / 广告系统实际ROI / 广告系统保本ROI / 有效销售 / 总单量 / 有效单量 / 取消率 / 全损率 / 净利润 -->
-    <div class="op-table-wrap px-3 px-lg-4" tabindex="0" aria-label="SPU ROI 明细，可横向滚动">
+    <div class="op-table-wrap" role="region" aria-label="SPU ROI 明细，可横向滚动">
       <div id="rows" class="op-tabulator" role="grid" aria-label="SPU 盈利明细表"></div>
     </div>
 
@@ -291,6 +284,7 @@
           <ul class="pagination mb-0 op-pagination" id="pager-pages"></ul>
         </nav>
       </div>
+    </section>
     </section>
   </main>
 

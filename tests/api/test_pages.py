@@ -53,12 +53,12 @@ def test_sidebar_groups_match_operator_workflow():
     """Sidebar grouping follows the operator-facing information architecture."""
     body = _sidebar_html("focused-spus")
 
-    assert body.index("总览</div>") < body.index("控制台")
-    assert body.index("控制台") < body.index("经营分析</div>")
-    assert body.index("经营分析</div>") < body.index("重点关注 SPU")
+    assert body.index("总览</h2>") < body.index("控制台")
+    assert body.index("控制台") < body.index("经营分析</h2>")
+    assert body.index("经营分析</h2>") < body.index("重点关注 SPU")
     assert body.index("重点关注 SPU") < body.index("SPU ROI")
     assert body.index("SPU ROI") < body.index("广告日明细")
-    assert body.index("基础设置</div>") < body.index("采购工作台")
+    assert body.index("基础设置</h2>") < body.index("采购工作台")
 
 
 def test_sidebar_marks_ad_daily_entry_active():
@@ -69,7 +69,7 @@ def test_sidebar_marks_ad_daily_entry_active():
     assert body.index("采购工作台") < body.index("店铺注册")
     assert body.index("店铺注册") < body.index("枚举映射")
     assert body.index("运行配置") < body.index("定时任务")
-    assert body.index("数据工具</div>") < body.index("拦截配置")
+    assert body.index("数据工具</h2>") < body.index("拦截配置")
 
 
 def test_sidebar_script_synchronizes_persisted_and_responsive_state():
@@ -128,24 +128,82 @@ def test_sidebar_css_is_injected_for_external_stylesheet_pages():
 
         assert "<style>" in body
         assert "margin-left: var(--sidebar-width);" in body
-        assert "@media (max-width: 991.98px)" in body
+        assert "@media (max-width: 1023.98px)" in body
         assert body.index("</head>") > sidebar_css_at
 
 
-def test_sidebar_tokens_fall_back_on_pages_with_a_different_theme_vocabulary():
-    """The sidebar token bridge stays defensive after the vocabulary unification.
-
-    Historically the enum-map page used ``--bg``/``--text`` instead of paper
-    tokens. Those pages now share the warm-paper vocabulary from
-    ``tokens.css``, but the sidebar keeps its ``var(--paper, var(--bg, …))``
-    fallback chain so a page that opts out of the shared layer still renders.
-    """
+def test_sidebar_uses_the_shared_navigation_palette():
+    """Legacy pages consume the same approved navigation tokens as React."""
     body = bytes(_render_page("intercept-configs.html", current_page="intercept-configs").body).decode()
 
-    assert "--sidebar-paper-deep: var(--paper-deep, var(--card, #EAE3D2));" in body
-    assert "--sidebar-ink: var(--ink, var(--text, #1B1814));" in body
-    assert "background: var(--sidebar-paper-deep);" in body
+    assert "static/css/tokens.css" in body
+    assert "static/css/common.css" in body
+    common_css = (
+        Path(__file__).resolve().parents[2] / "tts_erp_v2/static/css/common.css"
+    ).read_text(encoding="utf-8")
+    assert "body > #sidebar.sidebar" in common_css
+    assert "--sidebar-paper-deep: var(--navigation-background);" in common_css
+    assert "--sidebar-ink: var(--navigation-foreground);" in common_css
+    assert "--sidebar-accent: var(--navigation-active);" in common_css
+    assert "--sidebar-paper:" not in _SIDEBAR_CSS
+    assert 'static/css/navigation.css?v=' in body
     assert "font-family: var(--mono);" not in _SIDEBAR_CSS
+
+
+@pytest.mark.parametrize("page_id,profile,entry", [
+    ("focused-spus", "focused-spus", "focused-spus.js"),
+    ("spu-roi", "standard-roi", "spu-roi.js"),
+])
+def test_spu_profiles_share_workspace_navigation_without_losing_content(page_id, profile, entry):
+    body = bytes(_render_page(
+        "spu-profitability.html", current_page=page_id,
+        title=PAGE_BY_ID[page_id].label, profile_id=profile, entrypoint_js=entry,
+    ).body).decode()
+    assert body.count('class="erp-header"') == 1
+    assert body.count('<h1 ') == 1
+    assert 'class="sidebar erp-sidebar"' in body
+    assert 'class="erp-brand"' in body
+    assert 'class="erp-nav-list"' in body
+    assert 'class="erp-nav-indicator"' in body
+    assert 'SHOP OPERATIONS' in body
+    assert 'sidebar-nav-icon' not in body
+    assert f'href="../../v2/pages/{page_id}" class="erp-nav-link" title="{PAGE_BY_ID[page_id].label}" aria-current="page"' in body
+    for element_id in ('shop-switcher', 'data-freshness', 'filter-limit', 'pager-pages'):
+        assert body.count(f'id="{element_id}"') == 1
+    assert body.index('<main ') < body.index('class="op-context-toolbar')
+    assert 'id="ops-identity"' not in body
+    assert 'id="btn-logout"' not in body
+    assert 'class="op-table-panel mx-3 mx-lg-4"' in body
+    for source in ('ads', 'orders', 'logistics', 'miaoshou', 'fx'):
+        assert body.count(f'data-source="{source}"') == 1
+    assert f'static/js/{entry}?v=' in body
+    assert "static/js/spu-profitability-page.js?v=" in body
+    assert "body.sidebar-collapsed { margin-left: 0; }" in body
+    assert "(min-width: 1024px)" in body
+
+
+def test_workspace_navigation_has_one_stylesheet_owner():
+    root = Path(__file__).resolve().parents[2]
+    shared = (root / 'tts_erp_v2/static/css/navigation.css').read_text(encoding='utf-8')
+    styles = (root / 'frontend/src/styles.css').read_text(encoding='utf-8')
+    workspace = (root / 'frontend/src/app/workspace.css').read_text(encoding='utf-8')
+    assert 'static/css/navigation.css' in styles
+    assert '.erp-nav-link[aria-current="page"]' in shared
+    assert '.erp-sidebar {' not in workspace
+    assert '.erp-nav-link' not in workspace
+    assert '#sidebar .nav-link' not in _SIDEBAR_CSS
+
+
+def test_profitability_pages_do_not_keep_a_separate_palette():
+    """Both retained SPU profiles must consume the shared theme and table colors."""
+    css_dir = Path(__file__).resolve().parents[2] / "tts_erp_v2/static/css"
+    roi_css = (css_dir / "spu-roi.css").read_text(encoding="utf-8")
+    focused_css = (css_dir / "focused-spus.css").read_text(encoding="utf-8")
+    assert ":root {" not in roi_css
+    assert "rgba(184, 57, 14" not in roi_css
+    assert "var(--table-heading)" in roi_css
+    assert "var(--table-hover)" in roi_css
+    assert "var(--surface)" in focused_css
 
 
 def test_dashboard_consumes_backend_owned_summary_fields():

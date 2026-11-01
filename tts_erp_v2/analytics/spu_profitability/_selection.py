@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
 
 from tts_erp_v2.analytics.spu_profitability._types import (
     ExactIdsSelection,
@@ -19,7 +20,8 @@ _SQL_SELECTED_CATALOG = text(
            cp.main_image_url, s.shop_id, s.account_name AS shop_name
     FROM commerce.products_spu cp
     LEFT JOIN commerce.shops s ON s.id = cp.shop_pk
-    WHERE (CAST(:shop_pk AS bigint) IS NULL
+    WHERE """ + authorized_shop_clause("s") + """
+      AND (CAST(:shop_pk AS bigint) IS NULL
            OR cp.shop_pk = CAST(:shop_pk AS bigint))
       AND (CAST(:q AS text) IS NULL OR cp.spu_id ILIKE '%' || :q || '%')
       AND (CAST(:spu_ids AS text[]) IS NULL
@@ -48,6 +50,8 @@ def resolve_selected_spus(
 ) -> list[Any]:
     """Resolve one selection into catalog rows inside the caller's snapshot."""
 
+    if shop_pk is not None:
+        require_authorized_shop(session, shop_pk=shop_pk)
     spu_ids = selection.spu_ids if isinstance(selection, ExactIdsSelection) else None
     return list(
         session.execute(

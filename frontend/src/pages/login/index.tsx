@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, FieldError, Input, Label, TextField } from '@heroui/react';
+import { Alert, Button, FieldError, Input, InputGroup, Label, TextField } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import type { PageProps } from '../../shared/contracts';
 import { canonicalNext, confirmLogin, decodeCurrentIdentity, type CurrentIdentity } from './contracts';
 import { leaveLogin } from './navigation';
+import BrandPanel from './BrandPanel';
+import './login.css';
 
 interface Attempt { username: string; password: string; next: string; rootPath: string }
 interface Recovery { phase: 'unverified' | 'checking' | 'checked' | 'failed'; current?: CurrentIdentity | null; retryAllowed: boolean }
@@ -15,6 +17,7 @@ export default function Login({ bootstrap }: PageProps) {
   const next = canonicalNext(bootstrap.rootPath, bootstrap.loginNextPath);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<CommandFailure>();
   const [recovery, setRecovery] = useState<Recovery>();
@@ -104,36 +107,59 @@ export default function Login({ bootstrap }: PageProps) {
   }
   const blocked = !next || pending || cooldown || Boolean(recovery && !recovery.retryAllowed);
   const checking = recovery?.phase === 'checking';
-  return <div className="max-w-sm space-y-4">
-    <p>使用账号登录以访问系统。会话由服务端管理。</p>
-    {!next && <p role="alert">登录暂不可用：缺少有效的返回地址，请重新打开服务端登录页。</p>}
-    <form aria-label="登录表单" className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <TextField name="username" value={username} onChange={(value) => edited('username', value)} isRequired isDisabled={pending} isInvalid={Boolean(failure?.fieldErrors.username)}>
-        <Label>用户名</Label><Input autoComplete="username" maxLength={64} /><FieldError>{failure?.fieldErrors.username}</FieldError>
-      </TextField>
-      <TextField name="password" value={password} onChange={(value) => edited('password', value)} isRequired isDisabled={pending} isInvalid={Boolean(failure?.fieldErrors.password)}>
-        <Label>密码</Label><Input type="password" autoComplete="current-password" maxLength={128} /><FieldError>{failure?.fieldErrors.password}</FieldError>
-      </TextField>
-      <Button type="submit" isDisabled={blocked}>{pending ? '登录中…' : '登录'}</Button>
-      {pending && <p role="status">正在等待登录响应…</p>}
-    </form>
-    {failure && <Alert status="danger"><Alert.Content><Alert.Title>登录未完成</Alert.Title><Alert.Description>{failure.message}</Alert.Description></Alert.Content></Alert>}
-    {cooldown && <p role="status">请等待服务端指定的冷却时间；修改输入不会缩短等待，不会自动登录或查询。</p>}
-    {recovery && <section aria-label="登录结果核对" className="space-y-3 break-words">
-      <p>原请求用户名：{attempt.current?.username}</p>
-      <p>查询仅反映当前 Cookie 对应的会话，不能证明原密码正确、原请求成功或本次签发了会话。输入和原请求仅保留在本页内存；不会自动重试。</p>
-      <Button variant="secondary" isDisabled={checking || pending || cooldown} onPress={() => { void verify(); }}>查询当前会话</Button>
-      {checking && <p role="status">查询中…</p>}
-      {recovery.phase === 'failed' && <p role="status">查询未完成；请稍后手动查询，不能据此判定登录结果。</p>}
-      {recovery.phase === 'checked' && <>
-        <p role="status">查询完成：{recovery.current ? '当前存在已认证会话。' : '当前没有已认证会话，不代表原请求未生效。'}</p>
-        {recovery.current && <><dl><dt>当前用户名</dt><dd>{recovery.current.username}</dd><dt>当前显示名称</dt><dd>{recovery.current.displayName ?? '—'}</dd></dl>
-          <p>{recovery.current.username === attempt.current?.username.trim().toLowerCase() ? '当前用户名与原请求一致，但仍不能证明原登录成功。' : '当前用户名与原请求用户名不同；不会视为原登录成功。'}</p>
-          <Button variant="secondary" isDisabled={cooldown} onPress={useCurrentSession}>使用已查询的当前会话继续</Button></>}
-        <p>重新登录将使用当前表单输入，可能再次创建会话；继续使用当前会话不代表验证了原密码。请明确选择。</p>
-        <Button variant="secondary" isDisabled={cooldown || recovery.retryAllowed} onPress={permitManualLogin}>我已了解，允许手动重新登录</Button>
-        {recovery.retryAllowed && <p role="status">已允许手动登录；仍需点击登录，不会自动提交。重新查询将撤销此选择。</p>}
-      </>}
-    </section>}
+  return <div className="login-page">
+    <div className="login-layout">
+      <BrandPanel />
+      <section className="login-access" aria-labelledby="login-welcome">
+        <div className="login-access-caption"><span className="login-access-dot" aria-hidden="true" />你的店铺，你的工作台</div>
+        <div className="login-form-content">
+          <p className="login-eyebrow">WELCOME BACK</p>
+          <h2 id="login-welcome" className="login-welcome">欢迎回来</h2>
+          <p className="login-intro">登录工作账号，继续今天的经营。</p>
+          <div className="login-form-body">
+            {!next && <p role="alert">登录暂不可用：缺少有效的返回地址，请重新打开服务端登录页。</p>}
+            <form aria-label="登录表单" className="space-y-5" aria-busy={pending} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+              <TextField name="username" value={username} onChange={(value) => edited('username', value)} isRequired isDisabled={pending} isInvalid={Boolean(failure?.fieldErrors.username)}>
+                <Label>用户名</Label><Input className="min-h-12 text-base" fullWidth autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="请输入用户名" maxLength={64} /><FieldError>{failure?.fieldErrors.username}</FieldError>
+              </TextField>
+              <TextField name="password" value={password} onChange={(value) => edited('password', value)} isRequired isDisabled={pending} isInvalid={Boolean(failure?.fieldErrors.password)}>
+                <Label>密码</Label>
+                <InputGroup className="min-h-12" fullWidth>
+                  <InputGroup.Input className="text-base" type={passwordVisible ? 'text' : 'password'} autoComplete="current-password" placeholder="请输入密码" maxLength={128} />
+                  <InputGroup.Suffix>
+                    <Button type="button" variant="ghost" size="sm" isDisabled={pending} aria-label={passwordVisible ? '隐藏密码' : '显示密码'} aria-pressed={passwordVisible} onPress={() => setPasswordVisible((value) => !value)}>
+                      {passwordVisible ? '隐藏' : '显示'}
+                    </Button>
+                  </InputGroup.Suffix>
+                </InputGroup>
+                <FieldError>{failure?.fieldErrors.password}</FieldError>
+              </TextField>
+              <Button type="submit" fullWidth size="lg" isDisabled={blocked}>{pending ? '登录中…' : '登录'}<span aria-hidden="true">↗</span></Button>
+              {pending && <p role="status">正在等待登录响应…</p>}
+            </form>
+            {failure && <Alert status="danger"><Alert.Content><Alert.Title>登录未完成</Alert.Title><Alert.Description>{failure.message}</Alert.Description></Alert.Content></Alert>}
+            {cooldown && <p role="status">请等待服务端指定的冷却时间；修改输入不会缩短等待，不会自动登录或查询。</p>}
+            {recovery && <section aria-label="登录结果核对" className="space-y-3 break-words">
+              <p>原请求用户名：{attempt.current?.username}</p>
+              <p>查询仅反映当前 Cookie 对应的会话，不能证明原密码正确、原请求成功或本次签发了会话。输入和原请求仅保留在本页内存；不会自动重试。</p>
+              <Button variant="secondary" isDisabled={checking || pending || cooldown} onPress={() => { void verify(); }}>查询当前会话</Button>
+              {checking && <p role="status">查询中…</p>}
+              {recovery.phase === 'failed' && <p role="status">查询未完成；请稍后手动查询，不能据此判定登录结果。</p>}
+              {recovery.phase === 'checked' && <>
+                <p role="status">查询完成：{recovery.current ? '当前存在已认证会话。' : '当前没有已认证会话，不代表原请求未生效。'}</p>
+                {recovery.current && <><dl><dt>当前用户名</dt><dd>{recovery.current.username}</dd><dt>当前显示名称</dt><dd>{recovery.current.displayName ?? '—'}</dd></dl>
+                  <p>{recovery.current.username === attempt.current?.username.trim().toLowerCase() ? '当前用户名与原请求一致，但仍不能证明原登录成功。' : '当前用户名与原请求用户名不同；不会视为原登录成功。'}</p>
+                  <Button variant="secondary" isDisabled={cooldown} onPress={useCurrentSession}>使用已查询的当前会话继续</Button></>}
+                <p>重新登录将使用当前表单输入，可能再次创建会话；继续使用当前会话不代表验证了原密码。请明确选择。</p>
+                <Button variant="secondary" isDisabled={cooldown || recovery.retryAllowed} onPress={permitManualLogin}>我已了解，允许手动重新登录</Button>
+                {recovery.retryAllowed && <p role="status">已允许手动登录；仍需点击登录，不会自动提交。重新查询将撤销此选择。</p>}
+              </>}
+            </section>}
+          </div>
+          <p className="login-account-help">账号由管理员分配。<br />如需开通账号或重置密码，请联系管理员。</p>
+        </div>
+        <p className="login-access-footer">TTS ERP<span aria-hidden="true"> / </span>店铺运营工作台</p>
+      </section>
+    </div>
   </div>;
 }

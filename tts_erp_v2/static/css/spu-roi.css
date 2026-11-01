@@ -4,26 +4,7 @@
 
 /* ═══ tokens ═══ */
 
-/* 页面局部 surface 色：tokens.css 只收语义令牌，这里从规范令牌派生，
- * 不另养并行色板。 */
-:root {
-  /* 亏损行（.row-bad）冻结列的底色 —— 需比 --paper-deep 更偏红，
-   * tokens.css 无对应项，故保留为页面局部 surface 色。 */
-  --paper-danger: #eee3d9;
-  /* 弱面（.op-drill-wrap 底色、表格行 hover）—— 比 --paper 略深、比
-   * --paper-deep 轻，用于需要区分但不抢眼的层次。历史遗留：此令牌此前
-   * 只在 var() 里被引用、从未声明，一直在靠 fallback 降级。 */
-  --paper-soft: color-mix(in srgb, var(--paper) 55%, var(--paper-deep));
-/* Bootstrap 变量桥接：把 Bootstrap 的语义变量指到暖纸令牌上。 */
- --bs-body-bg: var(--paper);
- --bs-body-color: var(--ink);
- --bs-body-font-family: var(--sans);
- --bs-border-color: var(--rule);
- --bs-border-radius: 0;
- --bs-link-color: var(--accent);
- --bs-link-hover-color: var(--accent-deep);
- --bs-focus-ring-color: rgba(184, 57, 14, 0.22);
-}
+/* Palette and Bootstrap bridges live in canonical tokens.css, shared with React. */
 
 * {
  box-sizing: border-box;
@@ -58,53 +39,55 @@ a:hover {
  outline-offset: 1px;
 }
 
-/* ═══ header meta 区(shop-switcher + identity + 同步时间) ═══ */
-.op-header-meta {
- display: flex;
- flex-direction: column;
- align-items: flex-start;
- gap: 8px;
- min-width: 0;
- max-width: 100%;
-}
-.op-header-tools {
+/* Shop scope and data freshness; session controls belong to the shared header. */
+.op-context-toolbar {
  display: flex;
  flex-wrap: wrap;
- align-items: center;
- gap: 8px 12px;
- min-width: 0;
- max-width: 100%;
+ align-items: flex-end;
+ gap: 20px 32px;
+ padding: 20px 24px;
+ border: 1px solid var(--rule);
+ border-radius: 14px;
+ background: var(--surface);
+}
+.op-context-label,
+.op-shop > span {
+ color: var(--muted);
+ font-size: 12px;
+ font-weight: 500;
+ line-height: 1.5;
 }
 .op-freshness {
  display: flex;
+ flex: 1 1 420px;
  flex-direction: column;
- align-items: flex-start;
- gap: 4px;
+ gap: 8px;
  min-width: 0;
- max-width: 100%;
 }
 .op-freshness-times {
  display: flex;
  flex-wrap: wrap;
  align-items: center;
- gap: 6px;
+ gap: 8px;
  margin: 0;
  padding: 0;
  list-style: none;
+ min-height: 40px;
  max-width: 100%;
 }
 .op-freshness-times li {
  display: inline-flex;
- align-items: baseline;
- gap: 5px;
+ align-items: center;
+ gap: 6px;
  margin: 0;
- padding: 1px 7px;
+ padding: 6px 10px;
  border: 1px solid var(--rule-soft);
- background: color-mix(in srgb, var(--paper) 72%, white);
+ border-radius: 8px;
+ background: var(--paper);
  color: var(--muted);
  font-family: var(--sans);
- font-size: 13px;
- line-height: 1.45;
+ font-size: 12px;
+ line-height: 1.5;
  white-space: nowrap;
 }
 .op-freshness-dot {
@@ -117,11 +100,11 @@ a:hover {
 }
 .op-freshness-label {
  font-family: var(--sans);
- font-size: 13px;
+ font-size: 12px;
 }
 .op-freshness-time {
  font-family: var(--sans);
- font-size: 13px;
+ font-size: 12px;
  font-variant-numeric: tabular-nums;
  color: var(--ink);
 }
@@ -141,24 +124,22 @@ a:hover {
  color: var(--danger);
 }
 .op-shop {
- display: inline-flex;
- align-items: center;
- gap: 6px;
- font-size: 13px;
- color: var(--muted);
-}
-.op-shop span {
- white-space: nowrap;
+ display: flex;
+ flex: 0 1 280px;
+ flex-direction: column;
+ gap: 8px;
+ min-width: 0;
+ margin: 0;
 }
 .op-shop-select {
- width: auto;
- min-width: 9rem;
- font-family: var(--mono);
- font-size: 13px;
+ width: 100%;
+ min-height: 40px;
+ font-family: var(--sans);
+ font-size: 14px;
  color: var(--ink);
- background-color: var(--paper);
+ background-color: var(--surface);
  border-color: var(--rule);
- border-radius: 0;
+ border-radius: 10px;
  cursor: pointer;
 }
 .op-shop-select:focus {
@@ -206,18 +187,10 @@ a:hover {
  color: var(--muted);
 }
 .op-title {
- font-family: var(--serif);
+ font-family: var(--sans);
  font-weight: 700;
  font-size: 28px;
  letter-spacing: -0.01em;
-}
-.op-identity {
- font-size: 13px;
- color: var(--muted);
-}
-.op-identity code {
- font-family: var(--mono);
- color: var(--ink);
 }
 .op-scope-note {
  margin: 0;
@@ -290,7 +263,8 @@ a:hover {
 .op-counter-group {
  overflow: hidden;
  border: 1px solid var(--rule-soft);
- background: rgba(255, 255, 255, 0.08);
+ border-radius: 14px;
+ background: var(--surface);
 }
 .op-counter-group-label {
  padding: 4px 10px;
@@ -430,8 +404,10 @@ a:hover {
 
 /* ═══ 工具栏 ═══ */
 .op-toolbar {
- border-bottom: 1px solid var(--rule);
- background: var(--paper);
+ min-width: 0;
+ border: 1px solid var(--rule);
+ border-radius: 14px;
+ background: var(--surface);
 }
 .op-fld-label {
  font-size: 12px;
@@ -445,14 +421,14 @@ a:hover {
 .op-toolbar .form-select {
  min-width: 0;
  color: var(--ink);
- background-color: transparent;
+ background-color: var(--surface);
  border-color: var(--rule);
- border-radius: 0;
+ border-radius: var(--radius);
 }
 .op-toolbar .form-control:focus,
 .op-toolbar .form-select:focus {
  border-color: var(--accent);
- box-shadow: 0 0 0 0.15rem rgba(184, 57, 14, 0.12);
+ box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .op-toolbar input[type="date"] {
  color-scheme: light;
@@ -555,7 +531,7 @@ a:hover {
 }
 .op-toolbar .ts-wrapper.focus .ts-control {
  border-color: var(--accent);
- box-shadow: 0 0 0 0.15rem rgba(184, 57, 14, 0.12);
+ box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .op-toolbar .ts-wrapper.multi .ts-control > div {
  color: var(--ink);
@@ -649,9 +625,15 @@ a:hover {
 }
 .op-table-meta {
  display: flex;
- justify-content: flex-end;
- padding-bottom: 6px;
+ align-items: center;
+ justify-content: space-between;
+ flex-wrap: wrap;
+ gap: 12px 24px;
+ padding: 20px 24px;
+ border-bottom: 1px solid var(--rule-soft);
 }
+.op-table-heading h2 { margin: 0; color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.5; }
+.op-table-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .op-date-input-groups {
  display: flex;
  flex-wrap: wrap;
@@ -689,9 +671,9 @@ a:hover {
  --bs-btn-active-color: var(--accent);
  --bs-btn-active-border-color: var(--accent);
  --bs-btn-active-bg: transparent;
- --bs-btn-focus-box-shadow: 0 0 0 0.15rem rgba(184, 57, 14, 0.22);
+ --bs-btn-focus-box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--accent) 22%, transparent);
  font-size: 14px;
- border-radius: 0 !important;
+ border-radius: var(--radius) !important;
 }
 .op-btn:disabled {
  opacity: 0.45;
@@ -734,46 +716,49 @@ a:hover {
 /* ═══ 主表（Tabulator 6.3.1，自托管 vendor/tabulator.min.*，MIT）═══
    列头排序/列显隐/冻结首列由 Tabulator 接管；此处只保留暖纸皮肤适配。 */
 .op-main {
- max-width: 1920px;
+ max-width: 1680px;
  margin: 0 auto;
 }
 .op-table-wrap {
- /* 通栏白底 + 底部横线与 .op-toolbar/.op-counter 一致；内容内缩靠模板上的
-    Bootstrap `px-3 px-lg-4`（本文件禁止手写断点），否则主表列比上方筛选
-    面板/大盘卡片左右外凸 22.5px，看起来表格没对齐。 */
- background: var(--paper);
- border-bottom: 1px solid var(--rule);
+ /* The card owns the content inset; Tabulator owns its scrollable grid. */
+ background: var(--surface);
  overflow-x: auto;
 }
+.op-table-panel { min-width: 0; margin-top: 20px; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); overflow: hidden; }
 .op-table-wrap:focus-visible {
  outline-offset: -2px;
 }
 .op-tabulator {
- background: var(--paper);
+ background: var(--surface);
  border: 0;
- min-width: 980px;
+ width: 100%;
+ min-width: 0;
+ font-family: var(--sans);
  font-size: 14px;
  font-variant-numeric: tabular-nums;
 }
 .op-tabulator .tabulator-header .tabulator-col[tabulator-field^="priceStats."] {
- min-width: 104px;
+ min-width: 120px;
 }
 .op-tabulator .tabulator-header .tabulator-col.tabulator-col-group {
- min-width: 208px;
+ min-width: 240px;
 }
 .op-tabulator .tabulator-header {
- background: var(--paper);
+ background: var(--table-heading);
  border-bottom: 1px solid var(--rule);
 }
 .op-tabulator .tabulator-header .tabulator-col {
- background: var(--paper);
- color: var(--muted);
- font-size: 13px;
- letter-spacing: 0.04em;
+ background: var(--table-heading);
+ color: var(--ink-soft);
+ padding: 0;
+ font-size: 12px;
+ letter-spacing: 0;
  font-weight: 600;
- white-space: nowrap;
+ white-space: normal;
  border-right: 0;
 }
+.op-tabulator .tabulator-header .tabulator-col .tabulator-col-content { padding: 12px 16px; }
+.op-tabulator .tabulator-header .tabulator-col.tabulator-col-group .tabulator-col-group-cols { border-top-color: var(--rule); }
 .op-tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover {
  color: var(--accent);
 }
@@ -781,43 +766,54 @@ a:hover {
  outline: 2px solid var(--accent);
  outline-offset: -3px;
 }
-.op-tabulator .tabulator-header .tabulator-col .tabulator-col-title {
- white-space: nowrap;
+.op-tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-title {
+ white-space: normal;
+ overflow: visible;
+ text-overflow: clip;
+ line-height: 1.6;
 }
-.op-tabulator .tabulator-tableHolder .tabulator-table {
- background: transparent;
+.op-tabulator .tabulator-tableholder .tabulator-table {
+ background: var(--surface);
 }
 .op-tabulator .tabulator-row {
- background: transparent;
- border-bottom: 1px solid var(--rule-soft);
+ background: var(--surface);
+ border-bottom: 1px solid var(--table-line);
+ min-height: 76px;
 }
 .op-tabulator .tabulator-row:hover {
- background: var(--paper-deep);
+ background: var(--table-hover);
 }
 .op-tabulator .tabulator-row .tabulator-cell {
  border-right: 0;
+ padding: 14px 16px;
+ font-size: 13px;
+ line-height: 1.7;
 }
 /* 冻结首列（Tabulator frozen）：背景必须不透明，滚动时盖住下层列 */
 .op-tabulator .tabulator-row .tabulator-cell.tabulator-frozen {
- background: var(--paper);
- box-shadow: inset 1px 0 0 var(--rule-soft);
+ background: var(--surface);
+ box-shadow: 4px 0 8px -6px var(--ink-soft);
+ border-right: 1px solid var(--rule);
 }
 .op-tabulator .tabulator-header .tabulator-col.tabulator-frozen {
- background: var(--paper);
- box-shadow: inset 1px 0 0 var(--rule-soft);
+ background: var(--table-heading);
+ box-shadow: 4px 0 8px -6px var(--ink-soft);
+ border-right: 1px solid var(--rule);
 }
 .op-tabulator .tabulator-row:hover .tabulator-cell.tabulator-frozen {
- background: var(--paper-deep);
+ background: var(--table-hover);
 }
 .op-tabulator .tabulator-row.row-bad {
  box-shadow: inset 2px 0 0 var(--danger);
 }
 .op-tabulator .tabulator-row.row-bad .tabulator-cell {
- background: rgba(140, 26, 26, 0.045);
+ background: var(--surface);
 }
 .op-tabulator .tabulator-row.row-bad .tabulator-cell.tabulator-frozen {
- background: var(--paper-danger);
+ background: var(--surface);
+ box-shadow: inset 3px 0 var(--danger), 4px 0 8px -6px var(--ink-soft);
 }
+.op-tabulator .tabulator-row.row-bad:hover .tabulator-cell { background: var(--table-hover); }
 .op-tabulator .tabulator-row.row-bad .roi-red,
 .op-tabulator .tabulator-row.row-bad .np-red {
  color: var(--danger);
@@ -887,10 +883,15 @@ td.np-red,
  white-space: nowrap;
 }
 .td-title {
- max-width: clamp(110px, 14vw, 220px);
+ display: block;
+ max-width: 100%;
  overflow: hidden;
  text-overflow: ellipsis;
  white-space: nowrap;
+ color: var(--ink);
+ font-size: 13px;
+ font-weight: 600;
+ line-height: 1.5;
 }
 .td-null {
  color: var(--rule);
@@ -900,28 +901,30 @@ td.np-red,
  align-items: center;
  min-width: 0;
  overflow: hidden;
- gap: 4px;
+ gap: 12px;
 }
 .spu-img {
- width: 32px;
- height: 32px;
+ width: 48px;
+ height: 48px;
  flex: none;
- object-fit: cover;
+ object-fit: contain;
  border: 1px solid var(--rule);
- background: var(--paper-deep);
+ border-radius: 8px;
+ background: var(--surface);
  cursor: zoom-in;
 }
 .spu-img:hover {
  border-color: var(--accent);
 }
 .spu-img-missing {
- width: 32px;
- height: 32px;
+ width: 48px;
+ height: 48px;
  flex: none;
  display: flex;
  align-items: center;
  justify-content: center;
  border: 1px dashed var(--rule);
+ border-radius: 8px;
  background: var(--paper-deep);
  color: var(--rule);
  font-size: 10px;
@@ -930,11 +933,16 @@ td.np-red,
 }
 .td-spu-meta {
  display: flex;
+ flex: 1;
  flex-direction: column;
- gap: 2px;
+ gap: 4px;
  min-width: 0;
  overflow: hidden;
 }
+.td-product-flags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.td-product-flags > span { padding: 0 5px; border-radius: 4px; font-size: 10px; line-height: 1.6; }
+.td-product-flags .spu-status { margin-left: 0; }
+.td-product-flags .spu-loss { color: var(--danger); background: var(--paper-danger); }
 .spu-status {
  font-family: var(--mono);
  font-size: 11px;
@@ -984,13 +992,13 @@ td.np-red,
 /* ═══ 分页 / 提示行 ═══ */
 .op-pager {
  border-top: 1px solid var(--rule);
- background: var(--paper);
+ background: var(--surface);
 }
 .op-pager-limit {
  width: auto;
  min-width: 5.25rem;
  border-color: var(--rule);
- border-radius: 0;
+ border-radius: 8px;
  color: var(--ink);
  background-color: var(--paper);
 }
@@ -1003,7 +1011,7 @@ td.np-red,
  --bs-pagination-hover-border-color: var(--accent);
  --bs-pagination-focus-color: var(--accent);
  --bs-pagination-focus-bg: var(--paper);
- --bs-pagination-focus-box-shadow: 0 0 0 0.15rem rgba(184, 57, 14, 0.16);
+ --bs-pagination-focus-box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--accent) 16%, transparent);
  --bs-pagination-active-color: var(--paper);
  --bs-pagination-active-bg: var(--accent);
  --bs-pagination-active-border-color: var(--accent);
@@ -1105,7 +1113,7 @@ textarea[data-tip] {
  font-weight: 600;
 }
 .op-drill-tab:focus-visible {
- box-shadow: 0 0 0 0.15rem rgba(184, 57, 14, 0.22);
+ box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .op-drill-banner {
  padding: 8px 12px;
@@ -1179,7 +1187,7 @@ textarea[data-tip] {
  transform: scale(1.1);
 }
 .op-drill-cell-fallback {
- background: rgba(184, 57, 14, 0.06);
+ background: color-mix(in srgb, var(--warn) 6%, transparent);
  border-color: var(--warn, #b8390e);
 }
 /* ═══ 利润构成瀑布(§6.2) ═══ */
@@ -1273,9 +1281,9 @@ textarea[data-tip] {
 }
 .op-tab-table {
  min-width: 680px;
- font-size: 12px;
+ font-size: 14px;
  font-variant-numeric: tabular-nums;
- --bs-table-bg: transparent;
+ --bs-table-bg: var(--surface);
  --bs-table-color: var(--ink);
  --bs-table-hover-bg: var(--paper-deep);
  --bs-table-hover-color: var(--ink);
@@ -1288,7 +1296,8 @@ textarea[data-tip] {
  vertical-align: middle;
 }
 .op-tab-table th {
- font-size: 11px;
+ background: var(--table-heading);
+ font-size: 12px;
  font-weight: 600;
  color: var(--muted);
  letter-spacing: 0.04em;
@@ -1312,7 +1321,7 @@ textarea[data-tip] {
  width: auto !important;
  min-width: 0 !important;
  max-width: none !important;
- padding: 10px 14px !important;
+ padding: 14px 18px !important;
  text-align: left !important;
 }
 

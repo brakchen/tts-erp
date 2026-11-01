@@ -54,7 +54,7 @@ function DetailLink({ root, item }: { root: string; item: ComparisonItem }) {
 function Expanded({ item, meta, root, close }: { item: ComparisonItem; meta: Comparison['meta']; root: string; close: () => void }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus(); }, []);
-  return <section role="region" aria-labelledby={`detail-title-${item.spuPk}`} className="space-y-4 p-3" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); close(); } }}>
+  return <section role="region" aria-labelledby={`detail-title-${item.spuPk}`} className="erp-panel space-y-4 p-3" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); close(); } }}>
     <h2 ref={heading} tabIndex={-1} id={`detail-title-${item.spuPk}`}>SPU {item.spuId} 对比明细</h2>
     <Button variant="secondary" onPress={close}>关闭 SPU 明细</Button>
     <p>店铺 {item.shopPk} · 内部编号 {item.spuPk} · {item.windowDays} 天 · 截至日 {item.anchorDate}</p>
@@ -66,20 +66,20 @@ function Expanded({ item, meta, root, close }: { item: ComparisonItem; meta: Com
 function Row({ item, meta, root }: { item: ComparisonItem; meta: Comparison['meta']; root: string }) {
   const [expanded, setExpanded] = useState(false); const trigger = useRef<HTMLButtonElement>(null);
   const close = () => { setExpanded(false); trigger.current?.focus(); };
-  return <><tr className="border-b align-top">
-    <th scope="row" className="p-3 text-left"><div className="min-w-48 space-y-3"><strong className="break-all">{item.spuId}</strong><p>内部编号 {item.spuPk} · 店铺 {item.shopPk}</p>
-      <Button ref={trigger} size="sm" variant="secondary" aria-expanded={expanded} aria-controls={`detail-${item.spuPk}`} aria-label={`查看对比明细 ${item.spuId}`} onPress={() => expanded ? close() : setExpanded(true)}>查看对比明细</Button><p><DetailLink item={item} root={root} /></p></div></th>
-    <td className="min-w-48 p-3"><Metric label="ROI（比率）" previous={item.previousRoi} current={item.currentRoi} previousReason={item.previousRoiUnavailableReason} currentReason={item.currentRoiUnavailableReason} change /></td>
-    <td className="min-w-48 p-3"><Metric label="净利润（CNY）" previous={item.previousNetProfitCny} current={item.currentNetProfitCny} change unit="CNY" /></td>
-    <td className="min-w-32 p-3"><Metric label="订单数" previous={item.previousOrderCount} current={item.currentOrderCount} /></td>
-    <td className="min-w-48 p-3"><Metric label="广告消耗（CNY）" previous={item.previousSpendCny} current={item.currentSpendCny} /></td>
-    <td className="min-w-64 p-3"><Facts item={item} /></td>
-  </tr>{expanded && <tr><td colSpan={6} id={`detail-${item.spuPk}`}><Expanded item={item} meta={meta} root={root} close={close} /></td></tr>}</>;
+  return <><tr className="border-b align-top erp-table-row">
+    <th scope="row" className="p-3 text-left erp-table-cell erp-table-row-heading"><div className="min-w-48 space-y-3"><strong className="break-all">{item.spuId}</strong><p>内部编号 {item.spuPk} · 店铺 {item.shopPk}</p>
+      <Button className="erp-table-action" ref={trigger} size="sm" variant="secondary" aria-expanded={expanded} aria-controls={`detail-${item.spuPk}`} aria-label={`查看对比明细 ${item.spuId}`} onPress={() => expanded ? close() : setExpanded(true)}>查看对比明细</Button><p><DetailLink item={item} root={root} /></p></div></th>
+    <td className="min-w-48 p-3 erp-table-cell"><Metric label="ROI（比率）" previous={item.previousRoi} current={item.currentRoi} previousReason={item.previousRoiUnavailableReason} currentReason={item.currentRoiUnavailableReason} change /></td>
+    <td className="min-w-48 p-3 erp-table-cell"><Metric label="净利润（CNY）" previous={item.previousNetProfitCny} current={item.currentNetProfitCny} change unit="CNY" /></td>
+    <td className="min-w-32 p-3 erp-table-cell"><Metric label="订单数" previous={item.previousOrderCount} current={item.currentOrderCount} /></td>
+    <td className="min-w-48 p-3 erp-table-cell"><Metric label="广告消耗（CNY）" previous={item.previousSpendCny} current={item.currentSpendCny} /></td>
+    <td className="min-w-64 p-3 erp-table-cell"><Facts item={item} /></td>
+  </tr>{expanded && <tr className="erp-table-row"><td className="erp-table-cell" colSpan={6} id={`detail-${item.spuPk}`}><Expanded item={item} meta={meta} root={root} close={close} /></td></tr>}</>;
 }
 export default function ComparisonTable({ data, root }: { data: Comparison; root: string }) {
-  return <div role="region" aria-label="SPU 对比表格滚动区域" tabIndex={0} className="max-w-full overflow-x-auto rounded-xl border">
-    <table className="w-full text-sm" aria-label="SPU 两期盈利对比"><thead><tr>{['SPU / 查证', 'ROI（比率）', '净利润（CNY）', '订单数', '广告消耗（CNY）', '事实与限制'].map((label) => <th key={label} scope="col" className="p-3 text-left whitespace-nowrap">{label}</th>)}</tr></thead>
-      <tbody>{data.items.map((item) => <Row key={String(item.spuPk)} item={item} meta={data.meta} root={root} />)}</tbody>
+  return <div role="region" aria-label="SPU 对比表格滚动区域" tabIndex={0} className="erp-table erp-table-scroll">
+    <table className="w-full text-sm erp-table-content" aria-label="SPU 两期盈利对比"><thead className="erp-table-head"><tr className="erp-table-row">{['SPU / 查证', 'ROI（比率）', '净利润（CNY）', '订单数', '广告消耗（CNY）', '事实与限制'].map((label) => <th key={label} scope="col" className="p-3 text-left whitespace-nowrap erp-table-column">{label}</th>)}</tr></thead>
+      <tbody className="erp-table-body">{data.items.map((item) => <Row key={String(item.spuPk)} item={item} meta={data.meta} root={root} />)}</tbody>
     </table>
   </div>;
 }

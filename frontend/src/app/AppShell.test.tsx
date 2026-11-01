@@ -51,6 +51,18 @@ describe('AppShell', () => {
     viewport(1440);
   });
 
+  it('keeps fullscreen content in the shared landmarks without hidden interactive workspace controls', () => {
+    render(<AppShell bootstrap={bootstrap} title="登录" layout="fullscreen" actions={<Button>TEST_workspace_action</Button>}>
+      <p>TEST_fullscreen_content</p>
+    </AppShell>);
+    expect(screen.getAllByRole('banner')).toHaveLength(1);
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(within(screen.getByRole('main')).getByText('TEST_fullscreen_content')).toBeVisible();
+    expect(screen.getByRole('heading', { level: 1, name: '登录' })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
   it.each([375, 1440, 2560])('shares the header and main without empty business-navigation controls at %ipx', (width) => {
     viewport(width);
     render(<AppShell bootstrap={{ ...bootstrap, pageId: 'login', navigation: [], roleCapabilities: { readwrite: false, admin: false }, loginNextPath: '/tts/v2/pages/dashboard' }} title="登录"><p>TEST_public_login</p></AppShell>);

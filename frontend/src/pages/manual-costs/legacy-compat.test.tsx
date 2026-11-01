@@ -1,3 +1,4 @@
+import { editRowCost, readRowCost } from './test-editor';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -64,7 +65,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     await user.selectOptions(screen.getByRole('combobox', { name: '当前店铺' }), other.id);
     const row = (await screen.findByText(`TEST 店铺 ${other.id}`)).closest('tr')!;
     expect(catalogueQuery(fetcher).get('shop_pk')).toBe(other.id);
-    expect(within(row).getByRole('textbox', { name: '单位成本' })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '刷新当前列表' })).toBeEnabled();
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });
@@ -130,7 +131,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(document.body.textContent).not.toContain('SKU');
     for (const [index, value] of ['999999999999999.9999', '-0.0100', '', '0.0000'].entries()) {
       const row = screen.getByText(`TEST 商品 ${index}`).closest('tr')!;
-      expect(within(row).getByRole('textbox', { name: '单位成本' })).toHaveValue(value);
+      expect(readRowCost(row)).toBe(value);
       expect(within(row).getByText(rows[index].id)).toBeVisible();
       expect(within(row).getByText(rows[index].spu_id)).toBeVisible();
       expect(within(row).getByText(rows[index].source_created_at!)).toBeVisible();
@@ -147,10 +148,10 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     const row = { ...product(), unit_cost: null };
     const fetcher = setup([row]); const user = userEvent.setup(); render(<ManualCosts {...props} />);
     await screen.findByText('TEST 商品 0');
-    expect(screen.getByRole('textbox', { name: '单位成本' })).toHaveValue('123456789012345.1234');
+    expect(screen.getByText('货源：123456789012345.1234')).toBeVisible();
     if (view === 'unregistered') await user.click(screen.getByRole('checkbox', { name: '仅展示未登记 SPU' }));
     else await user.click(screen.getByRole('button', { name: '缺成本候选' }));
-    await waitFor(() => expect(screen.getByRole('textbox', { name: '单位成本' })).toHaveValue(''));
+    await waitFor(() => expect(readRowCost(screen.getByText('TEST 商品 0').closest('tr')!)).toBe(''));
     expect(screen.getByText('货源：123456789012345.1234')).toBeVisible();
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
@@ -159,8 +160,8 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
   it('replaces submit-all hooks with explicit dirty-row confirmation and confirmed per-row progress', async () => {
     const fetcher = setup([product(), product(1)]); const user = userEvent.setup(); render(<ManualCosts {...props} />);
     const row = (await screen.findByText('TEST 商品 0')).closest('tr')!;
-    fireEvent.change(within(row).getByRole('textbox', { name: '单位成本' }), { target: { value: '77.0100' } });
-    expect(within(row).getByText('已编辑')).toBeVisible();
+    editRowCost(row, '77.0100');
+    expect(within(row).queryByText('未编辑')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText(/SPU TEST_SPU_0 · 77.0100 VND/)).toBeVisible();

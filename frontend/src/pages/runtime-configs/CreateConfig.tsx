@@ -35,7 +35,7 @@ export default function CreateConfig({ disabled, pending, replacesUnsavedDraft, 
     try { if (await create(draft)) { setKey(''); setName(''); setPayload('{}'); setSchema('{}'); setCustom(false); setMessage(''); } }
     finally { setConfirming(undefined); }
   }
-  return <section className="space-y-3" aria-label="创建配置项"><h2 className="text-lg font-semibold">创建配置项</h2>
+  return <section className="erp-panel space-y-3" aria-label="创建配置项"><h2 className="text-lg font-semibold">创建配置项</h2>
     <form aria-label="创建配置" className="space-y-3" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
       <TextField value={key} isRequired isDisabled={pending} isInvalid={Boolean(errors.configKey)} onChange={(v) => { edit(); setKey(v); }}><Label>新配置键</Label><Input maxLength={128} /><FieldError>{errors.configKey}</FieldError></TextField>
       <TextField value={name} isRequired isDisabled={pending} isInvalid={Boolean(errors.displayName)} onChange={(v) => { edit(); setName(v); }}><Label>新配置名称</Label><Input maxLength={256} /><FieldError>{errors.displayName}</FieldError></TextField>

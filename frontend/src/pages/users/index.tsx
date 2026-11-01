@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Input, Label, ListBox, Modal, Select, Tabs, TextField } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
@@ -139,7 +140,8 @@ export default function Users({ bootstrap }: PageProps) {
   const title = dialog?.kind === 'createUser' ? '新建用户' : dialog?.kind === 'displayName' ? '编辑显示名' : dialog?.kind === 'roles' ? '分配角色' : dialog?.kind === 'password' ? '重置密码' : dialog?.kind === 'sessions' ? '会话管理' : dialog?.kind === 'detail' ? '用户详情' : dialog?.kind === 'status' ? '确认更改用户状态' : dialog?.kind === 'createRole' ? '新建角色' : dialog?.kind === 'editRole' ? '编辑角色' : '确认删除角色';
   const blockActions = command.pending || unresolved || command.cooldown;
   const formKind = dialog && ['createUser', 'displayName', 'roles', 'password', 'createRole', 'editRole'].includes(dialog.kind);
-  return <div className="space-y-4 min-w-0">
+  return <div className="erp-page">
+    <PageIntro eyebrow="ACCESS MANAGEMENT" title="为团队配置合适的访问权限" description="管理账号、角色与会话，按实际工作职责分配能力。" />
     <p>用户与角色权限管理。显示名、角色和启停分别提交；所有授权及自身 / 最后管理员保护由服务端判定。</p>
     {!canManage && <p>当前仅浏览；维护需要 admin 权限，以服务端判定为准。</p>}
     {command.notice && <p role="status">{command.notice}</p>}{command.pending && <p role="status">提交中，请勿重复操作…</p>}{command.cooldown && <p role="status">服务端冷却中，请等待指定时间后手动重试，不会自动请求。</p>}

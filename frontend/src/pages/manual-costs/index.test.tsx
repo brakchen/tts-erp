@@ -1,3 +1,4 @@
+import { closeRowEditor, editRowCost, openRowEditor, readRowCost } from './test-editor';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -22,7 +23,7 @@ function setup(command: (url: string, init: RequestInit) => Promise<Response> = 
 }
 async function editCost(value = '123456789012345.1234', name = 'TEST 商品') {
   const row = (await screen.findByText(name)).closest('tr')!;
-  fireEvent.change(within(row).getByRole('textbox', { name: '单位成本' }), { target: { value } });
+  editRowCost(row, value);
   return row;
 }
 async function confirmBatch(user: ReturnType<typeof userEvent.setup>) {
@@ -31,10 +32,25 @@ async function confirmBatch(user: ReturnType<typeof userEvent.setup>) {
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe('manual-costs workbench', () => {
+  it('shows an actionable read error and correlation id without leaking server details', async () => {
+    const fetcher = setup();
+    fetcher.mockImplementation(async (url) => url.includes('channel-accounts?') ? json([shop])
+      : json({ detail: 'TEST_private_database_error' }, 500, { 'x-request-id': 'TEST_read_request' }));
+    render(<ManualCosts {...props} />);
+    expect(await screen.findByText(/HTTP 500/)).toBeVisible();
+    expect(screen.getByText(/TEST_read_request/)).toBeVisible();
+    expect(screen.getByRole('button', { name: '重试列表' })).toBeEnabled();
+    expect(document.body.textContent).not.toContain('TEST_private_database_error');
+    expect(screen.queryByRole('table', { name: 'SPU 成本工作台' })).not.toBeInTheDocument();
+  });
   it('reads the actual shop-scoped catalogue and preserves zero, money strings and oversized counts', async () => {
     const fetcher = setup(); render(<ManualCosts {...props} />);
     const row = (await screen.findByText('TEST 商品')).closest('tr')!;
-    expect(within(row).getByRole('textbox', { name: '单位成本' })).toHaveValue('0.0000');
+    expect(within(row).queryByRole('textbox')).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: '撤销' })).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: '提交此行' })).not.toBeInTheDocument();
+    expect(within(row).queryByText('未编辑')).not.toBeInTheDocument();
+    expect(readRowCost(row)).toBe('0.0000');
     expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
     expect(screen.getByText('9007199254740995')).toBeVisible();
     expect(fetcher.mock.calls.some(([url]) => url.includes('shop_pk=9007199254740993'))).toBe(true);
@@ -144,8 +160,8 @@ describe('manual-costs draft and batch recovery', () => {
   it('undoes a later edit back to the last confirmed submission rather than a stale pre-submit catalogue value', async () => {
     setup(async () => saved()); const user = userEvent.setup(); render(<ManualCosts {...props} />);
     await editCost(); await confirmBatch(user); await screen.findByText('已确认成功');
-    const row = await editCost('999.0000'); await user.click(within(row).getByRole('button', { name: '撤销' }));
-    expect(within(row).getByRole('textbox', { name: '单位成本' })).toHaveValue('123456789012345.1234');
+    const row = await editCost('999.0000'); await user.click(screen.getByRole('button', { name: '撤销草稿 PK 9007199254740995' }));
+    expect(readRowCost(row)).toBe('123456789012345.1234');
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
   });
   it('submits dirty same-external-ID rows sequentially by distinct captured internal PKs, never untouched prefills', async () => {
@@ -170,9 +186,9 @@ describe('manual-costs draft and batch recovery', () => {
     const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost(); await editCost('22.0000', 'TEST 第二'); const unsent = await editCost('33.0000', 'TEST 第三');
     await confirmBatch(user); await screen.findByRole('region', { name: '提交结果核对' });
     const recovery = screen.getByRole('region', { name: '提交结果核对' });
-    expect(writes).toHaveLength(2); expect(within(unsent).getByRole('textbox', { name: '单位成本' })).toHaveValue('33.0000');
+    expect(writes).toHaveLength(2); expect(readRowCost(unsent)).toBe('33.0000');
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled(); expect(document.body.textContent).not.toContain('TEST_PRIVATE');
-    const second = screen.getByText('TEST 第二').closest('tr')!; fireEvent.change(within(second).getByRole('textbox', { name: '单位成本' }), { target: { value: '44.0000' } });
+    const second = screen.getByText('TEST 第二').closest('tr')!; editRowCost(second, '44.0000');
     expect(within(recovery).getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
     // Return exact captured target, not the now-selected list scope.
     fetcher.mockImplementationOnce(async (url: string, init: RequestInit) => { expect(url).toBe('/tts/v2/commerce/channel-products/9007199254740996'); expect(init.method).toBe('GET'); return json(product('9007199254740996', 'TEST 第二')); });
@@ -181,25 +197,25 @@ describe('manual-costs draft and batch recovery', () => {
     await user.click(screen.getByRole('button', { name: '核对后决定重新提交' }));
     expect(within(screen.getByRole('dialog')).getByText(/44.0000 VND/)).toBeVisible();
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' })); expect(writes).toHaveLength(2);
-    expect(within(second).getByRole('textbox', { name: '单位成本' })).toHaveValue('44.0000');
+    expect(readRowCost(second)).toBe('44.0000');
   });
   it.each([409, 422])('keeps actionable per-row HTTP %s errors, clears only field snapshots on genuine edit and permits explicit retry', async (status) => {
     let writes = 0; setup(async () => ++writes === 1 ? json({ detail: [{ loc: ['body', 'unit_cost'], type: 'greater_than', input: 'TEST_PRIVATE' }] }, status) : saved());
     const user = userEvent.setup(); render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
     await within(row).findByText(new RegExp(`HTTP ${status}`)); expect(document.body.textContent).not.toContain('TEST_PRIVATE');
-    const input = within(row).getByRole('textbox', { name: '单位成本' }); if (status === 422) expect(input).toBeInvalid();
-    fireEvent.change(input, { target: { value: '123456789012345.1235' } }); expect(input).toBeValid();
+    const input = openRowEditor(row).getByRole('textbox', { name: '单位成本' }); if (status === 422) expect(input).toBeInvalid();
+    fireEvent.change(input, { target: { value: '123456789012345.1235' } }); expect(input).toBeValid(); closeRowEditor();
     await confirmBatch(user); await screen.findByText('已确认成功'); expect(writes).toBe(2);
   });
   it('preserves drafts across view switches, dialog cancellation, server refresh and explicit server filters without submitting prefills', async () => {
     const fetcher = setup(); const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost('5.0001');
     await user.click(screen.getByRole('button', { name: '最近提交' })); await screen.findByText('暂无提交记录');
     await user.click(screen.getByRole('button', { name: '继续编辑 PK 9007199254740995' }));
-    let dialog = screen.getByRole('dialog'); expect(within(dialog).getByRole('textbox', { name: '单位成本' })).toHaveValue('5.0001');
+    let dialog = screen.getByRole('dialog'); expect(readRowCost(dialog)).toBe('5.0001');
     fireEvent.change(within(dialog).getByRole('textbox', { name: '备注' }), { target: { value: 'TEST draft note' } });
     await user.click(within(dialog).getByRole('button', { name: '取消并保留草稿' }));
     await user.click(screen.getByRole('button', { name: '全部 SPU' })); const row = (await screen.findByText('TEST 商品')).closest('tr')!;
-    expect(within(row).getByRole('textbox', { name: '单位成本' })).toHaveValue('5.0001');
+    expect(readRowCost(row)).toBe('5.0001');
     await user.click(screen.getByRole('checkbox', { name: '仅展示未登记 SPU' }));
     await screen.findByText('TEST 商品'); expect(fetcher.mock.calls.some(([url]) => url.includes('missing_manual_cost=true'))).toBe(true);
     await user.click(within(screen.getByText('TEST 商品').closest('tr')!).getByRole('button', { name: '编辑详情' })); dialog = screen.getByRole('dialog');
@@ -219,13 +235,13 @@ describe('manual-costs draft and batch recovery', () => {
     const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost();
     await user.click(within(screen.getByText('TEST 商品').closest('tr')!).getByRole('button', { name: '编辑详情' }));
     let dialog = screen.getByRole('dialog'); fireEvent.change(within(dialog).getByRole('textbox', { name: '生效时间' }), { target: { value: '2026-10-24T12:00' } });
-    await user.click(within(dialog).getByRole('button', { name: '确认此行草稿' })); await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
+    await user.click(within(dialog).getByRole('button', { name: '保存成本' })); await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
     expect(writes).toHaveLength(0);
     await user.click(within(screen.getByText('TEST 商品').closest('tr')!).getByRole('button', { name: '编辑详情' })); dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('textbox', { name: '生效时间' })).toBeInvalid();
     fireEvent.change(within(dialog).getByRole('textbox', { name: '生效时间' }), { target: { value: '2026-10-24T12:00:00+07:00' } });
     expect(within(dialog).getByRole('textbox', { name: '生效时间' })).toBeValid();
-    await user.click(within(dialog).getByRole('button', { name: '确认此行草稿' })); await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
+    await user.click(within(dialog).getByRole('button', { name: '保存成本' })); await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
     await screen.findByText('已确认成功'); expect(JSON.parse(writes[0].body as string).valid_from).toBe('2026-10-24T12:00:00+07:00');
   });
 });
@@ -238,7 +254,7 @@ describe('manual-costs read fences and cancellation', () => {
     await confirmBatch(user); await user.click(screen.getByRole('button', { name: '停止后续行' }));
     await act(async () => release(saved()));
     await screen.findByText('已确认成功'); expect(writes).toHaveLength(1);
-    expect(within(unsent).getByRole('textbox', { name: '单位成本' })).toHaveValue('22.0000'); expect(within(unsent).getByText('已编辑')).toBeVisible();
+    expect(readRowCost(unsent)).toBe('22.0000'); expect(within(unsent).queryByText('未编辑')).not.toBeInTheDocument();
   });
   it('keeps a full 600-second Retry-After across draft edits, scope changes and verification, with explicit-only requests after expiry', async () => {
     let release!: (response: Response) => void;
@@ -247,7 +263,7 @@ describe('manual-costs read fences and cancellation', () => {
     vi.useFakeTimers(); await act(async () => release(json({}, 500, { 'Retry-After': '600' })));
     const writes = fetcher.mock.calls.filter(([, init]) => init.method === 'POST').length;
     const reads = fetcher.mock.calls.filter(([, init]) => init.method === 'GET').length;
-    const row = screen.getByText('TEST 商品').closest('tr')!; fireEvent.change(within(row).getByRole('textbox', { name: '单位成本' }), { target: { value: '88.0001' } });
+    const row = screen.getByText('TEST 商品').closest('tr')!; editRowCost(row, '88.0001');
     expect(screen.getByRole('button', { name: '刷新当前列表' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '最近提交' })); await act(async () => {});
@@ -274,7 +290,7 @@ describe('manual-costs read fences and cancellation', () => {
       ? new Response('[{"id":9007199254740993,"shop_id":"TEST_shop","account_name":"TEST 店铺"}]')
       : new Response('[{"id":9007199254740995,"shop_pk":9007199254740993,"spu_id":"TEST_long","title":"TEST exact","unit_cost":"999999999999999.9999","currency":"CNY"}]', { headers: { 'X-Total-Count': '9007199254740997' } })));
     render(<ManualCosts {...props} />); const row = (await screen.findByText('TEST exact')).closest('tr')!;
-    expect(within(row).getByText('9007199254740995')).toBeVisible(); expect(within(row).getByRole('textbox', { name: '单位成本' })).toHaveValue('999999999999999.9999');
+    expect(within(row).getByText('9007199254740995')).toBeVisible(); expect(readRowCost(row)).toBe('999999999999999.9999');
     expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
   });
   it('does not let an old-shop GET overwrite a newer shop and retains the old-shop draft target', async () => {
@@ -292,7 +308,7 @@ describe('manual-costs read fences and cancellation', () => {
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: '继续编辑 PK 9007199254740995' }));
     expect(within(screen.getByRole('dialog')).getByRole('textbox', { name: '单位成本' })).toHaveValue('22.2000');
-    expect(within(screen.getByRole('dialog')).getByText(/店铺 #9007199254740993/)).toBeVisible();
+    expect(within(screen.getByRole('dialog')).getByText('#9007199254740993')).toBeVisible();
   });
 });
 
@@ -324,7 +340,7 @@ describe('manual-costs authority and read states', () => {
   it.each([undefined, { readwrite: false, admin: true }, { readwrite: false, admin: false }])('fails closed for non-write capabilities %# while preserving readable facts', async (roleCapabilities) => {
     const fetcher = setup(); render(<ManualCosts bootstrap={{ ...props.bootstrap, roleCapabilities }} />);
     const row = (await screen.findByText('TEST 商品')).closest('tr')!;
-    expect(within(row).getByRole('textbox', { name: '单位成本' })).toBeDisabled(); expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled(); expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled();
     expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
   });
   it('gives malformed reads an explicit retry rather than silently treating them as empty data', async () => {
@@ -388,21 +404,21 @@ describe('manual-costs bounded request lifetimes', () => {
     await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
     vi.useFakeTimers(); await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' })); });
     const calls = fetcher.mock.calls.length;
-    expect(writes).toHaveLength(1); expect(within(first).getByRole('textbox', { name: '单位成本' })).toBeDisabled();
+    expect(writes).toHaveLength(1); expect(within(first).getByRole('button', { name: '编辑详情' })).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
     expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(screen.getByRole('region', { name: '提交结果核对' })).toBeVisible();
     expect(signal.aborted).toBe(true); expect(screen.queryByRole('button', { name: '停止后续行' })).toBeNull();
-    expect(within(first).getByRole('textbox', { name: '单位成本' })).toBeEnabled();
-    expect(within(first).getByRole('textbox', { name: '单位成本' })).toHaveValue('123456789012345.1234');
-    expect(within(remaining).getByRole('textbox', { name: '单位成本' })).toHaveValue('22.0000');
+    expect(within(first).getByRole('button', { name: '编辑详情' })).toBeEnabled();
+    expect(readRowCost(first)).toBe('123456789012345.1234');
+    expect(readRowCost(remaining)).toBe('22.0000');
     expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
     expect(fetcher.mock.calls).toHaveLength(calls);
     await act(async () => { finish(); await vi.advanceTimersByTimeAsync(60_000); });
     expect(screen.queryByText('已确认成功')).toBeNull(); expect(screen.getByRole('region', { name: '提交结果核对' })).toBeVisible();
     expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toHaveLength(1);
-    fireEvent.change(within(first).getByRole('textbox', { name: '单位成本' }), { target: { value: '33.0000' } });
+    editRowCost(first, '33.0000');
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
     page.unmount(); expect(vi.getTimerCount()).toBe(0);
   });
@@ -425,7 +441,7 @@ describe('manual-costs bounded request lifetimes', () => {
     expect(signal.aborted).toBe(true); expect(screen.getByText(/核对未完成/)).toBeVisible();
     expect(screen.getByRole('button', { name: '查询当前事实' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
-    fireEvent.change(within(row).getByRole('textbox', { name: '单位成本' }), { target: { value: '44.0000' } });
+    editRowCost(row, '44.0000');
     await act(async () => { finish(); await vi.advanceTimersByTimeAsync(60_000); });
     expect(screen.queryByText(/已读取当前公开记录/)).toBeNull();
     expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
@@ -433,7 +449,7 @@ describe('manual-costs bounded request lifetimes', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); });
     expect(fetcher.mock.calls).toHaveLength(calls + 1); expect(writes).toBe(1);
     expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeEnabled();
-    expect(within(row).getByRole('textbox', { name: '单位成本' })).toHaveValue('44.0000');
+    expect(readRowCost(row)).toBe('44.0000');
     page.unmount(); expect(vi.getTimerCount()).toBe(0);
   });
 });
@@ -503,9 +519,9 @@ describe('manual-costs received error-header fences', () => {
     expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
     expect(writes).toHaveLength(1); expect(screen.queryByText('已确认成功')).toBeNull();
     const first = screen.getByText('TEST 商品').closest('tr')!;
-    expect(within(first).getByRole('textbox', { name: '单位成本' })).toHaveValue('123456789012345.1234');
+    expect(readRowCost(first)).toBe('123456789012345.1234');
     expect(within(screen.getByText('TEST 第二').closest('tr')!).getByRole('textbox', { name: '单位成本' })).toHaveValue('22.0000');
-    fireEvent.change(within(first).getByRole('textbox', { name: '单位成本' }), { target: { value: '33.0000' } });
+    editRowCost(first, '33.0000');
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); fireEvent.click(screen.getByRole('button', { name: '最近提交' })); });
     expect(fetcher.mock.calls).toHaveLength(calls);
     await act(async () => { await vi.advanceTimersByTimeAsync(569_999); });

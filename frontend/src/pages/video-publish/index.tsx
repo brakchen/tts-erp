@@ -1,3 +1,4 @@
+import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Modal, Table } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
@@ -80,20 +81,21 @@ function VideoPublishContent({ bootstrap }: PageProps) {
     setAppendPath(`${api}/tasks?${query}`);
   }
   function toggleAuto(value: string) { const enabled = value === 'on'; setAuto(enabled); try { localStorage.setItem(refreshKey, enabled ? 'on' : 'off'); } catch { /* Preference persistence is optional; no task data is stored. */ } }
-  return <div className="min-w-0 space-y-6">
+  return <div className="erp-page">
+    <PageIntro eyebrow="CONTENT OPERATIONS" title="从视频素材，到发布结果" description="查看设备与任务状态，管理发布队列并核对执行结果。" />
     {command.failure && <Alert status="danger"><Alert.Content><Alert.Title>操作未完成</Alert.Title><Alert.Description>{command.failure.message}</Alert.Description></Alert.Content></Alert>}
     {command.cooldown && <p role="status">请等待完整 Retry-After；读取、编辑或刷新不会缩短写入冷却，期满也不会自动重试。</p>}
     {command.needsCheck && <p role="status">原操作结果待核对。先使用对应操作的「查询当前事实」或「核对上传任务」，再由你明确决定是否重试。</p>}
     <UploadWorkbench key={bootstrap.rootPath} root={bootstrap.rootPath} config={config.data} canTaskWrite={canTaskWrite} command={command} resume={resume} onResumeAccepted={() => setResume(undefined)} onChanged={() => setRevision((value) => value + 1)} />
     {operation?.root === bootstrap.rootPath && <TaskOperations operation={operation} command={command} canWrite={canTaskWrite} onClose={() => setOperation(undefined)} onChanged={() => setRevision((value) => value + 1)} onResume={(task) => { setResume(task); }} />}
-    <div className="flex flex-wrap items-center gap-3"><label className="flex flex-wrap items-center gap-2">自动刷新<select aria-label="自动刷新" value={auto ? 'on' : 'off'} onChange={(event) => toggleAuto(event.target.value)}><option value="on">开（每 5 秒）</option><option value="off">关</option></select></label>
+    <div className="flex flex-wrap items-center gap-3"><label className="flex flex-wrap items-center gap-2">自动刷新<select className="erp-select" aria-label="自动刷新" value={auto ? 'on' : 'off'} onChange={(event) => toggleAuto(event.target.value)}><option value="on">开（每 5 秒）</option><option value="off">关</option></select></label>
       <Button variant="secondary" isDisabled={blocked} onPress={() => setRevision((value) => value + 1)}>立即刷新</Button>
       <span>上一响应结束后计时；隐藏页面暂停。</span>
     </div>
     {blocked && <p role="status">读取冷却中；等待完整 Retry-After 后可明确刷新，不会自动重试。</p>}
     {notice && <p role="status">{notice}</p>}
     {!canTaskWrite && <p>任务写操作需要服务端提供的 readwrite 能力提示；仍可读取详情，接口会再次验证权限。创建条件与任务允许操作分别由服务端判定。</p>}
-    <section aria-label="发布配置" className="space-y-3"><h2 className="text-xl font-semibold">发布配置与服务端能力</h2>
+    <section aria-label="发布配置" className="erp-panel space-y-3"><h2 className="text-xl font-semibold">发布配置与服务端能力</h2>
       {config.loading && !config.data && <p role="status">加载配置中…</p>}<ReadError name="配置" error={config.error} />
       {config.data && <><TargetFacts target={config.data.target} /><Facts items={[
         ['允许内容类型', config.data.acceptedContentTypes.join('、')], ['允许扩展名', config.data.acceptedExtensions.join('、')], ['视频上限（字节）', config.data.maxVideoBytes], ['文案上限（字符）', config.data.maxCaptionCharacters], ['上传票据 TTL（秒）', config.data.uploadUrlTtlSeconds],
@@ -102,7 +104,7 @@ function VideoPublishContent({ bootstrap }: PageProps) {
         ['创建条件 canWrite', config.data.canWrite], ['创建阻止原因', config.data.writeBlockReason], ['配置服务器时间', config.data.serverTime],
       ]} /><p>设备与 Worker 状态、canWrite、队列位置、允许操作均由服务端决定；不由浏览器推算。</p></>}
     </section>
-    <section aria-label="当前发布轨道" className="space-y-3"><h2 className="text-xl font-semibold">当前发布轨道</h2>
+    <section aria-label="当前发布轨道" className="erp-panel space-y-3"><h2 className="text-xl font-semibold">当前发布轨道</h2>
       {current.loading && !current.data && <p role="status">加载当前任务中…</p>}<ReadError name="当前任务" error={current.error} />
       {current.data && <><PollFacts poll={current.data.pollState} /><p>当前任务服务器时间：{current.data.serverTime} · 上次成功核对：{current.checkedAt}</p>
         {!current.data.tasks.length && <p>当前没有运行中或清理中的发布任务。</p>}
@@ -116,21 +118,21 @@ function VideoPublishContent({ bootstrap }: PageProps) {
         </article>)}
       </>}
     </section>
-    <section aria-label="任务记录" className="min-w-0 space-y-3"><h2 className="text-xl font-semibold">队列与任务记录</h2>
-      <label>任务状态 <select aria-label="任务状态" value={filter} onChange={(event) => chooseFilter(event.target.value)}>{filters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    <section aria-label="任务记录" className="erp-panel min-w-0 space-y-3"><h2 className="text-xl font-semibold">队列与任务记录</h2>
+      <label>任务状态 <select className="erp-select" aria-label="任务状态" value={filter} onChange={(event) => chooseFilter(event.target.value)}>{filters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       {history.loading && !history.data && <p role="status">加载任务记录中…</p>}<ReadError name="任务记录" error={history.error} />
       {history.data && <><PollFacts poll={history.data.pollState} /><p>本页返回条数（非业务总数）：{history.data.totalApprox} · 服务器时间：{history.data.serverTime} · 上次成功核对：{history.checkedAt}</p>
         <p>表格区域可横向滚动，保留全部业务列；顺序沿用服务端。</p>
-        <Table><Table.ScrollContainer role="region" aria-label="任务表格滚动区域"><Table.Content aria-label="视频发布任务" className="min-w-[95rem]"><Table.Header>
-          {['任务 ID / 版本', '状态 / 阶段 / 队列', '视频 / 大小', '文案', '发布 / 核验 / 总执行', 'Artemis ID', '创建者 / 时间', '服务端操作'].map((label, index) => <Table.Column key={label} isRowHeader={index === 0}>{label}</Table.Column>)}
-        </Table.Header><Table.Body renderEmptyState={() => '当前筛选下没有任务。'}>{rows.map((task) => <Table.Row key={task.taskId} id={task.taskId}>
-          <Table.Cell><code className="block max-w-56 break-all">{task.taskId}</code><p>rowVersion {task.rowVersion}</p></Table.Cell>
-          <Table.Cell><p>{task.statusLabel}</p><p>{task.stageLabel} · {task.operationalStage}</p><p>队列位置 {task.queuePosition ?? '—'}</p><p>入队 {task.queuedAt ?? '—'}</p></Table.Cell>
-          <Table.Cell><span className="block max-w-56 break-all">{task.filename}</span><p>{task.sizeBytes} 字节</p></Table.Cell><Table.Cell><span className="block max-w-64 whitespace-pre-wrap break-all">{task.captionPreview}</span></Table.Cell>
-          <Table.Cell>{task.publishAttemptCount} / {task.verifyAttemptCount} / {task.attemptCount}</Table.Cell>
-          <Table.Cell focusMode="child"><Identity value={task.latestArtemisSessionId} label={`任务 ${task.taskId} Artemis ID`} copy={(value) => { void copy(value); }} /></Table.Cell>
-          <Table.Cell><p>{task.createdBy}</p><p>{task.createdAt}</p><p>更新 {task.updatedAt}</p></Table.Cell>
-          <Table.Cell focusMode="child"><div className="space-y-2"><AvailableActions task={task} /><ActionButtons task={task} disabled={command.blocked || !canTaskWrite} onAction={actOn} />{task.allowedActions.includes('view') && <Button size="sm" variant="secondary" aria-label={`查看详情 ${task.taskId}`} onPress={() => setSelected(task.taskId)}>查看详情</Button>}</div></Table.Cell>
+        <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="任务表格滚动区域"><Table.Content aria-label="视频发布任务" className="min-w-[95rem] erp-table-content"><Table.Header className="erp-table-head">
+          {['任务 ID / 版本', '状态 / 阶段 / 队列', '视频 / 大小', '文案', '发布 / 核验 / 总执行', 'Artemis ID', '创建者 / 时间', '服务端操作'].map((label, index) => <Table.Column className="erp-table-column" key={label} isRowHeader={index === 0}>{label}</Table.Column>)}
+        </Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'当前筛选下没有任务。'}</div>}>{rows.map((task) => <Table.Row className="erp-table-row" key={task.taskId} id={task.taskId}>
+          <Table.Cell className="erp-table-cell"><code className="block max-w-56 break-all">{task.taskId}</code><p>rowVersion {task.rowVersion}</p></Table.Cell>
+          <Table.Cell className="erp-table-cell"><p>{task.statusLabel}</p><p>{task.stageLabel} · {task.operationalStage}</p><p>队列位置 {task.queuePosition ?? '—'}</p><p>入队 {task.queuedAt ?? '—'}</p></Table.Cell>
+          <Table.Cell className="erp-table-cell"><span className="block max-w-56 break-all">{task.filename}</span><p>{task.sizeBytes} 字节</p></Table.Cell><Table.Cell className="erp-table-cell"><span className="block max-w-64 whitespace-pre-wrap break-all">{task.captionPreview}</span></Table.Cell>
+          <Table.Cell className="erp-table-cell">{task.publishAttemptCount} / {task.verifyAttemptCount} / {task.attemptCount}</Table.Cell>
+          <Table.Cell className="erp-table-cell" focusMode="child"><Identity value={task.latestArtemisSessionId} label={`任务 ${task.taskId} Artemis ID`} copy={(value) => { void copy(value); }} /></Table.Cell>
+          <Table.Cell className="erp-table-cell"><p>{task.createdBy}</p><p>{task.createdAt}</p><p>更新 {task.updatedAt}</p></Table.Cell>
+          <Table.Cell className="erp-table-cell" focusMode="child"><div className="space-y-2"><AvailableActions task={task} /><ActionButtons task={task} disabled={command.blocked || !canTaskWrite} onAction={actOn} />{task.allowedActions.includes('view') && <Button className="erp-table-action" size="sm" variant="secondary" aria-label={`查看详情 ${task.taskId}`} onPress={() => setSelected(task.taskId)}>查看详情</Button>}</div></Table.Cell>
         </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>
         {nextCursor && <Button variant="secondary" isDisabled={more.loading || blocked} onPress={loadMore}>加载更多</Button>}
       </>}
@@ -142,7 +144,7 @@ function VideoPublishContent({ bootstrap }: PageProps) {
         <Button variant="secondary" isDisabled={detail.blocked} onPress={() => setRevision((value) => value + 1)}>刷新当前事实</Button>
         {detail.data && detail.data.taskId !== selected && <p role="alert">任务身份不匹配，请关闭后重试。</p>}
         {detail.data && detail.data.taskId === selected && <><DetailFacts task={detail.data} copy={(value) => { void copy(value); }} /><ActionButtons task={detail.data} disabled={command.blocked || !canTaskWrite} onAction={actOn} /></>}
-        <section aria-label="读取诊断" className="space-y-3">
+        <section aria-label="读取诊断" className="erp-panel space-y-3">
           <Button variant="secondary" isDisabled={!selected || diagnostics.blocked || diagnostics.loading} onPress={() => { if (selected) { setDiagnosticRequest({ root: bootstrap.rootPath, taskId: selected }); setDiagnosticRevision((value) => value + 1); } }}>{diagnosticPath ? '刷新脱敏诊断节选' : '读取脱敏诊断节选'}</Button>
           {diagnosticPath && <Button variant="secondary" onPress={() => setDiagnosticRequest(undefined)}>隐藏诊断节选</Button>}
           {diagnostics.blocked && <p role="status">诊断读取冷却中；等待完整 Retry-After 后明确重试，不会自动获取。</p>}

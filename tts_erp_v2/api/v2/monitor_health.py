@@ -63,8 +63,8 @@ def post_health(
     require_cookie_csrf(request)
     body, arrived = report
     scopes = request.scope.get("api_key_scopes", ())
-    # Here shopId is Seller Center's oec_seller_id / seller_id from tab-binding,
-    # not an advertiser ID, commerce PK, or assumed OpenAPI shop_id mapping.
+    # The bound seller_id is commerce.shops.shop_id, not its internal PK
+    # and not the advertiser ID. Health reporting never creates a shop.
     if scopes and "*" not in scopes:
         known = all(value.startswith(("seller:", "advertiser:")) for value in scopes)
         if not known or f"seller:{body.shop_id}" not in scopes:
