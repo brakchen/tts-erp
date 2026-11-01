@@ -74,6 +74,12 @@ owns only its empty ref container, preserving frozen columns and server sorting.
 mount the retired whole-page kernel. Dates and scope controls precede summaries; detailed
 metrics remain available through disclosures. See the [SPU migration record](../docs/plans/spu-react-migration-2026-11-01.md).
 
+Focused SPUs remain visible as removable tags inside the search field, as requested by the user.
+The existing HeroUI 3.2.6 / MIT [TagGroup](https://heroui.com/en/docs/react/components/tag-group)
+owns tag keyboard/removal interaction. A removal uses the existing explicit single-mutation
+handler and changes the displayed membership only after its receipt; readonly, failed-write
+readback and Retry-After guards remain in that handler. No separate collapsed selected list.
+
 - [Frontend standard](../docs/guides/frontend-development.md)
 - [Migration design](../docs/plans/frontend-progressive-migration.md)
 - [P0/P1 implementation](../docs/plans/frontend-p01-implementation.md)

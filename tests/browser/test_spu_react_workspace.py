@@ -128,8 +128,9 @@ def test_focused_list_reads_all_pages_beyond_a_thousand(frontend_browser_rendere
     page = frontend_browser_renderer.open('/v2/pages/focused-spus?shop_pk=7')
     expect(page.locator('#spu-selection-count')).to_have_text('已关注 1003 个')
     assert offsets == [0, 500, 1000]
-    selected_list = page.get_by_text('当前关注清单 · 1003 个', exact=True)
-    selected_list.click()
+    field = page.get_by_role('group', name='SPU 搜索与已选标签', exact=True)
+    expect(field.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(1003)
+    expect(field.get_by_label('按 SPU ID / 标题搜索')).to_be_visible()
     expect(page.get_by_role('button', name='移除 SPU TEST_FOCUS_1002', exact=True)).to_be_disabled()
     assert not frontend_browser_renderer.write_requests
 
