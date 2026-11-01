@@ -6,17 +6,17 @@ import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { array, decodeOptions, identity, record, type Option } from './contracts';
 import { parseIds } from './query';
 
-export default function Selection({ root, shopPk, focused, canWrite, blocked, applied, onApply, onFocused }: {
-  root: string; shopPk: string; focused: boolean; canWrite: boolean; blocked: boolean; applied: string[];
+export default function Selection({ root, shopPk, focused, canWrite, blocked, fence, applied, onApply, onFocused }: {
+  root: string; shopPk: string; focused: boolean; canWrite: boolean; blocked: boolean; fence: { current: number }; applied: string[];
   onApply: (ids: string[]) => void; onFocused: (count: number | null) => void;
 }) {
   const [draft, setDraft] = useState<string[]>(applied); const [choices, setChoices] = useState<Option[]>([]);
   const [query, setQuery] = useState(''); const [paste, setPaste] = useState(''); const [batchOpen, setBatchOpen] = useState(false);
   const [loading, setLoading] = useState(false); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
-  const [revision, setRevision] = useState(0); const [needsCheck, setNeedsCheck] = useState(false); const [cooldown, setCooldown] = useState(false);
+  const [revision, setRevision] = useState(0); const [needsCheck, setNeedsCheck] = useState(() => focused && performance.now() < fence.current); const [cooldown, setCooldown] = useState(() => performance.now() < fence.current);
   const [forbidden, setForbidden] = useState(false); const [savedCount, setSavedCount] = useState<number | null>(null);
   const lifetime = useRef<AbortController | undefined>(undefined); const pending = useRef(false); const cancelDelay = useRef<(() => void) | undefined>(undefined);
-  const notBefore = useRef(0);
+  const notBefore = fence;
   const resolveController = useRef<AbortController | undefined>(undefined); const resolveGeneration = useRef(0);
   function cancelResolution() { resolveGeneration.current += 1; resolveController.current?.abort(); resolveController.current = undefined; pending.current = false; setBusy(false); }
   function hold(error: unknown) { if (error instanceof ApiError && error.retryAfter) { notBefore.current = Math.max(notBefore.current, performance.now() + error.retryAfter * 1000); setCooldown(true); cancelDelay.current?.(); cancelDelay.current = scheduleReadDelay(() => setCooldown(false), notBefore.current - performance.now()); } }
@@ -25,7 +25,13 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, ap
   useEffect(() => { if (!focused) setDraft(applied); }, [applied, focused]);
   useEffect(() => {
     const controller = new AbortController(); lifetime.current = controller; pending.current = false;
-    setDraft(focused ? [] : applied); setChoices([]); setQuery(''); setPaste(''); setBusy(false); setNotice(''); setNeedsCheck(false); setCooldown(false); cancelDelay.current?.();
+    const cooling = performance.now() < notBefore.current;
+    setDraft(focused ? [] : applied); setChoices([]); setQuery(''); setPaste(''); setBusy(false); setNotice(''); setNeedsCheck(false); setCooldown(cooling); cancelDelay.current?.();
+    if (cooling) {
+      setLoading(false); setNotice('服务端冷却尚未结束；到期后请明确重试读取或搜索。'); setNeedsCheck(focused); focusedCallback.current(null);
+      cancelDelay.current = scheduleReadDelay(() => setCooldown(false), notBefore.current - performance.now());
+      return () => { controller.abort(); resolveController.current?.abort(); cancelDelay.current?.(); };
+    }
     if (!shopPk || !focused) { setLoading(false); focusedCallback.current(null); return () => controller.abort(); }
     setLoading(true); focusedCallback.current(null);
     void (async () => {
@@ -53,28 +59,30 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, ap
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [root, shopPk, query, draft]);
-  async function change(next: string[]) {
-    if (pending.current || loading || cooldown || needsCheck || blocked) return;
-    if (!focused) { if (next.length > 100) setNotice('最多选择 100 个 SPU'); else { setDraft(next); setNotice(''); } return; }
-    if (!canWrite || !shopPk || forbidden) return;
+  async function change(next: string[]): Promise<boolean> {
+    if (pending.current || loading || cooldown || needsCheck || blocked || performance.now() < notBefore.current) return false;
+    if (!focused) { if (next.length > 100) { setNotice('最多选择 100 个 SPU'); return false; } setDraft(next); setNotice(''); return true; }
+    if (!canWrite || !shopPk || forbidden) return false;
     const add = next.filter((id) => !draft.includes(id)); const remove = draft.filter((id) => !next.includes(id));
-    if (!add.length && !remove.length) return;
+    if (!add.length && !remove.length) return true;
     pending.current = true; setBusy(true); setNotice('正在保存…'); const scope = lifetime.current;
     try {
       // One explicit mutation at a time; never replay a failed or uncertain PATCH.
       const { data: raw } = await withinRequestLifetime(new AbortController(), (signal) => requestJson<unknown>(root, `/v2/reporting/focused-spus/${shopPk}`, { method: 'PATCH', signal, body: JSON.stringify({ addSpuIds: add, removeSpuIds: remove }) }, parseIdentityJson), scope?.signal);
       const result = record(raw); if (identity(result.shopPk) !== shopPk || !Number.isSafeInteger(Number(result.total)) || Number(result.total) < 0) throw new Error('保存响应不完整，需重新读取关注事实');
       array(result.addedSpuIds).forEach(identity); array(result.removedSpuIds).forEach(identity);
-      if (scope?.signal.aborted) return;
-      setDraft(next); setSavedCount(Number(result.total)); focusedCallback.current(Number(result.total)); setNotice('已实时保存');
+      if (scope?.signal.aborted) return false;
+      setDraft(next); setSavedCount(Number(result.total)); focusedCallback.current(Number(result.total)); setNotice('已实时保存'); return true;
     } catch (error: unknown) {
-      if (scope?.signal.aborted) return;
+      if (scope?.signal.aborted) return false;
       setNeedsCheck(true); focusedCallback.current(null); setNotice(`${error instanceof Error ? error.message : '保存未确认'}；原选择保留。请先重新读取关注事实，再决定后续修改。`);
       if (error instanceof ApiError && error.status === 403) setForbidden(true);
       hold(error);
+      return false;
     } finally { if (!scope?.signal.aborted) { pending.current = false; setBusy(false); } }
   }
   async function resolvePaste() {
+    if (performance.now() < notBefore.current) return;
     const ids = parseIds(paste); const maximum = focused ? 500 : 100;
     const next = [...new Set([...draft, ...ids])]; if (!ids.length || ids.length > maximum || (!focused && next.length > maximum)) { setNotice(`一次最多 ${maximum} 个 SPU${focused ? '' : '，含已选项'}`); return; }
     pending.current = true; setBusy(true); const scope = lifetime.current; const found: Option[] = [];
@@ -88,7 +96,8 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, ap
       if (scope?.signal.aborted || controller.signal.aborted || generation !== resolveGeneration.current) return;
       const returned = new Set(found.map((item) => item.spu_id)); const missing = ids.filter((id) => !returned.has(id));
       setChoices((old) => [...new Map([...old, ...found].map((item) => [item.spu_id, item])).values()]); pending.current = false; setBusy(false);
-      await change([...new Set([...draft, ...ids.filter((id) => returned.has(id))])]);
+      const saved = await change([...new Set([...draft, ...ids.filter((id) => returned.has(id))])]);
+      if (!saved || scope?.signal.aborted || controller.signal.aborted || generation !== resolveGeneration.current) return;
       if (missing.length) setNotice(`未添加当前店铺无法确认的 SPU：${missing.join('、')}`); else setPaste('');
     } catch (error: unknown) { if (!scope?.signal.aborted && !controller.signal.aborted && generation === resolveGeneration.current) { hold(error); setNotice(error instanceof Error ? error.message : '批量解析失败'); } }
     finally { scope?.signal.removeEventListener('abort', cancel); if (!scope?.signal.aborted && generation === resolveGeneration.current) { pending.current = false; setBusy(false); resolveController.current = undefined; } }

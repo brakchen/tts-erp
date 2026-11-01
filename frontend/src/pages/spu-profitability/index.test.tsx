@@ -13,21 +13,25 @@ let stored: { spuId: string; title: string }[];
 let patchFailure: number | undefined;
 let overviewError: { code: string } | undefined;
 let overviewTotal: number;
+let shopRows: typeof shop[];
+let limitedFocusedShop: string | undefined;
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }); }
 beforeEach(() => {
-  calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; overviewTotal = 1; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
+  calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; overviewTotal = 1; shopRows = [shop]; limitedFocusedShop = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); calls.push({ url, init });
-    if (url.includes('channel-accounts')) return response([shop]);
+    if (url.includes('channel-accounts')) return response(shopRows);
     if (url.includes('channel-product-options')) return response([{ spu_id: 'TEST_NEW', title: 'TEST 新商品', status: 'ACTIVATE' }]);
     if (url.includes('/reporting/focused-spus/')) {
+      const shopPk = new URL(url, location.origin).pathname.split('/').at(-1)!;
       if (init?.method === 'PATCH') {
         if (patchFailure) return response({ detail: 'TEST_failure' }, patchFailure);
         const body = JSON.parse(String(init.body)); stored = stored.filter((item) => !body.removeSpuIds.includes(item.spuId)); for (const id of body.addSpuIds) stored.push({ spuId: id, title: id });
         if (overviewTotal > 1) overviewTotal = stored.length;
         return response({ shopPk: 7, total: stored.length, addedSpuIds: body.addSpuIds, removedSpuIds: body.removeSpuIds });
       }
-      return response({ shopPk: 7, items: stored, total: stored.length, matchedTotal: stored.length, limit: 500, offset: 0 });
+      if (shopPk === limitedFocusedShop) return new Response('{"detail":"TEST_read_cooldown"}', { status: 429, headers: { 'Retry-After': '120', 'Content-Type': 'application/json' } });
+      return response({ shopPk: Number(shopPk), items: stored, total: stored.length, matchedTotal: stored.length, limit: 500, offset: 0 });
     }
     if (url.includes('/analytics/spu-roi?')) {
       if (overviewError) return response(overviewError, 503);
@@ -37,7 +41,7 @@ beforeEach(() => {
     return response({});
   }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it('both page profiles render through the same React owner and keep the server scope', async () => {
   render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByText('TEST_RESULT');
@@ -122,4 +126,35 @@ it('removing a focused item on the last page resets offset before refreshing the
   const last = calls.filter((call) => call.url.includes('/analytics/spu-roi?')).at(-1)!;
   expect(new URL(last.url, location.origin).searchParams.get('offset')).toBe('0');
   expect(stored).toHaveLength(100);
+});
+it('a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs', async () => {
+  patchFailure = 503; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
+  fireEvent.click(screen.getByRole('button', { name: '批量粘贴' }));
+  const input = screen.getByLabelText('粘贴 SPU ID（逗号、空格或换行分隔）');
+  fireEvent.change(input, { target: { value: 'TEST_NEW, TEST_MISSING' } });
+  fireEvent.click(screen.getByRole('button', { name: '解析并添加' }));
+  await screen.findByRole('button', { name: '重新读取关注事实' });
+  expect(screen.getByRole('alert')).toHaveTextContent('原选择保留。请先重新读取关注事实');
+  expect(input).toHaveValue('TEST_NEW, TEST_MISSING');
+  expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(1);
+});
+it('changing shop retains the selection Retry-After fence and requires explicit readback after expiry', async () => {
+  vi.useFakeTimers(); let now = 0; vi.spyOn(performance, 'now').mockImplementation(() => now);
+  limitedFocusedShop = '7'; shopRows = [shop, { ...shop, id: 8, shop_id: 'TEST_SHOP_EIGHT', account_name: 'TEST 店铺八' }];
+  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(screen.getByRole('button', { name: '重新读取关注事实' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('当前店铺'), { target: { value: '8' } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  const readsForEight = () => calls.filter((call) => call.url.includes('/reporting/focused-spus/8?'));
+  expect(readsForEight()).toHaveLength(0);
+  now = 119_000; await act(async () => { await vi.advanceTimersByTimeAsync(119_000); });
+  expect(screen.getByRole('button', { name: '重新读取关注事实' })).toBeDisabled();
+  now = 120_001; await act(async () => { await vi.advanceTimersByTimeAsync(1001); });
+  expect(readsForEight()).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '重新读取关注事实' }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(readsForEight()).toHaveLength(1);
+  expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(0);
 });
