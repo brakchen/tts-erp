@@ -10,11 +10,30 @@
 
 - 配置键有一个可变草稿和零到多个不可变已发布 revision。
 - 保存草稿和发布都必须携带 `expectedDraftVersion`，冲突返回 `409`，客户端必须重载。
+- 页面主流程为“编辑 → 检查并发布 → 确认发布”；“暂存草稿”是中途保存选项。检查不写入，最后一次确认将候选内容直接发布为不可变 revision，不先提交中间草稿。
 - 发布会创建递增版本号；历史版本绝不修改或删除。
 - 恢复不是倒退版本号：`rollback` 把目标 revision 的内容复制后发布为更高的新版本。
 - `GET /v2/config/runtime/snapshot` 只返回每个未归档配置项的已发布默认 payload 与 version，并以版本映射生成 ETag；支持 `If-None-Match`。
 - 配置项和 secret 均为软归档：`POST .../retire` 停止使用但保留审计历史，`POST .../restore` 恢复。归档 secret 前服务会拒绝仍被活动配置或草稿引用的操作。
 - 配置项归档后其引用不再阻止 secret 归档；此时再恢复配置项会被拒绝（`409`），直到被引用的 secret 重新启用。
+
+## 页面操作与候选发布
+
+列表、配置概览、编辑、检查、历史、新建和凭证管理分别显示。概览默认显示当前生效内容，有草稿时明确提示另有未发布草稿；Schema 默认折叠。暂存不保存发布说明，暂存成功也不会影响当前发布版本。
+
+`POST /v2/config/runtime/items/{config_key}/preview` 用于只读检查：请求包含 `expectedDraftVersion`、显式提供的 `expectedPublishedVersion`（未发布为 `null`）、对象 `payload` 和可选 `sourceRevisionVersion`。返回 `configKey`、两个当前版本、服务端判断的 `hasChanges`、只读规范化文本 `publishedText`/`candidateText` 和历史来源。未发布时 `publishedText=null`。对象键顺序和排版不构成变化，数组顺序保留，布尔与数字严格区分，非有限数字拒绝。
+
+同一个 `/publish` 接口支持候选模式：在上述请求中添加可选 `comment`，服务端持有配置与引用凭证锁，重新核对两个版本、Schema、业务约束和历史 sidecar，一次事务创建 revision。失败不改变原草稿或发布指针。已有发布内容与候选相同时返回 `409`，不创建重复 revision。
+
+旧客户端只发送 `expectedDraftVersion` / `comment` 时，仍发布服务器草稿，普通未知附加字段仍忽略；退役 `rollout` / `draftRollout` 请求字段明确返回 `422`。新模式不能省略 `expectedPublishedVersion`，`payload=null` 非法。旧模式若显式携带发布版本，也必须通过版本检查。
+
+新检查/候选发布的校验错误返回 HTTP `422` 和受控 `detail.code`：`runtime_schema_invalid`、`runtime_business_invalid`、`runtime_secret_unavailable`、`runtime_source_rollout_invalid`、`runtime_number_invalid`。页面映射为可修正的静态提示，不显示原始异常或凭证。旧草稿发布保留原字符串错误契约。
+
+页面“使用历史内容”先带入编辑，允许修复旧字段或凭证引用，再走同一检查发布出口。暂存历史工作副本前也检查来源，防止绕过历史 sidecar 护栏；原 `/rollback` API 仍保留直接重新发布语义。
+
+页面内离开未保存编辑时可暂存、明确放弃或继续编辑；凭证明文和未创建表单不作为普通配置草稿保存。刷新/关闭使用浏览器原生离开确认，不跨刷新恢复明文。网络中断导致写入结果未知时保留输入、要求手动核对并重新检查，不自动重发。发布成功响应已确认但后续重读失败时保留成功事实，读取最新详情后才能继续编辑该项。
+
+凭证新增与更新入口分开；更新锁定名称并说明对现有引用的影响。底层 PUT 仍是 upsert，页面名称检查不构成服务端只创建不覆盖保证。配置历史不会恢复凭证旧明文。
 
 ## 灰度已退役
 

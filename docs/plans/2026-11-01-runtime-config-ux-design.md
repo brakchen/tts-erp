@@ -2,7 +2,7 @@
 
 日期：2026-11-01（Asia/Shanghai）。
 
-状态：用户已认可产品草案的默认主流程“编辑 → 检查 → 确认发布；暂存草稿是可选操作”。本文给出对应技术方案，尚未实施或部署；具体 API 扩展属于待评审设计。
+状态：用户已认可产品主流程，并于 2026-11-01 明确授权完成开发。源码已按本文实施，隔离 API、组件、6 个原生浏览器场景及单次 fast 基线验证通过；未部署生产。证据见 [最终验证](../aegis/work/2026-11-01-runtime-config-ux/90-evidence.md)。
 
 ## 1. 目标、依据与范围
 
@@ -18,7 +18,7 @@
 6. 明确区分未保存修改、已保存未发布草稿、已发布内容，并保护未保存输入。
 7. 历史内容先带入编辑，再使用同一套检查发布流程；凭证管理单独处理。
 
-用户最近一次明确确认的是第 4、5 项默认主流程；其余沿用上一轮产品草案，实施前一并按本文验收矩阵复核。
+产品默认行为已确认，用户随后授权按方案完成开发；验收仍以本文矩阵和实际验证为准。
 
 ### 1.2 技术基线和权威边界
 
@@ -134,7 +134,7 @@
 
 ## 4. API 与事务设计
 
-以下均是拟新增/扩展的契约；现行接口仍以现行文档为准。线上的 HTTP 路径继续经现有客户端拼接 `rootPath`，不写死 `/tts` 或域名。
+以下是本次实现的新增/扩展契约，现行接口文档同步更新。线上的 HTTP 路径继续经现有客户端拼接 `rootPath`，不写死 `/tts` 或域名。
 
 ### 4.1 新增只读检查 endpoint
 
@@ -221,7 +221,7 @@
 
 现有 `JsonEditor` 负责编辑和全文查看，不具备本项目已封装的差异能力。拟采用维护中的 [jsdiff](https://github.com/kpdecker/jsdiff) 的 `diffLines`，不自写通用差异算法，不新增整套编辑器或 UI 库。
 
-2026-11-01 查阅 npm 官方 registry 和上游 tag：候选精确版本 `diff@9.0.0`，BSD-3-Clause，声明无运行时依赖，含 TypeScript 类型及 ESM 导出。参考 [v9.0.0 package.json](https://github.com/kpdecker/jsdiff/blob/v9.0.0/package.json)、[v9.0.0 README](https://github.com/kpdecker/jsdiff/blob/v9.0.0/README.md)、[安全公告页](https://github.com/kpdecker/jsdiff/security/advisories)。本次仅完成来源和包元数据核对；GitHub 公告 API 被限流，不能据此声称无漏洞。实施前复核公告、锁文件审计、Node 22/Vite/TypeScript 构建兼容性及打包增量；通过后精确锁定版本并记录证据。
+2026-11-01 查阅 npm 官方 registry 和上游 tag：候选精确版本 `diff@9.0.0`，BSD-3-Clause，声明无运行时依赖，含 TypeScript 类型及 ESM 导出。参考 [v9.0.0 package.json](https://github.com/kpdecker/jsdiff/blob/v9.0.0/package.json)、[v9.0.0 README](https://github.com/kpdecker/jsdiff/blob/v9.0.0/README.md)、[安全公告页](https://github.com/kpdecker/jsdiff/security/advisories)。已精确锁定该版本，Windows Node 22.23.2 与 Linux Node 22.23.3 的 TypeScript/Vite 构建通过，npm 安装审计报告零已知漏洞。GitHub 公告 API 被限流，因此不能把审计结果扩大为无漏洞保证。实际运行与最终回归证据见实施记录。
 
 仅调用 `diffLines`，不使用会再次普通 JSON 序列化的 `diffJson`。配置数字继续走既有 [lossless-json](https://github.com/josdejong/lossless-json) 和服务端 JSON 文本，防止大整数改变。设置上游支持的执行时间/编辑距离限制；超过限制时明确显示“差异过大，未生成高亮”，保留完整旧/新内容供检查，不伪装为无变化，也不改变服务端 `hasChanges`。
 
@@ -256,9 +256,9 @@ HeroUI 的 Button、Table、Modal、Disclosure 等优先直接复用，遵循 [�
 
 ## 7. 实施分解与验证
 
-本次交付为文档。后续代码由一个 writer 串行实施；各任务是结果单元，不强行拆成独立发布批次。
+本次交付包含方案与代码。后端和前端在不同工作树明确归属后实现，由父会话统一集成；各任务是结果单元，不强行拆成独立发布批次。
 
-TDD Route：本次 docs-only 为 skipped；后续实施按 auto/strict 处理发布事务、并发和页面状态变更，依据是新增候选发布契约和显著回归信号。先补能揭示旧行为缺口的针对性回归，再改实现；不为静态文案编写镜像测试。
+测试路线：原计划 auto/strict，实施先编写回归，但 Windows 环境前置失败导致未观察到 RED；实际按环境恢复后的回归验证记录，不宣称严格 RED/GREEN 已执行。用户提供 Linux 机器后，仅通过隔离 runner 验证发布事务、并发和真实用户路径；不为静态文案编写镜像测试。
 
 | 顺序 | 改动位置 | 最小结果及验证 |
 | --- | --- | --- |
@@ -282,7 +282,7 @@ bash scripts/test_isolated.sh browser tests/browser/test_runtime_config_workflow
 bash scripts/test_baseline.sh
 ```
 
-新增浏览器测试复用项目现有 owned-clone / child-server / BrowserFence 机制，必须验证真实写入进入当前临时库；未建立该绑定前不通过浏览器写配置。不要把 mock 截图作为真实事务验收。基线 suite 正常只运行一次；出现新失败只重跑最小失败选择。当前文档阶段没有执行上述应用测试。
+新增浏览器测试复用项目现有 owned-clone / child-server / BrowserFence 机制，必须验证真实写入进入当前临时库；未建立该绑定前不通过浏览器写配置。不要把 mock 截图作为真实事务验收。基线 suite 正常只运行一次；出现新失败只重跑最小失败选择。执行结果在实施记录和最终证据中维护，不用本节命令清单冒充已执行证据。
 
 ### 7.1 用户验收矩阵
 
@@ -303,6 +303,6 @@ bash scripts/test_baseline.sh
 2. 后端旧客户端契约有实际外部兼容意义，因此保留原入口并共用发布实现；本轮不删除 legacy JS/template 分支，清理由消费者盘点后的单独任务负责。
 3. 本轮不新增迁移、配置持久化缓存、发布队列、回执表或 rollout 开关。部署/生产操作仍按仓库既有授权边界处理。
 4. 最大实施风险是检查内容与实际提交不一致、版本冲突处理覆盖输入、数字精度改变和历史护栏绕行。用冻结候选、双版本校验、无损文本和共享服务端验证收敛。
-5. 当前只完成源码/现行契约核对和文档设计，未验证线上 UI、实际配置数据、生产消费者生效时机或依赖运行兼容性；不得把本方案写成已实现证据。
+5. 原生浏览器和 API 验证只针对当前独占临时库及编译产物，不代表线上 UI 或生产消费者已部署验证；发布时机说明不扩大为运行中任务刷新承诺。
 
-实施前同步最新 `origin/master`，若发布 API、页面 owner、业务消费者或权限契约已变化，先调整本文相关部分，不能照搬旧文件内容覆盖其他工作。代码完成后按仓库规定验证、提交和推送，再在串行集成流程中验证精确合并提交。当前文档分支的保留与推送只交付可评审方案，不代表用户已经批准运行时改造。
+实施前同步最新 `origin/master`，若发布 API、页面 owner、业务消费者或权限契约已变化，先调整本文相关部分，不能照搬旧文件内容覆盖其他工作。代码完成后按仓库规定验证、提交和推送，再在串行集成流程中验证精确合并提交。本次用户已授权源码开发，生产部署和服务操作仍须遵守仓库独立边界。
