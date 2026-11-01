@@ -3709,7 +3709,11 @@ def test_spu_roi_sort_order_desc_and_search(api_client, readonly_key, db_engine)
     ]
 
 
-def test_spu_roi_rejects_bad_params(api_client, readonly_key):
+def test_spu_roi_rejects_bad_params(api_client, readonly_key, db_engine):
+    with Session(db_engine) as sess:
+        shop_pk = _seed_shop(sess, "TEST_SELLER_BAD_PARAMS")
+        sess.commit()
+
     h = {"Authorization": f"Bearer {readonly_key}"}
     # 未知 sort → 422;limit 超上限 → 422;非法 fee_rate → 422
     assert (
@@ -3769,7 +3773,7 @@ def test_spu_roi_rejects_bad_params(api_client, readonly_key):
     invalid_options = api_client.get(
         "/v2/commerce/channel-product-options",
         headers=h,
-        params={"shop_pk": 1, "spu_ids": "，，"},
+        params={"shop_pk": shop_pk, "spu_ids": "，，"},
     )
     assert invalid_options.status_code == 422
 
