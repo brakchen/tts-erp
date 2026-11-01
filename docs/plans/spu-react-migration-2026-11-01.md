@@ -84,11 +84,11 @@ FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh
 
 字体检查仍以 `static/tokens.css` 的三套规范字体栈为唯一白名单，保留 normalize 与全部可见文字检查。删除的是将 HeroUI 默认变量当作规范字体的错误覆盖逻辑。价格弹窗测试等待真实 visible/hidden 与 FocusScope 返回焦点，保留原键盘及返焦断言，没有用强制 focus 或重复 Escape 替代恢复能力。
 
-本轮独立 review 发现的精确百分比输入、关注变更后分页复位、失败写入提示保留与跨店铺冷却边界已修复并由相应窄测覆盖。关注写入仍须明确增删，失败后读取事实再恢复；前端未新增金融公式、汇总、阈值或权限判定权威来源。旧整页 owner 已退出，保留的 Tabulator 只维护 ref 内专业表格；本轮以共享模块取代旧页面脚本，没有保留双 owner 的兼容路径。
+本轮独立 review 发现的关注变更后分页复位、失败写入提示保留与跨店铺冷却边界已修复并由相应窄测覆盖。关注写入仍须明确增删，失败后读取事实再恢复；前端未新增金融公式、汇总、阈值或权限判定权威来源。旧整页 owner 已退出，保留的 Tabulator 只维护 ref 内专业表格；本轮以共享模块取代旧页面脚本，没有保留双 owner 的兼容路径。
 
 用户在验收过程中另行明确批准两项最小产品修复：
 
-- 店铺编辑响应同时核对内部 ID 与外部 shop ID，阻止错误身份响应回填其他店铺；未改其他页面布局。
+- 店铺未确认写入后的 verify 事实读回 GET 同时核对内部 id 与外部 shop_id，阻止错误身份读回解除重试锁；未改其他页面布局。
 - 利润比较接口将店铺授权读取和原有比较读取放入同一个 canonical 一致只读快照，修复授权 SQL 提前开启默认事务导致的 503；未 rollback/commit 重启事务，未改金额公式或权限 owner。
 
 必要测试维护为已有 TEST 店铺补齐现有授权关系、对齐 React owner 的有效行为断言及 Modal 生命周期等待。ROI 查询预算仍将所有 SQL 计入总数，仅精确识别最多 2 条固定授权查询，其余业务 SQL 保留原 31 条上限；没有放宽业务预算或价格 oracle。
@@ -97,6 +97,6 @@ FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh
 
 在 `f3acd5c0` 执行了一次 `bash scripts/test_baseline.sh`，退出 1，相对于已提交的零失败基线报告 **313 个机械差异测试 ID**。其中含未同步的旧授权 fixture、原生页面文案和旧 schema 预期；后续窄测已修复并验证其中部分差异。313 既不是当前冻结 HEAD 的重新执行结果，也不能全部判定为本次新增回归或全部归为 master 既有失败。其余差异尚未逐项完成归因，未重跑整套来生成新基线，未修改 `docs/testing/baseline-fast.txt`。
 
-父协调会话在干净 master `5eb3ff5c` 最小复现了以下三项相同失败：`tests/api/test_commerce.py::test_list_shops_with_data` 因缺授权结果为空；`tests/api/test_admin_shops.py::test_register_creates_plugin_only_shop` 的 status 为 None 而非 active；`tests/api/test_style_tokens.py::test_every_var_reference_resolves` 缺 `--sidebar-rule`。此前的 shops 组件、manual-cost owned-child 404 与 ROI total 为 0 的代表问题也已在干净该 master 复现。这些是指定失败的既有性证据，不能外推为全部 313 项的归因结论。
+父协调会话在干净 master `5eb3ff5c` 最小复现了以下三项相同失败：`tests/api/test_commerce.py::test_list_shops_with_data` 因缺授权结果为空；`tests/api/test_admin_shops.py::test_register_creates_plugin_only_shop` 的 status 为 None 而非 active；`tests/api/test_style_tokens.py::test_every_var_reference_resolves` 的现有令牌检查器报告 `--sidebar-rule` 未声明（`common.css:38` 实际已声明，旧检查器结果待归因）。此前的 shops 组件、manual-cost owned-child 404 与 ROI total 为 0 的代表问题也已在干净该 master 复现。这些是指定失败的既有性证据，不能外推为全部 313 项的归因结论。
 
 当前交付为已提交并推送的可审查分支，**尚不满足 ready/merge 条件，未合并 master、未部署、未重启服务**。目标 SPU 窄测通过不代表全站或完整 fast suite 通过；仍需由协调者保留并分类剩余 baseline 差异，再按仓库整合流程验证拟合并提交。本轮到此停止扩大无关产品与测试修复。
