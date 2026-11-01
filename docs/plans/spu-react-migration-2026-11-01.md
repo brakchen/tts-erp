@@ -100,3 +100,7 @@ FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh
 父协调会话在干净 master `5eb3ff5c` 最小复现了以下三项相同失败：`tests/api/test_commerce.py::test_list_shops_with_data` 因缺授权结果为空；`tests/api/test_admin_shops.py::test_register_creates_plugin_only_shop` 的 status 为 None 而非 active；`tests/api/test_style_tokens.py::test_every_var_reference_resolves` 的现有令牌检查器报告 `--sidebar-rule` 未声明（`common.css:38` 实际已声明，旧检查器结果待归因）。此前的 shops 组件、manual-cost owned-child 404 与 ROI total 为 0 的代表问题也已在干净该 master 复现。这些是指定失败的既有性证据，不能外推为全部 313 项的归因结论。
 
 当前交付为已提交并推送的可审查分支，**尚不满足 ready/merge 条件，未合并 master、未部署、未重启服务**。目标 SPU 窄测通过不代表全站或完整 fast suite 通过；仍需由协调者保留并分类剩余 baseline 差异，再按仓库整合流程验证拟合并提交。本轮到此停止扩大无关产品与测试修复。
+
+### 后续用户指示：先合并，再排查
+
+上述为原交付时状态。用户随后明确指示“先合并 master，然后排查为什么会有313个失败项”，覆盖此前先通过基线再合并的顺序要求。已在整合锁下用独立工作树创建并推送合并提交 `7335af492dc5039b61f2726d03b2a9f0ead8d9ee`，未部署或重启生产服务。失败记录和基线保持原样，未宣称测试通过；后续归因见 [313项基线差异排查](../testing/baseline-failure-investigation-2026-11-01.md)。
