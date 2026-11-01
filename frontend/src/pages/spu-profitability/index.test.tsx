@@ -7,14 +7,15 @@ vi.mock('./ProfitabilityTable', () => ({ sortLabel: (value: string) => value, Pr
 const bootstrap: FrontendBootstrap = { pageId: 'spu-roi', rootPath: '', releaseId: 'TEST_release', navigation: [], roleCapabilities: { readwrite: true, admin: false } };
 const shop = { id: 7, shop_id: '90071992547409931', account_name: 'TEST 店铺', region: 'VN' };
 const product = { spu_pk: 101, spu_id: 'TEST_OLD', title: 'TEST 原商品', status: 'ACTIVATE', main_image_url: null };
-const payload = (id = 'TEST_RESULT') => ({ items: [{ ...product, spu_id: id }], total: 1, totals: { net_profit: '12.0000', spend: '3.0000' }, meta: {} });
+const payload = (id = 'TEST_RESULT') => ({ items: [{ ...product, spu_id: id }], total: overviewTotal, totals: { net_profit: '12.0000', spend: '3.0000' }, meta: {} });
 let calls: { url: string; init?: RequestInit }[];
 let stored: { spuId: string; title: string }[];
 let patchFailure: number | undefined;
 let overviewError: { code: string } | undefined;
+let overviewTotal: number;
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }); }
 beforeEach(() => {
-  calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
+  calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; overviewTotal = 1; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); calls.push({ url, init });
     if (url.includes('channel-accounts')) return response([shop]);
@@ -23,11 +24,16 @@ beforeEach(() => {
       if (init?.method === 'PATCH') {
         if (patchFailure) return response({ detail: 'TEST_failure' }, patchFailure);
         const body = JSON.parse(String(init.body)); stored = stored.filter((item) => !body.removeSpuIds.includes(item.spuId)); for (const id of body.addSpuIds) stored.push({ spuId: id, title: id });
+        if (overviewTotal > 1) overviewTotal = stored.length;
         return response({ shopPk: 7, total: stored.length, addedSpuIds: body.addSpuIds, removedSpuIds: body.removeSpuIds });
       }
       return response({ shopPk: 7, items: stored, total: stored.length, matchedTotal: stored.length, limit: 500, offset: 0 });
     }
-    if (url.includes('/analytics/spu-roi?')) return overviewError ? response(overviewError, 503) : response(payload());
+    if (url.includes('/analytics/spu-roi?')) {
+      if (overviewError) return response(overviewError, 503);
+      const result = payload(); if (Number(new URL(url, location.origin).searchParams.get('offset')) >= result.total) result.items = [];
+      return response(result);
+    }
     return response({});
   }));
 });
@@ -102,4 +108,18 @@ it('clear cancels a standard bulk lookup and ignores its late response', async (
   await act(async () => { finish(response([{ spu_id: 'TEST_NEW', title: 'TEST 新商品', status: 'ACTIVATE' }])); });
   expect(screen.queryByRole('button', { name: '移除 SPU TEST_NEW' })).not.toBeInTheDocument();
   expect(screen.getByText('已选择 0 个')).toBeInTheDocument();
+});
+it('removing a focused item on the last page resets offset before refreshing the smaller scope', async () => {
+  overviewTotal = 101; stored = Array.from({ length: 101 }, (_, index) => ({ spuId: `TEST_PAGE_${index}`, title: `TEST 商品 ${index}` }));
+  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  await screen.findByText('TEST_RESULT');
+  fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+  await screen.findByText('第 2 页 · 共 2 页');
+  fireEvent.click(screen.getByText('当前关注清单 · 101 个'));
+  fireEvent.click(screen.getByRole('button', { name: '移除 SPU TEST_PAGE_0' }));
+  await screen.findByText('第 1 页 · 共 1 页');
+  await screen.findByText('TEST_RESULT');
+  const last = calls.filter((call) => call.url.includes('/analytics/spu-roi?')).at(-1)!;
+  expect(new URL(last.url, location.origin).searchParams.get('offset')).toBe('0');
+  expect(stored).toHaveLength(100);
 });

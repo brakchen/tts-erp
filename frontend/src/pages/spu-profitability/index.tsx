@@ -45,7 +45,7 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
   }, [today, shop?.id, focused, query.datesTouched]);
   useEffect(() => { if (data) setPriceCapability(Boolean(data.totals.priceStats || data.items.some((row) => row.priceStats))); }, [data]);
   useEffect(() => { cache.current.clear(); setDrill(undefined); }, [root, path, revision]);
-  const focusedChanged = useCallback((count: number | null) => { setFocusedCount(count); setRevision((value) => value + 1); }, []);
+  const focusedChanged = useCallback((count: number | null) => { setFocusedCount(count); if (count !== null) setQuery((old) => old.offset === 0 ? old : { ...old, offset: 0 }); setRevision((value) => value + 1); }, []);
   function update(patch: Partial<Query>) {
     if (blocked) return;
     setDrill(undefined); cache.current.clear();
