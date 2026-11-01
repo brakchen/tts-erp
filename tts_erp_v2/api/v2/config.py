@@ -12,11 +12,11 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -48,6 +48,13 @@ from tts_erp_v2.runtime_config.validation import (
     validate_payload,
     validate_schema,
     validate_spu_deterioration_alert_runtime_mutation,
+)
+from tts_erp_v2.runtime_config.workflow import (
+    CandidateValidationError,
+    ConfigRevisionNotFound,
+    ConfigVersionConflict,
+    check_versions,
+    review_candidate,
 )
 
 router = APIRouter(prefix="/v2/config", tags=["config"])
@@ -200,7 +207,7 @@ class _RuntimeWireModel(BaseModel):
 
 
 class RuntimeConfigCreate(_RuntimeWireModel):
-    # ``extra="forbid"`` is scoped to the two payload-bearing write models only.
+    # Payload-bearing workflow models reject retired rollout inputs explicitly.
     # It is what turns a retired ``draftRollout``/``rollout`` field into an
     # explicit 422 instead of a silently dropped input.
     model_config = ConfigDict(extra="forbid")
@@ -224,9 +231,42 @@ class RuntimeDraftUpdate(_RuntimeWireModel):
     payload: dict[str, Any]
 
 
+class RuntimeCandidatePreview(_RuntimeWireModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_draft_version: int = Field(alias="expectedDraftVersion", ge=0)
+    expected_published_version: int | None = Field(alias="expectedPublishedVersion", ge=1)
+    payload: dict[str, Any]
+    source_revision_version: int | None = Field(default=None, alias="sourceRevisionVersion", ge=1)
+
+
 class RuntimePublish(_RuntimeWireModel):
     expected_draft_version: int = Field(alias="expectedDraftVersion", ge=0)
+    expected_published_version: int | None = Field(default=None, alias="expectedPublishedVersion", ge=1)
+    payload: dict[str, Any] | None = None
+    source_revision_version: int | None = Field(default=None, alias="sourceRevisionVersion", ge=1)
     comment: str | None = Field(default=None, max_length=2_000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_retired_rollout(cls, value: Any) -> Any:
+        # Preserve legacy ignore-extra compatibility except retired capabilities.
+        if isinstance(value, dict) and any(
+            field in value for field in ("rollout", "draftRollout", "draft_rollout")
+        ):
+            raise ValueError("rollout and draftRollout are no longer supported")
+        return value
+
+    @model_validator(mode="after")
+    def validate_candidate_mode(self) -> RuntimePublish:
+        if "payload" in self.model_fields_set:
+            if self.payload is None:
+                raise ValueError("payload must be an object")
+            if "expected_published_version" not in self.model_fields_set:
+                raise ValueError("expectedPublishedVersion is required with payload")
+        elif self.source_revision_version is not None:
+            raise ValueError("sourceRevisionVersion requires payload")
+        return self
 
 
 class RuntimeRollback(_RuntimeWireModel):
@@ -420,33 +460,98 @@ def save_runtime_config_draft(
     return _detail_out(sess, item)
 
 
+@router.post("/runtime/items/{config_key}/preview")
+def preview_runtime_config_candidate(
+    config_key: str,
+    body: RuntimeCandidatePreview,
+    request: Request,
+    sess: Annotated[Session, Depends(get_session)],
+) -> dict[str, Any]:
+    """Check a candidate against one consistent, locked observation; write nothing."""
+    require_role_at_least(request, "readwrite")
+    require_cookie_csrf(request)
+    item = _active_runtime_item_or_409(sess, config_key)
+    try:
+        check_versions(
+            item,
+            expected_draft_version=body.expected_draft_version,
+            expected_published_version=body.expected_published_version,
+        )
+        review = review_candidate(
+            sess, item=item, payload=body.payload,
+            source_revision_version=body.source_revision_version,
+        )
+    except CandidateValidationError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code}) from exc
+    except ConfigVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ConfigRevisionNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "configKey": config_key,
+        "draftVersion": item.draft_version,
+        "publishedVersion": item.published_version,
+        "hasChanges": review.has_changes,
+        "publishedText": review.published_text,
+        "candidateText": review.candidate_text,
+        "sourceRevisionVersion": body.source_revision_version,
+    }
+
+
 @router.post("/runtime/items/{config_key}/publish")
 def publish_runtime_config_item(
     config_key: str,
     body: RuntimePublish,
     request: Request,
-    sess: Session = Depends(get_session),
+    sess: Annotated[Session, Depends(get_session)],
 ) -> dict[str, Any]:
     require_role_at_least(request, "readwrite")
     require_cookie_csrf(request)
     item = _active_runtime_item_or_409(sess, config_key)
-    if body.expected_draft_version != item.draft_version:
-        raise HTTPException(
-            status_code=409, detail="draft version conflict; reload before publishing"
-        )
-    if item.draft_payload is None:
-        raise HTTPException(
-            status_code=422, detail="a draft payload is required before publishing"
-        )
+    candidate_mode = "payload" in body.model_fields_set
     try:
+        check_versions(
+            item,
+            expected_draft_version=body.expected_draft_version,
+            expected_published_version=body.expected_published_version,
+            check_published_version="expected_published_version" in body.model_fields_set,
+        )
+        payload = body.payload if candidate_mode else item.draft_payload
+        if payload is None:
+            raise ConfigValidationError("a draft payload is required before publishing")
+        review = review_candidate(
+            sess, item=item, payload=payload,
+            source_revision_version=body.source_revision_version,
+        )
+        if candidate_mode and not review.has_changes:
+            raise HTTPException(
+                status_code=409, detail="candidate matches current published configuration"
+            )
         revision = publish(
             sess,
             item=item,
-            payload=item.draft_payload,
+            payload=payload,
             comment=body.comment,
             actor=_runtime_actor(request),
         )
+    except CandidateValidationError as exc:
+        if candidate_mode:
+            raise HTTPException(status_code=422, detail={"code": exc.code}) from exc
+        raise _validation_error(exc) from exc
+    except ConfigVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ConfigRevisionNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (ConfigValidationError, KeyError) as exc:
+        if candidate_mode:
+            # repository.publish repeats business/reference checks under the
+            # same locks; keep its defensive failures controlled as well.
+            code = (
+                "runtime_secret_unavailable"
+                if isinstance(exc, KeyError)
+                else "runtime_business_invalid"
+            )
+            raise HTTPException(status_code=422, detail={"code": code}) from exc
         raise _validation_error(exc) from exc
     sess.commit()
     return {"configKey": config_key, "publishedVersion": revision.version}
