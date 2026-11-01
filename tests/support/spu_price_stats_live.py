@@ -56,6 +56,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.db.models import (
     ChannelAccount,
     ChannelProduct,
@@ -401,9 +402,43 @@ _WIPE_STATEMENTS = (
 def _wipe(engine: Engine) -> None:
     """按子表→父表清掉本 lane 的 `TEST_PRICE_E2E_` 行。"""
     with engine.begin() as conn:
+        # Capture only credentials selected by these exact fixture shops before
+        # deleting the shops (their owned App rows use ON DELETE CASCADE).
+        credentials = conn.execute(
+            text(
+                "SELECT c.id, c.external_account_id, c.service_id "
+                "FROM commerce.shops s JOIN integration.credentials c "
+                "ON c.id = s.credential_id "
+                "WHERE s.platform = 'tiktok' AND c.provider = 'tiktok' "
+                "AND c.external_account_id = s.shop_id "
+                "AND c.service_id = s.service_id "
+                "AND ((s.shop_id = :seller_a AND s.account_name = :account_a) "
+                "OR (s.shop_id = :seller_b AND s.account_name = :account_b))"
+            ),
+            {
+                "seller_a": SHOP_A.seller,
+                "account_a": SHOP_A.account_name,
+                "seller_b": SHOP_B.seller,
+                "account_b": SHOP_B.account_name,
+            },
+        ).all()
         for statement in _WIPE_STATEMENTS:
             # pi-lens-ignore: python-sql-injection
             conn.execute(text(statement), {"ts": FX_SEED_TS, "name": API_KEY_NAME})
+        for credential_id, shop_id, service_id in credentials:
+            conn.execute(
+                text(
+                    "DELETE FROM integration.credentials c WHERE c.id = :credential_id "
+                    "AND c.provider = 'tiktok' AND c.external_account_id = :shop_id "
+                    "AND c.service_id = :service_id AND NOT EXISTS "
+                    "(SELECT 1 FROM commerce.shops s WHERE s.credential_id = c.id)"
+                ),
+                {
+                    "credential_id": credential_id,
+                    "shop_id": shop_id,
+                    "service_id": service_id,
+                },
+            )
 
 
 def _seed_fx(sess: Session) -> int:
@@ -483,6 +518,7 @@ def _seed_shop(sess: Session, spec: SeedShop) -> SeededShop:
     )
     sess.add(account)
     sess.flush()
+    authorize_test_shop(sess, account.id, account.shop_id)
 
     products: dict[str, ChannelProduct] = {}
     costs_seeded: set[str] = set()
