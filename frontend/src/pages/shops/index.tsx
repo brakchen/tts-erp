@@ -166,6 +166,9 @@ export default function Shops({ bootstrap }: PageProps) {
       const path = attempt.id === undefined ? listPath({ ...initialFilters, q: attempt.shop_id }, 0) : `/v2/commerce/channel-accounts/${attempt.id}?view=management`;
       const { data } = await requestJson<unknown>(bootstrap.rootPath, path);
       const snapshot = attempt.id === undefined ? decodeShopList(data).find((shop) => shop.shop_id === attempt.shop_id) : decodeShop(data);
+      if (attempt.id !== undefined && (snapshot?.id !== attempt.id || snapshot.shop_id !== attempt.shop_id)) {
+        throw new Error('Shop verification identity mismatch');
+      }
       if (mounted.current) setRecoveries((previous) => ({ ...previous, [key]: {
         attempt, phase: 'checked', snapshot, message: snapshot ? '已读取当前记录，请核对后再决定是否提交。' : '未查到记录，不能据此确认原提交未生效。',
       } }));

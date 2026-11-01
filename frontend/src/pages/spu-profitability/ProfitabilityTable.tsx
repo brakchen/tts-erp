@@ -32,6 +32,7 @@ export const columns = [
   ['广告消耗', 'spend'], ['广告系统实际ROI', 'ad_system_actual_roi'], ['广告系统保本ROI', 'ad_system_breakeven_roi'], ['有效销售', 'effective_sales'], ['总单量', 'total_orders'], ['有效单量', 'effective_order_count'], ['取消率%', 'cancel_rate'], ['全损率%', 'full_loss_rate'], ['净利润', 'net_profit'],
 ] as const;
 const priceGroups = [['采购价', 'purchase', 'purchasePrice'], ['销售价', 'originalSale', 'originalSalePrice'], ['实付价', 'paid', 'paidPrice']] as const;
+export function sortLabel(field: string): string { const metric = columns.find(([, key]) => key === field); if (metric) return metric[0]; if (field === 'roi_real') return '实际ROI'; for (const [label, , prefix] of priceGroups) { if (field === `${prefix}Mean`) return `${label}平均值`; if (field === `${prefix}Median`) return `${label}中位数`; } return field; }
 export function ProfitabilityTable({ root, rows, sort, order, prices, meta, loading, error, selectedKey, blocked, onSort, onDrill, onZoom, onRetry }: {
   root: string; rows: ProfitRow[]; sort: string; order: 'asc' | 'desc'; prices: boolean;
   meta: RecordValue; loading: boolean; error?: string; selectedKey: string | null; blocked: boolean; onSort: (sort: string, order: 'asc' | 'desc') => void;
@@ -58,7 +59,7 @@ export function ProfitabilityTable({ root, rows, sort, order, prices, meta, load
         const tags = document.createElement('div'); tags.className = 'erp-profit-flags'; for (const [show, textValue, tip] of flags) if (show) { const span = document.createElement('span'); span.textContent = textValue; if (tip) span.title = text(tip); tags.append(span); }
         if (row.status && row.status !== 'ACTIVATE') { const tag = document.createElement('span'); tag.textContent = row.status; tags.append(tag); } facts.append(tags); wrap.append(facts); return wrap;
       };
-      const formatter = (cell: Cell) => { const row = cell.getData(); const field = cell.getField(); if (field === 'cancel_rate' || field === 'full_loss_rate') return displayPercent(cell.getValue()); return `${field === 'ad_system_breakeven_roi' && row.ad_system_breakeven_roi_status === 'estimated_known_costs' && cell.getValue() != null ? '≈' : ''}${displayValue(cell.getValue())}`; };
+      const formatter = (cell: Cell) => { const row = cell.getData(); const field = cell.getField(); const output = document.createElement('span'); output.textContent = field === 'cancel_rate' || field === 'full_loss_rate' ? displayPercent(cell.getValue()) : `${field === 'ad_system_breakeven_roi' && row.ad_system_breakeven_roi_status === 'estimated_known_costs' && cell.getValue() != null ? '≈' : ''}${displayValue(cell.getValue())}`; return output; };
       const instance = new Tabulator(element, {
         columns: [{ title: '商品', field: 'spu_id', frozen: true, width: frozenWidth(element.clientWidth), minWidth: 100, widthShrink: 0, variableHeight: true, headerSort: false, formatter: product },
           ...columns.map(([title, field]) => ({ title, field, minWidth: 136, hozAlign: 'right', headerHozAlign: 'right', headerSort: true, formatter })),

@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from tests._job_invocation import authorize_test_shop
 
 
 def _seed_shop_and_products(db_engine):
@@ -23,6 +26,10 @@ def _seed_shop_and_products(db_engine):
                 "'TEST_FOCUSED_SHOP_B', 'active') RETURNING id"
             )
         ).scalar_one()
+        with Session(bind=conn, join_transaction_mode="create_savepoint") as session:
+            authorize_test_shop(session, int(shop_a), "TEST_FOCUSED_SHOP_A")
+            authorize_test_shop(session, int(shop_b), "TEST_FOCUSED_SHOP_B")
+            session.commit()
         for shop_pk, spu_id, title in (
             (shop_a, "TEST_FOCUSED_A_1", "TEST Alpha"),
             (shop_a, "TEST_FOCUSED_A_2", "TEST Beta"),

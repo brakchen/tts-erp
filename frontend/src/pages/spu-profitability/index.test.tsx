@@ -1,37 +1,47 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Page from './index';
 import type { FrontendBootstrap } from '../../shared/contracts';
 
-vi.mock('./ProfitabilityTable', () => ({ ProfitabilityTable: ({ rows, error }: { rows: { spu_id: string }[]; error?: string }) => <div aria-label="TEST 盈利行">{rows.map((row) => <span key={row.spu_id}>{row.spu_id}</span>)}{error && <p role="alert">{error}</p>}</div> }));
+vi.mock('./ProfitabilityTable', () => ({ sortLabel: (value: string) => value, ProfitabilityTable: ({ rows, error }: { rows: { spu_id: string }[]; error?: string }) => <div aria-label="TEST 盈利行">{rows.map((row) => <span key={row.spu_id}>{row.spu_id}</span>)}{error && <p role="alert">{error}</p>}</div> }));
 const bootstrap: FrontendBootstrap = { pageId: 'spu-roi', rootPath: '', releaseId: 'TEST_release', navigation: [], roleCapabilities: { readwrite: true, admin: false } };
 const shop = { id: 7, shop_id: '90071992547409931', account_name: 'TEST 店铺', region: 'VN' };
 const product = { spu_pk: 101, spu_id: 'TEST_OLD', title: 'TEST 原商品', status: 'ACTIVATE', main_image_url: null };
-const payload = (id = 'TEST_RESULT') => ({ items: [{ ...product, spu_id: id }], total: 1, totals: { net_profit: '12.0000', spend: '3.0000' }, meta: {} });
+const payload = (id = 'TEST_RESULT') => ({ items: [{ ...product, spu_id: id }], total: overviewTotal, totals: { net_profit: '12.0000', spend: '3.0000' }, meta: {} });
 let calls: { url: string; init?: RequestInit }[];
 let stored: { spuId: string; title: string }[];
 let patchFailure: number | undefined;
 let overviewError: { code: string } | undefined;
+let overviewTotal: number;
+let shopRows: typeof shop[];
+let limitedFocusedShop: string | undefined;
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }); }
 beforeEach(() => {
-  calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
+  calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; overviewTotal = 1; shopRows = [shop]; limitedFocusedShop = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); calls.push({ url, init });
-    if (url.includes('channel-accounts')) return response([shop]);
+    if (url.includes('channel-accounts')) return response(shopRows);
     if (url.includes('channel-product-options')) return response([{ spu_id: 'TEST_NEW', title: 'TEST 新商品', status: 'ACTIVATE' }]);
     if (url.includes('/reporting/focused-spus/')) {
+      const shopPk = new URL(url, location.origin).pathname.split('/').at(-1)!;
       if (init?.method === 'PATCH') {
         if (patchFailure) return response({ detail: 'TEST_failure' }, patchFailure);
         const body = JSON.parse(String(init.body)); stored = stored.filter((item) => !body.removeSpuIds.includes(item.spuId)); for (const id of body.addSpuIds) stored.push({ spuId: id, title: id });
+        if (overviewTotal > 1) overviewTotal = stored.length;
         return response({ shopPk: 7, total: stored.length, addedSpuIds: body.addSpuIds, removedSpuIds: body.removeSpuIds });
       }
-      return response({ shopPk: 7, items: stored, total: stored.length, matchedTotal: stored.length, limit: 500, offset: 0 });
+      if (shopPk === limitedFocusedShop) return new Response('{"detail":"TEST_read_cooldown"}', { status: 429, headers: { 'Retry-After': '120', 'Content-Type': 'application/json' } });
+      return response({ shopPk: Number(shopPk), items: stored, total: stored.length, matchedTotal: stored.length, limit: 500, offset: 0 });
     }
-    if (url.includes('/analytics/spu-roi?')) return overviewError ? response(overviewError, 503) : response(payload());
+    if (url.includes('/analytics/spu-roi?')) {
+      if (overviewError) return response(overviewError, 503);
+      const result = payload(); if (Number(new URL(url, location.origin).searchParams.get('offset')) >= result.total) result.items = [];
+      return response(result);
+    }
     return response({});
   }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it('both page profiles render through the same React owner and keep the server scope', async () => {
   render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByText('TEST_RESULT');
@@ -81,4 +91,70 @@ it('explains only the typed missing-FX error and leaves no old successful result
   render(<Page bootstrap={bootstrap} />);
   expect(await screen.findByRole('alert')).toHaveTextContent('汇率数据缺失，无法计算结果');
   expect(screen.queryByText('TEST_RESULT')).not.toBeInTheDocument();
+});
+it('a server write denial remains a denial after reading the focused facts', async () => {
+  patchFailure = 403; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: '移除 SPU TEST_OLD' }));
+  fireEvent.click(await screen.findByRole('button', { name: '重新读取关注事实' }));
+  await screen.findByText('服务端拒绝修改此店铺的关注清单；重新读取事实不会解除写权限限制。');
+  expect(screen.getByRole('button', { name: '移除 SPU TEST_OLD' })).toBeDisabled();
+  expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(1);
+});
+it('clear cancels a standard bulk lookup and ignores its late response', async () => {
+  const fetcher = vi.mocked(fetch); const original = fetcher.getMockImplementation()!; let finish!: (response: Response) => void;
+  fetcher.mockImplementation((input, init) => String(input).includes('channel-product-options') ? new Promise<Response>((resolve) => { finish = resolve; }) : original(input, init));
+  render(<Page bootstrap={bootstrap} />); await screen.findByText('TEST_RESULT');
+  fireEvent.click(screen.getByRole('button', { name: '批量粘贴' }));
+  fireEvent.change(screen.getByLabelText('粘贴 SPU ID（逗号、空格或换行分隔）'), { target: { value: 'TEST_NEW' } });
+  fireEvent.click(screen.getByRole('button', { name: '解析并添加' }));
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  expect(screen.getByRole('button', { name: '清空' })).toBeEnabled(); fireEvent.click(screen.getByRole('button', { name: '清空' }));
+  await act(async () => { finish(response([{ spu_id: 'TEST_NEW', title: 'TEST 新商品', status: 'ACTIVATE' }])); });
+  expect(screen.queryByRole('button', { name: '移除 SPU TEST_NEW' })).not.toBeInTheDocument();
+  expect(screen.getByText('已选择 0 个')).toBeInTheDocument();
+});
+it('removing a focused item on the last page resets offset before refreshing the smaller scope', async () => {
+  overviewTotal = 101; stored = Array.from({ length: 101 }, (_, index) => ({ spuId: `TEST_PAGE_${index}`, title: `TEST 商品 ${index}` }));
+  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  await screen.findByText('TEST_RESULT');
+  fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+  await screen.findByText('第 2 页 · 共 2 页');
+  fireEvent.click(screen.getByText('当前关注清单 · 101 个'));
+  fireEvent.click(screen.getByRole('button', { name: '移除 SPU TEST_PAGE_0' }));
+  await screen.findByText('第 1 页 · 共 1 页');
+  await screen.findByText('TEST_RESULT');
+  const last = calls.filter((call) => call.url.includes('/analytics/spu-roi?')).at(-1)!;
+  expect(new URL(last.url, location.origin).searchParams.get('offset')).toBe('0');
+  expect(stored).toHaveLength(100);
+});
+it('a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs', async () => {
+  patchFailure = 503; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
+  fireEvent.click(screen.getByRole('button', { name: '批量粘贴' }));
+  const input = screen.getByLabelText('粘贴 SPU ID（逗号、空格或换行分隔）');
+  fireEvent.change(input, { target: { value: 'TEST_NEW, TEST_MISSING' } });
+  fireEvent.click(screen.getByRole('button', { name: '解析并添加' }));
+  await screen.findByRole('button', { name: '重新读取关注事实' });
+  expect(screen.getByRole('alert')).toHaveTextContent('原选择保留。请先重新读取关注事实');
+  expect(input).toHaveValue('TEST_NEW, TEST_MISSING');
+  expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(1);
+});
+it('changing shop retains the selection Retry-After fence and requires explicit readback after expiry', async () => {
+  vi.useFakeTimers(); let now = 0; vi.spyOn(performance, 'now').mockImplementation(() => now);
+  limitedFocusedShop = '7'; shopRows = [shop, { ...shop, id: 8, shop_id: 'TEST_SHOP_EIGHT', account_name: 'TEST 店铺八' }];
+  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(screen.getByRole('button', { name: '重新读取关注事实' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('当前店铺'), { target: { value: '8' } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  const readsForEight = () => calls.filter((call) => call.url.includes('/reporting/focused-spus/8?'));
+  expect(readsForEight()).toHaveLength(0);
+  now = 119_000; await act(async () => { await vi.advanceTimersByTimeAsync(119_000); });
+  expect(screen.getByRole('button', { name: '重新读取关注事实' })).toBeDisabled();
+  now = 120_001; await act(async () => { await vi.advanceTimersByTimeAsync(1001); });
+  expect(readsForEight()).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '重新读取关注事实' }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(readsForEight()).toHaveLength(1);
+  expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(0);
 });

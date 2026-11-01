@@ -14,6 +14,7 @@ from typing import Any, cast
 from urllib.parse import parse_qs
 
 import pytest
+from playwright.sync_api import expect
 
 import conftest as browser_conftest
 
@@ -184,7 +185,7 @@ def test_price_tooltip_is_keyboard_openable_and_restores_focus(frontend_browser_
     assert "计算时间：2026-10-06T00:00:00+00:00" in text
     page.keyboard.press("Escape")
     page.get_by_role("dialog", name="采购价统计口径").wait_for(state="hidden")
-    assert page.evaluate("document.activeElement === document.querySelector('[data-price-tip=\\\"purchase\\\"]')")
+    expect(button).to_be_focused()
 
 
 def test_price_tooltip_survives_lazy_drill_cycles(frontend_browser_renderer, monkeypatch):
@@ -202,15 +203,16 @@ def test_price_tooltip_survives_lazy_drill_cycles(frontend_browser_renderer, mon
         page.get_by_role("dialog", name="采购价统计口径").wait_for(state="visible")
         page.get_by_role("button", name="关闭价格说明").click()
         page.get_by_role("dialog", name="采购价统计口径").wait_for(state="hidden")
-        button.focus()
+        # Role hiding may precede Presence teardown. Wait for the real FocusScope
+        # return before keyboard reopening instead of forcing focus during exit.
+        expect(button).to_be_focused()
         page.keyboard.press("Enter")
         page.get_by_role("dialog", name="采购价统计口径").wait_for(state="visible")
         page.keyboard.press("Escape")
         page.get_by_role("dialog", name="采购价统计口径").wait_for(state="hidden")
-        assert page.evaluate("document.activeElement === document.querySelector('[data-price-tip=\\\"purchase\\\"]')")
-        # 收尾回到「drill 已关闭」：Escape 关 tooltip 时页面级 Escape 已把 drill 收起，
-        # 只有还开着才需要点行收起。旧版（rowClick 用 spu_pk+300ms 拦重复）下这次
-        # row.click() 反被吞掉，靠上一轮残留的 drill 撑过下一轮的可见性断言，是误测。
+        expect(button).to_be_focused()
+        # Modal 的退出动画和焦点返回由 HeroUI 完成；最终仍须回到原触发器。
+        # 每轮显式收起明细，防止上一轮残留的面板撑过下一轮可见性断言。
         if page.locator(".op-drill-row").count():
             page.get_by_role("button", name="收起商品详情").click()
         page.locator(".op-drill-row").wait_for(state="detached")

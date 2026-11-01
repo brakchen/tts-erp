@@ -1,58 +1,19 @@
-"""/v2/pages/* — server-rendered HTML pages (no SPA framework).
+"""Authenticated page routes and retained legacy-document rendering helpers.
 
-Pages are **Jinja2 templates** under ``tts_erp_v2/templates/pages/`` (one
-``.html`` per page), rendered by :func:`_render_page`. Templates are styled
-with **Bootstrap 5.3.8**, self-hosted at ``/static/vendor/bootstrap.min.css``
-(MIT — see ``static/vendor/NOTICE.md``); no CDN links. Page behaviour lives in
-``/static/js/*.js``. Layout is Bootstrap grid + utilities with the inline
-warm-paper skin; pages are mobile-adapted (the ROI shell has breakpoint
-column pruning + sticky first column).
+Registered pages use the manifest-backed React renderer; HTTP route and role
+gates remain here. Both profitability URLs load one shared React module.
+Their former Jinja shell and global DOM-owning scripts are retired.
 
-Template context/globals (see ``_render_page``):
-
-* ``current_page`` — sidebar slug; drives ``{{ sidebar(current_page) }}``
-  (markup + toggle JS) and ``{{ sidebar_css(current_page) }}`` injections.
-* ``js_version(name)`` / ``css_version(name)`` — SHA-256 content stamps for
-  cache-busting (``?v=`` tokens), replacing the old ``__JSV_*__`` placeholders.
-* The SPU-profitability shell additionally takes ``title`` / ``profile_id`` /
-  ``entrypoint_js`` (see :class:`_SpuProfitabilityPageConfig`).
-
-Cache-busting: /static has no explicit Cache-Control, so every mutable asset
-gets its own content hash. CSS and JS must not share a version token: a CSS-
-only hotfix otherwise keeps the old URL and remains stale on mobile browsers.
-
-Asset paths are RELATIVE (``../../static/…``) so the page works both on
-``127.0.0.1:9877`` directly and behind the NGINX ``/tts`` prefix
-(2026-08-31: absolute ``/static/…`` links 404'd behind the prefix).
-
-Auth classification: most pages are ``readonly``-equivalent for the GET
-(handler does no DB writes), while operational consoles such as
-``/v2/pages/sync-jobs`` can add handler-level ``readwrite`` gates. The page JS
-calls write endpoints such as ``/v2/reporting/manual-costs`` — which require a
-readwrite or admin session via the ``/v2/auth/login`` cookie flow.
-(2026-09-05 page-rework
-lane: the page no longer calls the ``/v2/spu-images/*`` upload/confirm
-endpoints — the image column renders the MinIO mirror instead.)
-
-Visual design (2026-09-01 redesign)
-----------------------------------
-Tone: industrial operations console — like a customs manifest or
-shipping dock dashboard. Honest, dense, monospace-heavy. The page's
-signature element is the oversized queue counter at the top: the
-operator's daily job is to grind that number down. Bootstrap stays for
-layout primitives (``d-flex``, ``gap-2``, ``mt-3`` …) but the visible
-personality comes from the inline ``<style>`` block — warm paper bg,
-hairline rules, burnt-sienna accent used in 3–4 specific places only.
-Constraint respected: no external CSS file (per the 2026-08-31 decision
-that retired ``/static/css/console.css``), and no webfonts (no CDN).
+Legacy helpers remain for other retained documents and their tests. They own
+Jinja context, shared navigation and independent CSS/JS content hashes only.
+Frontend assets and API URLs respect the server-provided root_path.
 """
 
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -351,29 +312,17 @@ def shops_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
 
 
 
-@dataclass(frozen=True, slots=True)
-class _SpuProfitabilityPageConfig:
-  slug: Literal["spu-roi", "focused-spus"]
-  title: str
-  profile_id: Literal["standard-roi", "focused-spus"]
-  entrypoint_js: Literal["spu-roi.js", "focused-spus.js"]
 
 
 @router.get("/spu-roi", response_class=HTMLResponse)
 def spu_roi_page(request: Request) -> HTMLResponse:
-  """SPU 实际 ROI 看板(账页式,§7 of docs/archive/spu-real-roi-dashboard.md)。
-
-  HTML shell 只做骨架:标题/结余带/工具栏/表格容器/分页;数据与业务计算
-  全部消费 GET /v2/analytics/spu-roi(只读,§5.1-1 页面不计算业务数字)。
-  布局 = Bootstrap 5.3.8 栅格/工具类 + 手机端适配(见 shell 头注释),行为在
-  static/js/spu-roi.js。
-  """
+  """Shared React profitability page; all business values remain API-owned."""
   return frontend_pages.render_frontend_page(request, "spu-roi")
 
 
 @router.get("/focused-spus", response_class=HTMLResponse)
 def focused_spus_page(request: Request) -> HTMLResponse:
-  """Persistent shop-scoped focused SPUs rendered by the shared page kernel."""
+  """Shared React profitability page; all business values remain API-owned."""
   return frontend_pages.render_frontend_page(request, "focused-spus")
 
 
@@ -406,29 +355,6 @@ def manual_costs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse
 # NOT TO ADD BACK: <details>API token (paste once; stored in localStorage)</details>
 
 
-
-
-# SPU 实际 ROI 看板(账页式)HTML shell — 结构见 docs/archive/spu-real-roi-dashboard.md §7。
-# 只读:JS 消费 GET /v2/analytics/spu-roi;业务数字全在服务端算好(§5.1-1)。
-# 页面布局 2026-09-29 统一到 Bootstrap 5.3.8(自托管 static/vendor/bootstrap.min.css):
-#   - 页头、结余分组、工具栏、分页、页脚均由 container/row/col 与断点工具类驱动；
-#   - 主表和钻取表统一使用 table-responsive，保留全部业务列，用横向滚动代替手写断点隐藏；
-#   - 钻取 summary 与 P&L 用 row-cols-* 随断点切换列数，tab 用 nav-tabs + overflow-x-auto；
-#   - 自定义 CSS 只保留 warm-paper 视觉 token、业务标色、sticky 首列、tooltip/lightbox 等行为皮肤，
-#     不再包含 max-width/min-width media query 或 nth-child 响应式规则。
-
-
-
-def _render_spu_profitability_page(
-  config: _SpuProfitabilityPageConfig,
-) -> HTMLResponse:
-  return _render_page(
-    "spu-profitability.html",
-    current_page=config.slug,
-    title=config.title,
-    profile_id=config.profile_id,
-    entrypoint_js=config.entrypoint_js,
-  )
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

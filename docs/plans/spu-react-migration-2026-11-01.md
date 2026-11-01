@@ -47,3 +47,20 @@ TDD mode auto，strict：迁移有日期、跨店铺异步、写入关注和错�
 - HeroUI 提供按钮、表单输入、Modal、Tabs；浏览器 checkbox 的单项切换只影响明确目标，避免原生 multiple 的普通点击误移除其他持久关注。手机号/业务 SPU/店铺标识始终作为字符串处理。
 
 初版 `dc444ade` 类型检查及 Vite 构建通过；尚不能由此推断隔离行为测试或线上发布完成。严格 TDD 的 RED 阶段受本地隔离运行前置限制，先写了查询用例而未直接运行框架；后续验证由服务器同版本隔离 runner 执行并记录真实结果。
+
+## 已执行验证（2026-11-01）
+
+服务器独立工作树在 `7c3d271` 的以下两项最小验证均退出 0，隔离 wrapper 完成模板克隆与临时库清理；前端构建产物为 `build-9b4c704321c5b9cddf96`：
+
+```bash
+FRONTEND_TEST_FILTER=src/pages/spu-profitability bash scripts/test_isolated.sh frontend tests/frontend/test_components.py
+FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh frontend tests/frontend/test_components.py
+```
+
+这是指定 SPU 组件/查询与统一客户端错误 code 测试的通过证据，不代表整个 frontend 域、fast baseline、浏览器或生产验收通过。后续提交仍需匹配版本复验。父协调会话在干净 `origin/master 5eb3ff5c` 对最小 shops 组件和 manual-cost owned-child 404 代表失败做了隔离复现；未改写 master baseline。
+
+## 旧资源退役核对
+
+`b3ce09b1` 测试维护并入后，运行代码、浏览器 fixture 和旧行为测试不再导入 SPU Jinja helper 或读取旧整页脚本。移除 `_SpuProfitabilityPageConfig`、`_render_spu_profitability_page`、旧盈利模板、三份全局脚本与两份专用 CSS。其他旧页面模板、公共 token/导航与 vendor 文件保持原有消费者；Tabulator JS/CSS 仍由新 React ref adapter 复用。
+
+离线 HTML 生成器改用现有 manifest renderer；历史部署脚本仅更新静态资产存在性检查到 release/manifest，迁移、授权和服务操作不执行也不更改。旧 CSS 一次性主题脚本不再枚举已退役两份 CSS。文档中初始设计的旧实现段已明确被本迁移记录取代，不作为恢复旧 owner 的依据。

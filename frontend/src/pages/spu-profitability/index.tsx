@@ -4,15 +4,16 @@ import { Button, Input, Modal } from '@heroui/react';
 import PageIntro from '../../shared/PageIntro';
 import type { PageProps } from '../../shared/contracts';
 import { decodeOverview, decodeShops, optionalRecord, record, text, type ProfitRow, type RecordValue } from './contracts';
-import { datePresets, initialQuery, persistQuery, queryParams, readPreferences, reportingDate, reportingZone, shiftDay, type Profile, type Query } from './query';
+import { datePresets, initialQuery, pageSequence, persistQuery, queryParams, readPreferences, reportingDate, reportingZone, shiftDay, type Profile, type Query } from './query';
 import { useRead } from './useRead';
 import Selection from './Selection';
 import { FeeFacts, PriceSummary, Summary } from './Summary';
-import { ProfitabilityTable } from './ProfitabilityTable';
+import { ProfitabilityTable, sortLabel } from './ProfitabilityTable';
 import DrillDetails from './DrillDetails';
 import './profitability.css';
 
 const emptyRows: ProfitRow[] = [];
+const freshnessLabels: Record<string, string> = { ok: '正常', warn: '更新滞后', crit: '严重滞后', unknown: '未知' };
 function displayTimestamp(value: unknown, region?: string | null): string { if (typeof value !== 'string') return '—'; const date = new Date(value); const zone = reportingZone(region); return Number.isNaN(date.getTime()) || !zone ? value : new Intl.DateTimeFormat('zh-CN', { timeZone: zone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date); }
 function ProfitabilityContent({ bootstrap }: PageProps) {
   const root = bootstrap.rootPath; const profile: Profile = bootstrap.pageId === 'focused-spus' ? 'focused-spus' : 'spu-roi'; const focused = profile === 'focused-spus';
@@ -20,6 +21,8 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
   const [dateStart, setDateStart] = useState(query.wStart); const [dateEnd, setDateEnd] = useState(query.wEnd);
   const [revision, setRevision] = useState(0); const [more, setMore] = useState(false); const [feeDismissed, setFeeDismissed] = useState(false);
   const [shopRevision, setShopRevision] = useState(0); const detailFence = useRef(0);
+  const selectionFence = useRef(0);
+  const [jumpPage, setJumpPage] = useState('');
   const [focusedCount, setFocusedCount] = useState<number | null>(null); const [drill, setDrill] = useState<{ row: ProfitRow; host: HTMLElement }>();
   const [image, setImage] = useState<string>(); const [priceCapability, setPriceCapability] = useState<boolean>();
   const cache = useRef(new Map<string, RecordValue>());
@@ -43,7 +46,7 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
   }, [today, shop?.id, focused, query.datesTouched]);
   useEffect(() => { if (data) setPriceCapability(Boolean(data.totals.priceStats || data.items.some((row) => row.priceStats))); }, [data]);
   useEffect(() => { cache.current.clear(); setDrill(undefined); }, [root, path, revision]);
-  const focusedChanged = useCallback((count: number | null) => { setFocusedCount(count); setRevision((value) => value + 1); }, []);
+  const focusedChanged = useCallback((count: number | null) => { setFocusedCount(count); if (count !== null) setQuery((old) => old.offset === 0 ? old : { ...old, offset: 0 }); setRevision((value) => value + 1); }, []);
   function update(patch: Partial<Query>) {
     if (blocked) return;
     setDrill(undefined); cache.current.clear();
@@ -64,6 +67,7 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
   const closeDrill = useCallback(() => { setDrill(undefined); }, []);
   const receiveDrill = useCallback((row: ProfitRow | null, host: HTMLElement | null) => { setDrill(row && host ? { row, host } : undefined); }, []);
   const fee = optionalRecord(data?.meta.fee); const meta = data?.meta ?? {};
+  const currentPage = Math.floor(query.offset / query.limit) + 1; const pages = data ? Math.max(1, Math.ceil(data.total / query.limit)) : 1;
   const presetOptions = datePresets(today);
   return <div className="erp-page" data-page-profile={focused ? 'focused-spus' : 'standard-roi'}>
     <PageIntro eyebrow="PRODUCT PERFORMANCE" title={focused ? '关注重点商品，把握经营变化' : '让商品的投入与回报清晰可见'} description="按店铺和经营日期查看商品表现，结合订单、成本与广告核对结果。" />
@@ -79,14 +83,16 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
       {blocked && <p role="status">服务端要求等待 Retry-After；到期后请明确刷新。</p>}
     </section>
     {shops.error && <div role="alert"><p>店铺读取失败：{shops.error}</p><Button variant="secondary" isDisabled={shops.loading || shops.blocked} onPress={() => setShopRevision((value) => value + 1)}>重试店铺列表</Button></div>}{shops.loading && <p role="status">加载店铺中…</p>}
-    {shop && <Selection key={`${root}:${shop.id}:${profile}`} root={root} shopPk={shop.id} focused={focused} canWrite={bootstrap.roleCapabilities?.readwrite === true} blocked={blocked} applied={query.spuIds} onApply={applyIds} onFocused={focusedChanged} />}
-    <section id="data-freshness" className="erp-profit-freshness" aria-label="数据更新" aria-live="polite"><span>数据更新</span>{freshness.error ? <span>同步时间加载失败</span> : Array.isArray(freshness.data?.sources) ? freshness.data.sources.map((raw) => { const source = optionalRecord(raw); const severity = ['ok', 'warn', 'crit', 'unknown'].includes(String(source.severity)) ? String(source.severity) : 'unknown'; return <span key={String(source.key)} data-source={String(source.key)} data-severity={severity} title={`${text(source.detail)} · ${text(source.job_name)} · ${text(source.synced_at)}`}><strong>{text(source.label ?? source.key)}</strong> <time dateTime={typeof source.synced_at === 'string' ? source.synced_at : undefined}>{displayTimestamp(source.synced_at, shop?.region)}</time> · {severity}{source.scope === 'system' ? ' · 全账号' : ''}</span>; }) : <span>—</span>}<span data-source="fx" data-severity="unknown">汇率快照 <time title={text(optionalRecord(meta.fx).as_of_at)}>{displayTimestamp(optionalRecord(meta.fx).as_of_at, shop?.region)}</time></span></section>
+    {shop && <Selection key={`${root}:${shop.id}:${profile}`} root={root} shopPk={shop.id} focused={focused} canWrite={bootstrap.roleCapabilities?.readwrite === true} blocked={blocked} fence={selectionFence} applied={query.spuIds} onApply={applyIds} onFocused={focusedChanged} />}
+    <section id="data-freshness" className="erp-profit-freshness" aria-label="数据更新" aria-live="polite"><span>数据更新</span>{freshness.error ? <span>同步时间加载失败</span> : Array.isArray(freshness.data?.sources) ? freshness.data.sources.map((raw) => { const source = optionalRecord(raw); const severity = ['ok', 'warn', 'crit', 'unknown'].includes(String(source.severity)) ? String(source.severity) : 'unknown'; return <span key={String(source.key)} data-source={String(source.key)} data-severity={severity} title={`${text(source.detail)} · ${text(source.job_name)} · ${text(source.synced_at)}`}><strong>{text(source.label ?? source.key)}</strong> <time dateTime={typeof source.synced_at === 'string' ? source.synced_at : undefined}>{displayTimestamp(source.synced_at, shop?.region)}</time> · {freshnessLabels[severity]}{source.scope === 'system' ? ' · 全账号' : ''}</span>; }) : <span>—</span>}<span data-source="fx" data-severity="unknown">汇率快照 <time title={text(optionalRecord(meta.fx).as_of_at)}>{displayTimestamp(optionalRecord(meta.fx).as_of_at, shop?.region)}</time></span></section>
     {data && <><FeeFacts fee={fee} dismissed={feeDismissed} onDismiss={() => setFeeDismissed(true)} /><Summary data={data} /></>}
     <PriceSummary data={data} supported={priceCapability} loading={overview.loading} error={overview.error} />
-    <section className="erp-panel min-w-0 space-y-4" aria-label="商品经营明细"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="erp-section-heading">商品经营明细</h2><p>点击商品查看明细；商品列固定，其他指标可横向滚动。</p></div><span id="sort-note">排序：{query.sort} {query.order === 'asc' ? '↑' : '↓'} · {data?.total ?? '—'} 条</span></div>
+    <section className="erp-panel min-w-0 space-y-4" aria-label="商品经营明细"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="erp-section-heading">商品经营明细</h2><p>点击商品查看明细；商品列固定，其他指标可横向滚动。</p></div><span id="sort-note">排序：{sortLabel(query.sort)} {query.order === 'asc' ? '↑' : '↓'} · {data?.total ?? '—'} 条</span></div>
       {focused && focusedCount === 0 && <p>尚未关注 SPU，请在上方搜索并添加。当前范围仍为关注清单。</p>}
       <ProfitabilityTable root={root} rows={data?.items ?? emptyRows} sort={query.sort} order={query.order} prices={priceCapability === true} meta={meta} loading={overview.loading} error={overview.error} selectedKey={drill?.row.spu_pk ?? null} blocked={blocked} onSort={(sort, order) => update({ sort, order })} onDrill={receiveDrill} onZoom={setImage} onRetry={() => setRevision((value) => value + 1)} />
-      <nav className="erp-profit-pagination" aria-label="SPU ROI 分页"><label className="flex items-center gap-2">每页显示<select id="filter-limit" aria-label="每页条数" className="erp-select" value={query.limit} disabled={blocked || overview.loading} onChange={(event) => update({ limit: Number(event.target.value) })}>{[50, 100, 200].map((value) => <option key={value}>{value}</option>)}</select></label><span id="pager-label">第 {Math.floor(query.offset / query.limit) + 1} 页 · 共 {data ? Math.max(1, Math.ceil(data.total / query.limit)) : '—'} 页</span><div className="flex gap-2"><Button variant="secondary" isDisabled={blocked || overview.loading || query.offset === 0} onPress={() => update({ offset: Math.max(0, query.offset - query.limit) })}>上一页</Button><Button variant="secondary" isDisabled={blocked || overview.loading || !data || query.offset + query.limit >= data.total} onPress={() => update({ offset: query.offset + query.limit })}>下一页</Button></div></nav>
+      <nav className="erp-profit-pagination" aria-label="SPU ROI 分页"><label className="flex items-center gap-2">每页显示<select id="filter-limit" aria-label="每页条数" className="erp-select" value={query.limit} disabled={blocked || overview.loading} onChange={(event) => update({ limit: Number(event.target.value) })}>{[50, 100, 200].map((value) => <option key={value}>{value}</option>)}</select></label><span id="pager-label">第 {currentPage} 页 · 共 {data ? pages : '—'} 页</span><div id="pager-pages" className="flex flex-wrap gap-2" aria-label="页码导航"><Button variant="secondary" isDisabled={blocked || overview.loading || query.offset === 0} onPress={() => update({ offset: Math.max(0, query.offset - query.limit) })}>上一页</Button>{pageSequence(currentPage, pages).map((page, index) => page === '…' ? <span key={`gap-${index}`}>…</span> : <Button key={page} size="sm" variant={page === currentPage ? 'primary' : 'secondary'} aria-label={`第 ${page} 页`} aria-current={page === currentPage ? 'page' : undefined} isDisabled={blocked || overview.loading || !data} onPress={() => update({ offset: (page - 1) * query.limit })}>{page}</Button>)}<Button variant="secondary" isDisabled={blocked || overview.loading || !data || query.offset + query.limit >= data.total} onPress={() => update({ offset: query.offset + query.limit })}>下一页</Button></div>
+        <form className="flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); const page = Number(jumpPage); if (data && Number.isSafeInteger(page) && page >= 1 && page <= pages) update({ offset: (page - 1) * query.limit }); }}><label className="grid w-24 gap-1">跳转页<Input fullWidth type="number" min={1} max={pages} aria-label="跳转页" value={jumpPage} disabled={blocked || overview.loading || !data} onChange={(event) => setJumpPage(event.target.value)} /></label><Button type="submit" variant="secondary" isDisabled={blocked || overview.loading || !data}>跳转</Button></form>
+      </nav>
     </section>
     {data && <details className="erp-panel space-y-3"><summary>计算依据与数据说明</summary><dl className="grid gap-3 sm:grid-cols-2">{[
       ['计算时间', meta.computed_at ?? meta.calculated_at ?? meta.calculatedAt], ['口径版本', meta.rubric_version], ['金额单位', optionalRecord(meta.currency).display ?? 'CNY'], ['经营日期', `${query.wStart || '不限'} ~ ${query.wEnd || '不限'}（含截止日）`],

@@ -29,7 +29,7 @@ export default function DrillDetails({ root, row, meta, enums, start, end, cache
     }).catch((error: unknown) => { if (current) { if (error instanceof ApiError && error.retryAfter) { fence.current = Math.max(fence.current, performance.now() + error.retryAfter * 1000); setBlocked(true); cancelDelay = scheduleReadDelay(() => setBlocked(false), fence.current - performance.now()); } setState({ key, error: error instanceof Error ? error.message : '明细读取失败' }); } });
     return () => { current = false; controller.abort(); cancelDelay?.(); };
   }, [root, path, key, tab, revision, cache, fence]);
-  useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); }; document.addEventListener('keydown', escape); return () => document.removeEventListener('keydown', escape); }, [onClose]);
+  useEffect(() => { const escape = (event: KeyboardEvent) => { const fromDialog = event.composedPath().some((node) => node instanceof Element && node.getAttribute('role') === 'dialog'); if (event.key === 'Escape' && !event.defaultPrevented && !fromDialog && !document.querySelector('[role="dialog"]')) onClose(); }; document.addEventListener('keydown', escape); return () => document.removeEventListener('keydown', escape); }, [onClose]);
   const presentation = optionalRecord(meta.presentation); const hints = optionalRecord(presentation.pnl_hints);
   const tr = (kind: string, value: unknown) => text(optionalRecord(enums[kind])[String(value)] ?? value);
   const data = state.key === key ? state.data : undefined; const rows = data && Array.isArray(data[tab]) ? data[tab] as unknown[] : []; const detailMeta = optionalRecord(data?.meta);

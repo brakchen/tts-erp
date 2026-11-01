@@ -17,7 +17,10 @@ import re
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tests.api.test_frontend_pages import _bootstrap
 from tts_erp_v2.access._policy import required_role
 from tts_erp_v2.access._types import Role
@@ -442,13 +445,23 @@ def test_spu_profit_deterioration_page_permission_gate(
 
 
 def test_spu_profit_deterioration_page_only_offers_prd_comparison_windows(
-    api_client, readonly_key
+    api_client, readonly_key, db_engine
 ):
     """AC-001/012: server still rejects other windows; actual controls live in React tests."""
+    shop_id = "TEST_PAGE_INVALID_COMPARISON_WINDOW"
+    with db_engine.begin() as conn:
+        shop_pk = conn.execute(
+            text("INSERT INTO commerce.shops (platform, shop_id, account_name, status) "
+                 "VALUES ('tiktok', :shop_id, :shop_id, 'active') RETURNING id"),
+            {"shop_id": shop_id},
+        ).scalar_one()
+        with Session(bind=conn, join_transaction_mode="create_savepoint") as session:
+            authorize_test_shop(session, int(shop_pk), shop_id)
+            session.commit()
     for window in (1, 4, 14, 21):
         response = api_client.get(
             "/v2/analytics/spu-profit-deterioration",
-            params={"shop_pk": 1, "window_days": window},
+            params={"shop_pk": int(shop_pk), "window_days": window},
             headers={"Authorization": f"Bearer {readonly_key}"},
         )
         assert response.status_code == 422, response.text
