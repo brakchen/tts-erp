@@ -8,6 +8,7 @@ follows the legacy v1 contract:
     {"code": 0, "data": {"tracking": [{"action_code", "description",
                                         "update_time_millis", ...}]}}
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -47,8 +48,9 @@ class FakeProxy:
         return {"code": 0, "data": {"tracking": []}}
 
 
-def _make_account_with_order(session, *, shop_id: str = "TEST_TT_LOG_SHOP",
-                             order_id: str = "TEST_SO_L") -> ChannelAccount:
+def _make_account_with_order(
+    session, *, shop_id: str = "TEST_TT_LOG_SHOP", order_id: str = "TEST_SO_L"
+) -> ChannelAccount:
     cred = Credentials(
         provider="tiktok",
         external_account_id=shop_id,
@@ -138,9 +140,13 @@ def test_logistics_writes_shipment_and_tracks_watermark(db_session) -> None:
     ).scalar_one()
     assert shipment.tracking_number == "TN1"
     assert shipment.provider_id == "UPS"
-    events = db_session.execute(
-        select(TrackingEvent).where(TrackingEvent.shipment_id == shipment.id)
-    ).scalars().all()
+    events = (
+        db_session.execute(
+            select(TrackingEvent).where(TrackingEvent.shipment_id == shipment.id)
+        )
+        .scalars()
+        .all()
+    )
     assert len(events) == 1
     assert events[0].action_code == 20101
     assert events[0].description == "Order placed."
@@ -171,18 +177,14 @@ def test_select_tracking_targets_does_not_load_full_raw_record(db_session) -> No
     db_session.flush()
     db_session.expunge_all()
 
-    targets = logistics_job._select_tracking_targets(
-        db_session, account_id=account.id
-    )
+    targets = logistics_job._select_tracking_targets(db_session, account_id=account.id)
 
     assert targets[0]["order_id"] == "TEST_SO_L"
     assert targets[0]["tracking_number"] == "TN1"
     assert targets[0]["external_package_id"] == "PKG1"
     assert targets[0]["provider_id"] == "UPS"
     loaded = [
-        obj
-        for obj in db_session.identity_map.values()
-        if isinstance(obj, RawRecord)
+        obj for obj in db_session.identity_map.values() if isinstance(obj, RawRecord)
     ]
     assert loaded == []
 
@@ -244,17 +246,25 @@ def test_logistics_unknown_order_writes_sync_issue(db_session) -> None:
     # may also contribute unrelated rows, so we assert on the issue +
     # the absence of a Shipment for the ghost package specifically.
     assert result.rows_failed >= 1
-    ghost_issues = db_session.execute(
-        select(SyncIssue).where(
-            SyncIssue.job_name == "tiktok.logistics",
-            SyncIssue.external_id == "PKG_GHOST",
+    ghost_issues = (
+        db_session.execute(
+            select(SyncIssue).where(
+                SyncIssue.job_name == "tiktok.logistics",
+                SyncIssue.external_id == "PKG_GHOST",
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(ghost_issues) == 1
     assert ghost_issues[0].issue_type == "UNKNOWN_ORDER"
-    ghost_shipments = db_session.execute(
-        select(Shipment).where(Shipment.external_package_id == "PKG_GHOST")
-    ).scalars().all()
+    ghost_shipments = (
+        db_session.execute(
+            select(Shipment).where(Shipment.external_package_id == "PKG_GHOST")
+        )
+        .scalars()
+        .all()
+    )
     assert ghost_shipments == []
 
 
@@ -284,9 +294,13 @@ def test_logistics_fetch_events_disabled_skips_tracking(db_session) -> None:
     ).scalar_one()
     # No tracking endpoint was called.
     assert all("tracking" not in path for _method, path in proxy.calls)
-    events_for_shipment = db_session.execute(
-        select(TrackingEvent).where(TrackingEvent.shipment_id == shipment.id)
-    ).scalars().all()
+    events_for_shipment = (
+        db_session.execute(
+            select(TrackingEvent).where(TrackingEvent.shipment_id == shipment.id)
+        )
+        .scalars()
+        .all()
+    )
     assert events_for_shipment == []
 
 
@@ -340,7 +354,8 @@ def test_logistics_excludes_terminal_status_orders(db_session) -> None:
     """Orders whose Shipment is already DELIVERED / RETURNED_TO_SELLER
     are excluded — their tracking never changes."""
     account = _make_account_with_order(
-        db_session, shop_id="TEST_TT_LOG_SHOP_TERM",
+        db_session,
+        shop_id="TEST_TT_LOG_SHOP_TERM",
         order_id="TEST_SO_DONE",
     )
     so_done = db_session.execute(
@@ -454,7 +469,9 @@ def test_logistics_excludes_other_shops_orders(db_session) -> None:
         db_session, shop_id="TEST_TT_LOG_SHOP_OTHER", order_id="TEST_SO_OTHER"
     )
     _seed_orders_raw_record(
-        db_session, order_id="TEST_SO_OTHER", tracking_number="TN_OTHER",
+        db_session,
+        order_id="TEST_SO_OTHER",
+        tracking_number="TN_OTHER",
         package_id="PKG_OTHER",
     )
     proxy = FakeProxy()
@@ -468,16 +485,24 @@ def test_logistics_excludes_other_shops_orders(db_session) -> None:
     # The foreign order is not a target at all: no proxy call, no issue,
     # no shipment, and it does not inflate rows_total.
     assert not any("TEST_SO_OTHER" in path for _m, path in proxy.calls)
-    issues = db_session.execute(
-        select(SyncIssue).where(
-            SyncIssue.job_name == "tiktok.logistics",
-            SyncIssue.external_id == "PKG_OTHER",
+    issues = (
+        db_session.execute(
+            select(SyncIssue).where(
+                SyncIssue.job_name == "tiktok.logistics",
+                SyncIssue.external_id == "PKG_OTHER",
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert issues == []
-    shipments = db_session.execute(
-        select(Shipment).where(Shipment.external_package_id == "PKG_OTHER")
-    ).scalars().all()
+    shipments = (
+        db_session.execute(
+            select(Shipment).where(Shipment.external_package_id == "PKG_OTHER")
+        )
+        .scalars()
+        .all()
+    )
     assert shipments == []
     assert all("TEST_SO_OTHER" not in t["order_id"] for t in [])  # sanity
 
@@ -490,7 +515,9 @@ def test_logistics_dedupes_duplicate_raw_records(db_session) -> None:
     )
     for _ in range(3):
         _seed_orders_raw_record(
-            db_session, order_id="TEST_SO_DUP", tracking_number="TN_DUP",
+            db_session,
+            order_id="TEST_SO_DUP",
+            tracking_number="TN_DUP",
             package_id="PKG_DUP",
         )
     proxy = FakeProxy()
@@ -504,7 +531,11 @@ def test_logistics_dedupes_duplicate_raw_records(db_session) -> None:
     dup_calls = [p for _m, p in proxy.calls if "TEST_SO_DUP" in p]
     assert len(dup_calls) == 1, f"expected 1 tracking fetch, got {len(dup_calls)}"
     assert result.rows_inserted == 1
-    shipments = db_session.execute(
-        select(Shipment).where(Shipment.external_package_id == "PKG_DUP")
-    ).scalars().all()
+    shipments = (
+        db_session.execute(
+            select(Shipment).where(Shipment.external_package_id == "PKG_DUP")
+        )
+        .scalars()
+        .all()
+    )
     assert len(shipments) == 1
