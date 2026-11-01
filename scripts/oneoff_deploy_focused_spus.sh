@@ -267,12 +267,14 @@ if missing:
     raise SystemExit(f"❌ 缺路由: {sorted(missing)}")
 print("✅ focused management / page / analytics 路由已注册")
 '
+# Both page URLs now use the same packaged React release. Keep this historical
+# human-only deployment check aligned with the current asset owner.
+RELEASE_ID=$(
+  curl -fsS -m 10 "http://127.0.0.1:${PORT}/static/frontend/release.json" |
+    "$PYTHON" -c 'import json,re,sys; value=json.load(sys.stdin).get("releaseId", ""); assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value); print(value)'
+)
 curl -fsS -m 10 \
-  "http://127.0.0.1:${PORT}/static/js/spu-profitability-page.js" >/dev/null
-curl -fsS -m 10 \
-  "http://127.0.0.1:${PORT}/static/js/focused-spus.js" >/dev/null
-curl -fsS -m 10 \
-  "http://127.0.0.1:${PORT}/static/css/focused-spus.css" >/dev/null
+  "http://127.0.0.1:${PORT}/static/frontend/${RELEASE_ID}/.vite/manifest.json" >/dev/null
 
 echo "✅ API active、healthz 正常、路由和静态资产齐备"
 echo

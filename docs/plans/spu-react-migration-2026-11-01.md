@@ -58,3 +58,9 @@ FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh
 ```
 
 这是指定 SPU 组件/查询与统一客户端错误 code 测试的通过证据，不代表整个 frontend 域、fast baseline、浏览器或生产验收通过。后续提交仍需匹配版本复验。父协调会话在干净 `origin/master 5eb3ff5c` 对最小 shops 组件和 manual-cost owned-child 404 代表失败做了隔离复现；未改写 master baseline。
+
+## 旧资源退役核对
+
+`b3ce09b1` 测试维护并入后，运行代码、浏览器 fixture 和旧行为测试不再导入 SPU Jinja helper 或读取旧整页脚本。移除 `_SpuProfitabilityPageConfig`、`_render_spu_profitability_page`、旧盈利模板、三份全局脚本与两份专用 CSS。其他旧页面模板、公共 token/导航与 vendor 文件保持原有消费者；Tabulator JS/CSS 仍由新 React ref adapter 复用。
+
+离线 HTML 生成器改用现有 manifest renderer；历史部署脚本仅更新静态资产存在性检查到 release/manifest，迁移、授权和服务操作不执行也不更改。旧 CSS 一次性主题脚本不再枚举已退役两份 CSS。文档中初始设计的旧实现段已明确被本迁移记录取代，不作为恢复旧 owner 的依据。
