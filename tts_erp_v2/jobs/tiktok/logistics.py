@@ -334,13 +334,8 @@ def run(
     events_written = 0
     max_update_ms: int | None = None
 
-    # Phase 1 — resolve orders and fetch tracking payloads WITHOUT any
-    # business-table writes. The whole run shares one transaction
-    # (run_with_sync_job commits at the end), so doing the slow upstream
-    # HTTP calls before the first shipment upsert keeps the transaction
-    # free of sales_orders/fulfillment row locks for minutes at a time —
-    # that long lock window was the amplifier behind the production
-    # DeadlockDetected errors (2026-10-02/03).
+    # Phase 1: short target reads, then transaction-free HTTP. Phase 2 writes
+    # one complete shipment/events unit at a time, with no network row locks.
     plan: list[tuple[int, dict, list[dict]]] = []
     for target in targets:
         total += 1

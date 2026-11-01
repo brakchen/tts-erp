@@ -112,8 +112,9 @@ def run_job(
 
     On clean exit → status='succeeded'. On exception → status='failed'
     with the exception type+message written to ``error_message`` and
-    the exception re-raised (so the caller's commit/rollback logic
-    remains in charge).
+    the exception re-raised. Running and terminal audit records each use an
+    independent short transaction. The body owns bounded business transactions
+    and performs network work between them.
 
     Usage::
 

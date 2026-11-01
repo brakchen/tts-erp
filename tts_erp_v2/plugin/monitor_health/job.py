@@ -1,9 +1,8 @@
-"""15s system-job component; bounded UTF-8 chunks under one total dispatch deadline.
+"""Claim notifications in short transactions; send without blocking heartbeats.
 
-The caller must commit immediately after run returns (the system JobSpec runner
-already does). Locks fence intake and acknowledgements until that commit. A
-crash after remote acceptance but before DB commit remains inherently ambiguous;
-Feishu bots offer no idempotency key. Ordinary concurrent scans are serialized.
+A bounded durable lease serializes concurrent dispatchers. Completion merges
+only notices belonging to that lease and retains in-flight recovery evidence.
+Remote acceptance followed by a crash before acknowledgement remains ambiguous.
 """
 
 from __future__ import annotations
@@ -119,6 +118,9 @@ def _run(session: Session, *, now: datetime | None = None) -> dict:
                 raise
             accepted = error.accepted_batches
             delivery_error = "monitor health Feishu notification failed"
+        except Exception:
+            _complete(session, owner=owner, pending=pending, delivered=set())
+            raise
         if not 0 <= accepted <= len(batches):
             raise RuntimeError("monitor health invalid accepted batch count")
     _complete(

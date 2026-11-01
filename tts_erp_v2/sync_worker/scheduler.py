@@ -484,12 +484,9 @@ def _run_system_job(
     Covers ``token.refresh`` (real TikTok refresher registry wired in),
     the seven ``miaoshou.*`` jobs and the two ``reporting.*`` recompute jobs.
 
-    Commit contract: the sync_jobs row written inside the job's
-    ``run_job`` context manager is NOT committed by the job itself —
-    we commit on the success path AND write a sentinel failed row on
-    any exception path before the session is closed. Without this,
-    bookkeeping is silently rolled back on session close (the
-    production observation that drove this fix)."""
+    Transaction contract: each entrypoint owns its short begin contexts and
+    durable lifecycle. This layer owns only Session lifetime and propagates
+    failures to the one-shot process; it never commits business data."""
     mod = importlib.import_module(spec.module_path)
 
     kwargs: dict = {}

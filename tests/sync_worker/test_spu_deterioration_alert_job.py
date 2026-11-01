@@ -17,7 +17,7 @@ from sqlalchemy import delete, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from tests._job_invocation import invoke_seeded_job
+from tests._job_invocation import authorize_test_shop, invoke_seeded_job
 from tts_erp_v2.analytics.spu_deterioration_alert.config import (
     ALERT_CONFIG_KEY,
     SEED_FALLBACK_CONFIG,
@@ -397,14 +397,15 @@ def test_failure_audit_redacts_read_and_write_exception_details(
 def test_failure_audit_commit_error_is_sanitized() -> None:
     session = MagicMock()
     sentinel = "SENSITIVE_FAILURE_AUDIT_SQL_BIND_TEST_SECRET"
-    session.commit.side_effect = SQLAlchemyError(sentinel)
+    session.begin.return_value.__exit__.side_effect = SQLAlchemyError(sentinel)
 
     with pytest.raises(RuntimeError) as error:
         _record_failure(session, phase="write", error_type="SQLAlchemyError")
 
     assert str(error.value) == "write:audit:SQLAlchemyError"
     assert sentinel not in str(error.value)
-    assert session.rollback.call_count >= 2
+    session.begin.assert_called_once()
+    session.commit.assert_not_called()
 
 
 def test_commit_failure_rolls_back_snapshot_and_sanitizes_audit(
@@ -422,6 +423,7 @@ def test_commit_failure_rolls_back_snapshot_and_sanitizes_audit(
         )
         session.add(shop)
         session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
         spu = ChannelProduct(
             shop_pk=shop.id, spu_id="TEST_commit_failure_spu", status="active"
         )
@@ -450,22 +452,29 @@ def test_commit_failure_rolls_back_snapshot_and_sanitizes_audit(
         session.commit()
         session.rollback()
 
-        original_commit = session.commit
-        commit_calls = 0
+        from sqlalchemy import event
 
-        def fail_first_commit() -> None:
-            nonlocal commit_calls
-            commit_calls += 1
-            if commit_calls == 1:
+        from tts_erp_v2.jobs import spu_deterioration_alert as alert_job
+        original_replace = alert_job.replace_anchor
+        pending_failure = {"write": False}
+
+        def replace_then_fail(*args, **kwargs):
+            result = original_replace(*args, **kwargs)
+            pending_failure["write"] = True
+            return result
+
+        def fail_write_commit(_session):
+            if pending_failure["write"]:
+                pending_failure["write"] = False
                 raise SQLAlchemyError(sentinel)
-            original_commit()
 
-        monkeypatch.setattr(session, "commit", fail_first_commit)
+        monkeypatch.setattr(alert_job, "replace_anchor", replace_then_fail)
+        event.listen(session, "before_commit", fail_write_commit)
         with caplog.at_level("ERROR"):
             result = invoke_seeded_job(run_scheduled, session)
 
     assert result["status"] == "failed"
-    assert result["phase"] == "finalize"
+    assert result["phase"] == "write"
     assert sentinel not in str(result)
     assert sentinel not in caplog.text
     with Session(db_engine) as session:
@@ -521,6 +530,7 @@ def test_read_phase_rollback_failure_is_sanitized(
         )
         session.add(shop)
         session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
         spu = ChannelProduct(
             shop_pk=shop.id, spu_id="TEST_rollback_failure_spu", status="active"
         )
@@ -545,28 +555,32 @@ def test_read_phase_rollback_failure_is_sanitized(
         session.commit()
         session.rollback()
 
-        original_rollback = session.rollback
-        rollback_calls = 0
+        from sqlalchemy import event
 
-        def fail_transition_rollback() -> None:
-            nonlocal rollback_calls
-            rollback_calls += 1
-            if rollback_calls == 1:
-                raise OperationalError(
-                    "ROLLBACK",
-                    {"bind:shop_pk": sentinel},
-                    Exception(sentinel),
-                )
-            original_rollback()
+        from tts_erp_v2.jobs import spu_deterioration_alert as alert_job
+        original_read = alert_job.build_materialized_rows
+        read_failures = {"armed": False, "count": 0}
 
-        monkeypatch.setattr(session, "rollback", fail_transition_rollback)
+        def arm_read_completion(*args, **kwargs):
+            result = original_read(*args, **kwargs)
+            read_failures["armed"] = True
+            return result
+
+        def fail_read_completion(_session):
+            if read_failures["armed"]:
+                read_failures["armed"] = False
+                read_failures["count"] += 1
+                raise OperationalError("COMMIT", {"bind:shop_pk": sentinel}, Exception(sentinel))
+
+        monkeypatch.setattr(alert_job, "build_materialized_rows", arm_read_completion)
+        event.listen(session, "before_commit", fail_read_completion)
         with caplog.at_level("ERROR"):
             result = invoke_seeded_job(run_scheduled, session)
     try:
-        assert rollback_calls >= 2
+        assert read_failures["count"] == 1
         assert result["status"] == "failed"
-        assert result["phase"] == "rollback"
-        assert result["error"] == "rollback:OperationalError"
+        assert result["phase"] == "read"
+        assert result["error"] == "read:OperationalError"
         assert sentinel not in str(result)
         assert sentinel not in caplog.text
         with Session(db_engine) as session:
@@ -626,6 +640,7 @@ def test_prod_shaped_db_writes_anchor_without_operator_release(
         )
         session.add(shop)
         session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
         session.add(
             ChannelProduct(
                 shop_pk=shop.id, spu_id="TEST_prod_shape_alert_spu", status="active"
@@ -680,6 +695,7 @@ def test_run_scheduled_materializes_and_replaces_idempotently(db_engine) -> None
         )
         session.add(shop)
         session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
         session.add(
             ChannelProduct(
                 shop_pk=shop.id, spu_id="TEST_alert_job_spu", status="active"
@@ -772,6 +788,7 @@ def test_published_rollout_fails_closed_without_replacing_rows(db_engine) -> Non
         )
         session.add(shop)
         session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
         spu = ChannelProduct(
             shop_pk=shop.id, spu_id="TEST_rollout_job_spu", status="active"
         )
@@ -834,6 +851,7 @@ def test_real_constraint_failure_rolls_back_replaced_snapshot(db_engine) -> None
         )
         session.add(shop)
         session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
         spu = ChannelProduct(
             shop_pk=shop.id, spu_id="TEST_alert_rollback_spu", status="active"
         )
@@ -986,6 +1004,7 @@ def test_real_canonical_queries_batch_more_than_500_scope(
         )
         session.add(shop)
         session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
         products = [
             ChannelProduct(
                 shop_pk=shop.id,

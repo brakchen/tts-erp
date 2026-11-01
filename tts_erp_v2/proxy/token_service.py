@@ -428,7 +428,7 @@ def refresh_if_needed(
         session: SQLAlchemy session.
         provider: ``"tiktok"`` / ``"miaoshou"``.
         external_account_id: shop_id / licenseId.
-        refresher: callable(provider, external_account_id) returning a dict.
+        refresher: callable(CredentialsView) returning a dict; consumes the exact CAS snapshot.
         skew: refresh window.
         force: skip the ``is_expired`` check and always call the refresher.
             Used by reactive-refresh paths where the caller already
@@ -503,7 +503,7 @@ def refresh_if_needed(
             return None
         # A concurrent OAuth callback/refresh owns the newer identity. Never
         # overwrite it with a response obtained from the previous credentials.
-        if current.ciphertext != previous_ciphertext:
+        if current.id != old_view.id or current.ciphertext != previous_ciphertext:
             return CredentialsView.from_row(current)
         upsert_credentials(
             session,

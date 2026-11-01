@@ -174,9 +174,8 @@ def build_proxy_call(
 ) -> Callable[..., dict]:
     """Return a ``proxy_call(method, path, *, body=None) -> dict`` closure.
 
-    The closure resolves the token's immutable issuing service_id once and
-    builds the matching signed client. It still reloads the shop's OAuth token
-    on every call so out-of-band refresh cannot leave a stale access token.
+    Each call snapshots the OAuth token and its matching shop-owned App in
+    one short read transaction. HTTP/retries run after that transaction ends.
     """
     api_host = os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
 

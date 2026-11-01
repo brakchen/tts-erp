@@ -873,9 +873,9 @@ def run(
     log ``STATEMENT_PAYOUT_UNRESOLVED`` for every statement on the
     first run after a fresh credentials row appears).
 
-    Each sub-job commits its own watermark at the end. ``run_with_sync_job``
-    calls ``session.commit()`` once after we return, so both cursor writes
-    and all the business rows land in the same transaction.
+    Payouts and statements use complete source-fact transactions. Each
+    transaction's components are atomic; no write unit includes HTTP calls.
+    A sub-job advances its watermark only after all required facts complete.
     """
     cursor_scope = scope or shop_id
     with session.begin():

@@ -249,7 +249,8 @@ def test_build_proxy_call_uses_token_bound_service_app_pair(
         return client
 
     monkeypatch.setattr(proxy_call, "_get_client", capture_client)
-    invoke_seeded_job(proxy_call.build_proxy_call, db_session, shop_id="TEST_TT_PROXY_DATABASE")
+    proxy = invoke_seeded_job(proxy_call.build_proxy_call, db_session, shop_id="TEST_TT_PROXY_DATABASE")
+    proxy("GET", "/finance/202309/payments")
 
     assert captured["app_key"] == "TEST_DATABASE_APP_KEY"
     assert captured["app_secret"] == "TEST_DATABASE_APP_SECRET"

@@ -179,6 +179,7 @@ def test_parallel_scans_no_duplicate_and_intake_not_overwritten(
             pool.submit(scan).result(timeout=5)  # SKIP LOCKED, no duplicate send
             arriving = pool.submit(intake)
             assert intake_started.wait(5)
+            arriving.result(timeout=2)  # Heartbeats complete before HTTP is released.
         finally:
             release.set()
         first.result(timeout=5)

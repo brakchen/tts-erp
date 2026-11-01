@@ -11,18 +11,10 @@ The inner callable receives an *open* session and any keyword args
 the caller passes to :func:`run_job`. It returns a :class:`JobResult`
 whose counters are written to the sync_jobs row.
 
-If the inner callable raises, :func:`run_job`:
-
-* Marks the sync_jobs row status='failed' with the exception message.
-* If the transaction is already aborted (e.g. the job was chosen as a
-  PostgreSQL deadlock victim), rolls back first and records the failure
-  in a fresh transaction — otherwise the bookkeeping UPDATE itself
-  fails with ``InFailedSqlTransaction`` and the run vanishes.
-* Re-raises the ORIGINAL exception so the caller (scheduler / CLI)
-  can react.
-
-Note: ``session.commit()`` is called inside the helper. Callers should
-NOT commit again (the helper manages transaction boundaries).
+Lifecycle writes are independent short transactions owned by jobs.runner.
+The inner callable owns each business unit using ``with session.begin()``;
+network calls run between units. Failed units roll back before the independent
+failure audit. No failure path commits unfinished business writes.
 """
 
 from __future__ import annotations
@@ -65,7 +57,7 @@ def start_sync_job(
     The row's ``started_at`` defaults to server-side ``now()`` per the
     model definition. Caller is expected to commit via
     :func:`run_with_sync_job` — this helper does NOT commit on its own
-    so the lifecycle row + first business rows share one transaction.
+    within the caller's explicit transaction.
 
     ``extra`` is operator metadata (for example ``{"shop_id": ...}`` on
     TikTok fan-out). It is not a cursor and is not read by the job itself.
@@ -113,9 +105,8 @@ def run_with_sync_job(
 
     Returns the (sync_jobs row, inner result). On exception the sync_jobs
     row is marked 'failed' with the exception message; the exception is
-    re-raised. Commits happen on both the success and failure path so the
-    sync_jobs row is durable (operators MUST see the run record even when
-    the job crashed).
+    re-raised. The running and terminal records use independent begin contexts;
+    inner must leave no active transaction on either exit path.
     """
     with run_job(
         session, job_name=job_name, credential_id=credential_id, extra=extra

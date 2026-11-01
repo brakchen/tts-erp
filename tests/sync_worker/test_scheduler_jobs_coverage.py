@@ -165,6 +165,7 @@ def test_build_scheduler_interval_trigger_uses_spec_seconds(
 def _make_history_factory(rows):
     """sessionmaker stand-in returning canned (job_name, finished_at) rows."""
     session = MagicMock(name="session")
+    session.__enter__.return_value = session
     session.execute.return_value.all.return_value = rows
     factory = MagicMock(name="session_factory", return_value=session)
     return factory
@@ -399,14 +400,12 @@ def _seed_credentials_for_enum(
         session.add(cred)
         session.flush()
         if with_shop_row:
-            session.add(
-                ChannelAccount(
-                    platform="tiktok",
-                    shop_id=external_id,
-                    credential_id=cred.id,
-                    status="active",
-                )
-            )
+            from tests._job_invocation import authorize_test_shop
+            account = ChannelAccount(platform="tiktok", shop_id=external_id,
+                                     credential_id=cred.id, status="active")
+            session.add(account)
+            session.flush()
+            authorize_test_shop(session, account.id, external_id)
         session.commit()
     finally:
         session.close()

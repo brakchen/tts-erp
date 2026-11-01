@@ -41,3 +41,26 @@ def credential_snapshot(provider: str, external_account_id: str):
         service_id="TEST_SERVICE",
         extra=None,
     )
+
+
+def authorize_test_shop(session: Session, shop_pk: int, shop_id: str) -> None:
+    """Arrange the current shop-owned App/credential authorization contract."""
+    from tts_erp_v2.db.models import ChannelAccount
+    from tts_erp_v2.proxy.token_service import (
+        upsert_credentials,
+        upsert_tiktok_app_credentials,
+    )
+
+    credential = upsert_credentials(
+        session, provider="tiktok", external_account_id=shop_id,
+        plaintext_access_token="TEST_AUTH_ACCESS", plaintext_refresh_token="TEST_AUTH_REFRESH",
+        service_id="TEST_AUTH_SERVICE",
+    )
+    shop = session.get(ChannelAccount, shop_pk)
+    shop.credential_id = credential.id
+    shop.service_id = "TEST_AUTH_SERVICE"
+    upsert_tiktok_app_credentials(
+        session, shop_pk=shop_pk, service_id="TEST_AUTH_SERVICE",
+        app_key="TEST_APP_KEY", plaintext_app_secret="TEST_APP_SECRET",
+    )
+    session.flush()
