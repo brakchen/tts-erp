@@ -23,7 +23,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import parse_qs
 
 import pytest
@@ -58,18 +58,7 @@ _PLAIN = {
     "intercept-stats": "intercept-stats.html",
     "users": "users.html",
 }
-_SPU_PAGES: tuple[
-    tuple[
-        Literal["spu-roi", "focused-spus"],
-        Literal["standard-roi", "focused-spus"],
-        Literal["spu-roi.js", "focused-spus.js"],
-        str,
-    ],
-    ...,
-] = (
-    ("spu-roi", "standard-roi", "spu-roi.js", "SPU 实际 ROI"),
-    ("focused-spus", "focused-spus", "focused-spus.js", "重点关注 SPU"),
-)
+_SPU_PAGES = ("spu-roi", "focused-spus")
 
 _MIME = {
     ".html": "text/html; charset=utf-8",
@@ -259,6 +248,41 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
                         "attributed_gmv": "21444.63", "weighted_roi": "3.213",
                         "currency": "USD"},
         }
+    if path.endswith("/v2/commerce/channel-product-options"):
+        params = parse_qs(query)
+        requested = set(params.get("spu_ids", [""])[0].split(","))
+        search = params.get("q", [""])[0].lower()
+        return [
+            {"spu_id": item["spu_id"], "title": item["title"], "status": item["status"]}
+            for item in _SPU_ITEMS
+            if (not requested or requested == {""} or item["spu_id"] in requested)
+            and (not search or search in item["spu_id"].lower() or search in item["title"].lower())
+        ]
+    if path.startswith("/v2/reporting/focused-spus/"):
+        params = parse_qs(query)
+        offset = int(params.get("offset", ["0"])[0])
+        limit = int(params.get("limit", ["500"])[0])
+        items = [{"spuPk": item["spu_pk"], "spuId": item["spu_id"],
+                  "title": item["title"], "status": item["status"]} for item in _SPU_ITEMS]
+        return {"shopPk": 7, "items": items[offset:offset + limit], "total": len(items),
+                "matchedTotal": len(items), "limit": limit, "offset": offset}
+    if "/v2/analytics/spu-roi/" in path:
+        kind = path.rsplit("/", 1)[-1]
+        evidence = {
+            "orders": [{"order_id": "TEST_ORDER_1", "status": "DELIVERED", "qty": 2,
+                        "is_settled": True, "arrived_overseas": True, "full_loss": False}],
+            "settlements": [{"order_id": "TEST_ORDER_1", "status": "DELIVERED",
+                             "share_ratio": "1.0000", "statement_time": _NOW,
+                             "components": [{"code": "SETTLEMENT", "amount": "123.0000"}]}],
+            "cases": [{"case_id": "TEST_CASE_1", "order_id": "TEST_ORDER_1",
+                       "type": "REFUND_ONLY", "status": "RETURN_OR_REFUND_REQUEST_COMPLETE",
+                       "refund_amount": "12.0000"}],
+            "ads": [{"campaign_id": "TEST_CAMPAIGN_1", "spend": "20.0000", "orders": 2,
+                     "first_day": "2026-09-01", "last_day": "2026-09-30"}],
+        }
+        if kind in evidence:
+            return {kind: evidence[kind], "meta": {"computed_at": _NOW,
+                    "rubric_version": "v10", "currency": {"display": "CNY"}}}
     if path.endswith("/v2/analytics/spu-roi"):
         return {
             "items": _SPU_ITEMS,
@@ -337,8 +361,6 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
     from tts_erp_v2.api.v2.ad_daily import ad_daily_page
     from tts_erp_v2.api.v2.pages import (
         _render_page,
-        _render_spu_profitability_page,
-        _SpuProfitabilityPageConfig,
     )
 
     effective = frontend_pages.MIGRATED_PAGE_IDS if migrated is None else migrated
@@ -354,13 +376,14 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
         else:
             resp = _render_page(tpl, current_page=slug)
             (out / f"{slug}.html").write_bytes(resp.body)
-    for slug, profile_id, entry, title in _SPU_PAGES:
-        resp = _render_spu_profitability_page(
-            _SpuProfitabilityPageConfig(
-                slug=slug, title=title, profile_id=profile_id, entrypoint_js=entry
+    for slug in _SPU_PAGES:
+        for prefix in ("", "/tts"):
+            request = Request(
+                {"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}"}
             )
-        )
-        (out / f"{slug}.html").write_bytes(resp.body)
+            response = frontend_pages.render_frontend_page(request, slug)
+            name = ("tts-" if prefix else "") + slug
+            (out / f"{name}.html").write_bytes(response.body)
     (out / f"{_ALERT_SLUG}.html").write_bytes(
         _render_page(f"{_ALERT_SLUG}.html", current_page=_ALERT_SLUG).body
     )

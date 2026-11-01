@@ -12,7 +12,7 @@
   加载在 tokens.css 之后）。
 * surface 色（淡强调底、亮/暗纸面）tokens.css 没有对应项，用 color-mix 从规范
   令牌派生，避免再养一套并行色板。
-* spu-roi.css 的 --bs-* 桥接块是 Bootstrap 变量覆盖，功能性的，保留。
+* 旧页面的 --bs-* 桥接块是 Bootstrap 变量覆盖，功能性的，保留。
 * border-radius 统一 0；但 50%/999px 是圆形/胶囊（头像、状态点），保留。
 """
 
@@ -78,7 +78,7 @@ def rebuild_root(css: str, filename: str) -> str:
         for name, expr in SURFACE.items():
             if re.search(rf"{re.escape(name)}\s*:", body):
                 keep.append(f"  {name}: {expr};")
-        # --bs-* 是 Bootstrap 变量桥接（spu-roi.css），功能性的，原样保留
+        # --bs-* 是旧页面 Bootstrap 变量桥接，功能性的，原样保留
         bs = [
             line for line in body.splitlines()
             if line.strip().startswith("--bs-")
@@ -119,8 +119,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
-    targets = ["ad-daily.css", "sync-jobs.css", "runtime-configs.css",
-               "focused-spus.css", "spu-roi.css"]
+    targets = ["ad-daily.css", "sync-jobs.css", "runtime-configs.css"]
     print(f"{'写盘' if args.apply else '试运行'}：{len(targets)} 个文件")
     for t in targets:
         process(t, args.apply)

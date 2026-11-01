@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.db.constants import SHOP_FEE_RATE_CALCULATION_VERSION
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -104,6 +106,9 @@ def _seed_shop_with_spu(db_engine, shop_id: str, spu_id: str) -> int:
             ),
             {"shop": shop_pk, "sid": spu_id, "title": f"{spu_id} 标题"},
         )
+        with Session(bind=conn, join_transaction_mode="create_savepoint") as session:
+            authorize_test_shop(session, shop_pk, shop_id)
+            session.commit()
     return shop_pk
 
 

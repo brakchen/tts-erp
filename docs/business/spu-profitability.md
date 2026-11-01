@@ -767,5 +767,5 @@ warning：
 | 纯公式 seam | `tts_erp_v2/analytics/spu_profitability/_formula_v10.py` |
 | 一致性快照 | `tts_erp_v2/analytics/spu_profitability/_snapshot.py` |
 | HTTP adapter | `tts_erp_v2/analytics/spu_roi.py` |
-| 页面 kernel | `tts_erp_v2/static/js/spu-profitability-page.js` |
+| 页面展示 | `frontend/src/pages/spu-profitability/`（React；金融计算仍由后端拥有） |
 | 历史资料 | `docs/archive/`（非现行计算依据） |

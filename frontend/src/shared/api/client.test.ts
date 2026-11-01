@@ -4,6 +4,10 @@ import { ApiError, requestJson } from './client';
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('requestJson', () => {
+  it('keeps a bounded public error code separate from the untrusted error message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'FX_RATE_UNAVAILABLE', message: 'TEST_untrusted_detail' }), { status: 503 })));
+    await expect(requestJson('', '/v2/analytics/spu-roi')).rejects.toMatchObject({ status: 503, code: 'FX_RATE_UNAVAILABLE', message: 'HTTP 503' });
+  });
   it('uses the prefixed path and same-origin cookies and preserves headers', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response('{"items":[]}', { headers: { 'Content-Type': 'application/json', 'X-Total-Count': '42' } }));
     vi.stubGlobal('fetch', fetcher);

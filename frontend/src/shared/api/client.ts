@@ -2,7 +2,7 @@ import { pathFor } from './paths';
 
 export class ApiError extends Error {
   /** detail is untrusted: consumers must select safe fields, never log/render input or ctx. */
-  constructor(message: string, readonly status: number, readonly retryAfter?: number, readonly requestId?: string, readonly detail?: unknown) {
+  constructor(message: string, readonly status: number, readonly retryAfter?: number, readonly requestId?: string, readonly detail?: unknown, readonly code?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -83,10 +83,12 @@ export async function requestJson<T>(rootPath: string, path: string, init: Reque
   }
   if (!response.ok) {
     const detail = data && typeof data === 'object' && 'detail' in data ? data.detail : undefined;
+    const code = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string'
+      && /^[A-Z][A-Z0-9_]{0,79}$/.test(data.code) ? data.code : undefined;
     // Error.message is rendered by legacy read consumers; raw detail is not a
     // public message. Keep it separate for explicit allowlisted field mapping.
     throw new ApiError(`HTTP ${response.status}`, response.status,
-      retryDelay(response.headers.get('Retry-After')), requestId, detail);
+      retryDelay(response.headers.get('Retry-After')), requestId, detail, code);
   }
   return { data: data as T, status: response.status, headers: response.headers };
 }

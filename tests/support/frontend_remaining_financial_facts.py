@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tests.support.frontend_p2_binding import checked_session
 from tts_erp_v2.db.models import (
     AdDaily,
@@ -33,6 +34,7 @@ from tts_erp_v2.db.models import (
     SyncJob,
 )
 from tts_erp_v2.db.models.fx import ExchangeRate, ExchangeRateSnapshot
+from tts_erp_v2.db.models.integration import Credentials, TikTokAppCredential
 
 if TYPE_CHECKING:
     from tests.scripts.test_frontend_remaining_live_api import OwnedClone
@@ -127,6 +129,7 @@ def _seed_shop(
     )
     session.add(shop)
     session.flush()
+    authorize_test_shop(session, shop.id, shop.shop_id)
     products = [
         ChannelProduct(
             shop_pk=shop.id,
@@ -291,7 +294,11 @@ def _owned_candidates(clone: OwnedClone, owned: Owned) -> dict[str, list[tuple]]
 
         shops = rows(
             select(
-                ChannelAccount.id, ChannelAccount.shop_id, ChannelAccount.account_name
+                ChannelAccount.id,
+                ChannelAccount.shop_id,
+                ChannelAccount.account_name,
+                ChannelAccount.credential_id,
+                ChannelAccount.service_id,
             )
             .where(
                 ChannelAccount.platform == "tiktok",
@@ -301,6 +308,24 @@ def _owned_candidates(clone: OwnedClone, owned: Owned) -> dict[str, list[tuple]]
             .order_by(ChannelAccount.id)
         )
         shop_pks = [row[0] for row in shops]
+        credentials = rows(
+            select(
+                Credentials.id,
+                Credentials.provider,
+                Credentials.external_account_id,
+                Credentials.service_id,
+            ).where(
+                Credentials.provider == "tiktok",
+                Credentials.external_account_id.in_(owned.shop_ids),
+            )
+        )
+        apps = rows(
+            select(
+                TikTokAppCredential.id,
+                TikTokAppCredential.shop_pk,
+                TikTokAppCredential.service_id,
+            ).where(TikTokAppCredential.shop_pk.in_(shop_pks))
+        )
         products = rows(
             select(
                 ChannelProduct.id,
@@ -363,6 +388,8 @@ def _owned_candidates(clone: OwnedClone, owned: Owned) -> dict[str, list[tuple]]
         )
         return {
             "shops": shops,
+            "credentials": credentials,
+            "shop_apps": apps,
             "products": products,
             "orders": orders,
             "lines": lines,
@@ -377,6 +404,15 @@ def _verify_ownership(owned: Owned, state: dict[str, list[tuple]]) -> None:
     """Every candidate row must carry this file's own marker."""
     for row in state["shops"]:
         assert row[2] == owned.marker and row[1] in owned.shop_ids
+    shops_by_external = {row[1]: row for row in state["shops"]}
+    shops_by_pk = {row[0]: row for row in state["shops"]}
+    for row in state["credentials"]:
+        shop = shops_by_external[row[2]]
+        assert row[1] == "tiktok" and shop[3] == row[0] and shop[4] == row[3]
+    for row in state["shop_apps"]:
+        assert shops_by_pk[row[1]][4] == row[2]
+    assert len(state["credentials"]) == len(state["shops"])
+    assert len(state["shop_apps"]) == len(state["shops"])
     for row in state["products"]:
         assert row[3] == owned.marker and row[2] in owned.spu_ids
     for row in state["orders"]:
@@ -399,7 +435,9 @@ def _delete_owned(session: Session, ids: dict[str, list[int]]) -> None:
         (AdDaily, "ad_daily"),
         (SyncJob, "sync_jobs"),
         (ChannelProduct, "products"),
+        (TikTokAppCredential, "shop_apps"),
         (ChannelAccount, "shops"),
+        (Credentials, "credentials"),
     ):
         session.execute(delete(model).where(model.id.in_(ids.get(key, []))))
 

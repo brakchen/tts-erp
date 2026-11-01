@@ -18,7 +18,10 @@ from tts_erp_v2.analytics.spu_deterioration_alert.comparison import (
     ComparisonInputError,
     read_comparison,
 )
-from tts_erp_v2.analytics.spu_profitability import ProfitabilityError
+from tts_erp_v2.analytics.spu_profitability import (
+    ProfitabilityError,
+    consistent_read_snapshot,
+)
 from tts_erp_v2.api.deps import get_session, require_role_at_least
 from tts_erp_v2.api.v2._common import request_id
 
@@ -61,7 +64,6 @@ def list_spu_profit_deterioration(
     from tts_erp_v2.commerce.shop_access import require_authorized_shop
 
     require_role_at_least(request, "readonly")
-    require_authorized_shop(session, shop_pk=shop_pk)
     rid = request_id(request)
 
     def invalid(message: str) -> HTTPException:
@@ -69,32 +71,38 @@ def list_spu_profit_deterioration(
             status_code=422, detail={"message": message, "requestId": rid}
         )
 
-    allowed = {
-        "shop_pk",
-        "spu_ids",
-        "window_days",
-        "activity",
-        "anchor_date",
-        "limit",
-        "offset",
-    }
-    if set(request.query_params) - allowed:
-        raise invalid(
-            "Unsupported/deprecated filters; use shop_pk, spu_ids, window_days=3/7 and activity."
-        )
-    if any(len(request.query_params.getlist(key)) > 1 for key in allowed - {"spu_ids"}):
-        raise invalid("Only spu_ids may be repeated; choose one window_days (3 or 7).")
     try:
-        result = read_comparison(
-            session,
-            shop_pk=shop_pk,
-            spu_pks=spu_ids,
-            window_days=window_days,
-            activity=activity,
-            anchor_date=anchor_date,
-            limit=limit,
-            offset=offset,
-        )
+        with consistent_read_snapshot(session):
+            # Authorize before reading facts, inside the same canonical snapshot.
+            require_authorized_shop(session, shop_pk=shop_pk)
+            allowed = {
+                "shop_pk",
+                "spu_ids",
+                "window_days",
+                "activity",
+                "anchor_date",
+                "limit",
+                "offset",
+            }
+            if set(request.query_params) - allowed:
+                raise invalid(
+                    "Unsupported/deprecated filters; use shop_pk, spu_ids, window_days=3/7 and activity."
+                )
+            if any(
+                len(request.query_params.getlist(key)) > 1
+                for key in allowed - {"spu_ids"}
+            ):
+                raise invalid("Only spu_ids may be repeated; choose one window_days (3 or 7).")
+            result = read_comparison(
+                session,
+                shop_pk=shop_pk,
+                spu_pks=spu_ids,
+                window_days=window_days,
+                activity=activity,
+                anchor_date=anchor_date,
+                limit=limit,
+                offset=offset,
+            )
     except ComparisonInputError as exc:
         detail = {"message": str(exc), "requestId": rid}
         if exc.latest_date is not None:

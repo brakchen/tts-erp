@@ -29,6 +29,7 @@ MIGRATED_PAGE_IDS: frozenset[str] = frozenset({
     "dashboard", "intercept-requests", "intercept-stats", "shops", "enum-map",
     "ad-daily", "sync-jobs", "users", "runtime-configs", "intercept-configs",
     "spu-profit-deterioration", "manual-costs", "video-publish", "login",
+    "spu-roi", "focused-spus",
 })
 _FRONTEND_DIR = Path(__file__).resolve().parents[2] / "static" / "frontend"
 _ENTRY = "src/main.tsx"

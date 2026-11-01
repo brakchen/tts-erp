@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 const modulePath = './contracts';
 const shop = { id: 41, platform: 'tiktok', shop_id: '90071992547409931234567', account_name: 'TEST_name', region: null, seller_type: null, status: 'active', opened_date: null, credential_id: null, service_id: 'TEST_svc', app_credentials_configured: true };
+const normalizedShop = { ...shop, shop_code: null, discovered_at: null, plugin_sources: [], auth_state: 'unauthorized' as const };
 
 describe('shop wire decoding', () => {
   it('preserves external IDs/null dates/internal PK and does not confuse App configuration with OAuth', async () => {
     const { decodeShop, decodeShopList } = await import(modulePath);
-    expect(decodeShop(shop)).toEqual(shop); expect(decodeShopList([shop])).toEqual([shop]);
+    expect(decodeShop(shop)).toEqual(normalizedShop); expect(decodeShopList([shop])).toEqual([normalizedShop]);
     expect(decodeShop({ ...shop, app_secret: 'TEST_SECRET' })).not.toHaveProperty('app_secret');
   });
   it.each([null, {}, { ...shop, id: '41' }, { ...shop, shop_id: Number.MAX_SAFE_INTEGER + 1 }, { ...shop, credential_id: '3' }, { ...shop, app_credentials_configured: 'true' }, { ...shop, opened_date: '2026-02-31' }])('rejects malformed required shape %#', async (value) => {
@@ -18,10 +19,10 @@ describe('shop wire decoding', () => {
   });
   it('requires the contracted command body and requested identity, not just successful HTTP', async () => {
     const { decodeShopCommand } = await import(modulePath);
-    expect(decodeShopCommand({ shop }, { id: 41 })).toEqual(shop);
+    expect(decodeShopCommand({ shop }, { id: 41 })).toEqual(normalizedShop);
     expect(() => decodeShopCommand({ shop }, { id: 42 })).toThrow();
     expect(() => decodeShopCommand({ shop }, { shop_id: shop.shop_id, register: true })).toThrow();
-    expect(decodeShopCommand({ created: false, shop }, { shop_id: shop.shop_id, register: true })).toEqual(shop);
+    expect(decodeShopCommand({ created: false, shop }, { shop_id: shop.shop_id, register: true })).toEqual(normalizedShop);
     expect(() => decodeShopCommand({ created: true, shop }, { shop_id: 'TEST_wrong', register: true })).toThrow();
     expect(() => decodeShopCommand(null, { id: 41 })).toThrow();
   });

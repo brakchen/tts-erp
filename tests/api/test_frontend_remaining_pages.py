@@ -132,8 +132,9 @@ def test_only_the_authoritative_registry_activates_reviewed_pages():
         "intercept-configs",
         "spu-profit-deterioration",
         "login",
+        "spu-roi",
+        "focused-spus",
     } <= frontend_pages.MIGRATED_PAGE_IDS
-    assert not {"spu-roi", "focused-spus"} & frontend_pages.MIGRATED_PAGE_IDS
 
 
 def test_anonymous_login_uses_the_public_route_without_business_hints(

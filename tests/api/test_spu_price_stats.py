@@ -31,6 +31,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.analytics.spu_profitability import _price_stats
 from tts_erp_v2.analytics.spu_profitability._price_stats import (
     PriceCoverageStatus,
@@ -210,6 +211,7 @@ def _seed_shop(sess: Session, seller: str, *, region: str = "VN") -> ChannelAcco
     )
     sess.add(account)
     sess.flush()
+    authorize_test_shop(sess, account.id, seller)
     return account
 
 
