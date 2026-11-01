@@ -420,7 +420,12 @@ describe('manual-costs bounded request lifetimes', () => {
     expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toHaveLength(1);
     editRowCost(first, '33.0000');
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
-    page.unmount(); expect(vi.getTimerCount()).toBe(0);
+    page.unmount();
+    // Closing the real HeroUI editor queues FocusScope's next-frame focus cleanup.
+    // Advance only that frame; a leaked 30-second request deadline must still fail.
+    await act(async () => { await vi.advanceTimersByTimeAsync(16); });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toHaveLength(1);
   });
 
   it.each(['fetch', 'body'])('bounds stalled verification %s, ignores late facts and requires a new explicit GET before any retry decision', async (stage) => {
@@ -450,7 +455,12 @@ describe('manual-costs bounded request lifetimes', () => {
     expect(fetcher.mock.calls).toHaveLength(calls + 1); expect(writes).toBe(1);
     expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeEnabled();
     expect(readRowCost(row)).toBe('44.0000');
-    page.unmount(); expect(vi.getTimerCount()).toBe(0);
+    page.unmount();
+    // Closing the real HeroUI editor queues FocusScope's next-frame focus cleanup.
+    // Advance only that frame; a leaked 30-second request deadline must still fail.
+    await act(async () => { await vi.advanceTimersByTimeAsync(16); });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetcher.mock.calls).toHaveLength(calls + 1); expect(writes).toBe(1);
   });
 });
 
