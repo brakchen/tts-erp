@@ -64,3 +64,39 @@ FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh
 `b3ce09b1` 测试维护并入后，运行代码、浏览器 fixture 和旧行为测试不再导入 SPU Jinja helper 或读取旧整页脚本。移除 `_SpuProfitabilityPageConfig`、`_render_spu_profitability_page`、旧盈利模板、三份全局脚本与两份专用 CSS。其他旧页面模板、公共 token/导航与 vendor 文件保持原有消费者；Tabulator JS/CSS 仍由新 React ref adapter 复用。
 
 离线 HTML 生成器改用现有 manifest renderer；历史部署脚本仅更新静态资产存在性检查到 release/manifest，迁移、授权和服务操作不执行也不更改。旧 CSS 一次性主题脚本不再枚举已退役两份 CSS。文档中初始设计的旧实现段已明确被本迁移记录取代，不作为恢复旧 owner 的依据。
+
+## 最终验收记录与交付限制（2026-11-01）
+
+代码与测试冻结提交为 `4a2d345a61b34fed089c7d848b08500f48205ec4`，分支为 `codex/spu-react-layout`；已整合的 master 修订为 `ed4da9add9a63aefb5afa6444f39c7e1f2b9b6c8`。下列隔离运行由父协调会话在用户指定服务器的独立测试工作树执行并回传结果，均经唯一入口 `bash scripts/test_isolated.sh ...`；实现 writer 未直接运行测试框架。本地该冻结提交的 `npm --prefix frontend run typecheck` 与 `git diff --check` 通过。
+
+| 提交 | 验证范围 | 结果与覆盖边界 |
+| --- | --- | --- |
+| `fd3a5b1c` | SPU React 组件/查询窄测 | 退出 0，含混合有效/无效 ID 写入失败后保留未确认提示，以及跨店铺 Retry-After 不可绕过的两项恢复回归；此前跨页移除关注后的 offset 重置回归也已通过 |
+| `836a3b66` | `test_spu_react_workspace.py` | 11 项通过，覆盖 375/1440/2560 宽度；隔离候选截图由父协调会话目视检查，控制区前置、表格与就近明细布局符合本轮要求 |
+| `ee1841ee` | `test_spu_price_columns.py` | 16 项通过，包含六价格列、远程排序、键盘价格说明及关闭返焦点 |
+| `5dcf3c43` | `test_spu_comparison_drilldown_dates.py` | 7 项通过，保留比较页传入钻取的日期范围 |
+| `f3acd5c0` | 日期、数值排序与预测浏览器窄测 | 6 项通过；这是指定浏览器范围的证据 |
+| `b6976bb4` | `test_spu_deterioration_alert_api.py` 整份 | 118 个参数化 case 通过，包含新增真实 fresh/RW/404 回归，隔离库清理退出 0 |
+| `fd3a5b1c` | financial 真实读取整份 | 12 项通过，包含获批的一致快照边界修复 |
+| `62c9dad7` | 费率 API 5 项、价格 API 19 项、ROI 参数校验与空值展示契约 2 项 | 共 26 项通过；授权 fixture 补齐后保留原金额、权限与参数断言 |
+| `62c9dad7` | `test_spu_price_stats_live.py` 整份真实数据链路 | 9 项通过，保留独立价格 oracle、金额/来源/FX、权限及键盘说明与原生返焦约束 |
+| `4a2d345a` | 两项页面登记与完整字体选择范围 | 共 16 项，14 通过、2 失败；两项登记及两 SPU 页字体均通过。失败为 dashboard、ad-daily 使用非 canonical 的 Tailwind `ui-monospace` 字体栈，未放宽白名单或改其 CSS |
+
+字体检查仍以 `static/tokens.css` 的三套规范字体栈为唯一白名单，保留 normalize 与全部可见文字检查。删除的是将 HeroUI 默认变量当作规范字体的错误覆盖逻辑。价格弹窗测试等待真实 visible/hidden 与 FocusScope 返回焦点，保留原键盘及返焦断言，没有用强制 focus 或重复 Escape 替代恢复能力。
+
+本轮独立 review 发现的精确百分比输入、关注变更后分页复位、失败写入提示保留与跨店铺冷却边界已修复并由相应窄测覆盖。关注写入仍须明确增删，失败后读取事实再恢复；前端未新增金融公式、汇总、阈值或权限判定权威来源。旧整页 owner 已退出，保留的 Tabulator 只维护 ref 内专业表格；本轮以共享模块取代旧页面脚本，没有保留双 owner 的兼容路径。
+
+用户在验收过程中另行明确批准两项最小产品修复：
+
+- 店铺编辑响应同时核对内部 ID 与外部 shop ID，阻止错误身份响应回填其他店铺；未改其他页面布局。
+- 利润比较接口将店铺授权读取和原有比较读取放入同一个 canonical 一致只读快照，修复授权 SQL 提前开启默认事务导致的 503；未 rollback/commit 重启事务，未改金额公式或权限 owner。
+
+必要测试维护为已有 TEST 店铺补齐现有授权关系、对齐 React owner 的有效行为断言及 Modal 生命周期等待。ROI 查询预算仍将所有 SQL 计入总数，仅精确识别最多 2 条固定授权查询，其余业务 SQL 保留原 31 条上限；没有放宽业务预算或价格 oracle。
+
+### 完整 baseline 的限制
+
+在 `f3acd5c0` 执行了一次 `bash scripts/test_baseline.sh`，退出 1，相对于已提交的零失败基线报告 **313 个机械差异测试 ID**。其中含未同步的旧授权 fixture、原生页面文案和旧 schema 预期；后续窄测已修复并验证其中部分差异。313 既不是当前冻结 HEAD 的重新执行结果，也不能全部判定为本次新增回归或全部归为 master 既有失败。其余差异尚未逐项完成归因，未重跑整套来生成新基线，未修改 `docs/testing/baseline-fast.txt`。
+
+父协调会话在干净 master `5eb3ff5c` 最小复现了以下三项相同失败：`tests/api/test_commerce.py::test_list_shops_with_data` 因缺授权结果为空；`tests/api/test_admin_shops.py::test_register_creates_plugin_only_shop` 的 status 为 None 而非 active；`tests/api/test_style_tokens.py::test_every_var_reference_resolves` 缺 `--sidebar-rule`。此前的 shops 组件、manual-cost owned-child 404 与 ROI total 为 0 的代表问题也已在干净该 master 复现。这些是指定失败的既有性证据，不能外推为全部 313 项的归因结论。
+
+当前交付为已提交并推送的可审查分支，**尚不满足 ready/merge 条件，未合并 master、未部署、未重启服务**。目标 SPU 窄测通过不代表全站或完整 fast suite 通过；仍需由协调者保留并分类剩余 baseline 差异，再按仓库整合流程验证拟合并提交。本轮到此停止扩大无关产品与测试修复。
