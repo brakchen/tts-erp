@@ -388,6 +388,8 @@ def test_price_tooltip_keyboard_opens_and_closes_with_real_basis(
     live: LiveBrowser, price_scene: PriceScene
 ) -> None:
     """Enter 打开/Escape 关闭价格 tooltip，文案来自真实响应 meta。"""
+    from playwright.sync_api import expect
+
     shop = price_scene.shop_a
     expected = shop.stats((DAY_D1,))
     page = live.open(spu_roi_path(shop.pk))
@@ -407,18 +409,20 @@ def test_price_tooltip_keyboard_opens_and_closes_with_real_basis(
 
     page.page.keyboard.press("Escape")
     page.page.get_by_role("dialog", name="采购价统计口径").wait_for(state="hidden")
-    assert page.page.evaluate(
-        "document.activeElement === document.querySelector('[data-price-tip=\"purchase\"]')"
-    )
+    # HeroUI hides the role before Presence/FocusScope finishes returning focus.
+    # Wait for the real return before opening another keyboard-driven dialog.
+    expect(button).to_be_focused()
 
     original = page.price_tip("originalSale")
     original.focus()
     page.page.keyboard.press("Enter")
+    page.page.get_by_role("dialog", name="销售价统计口径").wait_for(state="visible")
     original_text = page.page.locator("#ops-tip").inner_text()
     assert "来源：TikTok line_items.original_price" in original_text
     assert "覆盖：完整·10/10件" in "".join(original_text.split())
     page.page.keyboard.press("Escape")
     page.page.get_by_role("dialog", name="销售价统计口径").wait_for(state="hidden")
+    expect(original).to_be_focused()
 
 
 # ─── 6. 失败态与重试 ────────────────────────────────────────────────
