@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, delete, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from tests._job_invocation import authorize_test_shop
 from tests.support.frontend_p2_accounts import SeedAccount, seed_accounts
 from tests.support.frontend_p2_binding import (
     NONCE_HEADER,
@@ -33,6 +34,7 @@ from tests.support.frontend_p2_canary import (
 )
 from tests.support.frontend_p2_live import VerifiedChild, live_api_server
 from tts_erp_v2.db.models.commerce import ChannelAccount, ChannelProduct
+from tts_erp_v2.db.models.integration import Credentials, TikTokAppCredential
 from tts_erp_v2.db.models.intercept import InterceptConfig
 from tts_erp_v2.db.models.procurement import ManualProductCost
 
@@ -209,6 +211,13 @@ def manual_cost_facts(
         ]
         session.add_all(shops)
         session.flush()
+        # Business queries exclude discovered-only shops; keep the real gate.
+        for shop in shops:
+            authorize_test_shop(session, shop.id, shop.shop_id)
+        credential_owners = {
+            shop.credential_id: (shop.shop_id, shop.service_id) for shop in shops
+        }
+        app_owners = {shop.id: shop.service_id for shop in shops}
         products = [
             ChannelProduct(
                 shop_pk=shops[0].id,
@@ -271,11 +280,38 @@ def manual_cost_facts(
                 (spu_pks[1], shop_pks[1], shared_external, marker),
                 (spu_pks[2], shop_pks[0], other_external, marker),
             }
+            assert {
+                row.id: (row.external_account_id, row.service_id)
+                for row in session.execute(
+                    select(
+                        Credentials.id,
+                        Credentials.external_account_id,
+                        Credentials.service_id,
+                    ).where(
+                        Credentials.id.in_(credential_owners),
+                        Credentials.provider == "tiktok",
+                    )
+                )
+            } == credential_owners
+            app_rows = session.execute(
+                select(
+                    TikTokAppCredential.id,
+                    TikTokAppCredential.shop_pk,
+                    TikTokAppCredential.service_id,
+                ).where(TikTokAppCredential.shop_pk.in_(shop_pks))
+            ).all()
+            assert {row.shop_pk: row.service_id for row in app_rows} == app_owners
+            assert len(app_rows) == len(app_owners)
+            app_ids = tuple(row.id for row in app_rows)
             session.execute(
                 delete(ManualProductCost).where(ManualProductCost.spu_pk.in_(spu_pks))
             )
             session.execute(delete(ChannelProduct).where(ChannelProduct.id.in_(spu_pks)))
+            session.execute(
+                delete(TikTokAppCredential).where(TikTokAppCredential.id.in_(app_ids))
+            )
             session.execute(delete(ChannelAccount).where(ChannelAccount.id.in_(shop_pks)))
+            session.execute(delete(Credentials).where(Credentials.id.in_(credential_owners)))
             clone.child.require_live()
             session.commit()
         with checked_session(clone.child.binding, clone.engine, clone.factory) as session:
@@ -288,6 +324,12 @@ def manual_cost_facts(
             ) is None
             assert session.scalar(
                 select(ChannelAccount.id).where(ChannelAccount.id.in_(shop_pks))
+            ) is None
+            assert session.scalar(
+                select(TikTokAppCredential.id).where(TikTokAppCredential.id.in_(app_ids))
+            ) is None
+            assert session.scalar(
+                select(Credentials.id).where(Credentials.id.in_(credential_owners))
             ) is None
 
 
