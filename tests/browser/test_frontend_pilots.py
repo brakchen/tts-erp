@@ -26,6 +26,9 @@ def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, wi
     if slug == "spu-profit-deterioration":
         # Exercise populated comparison layout, not just its loading/error shell.
         page.get_by_text("TEST_RENDER_COMPARE_0", exact=True).wait_for(timeout=10_000)
+    if slug == "users":
+        tabs = page.get_by_role("tablist", name="管理页签")
+        assert tabs.bounding_box()["width"] <= 400
     if width < 1024:
         trigger = page.get_by_role("button", name="打开主导航")
         trigger.click()
