@@ -22,6 +22,8 @@
 - Sole live task/lane registry for non-Codex sessions: tower-do (`tower_do`, `tower_do_talk`, `tower_do_status`; see §8).
 - Stable lane lifecycle and board record format: `docs/guides/agent-git-workflow.md`. `docs/handoff/ACTIVE.md` is only a relocation notice; do not maintain live rows there.
 
+- 本机虚拟机测试服务器：`schan@192.168.47.129`（Ubuntu 26.04 LTS）；SSH 密钥位置、登录验证和适用边界见 `docs/ops/tts-erp.md` 的「本机虚拟机测试服务器（项目记忆）」。
+
 ## 3. Non-negotiable safety boundaries
 
 - Never run tests against `tts_erp`, `tts_erp_prod`, or any prod-shaped database name.
