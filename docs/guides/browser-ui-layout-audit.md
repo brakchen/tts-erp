@@ -1,7 +1,7 @@
 # 浏览器 UI 布局巡检（probe_ui_layout_*）
 
-> 状态：稳定工具。最后更新 2026-10-02。
-> 适用范围：`tts_erp_v2/templates/pages/` 与 `tts_erp_v2/static/` 下的页面布局回归。
+> 状态：截图与 DOM 度量辅助工具。页面渲染入口更新于 2026-11-01。
+> `probe_ui_layout_pages.py` 从权威 PAGES 目录用当前 React manifest renderer 生成页面，不连接数据库，不再导入旧 SPU Jinja helper。先构建完整前端资产；旧探针自身的页面名单/mock仍是辅助证据，不能替代当前 React 浏览器行为验收。
 
 ## 用途
 
@@ -21,7 +21,8 @@
 ## 用法
 
 ```bash
-# 1) 渲染全部页面为静态 HTML（真实 Jinja 环境，只读不碰数据库）
+# 1) 构建同版本资源，再生成全部已注册页面（无数据库 Request 上下文）
+bash scripts/build_frontend.sh
 .venv/bin/python scripts/probe_ui_layout_pages.py --out /tmp/ui-audit/pages
 
 # 2) 浏览器巡检：mock 业务接口、截图、DOM 度量
@@ -43,9 +44,11 @@ NODE_PATH=/home/schan/pi-web/node_modules \
 
 ## 覆盖页面
 
+HTML 生成器覆盖当前全部 15 个已注册业务页。布局/字体旧探针下列名单与 mock 范围保持显式，新增 React 状态须用 `bash scripts/test_isolated.sh browser ...` 下的当前编译产物测试验证；看到启动/错误占位不算足量数据巡检通过。
+
 `dashboard`、`shops`、`enum-map`、`runtime-configs`、`sync-jobs`、
 `manual-costs`、`intercept-configs`、`intercept-requests`、
-`intercept-stats`、`ad-daily`（内联 HTML 于 `ad_daily.py`）、
+`intercept-stats`、`ad-daily`、
 `spu-roi`、`focused-spus`（后两者自动带 `?shop_pk=7` 以触发主表数据渲染，
 否则空态不构成有效巡检）。
 

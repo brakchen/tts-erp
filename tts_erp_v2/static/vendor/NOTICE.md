@@ -17,9 +17,12 @@
 
 Self-hosted deliberately: operators reach this service over a private NAT
 tunnel; third-party CDN links would leak operator IPs and break offline.
-No Bootstrap JS — pages use Bootstrap utility/component classes. The SPU ROI
-page enhances a native `<select multiple>` with Tom Select's Bootstrap 5 theme;
-application-specific behavior remains in `/static/js/spu-roi.js`.
+No Bootstrap JS — retained legacy pages use Bootstrap utility/component classes.
+SPU ROI and focused pages now share `frontend/src/pages/spu-profitability/`.
+Their React adapter initializes the existing Tabulator 6.3.1 inside an empty ref;
+React owns filters, requests, summaries and detail content. Official integration:
+<https://www.tabulator.info/docs/6.x/react/>. The adapter loads the pinned,
+self-hosted JS and Vite bundles its pinned CSS; no new table wrapper dependency.
 
 Bootstrap MIT license text: <https://github.com/twbs/bootstrap/blob/main/LICENSE>
 (copyright 2011-2025 The Bootstrap Authors). Tom Select's Apache-2.0 license is

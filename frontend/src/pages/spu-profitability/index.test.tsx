@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Page from './index';
 import type { FrontendBootstrap } from '../../shared/contracts';
 
-vi.mock('./ProfitabilityTable', () => ({ ProfitabilityTable: ({ rows }: { rows: { spu_id: string }[] }) => <div aria-label="TEST 盈利行">{rows.map((row) => <span key={row.spu_id}>{row.spu_id}</span>)}</div> }));
+vi.mock('./ProfitabilityTable', () => ({ ProfitabilityTable: ({ rows, error }: { rows: { spu_id: string }[]; error?: string }) => <div aria-label="TEST 盈利行">{rows.map((row) => <span key={row.spu_id}>{row.spu_id}</span>)}{error && <p role="alert">{error}</p>}</div> }));
 const bootstrap: FrontendBootstrap = { pageId: 'spu-roi', rootPath: '', releaseId: 'TEST_release', navigation: [], roleCapabilities: { readwrite: true, admin: false } };
 const shop = { id: 7, shop_id: '90071992547409931', account_name: 'TEST 店铺', region: 'VN' };
 const product = { spu_pk: 101, spu_id: 'TEST_OLD', title: 'TEST 原商品', status: 'ACTIVATE', main_image_url: null };
@@ -11,9 +11,10 @@ const payload = (id = 'TEST_RESULT') => ({ items: [{ ...product, spu_id: id }], 
 let calls: { url: string; init?: RequestInit }[];
 let stored: { spuId: string; title: string }[];
 let patchFailure: number | undefined;
+let overviewError: { code: string } | undefined;
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }); }
 beforeEach(() => {
-  calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
+  calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); calls.push({ url, init });
     if (url.includes('channel-accounts')) return response([shop]);
@@ -26,7 +27,7 @@ beforeEach(() => {
       }
       return response({ shopPk: 7, items: stored, total: stored.length, matchedTotal: stored.length, limit: 500, offset: 0 });
     }
-    if (url.includes('/analytics/spu-roi?')) return response(payload());
+    if (url.includes('/analytics/spu-roi?')) return overviewError ? response(overviewError, 503) : response(payload());
     return response({});
   }));
 });
@@ -74,4 +75,10 @@ it('inverted date edits retain both inputs without querying a widened range', as
   expect(screen.getByLabelText('销售/退款起始日期（空 = 不限）')).toHaveValue('2026-10-01');
   expect(screen.getByLabelText('销售/退款截止日期（空 = 不限）')).toHaveValue('2026-09-30');
   expect(screen.getByRole('alert')).toHaveTextContent('起始日期不能晚于截止日期');
+});
+it('explains only the typed missing-FX error and leaves no old successful result visible', async () => {
+  overviewError = { code: 'FX_RATE_UNAVAILABLE' };
+  render(<Page bootstrap={bootstrap} />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('汇率数据缺失，无法计算结果');
+  expect(screen.queryByText('TEST_RESULT')).not.toBeInTheDocument();
 });

@@ -422,9 +422,9 @@ Candidate preview/publication validation returns HTTP `422` with a controlled `d
 | Endpoint | Role | Notes |
 | --- | --- | --- |
 | `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console（店铺切换、全部 SPU / 最近提交、仅展示未登记 SPU 的后端筛选、人工采购价录入）。Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
-| `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板。与重点关注页共享 `/static/js/spu-profitability-page.js` kernel；`/static/js/spu-roi.js` 只定义标准 PageProfile。 |
+| `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板。与重点关注页共享 `frontend/src/pages/spu-profitability/` React 模块、AppShell 和现有数据 API；标准页默认店铺当地 T-1。 |
 | `GET /v2/pages/spu-profit-deterioration` | readonly + `page:spu-profit-deterioration` | 保留既有入口的 SPU 盈利表现对比。只读消费同名 analytics API；默认 7 天、辅助 3 天，店铺/精确内部 SPU/活动范围/日期/分页可恢复。显示两期盈利原值、展示变化、订单/广告消耗、无单投放事实和来源限制；旧结果可读，日期不得超过后台上限；详情进入同店业务 SPU 与明确经营日期。没有阈值、severity/state/sample/layer、告警数量或配置写操作。 |
-| `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。使用相同盈利汇总、表格、分页和钻取；`/static/js/focused-spus.js` 提供持久 selection adapter 与编辑器。 |
+| `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。共用 React 盈利汇总、表格、分页和五明细；关注清单由既有 focused API 持久化，默认不限经营日期。 |
 | `GET /v2/pages/shops` | readonly | 店铺注册台。人工注册插件同步店铺（`commerce.shops` 补登记）；写入走 `POST /v2/admin/shops/register`（含 App Key/Secret 均 readwrite）；行内元信息编辑走 `PATCH /v2/admin/shops/{shop_pk}`；App pair 按 service_id 加密保存；「获取授权链接」按钮走 `GET /v2/oauth/tiktok/authorize?format=json`（readwrite）。 |
 | `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理页。读取 `/v2/sync/jobs`；readwrite 会话可调用 `/v2/admin/sync-jobs/{job_name}/trigger` 立即提交后台执行；admin 会话还可调用 `/v2/admin/sync-jobs/{job_name}/enabled` 启停周期 tick。 |
 | `GET /v2/pages/runtime-configs` | readwrite | 运行配置台：创建草稿、发布/恢复版本及加密 secret 引用。 |

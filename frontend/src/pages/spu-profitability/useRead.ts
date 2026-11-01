@@ -25,7 +25,10 @@ export function useRead<T>(root: string, path: string | null, decode: (value: un
       if (!current) return;
       const retryAt = error instanceof ApiError && error.retryAfter ? performance.now() + error.retryAfter * 1000 : undefined;
       if (retryAt !== undefined) fence.current.notBefore = Math.max(fence.current.notBefore, retryAt);
-      setState({ key, error: error instanceof Error ? error.message : '读取失败', loading: false, retryAt });
+      const message = error instanceof ApiError && error.code === 'FX_RATE_UNAVAILABLE' ? '汇率数据缺失，无法计算结果'
+        : error instanceof ApiError && error.code === 'PRICE_FX_UNAVAILABLE' ? '价格币种缺少本次快照可用的汇率，无法计算结果'
+          : error instanceof Error ? error.message : '读取失败';
+      setState({ key, error: message, loading: false, retryAt });
       if (retryAt !== undefined) cancelDelay = scheduleReadDelay(() => { if (current) setState((old) => ({ ...old, retryAt: undefined })); }, retryAt - performance.now());
     });
     const timer = interval ? setInterval(() => { if (!document.hidden) setTick((n) => n + 1); }, interval) : undefined;

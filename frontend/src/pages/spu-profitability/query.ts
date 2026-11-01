@@ -29,10 +29,18 @@ export function initialQuery(profile: Profile, search: string, saved: Record<str
 }
 export const sortable = new Set(['roi_real', 'spend', 'ad_system_actual_roi', 'ad_system_breakeven_roi', 'effective_sales', 'total_orders', 'effective_order_count', 'cancel_rate', 'full_loss_rate', 'net_profit', 'purchasePriceMean', 'purchasePriceMedian', 'originalSalePriceMean', 'originalSalePriceMedian', 'paidPriceMean', 'paidPriceMedian']);
 export function reportingDate(now: Date, region: string | null | undefined): string | null {
-  const timeZone = region ? zones[region.toUpperCase()] : undefined;
+  const timeZone = reportingZone(region);
   if (!timeZone) return null;
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
   return ['year', 'month', 'day'].map((kind) => parts.find((part) => part.type === kind)!.value).join('-');
+}
+export function reportingZone(region: string | null | undefined): string | undefined { return region ? zones[region.trim().toUpperCase()] : undefined; }
+export function datePresets(today: string | null): { id: string; label: string; start: string; end: string }[] {
+  if (!today) return [];
+  const end = shiftDay(today, -1);
+  const options = [{ id: '1', label: '昨天', start: end, end }, { id: '7', label: '近 7 天', start: shiftDay(end, -6), end }, { id: '30', label: '近 30 天', start: shiftDay(end, -29), end }, { id: 'month', label: '本月', start: end.slice(0, 8) + '01', end }, { id: 'all', label: '不限', start: '', end: '' }];
+  const month = options.find((option) => option.id === 'month')!;
+  return options.filter((option) => option.id === 'month' || option.start !== month.start || option.end !== month.end);
 }
 export function shiftDay(day: string, days: number): string {
   const [year, month, date] = day.split('-').map(Number);

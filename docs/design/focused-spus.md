@@ -5,6 +5,8 @@
 > v4 修订：增加 PageProfile、受控 view projection 与演进规则，使两页可差异化而不分叉公共生命周期
 > 关联现有页面：`GET /v2/pages/spu-roi`
 > 口径真相源：`GET /v2/analytics/spu-roi`
+>
+> **2026-11-01 前端更新：** 本文持久关注的数据/API契约继续有效。原无构建步骤、Tom Select、PageProfile 全局挂载与 Jinja shell 的实施方案已由 [React 迁移记录](../plans/spu-react-migration-2026-11-01.md) 取代。当前唯一页面实现位于 `frontend/src/pages/spu-profitability/`；`Selection.tsx` 通过明确逐项勾选/移除维护集合，React 拥有状态。普通添加不会隐式取消其他关注，写入失败须先重新读取事实后再明确操作。
 
 ## 1. 背景与目标
 

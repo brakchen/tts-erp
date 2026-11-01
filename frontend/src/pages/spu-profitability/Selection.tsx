@@ -6,8 +6,8 @@ import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { array, decodeOptions, identity, record, type Option } from './contracts';
 import { parseIds } from './query';
 
-export default function Selection({ root, shopPk, focused, canWrite, applied, onApply, onFocused }: {
-  root: string; shopPk: string; focused: boolean; canWrite: boolean; applied: string[];
+export default function Selection({ root, shopPk, focused, canWrite, blocked, applied, onApply, onFocused }: {
+  root: string; shopPk: string; focused: boolean; canWrite: boolean; blocked: boolean; applied: string[];
   onApply: (ids: string[]) => void; onFocused: (count: number | null) => void;
 }) {
   const [draft, setDraft] = useState<string[]>(applied); const [choices, setChoices] = useState<Option[]>([]);
@@ -16,6 +16,8 @@ export default function Selection({ root, shopPk, focused, canWrite, applied, on
   const [revision, setRevision] = useState(0); const [needsCheck, setNeedsCheck] = useState(false); const [cooldown, setCooldown] = useState(false);
   const lifetime = useRef<AbortController | undefined>(undefined); const pending = useRef(false); const cancelDelay = useRef<(() => void) | undefined>(undefined);
   const notBefore = useRef(0);
+  const resolveController = useRef<AbortController | undefined>(undefined); const resolveGeneration = useRef(0);
+  function cancelResolution() { resolveGeneration.current += 1; resolveController.current?.abort(); resolveController.current = undefined; pending.current = false; setBusy(false); }
   function hold(error: unknown) { if (error instanceof ApiError && error.retryAfter) { notBefore.current = Math.max(notBefore.current, performance.now() + error.retryAfter * 1000); setCooldown(true); cancelDelay.current?.(); cancelDelay.current = scheduleReadDelay(() => setCooldown(false), notBefore.current - performance.now()); } }
   const focusedCallback = useRef(onFocused); focusedCallback.current = onFocused;
   const optionsPath = '/v2/commerce/channel-product-options';
@@ -37,7 +39,7 @@ export default function Selection({ root, shopPk, focused, canWrite, applied, on
       const unique = [...new Map(items.map((item) => [item.spu_id, item])).values()];
       setChoices(unique); setDraft(unique.map((item) => item.spu_id)); focusedCallback.current(total); setLoading(false);
     })().catch((error: unknown) => { if (!controller.signal.aborted) { hold(error); setNotice(error instanceof Error ? error.message : '关注读取失败'); setLoading(false); setNeedsCheck(true); } });
-    return () => { controller.abort(); cancelDelay.current?.(); };
+    return () => { controller.abort(); resolveController.current?.abort(); cancelDelay.current?.(); };
     // An applied standard selection has a separate effect; only shop/profile invalidates this lifetime.
   }, [root, shopPk, focused, revision]);
   useEffect(() => {
@@ -51,7 +53,7 @@ export default function Selection({ root, shopPk, focused, canWrite, applied, on
     return () => { clearTimeout(timer); controller.abort(); };
   }, [root, shopPk, query, draft]);
   async function change(next: string[]) {
-    if (pending.current || loading || cooldown || needsCheck) return;
+    if (pending.current || loading || cooldown || needsCheck || blocked) return;
     if (!focused) { if (next.length > 100) setNotice('最多选择 100 个 SPU'); else { setDraft(next); setNotice(''); } return; }
     if (!canWrite || !shopPk) return;
     const add = next.filter((id) => !draft.includes(id)); const remove = draft.filter((id) => !next.includes(id));
@@ -73,20 +75,22 @@ export default function Selection({ root, shopPk, focused, canWrite, applied, on
     const ids = parseIds(paste); const maximum = focused ? 500 : 100;
     const next = [...new Set([...draft, ...ids])]; if (!ids.length || ids.length > maximum || (!focused && next.length > maximum)) { setNotice(`一次最多 ${maximum} 个 SPU${focused ? '' : '，含已选项'}`); return; }
     pending.current = true; setBusy(true); const scope = lifetime.current; const found: Option[] = [];
+    const controller = new AbortController(); resolveController.current?.abort(); resolveController.current = controller; const generation = ++resolveGeneration.current;
+    const cancel = () => controller.abort(); scope?.signal.addEventListener('abort', cancel, { once: true });
     try {
       for (let offset = 0; offset < ids.length; offset += 25) {
         const params = new URLSearchParams({ shop_pk: shopPk, spu_ids: ids.slice(offset, offset + 25).join(','), limit: '25' });
-        const result = await withinRequestLifetime(new AbortController(), (signal) => requestJson<unknown>(root, `${optionsPath}?${params}`, { signal }, parseIdentityJson), scope?.signal); found.push(...decodeOptions(result.data));
+        const result = await withinRequestLifetime(new AbortController(), (signal) => requestJson<unknown>(root, `${optionsPath}?${params}`, { signal }, parseIdentityJson), controller.signal); found.push(...decodeOptions(result.data));
       }
-      if (scope?.signal.aborted) return;
+      if (scope?.signal.aborted || controller.signal.aborted || generation !== resolveGeneration.current) return;
       const returned = new Set(found.map((item) => item.spu_id)); const missing = ids.filter((id) => !returned.has(id));
       setChoices((old) => [...new Map([...old, ...found].map((item) => [item.spu_id, item])).values()]); pending.current = false; setBusy(false);
       await change([...new Set([...draft, ...ids.filter((id) => returned.has(id))])]);
       if (missing.length) setNotice(`未添加当前店铺无法确认的 SPU：${missing.join('、')}`); else setPaste('');
-    } catch (error: unknown) { if (!scope?.signal.aborted) { hold(error); setNotice(error instanceof Error ? error.message : '批量解析失败'); } }
-    finally { if (!scope?.signal.aborted) { pending.current = false; setBusy(false); } }
+    } catch (error: unknown) { if (!scope?.signal.aborted && !controller.signal.aborted && generation === resolveGeneration.current) { hold(error); setNotice(error instanceof Error ? error.message : '批量解析失败'); } }
+    finally { scope?.signal.removeEventListener('abort', cancel); if (!scope?.signal.aborted && generation === resolveGeneration.current) { pending.current = false; setBusy(false); resolveController.current = undefined; } }
   }
-  const disabled = !shopPk || loading || busy || cooldown || needsCheck || focused && !canWrite;
+  const disabled = !shopPk || loading || busy || cooldown || needsCheck || blocked || focused && !canWrite;
   const selected = draft.map((id) => choices.find((item) => item.spu_id === id) ?? { spu_id: id, title: null, status: null });
   const options = [...new Map([...selected, ...choices].map((item) => [item.spu_id, item])).values()];
   return <section aria-label={focused ? '重点关注 SPU' : 'SPU 范围'} className="erp-panel space-y-3">
@@ -95,7 +99,7 @@ export default function Selection({ root, shopPk, focused, canWrite, applied, on
     {selected.length > 0 && <details open={selected.length <= 6}><summary>{focused ? '当前关注清单' : '当前已选商品'} · {selected.length} 个</summary><ul className="max-h-48 space-y-2 overflow-y-auto">{selected.map((item) => <li key={item.spu_id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">{item.title ?? item.spu_id} · {item.spu_id}</span><Button size="sm" variant="secondary" aria-label={`移除 SPU ${item.spu_id}`} isDisabled={disabled} onPress={() => { void change(draft.filter((id) => id !== item.spu_id)); }}>移除</Button></li>)}</ul></details>}
     <fieldset id={focused ? 'focused-spu-select' : 'filter-spu-ids'} aria-label={focused ? '重点关注 SPU 多选' : '批量选择 SPU'} disabled={disabled} className="space-y-2"><legend>{query ? '搜索结果 · 勾选添加，取消勾选仅移除此项' : '输入关键词搜索，或批量粘贴 SPU ID'}</legend><div className="max-h-48 space-y-2 overflow-y-auto">{options.filter((item) => query.trim() || !draft.includes(item.spu_id)).map((item) => <label className="flex items-start gap-2" key={item.spu_id}><input type="checkbox" checked={draft.includes(item.spu_id)} onChange={(event) => { void change(event.target.checked ? [...draft, item.spu_id] : draft.filter((id) => id !== item.spu_id)); }} /><span className="min-w-0 break-all">{item.spu_id} · {item.title ?? '无标题'} · {item.status ?? '未知状态'}</span></label>)}</div></fieldset>
     {batchOpen && <div className="space-y-2"><TextField value={paste} onChange={setPaste} isDisabled={disabled}><Label>粘贴 SPU ID（逗号、空格或换行分隔）</Label><TextArea fullWidth rows={3} /></TextField><Button isDisabled={disabled || !paste.trim()} onPress={() => { void resolvePaste(); }}>解析并添加</Button></div>}
-    {!focused && <div className="flex flex-wrap items-center gap-2"><Button id="btn-spu-apply" isDisabled={disabled} onPress={() => onApply(draft)}>查询</Button><Button id="btn-spu-clear" variant="secondary" isDisabled={disabled} onPress={() => { setDraft([]); onApply([]); }}>清空</Button><span>选择后点击查询应用；空范围表示店铺全部 SPU。</span></div>}
+    {!focused && <div className="flex flex-wrap items-center gap-2"><Button id="btn-spu-apply" isDisabled={disabled} onPress={() => onApply(draft)}>查询</Button><Button id="btn-spu-clear" variant="secondary" isDisabled={!shopPk || loading || cooldown || needsCheck || blocked} onPress={() => { cancelResolution(); setDraft([]); setPaste(''); setNotice(''); onApply([]); }}>清空</Button><span>选择后点击查询应用；空范围表示店铺全部 SPU。</span></div>}
     {focused && !canWrite && <p>当前为只读权限；可浏览关注商品，修改需要 readwrite。</p>}
     {loading && <p role="status">正在读取完整关注清单…</p>}{notice && <p id="spu-filter-feedback" role={needsCheck ? 'alert' : 'status'} className="break-all">{notice}</p>}
     {focused && needsCheck && <Button variant="secondary" isDisabled={busy || cooldown} onPress={() => { if (performance.now() >= notBefore.current) setRevision((value) => value + 1); }}>重新读取关注事实</Button>}

@@ -1,5 +1,7 @@
 # SPU 价格统计（采购价 / 原价 / 实付价）专项技术方案
 
+> **2026-11-01 UI 实施更新：** 数据、价格能力和精度契约保持不变；本文要求旧 Jinja shell / 全局 JS kernel 的部分由 [React 迁移记录](../plans/spu-react-migration-2026-11-01.md) 取代。当前 `Summary.tsx` 与 `ProfitabilityTable.tsx` 共用服务端 nested priceStats；不恢复旧整页 owner。
+
 > **状态：已交付（backend da908da + P2 加固，approve-with-notes；生产迁移/部署/回填仍为 human-only，不由本文批准）**
 > 本文只定义 `/v2/pages/spu-roi` 与 `/v2/pages/focused-spus` 共用价格统计组件的实现契约。公共盈利业务真相仍由 [`../business/spu-profitability.md`](../business/spu-profitability.md) 与飞书《SPU-ROI 计算口径》拥有；公共深模块方案由 [`spu-profitability-technical-design.md`](spu-profitability-technical-design.md) 拥有。本专项不是第二套盈利口径，发布后应由维护者把本文件链接合并进公共技术方案。
 >

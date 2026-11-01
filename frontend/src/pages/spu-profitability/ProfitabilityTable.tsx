@@ -41,7 +41,8 @@ export function ProfitabilityTable({ root, rows, sort, order, prices, meta, load
   const suppress = useRef(false); const [ready, setReady] = useState(false); const [failed, setFailed] = useState('');
   const [attempt, setAttempt] = useState(0);
   const state = useRef({ rows, sort, order, prices, meta, onSort, onDrill, onZoom, onRetry }); state.current = { rows, sort, order, prices, meta, onSort, onDrill, onZoom, onRetry };
-  function close() { state.current.onDrill(null, null); open.current?.host.remove(); open.current = undefined; }
+  function close() { state.current.onDrill(null, null); open.current?.opener?.setAttribute('aria-expanded', 'false'); open.current?.host.remove(); open.current = undefined; }
+  const frozenWidth = (width: number) => width < 600 ? Math.max(100, Math.min(160, width - 156)) : 280;
   useEffect(() => {
     let current = true; let dispose = () => {}; const element = host.current!; const handled = new WeakSet<Event>();
     void loadTable(root).then((Tabulator) => {
@@ -51,7 +52,7 @@ export function ProfitabilityTable({ root, rows, sort, order, prices, meta, load
         const row = cell.getData(); const wrap = document.createElement('div'); wrap.className = 'erp-profit-product';
         if (row.main_image_url) { const zoom = document.createElement('button'); zoom.type = 'button'; zoom.dataset.zoom = row.main_image_url; zoom.setAttribute('aria-label', `放大图片 ${row.spu_id}`); const image = document.createElement('img'); image.src = row.main_image_url; image.alt = ''; image.width = 48; image.height = 48; image.onerror = () => { image.hidden = true; zoom.textContent = '无主图'; }; zoom.append(image); wrap.append(zoom); }
         else { const missing = document.createElement('span'); missing.className = 'erp-profit-no-image'; missing.textContent = '无主图'; wrap.append(missing); }
-        const facts = document.createElement('div'); facts.className = 'min-w-0'; const label = document.createElement('button'); label.type = 'button'; label.className = 'erp-profit-detail-trigger'; label.setAttribute('aria-label', `查看商品盈利详情 ${row.spu_id}`); label.textContent = row.title ?? row.spu_id; facts.append(label);
+        const facts = document.createElement('div'); facts.className = 'min-w-0'; const label = document.createElement('button'); label.type = 'button'; label.className = 'erp-profit-detail-trigger'; label.setAttribute('aria-label', `查看商品盈利详情 ${row.spu_id}`); label.setAttribute('aria-expanded', 'false'); label.setAttribute('aria-controls', `spu-drill-${row.spu_pk}`); label.textContent = row.title ?? row.spu_id; facts.append(label);
         const id = document.createElement('div'); id.className = 'erp-table-id'; id.textContent = row.spu_id; facts.append(id);
         const presentation = optionalRecord(state.current.meta.presentation); const flags: [boolean, string, unknown][] = [[row.uses_default_unit_cost === true, '缺成本', presentation.default_cost_alert_message], [row.refund_rate_alert === true, '高退款', presentation.refund_rate_alert_message], [row.has_unsettled_orders === true, '≈ 含未结算', presentation.unsettled_alert_message], [row.profit_status === 'loss', '亏损', undefined]];
         const tags = document.createElement('div'); tags.className = 'erp-profit-flags'; for (const [show, textValue, tip] of flags) if (show) { const span = document.createElement('span'); span.textContent = textValue; if (tip) span.title = text(tip); tags.append(span); }
@@ -59,7 +60,7 @@ export function ProfitabilityTable({ root, rows, sort, order, prices, meta, load
       };
       const formatter = (cell: Cell) => { const row = cell.getData(); const field = cell.getField(); if (field === 'cancel_rate' || field === 'full_loss_rate') return displayPercent(cell.getValue()); return `${field === 'ad_system_breakeven_roi' && row.ad_system_breakeven_roi_status === 'estimated_known_costs' && cell.getValue() != null ? '≈' : ''}${displayValue(cell.getValue())}`; };
       const instance = new Tabulator(element, {
-        columns: [{ title: '商品', field: 'spu_id', frozen: true, width: element.clientWidth < 600 ? 160 : 280, minWidth: 160, widthShrink: 0, variableHeight: true, headerSort: false, formatter: product },
+        columns: [{ title: '商品', field: 'spu_id', frozen: true, width: frozenWidth(element.clientWidth), minWidth: 100, widthShrink: 0, variableHeight: true, headerSort: false, formatter: product },
           ...columns.map(([title, field]) => ({ title, field, minWidth: 136, hozAlign: 'right', headerHozAlign: 'right', headerSort: true, formatter })),
           ...priceGroups.map(([title, metric]) => ({ title, headerHozAlign: 'center', columns: ['mean', 'median'].map((kind) => ({ title: kind === 'mean' ? '平均值' : '中位数', field: `priceStats.${metric}.${kind}`, minWidth: 120, visible: state.current.prices, hozAlign: 'right', headerHozAlign: 'right', headerSort: true, formatter: (cell: Cell) => priceValue(cell.getValue(), metric === 'purchase' && optionalRecord(optionalRecord(cell.getData().priceStats)[metric]).estimated === true) })) }))],
         data: [], layout: 'fitColumns', renderVertical: 'basic', maxHeight: 'min(72vh, 880px)', sortMode: 'remote', columnDefaults: { headerWordWrap: true, vertAlign: 'middle' }, placeholder: '暂无商品',
@@ -71,7 +72,7 @@ export function ProfitabilityTable({ root, rows, sort, order, prices, meta, load
         const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-zoom]') : null;
         if (target) { state.current.onZoom(target.dataset.zoom!); return; }
         const item = row.getData(); const same = open.current?.key === item.spu_pk; close(); if (same) return;
-        const detail = document.createElement('div'); detail.className = 'op-drill-row erp-profit-drill'; detail.style.width = `${element.clientWidth}px`; row.getElement().after(detail); open.current = { key: item.spu_pk, host: detail, opener: row.getElement().querySelector<HTMLElement>('.erp-profit-detail-trigger') }; state.current.onDrill(item, detail);
+        const detail = document.createElement('div'); detail.id = `spu-drill-${item.spu_pk}`; detail.className = 'op-drill-row erp-profit-drill'; detail.style.width = `${element.clientWidth}px`; row.getElement().after(detail); const opener = row.getElement().querySelector<HTMLElement>('.erp-profit-detail-trigger'); opener?.setAttribute('aria-expanded', 'true'); open.current = { key: item.spu_pk, host: detail, opener }; state.current.onDrill(item, detail);
       });
       instance.on('dataSorting', (sorters: { field: string; dir: string }[]) => {
         if (suppress.current) return; const sorter = sorters[0]; if (!sorter) return;
@@ -83,13 +84,13 @@ export function ProfitabilityTable({ root, rows, sort, order, prices, meta, load
       element.addEventListener('keydown', keyboard);
       function keyboard(event: KeyboardEvent) { if (event.key !== 'Enter' && event.key !== ' ') return; const target = event.target instanceof Element ? event.target : null; if (target?.closest('.tabulator-col[tabulator-field]')) { event.preventDefault(); (target.closest('.tabulator-col') as HTMLElement).click(); } }
       instance.on('renderComplete', () => { for (const column of element.querySelectorAll<HTMLElement>('.tabulator-col[tabulator-field]')) { if (column.getAttribute('tabulator-field') !== 'spu_id') { column.tabIndex = 0; column.setAttribute('role', 'columnheader'); } } });
-      let width = element.clientWidth < 600 ? 160 : 280;
-      const resize = new ResizeObserver(() => { if (open.current) open.current.host.style.width = `${element.clientWidth}px`; const next = element.clientWidth < 600 ? 160 : 280; if (next !== width) { width = next; void instance.updateColumnDefinition('spu_id', { width: next }).catch(() => {}); } }); resize.observe(element);
+      let width = frozenWidth(element.clientWidth);
+      const resize = new ResizeObserver(() => { if (open.current) open.current.host.style.width = `${element.clientWidth}px`; const next = frozenWidth(element.clientWidth); if (next !== width) { width = next; void instance.updateColumnDefinition('spu_id', { width: next }).catch(() => {}); } }); resize.observe(element);
       dispose = () => { resize.disconnect(); element.removeEventListener('keydown', keyboard); };
     }).catch((error: unknown) => { if (current) setFailed(error instanceof Error ? error.message : '表格加载失败'); });
     return () => { current = false; dispose(); close(); table.current?.destroy(); table.current = undefined; setReady(false); };
   }, [root, attempt]);
-  useEffect(() => { if (selectedKey === null && open.current) { const previous = open.current; previous.host.remove(); open.current = undefined; if (previous.opener?.isConnected) previous.opener.focus(); } }, [selectedKey]);
+  useEffect(() => { if (selectedKey === null && open.current) { const previous = open.current; previous.opener?.setAttribute('aria-expanded', 'false'); previous.host.remove(); open.current = undefined; if (previous.opener?.isConnected) previous.opener.focus(); } }, [selectedKey]);
   useEffect(() => {
     if (!ready || !table.current) return;
     close(); const instance = table.current;

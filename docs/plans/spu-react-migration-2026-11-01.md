@@ -36,3 +36,14 @@ TDD mode auto，strict：迁移有日期、跨店铺异步、写入关注和错�
 ## Plan Pressure Test / Retirement
 
 唯一盈利展示 owner 为新的共享 React 模块，专业表格仅拥有其 ref 下内部DOM；旧整页 owner 退出主路径。不新增权限/金融/日期权威来源；日期工具沿用维护中的项目实现。静态资源引用、API URL、五明细和原语义测试逐项交叉核对。环境不足时交付已提交可审查结果与准确缺口，不能声称已验证或已上线。
+
+## 页面结构与复用记录
+
+页面依次为店铺和日期工具条、SPU 范围维护、简明新鲜度、当前关键指标、可展开的其余指标/预测、价格统计、主表与就近明细、分页及具名计算依据。原十余组 KPI 不再挡在日期操作之前；所有字段仍可展开读取。价格采用内部可滚表格，避免四列卡片挤压后裁切金额。
+
+- 复用既有 Tabulator **6.3.1 / MIT**（`static/vendor/NOTICE.md`），上游 <https://github.com/olifolkerd/tabulator>、官方 React ref 集成 <https://www.tabulator.info/docs/6.x/react/>。不新增 `react-tabulator` 竞争包装；表格保留分组价格列、冻结商品列和 remote sort。
+- React 的 `query.ts` 拥有展示查询/偏好适配；`Selection.tsx` 拥有显式逐项增删、25 ID 批量校验和关注写入恢复；`useRead.ts` 复用统一客户端、取消/超时与 Retry-After 等待。
+- `Summary.tsx` 只读取 totals 和状态，不累加可见行；价格能力仍由实际 nested priceStats 推导。`ProfitabilityTable.tsx` 只管理 ref 内的表格 DOM，不发请求或修改汇总。行内空 host 由表格创建，内部内容由 React portal 独占；`DrillDetails.tsx` 用 HeroUI Tabs 维护五明细，保留懒读/缓存/范围失效与关闭返焦点。
+- HeroUI 提供按钮、表单输入、Modal、Tabs；浏览器 checkbox 的单项切换只影响明确目标，避免原生 multiple 的普通点击误移除其他持久关注。手机号/业务 SPU/店铺标识始终作为字符串处理。
+
+初版 `dc444ade` 类型检查及 Vite 构建通过；尚不能由此推断隔离行为测试或线上发布完成。严格 TDD 的 RED 阶段受本地隔离运行前置限制，先写了查询用例而未直接运行框架；后续验证由服务器同版本隔离 runner 执行并记录真实结果。

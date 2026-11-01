@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialQuery, queryParams, preferenceKey, reportingDate, parseIds, percentToRatio } from './query';
+import { datePresets, initialQuery, queryParams, preferenceKey, reportingDate, parseIds, percentToRatio } from './query';
 
 describe('profitability page scope', () => {
   it('keeps explicit drill dates and exact business identities ahead of saved preferences', () => {
@@ -30,5 +30,10 @@ describe('profitability page scope', () => {
     expect(percentToRatio('1e1')).toBe('0.1');
     expect(percentToRatio('+1')).toBe('0.01');
     expect(percentToRatio('')).toBe(null);
+  });
+  it('keeps one preset when month-to-date equals a rolling window', () => {
+    const presets = datePresets('2026-11-08');
+    expect(presets.some((preset) => preset.id === '7')).toBe(false);
+    expect(presets.find((preset) => preset.id === 'month')).toMatchObject({ start: '2026-11-01', end: '2026-11-07' });
   });
 });
