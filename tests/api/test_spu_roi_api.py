@@ -36,6 +36,7 @@ import pytest
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.analytics.spu_profitability import (
     EvidenceKind,
     EvidenceRequest,
@@ -285,7 +286,7 @@ def _wipe(db_engine) -> None:
 
 def _seed_shop(sess, seller: str, *, region: str | None = "VN") -> int:
     # pi-lens-ignore: python-sql-injection
-    return sess.execute(
+    shop_pk = sess.execute(
         text(
             "INSERT INTO commerce.shops "
             "(platform, shop_id, account_name, status, region) "
@@ -293,6 +294,8 @@ def _seed_shop(sess, seller: str, *, region: str | None = "VN") -> int:
         ),
         {"sid": seller, "name": f"{seller} 店铺", "region": region},
     ).scalar_one()
+    authorize_test_shop(sess, shop_pk, seller)
+    return shop_pk
 
 
 def _seed_spu(
