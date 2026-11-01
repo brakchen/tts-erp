@@ -211,7 +211,7 @@ describe('manual-costs draft and batch recovery', () => {
     const fetcher = setup(); const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost('5.0001');
     await user.click(screen.getByRole('button', { name: '最近提交' })); await screen.findByText('暂无提交记录');
     await user.click(screen.getByRole('button', { name: '继续编辑 PK 9007199254740995' }));
-    let dialog = screen.getByRole('dialog'); expect(readRowCost(dialog)).toBe('5.0001');
+    let dialog = screen.getByRole('dialog'); expect(within(dialog).getByRole('textbox', { name: '单位成本' })).toHaveValue('5.0001');
     fireEvent.change(within(dialog).getByRole('textbox', { name: '备注' }), { target: { value: 'TEST draft note' } });
     await user.click(within(dialog).getByRole('button', { name: '取消并保留草稿' }));
     await user.click(screen.getByRole('button', { name: '全部 SPU' })); const row = (await screen.findByText('TEST 商品')).closest('tr')!;
@@ -520,7 +520,7 @@ describe('manual-costs received error-header fences', () => {
     expect(writes).toHaveLength(1); expect(screen.queryByText('已确认成功')).toBeNull();
     const first = screen.getByText('TEST 商品').closest('tr')!;
     expect(readRowCost(first)).toBe('123456789012345.1234');
-    expect(within(screen.getByText('TEST 第二').closest('tr')!).getByRole('textbox', { name: '单位成本' })).toHaveValue('22.0000');
+    expect(readRowCost(screen.getByText('TEST 第二').closest('tr')!)).toBe('22.0000');
     editRowCost(first, '33.0000');
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); fireEvent.click(screen.getByRole('button', { name: '最近提交' })); });
     expect(fetcher.mock.calls).toHaveLength(calls);
@@ -543,7 +543,7 @@ describe('manual-costs received error-header fences', () => {
     expect(writes).toHaveLength(2);
     expect(JSON.parse(writes[1].body as string)).toMatchObject({ spu_pk: '9007199254740995', spu_id: 'TEST_same_external', unit_cost: '33.0000', currency: 'VND' });
     expect(screen.getByText('已确认成功')).toBeVisible();
-    expect(within(screen.getByText('TEST 第二').closest('tr')!).getByRole('textbox', { name: '单位成本' })).toHaveValue('22.0000');
+    expect(readRowCost(screen.getByText('TEST 第二').closest('tr')!)).toBe('22.0000');
     page.unmount();
   });
 });
