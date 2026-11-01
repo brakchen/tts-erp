@@ -44,7 +44,6 @@ from tts_erp_v2.proxy.errors import AuthenticationError
 from tts_erp_v2.proxy.tiktok_auth import resolve_tiktok_app_credentials_for_view
 from tts_erp_v2.proxy.token_service import (
     CredentialsView,
-    TikTokAppCredentials,
     load_credentials,
     refresh_if_needed,
 )
@@ -83,7 +82,6 @@ _CLIENT_CACHE: dict[tuple[str, str, str], TiktokShopClient] = {}
 def _reactive_refresh(
     session: Session,
     shop_id: str,
-    app_credentials: TikTokAppCredentials,
 ):
     """Call :func:`refresh_if_needed` to rotate the shop's TikTok token.
 
@@ -113,8 +111,8 @@ def _reactive_refresh(
     from tts_erp_v2.proxy.tiktok_auth import refresh_tiktok_token
 
     def _refresher(view: CredentialsView) -> dict:
-        if view.service_id != app_credentials.service_id:
-            raise AuthenticationError("TikTok authorization changed during refresh")
+        with session.begin():
+            app_credentials = resolve_tiktok_app_credentials_for_view(session, view)
         return refresh_tiktok_token(
             refresh_token=view.refresh_token or "",
             app_credentials=app_credentials,
@@ -222,10 +220,13 @@ def build_proxy_call(
                 # as GET (one attempt). Failure propagates as-is so the
                 # caller's run_with_sync_job marks the job 'failed'.
                 view = _require_refreshed_view(
-                    _reactive_refresh(session, shop_id, app_credentials),
+                    _reactive_refresh(session, shop_id),
                     shop_id=shop_id,
                 )
                 extra_params["shop_cipher"] = view.shop_cipher or ""
+                with session.begin():
+                    retry_app = resolve_tiktok_app_credentials_for_view(session, view)
+                client = _get_client(retry_app.app_key, retry_app.app_secret, api_host)
                 result = client.post(
                     path=path,
                     access_token=view.access_token,
@@ -253,10 +254,13 @@ def build_proxy_call(
                 )
             except AuthenticationError:
                 view = _require_refreshed_view(
-                    _reactive_refresh(session, shop_id, app_credentials),
+                    _reactive_refresh(session, shop_id),
                     shop_id=shop_id,
                 )
                 extra_params["shop_cipher"] = view.shop_cipher or ""
+                with session.begin():
+                    retry_app = resolve_tiktok_app_credentials_for_view(session, view)
+                client = _get_client(retry_app.app_key, retry_app.app_secret, api_host)
                 result = client.get(
                     path=path,
                     access_token=view.access_token,

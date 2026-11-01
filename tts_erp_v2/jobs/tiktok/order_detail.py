@@ -292,6 +292,7 @@ def run(
                 try:
                     line_fields = _parse_line_payload(order_id, raw_line)
                 except ParseError as e:
+                    rows_failed += 1
                     record_sync_issue(
                         session,
                         job_name=JOB_NAME,

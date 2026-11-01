@@ -296,7 +296,7 @@ def test_token_commit_failure_reaches_one_shot_exit_code(db_engine, monkeypatch)
     ],
 )
 def test_miaoshou_network_releases_shared_account_lock(
-    db_engine, module_name, entrypoint
+    db_engine, monkeypatch, module_name, entrypoint
 ):
     from sqlalchemy import text
 
@@ -334,7 +334,14 @@ def test_miaoshou_network_releases_shared_account_lock(
                 calls.append(kwargs)
                 return {"result": "success", "data": {}}
 
-        getattr(module, entrypoint)(session, client=Client(), license_id=name)
+        if module_name == "shops":
+            monkeypatch.setattr(
+                "tts_erp_v2.jobs.miaoshou._common.miaoshou_client_factory",
+                lambda ctx: Client(),
+            )
+            getattr(module, entrypoint)(session, license_id=name)
+        else:
+            getattr(module, entrypoint)(session, client=Client(), license_id=name)
         assert calls
         assert not session.in_transaction()
 
@@ -402,3 +409,145 @@ def test_image_download_and_upload_run_outside_transactions(db_engine):
         run(session, spu_pks=[spu_pk], downloader=download, minio=Store())
         assert calls == ["download", "upload"]
         assert not session.in_transaction()
+
+
+@pytest.mark.parametrize(
+    "kind", ["products", "after_sales", "logistics", "logistics_nonzero", "finance"]
+)
+def test_failed_required_child_cannot_be_skipped_by_later_success(
+    db_engine, monkeypatch, kind
+):
+    from tts_erp_v2.sync_worker import watermarks
+
+    module_name = "logistics" if kind == "logistics_nonzero" else kind
+    module = importlib.import_module(f"tts_erp_v2.jobs.tiktok.{module_name}")
+    name = f"TEST_CHILD_CURSOR_{kind}"
+    cursor_job = "tiktok.finance.statements" if kind == "finance" else module.JOB_NAME
+    with Session(db_engine, expire_on_commit=False) as session:
+        with session.begin():
+            account = ChannelAccount(platform="tiktok", shop_id=name)
+            session.add(account)
+            session.flush()
+            for suffix in ("bad", "good"):
+                session.add(SalesOrder(shop_pk=account.id, order_id=f"{name}_{suffix}"))
+            watermarks.set_cursor(
+                session, job_name=cursor_job, scope=name, cursor_epoch_ms=1000
+            )
+        if module_name == "logistics":
+            monkeypatch.setattr(
+                module,
+                "_select_tracking_targets",
+                lambda *a, **k: [
+                    {
+                        "order_id": f"{name}_{suffix}",
+                        "external_package_id": f"{name}_{suffix}",
+                        "tracking_number": name,
+                        "provider_id": None,
+                        "provider_name": None,
+                    }
+                    for suffix in ("bad", "good")
+                ],
+            )
+
+        def proxy(method, path, **kwargs):
+            assert not session.in_transaction()
+            if kind == "products":
+                return {
+                    "code": 0,
+                    "data": {
+                        "products": [
+                            {"id": f"{name}_bad", "update_time": 2, "skus": [{}]},
+                            {"id": f"{name}_good", "update_time": 3, "skus": []},
+                        ]
+                    },
+                }
+            if kind == "after_sales":
+                return (
+                    {
+                        "code": 0,
+                        "data": {
+                            "return_orders": [
+                                {
+                                    "id": f"{name}_bad",
+                                    "order_id": f"{name}_bad",
+                                    "update_time": 2,
+                                    "return_line_items": [{}],
+                                },
+                                {
+                                    "id": f"{name}_good",
+                                    "order_id": f"{name}_good",
+                                    "update_time": 3,
+                                },
+                            ]
+                        },
+                    }
+                    if path == module.RETURNS_ENDPOINT
+                    else {"code": 0, "data": {}}
+                )
+            if module_name == "logistics":
+                if path.endswith(f"{name}_bad/tracking") or f"{name}_bad" in path:
+                    return (
+                        {"code": 42, "message": "TEST_FETCH_FAILED"}
+                        if kind.endswith("nonzero")
+                        else {"code": 0, "data": {"tracking": [{}]}}
+                    )
+                return {
+                    "code": 0,
+                    "data": {
+                        "tracking": [
+                            {
+                                "description": "TEST_NEW_EVENT",
+                                "update_time_millis": 3000,
+                            }
+                        ]
+                    },
+                }
+            if path == module.PAYOUTS_ENDPOINT:
+                return {
+                    "code": 0,
+                    "data": {
+                        "payments": [
+                            {"payment_id": name, "currency": "USD", "create_time": 3}
+                        ]
+                    },
+                }
+            if path == module.STATEMENTS_ENDPOINT:
+                return {
+                    "code": 0,
+                    "data": {
+                        "statements": [
+                            {
+                                "id": f"{name}_bad",
+                                "payment_id": name,
+                                "statement_time": 2,
+                            },
+                            {
+                                "id": f"{name}_good",
+                                "payment_id": name,
+                                "statement_time": 3,
+                                "currency": "USD",
+                            },
+                        ]
+                    },
+                }
+            return {
+                "code": 0,
+                "data": {
+                    "statement_transactions": [
+                        {
+                            "transaction_id": f"{name}_bad_txn"
+                            if f"{name}_bad" in path
+                            else f"{name}_good_txn",
+                            "fee_amount": "1",
+                        }
+                    ]
+                },
+            }
+
+        kwargs = {"image_fetcher": lambda **kwargs: {}} if kind == "products" else {}
+        result = module.run(session, proxy_call=proxy, shop_id=name, **kwargs)
+        assert result.rows_failed > 0
+        with session.begin():
+            assert (
+                watermarks.get_cursor(session, job_name=cursor_job, scope=name) == 1000
+            )

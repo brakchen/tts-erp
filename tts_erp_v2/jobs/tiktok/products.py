@@ -392,6 +392,7 @@ def run(
                     sku_input = detail_match or raw_v
                     v_fields = _parse_variant(sku_input)
                 except ParseError as exc:
+                    rows_failed += 1
                     session.add(
                         SyncIssue(
                             job_name=JOB_NAME,

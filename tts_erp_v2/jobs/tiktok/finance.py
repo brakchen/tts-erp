@@ -471,7 +471,7 @@ def _store_raw(
 
 def _write_components(
     session, *, transaction_id: int, raw: dict, default_currency: str | None = None
-) -> int:
+) -> tuple[int, int]:
     """Write all present settlement_components rows. Returns count written.
 
     Explicit zeros are stored (2026-09-07, spu-roi-v7-refactor §3.5); only
@@ -483,7 +483,7 @@ def _write_components(
     ``db/models/finance.py``. ``source_order`` keeps the upstream field
     index for traceability.
     """
-    written = 0
+    written = failed = 0
     for source_order, col in enumerate(_COMPONENT_COLUMNS):
         amount = _to_decimal(raw.get(col))
         # 2026-09-07（spu-roi-v7-refactor §3.5）：显式 0 落库，仅缺失跳过
@@ -492,6 +492,7 @@ def _write_components(
         code = col.removesuffix("_amount").upper()
         currency = raw.get(f"{col}_currency") or raw.get("currency") or default_currency
         if not currency:
+            failed += 1
             # Without a currency we can't write a valid component row
             # (NOT NULL constraint). Surface as a sync_issue rather than
             # crashing the page.
@@ -523,7 +524,7 @@ def _write_components(
             )
         )
         written += 1
-    return written
+    return written, failed
 
 
 # ─── Sub-job: payouts ──────────────────────────────────────────────
@@ -715,12 +716,13 @@ def _persist_statement_transactions(
                 raw_record_id=raw_t_row.id,
             )
             if include_components:
-                _write_components(
+                _, component_failures = _write_components(
                     session,
                     transaction_id=txn_id,
                     raw=raw_t,
                     default_currency=currency,
                 )
+                failed += component_failures
 
     return failed
 

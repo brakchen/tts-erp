@@ -366,6 +366,7 @@ def run(
                 if resp.get("code") == 0:
                     raw_tracking = (resp.get("data") or {}).get("tracking") or []
                 else:
+                    failed += 1
                     with session.begin():
                         session.add(
                             SyncIssue(
@@ -379,6 +380,7 @@ def run(
                                 },
                             )
                         )
+                    continue
             except UpstreamJobError as e:
                 with session.begin():
                     session.add(
@@ -434,6 +436,7 @@ def run(
                 try:
                     e_fields = _parse_event(raw_e)
                 except ParseError as e:
+                    failed += 1
                     session.add(
                         SyncIssue(
                             job_name=JOB_NAME,

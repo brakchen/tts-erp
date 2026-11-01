@@ -367,6 +367,7 @@ def _process_one_type(
             ):
                 external_case_line_id, order_line_key = _resolve_case_line_key(raw_line)
                 if external_case_line_id is None:
+                    failed += 1
                     # Truly nothing usable on the line. Should be rare now
                     # that we accept sku_id as a last resort, but guard anyway.
                     record_sync_issue(
@@ -414,6 +415,7 @@ def _process_one_type(
                     lookup_path = "external_variant_id_snapshot"
                     lookup_value = raw_line.get("sku_id")
                 if sol_id is None:
+                    failed += 1
                     # The case's line references a sales_order_line that
                     # hasn't been synced yet — surface as a sync_issue and
                     # skip rather than crash the page.
