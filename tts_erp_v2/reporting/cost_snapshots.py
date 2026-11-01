@@ -91,6 +91,7 @@ def rebuild_snapshots(
     *,
     calculation_version: int,
     valid_from: datetime,
+    spu_pks: list[int] | None = None,
     source_cost_lookup=None,  # callable: spu_pk -> (Decimal|None, str|None)
 ) -> int:
     """Walk every active SPU, resolve unit cost, and write a snapshot.
@@ -101,7 +102,10 @@ def rebuild_snapshots(
     rows_written = 0
     spus = (
         session.execute(
-            select(ChannelProduct).where(ChannelProduct.status == ACTIVE_PRODUCT_STATUS)
+            select(ChannelProduct).where(
+                ChannelProduct.status == ACTIVE_PRODUCT_STATUS,
+                *([ChannelProduct.id.in_(spu_pks)] if spu_pks is not None else []),
+            )
         )
         .scalars()
         .all()

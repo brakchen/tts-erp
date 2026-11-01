@@ -194,17 +194,12 @@ def _parse_variant(raw: dict) -> dict:
     }
 
 
-def _build_default_image_fetcher(session: Session) -> ImageFetcher:
-    """Return a fetcher that calls TikTok Get Product via the signed proxy.
-
-    Production path for :func:`run`; the closure captures the session so
-    credential lookup happens per call (tokens refresh out-of-band).
-    """
-    from tts_erp_v2.proxy.tts_shop.products_api import get_product
-
+def _build_default_image_fetcher(proxy_call: ProxyCall) -> ImageFetcher:
     def fetch(*, shop_pk: int, product_id: str) -> dict:
-        return get_product(session=session, shop_pk=shop_pk, product_id=product_id)
-
+        response = proxy_call("GET", f"/product/202309/products/{product_id}")
+        if response.get("code") != 0 or not isinstance(response.get("data"), dict):
+            raise ImageFetchError("Get Product returned an invalid response")
+        return response["data"]
     return fetch
 
 
@@ -265,25 +260,27 @@ def run(
     from tts_erp_v2.sync_worker import watermarks
 
     cursor_scope = scope or shop_id
-    account = session.execute(
-        select(ChannelAccount).where(
-            ChannelAccount.platform == "tiktok",
-            ChannelAccount.shop_id == shop_id,
-        )
-    ).scalar_one_or_none()
-    if account is None:
-        raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+    with session.begin():
+        account = session.execute(
+            select(ChannelAccount).where(
+                ChannelAccount.platform == "tiktok",
+                ChannelAccount.shop_id == shop_id,
+            )
+        ).scalar_one_or_none()
+        if account is None:
+            raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+        account_id = account.id
 
-    # Default fetcher: signed Get Product call (production path).
-    # Tests inject their own ``image_fetcher`` to avoid hitting upstream.
-    if image_fetcher is None:
-        image_fetcher = _build_default_image_fetcher(session)
+        # Default fetcher: signed Get Product call (production path).
+        # Tests inject their own ``image_fetcher`` to avoid hitting upstream.
+        if image_fetcher is None:
+            image_fetcher = _build_default_image_fetcher(proxy_call)
 
-    watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
+        watermark_ms = watermarks.get_cursor(session, job_name=JOB_NAME, scope=cursor_scope)
 
-    base_body: dict[str, Any] = {"page_size": page_size}
-    if watermark_ms:
-        base_body["update_time_ge"] = _safe_int(watermark_ms) // 1000
+        base_body: dict[str, Any] = {"page_size": page_size}
+        if watermark_ms:
+            base_body["update_time_ge"] = _safe_int(watermark_ms) // 1000
 
     products = _walk_pages(proxy_call, base_body=base_body)
 
@@ -293,126 +290,137 @@ def run(
     max_update_ms: int | None = None
     rows_image_fetch_failed = 0
 
+    details: dict[str, dict] = {}
+    image_errors: dict[str, Exception] = {}
     for raw in products:
-        ext_product_id = str(raw.get("product_id") or raw.get("id") or "<unknown>")
+        product_id = str(raw.get("product_id") or raw.get("id") or "<unknown>")
         try:
-            p_fields = _parse_product(raw)
-        except ParseError as exc:
-            rows_failed += 1
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="PARSE_ERROR",
-                    external_id=ext_product_id,
-                    details={"error": str(exc)},
-                )
-            )
-            continue
+            details[product_id] = image_fetcher(shop_pk=account_id, product_id=product_id)
+        except Exception as exc:
+            image_errors[product_id] = exc
 
-        # Fetch full product for image URLs (search payload has none).
-        # A failure here is non-fatal — we still write the SPU row from
-        # search data and log an IMAGE_FETCH_ERROR SyncIssue.
-        full_product: dict | None = None
-        try:
-            full_product = image_fetcher(
-                shop_pk=account.id, product_id=p_fields["spu_id"]
-            )
-            fetched_url = _extract_main_image_url(full_product)
-            if fetched_url:
-                p_fields["main_image_url"] = fetched_url
-        except Exception as exc:  # noqa: BLE001 — boundary
-            rows_image_fetch_failed += 1
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="IMAGE_FETCH_ERROR",
-                    external_id=p_fields["spu_id"],
-                    details={
-                        "error": str(exc),
-                        "type": type(exc).__name__,
-                    },
-                )
-            )
-            full_product = None
-
-        raw_row = RawRecord(
-            endpoint=ENDPOINT,
-            external_id=p_fields["spu_id"],
-            payload=raw,
-        )
-        session.add(raw_row)
-        session.flush()
-        cp_id = _upsert_product(
-            session,
-            account_id=account.id,
-            fields=p_fields,
-            raw_record_id=raw_row.id,
-        )
-
-        # Variants: prefer the detail payload's SKUs (which carry
-        # sales_attributes[].sku_img) and fall back to the search list
-        # when the detail fetch failed.
-        search_skus = raw.get("skus") or raw.get("variants") or []
-        detail_skus = (
-            (full_product or {}).get("skus") if isinstance(full_product, dict) else None
-        )
-        # Match by variant ID; if detail didn't carry a particular SKU,
-        # we still write it from search data (no image in that case).
-        detail_by_id: dict[str, dict] = {}
-        if isinstance(detail_skus, list):
-            for fs in detail_skus:
-                if isinstance(fs, dict) and fs.get("id") is not None:
-                    detail_by_id[str(fs["id"])] = fs
-        for raw_v in search_skus:
+    for raw in products:
+        with session.begin():
+            ext_product_id = str(raw.get("product_id") or raw.get("id") or "<unknown>")
             try:
-                # Prefer detail payload (has sales_attributes); fall back
-                # to search payload (id/seller_sku/sku_name only).
-                detail_match = None
-                if isinstance(raw_v, dict) and raw_v.get("id") is not None:
-                    detail_match = detail_by_id.get(str(raw_v["id"]))
-                sku_input = detail_match or raw_v
-                v_fields = _parse_variant(sku_input)
+                p_fields = _parse_product(raw)
             except ParseError as exc:
+                rows_failed += 1
                 session.add(
                     SyncIssue(
                         job_name=JOB_NAME,
                         issue_type="PARSE_ERROR",
-                        external_id=f"{p_fields['spu_id']}:<sku>",
+                        external_id=ext_product_id,
                         details={"error": str(exc)},
                     )
                 )
                 continue
-            _upsert_variant(
+
+            # Fetch full product for image URLs (search payload has none).
+            # A failure here is non-fatal — we still write the SPU row from
+            # search data and log an IMAGE_FETCH_ERROR SyncIssue.
+            full_product: dict | None = None
+            try:
+                if ext_product_id in image_errors:
+                    raise image_errors[ext_product_id]
+                full_product = details[ext_product_id]
+                fetched_url = _extract_main_image_url(full_product)
+                if fetched_url:
+                    p_fields["main_image_url"] = fetched_url
+            except Exception as exc:  # noqa: BLE001 — boundary
+                rows_image_fetch_failed += 1
+                session.add(
+                    SyncIssue(
+                        job_name=JOB_NAME,
+                        issue_type="IMAGE_FETCH_ERROR",
+                        external_id=p_fields["spu_id"],
+                        details={
+                            "error": str(exc),
+                            "type": type(exc).__name__,
+                        },
+                    )
+                )
+                full_product = None
+
+            raw_row = RawRecord(
+                endpoint=ENDPOINT,
+                external_id=p_fields["spu_id"],
+                payload=raw,
+            )
+            session.add(raw_row)
+            session.flush()
+            cp_id = _upsert_product(
                 session,
-                spu_pk=cp_id,
-                fields=v_fields,
+                account_id=account_id,
+                fields=p_fields,
                 raw_record_id=raw_row.id,
             )
 
-        rows_inserted += 1
-        update_ms = p_fields.get("source_updated_at") and _safe_int(
-            p_fields["source_updated_at"].timestamp() * 1000
-        )
-        if update_ms and (max_update_ms is None or update_ms > max_update_ms):
-            max_update_ms = update_ms
+            # Variants: prefer the detail payload's SKUs (which carry
+            # sales_attributes[].sku_img) and fall back to the search list
+            # when the detail fetch failed.
+            search_skus = raw.get("skus") or raw.get("variants") or []
+            detail_skus = (
+                (full_product or {}).get("skus") if isinstance(full_product, dict) else None
+            )
+            # Match by variant ID; if detail didn't carry a particular SKU,
+            # we still write it from search data (no image in that case).
+            detail_by_id: dict[str, dict] = {}
+            if isinstance(detail_skus, list):
+                for fs in detail_skus:
+                    if isinstance(fs, dict) and fs.get("id") is not None:
+                        detail_by_id[str(fs["id"])] = fs
+            for raw_v in search_skus:
+                try:
+                    # Prefer detail payload (has sales_attributes); fall back
+                    # to search payload (id/seller_sku/sku_name only).
+                    detail_match = None
+                    if isinstance(raw_v, dict) and raw_v.get("id") is not None:
+                        detail_match = detail_by_id.get(str(raw_v["id"]))
+                    sku_input = detail_match or raw_v
+                    v_fields = _parse_variant(sku_input)
+                except ParseError as exc:
+                    session.add(
+                        SyncIssue(
+                            job_name=JOB_NAME,
+                            issue_type="PARSE_ERROR",
+                            external_id=f"{p_fields['spu_id']}:<sku>",
+                            details={"error": str(exc)},
+                        )
+                    )
+                    continue
+                _upsert_variant(
+                    session,
+                    spu_pk=cp_id,
+                    fields=v_fields,
+                    raw_record_id=raw_row.id,
+                )
+
+            rows_inserted += 1
+            update_ms = p_fields.get("source_updated_at") and _safe_int(
+                p_fields["source_updated_at"].timestamp() * 1000
+            )
+            if update_ms and (max_update_ms is None or update_ms > max_update_ms):
+                max_update_ms = update_ms
 
     # 2026-09-06:订单行若先于产品目录落地(spu_pk NULL),产品同步完
     # 成后回填补关联(幂等;只碰 NULL 行)。根因与收敛路径见 spu_link 模块。
-    linked = spu_link.backfill_null_line_spu_pk(session, shop_pk=account.id)
-    if linked:
-        sys.stderr.write(f"[tiktok.products] linked {linked} order lines to SPUs\n")
+    with session.begin():
+        linked = spu_link.backfill_null_line_spu_pk(session, shop_pk=account_id)
+        if linked:
+            sys.stderr.write(f"[tiktok.products] linked {linked} order lines to SPUs\n")
 
-    new_cursor_ms: int | None = None
-    if max_update_ms is not None and (
-        watermark_ms is None or max_update_ms > _safe_int(watermark_ms)
-    ):
-        watermarks.set_cursor(
-            session,
-            job_name=JOB_NAME,
-            scope=cursor_scope,
-            cursor_epoch_ms=max_update_ms,
-        )
-        new_cursor_ms = max_update_ms
+        new_cursor_ms: int | None = None
+        if max_update_ms is not None and (
+            watermark_ms is None or max_update_ms > _safe_int(watermark_ms)
+        ):
+            watermarks.set_cursor(
+                session,
+                job_name=JOB_NAME,
+                scope=cursor_scope,
+                cursor_epoch_ms=max_update_ms,
+            )
+            new_cursor_ms = max_update_ms
 
     return JobResult(
         rows_total=rows_total,

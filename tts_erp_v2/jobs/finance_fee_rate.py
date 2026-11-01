@@ -210,96 +210,98 @@ def compute_shop_fee_rates(
     window_start = now - timedelta(days=lookback_days)
     calculated_on: date = now.date()
 
-    rows = (
-        session.execute(
-            _SQL_SHOP_FEE_RATE,
-            {
-                "window_start": window_start,
-                "window_end": window_end,
-                "shop_pks": list(shop_pks) if shop_pks is not None else None,
-            },
-        )
-        .mappings()
-        .all()
-    )
-
-    upserted = 0
-    skipped = 0
-    skipped_reasons: dict[str, int] = {}
-
-    def _skip(shop_pk: int, reason: str, **fields: Any) -> None:
-        nonlocal skipped
-        skipped += 1
-        skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
-        log.warning(
-            "[%s] shop_pk=%s skipped (%s) %s", JOB_NAME, shop_pk, reason, fields
-        )
-
-    for row in rows:
-        # 这些值来自 SQL 聚合，psycopg 直接返回 Python int/Decimal；原先套的
-        # ``int()`` 纯属多余类型转换，去掉后又刚好避开 pi-lens 的
-        # ``unchecked-throwing-call-python``（它匹配任何裸 int()/float()）。
-        shop_pk = row["shop_pk"]
-        kept_count = row["kept_order_count"] or 0
-        kept_gmv = Decimal(row["kept_line_gmv"] or 0)
-        window_gmv = Decimal(row["window_line_gmv"] or 0)
-        fee_total = Decimal(row["total_fee"] or 0)
-        currency = row["currency"]
-        currency_count = row["fee_currency_count"] or 0
-        max_order_currency_count = row["max_order_fee_currency_count"] or 0
-
-        if currency is None or kept_gmv <= 0:
-            _skip(shop_pk, "no_kept_orders")
-            continue
-        if currency_count > 1 or max_order_currency_count > 1:
-            # 同店跨订单、同一订单跨交易的混币种都不可相加。
-            _skip(
-                shop_pk,
-                "mixed_fee_currency",
-                currency_count=currency_count,
-                max_order_currency_count=max_order_currency_count,
+    with session.begin():
+        rows = (
+            with session.begin():
+            session.execute(
+                    _SQL_SHOP_FEE_RATE,
+                    {
+                        "window_start": window_start,
+                        "window_end": window_end,
+                        "shop_pks": list(shop_pks) if shop_pks is not None else None,
+                    },
+                )
+                .mappings()
+                .all()
             )
-            continue
-        if kept_count < MIN_ELIGIBLE_ORDER_COUNT:
-            _skip(
-                shop_pk,
-                "insufficient_sample",
-                kept_order_count=kept_count,
-                required=MIN_ELIGIBLE_ORDER_COUNT,
+
+        upserted = 0
+        skipped = 0
+        skipped_reasons: dict[str, int] = {}
+
+        def _skip(shop_pk: int, reason: str, **fields: Any) -> None:
+            nonlocal skipped
+            skipped += 1
+            skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
+            log.warning(
+                "[%s] shop_pk=%s skipped (%s) %s", JOB_NAME, shop_pk, reason, fields
             )
-            continue
 
-        # kept_share 只记录、不阻断。余量 = 退款订单 + 缺 FEE 分项的订单。
-        kept_share = (
-            _q(kept_gmv / window_gmv, _RATE_Q) if window_gmv > 0 else Decimal(0)
-        )
+        for row in rows:
+            # 这些值来自 SQL 聚合，psycopg 直接返回 Python int/Decimal；原先套的
+            # ``int()`` 纯属多余类型转换，去掉后又刚好避开 pi-lens 的
+            # ``unchecked-throwing-call-python``（它匹配任何裸 int()/float()）。
+            shop_pk = row["shop_pk"]
+            kept_count = row["kept_order_count"] or 0
+            kept_gmv = Decimal(row["kept_line_gmv"] or 0)
+            window_gmv = Decimal(row["window_line_gmv"] or 0)
+            fee_total = Decimal(row["total_fee"] or 0)
+            currency = row["currency"]
+            currency_count = row["fee_currency_count"] or 0
+            max_order_currency_count = row["max_order_fee_currency_count"] or 0
 
-        rate = _q(fee_total / kept_gmv, _RATE_Q)
-        if not (RATE_MIN <= rate <= RATE_MAX):
-            _skip(
-                shop_pk,
-                "rate_out_of_range",
-                rate=str(rate),
-                bounds=f"[{RATE_MIN}, {RATE_MAX}]",
+            if currency is None or kept_gmv <= 0:
+                _skip(shop_pk, "no_kept_orders")
+                continue
+            if currency_count > 1 or max_order_currency_count > 1:
+                # 同店跨订单、同一订单跨交易的混币种都不可相加。
+                _skip(
+                    shop_pk,
+                    "mixed_fee_currency",
+                    currency_count=currency_count,
+                    max_order_currency_count=max_order_currency_count,
+                )
+                continue
+            if kept_count < MIN_ELIGIBLE_ORDER_COUNT:
+                _skip(
+                    shop_pk,
+                    "insufficient_sample",
+                    kept_order_count=kept_count,
+                    required=MIN_ELIGIBLE_ORDER_COUNT,
+                )
+                continue
+
+            # kept_share 只记录、不阻断。余量 = 退款订单 + 缺 FEE 分项的订单。
+            kept_share = (
+                _q(kept_gmv / window_gmv, _RATE_Q) if window_gmv > 0 else Decimal(0)
             )
-            continue
 
-        session.execute(
-            _SQL_UPSERT,
-            {
-                "shop_pk": shop_pk,
-                "calculated_on": calculated_on,
-                "lookback_days": lookback_days,
-                "fee_rate": rate,
-                "kept_order_count": kept_count,
-                "kept_line_gmv": _q(kept_gmv, _AMOUNT_Q),
-                "window_line_gmv": _q(window_gmv, _AMOUNT_Q),
-                "kept_share": kept_share,
-                "total_fee": _q(fee_total, _AMOUNT_Q),
-                "currency": currency,
-                "calculation_version": CALCULATION_VERSION,
-            },
-        )
+            rate = _q(fee_total / kept_gmv, _RATE_Q)
+            if not (RATE_MIN <= rate <= RATE_MAX):
+                _skip(
+                    shop_pk,
+                    "rate_out_of_range",
+                    rate=str(rate),
+                    bounds=f"[{RATE_MIN}, {RATE_MAX}]",
+                )
+                continue
+
+            session.execute(
+                _SQL_UPSERT,
+                {
+                    "shop_pk": shop_pk,
+                    "calculated_on": calculated_on,
+                    "lookback_days": lookback_days,
+                    "fee_rate": rate,
+                    "kept_order_count": kept_count,
+                    "kept_line_gmv": _q(kept_gmv, _AMOUNT_Q),
+                    "window_line_gmv": _q(window_gmv, _AMOUNT_Q),
+                    "kept_share": kept_share,
+                    "total_fee": _q(fee_total, _AMOUNT_Q),
+                    "currency": currency,
+                    "calculation_version": CALCULATION_VERSION,
+                },
+            )
         upserted += 1
 
     return {

@@ -417,8 +417,14 @@ def _run_tiktok_job(
         log.info("[%s] no authorised TikTok shops — skipping tick", spec.job_name)
         return
 
+    failures = []
     for shop_id in shop_ids:
-        _run_tiktok_job_for_shop(spec, session_factory, shop_id=shop_id, mod=mod)
+        try:
+            _run_tiktok_job_for_shop(spec, session_factory, shop_id=shop_id, mod=mod)
+        except Exception:
+            failures.append(shop_id)
+    if failures:
+        raise RuntimeError(f"{spec.job_name}: {len(failures)} shop runs failed")
 
 
 def _run_tiktok_job_for_shop(
@@ -435,48 +441,31 @@ def _run_tiktok_job_for_shop(
     if mod is None:
         mod = importlib.import_module(spec.module_path)
     for attempt in range(2):
-        session = session_factory()
         try:
-            proxy_call = build_proxy_call(session, shop_id=shop_id)
-            _row, result = run_with_sync_job(
-                session,
-                job_name=spec.job_name,
-                # shop_id lives in extra so /v2/sync/freshness can show this
-                # shop's last success without a schema change. Historical
-                # rows predate the field and fall back to sync_cursors.
-                extra={"shop_id": shop_id},
-                inner=mod.run,
-                inner_kwargs={
-                    "proxy_call": proxy_call,
-                    "shop_id": shop_id,
-                },
-            )
+            with session_factory() as session:
+                def inner(business_session: Session) -> object:
+                    proxy_call = build_proxy_call(business_session, shop_id=shop_id)
+                    return mod.run(business_session, proxy_call=proxy_call, shop_id=shop_id)
+
+                _row, result = run_with_sync_job(
+                    session,
+                    job_name=spec.job_name,
+                    extra={"shop_id": shop_id},
+                    inner=inner,
+                )
             log.info(
                 "[%s] shop=%s ok total=%d inserted=%d failed=%d",
-                spec.job_name,
-                shop_id,
-                result.rows_total,
-                result.rows_inserted,
-                result.rows_failed,
+                spec.job_name, shop_id, result.rows_total,
+                result.rows_inserted, result.rows_failed,
             )
-            break  # success → exit retry loop
+            return
         except Exception:
-            if attempt == 0:
-                log.warning(
-                    "[%s] shop=%s first attempt failed; retrying in 5s",
-                    spec.job_name,
-                    shop_id,
-                    exc_info=True,
-                )
-                time.sleep(5)
-            else:
-                log.exception(
-                    "[%s] shop=%s giving up after 2 attempts",
-                    spec.job_name,
-                    shop_id,
-                )
-        finally:
-            session.close()
+            if attempt:
+                log.exception("[%s] shop=%s giving up after 2 attempts", spec.job_name, shop_id)
+                raise
+            log.warning("[%s] shop=%s retrying in 5s", spec.job_name, shop_id, exc_info=True)
+        # The failed session/transaction is closed BEFORE backoff.
+        time.sleep(5)
 
 
 def _run_system_job(
@@ -504,33 +493,16 @@ def _run_system_job(
 
         kwargs["registry"] = build_token_registry(session_factory=session_factory)
 
-    session = session_factory()
     try:
-        entrypoint = getattr(mod, spec.entrypoint)
-        result = entrypoint(session, **kwargs)
-        try:
-            session.commit()
-        except Exception:
-            log.exception("[%s] commit() failed after successful run", spec.job_name)
-            session.rollback()
+        with session_factory() as session:
+            entrypoint = getattr(mod, spec.entrypoint)
+            result = entrypoint(session, **kwargs)
+            if isinstance(result, dict) and result.get("status") == "failed":
+                raise RuntimeError(f"{spec.job_name}: job reported failure")
         log.info("[%s] ok result=%s", spec.job_name, result)
-    except Exception as exc:
-        # The exception fired BEFORE the sync_jobs row was committed
-        # (or DURING the commit). Roll back the inner transaction
-        # first, then write a sentinel 'failed' sync_jobs row in a
-        # NEW transaction so operators still see the tick happened.
-        try:
-            session.rollback()
-        except Exception:
-            log.exception("[%s] rollback during error path failed", spec.job_name)
-        _record_failed_tick(
-            session_factory,
-            spec,
-            f"tick raised: {type(exc).__name__}: {exc}",
-        )
+    except Exception:
         log.exception("[%s] tick failed", spec.job_name)
-    finally:
-        session.close()
+        raise
 
 
 def _enumerate_tiktok_shops_in_factory(
@@ -560,26 +532,14 @@ def _record_failed_tick(
     """
     from tts_erp_v2.db.models.integration import SyncJob as _SyncJob
 
-    session = session_factory()
-    try:
-        row = _SyncJob(
+    with session_factory() as session, session.begin():
+        session.add(_SyncJob(
             job_name=spec.job_name,
             status="failed",
             started_at=datetime.now(UTC),
             finished_at=datetime.now(UTC),
             error_message=reason[:2000],
-        )
-        session.add(row)
-        session.commit()
-    except Exception:
-        log.exception(
-            "[%s] could not write sentinel failed sync_jobs row",
-            spec.job_name,
-        )
-        with suppress(Exception):
-            session.rollback()
-    finally:
-        session.close()
+        ))
 
 
 def _scheduled_child_command(job_name: str) -> list[str]:

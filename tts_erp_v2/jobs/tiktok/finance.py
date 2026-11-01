@@ -533,23 +533,24 @@ def _sync_payouts(
     session: Session,
     *,
     proxy_call: ProxyCall,
-    account: ChannelAccount,
+    account_id: int,
     scope: str,
     page_size: int,
 ) -> JobResult:
     """Pull payouts under cursor ``tiktok.finance.payouts``."""
     from tts_erp_v2.sync_worker import watermarks
 
-    watermark_raw = watermarks.get_cursor(
-        session, job_name=PAYOUTS_JOB_NAME, scope=scope
-    )
-    # The payouts sub-job always writes an epoch_ms int (see set_cursor
-    # call below), but get_cursor's return type is int|str|None to
-    # accommodate the logistics token-cursor. Narrow to int up-front.
-    watermark_ms: int | None = watermark_raw if isinstance(watermark_raw, int) else None
-    base_body: dict[str, Any] = {"page_size": page_size}
-    if watermark_ms:
-        base_body["update_time_ge"] = watermark_ms // 1000
+    with session.begin():
+        watermark_raw = watermarks.get_cursor(
+            session, job_name=PAYOUTS_JOB_NAME, scope=scope
+        )
+        # The payouts sub-job always writes an epoch_ms int (see set_cursor
+        # call below), but get_cursor's return type is int|str|None to
+        # accommodate the logistics token-cursor. Narrow to int up-front.
+        watermark_ms: int | None = watermark_raw if isinstance(watermark_raw, int) else None
+        base_body: dict[str, Any] = {"page_size": page_size}
+        if watermark_ms:
+            base_body["update_time_ge"] = watermark_ms // 1000
 
     # Walk the payouts pages. Upstream failures propagate (no silent
     # swallow) so run_with_sync_job marks the tick 'failed' and the
@@ -567,58 +568,60 @@ def _sync_payouts(
     max_cursor_ms: int | None = watermark_ms
 
     for raw_p in raw_payouts:
-        total += 1
-        ext_payout_id = str(raw_p.get("payment_id") or raw_p.get("id") or "<unknown>")
-        try:
-            p_fields = _parse_payout(raw_p)
-        except ParseError as exc:
-            failed += 1
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="PARSE_ERROR",
-                    external_id=ext_payout_id,
-                    details={"error": str(exc), "section": "payouts"},
+        with session.begin():
+            total += 1
+            ext_payout_id = str(raw_p.get("payment_id") or raw_p.get("id") or "<unknown>")
+            try:
+                p_fields = _parse_payout(raw_p)
+            except ParseError as exc:
+                failed += 1
+                session.add(
+                    SyncIssue(
+                        job_name=JOB_NAME,
+                        issue_type="PARSE_ERROR",
+                        external_id=ext_payout_id,
+                        details={"error": str(exc), "section": "payouts"},
+                    )
                 )
+                continue
+
+            raw_row = _store_raw(
+                session,
+                endpoint=PAYOUTS_ENDPOINT,
+                external_id=p_fields["external_payout_id"],
+                payload=raw_p,
             )
-            continue
+            _upsert_payout(
+                session,
+                account_id=account_id,
+                fields=p_fields,
+                raw_record_id=raw_row.id,
+            )
 
-        raw_row = _store_raw(
-            session,
-            endpoint=PAYOUTS_ENDPOINT,
-            external_id=p_fields["external_payout_id"],
-            payload=raw_p,
-        )
-        _upsert_payout(
-            session,
-            account_id=account.id,
-            fields=p_fields,
-            raw_record_id=raw_row.id,
-        )
+            inserted += 1
+            # Live 202309 /payments payloads carry NO ``update_time`` (audit
+            # 2026-09-06) → source_updated_at is always None and the watermark
+            # never advanced, so every tick re-pulled ALL payments from epoch
+            # (idempotent, but raw_records grew a duplicate per tick). Payments
+            # are created once and never change after PAID, so fall back to
+            # ``create_time`` as the cursor source; once a cursor exists the
+            # sub-job sends ``update_time_ge`` exactly as before.
+            cursor_time = p_fields["source_updated_at"] or p_fields["source_created_at"]
+            if cursor_time is not None:
+                cursor_ms = _safe_int(cursor_time.timestamp() * 1000)
+                if cursor_ms and (max_cursor_ms is None or cursor_ms > max_cursor_ms):
+                    max_cursor_ms = cursor_ms
 
-        inserted += 1
-        # Live 202309 /payments payloads carry NO ``update_time`` (audit
-        # 2026-09-06) → source_updated_at is always None and the watermark
-        # never advanced, so every tick re-pulled ALL payments from epoch
-        # (idempotent, but raw_records grew a duplicate per tick). Payments
-        # are created once and never change after PAID, so fall back to
-        # ``create_time`` as the cursor source; once a cursor exists the
-        # sub-job sends ``update_time_ge`` exactly as before.
-        cursor_time = p_fields["source_updated_at"] or p_fields["source_created_at"]
-        if cursor_time is not None:
-            cursor_ms = _safe_int(cursor_time.timestamp() * 1000)
-            if cursor_ms and (max_cursor_ms is None or cursor_ms > max_cursor_ms):
-                max_cursor_ms = cursor_ms
-
-    if max_cursor_ms is not None and (
-        watermark_ms is None or max_cursor_ms > watermark_ms
-    ):
-        watermarks.set_cursor(
-            session,
-            job_name=PAYOUTS_JOB_NAME,
-            scope=scope,
-            cursor_epoch_ms=max_cursor_ms,
-        )
+    with session.begin():
+        if max_cursor_ms is not None and (
+            watermark_ms is None or max_cursor_ms > watermark_ms
+        ):
+            watermarks.set_cursor(
+                session,
+                job_name=PAYOUTS_JOB_NAME,
+                scope=scope,
+                cursor_epoch_ms=max_cursor_ms,
+            )
 
     return JobResult(
         rows_total=total,
@@ -631,240 +634,14 @@ def _sync_payouts(
 # ─── Sub-job: statements (top-level, not nested in payouts loop) ───
 
 
-def _sync_statements(
-    session: Session,
-    *,
-    proxy_call: ProxyCall,
-    account: ChannelAccount,
-    scope: str,
-    page_size: int,
-) -> JobResult:
-    """Pull statements + their transactions under ``tiktok.finance.statements``.
-
-    The statements cursor advances independently of the payouts cursor —
-    this is the fix for the late-statement problem: a payout that has
-    settled and stopped bumping ``update_time`` can still receive a
-    late statement, and we still want to pick it up next tick.
-    """
-    from tts_erp_v2.sync_worker import watermarks
-
-    watermark_raw = watermarks.get_cursor(
-        session, job_name=STATEMENTS_JOB_NAME, scope=scope
-    )
-    watermark_ms: int | None = watermark_raw if isinstance(watermark_raw, int) else None
-    base_body: dict[str, Any] = {"page_size": page_size}
-    if watermark_ms:
-        # TikTok 202309 statement filter is `statement_time_ge` (seconds).
-        base_body["statement_time_ge"] = watermark_ms // 1000
-
-    # Walk the statements pages. Upstream failures propagate (no silent
-    # swallow) so run_with_sync_job marks the tick 'failed' and the
-    # watermark stays put.
-    raw_statements = _walk_pages(
-        proxy_call,
-        endpoint=STATEMENTS_ENDPOINT,
-        base_body=base_body,
-        items_key="statements",
-    )
-
-    total = 0
-    inserted = 0
+def _persist_statement_transactions(
+    session: Session, *, raw_txns: list[dict], account_id: int,
+    stmt_id: int, external_statement_id: str, currency: str | None,
+    include_components: bool,
+) -> int:
     failed = 0
-    # Track max statement_time ONLY for successfully-resolved statements.
-    # Statements we skip (missing payment_id, unresolved payout, parse
-    # error) MUST NOT advance the cursor past them — the next tick will
-    # re-fetch and try again.
-    max_statement_ms: int | None = watermark_ms
-
-    for raw_s in raw_statements:
-        total += 1
-        ext_stmt_id = str(raw_s.get("id") or raw_s.get("statement_id") or "<unknown>")
-
-        # Step 1: resolve owning payout via upstream ``payment_id``.
-        # Production evidence (audit 2026-08-31): 29/45 statements carry
-        # ``payment_id``; the other 16 don't (TikTok dropped it from
-        # earlier payloads). We MUST NOT silently attach — the FK would
-        # be wrong, and we'd lose the chance to back-fill later.
-        # V3 §14.3（2026-09-28）：payment_id 缺失时 statement 以
-        # payout_id=NULL 入库 + transactions 照抓（之前是“干胶 statement
-        # + transactions”被跳过）。sync_issue 仍然记（人工可追），但不
-        # 阻断数据入库。transaction 抓取后续跑逐行 _upsert_transaction
-        # 路径同主流程 §Step 3。
-        payment_id = raw_s.get("payment_id")
-        if not payment_id:
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="STATEMENT_PAYMENT_ID_MISSING",
-                    external_id=ext_stmt_id,
-                    details={
-                        "section": "statements",
-                        "reason": "payment_id missing in payload",
-                    },
-                )
-            )
-            try:
-                s_fields = _parse_statement(raw_s, payout_id=None)
-            except ParseError as exc:
-                failed += 1
-                session.add(
-                    SyncIssue(
-                        job_name=JOB_NAME,
-                        issue_type="PARSE_ERROR",
-                        external_id=ext_stmt_id,
-                        details={"error": str(exc), "section": "statements"},
-                    )
-                )
-                continue
-            raw_s_row = _store_raw(
-                session,
-                endpoint=STATEMENTS_ENDPOINT,
-                external_id=s_fields["external_statement_id"],
-                payload=raw_s,
-            )
-            stmt_id = _upsert_statement(
-                session,
-                fields=s_fields,
-                raw_record_id=raw_s_row.id,
-            )
-            # watermark 推进：statement 本身入库了，可以推进。
-            if s_fields["statement_time"] is not None:
-                stime_ms = _safe_int(s_fields["statement_time"].timestamp() * 1000)
-                if stime_ms and (
-                    max_statement_ms is None or stime_ms > max_statement_ms
-                ):
-                    max_statement_ms = stime_ms
-            # Step 3（import 同主流程）：抓 transactions。
-            raw_txns = _walk_pages(
-                proxy_call,
-                endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
-                    statement_id=s_fields["external_statement_id"]
-                ),
-                base_body={"page_size": page_size},
-                items_key="statement_transactions",
-            )
-            for raw_t in raw_txns:
-                ext_txn_id = str(
-                    raw_t.get("transaction_id") or raw_t.get("id") or "<unknown>"
-                )
-                try:
-                    t_fields = _parse_transaction(raw_t)
-                except ParseError as exc:
-                    failed += 1
-                    session.add(
-                        SyncIssue(
-                            job_name=JOB_NAME,
-                            issue_type="PARSE_ERROR",
-                            external_id=ext_txn_id,
-                            details={
-                                "error": str(exc),
-                                "section": "transactions",
-                            },
-                        )
-                    )
-                    continue
-                order_id_ext = raw_t.get("order_id")
-                if order_id_ext:
-                    order_pk = session.execute(
-                        select(SalesOrder.id).where(
-                            SalesOrder.shop_pk == account.id,
-                            SalesOrder.order_id == str(order_id_ext),
-                        )
-                    ).scalar_one_or_none()
-                    t_fields["order_pk"] = order_pk
-                    if order_pk is None:
-                        failed += 1
-                        session.add(
-                            SyncIssue(
-                                job_name=JOB_NAME,
-                                issue_type="TXN_ORDER_NOT_FOUND",
-                                external_id=ext_txn_id,
-                                details={
-                                    "section": "transactions",
-                                    "order_id": str(order_id_ext),
-                                },
-                            )
-                        )
-                raw_t_row = _store_raw(
-                    session,
-                    endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
-                        statement_id=s_fields["external_statement_id"]
-                    ),
-                    external_id=t_fields["external_transaction_id"],
-                    payload=raw_t,
-                )
-                _upsert_transaction(
-                    session,
-                    stmt_id=stmt_id,
-                    fields=t_fields,
-                    raw_record_id=raw_t_row.id,
-                )
-            inserted += 1
-            continue
-
-        payout_row = session.execute(
-            select(Payout).where(
-                Payout.shop_pk == account.id,
-                Payout.external_payout_id == str(payment_id),
-            )
-        ).scalar_one_or_none()
-        if payout_row is None:
-            failed += 1
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="STATEMENT_PAYOUT_UNRESOLVED",
-                    external_id=ext_stmt_id,
-                    details={
-                        "section": "statements",
-                        "reason": "no payouts row for payment_id",
-                        "payment_id": str(payment_id),
-                    },
-                )
-            )
-            continue
-
-        # Step 2: parse the statement itself.
-        try:
-            s_fields = _parse_statement(raw_s, payout_id=payout_row.id)
-        except ParseError as exc:
-            failed += 1
-            session.add(
-                SyncIssue(
-                    job_name=JOB_NAME,
-                    issue_type="PARSE_ERROR",
-                    external_id=ext_stmt_id,
-                    details={"error": str(exc), "section": "statements"},
-                )
-            )
-            continue
-
-        raw_s_row = _store_raw(
-            session,
-            endpoint=STATEMENTS_ENDPOINT,
-            external_id=s_fields["external_statement_id"],
-            payload=raw_s,
-        )
-        stmt_id = _upsert_statement(
-            session,
-            fields=s_fields,
-            raw_record_id=raw_s_row.id,
-        )
-
-        # Step 3: pull transactions for this statement. Upstream failures
-        # propagate (no silent swallow) — pre-refactor this was
-        # ``except UpstreamJobError: raw_txns=[]`` which masked
-        # intermittent 5xx as empty transactions (silent data loss).
-        raw_txns = _walk_pages(
-            proxy_call,
-            endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
-                statement_id=s_fields["external_statement_id"]
-            ),
-            base_body={"page_size": page_size},
-            items_key="statement_transactions",
-        )
-
-        for raw_t in raw_txns:
+    for raw_t in raw_txns:
+        with session.begin():
             ext_txn_id = str(
                 raw_t.get("transaction_id") or raw_t.get("id") or "<unknown>"
             )
@@ -893,7 +670,7 @@ def _sync_statements(
             if order_id_ext:
                 order_pk = session.execute(
                     select(SalesOrder.id).where(
-                        SalesOrder.shop_pk == account.id,
+                        SalesOrder.shop_pk == account_id,
                         SalesOrder.order_id == str(order_id_ext),
                     )
                 ).scalar_one_or_none()
@@ -915,7 +692,7 @@ def _sync_statements(
             raw_t_row = _store_raw(
                 session,
                 endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(
-                    statement_id=s_fields["external_statement_id"]
+                    statement_id=external_statement_id
                 ),
                 external_id=t_fields["external_transaction_id"],
                 payload=raw_t,
@@ -926,36 +703,93 @@ def _sync_statements(
                 fields=t_fields,
                 raw_record_id=raw_t_row.id,
             )
-            _write_components(
-                session,
-                transaction_id=txn_id,
-                raw=raw_t,
-                default_currency=s_fields.get("currency"),
-            )
+            if include_components:
+                _write_components(
+                    session,
+                    transaction_id=txn_id,
+                    raw=raw_t,
+                    default_currency=currency,
+                )
 
-        # Only advance the cursor past statements we successfully ingested.
-        inserted += 1
-        if s_fields["statement_time"] is not None:
-            stime_ms = _safe_int(s_fields["statement_time"].timestamp() * 1000)
-            if stime_ms and (max_statement_ms is None or stime_ms > max_statement_ms):
-                max_statement_ms = stime_ms
+    return failed
 
-    if max_statement_ms is not None and (
-        watermark_ms is None or max_statement_ms > watermark_ms
-    ):
-        watermarks.set_cursor(
-            session,
-            job_name=STATEMENTS_JOB_NAME,
-            scope=scope,
-            cursor_epoch_ms=max_statement_ms,
+
+def _sync_statements(
+    session: Session, *, proxy_call: ProxyCall, account_id: int,
+    scope: str, page_size: int,
+) -> JobResult:
+    from tts_erp_v2.sync_worker import watermarks
+
+    with session.begin():
+        watermark_raw = watermarks.get_cursor(session, job_name=STATEMENTS_JOB_NAME, scope=scope)
+    watermark_ms = watermark_raw if isinstance(watermark_raw, int) else None
+    body: dict[str, Any] = {"page_size": page_size}
+    if watermark_ms:
+        body["statement_time_ge"] = watermark_ms // 1000
+    statements = _walk_pages(proxy_call, endpoint=STATEMENTS_ENDPOINT, base_body=body, items_key="statements")
+    inserted = failed = 0
+    max_statement_ms = watermark_ms
+    for raw_s in statements:
+        external_id = str(raw_s.get("id") or raw_s.get("statement_id") or "<unknown>")
+        payment_id = raw_s.get("payment_id")
+        with session.begin():
+            payout_id = None
+            if payment_id:
+                payout_id = session.scalar(select(Payout.id).where(
+                    Payout.shop_pk == account_id,
+                    Payout.external_payout_id == str(payment_id),
+                ))
+                if payout_id is None:
+                    failed += 1
+                    session.add(SyncIssue(
+                        job_name=JOB_NAME, issue_type="STATEMENT_PAYOUT_UNRESOLVED",
+                        external_id=external_id,
+                        details={"section": "statements", "reason": "no payouts row for payment_id", "payment_id": str(payment_id)},
+                    ))
+                    continue
+            else:
+                session.add(SyncIssue(
+                    job_name=JOB_NAME, issue_type="STATEMENT_PAYMENT_ID_MISSING",
+                    external_id=external_id,
+                    details={"section": "statements", "reason": "payment_id missing in payload"},
+                ))
+            try:
+                fields = _parse_statement(raw_s, payout_id=payout_id)
+            except ParseError as exc:
+                failed += 1
+                session.add(SyncIssue(
+                    job_name=JOB_NAME, issue_type="PARSE_ERROR", external_id=external_id,
+                    details={"error": str(exc), "section": "statements"},
+                ))
+                continue
+            raw_row = _store_raw(session, endpoint=STATEMENTS_ENDPOINT,
+                                 external_id=fields["external_statement_id"], payload=raw_s)
+            stmt_id = _upsert_statement(session, fields=fields, raw_record_id=raw_row.id)
+        # Statement headers and each transaction (raw + components) are atomic
+        # source facts. No business row lock is held across child pagination.
+        raw_txns = _walk_pages(
+            proxy_call,
+            endpoint=STATEMENT_TRANSACTIONS_TEMPLATE.format(statement_id=fields["external_statement_id"]),
+            base_body={"page_size": page_size}, items_key="statement_transactions",
         )
-
-    return JobResult(
-        rows_total=total,
-        rows_inserted=inserted,
-        rows_failed=failed,
-        cursor=max_statement_ms,
-    )
+        failed += _persist_statement_transactions(
+            session, raw_txns=raw_txns, account_id=account_id, stmt_id=stmt_id,
+            external_statement_id=fields["external_statement_id"],
+            currency=fields.get("currency"), include_components=bool(payment_id),
+        )
+        inserted += 1
+        if fields["statement_time"] is not None:
+            value = _safe_int(fields["statement_time"].timestamp() * 1000)
+            if value and (max_statement_ms is None or value > max_statement_ms):
+                max_statement_ms = value
+    # Do not advance until every statement/child completed. A crash before here
+    # replays committed idempotent facts using the unchanged previous cursor.
+    if max_statement_ms is not None and (watermark_ms is None or max_statement_ms > watermark_ms):
+        with session.begin():
+            watermarks.set_cursor(session, job_name=STATEMENTS_JOB_NAME, scope=scope,
+                                  cursor_epoch_ms=max_statement_ms)
+    return JobResult(rows_total=len(statements), rows_inserted=inserted,
+                     rows_failed=failed, cursor=max_statement_ms)
 
 
 # ─── Orchestrator ──────────────────────────────────────────────────
@@ -981,26 +815,29 @@ def run(
     and all the business rows land in the same transaction.
     """
     cursor_scope = scope or shop_id
-    account = session.execute(
-        select(ChannelAccount).where(
-            ChannelAccount.platform == "tiktok",
-            ChannelAccount.shop_id == shop_id,
-        )
-    ).scalar_one_or_none()
-    if account is None:
-        raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+    with session.begin():
+        account = session.execute(
+            select(ChannelAccount).where(
+                ChannelAccount.platform == "tiktok",
+                ChannelAccount.shop_id == shop_id,
+            )
+        ).scalar_one_or_none()
+        if account is None:
+            raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+
+        account_id = account.id
 
     payouts_result = _sync_payouts(
         session,
         proxy_call=proxy_call,
-        account=account,
+        account_id=account_id,
         scope=cursor_scope,
         page_size=page_size,
     )
     statements_result = _sync_statements(
         session,
         proxy_call=proxy_call,
-        account=account,
+        account_id=account_id,
         scope=cursor_scope,
         page_size=page_size,
     )

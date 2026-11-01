@@ -204,13 +204,16 @@ def sync_token_refresh(
         now = datetime.now(timezone.utc)
 
     with run_job(session, job_name=JOB_NAME) as job:
-        rows = _query_due_credentials(
-            session,
-            providers=providers,
-            window=window,
-            stale_threshold=stale_threshold,
-            now=now,
-        )
+        with session.begin():
+            rows = _query_due_credentials(
+                session,
+                providers=providers,
+                window=window,
+                stale_threshold=stale_threshold,
+                now=now,
+            )
+            for credential in rows:
+                session.expunge(credential)
 
         refreshed = 0
         skipped = 0
@@ -247,13 +250,14 @@ def sync_token_refresh(
                 )
             except Exception as e:  # noqa: BLE001
                 import traceback
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="TOKEN_REFRESH_FAILED",
-                    external_id=f"{row.provider}:{row.external_account_id}",
-                    details={"error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()},
-                )
+                with session.begin():
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="TOKEN_REFRESH_FAILED",
+                        external_id=f"{row.provider}:{row.external_account_id}",
+                        details={"error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()},
+                    )
                 issues += 1
                 failed += 1
                 continue
@@ -279,13 +283,14 @@ def sync_token_refresh(
                 # Refresher was called but returned no usable token.
                 # refresh_if_needed left the stale row; count as skipped
                 # and write an advisory issue so ops can see the pattern.
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="TOKEN_REFRESH_NO_TOKEN",
-                    external_id=f"{row.provider}:{row.external_account_id}",
-                    details={"reason": "refresher returned empty access_token"},
-                )
+                with session.begin():
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="TOKEN_REFRESH_NO_TOKEN",
+                        external_id=f"{row.provider}:{row.external_account_id}",
+                        details={"reason": "refresher returned empty access_token"},
+                    )
                 issues += 1
                 skipped += 1
                 continue
@@ -331,13 +336,14 @@ def sync_token_refresh(
                 "window_seconds": int(window.total_seconds()),
                 "stale_threshold_seconds": int(stale_threshold.total_seconds()),
             }
-            record_sync_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="TOKEN_REFRESH_NOOP",
-                external_id="*",
-                details=details_payload,
-            )
+            with session.begin():
+                record_sync_issue(
+                    session,
+                    job_name=JOB_NAME,
+                    issue_type="TOKEN_REFRESH_NOOP",
+                    external_id="*",
+                    details=details_payload,
+                )
             issues += 1
 
         job.rows_total = len(rows)

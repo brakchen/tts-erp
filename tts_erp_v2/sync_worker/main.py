@@ -204,14 +204,16 @@ def _run_one_job(name: str) -> int:
 
     session_factory = get_session_factory()
     spec = JOBS[name]
-    if spec.is_tiktok:
-        from tts_erp_v2.sync_worker.scheduler import _run_tiktok_job
-
-        _run_tiktok_job(spec, session_factory)
-    else:
-        from tts_erp_v2.sync_worker.scheduler import _run_system_job
-
-        _run_system_job(spec, session_factory)
+    try:
+        if spec.is_tiktok:
+            from tts_erp_v2.sync_worker.scheduler import _run_tiktok_job
+            _run_tiktok_job(spec, session_factory)
+        else:
+            from tts_erp_v2.sync_worker.scheduler import _run_system_job
+            _run_system_job(spec, session_factory)
+    except Exception:
+        logging.getLogger(__name__).exception("[%s] one-shot run failed", name)
+        return 1
     return 0
 
 

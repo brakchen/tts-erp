@@ -49,14 +49,11 @@ def _record_failure(session: Session, *, phase: str, error_type: str) -> dict[st
         "error": safe_error,
     }
     try:
-        session.rollback()
-        job = start_job(session, job_name=JOB_NAME)
-        job.extra = result
-        finish_job(session, job, status="failed", rows_failed=1, extra=result)
-        session.commit()
+        with session.begin():
+            job = start_job(session, job_name=JOB_NAME)
+            job.extra = result
+            finish_job(session, job, status="failed", rows_failed=1, extra=result)
     except _EXPECTED_ERRORS as exc:
-        with suppress(*_EXPECTED_ERRORS):
-            session.rollback()
         raise RuntimeError(f"{phase}:audit:{type(exc).__name__}") from None
     return result
 
@@ -64,29 +61,23 @@ def _record_failure(session: Session, *, phase: str, error_type: str) -> dict[st
 def run_scheduled(session: Session) -> dict[str, Any]:
     """Read facts in a repeatable-read snapshot, then atomically write anchors."""
     try:
-        anchors = build_materialized_rows(session)
+        with session.begin():
+            if session.get_bind().dialect.name == "postgresql":
+                session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+                from sqlalchemy import text
+                session.execute(text("SET TRANSACTION READ ONLY"))
+            anchors = build_materialized_rows(session)
     except _EXPECTED_ERRORS as exc:
         error_type = type(exc).__name__
-        log.error(
-            "deterioration alert read failed phase=read error_type=%s", error_type
-        )
+        log.error("deterioration alert read failed error_type=%s", error_type)
         return _record_failure(session, phase="read", error_type=error_type)
-    try:
-        session.rollback()
-    except _EXPECTED_ERRORS as exc:
-        error_type = type(exc).__name__
-        log.error(
-            "deterioration alert read rollback failed phase=rollback error_type=%s",
-            error_type,
-        )
-        return _record_failure(session, phase="rollback", error_type=error_type)
     if not anchors:
         result = {"status": "disabled", "anchorCount": 0, "rows": 0}
         try:
-            job = start_job(session, job_name=JOB_NAME)
-            job.extra = result
-            finish_job(session, job, status="skipped", extra=result)
-            session.commit()
+            with session.begin():
+                job = start_job(session, job_name=JOB_NAME)
+                job.extra = result
+                finish_job(session, job, status="skipped", extra=result)
         except _EXPECTED_ERRORS as exc:
             error_type = type(exc).__name__
             log.error(
@@ -98,7 +89,8 @@ def run_scheduled(session: Session) -> dict[str, Any]:
     try:
         row_count = 0
         for anchor_date, rows in anchors.items():
-            row_count += replace_anchor(session, rows=rows, anchor_date=anchor_date)
+            with session.begin():
+                row_count += replace_anchor(session, rows=rows, anchor_date=anchor_date)
     except _EXPECTED_ERRORS as exc:
         error_type = type(exc).__name__
         log.error(
@@ -107,24 +99,24 @@ def run_scheduled(session: Session) -> dict[str, Any]:
         return _record_failure(session, phase="write", error_type=error_type)
 
     try:
-        job = start_job(session, job_name=JOB_NAME)
-        result = {
-            "status": "success",
-            "anchorCount": len(anchors),
-            "rows": row_count,
-            "failureCount": 0,
-        }
-        job.extra = result
-        finish_job(
-            session,
-            job,
-            status="succeeded",
-            rows_total=row_count,
-            rows_inserted=row_count,
-            extra=result,
-        )
-        session.commit()
-        return result
+        with session.begin():
+            job = start_job(session, job_name=JOB_NAME)
+            result = {
+                "status": "success",
+                "anchorCount": len(anchors),
+                "rows": row_count,
+                "failureCount": 0,
+            }
+            job.extra = result
+            finish_job(
+                session,
+                job,
+                status="succeeded",
+                rows_total=row_count,
+                rows_inserted=row_count,
+                extra=result,
+            )
+            return result
     except _EXPECTED_ERRORS as exc:
         error_type = type(exc).__name__
         log.error(

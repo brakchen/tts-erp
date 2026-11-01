@@ -112,7 +112,8 @@ def _reactive_refresh(
     """
     from tts_erp_v2.proxy.tiktok_auth import refresh_tiktok_token
 
-    current_rt = _current_refresh_token(session, shop_id)
+    with session.begin():
+        current_rt = _current_refresh_token(session, shop_id)
 
     def _refresher(_p: str, _eid: str) -> dict:
         return refresh_tiktok_token(
@@ -191,10 +192,11 @@ def build_proxy_call(
     builds the matching signed client. It still reloads the shop's OAuth token
     on every call so out-of-band refresh cannot leave a stale access token.
     """
-    app_credentials = resolve_tiktok_app_credentials_for_shop(
-        session,
-        shop_id=shop_id,
-    )
+    with session.begin():
+        app_credentials = resolve_tiktok_app_credentials_for_shop(
+            session,
+            shop_id=shop_id,
+        )
     api_host = os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
     client = _get_client(
         app_credentials.app_key,
@@ -203,7 +205,8 @@ def build_proxy_call(
     )
 
     def proxy_call(method: str, path: str, *, body: dict | None = None) -> dict:
-        view = load_credentials(session, "tiktok", shop_id)
+        with session.begin():
+            view = load_credentials(session, "tiktok", shop_id)
         if view is None:
             raise RuntimeError(
                 f"credentials row not found for provider=tiktok "

@@ -132,10 +132,11 @@ def _record_currency_mismatch(
     )
 
 
-def rebuild(session: Session, *, profit_date: date) -> list[ProductProfitDaily]:
+def rebuild(session: Session, *, profit_date: date, spu_pks: list[int] | None = None, calculation_version: int | None = None) -> list[ProductProfitDaily]:
     """Rebuild the profit rows for ``profit_date``. Returns the rows
     written in this run."""
-    calculation_version = _next_calculation_version(session)
+    if calculation_version is None:
+        calculation_version = _next_calculation_version(session)
     calculated_at = datetime.utcnow()
 
     # Aggregate paid sales_order_lines by channel_product for the day.
@@ -155,6 +156,7 @@ def rebuild(session: Session, *, profit_date: date) -> list[ProductProfitDaily]:
         .where(SalesOrder.paid_at.is_not(None))
         .where(func.date(SalesOrder.paid_at) == profit_date)
         .where(SalesOrderLine.spu_pk.is_not(None))
+        .where(*([SalesOrderLine.spu_pk.in_(spu_pks)] if spu_pks is not None else []))
         .group_by(SalesOrderLine.spu_pk)
     ).all()
 

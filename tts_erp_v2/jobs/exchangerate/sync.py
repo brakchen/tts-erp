@@ -124,19 +124,22 @@ def sync_fx_rates(
             "base_code": code,
         }
 
-    latest = latest_snapshot(session, code)
-    if (
-        latest is not None
-        and latest.next_update_at is not None
-        and not force
-        and moment < latest.next_update_at
-    ):
-        return {
-            "status": "skipped",
-            "reason": "within upstream refresh horizon (cache still fresh)",
-            "base_code": code,
-            "snapshot_id": latest.id,
-        }
+    with session.begin():
+        latest = latest_snapshot(session, code)
+        if latest is not None:
+            session.expunge(latest)
+        if (
+            latest is not None
+            and latest.next_update_at is not None
+            and not force
+            and moment < latest.next_update_at
+        ):
+            return {
+                "status": "skipped",
+                "reason": "within upstream refresh horizon (cache still fresh)",
+                "base_code": code,
+                "snapshot_id": latest.id,
+            }
 
     rates = fetcher(api_key, code)
     rates_count = len(rates.conversion_rates)
@@ -144,62 +147,63 @@ def sync_fx_rates(
 
     # Idempotency: same upstream timestamp → refresh the existing row,
     # do not duplicate rate rows.
-    existing = session.execute(
-        select(ExchangeRateSnapshot)
-        .where(ExchangeRateSnapshot.base_code == code)
-        .where(ExchangeRateSnapshot.upstream_last_update == rates.upstream_last_update)
-        .order_by(ExchangeRateSnapshot.id.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    with session.begin():
+        existing = session.execute(
+            select(ExchangeRateSnapshot)
+            .where(ExchangeRateSnapshot.base_code == code)
+            .where(ExchangeRateSnapshot.upstream_last_update == rates.upstream_last_update)
+            .order_by(ExchangeRateSnapshot.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
-    if existing is not None:
-        existing.next_update_at = horizon
-        existing.fetched_at = moment
-        existing.rates_count = rates_count
-        session.flush()
-        return {
-            "status": "upstream_unchanged",
-            "reason": "upstream timestamp unchanged; refreshed cache horizon",
-            "base_code": code,
-            "snapshot_id": existing.id,
-            "rates_count": rates_count,
-            "rows_inserted": 0,
-        }
+        if existing is not None:
+            existing.next_update_at = horizon
+            existing.fetched_at = moment
+            existing.rates_count = rates_count
+            session.flush()
+            return {
+                "status": "upstream_unchanged",
+                "reason": "upstream timestamp unchanged; refreshed cache horizon",
+                "base_code": code,
+                "snapshot_id": existing.id,
+                "rates_count": rates_count,
+                "rows_inserted": 0,
+            }
 
-    snapshot = ExchangeRateSnapshot(
-        base_code=code,
-        upstream_last_update=rates.upstream_last_update,
-        next_update_at=horizon,
-        fetched_at=moment,
-        rates_count=rates_count,
-    )
-    session.add(snapshot)
-    session.flush()
-    rows = [
-        ExchangeRate(
-            snapshot_id=snapshot.id,
+        snapshot = ExchangeRateSnapshot(
             base_code=code,
-            target_code=target,
-            rate=quantize_rate(rate_value),
+            upstream_last_update=rates.upstream_last_update,
+            next_update_at=horizon,
+            fetched_at=moment,
+            rates_count=rates_count,
         )
-        for target, rate_value in rates.conversion_rates.items()
-    ]
-    session.add_all(rows)
-    # Raw upstream payload → integration.raw_records (audit / drift).
-    record_raw_payload(
-        session,
-        endpoint=f"exchangerate/v6/{code}/latest",
-        payload=rates.payload,
-        external_id=code,
-    )
-    return {
-        "status": "fetched",
-        "base_code": code,
-        "snapshot_id": snapshot.id,
-        "upstream_last_update": rates.upstream_last_update.isoformat(),
-        "rates_count": rates_count,
-        "rows_inserted": len(rows),
-    }
+        session.add(snapshot)
+        session.flush()
+        rows = [
+            ExchangeRate(
+                snapshot_id=snapshot.id,
+                base_code=code,
+                target_code=target,
+                rate=quantize_rate(rate_value),
+            )
+            for target, rate_value in rates.conversion_rates.items()
+        ]
+        session.add_all(rows)
+        # Raw upstream payload → integration.raw_records (audit / drift).
+        record_raw_payload(
+            session,
+            endpoint=f"exchangerate/v6/{code}/latest",
+            payload=rates.payload,
+            external_id=code,
+        )
+        return {
+            "status": "fetched",
+            "base_code": code,
+            "snapshot_id": snapshot.id,
+            "upstream_last_update": rates.upstream_last_update.isoformat(),
+            "rates_count": rates_count,
+            "rows_inserted": len(rows),
+        }
 
 
 def run_scheduled(session: Session) -> dict[str, Any]:
@@ -229,17 +233,18 @@ def run_scheduled(session: Session) -> dict[str, Any]:
             # row failed and the scheduler logs it.
             if exc.error_type in _COOLDOWN_ERROR_TYPES:
                 _cooldown_until[base_code] = datetime.now(UTC) + COOLDOWN
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="EXCHANGERATE_UPSTREAM_ERROR",
-                    external_id=base_code,
-                    details={
-                        "error_type": exc.error_type,
-                        "cooldown_hours": int(COOLDOWN.total_seconds() // 3600),
-                        "message": str(exc),
-                    },
-                )
+                with session.begin():
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="EXCHANGERATE_UPSTREAM_ERROR",
+                        external_id=base_code,
+                        details={
+                            "error_type": exc.error_type,
+                            "cooldown_hours": int(COOLDOWN.total_seconds() // 3600),
+                            "message": str(exc),
+                        },
+                    )
                 job.status = "skipped"
                 job.rows_total = 0
                 job.extra = {

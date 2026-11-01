@@ -427,23 +427,31 @@ def refresh_if_needed(
         A :class:`CredentialsView` (post-refresh if refreshed, original
         if still fresh). Returns None if no row exists.
     """
-    row = session.execute(
-        select(Credentials).where(
-            Credentials.provider == provider,
-            Credentials.external_account_id == external_account_id,
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        return None
-
-    if not force and not is_expired(row.expires_at, skew=skew):
-        return CredentialsView.from_row(row)
+    with session.begin():
+        row = session.execute(
+            select(Credentials).where(
+                Credentials.provider == provider,
+                Credentials.external_account_id == external_account_id,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        old_view = CredentialsView.from_row(row)
+        if not force and not is_expired(row.expires_at, skew=skew):
+            return old_view
+        previous_ciphertext = row.ciphertext
+        metadata = {
+            "account_label": row.account_label,
+            "granted_scopes": row.granted_scopes,
+            "service_id": row.service_id,
+            "extra": row.extra,
+        }
 
     # Call the refresher (caller-supplied; tested with a fake).
     fresh = refresher(provider, external_account_id)
     if not fresh or not fresh.get("access_token"):
         # Refresher failed; return the stale row so the caller can decide.
-        return CredentialsView.from_row(row)
+        return old_view
 
     # Carry forward the shop identity when the refresh response omits
     # it. TikTok's token-refresh response has stopped returning
@@ -454,7 +462,6 @@ def refresh_if_needed(
     # explicit value from the refresher replaces the old one. Same
     # guard for refresh_token (a refresher that omits it must not
     # strand us token-less on the next refresh).
-    old_view = CredentialsView.from_row(row)
     next_refresh_token = fresh.get("refresh_token") or old_view.refresh_token
     next_shop_cipher = fresh.get("shop_cipher") or old_view.shop_cipher
 
@@ -470,25 +477,32 @@ def refresh_if_needed(
         except ValueError:
             expires_at = None
 
-    upsert_credentials(
-        session,
-        provider=provider,
-        external_account_id=external_account_id,
-        plaintext_access_token=fresh["access_token"],
-        plaintext_refresh_token=next_refresh_token,
-        plaintext_shop_cipher=next_shop_cipher,
-        account_label=row.account_label,
-        expires_at=expires_at,
-        granted_scopes=row.granted_scopes,
-        service_id=row.service_id,
-        extra=row.extra,
-    )
-    session.commit()
-    # Expire the identity map so the post-commit SELECT refetches the
-    # updated ciphertext + expires_at instead of returning the stale
-    # ORM-cached row (which would carry the old plaintext envelope).
-    session.expire_all()
-    return load_credentials(session, provider, external_account_id)
+    with session.begin():
+        current = session.execute(
+            select(Credentials).where(
+                Credentials.provider == provider,
+                Credentials.external_account_id == external_account_id,
+            ).with_for_update().execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if current is None:
+            return None
+        # A concurrent OAuth callback/refresh owns the newer identity. Never
+        # overwrite it with a response obtained from the previous credentials.
+        if current.ciphertext != previous_ciphertext:
+            return CredentialsView.from_row(current)
+        upsert_credentials(
+            session,
+            provider=provider,
+            external_account_id=external_account_id,
+            plaintext_access_token=fresh["access_token"],
+            plaintext_refresh_token=next_refresh_token,
+            plaintext_shop_cipher=next_shop_cipher,
+            expires_at=expires_at,
+            **metadata,
+        )
+        session.flush()
+        session.expire(current)
+        return CredentialsView.from_row(current)
 
 
 __all__ = [

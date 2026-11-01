@@ -192,21 +192,23 @@ def run(
     explicit list is a no-op (kept for backward compat with test
     fixtures that want to assert the no-op behaviour).
     """
-    account = session.execute(
-        select(ChannelAccount).where(
-            ChannelAccount.platform == "tiktok",
-            ChannelAccount.shop_id == shop_id,
-        )
-    ).scalar_one_or_none()
-    if account is None:
-        raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
-    # 2026-09-06:与 orders 同规则,写行时目录命中即填 spu_pk。
-    spu_map = spu_link.spu_map_for_shop(session, shop_pk=account.id)
+    with session.begin():
+        account = session.execute(
+            select(ChannelAccount).where(
+                ChannelAccount.platform == "tiktok",
+                ChannelAccount.shop_id == shop_id,
+            )
+        ).scalar_one_or_none()
+        if account is None:
+            raise UpstreamJobError(f"shops row missing for tiktok shop_id={shop_id!r}")
+        # 2026-09-06:与 orders 同规则,写行时目录命中即填 spu_pk。
+        account_id = account.id
+        spu_map = spu_link.spu_map_for_shop(session, shop_pk=account_id)
 
-    if order_ids is None:
-        order_ids = _auto_collect_order_ids(session, account_id=account.id)
-    if not order_ids:
-        return JobResult()
+        if order_ids is None:
+            order_ids = _auto_collect_order_ids(session, account_id=account_id)
+        if not order_ids:
+            return JobResult()
 
     rows_total = 0
     rows_inserted = 0
@@ -216,125 +218,126 @@ def run(
         # 202309 detail = GET the orders endpoint with ids=<order_id>
         # (query param; the proxy lifts body keys to the query string).
         resp = proxy_call("GET", DETAIL_ENDPOINT, body={"ids": order_id})
-        code = resp.get("code", -1)
-        if code != 0:
-            rows_failed += 1
-            record_sync_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="UPSTREAM_NONZERO",
-                external_id=order_id,
-                details={"code": code, "message": resp.get("message")},
-            )
-            continue
-        detail_data = resp.get("data") or {}
-        raw = detail_data.get("order")
-        if raw is None:
-            orders = detail_data.get("orders") or []
-            raw = orders[0] if orders else None
-        raw = raw or {}  # missing order body → parse raises below
-        try:
-            fields = _parse_order_payload(raw)
-        except ParseError as e:
-            rows_failed += 1
-            record_sync_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="PARSE_ERROR",
-                external_id=order_id,
-                details={"error": str(e), "raw": _safe_truncate(raw)},
-            )
-            continue
-        if not detail_response_matches_request(order_id, fields["order_id"]):
-            rows_failed += 1
-            record_sync_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="RESPONSE_ORDER_ID_MISMATCH",
-                external_id=order_id,
-                details={
-                    "requested_order_id": order_id,
-                    "response_order_id": fields["order_id"],
-                },
-            )
-            continue
-
-        raw_row = _store_raw(
-            session,
-            endpoint=DETAIL_ENDPOINT,
-            external_id=order_id,
-            payload=raw,
-        )
-        so_row = _upsert_sales_order(
-            session,
-            shop_pk=account.id,
-            fields=fields,
-            raw_record_id=raw_row.id,
-        )
-        if incoming_order_is_stale(
-            fields.get("order_modify_time"), so_row.order_modify_time
-        ):
-            record_sync_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="STALE_OBSERVATION_SKIPPED",
-                external_id=order_id,
-                details={"reason": "older_or_missing_source_version"},
-            )
-            continue
-
-        for raw_line in raw.get("line_items") or []:
+        with session.begin():
+            code = resp.get("code", -1)
+            if code != 0:
+                rows_failed += 1
+                record_sync_issue(
+                    session,
+                    job_name=JOB_NAME,
+                    issue_type="UPSTREAM_NONZERO",
+                    external_id=order_id,
+                    details={"code": code, "message": resp.get("message")},
+                )
+                continue
+            detail_data = resp.get("data") or {}
+            raw = detail_data.get("order")
+            if raw is None:
+                orders = detail_data.get("orders") or []
+                raw = orders[0] if orders else None
+            raw = raw or {}  # missing order body → parse raises below
             try:
-                line_fields = _parse_line_payload(order_id, raw_line)
+                fields = _parse_order_payload(raw)
             except ParseError as e:
+                rows_failed += 1
                 record_sync_issue(
                     session,
                     job_name=JOB_NAME,
                     issue_type="PARSE_ERROR",
-                    external_id=f"{order_id}:{raw_line.get('line_id')}",
-                    details={"error": str(e), "raw": _safe_truncate(raw_line)},
+                    external_id=order_id,
+                    details={"error": str(e), "raw": _safe_truncate(raw)},
                 )
                 continue
-            # snapshot 原始值可能是数字(JSON number),目录键恒 str
-            # (products.py 存 str(spu_id));归一化后再查,避免漏命中
-            snap_pid = line_fields.get("external_product_id_snapshot")
-            resolved = spu_link.link_line_spu_pk(
-                spu_map, product_snapshot=None if snap_pid is None else str(snap_pid)
-            )
-            if resolved is not None:
-                line_fields["spu_pk"] = resolved
-            li_values = {
-                "order_pk": so_row.id,
-                **line_fields,
-                "raw_record_id": raw_row.id,
-            }
-            li_update = {k: li_values[k] for k in line_fields}
-            li_update["raw_record_id"] = raw_row.id
-            session.execute(
-                pg_insert(SalesOrderLine)
-                .values(**li_values)
-                .on_conflict_do_update(
-                    index_elements=["order_pk", "external_line_id"],
-                    set_=li_update,
+            if not detail_response_matches_request(order_id, fields["order_id"]):
+                rows_failed += 1
+                record_sync_issue(
+                    session,
+                    job_name=JOB_NAME,
+                    issue_type="RESPONSE_ORDER_ID_MISMATCH",
+                    external_id=order_id,
+                    details={
+                        "requested_order_id": order_id,
+                        "response_order_id": fields["order_id"],
+                    },
                 )
-            )
-            persist_price_observation(
+                continue
+
+            raw_row = _store_raw(
                 session,
-                raw_line=raw_line,
-                shop_pk=account.id,
-                order_pk=so_row.id,
-                raw_record_id=raw_row.id,
-                source_endpoint="ORDER_DETAIL",
-                source_captured_at=raw_row.captured_at,
-                source_order_version_at=fields.get("order_modify_time"),
-                parent_status=fields.get("status"),
-                parent_currency=fields.get("currency"),
-                spu_pk=line_fields.get("spu_pk"),
+                endpoint=DETAIL_ENDPOINT,
+                external_id=order_id,
+                payload=raw,
             )
-        # Success: resolve any open issues for this order so the next
-        # tick doesn't re-fetch the same id.
-        _resolve_matching_issues(session, order_id=order_id)
-        rows_inserted += 1
+            so_row = _upsert_sales_order(
+                session,
+                shop_pk=account_id,
+                fields=fields,
+                raw_record_id=raw_row.id,
+            )
+            if incoming_order_is_stale(
+                fields.get("order_modify_time"), so_row.order_modify_time
+            ):
+                record_sync_issue(
+                    session,
+                    job_name=JOB_NAME,
+                    issue_type="STALE_OBSERVATION_SKIPPED",
+                    external_id=order_id,
+                    details={"reason": "older_or_missing_source_version"},
+                )
+                continue
+
+            for raw_line in raw.get("line_items") or []:
+                try:
+                    line_fields = _parse_line_payload(order_id, raw_line)
+                except ParseError as e:
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="PARSE_ERROR",
+                        external_id=f"{order_id}:{raw_line.get('line_id')}",
+                        details={"error": str(e), "raw": _safe_truncate(raw_line)},
+                    )
+                    continue
+                # snapshot 原始值可能是数字(JSON number),目录键恒 str
+                # (products.py 存 str(spu_id));归一化后再查,避免漏命中
+                snap_pid = line_fields.get("external_product_id_snapshot")
+                resolved = spu_link.link_line_spu_pk(
+                    spu_map, product_snapshot=None if snap_pid is None else str(snap_pid)
+                )
+                if resolved is not None:
+                    line_fields["spu_pk"] = resolved
+                li_values = {
+                    "order_pk": so_row.id,
+                    **line_fields,
+                    "raw_record_id": raw_row.id,
+                }
+                li_update = {k: li_values[k] for k in line_fields}
+                li_update["raw_record_id"] = raw_row.id
+                session.execute(
+                    pg_insert(SalesOrderLine)
+                    .values(**li_values)
+                    .on_conflict_do_update(
+                        index_elements=["order_pk", "external_line_id"],
+                        set_=li_update,
+                    )
+                )
+                persist_price_observation(
+                    session,
+                    raw_line=raw_line,
+                    shop_pk=account_id,
+                    order_pk=so_row.id,
+                    raw_record_id=raw_row.id,
+                    source_endpoint="ORDER_DETAIL",
+                    source_captured_at=raw_row.captured_at,
+                    source_order_version_at=fields.get("order_modify_time"),
+                    parent_status=fields.get("status"),
+                    parent_currency=fields.get("currency"),
+                    spu_pk=line_fields.get("spu_pk"),
+                )
+            # Success: resolve any open issues for this order so the next
+            # tick doesn't re-fetch the same id.
+            _resolve_matching_issues(session, order_id=order_id)
+            rows_inserted += 1
 
     return JobResult(
         rows_total=rows_total,

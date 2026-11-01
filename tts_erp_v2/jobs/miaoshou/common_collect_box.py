@@ -221,51 +221,52 @@ def sync_common_collect_box(
         issues = 0
 
         for item in items:
-            if not isinstance(item, dict):
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="COMMON_BOX_PARSE_FAILED",
-                    details={"item": repr(item)[:300]},
-                )
-                issues += 1
-                continue
-            try:
-                parsed = _parse_product_row(item)
-                if parsed is None:
+            with session.begin():
+                if not isinstance(item, dict):
                     record_sync_issue(
                         session,
                         job_name=JOB_NAME,
-                        issue_type="COMMON_BOX_MISSING_ID",
-                        details={"item_keys": list(item.keys())[:10]},
+                        issue_type="COMMON_BOX_PARSE_FAILED",
+                        details={"item": repr(item)[:300]},
                     )
                     issues += 1
                     continue
+                try:
+                    parsed = _parse_product_row(item)
+                    if parsed is None:
+                        record_sync_issue(
+                            session,
+                            job_name=JOB_NAME,
+                            issue_type="COMMON_BOX_MISSING_ID",
+                            details={"item_keys": list(item.keys())[:10]},
+                        )
+                        issues += 1
+                        continue
 
-                record_raw_payload(
-                    session,
-                    endpoint=ENDPOINT,
-                    payload=item,
-                    external_id=parsed["external_product_id"],
-                    credential_id=ctx.credentials.id if ctx else None,
-                )
+                    record_raw_payload(
+                        session,
+                        endpoint=ENDPOINT,
+                        payload=item,
+                        external_id=parsed["external_product_id"],
+                        credential_id=ctx.credentials.id if ctx else None,
+                    )
 
-                assert ctx is not None  # narrowed by the early-return above
-                _upsert_product(
-                    session,
-                    procurement_account_id=ctx.account_id,
-                    parsed=parsed,
-                )
-                products_upserted += 1
-            except Exception as e:  # noqa: BLE001
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="COMMON_BOX_PARSE_FAILED",
-                    external_id=str(item.get("commonCollectBoxDetailId")),
-                    details={"error": f"{type(e).__name__}: {e}"},
-                )
-                issues += 1
+                    assert ctx is not None  # narrowed by the early-return above
+                    _upsert_product(
+                        session,
+                        procurement_account_id=ctx.account_id,
+                        parsed=parsed,
+                    )
+                    products_upserted += 1
+                except Exception as e:  # noqa: BLE001
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="COMMON_BOX_PARSE_FAILED",
+                        external_id=str(item.get("commonCollectBoxDetailId")),
+                        details={"error": f"{type(e).__name__}: {e}"},
+                    )
+                    issues += 1
 
         job.rows_total = len(items)
         job.rows_inserted = products_upserted

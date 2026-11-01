@@ -32,7 +32,7 @@ import hashlib
 import re
 from collections.abc import Callable
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models import ChannelProduct, SyncIssue
@@ -152,38 +152,38 @@ def run(
     rows_total = 0
     rows_inserted = 0  # mirrored (or confirmed current)
     rows_failed = 0
-    existing = _current_object_keys(session)
-
-    for spu in _iter_spus_with_main_image(session, spu_pks):
+    with session.begin():
+        candidates = [
+            (spu.id, str(spu.spu_id), spu.main_image_url or "", spu.mirror_object_key)
+            for spu in _iter_spus_with_main_image(session, spu_pks)
+        ]
+    for spu_pk, spu_id, url, existing_key in candidates:
         rows_total += 1
-        url = spu.main_image_url or ""
-        key = _object_key_for(spu.id, url)
-
-        if existing.get(spu.id) == key:
-            # Already mirrored with the current URL — skip (no download,
-            # no put, no UPDATE).
+        key = _object_key_for(spu_pk, url)
+        if existing_key == key:
             continue
-
         try:
             data, content_type = downloader(url)
             minio.put_bytes(key, data, content_type)
-        except Exception as exc:  # noqa: BLE001 — boundary, one SPU
+        except Exception as exc:
             rows_failed += 1
-            # record_sync_issue dedupes by (job, type, external_id,
-            # still-open) so a persistently failing URL does not append a
-            # new row every tick — same convention as miaoshou.* jobs.
-            record_sync_issue(
-                session,
-                job_name=JOB_NAME,
-                issue_type="MIRROR_DOWNLOAD_FAILED",
-                external_id=str(spu.spu_id),
-                details={"url": url, "error": str(exc)},
-            )
+            with session.begin():
+                record_sync_issue(
+                    session, job_name=JOB_NAME, issue_type="MIRROR_DOWNLOAD_FAILED",
+                    external_id=spu_id, details={"url": url, "error": str(exc)},
+                )
             continue
-
-        spu.mirror_object_key = key
-        rows_inserted += 1
-        _resolve_open_issues(session, spu.spu_id)
+        with session.begin():
+            # Product sync may have replaced the source URL during download.
+            # Never advertise the old mirror as the new product image.
+            updated = session.execute(
+                update(ChannelProduct)
+                .where(ChannelProduct.id == spu_pk, ChannelProduct.main_image_url == url)
+                .values(mirror_object_key=key)
+            ).rowcount
+            if updated:
+                _resolve_open_issues(session, spu_id)
+                rows_inserted += 1
 
     return JobResult(
         rows_total=rows_total,

@@ -78,16 +78,17 @@ def resolve_miaoshou_context(
     ext_id = (license_id or os.environ.get("MIAOSHOU_LICENSE_ID") or "").strip()
     if not ext_id:
         return None
-    view = load_credentials(session, MIAOSHOU_PROVIDER, ext_id)
-    if view is None:
-        return None
-    acct = ensure_procurement_account(
-        session,
-        provider=MIAOSHOU_PROVIDER,
-        external_account_id=ext_id,
-        account_name=ext_id,
-    )
-    return MiaoshouContext(credentials=view, account_id=acct.id)
+    with session.begin():
+        view = load_credentials(session, MIAOSHOU_PROVIDER, ext_id)
+        if view is None:
+            return None
+        acct = ensure_procurement_account(
+            session,
+            provider=MIAOSHOU_PROVIDER,
+            external_account_id=ext_id,
+            account_name=ext_id,
+        )
+        return MiaoshouContext(credentials=view, account_id=acct.id)
 
 
 def ensure_procurement_account(

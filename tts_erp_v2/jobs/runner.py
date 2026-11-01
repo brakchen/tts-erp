@@ -97,7 +97,6 @@ def finish_job(
         merged = dict(job.extra or {})
         merged.update(extra)
         job.extra = merged
-    session.flush()
     return job
 
 
@@ -122,28 +121,41 @@ def run_job(
             ...
             job.extra = {"pages": 3}
     """
-    job = start_job(
-        session, job_name=job_name, credential_id=credential_id, extra=extra
-    )
+    # Lifecycle records must be visible while a tick is doing network I/O.
+    # Detach before commit: counter mutations must not autobegin a transaction
+    # or autoflush into the next business unit, including expire-on-commit users.
+    with session.begin():
+        job = start_job(
+            session, job_name=job_name, credential_id=credential_id, extra=extra
+        )
+        session.expunge(job)
     try:
         yield job
     except BaseException as e:
         # NOTE: we do NOT swallow. The caller's transaction will be
         # rolled back by their own outer handler — but the error
         # message is captured on the ORM object first.
-        finish_job(
-            session,
-            job,
-            status="failed",
-            error_message=f"{type(e).__name__}: {e}",
-        )
+        with session.begin():
+            session.add(job)
+            finish_job(
+                session,
+                job,
+                status="failed",
+                error_message=f"{type(e).__name__}: {e}",
+            )
+            session.flush()
+            session.expunge(job)
         log.exception("job %s failed", job_name)
         raise
     else:
         # Caller already updated counters; only stamp terminal status
         # if they haven't set it to failed/succeeded themselves.
-        if job.status == "running":
-            finish_job(session, job, status="succeeded")
+        with session.begin():
+            session.add(job)
+            if job.status == "running":
+                finish_job(session, job, status="succeeded")
+            session.flush()
+            session.expunge(job)
 
 
 # ---- raw_records + sync_issues -------------------------------------

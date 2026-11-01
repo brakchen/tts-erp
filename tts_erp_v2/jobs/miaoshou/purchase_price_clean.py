@@ -539,31 +539,32 @@ def _record_raw_orders(
     inserted = 0
     now = datetime.now(UTC)
     for order in orders:
-        order_sn = str(order.get("purchaseOrderSn") or "")
-        if not order_sn:
-            continue
-        safe_order = _redact_secrets(order)
-        canonical = json.dumps(safe_order, ensure_ascii=False, sort_keys=True)
-        payload_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        stmt = pg_insert(MiaoshouPurchaseOrderRawRecord).values(
-            credential_id=credential_id,
-            external_purchase_order_id=order_sn,
-            endpoint=ENDPOINT,
-            payload=safe_order,
-            payload_hash=payload_hash,
-            captured_at=now,
-        )
-        inserted_id = session.execute(
-            stmt.on_conflict_do_nothing(
-                index_elements=[
-                    "credential_id",
-                    "external_purchase_order_id",
-                    "payload_hash",
-                ]
-            ).returning(MiaoshouPurchaseOrderRawRecord.id)
-        ).scalar_one_or_none()
-        if inserted_id is not None:
-            inserted += 1
+        with session.begin():
+            order_sn = str(order.get("purchaseOrderSn") or "")
+            if not order_sn:
+                continue
+            safe_order = _redact_secrets(order)
+            canonical = json.dumps(safe_order, ensure_ascii=False, sort_keys=True)
+            payload_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            stmt = pg_insert(MiaoshouPurchaseOrderRawRecord).values(
+                credential_id=credential_id,
+                external_purchase_order_id=order_sn,
+                endpoint=ENDPOINT,
+                payload=safe_order,
+                payload_hash=payload_hash,
+                captured_at=now,
+            )
+            inserted_id = session.execute(
+                stmt.on_conflict_do_nothing(
+                    index_elements=[
+                        "credential_id",
+                        "external_purchase_order_id",
+                        "payload_hash",
+                    ]
+                ).returning(MiaoshouPurchaseOrderRawRecord.id)
+            ).scalar_one_or_none()
+            if inserted_id is not None:
+                inserted += 1
     return inserted
 
 
@@ -722,21 +723,22 @@ def sync_purchase_prices(
 ) -> dict[str, Any]:
     """Run one complete purchase-price fetch/clean/publish cycle."""
     with run_job(session, job_name=JOB_NAME) as job:
-        if not _schema_ready(session):
-            result = _skipped_result("migration 0047 not applied")
-            finish_job(
-                session, job, status="skipped", extra={"reason": result["reason"]}
+        with session.begin():
+            if not _schema_ready(session):
+                result = _skipped_result("migration 0047 not applied")
+                finish_job(
+                    session, job, status="skipped", extra={"reason": result["reason"]}
+                )
+                return result
+            credentials = _resolve_credentials(
+                session, external_account_id=external_account_id
             )
-            return result
-        credentials = _resolve_credentials(
-            session, external_account_id=external_account_id
-        )
-        if credentials is None:
-            result = _skipped_result("miaoshou_web credentials not configured")
-            finish_job(
-                session, job, status="skipped", extra={"reason": result["reason"]}
-            )
-            return result
+            if credentials is None:
+                result = _skipped_result("miaoshou_web credentials not configured")
+                finish_job(
+                    session, job, status="skipped", extra={"reason": result["reason"]}
+                )
+                return result
         credential_id = credentials.id
         if client is None:
             client = _build_client(credentials)
@@ -751,56 +753,58 @@ def sync_purchase_prices(
         )
         latest, cleaning_issues = clean_latest_prices(orders)
         for issue in cleaning_issues:
-            _record_issue(
-                session,
-                credential_id=credential_id,
-                issue_type=str(issue["issue_type"]),
-                external_id=str(
-                    issue.get("spu_id") or issue.get("purchase_order_sn") or ""
+            with session.begin():
+                _record_issue(
+                    session,
+                    credential_id=credential_id,
+                    issue_type=str(issue["issue_type"]),
+                    external_id=str(
+                        issue.get("spu_id") or issue.get("purchase_order_sn") or ""
+                    )
+                    or None,
+                    details=issue,
                 )
-                or None,
-                details=issue,
-            )
 
         matched_shops = 0
         unmatched_shops = 0
         shop_issues = 0
         for observation in latest.values():
-            shop_pk, resolution_status = _resolve_database_shop(session, observation)
-            if shop_pk is not None:
-                matched_shops += 1
-                _resolve_shop_issues(
-                    session,
-                    credential_id=credential_id,
-                    miaoshou_shop_id=observation.miaoshou_shop_id,
-                    spu_id=observation.spu_id,
-                )
-            else:
-                unmatched_shops += 1
-                shop_issues += 1
-                _record_issue(
-                    session,
-                    credential_id=credential_id,
-                    issue_type=resolution_status.upper(),
-                    external_id=(
-                        f"{observation.miaoshou_shop_id}:{observation.spu_id}"
-                    ),
-                    details={
-                        "miaoshou_shop_id": observation.miaoshou_shop_id,
-                        "shop_name": observation.shop_name,
-                        "spu_id": observation.spu_id,
-                        "unit_cost": str(observation.unit_cost),
-                        "purchase_order_sn": observation.purchase_order_sn,
-                    },
-                )
-            if shop_pk is not None:
-                _upsert_purchase_price(
-                    session,
-                    credential_id=credential_id,
-                    observation=observation,
-                    shop_pk=shop_pk,
-                    resolution_status=resolution_status,
-                )
+            with session.begin():
+                shop_pk, resolution_status = _resolve_database_shop(session, observation)
+                if shop_pk is not None:
+                    matched_shops += 1
+                    _resolve_shop_issues(
+                        session,
+                        credential_id=credential_id,
+                        miaoshou_shop_id=observation.miaoshou_shop_id,
+                        spu_id=observation.spu_id,
+                    )
+                else:
+                    unmatched_shops += 1
+                    shop_issues += 1
+                    _record_issue(
+                        session,
+                        credential_id=credential_id,
+                        issue_type=resolution_status.upper(),
+                        external_id=(
+                            f"{observation.miaoshou_shop_id}:{observation.spu_id}"
+                        ),
+                        details={
+                            "miaoshou_shop_id": observation.miaoshou_shop_id,
+                            "shop_name": observation.shop_name,
+                            "spu_id": observation.spu_id,
+                            "unit_cost": str(observation.unit_cost),
+                            "purchase_order_sn": observation.purchase_order_sn,
+                        },
+                    )
+                if shop_pk is not None:
+                    _upsert_purchase_price(
+                        session,
+                        credential_id=credential_id,
+                        observation=observation,
+                        shop_pk=shop_pk,
+                        resolution_status=resolution_status,
+                    )
 
         issues = len(cleaning_issues) + shop_issues
         job.rows_total = len(orders)

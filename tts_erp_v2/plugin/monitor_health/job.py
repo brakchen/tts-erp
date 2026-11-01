@@ -9,7 +9,9 @@ Feishu bots offer no idempotency key. Ordinary concurrent scans are serialized.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -48,23 +50,38 @@ def _line(row: MonitorHealth, notice: str) -> str:
 
 def run(session: Session, *, now: datetime | None = None) -> dict:
     timestamp = (now or datetime.now(UTC)).timestamp()
+    owner = str(uuid4())
     pending: list[tuple[float, str, str, MonitorHealth]] = []
-    for row in locked_current(session):
-        row.state, notices = plan(row.state, timestamp)
-        for notice in notices:
-            step = notice.split(":")[0]
-            pending.append(
-                (
-                    (
-                        row.state["faults"][step]["recovery_since"]
-                        if notice.endswith(":recovery")
-                        else row.state["faults"][step]["since"]
-                    ),
-                    row.shop_id,
-                    notice,
-                    row,
-                )
-            )
+    with session.begin():
+        for row in locked_current(session):
+            if row.state.get("_dispatch", {}).get("expires_at", 0) > timestamp:
+                continue
+            state, notices = plan(row.state, timestamp)
+            identities = {}
+            for notice in notices:
+                step = notice.split(":")[0]
+                since = state["faults"][step][
+                    "recovery_since" if notice.endswith(":recovery") else "since"
+                ]
+                identities[notice] = since
+                pending.append((since, row.shop_id, notice, row))
+            if notices:
+                state["_dispatch"] = {
+                    "owner": owner,
+                    "expires_at": timestamp + NOTIFICATION_BUDGET_SECONDS + SCAN_SECONDS,
+                    "notices": identities,
+                    "recovered": {},
+                }
+            else:
+                state.pop("_dispatch", None)
+            row.state = state
+        # The webhook is a plaintext value snapshot; no DB connection survives
+        # into the notification sender.
+        target = webhook(session) if pending else ""
+        session.flush()
+        for _, _, _, row in pending:
+            if row in session:
+                session.expunge(row)
     pending.sort(key=lambda entry: entry[:3])
     batches: list[list[str]] = []
     members: list[list[tuple[MonitorHealth, str]]] = []
@@ -83,17 +100,19 @@ def run(session: Session, *, now: datetime | None = None) -> dict:
     delivery_error = None
     if batches:
         try:
-            accepted = send(webhook(session), batches)
+            accepted = send(target, batches)
         except DeliveryError as error:
             if error.accepted_batches == 0:
+                _complete(session, owner=owner, pending=pending, delivered=set())
                 raise
             accepted = error.accepted_batches
             delivery_error = "monitor health Feishu notification failed"
         if not 0 <= accepted <= len(batches):
             raise RuntimeError("monitor health invalid accepted batch count")
-        for batch in members[:accepted]:
-            for row, notice in batch:
-                row.state = acknowledge(row.state, [notice])
+    _complete(
+        session, owner=owner, pending=pending,
+        delivered={(row.shop_id, notice) for batch in members[:accepted] for row, notice in batch},
+    )
     delivered = sum(len(batch) for batch in members[:accepted])
     deadline_at_risk = any(
         notice == "heartbeat:fault"
@@ -109,7 +128,6 @@ def run(session: Session, *, now: datetime | None = None) -> dict:
             accepted,
             len(pending) - delivered,
         )
-    session.flush()
     return {
         "sent": delivered,
         "pending": len(pending) - delivered,
@@ -120,3 +138,41 @@ def run(session: Session, *, now: datetime | None = None) -> dict:
         ),
         "deliveryError": delivery_error,
     }
+
+
+def _complete(
+    session: Session, *, owner: str,
+    pending: list[tuple[float, str, str, MonitorHealth]],
+    delivered: set[tuple[str, str]],
+) -> None:
+    by_shop: dict[str, list[tuple[float, str]]] = {}
+    for since, shop_id, notice, _ in pending:
+        by_shop.setdefault(shop_id, []).append((since, notice))
+    for shop_id, notices in by_shop.items():
+        with session.begin():
+            row = session.get(MonitorHealth, shop_id, with_for_update=True, populate_existing=True)
+            if row is None:
+                continue
+            state = deepcopy(row.state)
+            dispatch = state.get("_dispatch", {})
+            if dispatch.get("owner") != owner:
+                continue
+            for since, notice in notices:
+                if (shop_id, notice) not in delivered:
+                    continue
+                step, kind = notice.split(":")
+                fault = state["faults"].get(step)
+                if kind == "recovery":
+                    if fault and fault.get("recovery_since") == since:
+                        state = acknowledge(state, [notice])
+                    continue
+                recovered_at = dispatch.get("recovered", {}).get(step)
+                if recovered_at is not None:
+                    if fault is None:
+                        fault = {"since": since, "active": False, "notified": True}
+                        state["faults"][step] = fault
+                    fault.update(recovery_pending=True, recovery_since=recovered_at)
+                if fault and fault["since"] == since:
+                    fault["notified"] = True
+            state.pop("_dispatch", None)
+            row.state = state
