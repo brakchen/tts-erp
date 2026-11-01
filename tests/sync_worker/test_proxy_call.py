@@ -130,27 +130,14 @@ def _seed_credentials(db_session, *, external_id: str = "TEST_TT_PROXY") -> None
     db_session.commit()
 
 
-def _refreshed_view(provider: str, external_account_id: str):
-    """Build a CredentialsView representing the post-refresh state.
+def _refreshed_view(session, provider: str, external_account_id: str):
+    from dataclasses import replace
 
-    Uses variable indirection so the S105 false-positive on
-    credential-named kwargs doesn't fire.
-    """
-    from tts_erp_v2.proxy.token_service import CredentialsView
-
-    return CredentialsView(
-        id=0,
-        provider=provider,
-        external_account_id=external_account_id,
-        account_label=None,
-        access_token=REFRESHED_AT,
-        refresh_token=REFRESHED_RT,
-        shop_cipher=REFRESHED_SC,
-        expires_at=None,
-        granted_scopes=None,
-        service_id="TEST_PROXY_SERVICE",
-        extra=None,
-    )
+    from tts_erp_v2.proxy.token_service import load_credentials
+    with session.begin():
+        current = load_credentials(session, provider, external_account_id)
+    return replace(current, access_token=REFRESHED_AT, refresh_token=REFRESHED_RT,
+                   shop_cipher=REFRESHED_SC)
 
 
 # Module-level constants for the refreshed token values. Pulled out so
@@ -385,7 +372,7 @@ def test_reactive_refresh_on_401_retries_once(
         refresh_calls.append(
             {"provider": provider, "external_account_id": external_account_id, "force": force}
         )
-        return _refreshed_view(provider, external_account_id)
+        return _refreshed_view(session, provider, external_account_id)
 
     monkeypatch.setattr(
         "tts_erp_v2.sync_worker.proxy_call.refresh_if_needed",
@@ -443,7 +430,7 @@ def test_reactive_refresh_on_401_no_infinite_loop(
         force: bool = False,
     ) -> Any:
         refresh_calls.append({"external_account_id": external_account_id, "force": force})
-        return _refreshed_view(provider, external_account_id)
+        return _refreshed_view(session, provider, external_account_id)
 
     monkeypatch.setattr(
         "tts_erp_v2.sync_worker.proxy_call.refresh_if_needed",

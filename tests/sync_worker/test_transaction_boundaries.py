@@ -5,15 +5,41 @@ from __future__ import annotations
 import importlib
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, event, select
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.db.models import ChannelAccount, RawRecord, SalesOrder, SyncJob
+from tts_erp_v2.db.models import (
+    ChannelAccount,
+    RawRecord,
+    SalesOrder,
+    SyncIssue,
+    SyncJob,
+)
 from tts_erp_v2.proxy.token_service import refresh_if_needed
 from tts_erp_v2.sync_worker.job_runner import JobResult, run_with_sync_job
 
 pytestmark = [pytest.mark.domain_sync, pytest.mark.layer_integration]
+
+
+@pytest.fixture(autouse=True)
+def clean_this_tests_committed_issues(db_engine):
+    # Fresh Sessions are necessary for cross-connection visibility/lock tests.
+    # Track exactly this test's inserted issues instead of deleting a shared
+    # job namespace that other tests also use.
+    inserted_ids = []
+
+    def capture(mapper, connection, target):
+        inserted_ids.append(target.id)
+
+    event.listen(SyncIssue, "after_insert", capture)
+    try:
+        yield
+    finally:
+        event.remove(SyncIssue, "after_insert", capture)
+        if inserted_ids:
+            with Session(db_engine) as cleanup, cleanup.begin():
+                cleanup.execute(delete(SyncIssue).where(SyncIssue.id.in_(inserted_ids)))
 
 
 def test_running_audit_is_durable_without_holding_business_transaction(db_engine):
@@ -551,3 +577,101 @@ def test_failed_required_child_cannot_be_skipped_by_later_success(
             assert (
                 watermarks.get_cursor(session, job_name=cursor_job, scope=name) == 1000
             )
+
+
+def test_reactive_refresh_and_retry_use_reauthorized_app_revision(
+    db_engine, monkeypatch
+):
+    from tts_erp_v2.proxy.errors import AuthenticationError
+    from tts_erp_v2.proxy.token_service import (
+        upsert_credentials,
+        upsert_tiktok_app_credentials,
+    )
+    from tts_erp_v2.proxy.tts_shop.client import TiktokCallResult
+    from tts_erp_v2.sync_worker.proxy_call import build_proxy_call
+
+    name = "TEST_REACTIVE_APP_SNAPSHOT"
+    seen = []
+    with Session(db_engine, expire_on_commit=False) as session:
+        with session.begin():
+            credential = upsert_credentials(
+                session,
+                provider="tiktok",
+                external_account_id=name,
+                plaintext_access_token="TEST_OLD_ACCESS",
+                plaintext_refresh_token="TEST_OLD_REFRESH",
+                service_id=name,
+                extra={"app_revision": 1},
+            )
+            account = ChannelAccount(
+                platform="tiktok",
+                shop_id=name,
+                service_id=name,
+                credential_id=credential.id,
+            )
+            session.add(account)
+            session.flush()
+            shop_pk = account.id
+            upsert_tiktok_app_credentials(
+                session,
+                shop_pk=shop_pk,
+                service_id=name,
+                app_key="TEST_OLD_APP",
+                plaintext_app_secret="TEST_OLD_SECRET",
+            )
+
+        class Client:
+            def __init__(self, app_key):
+                self.app_key = app_key
+
+            def get(self, **kwargs):
+                assert not session.in_transaction()
+                seen.append(("request", self.app_key))
+                if self.app_key == "TEST_OLD_APP":
+                    with Session(db_engine) as callback, callback.begin():
+                        app = upsert_tiktok_app_credentials(
+                            callback,
+                            shop_pk=shop_pk,
+                            service_id=name,
+                            app_key="TEST_NEW_APP",
+                            plaintext_app_secret="TEST_NEW_SECRET",
+                        )
+                        upsert_credentials(
+                            callback,
+                            provider="tiktok",
+                            external_account_id=name,
+                            plaintext_access_token="TEST_NEW_ACCESS",
+                            plaintext_refresh_token="TEST_NEW_REFRESH",
+                            service_id=name,
+                            extra={"app_revision": app.revision},
+                        )
+                    raise AuthenticationError("TEST_REAUTHORIZE_DURING_REQUEST")
+                return TiktokCallResult(
+                    payload={"code": 0, "data": {}}, http_status=200
+                )
+
+        def refresh(*, refresh_token, app_credentials):
+            assert not session.in_transaction()
+            seen.append(("refresh", app_credentials.app_key, refresh_token))
+            return {
+                "access_token": "TEST_ROTATED_ACCESS",
+                "refresh_token": "TEST_ROTATED_REFRESH",
+            }
+
+        monkeypatch.setattr(
+            "tts_erp_v2.sync_worker.proxy_call._get_client",
+            lambda key, *args: Client(key),
+        )
+        monkeypatch.setattr(
+            "tts_erp_v2.proxy.tiktok_auth.refresh_tiktok_token", refresh
+        )
+        assert (
+            build_proxy_call(session, shop_id=name)("GET", "/TEST_endpoint")["code"]
+            == 0
+        )
+        assert seen == [
+            ("request", "TEST_OLD_APP"),
+            ("refresh", "TEST_NEW_APP", "TEST_NEW_REFRESH"),
+            ("request", "TEST_NEW_APP"),
+        ]
+        assert not session.in_transaction()
