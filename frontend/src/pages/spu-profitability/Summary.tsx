@@ -3,7 +3,7 @@ import { Button, Modal } from '@heroui/react';
 import { optionalRecord, text, type Overview, type RecordValue } from './contracts';
 import { displayDecimal } from '../ad-daily/query';
 
-export function displayValue(value: unknown): string { return value == null || value === '' ? '—' : typeof value === 'string' || typeof value === 'number' ? displayDecimal(value) : '—'; }
+export function displayValue(value: unknown): string { if (value == null || value === '' || !['string', 'number'].includes(typeof value) || !/^-?\d+(\.\d+)?$/.test(String(value))) return '—'; return displayDecimal(value as string | number); }
 export function displayPercent(value: unknown): string { if (value == null || value === '') return '—'; const number = Number(value); return Number.isFinite(number) ? `${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(number * 100)}%` : '—'; }
 export function priceValue(value: unknown, estimated: boolean): string { if (value == null || value === '') return '—'; const raw = String(value); if (!/^-?\d+(\.\d+)?$/.test(raw)) return '—'; const [whole, fraction = ''] = raw.split('.'); return `${estimated ? '≈' : ''}${whole}.${fraction.padEnd(4, '0')}`; }
 export const currentMetrics: [string, string, string, boolean?][] = [
