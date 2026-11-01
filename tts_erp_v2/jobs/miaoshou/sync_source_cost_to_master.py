@@ -84,7 +84,7 @@ def sync_source_cost_to_master(session: Session) -> dict[str, Any]:
 
     Returns a dict with counters: tk_rows_total / rows_updated / issues.
     SyncJob row (rows_total/inserted/failed) is set inside run_job.
-    Caller commits the session (matches other jobs in this directory).
+    Each bounded batch is committed by its ``session.begin()`` context.
     """
     with run_job(session, job_name=JOB_NAME) as job:
         with session.begin():

@@ -112,7 +112,7 @@ def sync_shops(
     """Sync the miaoshou shop list.
 
     Args:
-        session: SQLAlchemy session (caller commits).
+        session: SQLAlchemy session without an active transaction.
         client: optional ``MiaoshouErpClient``-like object. If omitted,
             :func:`resolve_miaoshou_context` + the default factory are
             used.

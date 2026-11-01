@@ -75,7 +75,7 @@ def sync_move_collect(
     """Sync the move-collect task list.
 
     Args:
-        session: SQLAlchemy session (caller commits).
+        session: SQLAlchemy session without an active transaction.
         client: optional ``MiaoshouErpClient``-like object. If omitted,
             the default factory is used.
         status: optional upstream ``filter.status`` (e.g. ``"success"``).

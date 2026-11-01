@@ -106,8 +106,8 @@ def sync_fx_rates(
 ) -> dict[str, Any]:
     """One horizon-gated sync pass for ``base_code``. Returns counters.
 
-    Does NOT commit (the scheduler's system-job executor commits on the
-    success path — same contract as the reporting.* jobs). Raises
+    Owns separate read and write ``session.begin()`` contexts around
+    transaction-free HTTP. Raises
     :class:`ExchangeRateAPIError` / ``RuntimeError`` on upstream trouble;
     ``run_scheduled`` converts quota-style errors into a cooldown skip.
     """

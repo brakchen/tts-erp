@@ -166,7 +166,7 @@ def sync_common_collect_box(
     """Sync the miaoshou common-collect-box (货源) list.
 
     Args:
-        session: SQLAlchemy session (caller commits).
+        session: SQLAlchemy session without an active transaction.
         client: optional fake / real ``MiaoshouErpClient``.
         license_id: explicit license id; falls back to env.
 

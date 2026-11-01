@@ -108,7 +108,7 @@ def sync_collect_box(
     """Sync the miaoshou collect-box list.
 
     Args:
-        session: SQLAlchemy session (caller commits).
+        session: SQLAlchemy session without an active transaction.
         client: optional fake / real ``MiaoshouErpClient``.
         license_id: explicit license id; falls back to env.
 

@@ -12,10 +12,9 @@ Cadence (see scheduler.JOBS):
 * ``reporting.profit_daily`` — every 1 h, rebuilding today + yesterday
   (UTC) so late order updates / after-sales changes land.
 
-Bookkeeping: both use :func:`tts_erp_v2.jobs.runner.run_job`, which does
-NOT commit — the scheduler's system-job executor commits on success and
-writes a sentinel failed row on exception (same contract as
-``token.refresh``).
+Bookkeeping uses :func:`tts_erp_v2.jobs.runner.run_job` for independent
+audit transactions. Each job owns bounded business transactions through
+``session.begin()``; the scheduler manages only Session lifetime.
 """
 
 from __future__ import annotations

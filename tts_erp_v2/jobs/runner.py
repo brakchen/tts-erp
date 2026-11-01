@@ -45,7 +45,7 @@ def start_job(
     credential_id: int | None = None,
     extra: dict | None = None,
 ) -> SyncJob:
-    """Insert a 'running' SyncJob row. Caller commits."""
+    """Insert a 'running' SyncJob row within the caller's begin context."""
     job = SyncJob(
         job_name=job_name,
         credential_id=credential_id,
@@ -176,7 +176,7 @@ def record_raw_payload(
 
     Hash is sha256 of the canonical (sorted-keys) JSON, which gives
     downstream jobs a cheap "have I seen this exact payload before?"
-    check. Callers must commit the session.
+    check. Caller includes this write in its entity transaction.
     """
     if isinstance(payload, (dict, list)):
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True)

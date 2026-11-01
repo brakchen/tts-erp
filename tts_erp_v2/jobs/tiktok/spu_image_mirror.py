@@ -141,7 +141,7 @@ def run(
     targeted operator re-runs (e.g. one SPU whose mirror failed).
 
     Returns counters only; failures write SyncIssues and are counted in
-    ``rows_failed``. The caller (run_with_sync_job) commits.
+    ``rows_failed``. Each image write owns a short ``session.begin()`` context.
     """
     if downloader is None:
         downloader = _default_downloader()
@@ -228,8 +228,8 @@ def run_scheduled(session: Session) -> dict:
 
     Wraps the full-DB mirror pass in the shared ``sync_jobs`` lifecycle
     (same convention as the miaoshou.* / reporting.* system jobs), so
-    every tick leaves a durable run record with counters instead of
-    relying on the bare scheduler commit.
+    every tick leaves a durable run record with counters. The scheduler
+    manages Session lifetime; it does not commit business rows.
     """
     with run_job(session, job_name=JOB_NAME) as job:
         result = run(session)

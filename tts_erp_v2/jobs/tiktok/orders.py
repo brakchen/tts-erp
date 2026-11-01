@@ -142,8 +142,8 @@ def _store_raw(
 ) -> RawRecord:
     """Insert a raw_records row and return the new ORM instance.
 
-    Caller is expected to be inside an outer transaction managed by
-    :func:`run_with_sync_job`; we commit only when the job commits.
+    Caller includes this write in the complete entity's ``session.begin()``
+    context; lifecycle bookkeeping does not commit business rows.
     """
     payload_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(
         "utf-8"

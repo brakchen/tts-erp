@@ -189,7 +189,7 @@ def sync_token_refresh(
     """Refresh all due credentials.
 
     Args:
-        session: SQLAlchemy session (caller commits).
+        session: SQLAlchemy session without an active transaction.
         registry: callable(provider, external_account_id) → refresher.
             Defaults to the no-op registry.
         providers: which provider labels to scan.

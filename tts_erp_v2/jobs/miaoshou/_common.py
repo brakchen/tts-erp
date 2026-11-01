@@ -103,8 +103,7 @@ def ensure_procurement_account(
 ) -> ProcurementAccount:
     """Idempotent upsert of a procurement account row.
 
-    Returns the row (caller commits). Safe to call from inside an
-    outer transaction; uses ``ON CONFLICT DO UPDATE`` so concurrent
+    Returns the row within the caller's short initialization transaction; uses ``ON CONFLICT DO UPDATE`` so concurrent
     jobs do not create duplicates.
     """
     values: dict[str, Any] = {
