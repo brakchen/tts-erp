@@ -47,6 +47,7 @@ from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.proxy.errors import SigningError, UpstreamHttpError
 from tts_erp_v2.proxy.token_service import (
     CredentialsView,
+    RefresherFn,
     TikTokAppCredentials,
     load_credentials,
     resolve_tiktok_app_credentials,
@@ -71,9 +72,6 @@ AUTHORIZE_PATH = "/open/authorize"
 
 # Cap on the upstream response body we keep for diagnostics.
 _BODY_PREVIEW_CHARS = 300
-
-RefresherFn = Callable[[str, str], dict]
-
 
 def _resolve_app_credentials() -> tuple[str, str, str]:
     """Read the legacy environment App pair and token host.
@@ -653,7 +651,7 @@ def _tiktok_refresher(
 
     The returned callable has signature
     ``(provider, external_account_id) -> refresher`` where the inner
-    ``refresher(provider, external_account_id)`` does the actual
+    ``refresher(credentials_view)`` does the actual
     HTTP call. We need the closure shape (vs. a flat dict) so the
     scheduler can call ``registry(provider, eid)`` per row in
     :mod:`tts_erp_v2.jobs.token_refresh`.
@@ -697,15 +695,15 @@ def build_token_registry(
     """Build the per-provider refresher registry used by the scheduler.
 
     Args:
-        session_factory: SQLAlchemy ``sessionmaker`` used to read the
-            current ``refresh_token`` from the encrypted credentials
-            row. If None, defers to
+        session_factory: SQLAlchemy ``sessionmaker`` used to resolve the
+            shop-owned App against the caller's credential snapshot.
+            If None, defers to
             :func:`tts_erp_v2.db.base.get_session_factory` (so daemon
             mode picks up the production sessionmaker).
 
     Returns:
         Callable ``(provider, external_account_id) -> refresher``,
-        where ``refresher(provider, external_account_id) -> dict``
+        where ``refresher(credentials_view) -> dict``
         is what ``refresh_if_needed`` invokes.
 
     Provider dispatch:
