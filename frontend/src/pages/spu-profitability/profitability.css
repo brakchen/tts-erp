@@ -4,8 +4,8 @@
 .erp-profit-controls label { display: grid; min-width: 0; gap: 8px; color: var(--ink-soft); font-size: 12px; }
 .erp-profit-controls label:has(input[type=checkbox]) { display: flex; align-items: center; }
 .erp-profit-scope-row, .erp-profit-dates { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
-.erp-profit-scope-row .erp-shop-picker { width: min(100%, 300px); }
-.erp-profit-dates > label { flex: 0 1 156px; }
+.erp-profit-scope-row .erp-shop-picker { width: 300px; max-width: 100%; }
+.erp-profit-dates > label { width: 156px; flex: 0 1 156px; }
 .erp-profit-projection { width: 100px; }
 .erp-spu-selection-search { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
 .erp-spu-selection-search > :first-child { width: min(100%, 480px); flex: 1 1 480px; min-width: 0; }
