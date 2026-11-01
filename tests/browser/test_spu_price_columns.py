@@ -112,14 +112,27 @@ def _open_with_supported_payload(
     shop_button = page.locator("#shop-modal-list button").first
     if shop_button.is_visible():
         shop_button.click()
-    page.locator("#price-summary").wait_for(state="visible")
+    if "/focused-spus" not in path:
+        page.locator("#price-summary").wait_for(state="visible")
     page.locator(".tabulator-row").first.wait_for(state="visible")
     return page
 
 
-def test_nested_price_summary_and_grouped_columns_render_on_both_profiles(frontend_browser_renderer, monkeypatch):
+def test_price_content_is_only_shown_on_standard_roi_profile(frontend_browser_renderer, monkeypatch):
     for path in ("/v2/pages/spu-roi", "/v2/pages/focused-spus"):
         page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, path)
+        if "/focused-spus" in path:
+            expect(page.locator("#price-summary")).to_have_count(0)
+            for metric in _METRICS:
+                for kind in ("mean", "median"):
+                    expect(page.locator(
+                        f'.tabulator-header [tabulator-field="priceStats.{metric}.{kind}"]'
+                    )).to_be_hidden()
+            for label in ("采购价", "销售价", "实付价"):
+                expect(page.locator(".tabulator-header").get_by_text(label, exact=True)).to_be_hidden()
+            expect(page.locator("#sum-roi")).to_be_visible()
+            assert page.locator(".tabulator-row").count() >= 1
+            continue
         assert "采购价" in page.locator("#price-summary").inner_text()
         assert "37.0000" in page.locator("#price-summary").inner_text()
         assert "≈40.0000" in page.locator("#price-summary").inner_text()
@@ -133,7 +146,7 @@ def test_nested_price_summary_and_grouped_columns_render_on_both_profiles(fronte
 def test_null_and_empty_price_values_never_render_as_zero(frontend_browser_renderer, monkeypatch):
     for path, empty_value, status in (
         ("/v2/pages/spu-roi", None, "no_samples"),
-        ("/v2/pages/focused-spus", "", "partial"),
+        ("/v2/pages/spu-roi", "", "partial"),
     ):
         stats = _price_stats()
         for metric in _METRICS:

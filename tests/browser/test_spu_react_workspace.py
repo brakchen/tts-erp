@@ -52,7 +52,9 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
                 scrollable: holder.scrollWidth > holder.clientWidth};
     }''')
     assert observed['available'] >= 135, observed
-    assert observed['scrollable'], observed
+    # Without price columns the focused table can fit on an ultrawide viewport.
+    if profile == 'spu-roi' or width < 2560:
+        assert observed['scrollable'], observed
     grid = page.locator('#rows').bounding_box()
     for control in [page.locator('#shop-switcher'), page.locator('#filter-w-start'),
                     page.locator('#filter-w-end'), page.get_by_label('按 SPU ID / 标题搜索'),
