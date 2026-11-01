@@ -125,3 +125,17 @@ FRONTEND_TEST_FILTER=src/shared/api/client.test.ts bash scripts/test_isolated.sh
 完整基线仅在初版 `dd2f6f78` 执行一次 `bash scripts/test_baseline.sh --keep-log /tmp/codex-spu-tags-baseline-pytest.log`，退出 1，共 **153 个失败 ID**：与前次逐项复验的 149 个剩余失败完全重合，另有本次 4 个差异（组件 adapter 及本浏览器文件的分页、单项增删、失败读回三个 case）。这 4 项的失败详情均为初版标签的可访问名称重复，导致原有精确按钮选择器无法匹配；组件 adapter 内具体失败为 `a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs`。`ce47567b` 改用原生标签与移除按钮的名称关联后，上述两份专项复验全部通过，未放宽精确按钮查询或原有业务断言。
 
 未重跑整个 fast suite，未更新零失败基线。153 是初版实际运行结果，不能写成最终修正版仍有 153 项失败；149 是本次基线与此前失败清单的交集，不是对 `ce47567b` 的另一次完整执行结果。原始日志、退出码和清单对比保留于测试服务器 `/tmp/codex-spu-tags-baseline*`，既有失败的归因仍见前述报告。专项通过不代表全站测试通过。
+
+### 用户更新：重点页不展示价格（2026-11-01）
+
+从 `origin/master 92bcde80` 开始，`codex/hide-focused-spu-prices` 仅调整共享 React 页的 profile 展示：重点关注页不挂载价格统计块，并向现有表格传递关闭价格列的展示参数。SPU ROI 页继续展示价格统计与六列价格，后端价格 API、公式、经营指标和关注维护保持原合同。需求变更同时记录在 [价格设计](../design/spu-price-statistics.md) 原批准范围之前。
+
+产品提交 `c2fb82c0`、宽屏测试维护 `b1546774` 已合并为 `7e5bb7e4`。`bash scripts/test_isolated.sh browser tests/browser/test_spu_price_columns.py tests/browser/test_spu_react_workspace.py --tb=short` 共 27 项中 26 项通过；唯一失败为重点页 2560px 表格必须滚动的旧断言。移除六个价格列后表格可完整放下，保留手机及普通桌面的滚动、整页溢出和完整经营列检查，仅允许重点页超宽屏无需滚动。该参数化 case 在 `b1546774` 经隔离 runner 单项复验通过。价格范围检查使用服务端仍返回完整价格数据的 fixture，确认重点页不显示价格块、六个价格列及其分组标题，SPU ROI 保留价格原值、空值及服务端排序覆盖。
+
+类型检查与构建退出 0，本机已激活 `build-f113c0c55d327bf48d5e`。实际页面只读验收：重点页 29 个关注标签及 29 行数据正常，价格块不存在、可见价格列为 0；SPU ROI 显示价格统计及六列价格。2560px、375px 已目视检查，页面没有横向溢出，未修改真实关注数据。
+
+在 `c2fb82c0` 仅运行一次完整 `bash scripts/test_baseline.sh --keep-log /tmp/codex-spu-hide-prices-baseline-pytest.log`，退出 1，记录 **152 个失败 ID**。其中 149 个与此前剩余清单完全重合；另外 3 个为上述宽屏断言、真实价格浏览器测试仍等待重点页价格块，以及 frontend adapter 内视频发布 `fails closed for task writes when role hint is missing/false 1` 的瞬时空表。
+
+真实价格用例在 `df8f7e32` 经 `bash scripts/test_isolated.sh browser tests/browser/test_spu_price_stats_live.py::test_focused_spus_profile_matches_spu_roi_price_totals --tb=short` 单项复验通过。新预期为重点页不显示价格块/列，而 ROI 页面继续接受原有六个独立 oracle 金额及状态校验；额外用两个页面各自实际查询 URL 和已认证上下文请求真实隔离 API，逐一比较总价格统计及两行全部价格事实，保留同范围价格一致性覆盖。首次维护复验漏导入 `expect` 已补齐，最终复验退出 0。视频发布未修改，使用 `FRONTEND_TEST_FILTER=src/pages/video-publish/index.test.tsx bash scripts/test_isolated.sh frontend tests/frontend/test_components.py --tb=short` 单独复验退出 0，按测试指南归为顺序/负载偶发，未放宽权限断言。
+
+未再次执行整个 fast suite，未修改零失败基线；152 属于 `c2fb82c0` 的完整运行结果，不能写成最终版本仍有 152 个失败。专项复验关闭上述新增差异，不代表全站通过。原始日志、退出码和逐 ID 对比位于测试服务器 `/tmp/codex-spu-hide-prices-*`。
