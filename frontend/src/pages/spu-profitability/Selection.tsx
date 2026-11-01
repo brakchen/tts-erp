@@ -14,6 +14,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, ap
   const [query, setQuery] = useState(''); const [paste, setPaste] = useState(''); const [batchOpen, setBatchOpen] = useState(false);
   const [loading, setLoading] = useState(false); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0); const [needsCheck, setNeedsCheck] = useState(false); const [cooldown, setCooldown] = useState(false);
+  const [forbidden, setForbidden] = useState(false); const [savedCount, setSavedCount] = useState<number | null>(null);
   const lifetime = useRef<AbortController | undefined>(undefined); const pending = useRef(false); const cancelDelay = useRef<(() => void) | undefined>(undefined);
   const notBefore = useRef(0);
   const resolveController = useRef<AbortController | undefined>(undefined); const resolveGeneration = useRef(0);
@@ -37,7 +38,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, ap
       } while (offset < total);
       if (controller.signal.aborted) return;
       const unique = [...new Map(items.map((item) => [item.spu_id, item])).values()];
-      setChoices(unique); setDraft(unique.map((item) => item.spu_id)); focusedCallback.current(total); setLoading(false);
+      setChoices(unique); setDraft(unique.map((item) => item.spu_id)); setSavedCount(total); focusedCallback.current(total); setLoading(false);
     })().catch((error: unknown) => { if (!controller.signal.aborted) { hold(error); setNotice(error instanceof Error ? error.message : '关注读取失败'); setLoading(false); setNeedsCheck(true); } });
     return () => { controller.abort(); resolveController.current?.abort(); cancelDelay.current?.(); };
     // An applied standard selection has a separate effect; only shop/profile invalidates this lifetime.
@@ -55,19 +56,21 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, ap
   async function change(next: string[]) {
     if (pending.current || loading || cooldown || needsCheck || blocked) return;
     if (!focused) { if (next.length > 100) setNotice('最多选择 100 个 SPU'); else { setDraft(next); setNotice(''); } return; }
-    if (!canWrite || !shopPk) return;
+    if (!canWrite || !shopPk || forbidden) return;
     const add = next.filter((id) => !draft.includes(id)); const remove = draft.filter((id) => !next.includes(id));
     if (!add.length && !remove.length) return;
     pending.current = true; setBusy(true); setNotice('正在保存…'); const scope = lifetime.current;
     try {
       // One explicit mutation at a time; never replay a failed or uncertain PATCH.
       const { data: raw } = await withinRequestLifetime(new AbortController(), (signal) => requestJson<unknown>(root, `/v2/reporting/focused-spus/${shopPk}`, { method: 'PATCH', signal, body: JSON.stringify({ addSpuIds: add, removeSpuIds: remove }) }, parseIdentityJson), scope?.signal);
-      const result = record(raw); if (identity(result.shopPk) !== shopPk || !Number.isSafeInteger(Number(result.total))) throw new Error('保存响应不完整，需重新读取关注事实');
+      const result = record(raw); if (identity(result.shopPk) !== shopPk || !Number.isSafeInteger(Number(result.total)) || Number(result.total) < 0) throw new Error('保存响应不完整，需重新读取关注事实');
+      array(result.addedSpuIds).forEach(identity); array(result.removedSpuIds).forEach(identity);
       if (scope?.signal.aborted) return;
-      setDraft(next); focusedCallback.current(Number(result.total)); setNotice('已实时保存');
+      setDraft(next); setSavedCount(Number(result.total)); focusedCallback.current(Number(result.total)); setNotice('已实时保存');
     } catch (error: unknown) {
       if (scope?.signal.aborted) return;
       setNeedsCheck(true); focusedCallback.current(null); setNotice(`${error instanceof Error ? error.message : '保存未确认'}；原选择保留。请先重新读取关注事实，再决定后续修改。`);
+      if (error instanceof ApiError && error.status === 403) setForbidden(true);
       hold(error);
     } finally { if (!scope?.signal.aborted) { pending.current = false; setBusy(false); } }
   }
@@ -90,17 +93,18 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, ap
     } catch (error: unknown) { if (!scope?.signal.aborted && !controller.signal.aborted && generation === resolveGeneration.current) { hold(error); setNotice(error instanceof Error ? error.message : '批量解析失败'); } }
     finally { scope?.signal.removeEventListener('abort', cancel); if (!scope?.signal.aborted && generation === resolveGeneration.current) { pending.current = false; setBusy(false); resolveController.current = undefined; } }
   }
-  const disabled = !shopPk || loading || busy || cooldown || needsCheck || blocked || focused && !canWrite;
+  const disabled = !shopPk || loading || busy || cooldown || needsCheck || blocked || forbidden || focused && !canWrite;
   const selected = draft.map((id) => choices.find((item) => item.spu_id === id) ?? { spu_id: id, title: null, status: null });
   const options = [...new Map([...selected, ...choices].map((item) => [item.spu_id, item])).values()];
   return <section aria-label={focused ? '重点关注 SPU' : 'SPU 范围'} className="erp-panel space-y-3">
-    <div className="flex flex-wrap items-center gap-3"><h2 className="erp-section-heading">{focused ? '重点关注 SPU' : 'SPU 范围'}</h2><span id="spu-selection-count">{focused ? '已关注' : '已选择'} {draft.length} 个</span>{focused && <span>修改后实时保存</span>}</div>
+    <div className="flex flex-wrap items-center gap-3"><h2 className="erp-section-heading">{focused ? '重点关注 SPU' : 'SPU 范围'}</h2><span id="spu-selection-count">{focused ? '已关注' : '已选择'} {focused ? savedCount ?? '—' : draft.length} 个</span>{focused && <span>修改后实时保存</span>}</div>
     <div className="erp-spu-selection-search"><TextField value={query} onChange={setQuery} isDisabled={disabled}><Label>按 SPU ID / 标题搜索</Label><Input fullWidth /></TextField><Button variant="secondary" isDisabled={disabled} onPress={() => setBatchOpen(!batchOpen)} aria-expanded={batchOpen}>批量粘贴</Button></div>
     {selected.length > 0 && <details open={selected.length <= 6}><summary>{focused ? '当前关注清单' : '当前已选商品'} · {selected.length} 个</summary><ul className="max-h-48 space-y-2 overflow-y-auto">{selected.map((item) => <li key={item.spu_id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">{item.title ?? item.spu_id} · {item.spu_id}</span><Button size="sm" variant="secondary" aria-label={`移除 SPU ${item.spu_id}`} isDisabled={disabled} onPress={() => { void change(draft.filter((id) => id !== item.spu_id)); }}>移除</Button></li>)}</ul></details>}
     <fieldset id={focused ? 'focused-spu-select' : 'filter-spu-ids'} aria-label={focused ? '重点关注 SPU 多选' : '批量选择 SPU'} disabled={disabled} className="space-y-2"><legend>{query ? '搜索结果 · 勾选添加，取消勾选仅移除此项' : '输入关键词搜索，或批量粘贴 SPU ID'}</legend><div className="max-h-48 space-y-2 overflow-y-auto">{options.filter((item) => query.trim() || !draft.includes(item.spu_id)).map((item) => <label className="flex items-start gap-2" key={item.spu_id}><input type="checkbox" checked={draft.includes(item.spu_id)} onChange={(event) => { void change(event.target.checked ? [...draft, item.spu_id] : draft.filter((id) => id !== item.spu_id)); }} /><span className="min-w-0 break-all">{item.spu_id} · {item.title ?? '无标题'} · {item.status ?? '未知状态'}</span></label>)}</div></fieldset>
     {batchOpen && <div className="space-y-2"><TextField value={paste} onChange={setPaste} isDisabled={disabled}><Label>粘贴 SPU ID（逗号、空格或换行分隔）</Label><TextArea fullWidth rows={3} /></TextField><Button isDisabled={disabled || !paste.trim()} onPress={() => { void resolvePaste(); }}>解析并添加</Button></div>}
     {!focused && <div className="flex flex-wrap items-center gap-2"><Button id="btn-spu-apply" isDisabled={disabled} onPress={() => onApply(draft)}>查询</Button><Button id="btn-spu-clear" variant="secondary" isDisabled={!shopPk || loading || cooldown || needsCheck || blocked} onPress={() => { cancelResolution(); setDraft([]); setPaste(''); setNotice(''); onApply([]); }}>清空</Button><span>选择后点击查询应用；空范围表示店铺全部 SPU。</span></div>}
     {focused && !canWrite && <p>当前为只读权限；可浏览关注商品，修改需要 readwrite。</p>}
+    {forbidden && <p role="alert">服务端拒绝修改此店铺的关注清单；重新读取事实不会解除写权限限制。</p>}
     {loading && <p role="status">正在读取完整关注清单…</p>}{notice && <p id="spu-filter-feedback" role={needsCheck ? 'alert' : 'status'} className="break-all">{notice}</p>}
     {focused && needsCheck && <Button variant="secondary" isDisabled={busy || cooldown} onPress={() => { if (performance.now() >= notBefore.current) setRevision((value) => value + 1); }}>重新读取关注事实</Button>}
   </section>;

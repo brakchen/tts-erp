@@ -1,9 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Page from './index';
 import type { FrontendBootstrap } from '../../shared/contracts';
 
-vi.mock('./ProfitabilityTable', () => ({ ProfitabilityTable: ({ rows, error }: { rows: { spu_id: string }[]; error?: string }) => <div aria-label="TEST 盈利行">{rows.map((row) => <span key={row.spu_id}>{row.spu_id}</span>)}{error && <p role="alert">{error}</p>}</div> }));
+vi.mock('./ProfitabilityTable', () => ({ sortLabel: (value: string) => value, ProfitabilityTable: ({ rows, error }: { rows: { spu_id: string }[]; error?: string }) => <div aria-label="TEST 盈利行">{rows.map((row) => <span key={row.spu_id}>{row.spu_id}</span>)}{error && <p role="alert">{error}</p>}</div> }));
 const bootstrap: FrontendBootstrap = { pageId: 'spu-roi', rootPath: '', releaseId: 'TEST_release', navigation: [], roleCapabilities: { readwrite: true, admin: false } };
 const shop = { id: 7, shop_id: '90071992547409931', account_name: 'TEST 店铺', region: 'VN' };
 const product = { spu_pk: 101, spu_id: 'TEST_OLD', title: 'TEST 原商品', status: 'ACTIVATE', main_image_url: null };
@@ -81,4 +81,25 @@ it('explains only the typed missing-FX error and leaves no old successful result
   render(<Page bootstrap={bootstrap} />);
   expect(await screen.findByRole('alert')).toHaveTextContent('汇率数据缺失，无法计算结果');
   expect(screen.queryByText('TEST_RESULT')).not.toBeInTheDocument();
+});
+it('a server write denial remains a denial after reading the focused facts', async () => {
+  patchFailure = 403; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: '移除 SPU TEST_OLD' }));
+  fireEvent.click(await screen.findByRole('button', { name: '重新读取关注事实' }));
+  await screen.findByText('服务端拒绝修改此店铺的关注清单；重新读取事实不会解除写权限限制。');
+  expect(screen.getByRole('button', { name: '移除 SPU TEST_OLD' })).toBeDisabled();
+  expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(1);
+});
+it('clear cancels a standard bulk lookup and ignores its late response', async () => {
+  const fetcher = vi.mocked(fetch); const original = fetcher.getMockImplementation()!; let finish!: (response: Response) => void;
+  fetcher.mockImplementation((input, init) => String(input).includes('channel-product-options') ? new Promise<Response>((resolve) => { finish = resolve; }) : original(input, init));
+  render(<Page bootstrap={bootstrap} />); await screen.findByText('TEST_RESULT');
+  fireEvent.click(screen.getByRole('button', { name: '批量粘贴' }));
+  fireEvent.change(screen.getByLabelText('粘贴 SPU ID（逗号、空格或换行分隔）'), { target: { value: 'TEST_NEW' } });
+  fireEvent.click(screen.getByRole('button', { name: '解析并添加' }));
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  expect(screen.getByRole('button', { name: '清空' })).toBeEnabled(); fireEvent.click(screen.getByRole('button', { name: '清空' }));
+  await act(async () => { finish(response([{ spu_id: 'TEST_NEW', title: 'TEST 新商品', status: 'ACTIVATE' }])); });
+  expect(screen.queryByRole('button', { name: '移除 SPU TEST_NEW' })).not.toBeInTheDocument();
+  expect(screen.getByText('已选择 0 个')).toBeInTheDocument();
 });
