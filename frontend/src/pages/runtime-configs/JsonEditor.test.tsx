@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import JsonEditor from './JsonEditor';
 
@@ -22,6 +23,8 @@ afterAll(() => {
 describe('runtime-configs public editor adapter (real SDK, jsdom geometry)', () => {
   it('shows exact integer and decimal tokens in code, tree and readOnly view and preserves them through formatting', async () => {
     render(<Harness />);
+    await userEvent.click(screen.getByRole('button', { name: '无障碍 JSON 文本编辑' }));
+    expect(screen.getByRole('textbox', { name: 'TEST 配置 JSON 文本' })).toBeVisible();
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'TEST 配置 编辑器' })).toHaveTextContent('0.123456789012345678901'));
     fireEvent.click(screen.getByRole('button', { name: 'TEST 配置 tree' }));
     await waitFor(() => expect(screen.getByRole('tree')).toHaveTextContent('900719925474099312345'));
@@ -35,6 +38,8 @@ describe('runtime-configs public editor adapter (real SDK, jsdom geometry)', () 
   });
   it('retains invalid canonical text across rejected tree conversion and disabled/enabled transitions', async () => {
     const view = render(<Harness initial="{TEST invalid" />);
+    await userEvent.click(screen.getByRole('button', { name: '无障碍 JSON 文本编辑' }));
+    expect(screen.getByRole('textbox', { name: 'TEST 配置 JSON 文本' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'TEST 配置 tree' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('无效文本已保留');
     expect(screen.getByLabelText('TEST 配置 JSON 文本')).toHaveValue('{TEST invalid');
@@ -48,6 +53,7 @@ describe('runtime-configs public editor adapter (real SDK, jsdom geometry)', () 
   });
   it('locks view mode edits in both the SDK and the accessible text path', async () => {
     render(<Harness />); fireEvent.click(screen.getByRole('button', { name: 'TEST 配置 view' }));
+    await userEvent.click(screen.getByRole('button', { name: '无障碍 JSON 文本编辑' }));
     const editor = screen.getByRole('region', { name: 'TEST 配置' });
     expect(within(editor).getByLabelText('TEST 配置 JSON 文本')).toHaveAttribute('readonly');
   });

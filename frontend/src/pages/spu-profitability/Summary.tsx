@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Button, Card, Modal } from '@heroui/react';
+import { Button, Card, Disclosure, Modal, Table } from '@heroui/react';
 import { optionalRecord, text, type Overview, type RecordValue } from './contracts';
 import { displayDecimal } from '../ad-daily/query';
 
@@ -39,7 +39,8 @@ function RoiComparison({ data }: { data: Overview }) {
   const hints = optionalRecord(optionalRecord(data.meta.presentation).summary_hints);
   const current = currentMetrics.filter((item) => item[1].includes('roi'));
   const projected = projectedMetrics.filter((item) => item[1].includes('roi'));
-  return <><table className="erp-overview-roi" aria-label="当前与预计 ROI"><thead><tr><th scope="col">ROI</th><th scope="col">当前</th><th scope="col">预计最终</th></tr></thead><tbody>{current.map(([label, field, id], index) => { const [, projectedField, projectedId] = projected[index]; return <tr key={field}><th scope="row">{label}<Button size="sm" variant="ghost" aria-label={`查看${label}口径`} onPress={() => setHint({ label, body: `${text(hints[field] ?? metricHints[field])}\n${text(hints[projectedField] ?? metricHints[projectedField])}` })}>?</Button></th><td id={id}>{field === 'ad_system_breakeven_roi' && data.totals.ad_system_breakeven_roi_status === 'estimated_known_costs' && data.totals[field] != null ? '≈' : ''}{displayValue(data.totals[field])}</td><td id={projectedId}>{displayValue(data.totals[projectedField])}</td></tr>; })}</tbody></table>
+  return <><Table variant="secondary"><Table.ScrollContainer><Table.Content className="erp-overview-roi" aria-label="当前与预计 ROI"><Table.Header><Table.Column isRowHeader>ROI</Table.Column><Table.Column>当前</Table.Column><Table.Column>预计最终</Table.Column></Table.Header><Table.Body>{current.map(([label, field, id], index) => { const [, projectedField, projectedId] = projected[index]; return <Table.Row key={field} id={field}><Table.Cell>{label}</Table.Cell><Table.Cell><span id={id}>{field === 'ad_system_breakeven_roi' && data.totals.ad_system_breakeven_roi_status === 'estimated_known_costs' && data.totals[field] != null ? '≈' : ''}{displayValue(data.totals[field])}</span></Table.Cell><Table.Cell><span id={projectedId}>{displayValue(data.totals[projectedField])}</span></Table.Cell></Table.Row>; })}</Table.Body></Table.Content></Table.ScrollContainer></Table>
+    <div role="group" aria-label="ROI 口径说明" className="flex flex-wrap gap-1">{current.map(([label, field], index) => { const projectedField = projected[index][1]; return <Button key={field} size="sm" variant="ghost" aria-label={`查看${label}口径`} onPress={() => setHint({ label, body: `${text(hints[field] ?? metricHints[field])}\n${text(hints[projectedField] ?? metricHints[projectedField])}` })}>{label}说明</Button>; })}</div>
     <Modal.Backdrop isOpen={Boolean(hint)} onOpenChange={(open) => { if (!open) setHint(undefined); }}><Modal.Container><Modal.Dialog><Modal.CloseTrigger aria-label="关闭指标说明" /><Modal.Header><Modal.Heading>{hint?.label}口径</Modal.Heading></Modal.Header><Modal.Body><p className="whitespace-pre-line">{hint?.body}</p></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop></>;
 }
 export function Summary({ data, scope, stateMessage, salesPrices, costPrices, feeFacts }: { data: Overview; scope?: string; stateMessage?: string; salesPrices?: ReactNode; costPrices?: ReactNode; feeFacts?: ReactNode }) {
@@ -59,7 +60,7 @@ export function Summary({ data, scope, stateMessage, salesPrices, costPrices, fe
         <Metrics values={data.totals} meta={data.meta} metrics={[[ '全损成本', 'return_loss', 'sum-full-loss-cost' ], ...currentMetrics.filter((item) => ['full_loss_order_count', 'full_loss_rate'].includes(item[1]))]} />
         {feeFacts}{costPrices}
         <Metrics values={data.totals} meta={data.meta} labels={overviewLabels} metrics={projectedMetrics.filter((item) => item[1] === 'projected_future_full_loss_qty')} />
-        <details id="projection-basis-card"><summary className="op-counter-group-label">预测依据</summary><p className="op-projection-window erp-table-meta">样本：<span id="projection-sample-window">{text(projection.sample_start)} ~ {text(projection.sample_end)}</span></p><p className="erp-table-meta">{metricHints.projection_status}</p><Metrics values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => ['projection_completed_basis_order_count', 'projection_completed_full_loss_order_count', 'completed_full_loss_rate'].includes(item[1]))} /></details>
+        <div id="projection-basis-card"><Disclosure><Disclosure.Heading><Disclosure.Trigger className="op-counter-group-label">预测依据<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body><p className="op-projection-window erp-table-meta">样本：<span id="projection-sample-window">{text(projection.sample_start)} ~ {text(projection.sample_end)}</span></p><p className="erp-table-meta">{metricHints.projection_status}</p><Metrics values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => ['projection_completed_basis_order_count', 'projection_completed_full_loss_order_count', 'completed_full_loss_rate'].includes(item[1]))} /></Disclosure.Body></Disclosure.Content></Disclosure></div>
       </Card.Content></Card>
       <Card className="erp-overview-profit" aria-label="利润"><Card.Header className="flex-row flex-wrap items-center justify-between gap-3"><Card.Title>利润</Card.Title><span id="sum-projection-status" className="erp-table-meta">{status[String(data.totals.projection_status)] ?? text(data.totals.projection_status)}</span></Card.Header><Card.Content>
         <div className="erp-overview-comparison">
@@ -73,22 +74,38 @@ export function Summary({ data, scope, stateMessage, salesPrices, costPrices, fe
   </section>;
 }
 const priceLabels: Record<string, string> = { purchase: '采购价', originalSale: '销售价', paid: '实付价' };
+function priceStatus(raw: unknown) { return { complete: '完整', partial: '部分覆盖', no_samples: '无样本' }[String(raw)] ?? text(raw); }
+
+/** Dialog controls stay outside the table's row-focus ownership. Root/Button is
+ * the standard Modal composition; restoring its opener must not re-enter a grid.
+ * https://heroui.com/en/docs/react/components/modal (HeroUI 3.2.6, MIT).
+ */
+function PriceTip({ metric, stats, meta }: { metric: string; stats: RecordValue; meta: RecordValue }) {
+  const fx = optionalRecord(meta.priceFx ?? meta.priceFX); const cost = optionalRecord(meta.priceCost);
+  return <Modal.Root>
+    <Button size="sm" variant="ghost" data-price-tip={metric} aria-label={`查看${priceLabels[metric]}统计口径`}>{priceLabels[metric]}口径</Button>
+    <Modal.Backdrop><Modal.Container size="lg" scroll="inside"><Modal.Dialog><Modal.CloseTrigger aria-label="关闭价格说明" /><Modal.Header><Modal.Heading>{priceLabels[metric]}统计口径</Modal.Heading></Modal.Header><Modal.Body id="ops-tip" className="space-y-2">
+      <p>来源：{metric === 'purchase' ? 'ROI 当前有效成本' : metric === 'originalSale' ? 'TikTok line_items.original_price' : 'TikTok line_items.sale_price'}。按件数加权平均值 / 中位数，当前经营窗口，已付款且排除赠品。</p>
+      <p>覆盖：{priceStatus(stats.status)} · {text(stats.observedQuantity)} / {text(stats.eligibleQuantity)} 件</p><p>币种：{text(meta.priceCurrency ?? 'CNY')} · 汇率快照：{text(fx.snapshotId ?? fx.snapshot_id)}</p><p>成本基准：{text(cost.basisFingerprint)} · 计算时间：{text(meta.calculatedAt ?? meta.calculated_at)}</p>{stats.estimated === true && <p>≈ 表示服务端估算成本，非人工登记成本。</p>}
+    </Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+  </Modal.Root>;
+}
+
 export function PriceSummary({ data, supported, loading, error, kind }: { data?: Overview; supported: boolean | undefined; loading: boolean; error?: string; kind: 'sales' | 'purchase' }) {
-  const [tip, setTip] = useState<string>(); const all = optionalRecord(data?.totals.priceStats); const meta = data?.meta ?? {};
-  const stats = optionalRecord(tip ? all[tip] : undefined); const fx = optionalRecord(meta.priceFx ?? meta.priceFX); const cost = optionalRecord(meta.priceCost);
-  const status = (raw: unknown) => ({ complete: '完整', partial: '部分覆盖', no_samples: '无样本' }[String(raw)] ?? text(raw));
+  const all = optionalRecord(data?.totals.priceStats); const meta = data?.meta ?? {};
+  const visiblePrices = Object.entries(priceLabels).filter(([metric]) => (metric === 'purchase') === (kind === 'purchase'));
   return <section id={kind === 'sales' ? 'price-summary' : 'price-summary-purchase'} hidden={supported !== true} className="erp-overview-prices space-y-2" aria-label={kind === 'sales' ? '销售价格' : '采购价格'} aria-busy={loading}>
     <span id={kind === 'sales' ? 'price-summary-status' : 'price-summary-purchase-status'} className={loading || error ? 'erp-table-meta' : 'sr-only'}>{loading ? '加载中…' : error ? `加载失败 · ${error}` : '已加载'}</span>
-    <div className="erp-table-scroll"><table className="erp-table-content erp-price-summary-table"><thead><tr><th scope="col">价格</th><th scope="col">均价</th><th scope="col">中位数</th><th scope="col">覆盖</th></tr></thead><tbody>{Object.entries(priceLabels).filter(([metric]) => (metric === 'purchase') === (kind === 'purchase')).map(([metric, label]) => { const value = optionalRecord(all[metric]); return <tr key={metric}><th scope="row">{label} <Button size="sm" variant="ghost" data-price-tip={metric} aria-label={`查看${label}统计口径`} onPress={() => setTip(metric)}>?</Button></th>{['mean', 'median'].map((kind) => <td key={kind} id={`price-${metric}-${kind}`} className="erp-table-number">{loading ? '加载中…' : error ? '—' : priceValue(value[kind], metric === 'purchase' && value.estimated === true)}</td>)}<td id={`price-status-${metric}`}>{status(value.status)}</td></tr>; })}</tbody></table></div>
-    <Modal.Backdrop isOpen={Boolean(tip)} onOpenChange={(open) => { if (!open) setTip(undefined); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog><Modal.CloseTrigger aria-label="关闭价格说明" /><Modal.Header><Modal.Heading>{tip ? priceLabels[tip] : ''}统计口径</Modal.Heading></Modal.Header><Modal.Body id="ops-tip" className="space-y-2">
-      <p>来源：{tip === 'purchase' ? 'ROI 当前有效成本' : tip === 'originalSale' ? 'TikTok line_items.original_price' : 'TikTok line_items.sale_price'}。按件数加权平均值 / 中位数，当前经营窗口，已付款且排除赠品。</p>
-      <p>覆盖：{status(stats.status)} · {text(stats.observedQuantity)} / {text(stats.eligibleQuantity)} 件</p><p>币种：{text(meta.priceCurrency ?? 'CNY')} · 汇率快照：{text(fx.snapshotId ?? fx.snapshot_id)}</p><p>成本基准：{text(cost.basisFingerprint)} · 计算时间：{text(meta.calculatedAt ?? meta.calculated_at)}</p>{stats.estimated === true && <p>≈ 表示服务端估算成本，非人工登记成本。</p>}
-    </Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
+    <div role="group" aria-label={kind === 'sales' ? '销售价格口径说明' : '采购价格口径说明'} className="flex flex-wrap gap-1">
+      {visiblePrices.map(([metric]) => <PriceTip key={metric} metric={metric} stats={optionalRecord(all[metric])} meta={meta} />)}
+    </div>
+    <Table variant="secondary"><Table.ScrollContainer className="erp-table-scroll"><Table.Content aria-label={kind === 'sales' ? '销售价格统计' : '采购价格统计'} className="erp-table-content erp-price-summary-table"><Table.Header><Table.Column isRowHeader>价格</Table.Column><Table.Column>均价</Table.Column><Table.Column>中位数</Table.Column><Table.Column>覆盖</Table.Column></Table.Header><Table.Body>{visiblePrices.map(([metric, label]) => { const value = optionalRecord(all[metric]); return <Table.Row key={metric} id={metric}><Table.Cell>{label}</Table.Cell>{['mean', 'median'].map((statistic) => <Table.Cell key={statistic} className="erp-table-number"><span id={`price-${metric}-${statistic}`}>{loading ? '加载中…' : error ? '—' : priceValue(value[statistic], metric === 'purchase' && value.estimated === true)}</span></Table.Cell>)}<Table.Cell><span id={`price-status-${metric}`}>{priceStatus(value.status)}</span></Table.Cell></Table.Row>; })}</Table.Body></Table.Content></Table.ScrollContainer></Table>
   </section>;
 }
+
 export function FeeFacts({ fee, dismissed, onDismiss }: { fee: RecordValue; dismissed: boolean; onDismiss: () => void }) {
   const labels: Record<string, string> = { user_override: '覆写', shop_estimate: '实测', baseline: '基线', mixed: '混合' };
   return <section id="fee-card" hidden={dismissed || !fee.source} data-source={text(fee.source)} className="space-y-2" aria-label="本次费率依据"><div className="flex flex-wrap items-center gap-3"><span id="fee-card-rate">佣金率 {displayPercent(fee.rate)}</span><strong id="fee-card-source">{labels[String(fee.source)] ?? text(fee.source)}</strong>{fee.degraded === true && <span id="fee-card-fallback" title={text(fee.fallback_message)}>已回退基线</span>}<Button id="fee-card-close" size="sm" variant="ghost" aria-label="关闭费率提示" onPress={onDismiss}>关闭</Button></div>
-    <details><summary>费率依据</summary><div id="fee-card-estimate">{Array.isArray(fee.per_shop) && fee.per_shop.map((raw, index) => { const shop = optionalRecord(raw); const estimate = optionalRecord(shop.estimate); return <p key={index}>{text(shop.shop_name ?? shop.shop_pk)} · {shop.source === 'shop_estimate' ? `${text(estimate.kept_order_count)} 单 · 覆盖 ${displayPercent(estimate.kept_share)} · ${text(estimate.calculated_on)}` : shop.fallback_reason === 'stale_estimate' ? '快照过期' : text(shop.fallback_reason)}</p>; })}</div></details>
+    <Disclosure><Disclosure.Heading><Disclosure.Trigger>费率依据<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body><div id="fee-card-estimate">{Array.isArray(fee.per_shop) && fee.per_shop.map((raw, index) => { const shop = optionalRecord(raw); const estimate = optionalRecord(shop.estimate); return <p key={index}>{text(shop.shop_name ?? shop.shop_pk)} · {shop.source === 'shop_estimate' ? `${text(estimate.kept_order_count)} 单 · 覆盖 ${displayPercent(estimate.kept_share)} · ${text(estimate.calculated_on)}` : shop.fallback_reason === 'stale_estimate' ? '快照过期' : text(shop.fallback_reason)}</p>; })}</div></Disclosure.Body></Disclosure.Content></Disclosure>
   </section>;
 }

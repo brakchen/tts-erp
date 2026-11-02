@@ -59,6 +59,18 @@ async function prepareUpload(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: '上传并加入发布队列' }));
   await user.click(screen.getByRole('button', { name: '确认并上传' })); return file;
 }
+async function clickWithFakeTimers(user: ReturnType<typeof userEvent.setup>, target: HTMLElement) {
+  await act(async () => {
+    let completed = false;
+    const click = user.click(target).then(() => { completed = true; });
+    // userEvent.advanceTimers owns its internal delays. RTL's asyncWrapper also
+    // schedules a trailing 0ms drain, but only auto-advances that timer in Jest.
+    await vi.advanceTimersByTimeAsync(0);
+    // Sinon moves a nested 0ms timer to the next millisecond during a tick.
+    if (!completed) await vi.advanceTimersByTimeAsync(1);
+    await click;
+  });
+}
 beforeEach(() => {
   localStorage.setItem('tts-erp.video-publish.refresh-preference', 'off');
   TestPut.requests = []; vi.stubGlobal('XMLHttpRequest', TestPut);
@@ -107,7 +119,7 @@ describe('video publish read slice', () => {
     await user.click(screen.getByRole('button', { name: '立即刷新' }));
     expect(screen.getByRole('grid', { name: '视频发布任务' })).toHaveTextContent('TEST_video.mp4');
     expect(fetcher.mock.calls.some(([url, init]) => url.endsWith('/tasks') && new Headers(init.headers).get('If-None-Match') === '"TEST_list"')).toBe(true);
-    await user.selectOptions(screen.getByRole('combobox', { name: '任务状态' }), 'failed');
+    await user.click(screen.getByRole('button', { name: /任务状态/ })); await user.click(screen.getByRole('option', { name: '失败' }));
     await screen.findByRole('grid', { name: '视频发布任务' });
     const filtered = fetcher.mock.calls.find(([url]) => url.endsWith('/tasks?status=failed'));
     expect(filtered).toBeDefined(); expect(new Headers(filtered![1].headers).has('If-None-Match')).toBe(false);
@@ -138,7 +150,7 @@ describe('video publish read slice', () => {
     let resolve!: (response: Response) => void; let oldSignal: AbortSignal | null | undefined;
     mockReads((url, init) => url.endsWith('/tasks') ? new Promise<Response>((r) => { resolve = r; oldSignal = init.signal; }) : url.includes('status=failed') ? json({ ...list, items: [] }) : undefined);
     const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
-    await user.selectOptions(screen.getByRole('combobox', { name: '任务状态' }), 'failed');
+    await user.click(screen.getByRole('button', { name: /任务状态/ })); await user.click(screen.getByRole('option', { name: '失败' }));
     expect(oldSignal?.aborted).toBe(true); await screen.findByText('当前筛选下没有任务。');
     await act(async () => { resolve(json(list)); });
     expect(screen.getByText('当前筛选下没有任务。')).toBeVisible();
@@ -150,17 +162,22 @@ describe('video publish read slice', () => {
     expect(await screen.findByText('rowVersion 9007199254740993')).toBeVisible();
   });
   it('waits full Retry-After across query changes; expiry allows explicit retry without replay', async () => {
-    vi.useFakeTimers(); let limited = true;
+    vi.useFakeTimers(); const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime }); let limited = true;
     const fetcher = mockReads((url) => url.includes('/tasks') && !url.includes('/current') && !url.includes(id) && limited ? json({}, 429, { 'Retry-After': '600' }) : undefined);
     const view = render(<VideoPublish {...props} />); await act(async () => {});
     expect(screen.getByRole('button', { name: '立即刷新' })).toBeDisabled();
     const count = fetcher.mock.calls.length;
-    await act(async () => { fireEvent.change(screen.getByRole('combobox', { name: '任务状态' }), { target: { value: 'failed' } }); });
+    const cooldownStartedAt = performance.now();
+    await clickWithFakeTimers(user, screen.getByRole('button', { name: /任务状态/ })); await clickWithFakeTimers(user, screen.getByRole('option', { name: '失败' }));
     expect(fetcher).toHaveBeenCalledTimes(count);
-    await act(async () => { await vi.advanceTimersByTimeAsync(599000); });
+    const interactionElapsed = performance.now() - cooldownStartedAt;
+    await act(async () => { await vi.advanceTimersByTimeAsync(599000 - interactionElapsed); });
     expect(fetcher).toHaveBeenCalledTimes(count);
     expect(screen.getByRole('button', { name: '立即刷新' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+    expect(fetcher).toHaveBeenCalledTimes(count);
+    expect(screen.getByRole('button', { name: '立即刷新' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetcher).toHaveBeenCalledTimes(count);
     expect(screen.getByRole('button', { name: '立即刷新' })).toBeEnabled();
     limited = false;
@@ -208,6 +225,7 @@ describe('video publish read slice', () => {
   });
   it('does not overlap a slow channel and disabling polling sends no extra read', async () => {
     vi.useFakeTimers(); localStorage.setItem('tts-erp.video-publish.refresh-preference', 'on');
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     let resolve!: (response: Response) => void;
     const fetcher = mockReads((url) => url.endsWith('/tasks') ? new Promise<Response>((r) => { resolve = r; }) : undefined);
     const view = render(<VideoPublish {...props} />); await act(async () => {});
@@ -215,7 +233,7 @@ describe('video publish read slice', () => {
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/tasks'))).toHaveLength(1);
     await act(async () => { resolve(json(list)); });
     const count = fetcher.mock.calls.length;
-    await act(async () => { fireEvent.change(screen.getByRole('combobox', { name: '自动刷新' }), { target: { value: 'off' } }); });
+    await clickWithFakeTimers(user, screen.getByRole('button', { name: /自动刷新/ })); await clickWithFakeTimers(user, screen.getByRole('option', { name: '关' }));
     expect(fetcher).toHaveBeenCalledTimes(count);
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); }); expect(fetcher).toHaveBeenCalledTimes(count);
     view.unmount(); expect(vi.getTimerCount()).toBe(0);
@@ -257,7 +275,7 @@ describe('video publish read slice', () => {
     expect(put.withCredentials).toBe(false); expect(put.open).toHaveBeenCalledWith('PUT', expect.stringContaining('https://TEST.invalid/'));
     expect(put.setRequestHeader.mock.calls).toEqual([['Content-Type', 'video/mp4']]); expect(put.send).toHaveBeenCalledWith(file);
     await act(async () => { put.upload.onprogress?.(new ProgressEvent('progress', { lengthComputable: true, loaded: 5, total: 10 })); });
-    expect(screen.getByRole('progressbar', { name: '视频上传进度' })).toHaveAttribute('value', '50');
+    expect(screen.getByRole('progressbar', { name: '视频上传进度' })).toHaveAttribute('aria-valuenow', '50');
     await act(async () => { put.finish(); });
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/confirm-upload'))).toHaveLength(0);
     await user.click(screen.getByRole('button', { name: '确认上传并入队' }));
@@ -648,11 +666,12 @@ describe('video publish read slice', () => {
   });
 
   it('does not poll the diagnostic query when the ordinary five-second refresh is enabled', async () => {
-    const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? json({ ...detail, attempts: [] }) : undefined);
-    const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
-    await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('尚无执行诊断记录。');
     vi.useFakeTimers();
-    await act(async () => { fireEvent.change(screen.getByRole('combobox', { name: '自动刷新', hidden: true }), { target: { value: 'on' } }); });
+    const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? json({ ...detail, attempts: [] }) : undefined);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime }); const view = render(<VideoPublish {...props} />);
+    await act(async () => {});
+    await clickWithFakeTimers(user, screen.getByRole('button', { name: /自动刷新/ })); await clickWithFakeTimers(user, screen.getByRole('option', { name: '开（每 5 秒）' }));
+    await clickWithFakeTimers(user, screen.getByRole('button', { name: `查看详情 ${id}` })); await clickWithFakeTimers(user, screen.getByRole('button', { name: '读取脱敏诊断节选' })); expect(screen.getByText('尚无执行诊断记录。')).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
     expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1);
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/tasks/current')).length).toBeGreaterThan(2);
@@ -675,7 +694,7 @@ describe('video publish read slice', () => {
     const workbench = screen.getByRole('region', { name: '新建发布任务' });
     expect(within(workbench).getByRole('textbox', { name: '发布文案' })).toBeEnabled();
     expect(within(workbench).getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_next_caption');
-    expect(within(workbench).getByRole('combobox', { name: '创建目标设备' })).toBeEnabled();
+    expect(within(workbench).getByRole('button', { name: /创建目标设备/ })).toBeEnabled();
     expect(within(workbench).queryByText('上传任务 ID')).toBeNull();
     await user.click(within(workbench).getByRole('button', { name: '上传并加入发布队列' })); await user.click(screen.getByRole('button', { name: '确认并上传' }));
     expect(bodies).toHaveLength(2); expect(bodies[1].clientRequestId).not.toBe(bodies[0].clientRequestId);

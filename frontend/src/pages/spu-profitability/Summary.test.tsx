@@ -21,9 +21,9 @@ it('groups the original server values into sales, costs and profit without deriv
   expect(profit.querySelector('#sum-net-revenue')).toHaveTextContent('—');
   expect(within(profit).getByText('412.5134')).toBeInTheDocument();
   expect(within(profit).getByText('-33.7859')).toBeInTheDocument();
-  expect(within(profit).getByRole('table')).toHaveTextContent('1.71');
-  expect(within(profit).getByRole('table')).toHaveTextContent('1.46');
-  expect(within(profit).getByRole('table')).toHaveTextContent('≈2.86');
+  expect(within(profit).getByRole('grid', { name: '当前与预计 ROI' })).toHaveTextContent('1.71');
+  expect(within(profit).getByRole('grid', { name: '当前与预计 ROI' })).toHaveTextContent('1.46');
+  expect(within(profit).getByRole('grid', { name: '当前与预计 ROI' })).toHaveTextContent('≈2.86');
   expect(within(sales).queryByText('预计净收入')).toBeNull();
   expect(within(costs).queryByText('预计净收入')).toBeNull();
 });

@@ -18,6 +18,7 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   'manual-costs': () => import('../pages/manual-costs'),
   'video-publish': () => import('../pages/video-publish'),
   login: () => import('../pages/login'),
+  'oauth-onboard': () => import('../pages/oauth-onboard'),
 };
 
 /** Code mapping only: page metadata and permissions remain backend-owned. */

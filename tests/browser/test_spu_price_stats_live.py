@@ -328,7 +328,7 @@ def test_shop_switch_refetches_price_stats(
         shop_a.stats(window).cells(), shop_a.stats(window).summary_status()
     )
 
-    page.select_shop(shop_b.pk)
+    page.select_shop(shop_b)
     expected_b = shop_b.stats(window)
     page.wait_price_state(expected_b.cells(), expected_b.summary_status())
     assert expected_b.summary_status() != shop_a.stats(window).summary_status()

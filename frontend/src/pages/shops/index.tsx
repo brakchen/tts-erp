@@ -39,6 +39,7 @@ export default function Shops({ bootstrap }: PageProps) {
   const [list, setList] = useState<{ loading: boolean; shops?: Shop[]; total?: number | null; error?: string }>({ loading: true });
   const [readBlocked, setReadBlocked] = useState(false);
   const [dialog, setDialog] = useState<{ kind: ShopFormKind; shop?: Shop }>();
+  const [discardOpen, setDiscardOpen] = useState(false);
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [cooldown, setCooldown] = useState<Record<string, boolean>>({});
   const [failures, setFailures] = useState<Record<string, CommandFailure | undefined>>({});
@@ -116,7 +117,7 @@ export default function Shops({ bootstrap }: PageProps) {
   }
   function close() {
     if (dialog && pending[shopKey(dialog.shop)]) return;
-    if (dirty.current && !window.confirm('放弃本次尚未保存的修改？')) return;
+    if (dirty.current) { setDiscardOpen(true); return; }
     dirty.current = false; setDialog(undefined);
   }
   async function save(draft: ShopDraft) {
@@ -238,6 +239,11 @@ export default function Shops({ bootstrap }: PageProps) {
     <Modal.Backdrop isOpen={dialog !== undefined} isDismissable={!dialogPending} isKeyboardDismissDisabled={dialogPending} onOpenChange={(isOpen) => { if (!isOpen) close(); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭店铺表单" isDisabled={dialogPending} /><Modal.Header><Modal.Heading>{dialog?.kind === 'register' ? '手工补录店铺' : dialog?.kind === 'app' ? '配置当前店铺 App' : '编辑店铺信息'}</Modal.Heading></Modal.Header>
       <Modal.Body className="space-y-4">{feedback(dialogKey)}{dialog && <ShopForm key={dialog.kind + '-' + dialogKey} kind={dialog.kind} shop={dialog.shop} pending={dialogPending} blocked={Boolean(cooldown[dialogKey] || !canWrite || (recoveries[dialogKey] && recoveries[dialogKey]?.phase !== 'checked'))} submitLabel={recoveries[dialogKey]?.phase === 'checked' ? '核对后重新保存' : '保存'} errors={failures[dialogKey]?.fieldErrors ?? {}} onFieldEdit={() => { dirty.current = true; setFailures((previous) => { const current = previous[dialogKey]; return current ? { ...previous, [dialogKey]: { ...current, fieldErrors: {} } } : previous; }); }} onSubmit={(draft) => { void save(draft); }} onCancel={close} />}</Modal.Body>
+    </Modal.Dialog></Modal.Container></Modal.Backdrop>
+    <Modal.Backdrop isOpen={discardOpen} onOpenChange={setDiscardOpen}><Modal.Container size="sm"><Modal.Dialog>
+      <Modal.Header><Modal.Heading>放弃本次尚未保存的修改？</Modal.Heading></Modal.Header>
+      <Modal.Body>放弃后，本次店铺表单中的修改不会保存。</Modal.Body>
+      <Modal.Footer><Button variant="secondary" onPress={() => setDiscardOpen(false)}>继续编辑</Button><Button variant="danger" isDisabled={dialogPending} onPress={() => { if (dialogPending) return; dirty.current = false; setDiscardOpen(false); setDialog(undefined); }}>放弃修改</Button></Modal.Footer>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
     <Modal.Backdrop isOpen={link !== undefined} onOpenChange={(isOpen) => { if (!isOpen) setLink(undefined); }}><Modal.Container size="lg"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭授权链接" /><Modal.Header><Modal.Heading>为当前店铺授权</Modal.Heading></Modal.Header>

@@ -31,12 +31,18 @@ GET /v2/oauth/tiktok/authorize ────────────────�
 
 ### `GET /v2/oauth/tiktok/onboard` — 新店授权控制台页（浏览器 UI）
 
-- **Role**: readonly（`_READONLY_EXACT` 精确豁免行；HTML 壳页本身无数据/无副作用）。
-  未登录浏览器 GET → 302 `/v2/auth/login?next=/v2/oauth/tiktok/onboard`。
-- **行为**: 内联 JS 探测 `/v2/auth/me`，readwrite 及以上可以点「生成授权链接」
-  调 `GET /v2/oauth/tiktok/authorize?format=json` → 展示新链接（复制 / 新窗口打开 / 到期时间）。
-  readonly 用户按钮可点但服务端会回 403，JS 把 inline `<div id="role-gate">` 解锁
-  并禁用按钮。每次生成 = 新 state（45min、单次使用），**不缓存链接**。
+- **Role**: readonly；沿用既有权限判定和未登录浏览器 GET → 302
+  `/v2/auth/login?next=/v2/oauth/tiktok/onboard`。
+- **展示**：共享 React MPA renderer + 免费 HeroUI 控件。该页只提供接入说明，
+  显示只读权限提示、部署前缀正确的店铺注册台入口和 callback 配置地址；
+  不查询 `/v2/auth/me`，不生成 state，也不自动打开授权窗口。
+- **生成入口的唯一所有者**：前往店铺注册台，选择已登记店铺、配置该店 App，
+  再获取授权链接。生成请求必须带该店的内部主键 `shop_pk`，复用店铺页已有的
+  权限提示、提交状态和失败恢复。原 onboard 脚本遗漏 `shop_pk` 的请求已退役，
+  不提供无目标店铺的授权路径。生成仍要求 readwrite 及以上，访问店铺台还需
+  既有店铺页面权限；只读用户可以阅读 onboard 说明。
+- **辅助页边界**：onboard 和结果页的 metadata 独立于菜单/页面权限目录；
+  空导航及 false 写入提示只用于此说明/结果文档，不改变店铺台和 API 的实际授权。
 
 ### `GET /v2/oauth/tiktok/authorize` — 发起授权（readwrite 及以上）
 
@@ -46,7 +52,9 @@ GET /v2/oauth/tiktok/authorize ────────────────�
   生成操作本身只插一行 `integration.oauth_states`（state sha256），无破坏性
   数据变更（真正的写入在 `callback`，由 public 握手驱动）；因此从 admin
   降到 readwrite 比 `linkage overrides`（业务数据覆写，留 admin）更合理。
-- **Query**: 无必选。`format=json` → JSON；否则 HTML（含可直接点的链接）。
+- **Query**: 必选正整数 `shop_pk`（店铺内部主键）；`format=json` → 原有 JSON；
+  否则共享 HeroUI HTML 结果页，显示可打开/复制的授权链接及到期时间。
+  这只是既有 shop-bound 端点的展示迁移，不改变 state 注册、App 解析或 CSRF 约定。
 - **响应 200 (json)**:
 
   ```json
@@ -91,7 +99,10 @@ GET /v2/oauth/tiktok/authorize ────────────────�
     `account_name/region/seller_type/status='active'/credential_id` 关联。
   - **幂等**：同一 shop 重复授权 = 续期路径，两行原地更新，不产生重复。
   - 授权响应中店铺列表为空 → `kind=no_authorized_shop`（不落任何行）。
-- **响应**: 默认 HTML 结果页（浏览器展示 shop_id/name/region/scopes）；
+- **响应**: 默认共享 HeroUI HTML 结果页，展示白名单店铺字段
+  （shop_id/name/region/seller_type、既有记录 ID、到期时间及 scopes）；
+  bootstrap 不包含 access_token、refresh_token、shop_cipher 或未筛选的上游载荷。
+  HTML 错误仅使用固定的可公开说明；下述 JSON 响应协议保持不变。
   `format=json`:
   - 成功 → `200 {"ok": true, "kind": "authorized", "result": {"shops": [{shop_id,
     credential_id, account_id, account_name, region, seller_type, expires_at, granted_scopes}]}}`
@@ -106,6 +117,22 @@ GET /v2/oauth/tiktok/authorize ────────────────�
   - 无 `code` 裸访问 → `400 kind=missing_code`
 - **副作用**: state 消费置 `consumed_at`；成功后 sync worker 下一 tick 自动
   把新 shop 纳入（`scheduler._enumerate_tiktok_shops` 读 credentials 表）。
+
+### HTML 辅助结果页与资源失败
+
+- callback 是 public 入口；HTML 结果页无需登录即可显示，不做会话探测、
+  不执行全局 401 登录跳转，也不在 React 渲染/重渲染时调用 authorize 或 callback。
+  state 消费及授权处理只由原 handler 执行一次，前端只展示已完成的结构化结果。
+- HTTP 状态保留：seller 拒绝仍为既有 `200`，缺 code/授权校验失败为 `400`，
+  上游或代理失败为 `502`；同一展示 renderer 用于浏览器 `403` 拒绝页时仍返回 `403`。
+  JSON 分支、认证角色、CSRF、state 生命周期和授权落库不因控件迁移变化。
+- 文档带 `Cache-Control: private, no-store`，路径消费服务端 `root_path`；
+  bootstrap 的 JSON 与初始 HTML 分别转义，React 只渲染文本，不注入原始 HTML。
+- **明确例外**：辅助结果文档遇到前端资源缺失时，保留原 HTTP 状态和已完成结果，
+  不用 `503` 覆盖 `403` 或已消费 state 的回调结果。初始内容使用安全语义结构和
+  HeroUI 公开 CSS 类；禁用 JavaScript 时仍可阅读事实和导航，CSS 不可用时保留
+  无样式的可访问内容。这不是旧 inline JS/自建皮肤的回退路径，不重放授权请求。
+  普通业务页面及登录页仍遵守缺构建产物返回 `503` 的既有规则。
 
 ## 环境变量
 

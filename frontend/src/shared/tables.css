@@ -1,6 +1,6 @@
 /* HeroUI 3 public slot className API; no private selectors or component forks.
  * Source: https://heroui.com/en/docs/react/components/table (MIT, 3.2.6).
- * Native detail tables share the same explicit classes and semantic table markup.
+ * Ordinary tables and their detail views use the same HeroUI table slots.
  */
 .erp-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
 .erp-table-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

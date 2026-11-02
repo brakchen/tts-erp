@@ -1,4 +1,4 @@
-import type { FrontendBootstrap, NavigationItem } from './shared/contracts';
+import type { AuxiliaryPageData, FrontendBootstrap, MessagePageData, MessageSection, NavigationItem } from './shared/contracts';
 import { pathFor } from './shared/api/paths';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -7,6 +7,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function readAuxiliaryData(value: unknown, pageId: string): AuxiliaryPageData {
+  if (!isRecord(value) || value.kind !== pageId) throw new Error('辅助页面数据无效');
+  if (pageId === 'oauth-onboard') return { kind: 'oauth-onboard' };
+  if (!nonempty(value.title) || typeof value.message !== 'string'
+    || !['success', 'danger', 'warning', 'default'].includes(String(value.tone))
+    || !['shops', 'login', 'onboard'].includes(String(value.action)) || !Array.isArray(value.sections)) {
+    throw new Error('结果页面数据无效');
+  }
+  const sections: MessageSection[] = value.sections.map((section: unknown) => {
+    if (!isRecord(section) || typeof section.title !== 'string' || !Array.isArray(section.facts)) throw new Error('结果明细无效');
+    return { title: section.title, facts: section.facts.map((fact: unknown) => {
+      if (!isRecord(fact) || typeof fact.label !== 'string' || typeof fact.value !== 'string') throw new Error('结果字段无效');
+      return { label: fact.label, value: fact.value };
+    }) };
+  });
+  const data: MessagePageData = { kind: 'message', title: value.title, message: value.message,
+    tone: value.tone as MessagePageData['tone'], action: value.action as MessagePageData['action'], sections };
+  if (value.authorization !== undefined) {
+    const link = value.authorization;
+    if (!isRecord(link) || !nonempty(link.url) || typeof link.expiresAt !== 'string') throw new Error('授权链接数据无效');
+    const url = new URL(link.url);
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) throw new Error('授权链接地址无效');
+    data.authorization = { url: link.url, expiresAt: link.expiresAt };
+  }
+  return data;
 }
 
 /** Validate the one backend-owned bootstrap before rendering any page. */
@@ -38,6 +65,14 @@ export function readBootstrap(): FrontendBootstrap {
       throw new Error('匿名登录初始化数据无效');
     }
     bootstrap.loginNextPath = next;
+  }
+  if (value.pageId === 'message' || value.pageId === 'oauth-onboard') {
+    // Auxiliary pages cannot grant navigation/write hints. Callback and forbidden
+    // results work anonymously and do not query the session or replay a command.
+    if (navigation.length || !isRecord(hints) || hints.readwrite !== false || hints.admin !== false) {
+      throw new Error('辅助页面权限数据无效');
+    }
+    bootstrap.pageData = readAuxiliaryData(value.pageData, value.pageId);
   }
   return bootstrap;
 }

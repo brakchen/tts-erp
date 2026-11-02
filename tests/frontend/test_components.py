@@ -32,4 +32,8 @@ def test_frontend_components() -> None:
         check=False,
         env={**os.environ, "CI": "1", "NODE_ENV": "test"},
     )
-    assert result.returncode == 0, (result.stdout + result.stderr)[-24000:]
+    output = result.stdout + result.stderr
+    log = frontend / ".cache" / "vitest.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(output, encoding="utf-8")
+    assert result.returncode == 0, output[-24000:]

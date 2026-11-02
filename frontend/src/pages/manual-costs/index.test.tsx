@@ -102,6 +102,7 @@ describe('manual-costs server-total pagination', () => {
     const fetcher = setupPages(view, '100'); const user = userEvent.setup(); await openView(view, user);
     // Resolve the live controls each time without scanning all 50 rows' actions.
     const pagingControls = () => within(screen.getByLabelText('分页'));
+    const filterControls = () => within(screen.getByRole('form', { name: '工作台筛选' }));
     await screen.findByText('TEST page 0 row 0');
     expect(pagingControls().getByRole('button', { name: '上一页' })).toBeDisabled();
     expect(pagingControls().getByRole('button', { name: '下一页' })).toBeEnabled();
@@ -112,7 +113,7 @@ describe('manual-costs server-total pagination', () => {
     await user.click(pagingControls().getByRole('button', { name: '下一页' })); expect(fetcher.mock.calls).toHaveLength(calls);
     await user.click(pagingControls().getByRole('button', { name: '上一页' })); await screen.findByText('TEST page 0 row 0');
     fetcher.mockImplementationOnce(async () => view === 'all' ? json(pageRows(), 200, { 'X-Total-Count': '50' }) : json({ items: historyRows(pageRows()), total: 50 }));
-    await user.click(screen.getByRole('button', { name: '刷新当前列表' })); await screen.findByText(/服务端总数：50/);
+    await user.click(filterControls().getByRole('button', { name: '刷新当前列表' })); await screen.findByText(/服务端总数：50/);
     expect(pagingControls().getByRole('button', { name: '下一页' })).toBeDisabled();
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=50') && url.includes(view === 'all' ? 'channel-products?' : '/reporting/manual-costs?'))).toBe(true);
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=100'))).toBe(false);
@@ -302,7 +303,9 @@ describe('manual-costs read fences and cancellation', () => {
       return json([{ ...product('9007199254740996', 'TEST 别店商品'), shop_pk: other.id }]);
     });
     vi.stubGlobal('fetch', fetcher); const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost('22.2000');
-    await user.click(screen.getByRole('button', { name: '刷新当前列表' })); await user.selectOptions(screen.getByRole('combobox', { name: '当前店铺' }), other.id);
+    await user.click(screen.getByRole('button', { name: '刷新当前列表' }));
+    await user.click(screen.getByRole('button', { name: /当前店铺/ }));
+    await user.click(await screen.findByRole('option', { name: /TEST 别店/ }));
     await screen.findByText('TEST 别店商品'); await act(async () => stale(json([product('9007199254740997', 'TEST stale')])));
     expect(screen.queryByText('TEST stale')).toBeNull(); expect(screen.getByText('TEST 别店商品')).toBeVisible();
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();

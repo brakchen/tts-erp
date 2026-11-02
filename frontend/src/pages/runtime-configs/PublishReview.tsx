@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Button, Input, Label, TextField } from '@heroui/react';
+import { Button, Disclosure, Input, Label, TextField } from '@heroui/react';
 import { diffLines } from 'diff';
 import type { Review } from './contracts';
 
@@ -18,10 +18,10 @@ export default function PublishReview({ review, comment, disabled, changeComment
       <h3 className="font-semibold">本次内容变更</h3>
       {changes ? <pre className="overflow-auto whitespace-pre-wrap break-all rounded-lg bg-default p-3 text-sm" aria-label="增加和删除的内容">{changes.map((change, index) => <span key={index} className={change.added ? 'block text-emerald-800 dark:text-emerald-300' : change.removed ? 'block text-red-800 dark:text-red-300' : 'block'}>{change.added ? '＋ 新增\n' : change.removed ? '− 删除\n' : '  未变\n'}{change.value}</span>)}</pre> : <p>差异过大，未生成高亮；请检查下方完整内容。</p>}
     </section>
-    <details><summary>查看当前生效内容和准备发布的完整内容</summary><div className="grid min-w-0 gap-4 lg:grid-cols-2">
+    <Disclosure><Disclosure.Heading><Disclosure.Trigger type="button">查看当前生效内容和准备发布的完整内容<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body className="grid min-w-0 gap-4 lg:grid-cols-2">
       <section className="min-w-0"><h3 className="font-semibold">当前生效内容</h3><pre className="whitespace-pre-wrap break-all">{review.publishedText ?? '尚未发布'}</pre></section>
       <section className="min-w-0"><h3 className="font-semibold">准备发布的内容</h3><pre className="whitespace-pre-wrap break-all">{review.candidateText}</pre></section>
-    </div></details>
+    </Disclosure.Body></Disclosure.Content></Disclosure>
     <TextField value={comment} isDisabled={disabled} onChange={changeComment}><Label>发布说明</Label><Input maxLength={2000} placeholder="选填：说明本次修改的目的" /></TextField>
     <p>确认后将保存本次内容并发布新版本。后续读取将使用此版本，正在运行的任务不会因此自动重新执行。</p>
     <div className="flex flex-wrap gap-3"><Button variant="secondary" isDisabled={disabled} onPress={back}>返回修改</Button><Button isDisabled={disabled || !review.hasChanges} onPress={publish}>确认发布</Button></div>

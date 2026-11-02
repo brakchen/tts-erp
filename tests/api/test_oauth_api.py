@@ -9,19 +9,28 @@ Full contract: docs/api/tiktok-shop-oauth.md. Key facts tested here:
   above the readonly HTML shell it lives behind.)
 * ``callback`` is PUBLIC (TikTok redirect target — no API key) and is
   the only place the flow does anything; bad/forged states fail closed.
-* The happy path bootstraps ``integration.credentials`` +
-  ``commerce.shops`` rows (TEST_ sentinel ids; wiped by conftest).
+* The happy path authorizes one pre-registered target and persists its
+  credentials in place (TEST_ sentinel ids; cleaned by API conftest).
 """
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from tests.api.test_frontend_pages import _bootstrap
+from tts_erp_v2.db.models.commerce import ChannelAccount
+from tts_erp_v2.db.models.integration import Credentials, OAuthState
+from tts_erp_v2.proxy.tiktok_oauth import _state_hash
+from tts_erp_v2.proxy.token_service import upsert_tiktok_app_credentials
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -29,6 +38,9 @@ AUTHZ = "/v2/oauth/tiktok/authorize"
 CALLBACK = "/v2/oauth/tiktok/callback"
 
 TEST_SHOP_ID = "TEST_OAUTH_SHOP_API_1"
+TEST_SERVICE_ID = "TEST_OAUTH_OWN_SERVICE_API"
+TEST_APP_KEY = "TEST_OAUTH_OWN_APP_KEY_API"
+TEST_APP_SECRET = "TEST_OAUTH_OWN_APP_SECRET_API"
 
 
 def _bearer(key: str) -> dict[str, str]:
@@ -46,7 +58,7 @@ def _grant_payload() -> dict[str, Any]:
         "access_token": "TTP_grant_at_api",
         "refresh_token": "TTP_grant_rt_api",
         "shop_cipher": "api_grant_cipher",
-        "expires_at": "2026-10-01T00:00:00+00:00",  # string form OK here
+        "expires_at": datetime(2026, 12, 1, tzinfo=UTC),
         "shop_id": TEST_SHOP_ID,
         "account_name": "TEST Seller API",
         "region": "VN",
@@ -58,10 +70,45 @@ def _grant_payload() -> dict[str, Any]:
 
 @pytest.fixture()
 def app_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Authorize-link + token env for the app process."""
+    """Conflicting global defaults must never replace a target shop's own App."""
     monkeypatch.setenv("TIKTOK_SERVICE_ID", "test_service_api_1")
     monkeypatch.setenv("TIKTOK_APP_KEY", "test_app_key_api")
     monkeypatch.setenv("TIKTOK_APP_SECRET", "test_app_secret_api")
+
+
+@dataclass(frozen=True, slots=True)
+class OAuthTarget:
+    shop_pk: int
+    shop_id: str
+    service_id: str
+    app_key: str
+    app_revision: int
+
+
+def _create_target(
+    db_engine, *, shop_id: str = TEST_SHOP_ID,
+    service_id: str = TEST_SERVICE_ID, app_key: str = TEST_APP_KEY,
+    app_secret: str = TEST_APP_SECRET,
+) -> OAuthTarget:
+    # Requests use the app's own connection; commit this TEST_ target and its
+    # shop-owned encrypted App configuration outside db_session's savepoint.
+    # API conftest cleanup removes our TEST_ shops and cascades their App rows.
+    with Session(db_engine) as session:
+        account = ChannelAccount(platform="tiktok", shop_id=shop_id,
+            status="active", service_id=service_id)
+        session.add(account)
+        session.flush()
+        app = upsert_tiktok_app_credentials(session, shop_pk=account.id,
+            service_id=service_id, app_key=app_key, plaintext_app_secret=app_secret)
+        target = OAuthTarget(account.id, shop_id, service_id, app_key, app.revision)
+        session.commit()
+        return target
+
+
+@pytest.fixture()
+def target_shop(db_engine, app_env: None) -> OAuthTarget:
+    """A registered TEST_ target with its own real token_service App owner."""
+    return _create_target(db_engine)
 
 
 @pytest.fixture()
@@ -101,107 +148,88 @@ def fake_exchange(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def test_authorize_requires_readwrite_or_above(
-    api_client, readonly_key, readwrite_key
+    api_client, readonly_key, readwrite_key, target_shop: OAuthTarget,
 ) -> None:
-    """readonly is 403; readwrite passes (admin also passes by
-    transitivity, but we don't test it here — the role-lattice
-    guarantee is in middleware)."""
-    r = api_client.get(
-        AUTHZ, headers=_bearer(readonly_key), params={"format": "json"}
-    )
-    assert r.status_code == 403, r.text
-
-    r = api_client.get(
-        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
-    )
-    assert r.status_code == 200, r.text
+    """The same valid target is denied readonly and accepted readwrite."""
+    params = {"format": "json", "shop_pk": target_shop.shop_pk}
+    denied = api_client.get(AUTHZ, headers=_bearer(readonly_key), params=params)
+    assert denied.status_code == 403, denied.text
+    accepted = api_client.get(AUTHZ, headers=_bearer(readwrite_key), params=params)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["shop_id"] == target_shop.shop_id
 
 
 def test_authorize_returns_link(
-    api_client, readwrite_key, app_env: None, db_session
+    api_client, readwrite_key, target_shop: OAuthTarget, db_session,
 ) -> None:
-    """readwrite gets an authorize_url with service_id + a fresh state."""
-    r = api_client.get(
-        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
-    )
+    """The link and persisted state bind exactly the target's own App."""
+    r = api_client.get(AUTHZ, headers=_bearer(readwrite_key),
+        params={"format": "json", "shop_pk": target_shop.shop_pk})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["ok"] is True
+    assert body["shop_id"] == target_shop.shop_id
+    assert body["service_id"] == target_shop.service_id
     url = body["authorize_url"]
     assert url.startswith("https://services.tiktokshop.com/open/authorize?")
-    assert "service_id=test_service_api_1" in url
+    assert parse_qs(urlparse(url).query)["service_id"] == [target_shop.service_id]
     state = _state_from_url(url)
-    assert state
-    assert body["state"] == state
-
-    # The state is persisted (hash only) — findable by full re-registration
-    # count is awkward; assert the returned token round-trips through the
-    # flow's own hash by looking the row up via the module.
-    from tts_erp_v2.db.models.integration import OAuthState
-    from tts_erp_v2.proxy.tiktok_oauth import _state_hash
-
-    row = db_session.execute(
-        select(OAuthState).where(OAuthState.state_hash == _state_hash(state))
-    ).scalar_one_or_none()
-    assert row is not None
-    assert row.provider == "tiktok"
+    assert state and body["state"] == state
+    row = db_session.execute(select(OAuthState).where(
+        OAuthState.state_hash == _state_hash(state))).scalar_one()
+    assert row.provider == "tiktok" and row.consumed_at is None
+    assert row.extra == {
+        "expected_shop_pk": target_shop.shop_pk,
+        "expected_shop_id": target_shop.shop_id,
+        "service_id": target_shop.service_id,
+        "app_revision": target_shop.app_revision,
+        "created_by": hashlib.sha256(readwrite_key.encode()).hexdigest(),
+    }
 
 
-def test_authorize_missing_service_id_is_500(
-    api_client, readwrite_key, monkeypatch: pytest.MonkeyPatch
+def test_authorize_missing_target_service_id_is_422(
+    api_client, readwrite_key, target_shop: OAuthTarget, db_engine,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No TIKTOK_SERVICE_ID env var and no service_id param → 500 config error."""
+    """An existing target without Service ID is a 422 configuration error."""
     monkeypatch.delenv("TIKTOK_SERVICE_ID", raising=False)
-    r = api_client.get(
-        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
-    )
-    assert r.status_code == 500, r.text
-    assert "service_id" in r.text.lower()
-
-
-def test_authorize_explicit_service_id_overrides_env(
-    api_client, readwrite_key, app_env: None, db_session, db_engine
-) -> None:
-    """显式 service_id 使用其独立加密 App pair，而不是环境默认。"""
-    from tts_erp_v2.db.models.integration import OAuthState, TikTokAppCredential
-    from tts_erp_v2.proxy.tiktok_oauth import _state_hash
-    from tts_erp_v2.proxy.token_service import upsert_tiktok_app_credentials
-
-    service_id = "TEST_EXPLICIT_SERVICE_789"
     with Session(db_engine) as session:
-        upsert_tiktok_app_credentials(
-            session,
-            service_id=service_id,
-            app_key="TEST_EXPLICIT_APP_KEY",
-            plaintext_app_secret="TEST_EXPLICIT_APP_SECRET",
-        )
+        account = session.get(ChannelAccount, target_shop.shop_pk)
+        assert account is not None
+        account.service_id = None
         session.commit()
-    try:
-        r = api_client.get(
-            AUTHZ,
-            headers=_bearer(readwrite_key),
-            params={"format": "json", "service_id": service_id},
-        )
-        assert r.status_code == 200, r.text
-        body = r.json()
-        url = body["authorize_url"]
-        assert f"service_id={service_id}" in url
-        assert "test_service_api_1" not in url
+    r = api_client.get(AUTHZ, headers=_bearer(readwrite_key),
+        params={"format": "json", "shop_pk": target_shop.shop_pk})
+    assert r.status_code == 422, r.text
+    assert "service id" in r.json()["detail"].lower()
 
-        state = _state_from_url(url)
-        row = db_session.execute(
-            select(OAuthState).where(OAuthState.state_hash == _state_hash(state))
-        ).scalar_one_or_none()
-        assert row is not None
-        assert row.extra == {"service_id": service_id}
-    finally:
-        with Session(db_engine) as session:
-            session.execute(
-                delete(TikTokAppCredential).where(
-                    TikTokAppCredential.service_id == service_id
-                )
-            )
-            session.commit()
+
+def test_authorize_uses_target_app_ignoring_global_service_override(
+    api_client, readwrite_key, target_shop: OAuthTarget, db_session, db_engine,
+) -> None:
+    """Another shop's App and an extra service_id query cannot choose the App."""
+    other = _create_target(db_engine, shop_id="TEST_OAUTH_OTHER_SHOP_API",
+        service_id="TEST_OAUTH_OTHER_SERVICE_API", app_key="TEST_OAUTH_OTHER_APP_KEY_API",
+        app_secret="TEST_OAUTH_OTHER_APP_SECRET_API")
+    assert other.shop_pk != target_shop.shop_pk
+    r = api_client.get(AUTHZ, headers=_bearer(readwrite_key), params={
+        "format": "json", "shop_pk": target_shop.shop_pk, "service_id": other.service_id})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["service_id"] == target_shop.service_id
+    assert parse_qs(urlparse(body["authorize_url"]).query)["service_id"] == [target_shop.service_id]
+    assert other.service_id not in body["authorize_url"]
+    assert "test_service_api_1" not in body["authorize_url"]
+    state = _state_from_url(body["authorize_url"])
+    row = db_session.execute(select(OAuthState).where(
+        OAuthState.state_hash == _state_hash(state))).scalar_one()
+    assert row.extra == {
+        "expected_shop_pk": target_shop.shop_pk,
+        "expected_shop_id": target_shop.shop_id,
+        "service_id": target_shop.service_id,
+        "app_revision": target_shop.app_revision,
+        "created_by": hashlib.sha256(readwrite_key.encode()).hexdigest(),
+    }
 
 
 # ─── callback ────────────────────────────────────────────────────────
@@ -244,161 +272,110 @@ def test_callback_forged_state_fails_closed(
 
 
 def test_callback_rejects_app_key_mismatch_before_exchange(
-    api_client,
-    readwrite_key,
-    app_env: None,
-    fake_exchange: dict[str, Any],
+    api_client, readwrite_key, target_shop: OAuthTarget,
+    fake_exchange: dict[str, Any], db_session,
 ) -> None:
-    r = api_client.get(
-        AUTHZ,
-        headers=_bearer(readwrite_key),
-        params={"format": "json"},
-    )
-    state = _state_from_url(r.json()["authorize_url"])
-
-    r = api_client.get(
-        CALLBACK,
-        params={
-            "format": "json",
-            "code": "code_wrong_app",
-            "state": state,
-            "app_key": "TEST_WRONG_CALLBACK_APP_KEY",
-        },
-    )
+    issued = api_client.get(AUTHZ, headers=_bearer(readwrite_key),
+        params={"format": "json", "shop_pk": target_shop.shop_pk})
+    assert issued.status_code == 200, issued.text
+    state = _state_from_url(issued.json()["authorize_url"])
+    r = api_client.get(CALLBACK, params={"format": "json", "code": "TEST_code_wrong_app",
+        "state": state, "app_key": "TEST_WRONG_CALLBACK_APP_KEY"})
     assert r.status_code == 400, r.text
     assert r.json()["kind"] == "app_key_mismatch"
     assert "auth_code_seen" not in fake_exchange
+    row = db_session.execute(select(OAuthState).where(
+        OAuthState.state_hash == _state_hash(state))).scalar_one()
+    assert row.consumed_at is not None
+    assert db_session.execute(select(Credentials).where(
+        Credentials.provider == "tiktok", Credentials.external_account_id == target_shop.shop_id,
+    )).scalar_one_or_none() is None
 
 
 def test_callback_happy_path_bootstraps_rows(
-    api_client,
-    readwrite_key,
-    db_session,
-    app_env: None,
+    api_client, readwrite_key, db_session, target_shop: OAuthTarget,
     fake_exchange: dict[str, Any],
 ) -> None:
-    """Full round-trip: authorize → TikTok redirect → rows exist."""
-    from tts_erp_v2.db.models.commerce import ChannelAccount
-    from tts_erp_v2.db.models.integration import Credentials
+    """Authorize the existing target and persist its own credentials/identity."""
     from tts_erp_v2.proxy.token_service import load_credentials
 
-    # 1. Start the flow (readwrite-or-above; admin also passes by transitivity).
-    r = api_client.get(
-        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
-    )
-    assert r.status_code == 200, r.text
-    state = _state_from_url(r.json()["authorize_url"])
-
-    # 2. TikTok redirects the seller's browser here (no key!).
-    r = api_client.get(
-        CALLBACK, params={"format": "json", "code": "TTP_real_code", "state": state}
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["ok"] is True
-    assert body["kind"] == "authorized"
+    issued = api_client.get(AUTHZ, headers=_bearer(readwrite_key),
+        params={"format": "json", "shop_pk": target_shop.shop_pk})
+    assert issued.status_code == 200, issued.text
+    state = _state_from_url(issued.json()["authorize_url"])
+    response = api_client.get(CALLBACK, params={"format": "json", "code": "TEST_real_code",
+        "state": state, "app_key": target_shop.app_key})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ok"] is True and body["kind"] == "authorized"
     shop = body["result"]["shops"][0]
-    assert shop["shop_id"] == TEST_SHOP_ID
-    assert fake_exchange["auth_code_seen"] == "TTP_real_code"
-    expected_at = "TTP_grant_at_api"
-    assert fake_exchange["shops_access_token_seen"] == expected_at
+    assert shop["shop_id"] == target_shop.shop_id
+    assert shop["account_id"] == target_shop.shop_pk
+    assert fake_exchange["auth_code_seen"] == "TEST_real_code"
+    assert fake_exchange["app_service_id_seen"] == target_shop.service_id
+    assert fake_exchange["app_key_seen"] == target_shop.app_key
+    assert fake_exchange["shops_access_token_seen"] == "TTP_grant_at_api"
 
-    # 3. Rows bootstrapped (committed by the app's own connection).
-    acct = db_session.execute(
-        select(ChannelAccount).where(
-            ChannelAccount.platform == "tiktok",
-            ChannelAccount.shop_id == TEST_SHOP_ID,
-        )
-    ).scalar_one()
-    assert acct.credential_id == shop["credential_id"]
-    cred = db_session.execute(
-        select(Credentials).where(
-            Credentials.provider == "tiktok",
-            Credentials.external_account_id == TEST_SHOP_ID,
-        )
-    ).scalar_one()
-    assert cred.id == acct.credential_id
-
-    # 4. Decrypted envelope round-trips (real Fernet key from .env).
-    view = load_credentials(db_session, "tiktok", TEST_SHOP_ID)
+    account = db_session.execute(select(ChannelAccount).where(
+        ChannelAccount.platform == "tiktok", ChannelAccount.shop_id == target_shop.shop_id,
+    )).scalar_one()
+    assert account.id == target_shop.shop_pk
+    assert account.credential_id == shop["credential_id"]
+    cred = db_session.execute(select(Credentials).where(
+        Credentials.provider == "tiktok", Credentials.external_account_id == target_shop.shop_id,
+    )).scalar_one()
+    assert cred.id == account.credential_id
+    assert cred.service_id == target_shop.service_id
+    assert cred.extra == {"app_revision": target_shop.app_revision}
+    # Real encryption/decryption continues through the sole credential owner.
+    view = load_credentials(db_session, provider="tiktok", external_account_id=target_shop.shop_id)
     assert view is not None
-    expected_at = "TTP_grant_at_api"
-    expected_cipher = "api_grant_cipher"
-    assert view.access_token == expected_at
-    assert view.shop_cipher == expected_cipher
+    assert view.access_token == "TTP_grant_at_api"
+    assert view.shop_cipher == "api_grant_cipher"
 
 
 def test_callback_upgrades_plugin_registered_shop(
-    api_client,
-    readwrite_key,
-    db_engine,
-    db_session,
-    app_env: None,
+    api_client, readwrite_key, db_engine, db_session, target_shop: OAuthTarget,
     fake_exchange: dict[str, Any],
 ) -> None:
-    """插件注册店铺（credential_id=NULL）拿到 API 授权后走 OAuth callback：
-    同一行升级（credential_id 补上），不产生重复行。opened_date 不在
-    OAuth upsert 的 set_ 里，人工填的开店日期保留。"""
-    from sqlalchemy import text as _text
-
-    from tts_erp_v2.db.models.commerce import ChannelAccount
-
-    with db_engine.begin() as conn:
-        conn.execute(
-            _text(
-                "INSERT INTO commerce.shops "
-                "(platform, shop_id, account_name, status, opened_date) "
-                "VALUES ('tiktok', :sid, 'Plugin Shop', 'active', "
-                "        '2026-06-01')"
-            ).bindparams(sid=TEST_SHOP_ID)
-        )
-
-    r = api_client.get(
-        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
-    )
-    state = _state_from_url(r.json()["authorize_url"])
-    r = api_client.get(
-        CALLBACK, params={"format": "json", "code": "TTP_real_code", "state": state}
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["ok"] is True
-
-    rows = db_session.execute(
-        select(ChannelAccount).where(
-            ChannelAccount.platform == "tiktok",
-            ChannelAccount.shop_id == TEST_SHOP_ID,
-        )
-    ).scalars().all()
+    """A configured plugin shop upgrades in place and keeps its opened_date."""
+    with Session(db_engine) as session:
+        account = session.get(ChannelAccount, target_shop.shop_pk)
+        assert account is not None and account.credential_id is None
+        account.account_name = "TEST Plugin Shop"
+        account.opened_date = date(2026, 6, 1)
+        session.commit()
+    issued = api_client.get(AUTHZ, headers=_bearer(readwrite_key),
+        params={"format": "json", "shop_pk": target_shop.shop_pk})
+    assert issued.status_code == 200, issued.text
+    state = _state_from_url(issued.json()["authorize_url"])
+    response = api_client.get(CALLBACK, params={"format": "json", "code": "TEST_real_code", "state": state})
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True
+    rows = db_session.execute(select(ChannelAccount).where(
+        ChannelAccount.platform == "tiktok", ChannelAccount.shop_id == target_shop.shop_id,
+    )).scalars().all()
     assert len(rows) == 1, "OAuth 升级不得产生重复 shops 行"
-    acct = rows[0]
-    assert acct.credential_id is not None
-    assert str(acct.opened_date) == "2026-06-01"  # 人工填写值保留
+    account = rows[0]
+    assert account.id == target_shop.shop_pk and account.credential_id is not None
+    assert account.account_name == "TEST Plugin Shop"
+    assert str(account.opened_date) == "2026-06-01"
 
 
 def test_callback_reusing_state_is_rejected(
-    api_client,
-    readwrite_key,
-    app_env: None,
-    fake_exchange: dict[str, Any],
+    api_client, readwrite_key, target_shop: OAuthTarget, fake_exchange: dict[str, Any],
 ) -> None:
-    """The CSRF state is single-use — a second callback with the same
-    state gets 400 state_reused and must not re-run the exchange."""
-    r = api_client.get(
-        AUTHZ, headers=_bearer(readwrite_key), params={"format": "json"}
-    )
-    state = _state_from_url(r.json()["authorize_url"])
-
-    r1 = api_client.get(
-        CALLBACK, params={"format": "json", "code": "code_1", "state": state}
-    )
-    assert r1.status_code == 200, r1.text
-
+    """The second callback rejects consumed state without another exchange."""
+    issued = api_client.get(AUTHZ, headers=_bearer(readwrite_key),
+        params={"format": "json", "shop_pk": target_shop.shop_pk})
+    assert issued.status_code == 200, issued.text
+    state = _state_from_url(issued.json()["authorize_url"])
+    first = api_client.get(CALLBACK, params={"format": "json", "code": "TEST_code_1", "state": state})
+    assert first.status_code == 200, first.text
     fake_exchange.pop("auth_code_seen")
-    r2 = api_client.get(
-        CALLBACK, params={"format": "json", "code": "code_2", "state": state}
-    )
-    assert r2.status_code == 400, r2.text
-    assert r2.json()["kind"] == "state_reused"
+    second = api_client.get(CALLBACK, params={"format": "json", "code": "TEST_code_2", "state": state})
+    assert second.status_code == 400, second.text
+    assert second.json()["kind"] == "state_reused"
     assert "auth_code_seen" not in fake_exchange
 
 
@@ -408,7 +385,8 @@ def test_callback_html_default_render(api_client, app_env: None) -> None:
     r = api_client.get(CALLBACK)  # no code → 400 HTML page
     assert r.status_code == 400
     assert "text/html" in r.headers["content-type"]
-    assert "No authorization code" in r.text
+    assert _bootstrap(r.text)["pageData"]["title"] == "缺少授权码"
+    assert r.headers["cache-control"] == "private, no-store"
 
 
 # ─── onboard console page ────────────────────────────────────────────
@@ -440,18 +418,14 @@ def test_onboard_page_readonly_can_view(
     r = api_client.get("/v2/oauth/tiktok/onboard", headers=_bearer(readonly_key))
     assert r.status_code == 200, r.text
     assert "新店接入授权" in r.text
-    assert 'id="btn-gen"' in r.text
-    assert "authorize?format=json" in r.text
-    # New error message references the readwrite threshold (not admin)
-    # and the new button label "授权新店".
-    assert "readwrite" in r.text
-    assert "授权新店" in r.text
-    # Two-step UX (linkbox + copy button) is gone — click auto-opens.
-    assert "id=\"linkbox\"" not in r.text
-    assert "id=\"btn-copy\"" not in r.text
-    assert "复制链接" not in r.text
-    # JS uses window.open for the new flow (visible in the inline script).
-    assert "window.open" in r.text
+    data = _bootstrap(r.text)
+    assert data["pageId"] == "oauth-onboard" and data["navigation"] == []
+    assert data["pageData"] == {"kind": "oauth-onboard"}
+    assert "readwrite" in r.text and "只读" in r.text
+    assert 'href="/v2/pages/shops"' in r.text
+    assert "window.open" not in r.text and 'id="btn-gen"' not in r.text
+    assert "authorize?format=json" not in r.text
+
 
 
 def test_onboard_page_admin_same_shell(api_client, admin_key, app_env: None) -> None:
@@ -460,5 +434,5 @@ def test_onboard_page_admin_same_shell(api_client, admin_key, app_env: None) -> 
     same; gating happens on click, not in the HTML itself)."""
     r = api_client.get("/v2/oauth/tiktok/onboard", headers=_bearer(admin_key))
     assert r.status_code == 200, r.text
-    assert 'id="btn-gen"' in r.text
-    assert "授权新店" in r.text
+    assert _bootstrap(r.text)["pageData"] == {"kind": "oauth-onboard"}
+    assert 'href="/v2/pages/shops"' in r.text

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import InterceptConfigs from './index';
@@ -44,9 +44,12 @@ describe('intercept-configs content', () => {
     const fetcher = api(async () => json({})); const user = userEvent.setup(); render(<InterceptConfigs {...props} />); await screen.findByText(row.domain);
     expect(screen.getByText('共 51 条 · 已选 0 条')).toBeVisible(); await user.click(screen.getByRole('button', { name: '下一页' }));
     await screen.findByText('第 2 页 / 2 页'); expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/tts/v2/intercept/configs?limit=50&offset=50');
-    fireEvent.change(screen.getByRole('textbox', { name: '筛选域名' }), { target: { value: ' TEST.example ' } }); fireEvent.change(screen.getByRole('combobox', { name: '筛选状态' }), { target: { value: 'false' } }); fireEvent.change(screen.getByRole('textbox', { name: '搜索' }), { target: { value: ' test ' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '筛选域名' }), { target: { value: ' TEST.example ' } }); await user.click(screen.getByRole('button', { name: /筛选状态/ })); await user.click(screen.getByRole('option', { name: '禁用' })); fireEvent.change(screen.getByRole('textbox', { name: '搜索' }), { target: { value: ' test ' } });
     await user.click(screen.getByRole('button', { name: '查询配置' })); await screen.findByText('第 1 页 / 2 页');
     expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/tts/v2/intercept/configs?domain=TEST.example&enabled=false&search=test&limit=50&offset=0'); expect(screen.getByText(/当前接口未实现搜索/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /筛选状态/ })); await user.click(screen.getByRole('option', { name: '全部' }));
+    await user.click(screen.getByRole('button', { name: '查询配置' }));
+    await waitFor(() => expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/tts/v2/intercept/configs?domain=TEST.example&search=test&limit=50&offset=0'));
   });
   it.each([403, 409, 422])('retains draft on known HTTP %s without raw error or replay', async (status) => {
     let writes = 0; api(async () => { writes++; return json({ detail: [{ loc: ['body', 'domain'], type: 'string_too_long', msg: 'TEST_RAW_SECRET', input: 'TEST_RAW_SECRET' }] }, status); });
