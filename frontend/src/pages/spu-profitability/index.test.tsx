@@ -42,6 +42,17 @@ beforeEach(() => {
   }));
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it.each(['spu-roi', 'focused-spus'] as const)('keeps every %s search and scope control below the overview', async (pageId) => {
+  render(<Page bootstrap={{ ...bootstrap, pageId }} />);
+  await screen.findByText('TEST_RESULT');
+  const overview = screen.getByRole('region', { name: '经营概览' });
+  for (const control of [screen.getByRole('region', { name: '店铺与经营范围' }), screen.getByLabelText('按 SPU ID / 标题搜索')]) {
+    expect(overview.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }
+  expect(within(overview).getByLabelText('销售')).toBeInTheDocument();
+  expect(within(overview).getByLabelText('成本')).toBeInTheDocument();
+  expect(within(overview).getByLabelText('利润')).toBeInTheDocument();
+});
 it('both page profiles render through the same React owner and keep the server scope', async () => {
   render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByText('TEST_RESULT');

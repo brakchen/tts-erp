@@ -41,8 +41,20 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
     page = frontend_browser_renderer.open(f'/v2/pages/{profile}?shop_pk=7', width=width, height=900)
     _wait_rows(page)
     assert page.locator('.tabulator-row').count() >= 3
+    overview = page.get_by_role('region', name='经营概览').bounding_box()
+    sales = page.get_by_label('销售', exact=True).bounding_box()
+    costs = page.get_by_label('成本', exact=True).bounding_box()
+    profit = page.get_by_label('利润', exact=True).bounding_box()
+    assert overview and sales and costs and profit
+    assert profit['y'] >= max(sales['y'] + sales['height'], costs['y'] + costs['height'])
+    if width >= 1440:
+        assert abs(sales['y'] - costs['y']) <= 2
+        assert costs['x'] >= sales['x'] + sales['width']
+    else:
+        assert costs['y'] >= sales['y'] + sales['height']
     filters = page.get_by_role('region', name='店铺与经营范围').bounding_box()
     assert filters
+    assert filters['y'] >= overview['y'] + overview['height']
     if width == 2560:
         assert filters['height'] <= 160, filters
         controls = [page.locator(selector).bounding_box() for selector in (
@@ -74,6 +86,7 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
                     page.get_by_role('group', name='快捷日期范围')]:
         bounds = control.bounding_box()
         assert bounds and grid and bounds['y'] + bounds['height'] <= grid['y'], bounds
+        assert bounds['y'] >= overview['y'] + overview['height'], bounds
     if profile == 'spu-roi':
         bounds = page.locator('#btn-spu-apply').bounding_box()
         assert bounds and bounds['y'] < grid['y']

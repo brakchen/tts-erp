@@ -4314,7 +4314,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in summary
     assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in summary
     assert 'id="sum-projection-status"' in summary
-    assert "metrics={projectedMetrics}" in summary and "<details" in summary
+    assert "metrics={projectedMetrics.filter(" in summary and "<details" in summary
     assert "ad_system_breakeven_roi_status === 'estimated_known_costs'" in summary
     for retired in ("sum-n", "sum-projected-terminal-loss-qty", "预计拒收金额率", "预计财务ROI"):
         assert f"'{retired}'" not in summary and f'id="{retired}"' not in summary
@@ -4332,7 +4332,7 @@ def test_spu_roi_drill_summary_excludes_projection_metrics():
     assert "metrics={projectedMetrics}" not in details and "projection_status" not in details
     summary = _react_profitability_source("Summary.tsx")
     assert 'id="sum-projection-status"' in summary
-    assert "'sum-projected-net-profit'" in summary and "metrics={projectedMetrics}" in summary
+    assert "'sum-projected-net-profit'" in summary and "metrics={projectedMetrics.filter(" in summary
 
 
 def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
@@ -4431,7 +4431,8 @@ def test_spu_roi_frontend_only_displays_backend_profitability():
     assert "error.code === 'FX_RATE_UNAVAILABLE'" in read
     assert "汇率数据缺失，无法计算结果" in read
     assert "setState({ key, error: message, loading: false" in read
-    assert "{data && <>" in page
+    assert "data={data ?? emptyOverview}" in page
+    assert "totals: {}, meta: {}" in page
     assert "ad_system_breakeven_roi_status === 'estimated_known_costs'" in summary
     assert "optionalRecord(meta.fx).as_of_at" in page
     assert "shop_estimate: '实测'" in summary

@@ -54,6 +54,7 @@ def test_projection_control_is_visible_and_switches_only_projection(frontend_bro
     assert control.is_visible()
     assert control.input_value() == "30"
     assert page.locator("#projection-basis-card").is_visible()
+    page.locator("#projection-basis-card > summary").click()
     assert page.locator("#projection-sample-window").is_visible()
 
     reporting_start = page.locator("#filter-w-start").input_value()
@@ -74,11 +75,10 @@ def test_projection_control_is_visible_and_switches_only_projection(frontend_bro
     assert page.locator("#filter-w-end").input_value() == reporting_end
     card = page.locator("#projection-basis-card")
     window = card.locator(".op-projection-window")
-    assert window.inner_text() == "预测样本窗口：2026-07-03 ~ 2026-09-30"
+    assert window.inner_text() == "样本：2026-07-03 ~ 2026-09-30"
     title = card.locator(".op-counter-group-label")
-    assert title.inner_text().count("预测样本窗口：") == 1
-    assert "2026-07-03 ~ 2026-09-30" in title.inner_text()
-    assert title.locator(".op-projection-window").count() == 1
+    assert title.inner_text() == "预测依据"
+    assert card.locator(".op-projection-window").count() == 1
     assert page.locator("#projection-maturity-as-of").count() == 0
     assert page.locator("#projection-basis-counts").count() == 0
     assert page.locator("#projection-basis-status").count() == 0
@@ -93,4 +93,4 @@ def test_projection_control_is_visible_and_switches_only_projection(frontend_bro
         }"""
     )
     page.wait_for_timeout(700)
-    assert window.inner_text() == "预测样本窗口：2026-07-03 ~ 2026-09-30"
+    assert window.inner_text() == "样本：2026-07-03 ~ 2026-09-30"
