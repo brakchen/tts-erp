@@ -10,7 +10,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
-import conftest as browser_conftest
+from tests.browser import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 

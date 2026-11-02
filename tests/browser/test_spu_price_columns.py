@@ -16,7 +16,7 @@ from urllib.parse import parse_qs
 import pytest
 from playwright.sync_api import expect
 
-import conftest as browser_conftest
+from tests.browser import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
