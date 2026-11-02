@@ -1,11 +1,12 @@
 import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Modal, Table } from '@heroui/react';
+import { Alert, Button, Chip, Input, Label, ListBox, Modal, Select, Table, TextField, buttonVariants } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import type { PageProps } from '../../shared/contracts';
 import { decodeAuthorization, decodeShop, decodeShopCommand, decodeShopList, decodeTotal, type AuthorizationLink, type Shop } from './contracts';
 import ShopForm, { fieldLabels, type ShopDraft, type ShopFormKind } from './ShopForm';
+import './shops.css';
 
 interface Attempt { key: string; kind: ShopFormKind | 'authorize'; id?: number; shop_id: string; appPair: boolean }
 interface Recovery { attempt: Attempt; phase: 'unverified' | 'checking' | 'checked' | 'failed'; snapshot?: Shop; message?: string }
@@ -15,6 +16,11 @@ const pageSize = 50;
 const shopKey = (shop?: Shop) => shop ? String(shop.id) : 'register';
 const authLabels = { unauthorized: '未授权', authorized: '已授权', reauthorize: '需重新授权', unknown: '待确认' };
 const sourceLabels: Record<string, string> = { 'ads-data-sync': 'Ads', monitor: 'Monitor' };
+const filterOptions = [
+  { key: 'source', label: '发现来源', options: [['all', '全部来源'], ['ads-data-sync', 'Ads 插件'], ['monitor', 'Monitor 插件']] },
+  { key: 'app_state', label: 'App 配置', options: [['all', '全部配置'], ['configured', '已配置'], ['unconfigured', '未配置']] },
+  { key: 'auth_state', label: 'OAuth 授权', options: [['all', '全部授权状态'], ...Object.entries(authLabels)] },
+] as const;
 function localTime(value?: string | null) {
   return value ? new Date(value).toLocaleString('zh-CN') : '未上报';
 }
@@ -196,43 +202,46 @@ export default function Shops({ bootstrap }: PageProps) {
   function updateFilter(field: keyof Filters, value: string) { setOffset(0); setFilters((previous) => ({ ...previous, [field]: value })); }
   const dialogKey = shopKey(dialog?.shop);
   const dialogPending = Boolean(dialog && pending[dialogKey]);
-  const filterClass = 'min-h-10 rounded-lg border border-[var(--rule)] bg-[var(--paper)] px-3 text-sm';
-  return <div className="erp-page">
-    <PageIntro eyebrow="SHOP CONNECTIONS" title="店铺接入管理" description="从插件发现到 App 配置与授权，在这里完成每家店铺的接入。" />
-    <div className="erp-toolbar">
-      <p className="erp-table-meta">已登记 {list.total ?? '—'} 家店铺 · 未授权店铺仅在此页展示</p>
-      <div className="flex gap-3"><Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>刷新店铺</Button><Button isDisabled={blocked('register')} onPress={() => open('register')}>手工补录</Button></div>
-    </div>
-    <form aria-label="店铺筛选" className="erp-filters" onSubmit={(event) => { event.preventDefault(); updateFilter('q', search); }}>
-      <label className="flex flex-col gap-2 text-sm"><span>店铺搜索</span><input className={filterClass} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="店铺名称 / ID / 编码" /></label>
-      <label className="flex flex-col gap-2 text-sm"><span>发现来源</span><select className={filterClass} value={filters.source} onChange={(event) => updateFilter('source', event.target.value)}><option value="">全部来源</option><option value="ads-data-sync">Ads 插件</option><option value="monitor">Monitor 插件</option></select></label>
-      <label className="flex flex-col gap-2 text-sm"><span>App 配置</span><select className={filterClass} value={filters.app_state} onChange={(event) => updateFilter('app_state', event.target.value)}><option value="">全部配置</option><option value="configured">已配置</option><option value="unconfigured">未配置</option></select></label>
-      <label className="flex flex-col gap-2 text-sm"><span>OAuth 授权</span><select className={filterClass} value={filters.auth_state} onChange={(event) => updateFilter('auth_state', event.target.value)}><option value="">全部授权状态</option>{Object.entries(authLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <Button type="submit">搜索</Button><Button type="button" variant="secondary" onPress={() => { setSearch(''); setFilters(initialFilters); setOffset(0); }}>重置</Button>
+  return <div className="erp-page shops-page">
+    <PageIntro eyebrow="SHOP CONNECTIONS" title="店铺接入管理" description="从插件发现到 App 配置与授权，在这里完成每家店铺的接入。">
+      <Button variant="secondary" className="h-11" isDisabled={readBlocked || list.loading} onPress={() => setRefresh((value) => value + 1)}>刷新店铺</Button>
+      <Button className="h-11" isDisabled={blocked('register')} onPress={() => open('register')}>手工补录</Button>
+    </PageIntro>
+    <form aria-label="店铺筛选" className="erp-panel shops-filters" onSubmit={(event) => { event.preventDefault(); updateFilter('q', search); }}>
+      <TextField className="min-w-0" value={search} onChange={setSearch}>
+        <Label>店铺搜索</Label><Input fullWidth className="h-11" type="search" placeholder="店铺名称 / ID / 编码" />
+      </TextField>
+      {filterOptions.map((field) => <Select key={field.key} fullWidth selectedKey={filters[field.key] || 'all'} onSelectionChange={(key) => updateFilter(field.key, key == null || key === 'all' ? '' : String(key))}>
+        <Label>{field.label}</Label><Select.Trigger className="h-11"><Select.Value /><Select.Indicator /></Select.Trigger>
+        <Select.Popover><ListBox>{field.options.map(([value, label]) => <ListBox.Item key={value} id={value} textValue={label}>{label}<ListBox.ItemIndicator /></ListBox.Item>)}</ListBox></Select.Popover>
+      </Select>)}
+      <div className="shops-filter-actions"><Button type="submit" className="h-11">搜索</Button><Button type="button" variant="secondary" className="h-11" onPress={() => { setSearch(''); setFilters(initialFilters); setOffset(0); }}>重置</Button></div>
     </form>
     {!canWrite && <p className="erp-table-meta">当前为只读权限，配置和授权需要写入权限。</p>}
     {notice && <p role="status">{notice}</p>}
     {!dialog && Object.keys(failures).map((key) => <div key={key}>{feedback(key)}</div>)}
-    {list.loading && <p role="status">正在读取店铺…</p>}
+    <section className="shops-list" aria-labelledby="shops-list-heading" aria-busy={list.loading}>
+    <header className="shops-list-header"><div><h3 id="shops-list-heading" className="erp-section-heading">店铺列表</h3><p className="erp-table-meta">已登记 {list.total ?? '—'} 家店铺 · 未授权店铺仅在此页展示</p></div>{list.loading && <p role="status" className="erp-table-meta">正在读取店铺…</p>}</header>
     {list.error && <Alert status="danger"><Alert.Content><Alert.Title>列表读取失败</Alert.Title><Alert.Description>{list.error}</Alert.Description><Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>重试</Button></Alert.Content></Alert>}
-    {list.shops && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="店铺表格"><Table.Content aria-label="店铺接入列表" className="min-w-[78rem] erp-table-content"><Table.Header className="erp-table-head">
-      {['店铺', '区域 / 开店日期', '插件资料同步', 'App 配置', 'OAuth 授权', '操作'].map((name, index) => <Table.Column className="erp-table-column" key={name} isRowHeader={index === 0}>{name}</Table.Column>)}
+    {list.shops && <Table variant="secondary" className="erp-table shops-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="店铺表格"><Table.Content aria-label="店铺接入列表" className="erp-table-content shops-table-content"><Table.Header className="erp-table-head">
+      {['店铺', '区域 / 开店日期', '插件资料同步', 'App 配置', 'OAuth 授权', '操作'].map((name, index) => <Table.Column className={`erp-table-column shops-column-${index}`} key={name} isRowHeader={index === 0}>{name}</Table.Column>)}
     </Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">没有符合条件的店铺。绑定插件后会自动登记，也可以手工补录。</div>}>{list.shops.map((shop) => <Table.Row className="erp-table-row" key={shop.id} id={shop.id}>
-      <Table.Cell className="erp-table-cell"><p className="erp-table-primary">{shop.account_name ?? '名称待同步'}</p><p className="erp-table-id mt-1">{shop.shop_id}</p>{shop.shop_code && <p className="erp-table-meta">编码 {shop.shop_code}</p>}{shop.discovered_at && <p className="erp-table-meta">首次发现 {localTime(shop.discovered_at)}</p>}</Table.Cell>
-      <Table.Cell className="erp-table-cell"><p>{shop.region ?? '区域待同步'}</p><p className="erp-table-meta">{shop.opened_date ?? '未填开店日期'}</p></Table.Cell>
+      <Table.Cell className="erp-table-cell"><p className="erp-table-primary shops-name">{shop.account_name ?? '名称待同步'}</p><p className="erp-table-id mt-1">{shop.shop_id}</p>{shop.shop_code && <p className="erp-table-meta">编码 {shop.shop_code}</p>}{shop.discovered_at && <p className="erp-table-meta">首次发现 {localTime(shop.discovered_at)}</p>}</Table.Cell>
+      <Table.Cell className="erp-table-cell"><p className="font-medium">{shop.region ?? '区域待同步'}</p><p className="erp-table-meta">{shop.opened_date ?? '未填开店日期'}</p></Table.Cell>
       <Table.Cell className="erp-table-cell">{shop.plugin_sources?.length ? shop.plugin_sources.map((source) => <div key={source.source} className="mb-2 last:mb-0"><p>{sourceLabels[source.source] ?? source.source}</p><p className="erp-table-meta">{localTime(source.last_received_at)}</p></div>) : <span className="erp-table-meta">尚无插件上报</span>}</Table.Cell>
-      <Table.Cell className="erp-table-cell"><span className="erp-table-status">{shop.app_credentials_configured ? '已配置' : '未配置'}</span><p className="erp-table-id mt-1 max-w-40 break-all">{shop.service_id ?? '未填 Service ID'}</p></Table.Cell>
-      <Table.Cell className="erp-table-cell"><span className="erp-table-status">{authLabels[shop.auth_state ?? 'unknown']}</span>{shop.auth_state === 'authorized' && <p className="erp-table-meta">自动同步已接入</p>}{shop.auth_state === 'reauthorize' && <p className="erp-table-meta">请重新完成店铺授权</p>}</Table.Cell>
-      <Table.Cell className="erp-table-cell" focusMode="child"><div className="flex flex-wrap gap-2 erp-table-actions"><Button className="erp-table-action" variant="secondary" size="sm" isDisabled={blocked(shopKey(shop))} onPress={() => open('edit', shop)}>编辑信息</Button><Button className="erp-table-action" variant="ghost" size="sm" isDisabled={blocked(shopKey(shop))} onPress={() => open('app', shop)}>配置 App</Button><Button className="erp-table-action" variant="ghost" size="sm" isDisabled={blocked(shopKey(shop)) || !shop.app_credentials_configured || !shop.service_id} onPress={() => { void authorize(shop); }}>{pending[shopKey(shop)] ? '处理中…' : '获取授权链接'}</Button></div></Table.Cell>
+      <Table.Cell className="erp-table-cell"><Chip size="sm" variant="soft" color={shop.app_credentials_configured ? 'success' : 'default'}>{shop.app_credentials_configured ? '已配置' : '未配置'}</Chip><p className="erp-table-meta">Service ID</p><p className="erp-table-id">{shop.service_id ?? '未填 Service ID'}</p></Table.Cell>
+      <Table.Cell className="erp-table-cell"><Chip size="sm" variant="soft" color={shop.auth_state === 'authorized' ? 'success' : shop.auth_state === 'reauthorize' ? 'warning' : 'default'}>{authLabels[shop.auth_state ?? 'unknown']}</Chip>{shop.auth_state === 'authorized' && <p className="erp-table-meta">自动同步已接入</p>}{shop.auth_state === 'reauthorize' && <p className="erp-table-meta">请重新完成店铺授权</p>}</Table.Cell>
+      <Table.Cell className="erp-table-cell" focusMode="child"><div className="shops-row-actions"><Button variant="secondary" size="sm" isDisabled={blocked(shopKey(shop))} onPress={() => open('edit', shop)}>编辑信息</Button><Button variant="secondary" size="sm" isDisabled={blocked(shopKey(shop))} onPress={() => open('app', shop)}>配置 App</Button><Button className="shops-authorize" variant="tertiary" size="sm" isDisabled={blocked(shopKey(shop)) || !shop.app_credentials_configured || !shop.service_id} onPress={() => { void authorize(shop); }}>{pending[shopKey(shop)] ? '处理中…' : '获取授权链接'}</Button></div></Table.Cell>
     </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>}
-    <div className="flex flex-wrap items-center justify-between gap-3 text-sm"><p className="erp-table-meta">每页 {pageSize} 家 · 第 {Math.floor(offset / pageSize) + 1} 页</p><div className="flex gap-2"><Button variant="secondary" size="sm" isDisabled={list.loading || readBlocked || offset === 0} onPress={() => setOffset((value) => Math.max(0, value - pageSize))}>上一页</Button><Button variant="secondary" size="sm" isDisabled={list.loading || readBlocked || (list.total != null ? offset + pageSize >= list.total : (list.shops?.length ?? 0) < pageSize)} onPress={() => setOffset((value) => value + pageSize)}>下一页</Button></div></div>
+    <footer className="shops-list-footer"><p className="erp-table-meta">每页 {pageSize} 家 · 第 {Math.floor(offset / pageSize) + 1} 页</p><div className="flex gap-2"><Button variant="secondary" size="sm" isDisabled={list.loading || readBlocked || offset === 0} onPress={() => setOffset((value) => Math.max(0, value - pageSize))}>上一页</Button><Button variant="secondary" size="sm" isDisabled={list.loading || readBlocked || (list.total != null ? offset + pageSize >= list.total : (list.shops?.length ?? 0) < pageSize)} onPress={() => setOffset((value) => value + pageSize)}>下一页</Button></div></footer>
+    </section>
     <Modal.Backdrop isOpen={dialog !== undefined} isDismissable={!dialogPending} isKeyboardDismissDisabled={dialogPending} onOpenChange={(isOpen) => { if (!isOpen) close(); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭店铺表单" isDisabled={dialogPending} /><Modal.Header><Modal.Heading>{dialog?.kind === 'register' ? '手工补录店铺' : dialog?.kind === 'app' ? '配置当前店铺 App' : '编辑店铺信息'}</Modal.Heading></Modal.Header>
       <Modal.Body className="space-y-4">{feedback(dialogKey)}{dialog && <ShopForm key={dialog.kind + '-' + dialogKey} kind={dialog.kind} shop={dialog.shop} pending={dialogPending} blocked={Boolean(cooldown[dialogKey] || !canWrite || (recoveries[dialogKey] && recoveries[dialogKey]?.phase !== 'checked'))} submitLabel={recoveries[dialogKey]?.phase === 'checked' ? '核对后重新保存' : '保存'} errors={failures[dialogKey]?.fieldErrors ?? {}} onFieldEdit={() => { dirty.current = true; setFailures((previous) => { const current = previous[dialogKey]; return current ? { ...previous, [dialogKey]: { ...current, fieldErrors: {} } } : previous; }); }} onSubmit={(draft) => { void save(draft); }} onCancel={close} />}</Modal.Body>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
     <Modal.Backdrop isOpen={link !== undefined} onOpenChange={(isOpen) => { if (!isOpen) setLink(undefined); }}><Modal.Container size="lg"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭授权链接" /><Modal.Header><Modal.Heading>为当前店铺授权</Modal.Heading></Modal.Header>
-      <Modal.Body className="space-y-4">{link && <><div><p className="font-semibold">{link.shop.account_name ?? link.shop.shop_id}</p><p className="erp-table-meta break-all">店铺 {link.shop.shop_id} · Service {link.shop.service_id}</p></div><p>请使用此店铺完成授权。成功后系统会自动开始同步。</p><p className="erp-table-meta">链接有效至 {localTime(link.value.state_expires_at)}，仅可使用一次。</p><p className="rounded-lg border border-[var(--rule)] p-3 text-sm break-all">{link.value.authorize_url}</p><div className="flex flex-wrap gap-3"><a className="inline-flex items-center rounded-full bg-[var(--ink)] px-4 py-2 text-sm text-white" href={link.value.authorize_url} target="_blank" rel="noopener noreferrer">打开授权页面</a><Button variant="secondary" onPress={() => { void navigator.clipboard.writeText(link.value.authorize_url).then(() => setNotice('授权链接已复制'), () => setNotice('复制失败，请手动选择链接复制')); }}>复制链接</Button></div>{notice && <p role="status">{notice}</p>}</>}</Modal.Body>
+      <Modal.Body className="space-y-4">{link && <><div><p className="font-semibold">{link.shop.account_name ?? link.shop.shop_id}</p><p className="erp-table-meta break-all">店铺 {link.shop.shop_id} · Service {link.shop.service_id}</p></div><p>请使用此店铺完成授权。成功后系统会自动开始同步。</p><p className="erp-table-meta">链接有效至 {localTime(link.value.state_expires_at)}，仅可使用一次。</p><p className="rounded-lg border border-[var(--rule)] p-3 text-sm break-all">{link.value.authorize_url}</p><div className="flex flex-wrap gap-3"><a className={buttonVariants({ variant: 'primary' })} href={link.value.authorize_url} target="_blank" rel="noopener noreferrer">打开授权页面</a><Button variant="secondary" onPress={() => { void navigator.clipboard.writeText(link.value.authorize_url).then(() => setNotice('授权链接已复制'), () => setNotice('复制失败，请手动选择链接复制')); }}>复制链接</Button></div>{notice && <p role="status">{notice}</p>}</>}</Modal.Body>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
   </div>;
 }

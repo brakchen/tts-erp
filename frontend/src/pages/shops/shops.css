@@ -1,0 +1,43 @@
+/* Page layout only. Controls use HeroUI 3.2.6 public slots and variants (MIT):
+ * https://heroui.com/en/docs/react/components/select
+ * https://heroui.com/en/docs/react/components/table
+ */
+.shops-filters { display: grid; grid-template-columns: minmax(220px, 1.7fr) repeat(3, minmax(130px, 1fr)) auto; align-items: end; gap: 16px; padding: 20px; }
+.shops-filter-actions { display: flex; align-items: center; gap: 8px; }
+.shops-list { min-width: 0; border: 1px solid var(--rule); border-radius: 16px; background: var(--surface); }
+.shops-list-header, .shops-list-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; }
+.shops-list .shops-table { border: 0; border-radius: 0; }
+.shops-table-content { min-width: 1060px; table-layout: fixed; }
+.shops-column-0 { width: 22%; }
+.shops-column-1 { width: 13%; }
+.shops-column-2 { width: 16%; }
+.shops-column-3 { width: 17%; }
+.shops-column-4 { width: 14%; }
+.shops-column-5 { width: 18%; }
+.shops-name { max-width: 256px; overflow-wrap: anywhere; }
+.shops-row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.shops-row-actions > button { width: 100%; min-height: 36px; padding-inline: 8px; font-size: 12px; }
+.shops-authorize { grid-column: 1 / -1; }
+.shops-list-footer { border-top: 1px solid var(--rule); }
+.shops-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.shops-form-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.shops-form-actions { display: flex; justify-content: flex-end; gap: 12px; padding-top: 16px; border-top: 1px solid var(--rule); }
+@media (max-width: 1279px) {
+  .shops-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .shops-filter-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (min-width: 640px) {
+  .shops-form-fields--register { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+  .shops-filters { padding: 16px; gap: 16px; }
+  .shops-list-header, .shops-list-footer { padding: 16px; }
+  .shops-page .erp-intro-actions { width: 100%; }
+  .shops-page .erp-intro-actions > button { flex: 1; }
+}
+@media (max-width: 479px) {
+  .shops-filters { grid-template-columns: minmax(0, 1fr); }
+  .shops-filter-actions > button { flex: 1; }
+  .shops-list-footer > div { width: 100%; }
+  .shops-list-footer button { flex: 1; }
+}
