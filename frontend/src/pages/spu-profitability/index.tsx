@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, Input, Modal } from '@heroui/react';
-import PageIntro from '../../shared/PageIntro';
 import type { PageProps } from '../../shared/contracts';
 import { decodeOverview, decodeShops, optionalRecord, record, text, type ProfitRow, type RecordValue } from './contracts';
 import { datePresets, initialQuery, pageSequence, persistQuery, queryParams, readPreferences, reportingDate, reportingZone, shiftDay, type Profile, type Query } from './query';
@@ -13,6 +12,7 @@ import DrillDetails from './DrillDetails';
 import './profitability.css';
 
 const emptyRows: ProfitRow[] = [];
+const emptyOverview = { items: emptyRows, total: 0, totals: {}, meta: {} };
 const freshnessLabels: Record<string, string> = { ok: '正常', warn: '更新滞后', crit: '严重滞后', unknown: '未知' };
 function displayTimestamp(value: unknown, region?: string | null): string { if (typeof value !== 'string') return '—'; const date = new Date(value); const zone = reportingZone(region); return Number.isNaN(date.getTime()) || !zone ? value : new Intl.DateTimeFormat('zh-CN', { timeZone: zone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date); }
 function ProfitabilityContent({ bootstrap }: PageProps) {
@@ -70,7 +70,11 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
   const currentPage = Math.floor(query.offset / query.limit) + 1; const pages = data ? Math.max(1, Math.ceil(data.total / query.limit)) : 1;
   const presetOptions = datePresets(today);
   return <div className="erp-page" data-page-profile={focused ? 'focused-spus' : 'standard-roi'}>
-    <PageIntro eyebrow="PRODUCT PERFORMANCE" title={focused ? '关注重点商品，把握经营变化' : '让商品的投入与回报清晰可见'} description="按店铺和经营日期查看商品表现，结合订单、成本与广告核对结果。" />
+    <Summary data={data ?? emptyOverview} stateMessage={overview.error ? '经营概览加载失败' : overview.loading ? '加载中…' : !shop ? '请选择店铺' : undefined} scope={`${shop?.account_name ?? shop?.shop_id ?? ''} · ${query.wStart || '不限'} ~ ${query.wEnd || '不限'}`}
+      salesPrices={!focused && <PriceSummary data={data} supported={priceCapability} loading={overview.loading} error={overview.error} kind="sales" />}
+      costPrices={!focused && <PriceSummary data={data} supported={priceCapability} loading={overview.loading} error={overview.error} kind="purchase" />}
+      feeFacts={<FeeFacts fee={fee} dismissed={feeDismissed} onDismiss={() => setFeeDismissed(true)} />}
+    />
     <section className="erp-panel erp-profit-controls" aria-label="店铺与经营范围">
       <div className="erp-profit-toolbar">
       <div className="erp-profit-scope-row"><label className="erp-shop-picker">当前店铺<select id="shop-switcher" className="erp-select" aria-label="当前店铺" value={shop?.id ?? ''} disabled={shops.loading || blocked} onChange={(event) => changeShop(event.target.value)}><option value="" disabled>请选择店铺</option>{shops.data?.map((row) => <option key={row.id} value={row.id}>{row.account_name ?? row.shop_id} · {row.shop_id}</option>)}</select></label><Button variant="secondary" isDisabled={overview.loading || blocked} onPress={() => setRevision((value) => value + 1)}>刷新当前数据</Button></div>
@@ -87,8 +91,6 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
     {shops.error && <div role="alert"><p>店铺读取失败：{shops.error}</p><Button variant="secondary" isDisabled={shops.loading || shops.blocked} onPress={() => setShopRevision((value) => value + 1)}>重试店铺列表</Button></div>}{shops.loading && <p role="status">加载店铺中…</p>}
     {shop && <Selection key={`${root}:${shop.id}:${profile}`} root={root} shopPk={shop.id} focused={focused} canWrite={bootstrap.roleCapabilities?.readwrite === true} blocked={blocked} fence={selectionFence} applied={query.spuIds} onApply={applyIds} onFocused={focusedChanged} />}
     <section id="data-freshness" className="erp-profit-freshness" aria-label="数据更新" aria-live="polite"><span>数据更新</span>{freshness.error ? <span>同步时间加载失败</span> : Array.isArray(freshness.data?.sources) ? freshness.data.sources.map((raw) => { const source = optionalRecord(raw); const severity = ['ok', 'warn', 'crit', 'unknown'].includes(String(source.severity)) ? String(source.severity) : 'unknown'; return <span key={String(source.key)} data-source={String(source.key)} data-severity={severity} title={`${text(source.detail)} · ${text(source.job_name)} · ${text(source.synced_at)}`}><strong>{text(source.label ?? source.key)}</strong> <time dateTime={typeof source.synced_at === 'string' ? source.synced_at : undefined}>{displayTimestamp(source.synced_at, shop?.region)}</time> · {freshnessLabels[severity]}{source.scope === 'system' ? ' · 全账号' : ''}</span>; }) : <span>—</span>}<span data-source="fx" data-severity="unknown">汇率快照 <time title={text(optionalRecord(meta.fx).as_of_at)}>{displayTimestamp(optionalRecord(meta.fx).as_of_at, shop?.region)}</time></span></section>
-    {data && <><FeeFacts fee={fee} dismissed={feeDismissed} onDismiss={() => setFeeDismissed(true)} /><Summary data={data} /></>}
-    {!focused && <PriceSummary data={data} supported={priceCapability} loading={overview.loading} error={overview.error} />}
     <section className="erp-panel min-w-0 space-y-4" aria-label="商品经营明细"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="erp-section-heading">商品经营明细</h2><p>点击商品查看明细；商品列固定，其他指标可横向滚动。</p></div><span id="sort-note">排序：{sortLabel(query.sort)} {query.order === 'asc' ? '↑' : '↓'} · {data?.total ?? '—'} 条</span></div>
       {focused && focusedCount === 0 && <p>尚未关注 SPU，请在上方搜索并添加。当前范围仍为关注清单。</p>}
       <ProfitabilityTable root={root} rows={data?.items ?? emptyRows} sort={query.sort} order={query.order} prices={!focused && priceCapability === true} meta={meta} loading={overview.loading} error={overview.error} selectedKey={drill?.row.spu_pk ?? null} blocked={blocked} onSort={(sort, order) => update({ sort, order })} onDrill={receiveDrill} onZoom={setImage} onRetry={() => setRevision((value) => value + 1)} />

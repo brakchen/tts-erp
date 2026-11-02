@@ -133,9 +133,11 @@ def test_price_content_is_only_shown_on_standard_roi_profile(frontend_browser_re
             expect(page.locator("#sum-roi")).to_be_visible()
             assert page.locator(".tabulator-row").count() >= 1
             continue
-        assert "采购价" in page.locator("#price-summary").inner_text()
-        assert "37.0000" in page.locator("#price-summary").inner_text()
-        assert "≈40.0000" in page.locator("#price-summary").inner_text()
+        assert "采购价" in page.locator("#price-summary-purchase").inner_text()
+        assert "37.0000" in page.locator("#price-summary-purchase").inner_text()
+        assert "≈40.0000" in page.locator("#price-summary-purchase").inner_text()
+        expect(page.get_by_label("成本", exact=True).locator("#price-summary-purchase")).to_be_visible()
+        expect(page.get_by_label("销售", exact=True).locator("#price-summary")).to_be_visible()
         assert "0.0000" in page.locator(".tabulator-row").first.inner_text()
         assert page.locator('.tabulator-header [tabulator-field="priceStats.purchase.mean"]').count() == 1
         assert page.locator('.tabulator-header [tabulator-field="priceStats.originalSale.median"]').count() == 1
