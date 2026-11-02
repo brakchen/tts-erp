@@ -44,8 +44,13 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
 
     page.route("**/v2/commerce/channel-accounts?*", read_shops)
     page.reload(wait_until="networkidle")
-    page.get_by_role("grid", name="已注册店铺").get_by_text(SHOP["shop_id"], exact=True).wait_for()
-    assert page.get_by_text("已注册总数：502", exact=False).is_visible()
+    page.get_by_role("grid", name="店铺接入列表").get_by_text(SHOP["shop_id"], exact=True).wait_for()
+    assert page.get_by_text("已登记 502 家店铺", exact=False).is_visible()
+    search = page.get_by_role("searchbox", name="店铺搜索", exact=True)
+    search_box = search.bounding_box()
+    assert search_box is not None and search_box["height"] >= 40, search_box
+    filters_box = page.get_by_role("form", name="店铺筛选").bounding_box()
+    assert filters_box is not None and filters_box["width"] <= width, filters_box
     name_box = page.get_by_text(SHOP["account_name"], exact=True).bounding_box()
     assert name_box is not None and 160 <= name_box["width"] <= 256, name_box
     row_box = page.get_by_role("row").filter(has=page.get_by_text(SHOP["shop_id"], exact=True)).bounding_box()
@@ -64,7 +69,7 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
         assert scroll.evaluate("el => el.scrollWidth > el.clientWidth")
     if role == "readonly":
         page.get_by_role("button", name="获取授权链接", exact=True).scroll_into_view_if_needed()
-        for name in ("注册店铺", "编辑元信息", "配置 App", "获取授权链接"):
+        for name in ("手工补录", "编辑信息", "配置 App", "获取授权链接"):
             assert page.get_by_role("button", name=name, exact=True).is_disabled()
     else:
         trigger = page.get_by_role("button", name="配置 App", exact=True)
@@ -72,9 +77,14 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
         trigger.focus()
         page.keyboard.press("Enter")
         dialog = page.get_by_role("dialog")
-        dialog.get_by_text("同一 Service ID", exact=False).wait_for()
+        dialog.get_by_text("配置仅用于当前店铺", exact=False).wait_for()
         secret = dialog.get_by_label("App Secret", exact=True)
         assert secret.get_attribute("type") == "password"
+        service_box = dialog.get_by_label("Service ID", exact=True).bounding_box()
+        secret_box = secret.bounding_box()
+        assert service_box is not None and secret_box is not None
+        assert abs(service_box["width"] - secret_box["width"]) <= 1
+        assert secret_box["height"] >= 40
         secret.fill("TEST_cancel_only")
         page.keyboard.press("Escape")
         dialog.wait_for(state="hidden")
