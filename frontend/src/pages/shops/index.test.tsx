@@ -75,7 +75,7 @@ describe('shops content', () => {
       const query = new URL(fetcher.mock.calls.at(-1)![0], 'https://test.invalid').searchParams;
       expect(Object.fromEntries(query)).toMatchObject({ platform: 'tiktok', view: 'management', offset: '0', q: 'TEST_query', source: 'ads-data-sync', app_state: 'configured', auth_state: 'reauthorize' });
     });
-    await user.click(screen.getByRole('button', { name: '重置', exact: true }));
+    await user.click(screen.getByRole('button', { name: '重置' }));
     await waitFor(() => expect(fetcher.mock.calls.at(-1)![0]).toBe('/tts/v2/commerce/channel-accounts?platform=tiktok&view=management&limit=50&offset=0'));
     expect(screen.getByRole('searchbox', { name: '店铺搜索' })).toHaveValue('');
   });
