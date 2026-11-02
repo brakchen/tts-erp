@@ -12,9 +12,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from playwright.sync_api import expect
+from render_support import overflow_report
 
 from tests.browser import conftest as browser_conftest
-from render_support import overflow_report
 from tests.browser.test_spu_price_columns import _nested_payload
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
