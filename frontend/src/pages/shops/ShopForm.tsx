@@ -23,7 +23,7 @@ export default function ShopForm({ kind, shop, pending, blocked, errors, submitL
   const needsPair = kind === 'app' && !shop?.app_credentials_configured;
   return <form aria-label="店铺表单" className="shops-form" onSubmit={(event) => { event.preventDefault(); if (!pending && !blocked) onSubmit(draft); }}>
     {shop && <div className="rounded-xl border border-[var(--rule)] bg-[var(--paper-deep)] p-4">
-      <p className="font-semibold">{shop.account_name ?? '未取得店铺名称'}</p>
+      <p className="font-semibold break-words">{shop.account_name ?? '未取得店铺名称'}</p>
       <p className="erp-table-meta break-all">{shop.shop_id} · {shop.region ?? '区域待同步'}</p>
     </div>}
     {kind === 'register' && <p className="erp-table-meta">插件会自动登记当前绑定店铺，也可以在这里手工补录。名称和区域保存后只读，App 可稍后配置。</p>}

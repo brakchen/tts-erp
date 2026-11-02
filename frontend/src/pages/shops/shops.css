@@ -19,8 +19,8 @@
 .shops-row-actions > button { width: 100%; min-height: 36px; padding-inline: 8px; font-size: 12px; }
 .shops-authorize { grid-column: 1 / -1; }
 .shops-list-footer { border-top: 1px solid var(--rule); }
-.shops-form { display: grid; gap: 20px; }
-.shops-form-fields { display: grid; gap: 16px; }
+.shops-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.shops-form-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .shops-form-actions { display: flex; justify-content: flex-end; gap: 12px; padding-top: 16px; border-top: 1px solid var(--rule); }
 @media (max-width: 1279px) {
   .shops-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }

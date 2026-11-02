@@ -80,11 +80,16 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
         dialog.get_by_text("配置仅用于当前店铺", exact=False).wait_for()
         secret = dialog.get_by_label("App Secret", exact=True)
         assert secret.get_attribute("type") == "password"
-        service_box = dialog.get_by_label("Service ID", exact=True).bounding_box()
-        secret_box = secret.bounding_box()
-        assert service_box is not None and secret_box is not None
-        assert abs(service_box["width"] - secret_box["width"]) <= 1
-        assert secret_box["height"] >= 40
+        # Layout sizes avoid sampling two different frames of the modal animation.
+        sizes = page.evaluate(
+            "([service, secret, dialog]) => ({service: service.clientWidth, secret: secret.clientWidth, "
+            "height: secret.clientHeight, dialog: dialog.clientWidth, scroll: dialog.scrollWidth})",
+            [dialog.get_by_label("Service ID", exact=True).element_handle(), secret.element_handle(), dialog.element_handle()],
+        )
+        assert abs(sizes["service"] - sizes["secret"]) <= 1, sizes
+        assert sizes["service"] <= sizes["dialog"] - 32, sizes
+        assert sizes["scroll"] <= sizes["dialog"] + 1, sizes
+        assert sizes["height"] >= 40, sizes
         secret.fill("TEST_cancel_only")
         page.keyboard.press("Escape")
         dialog.wait_for(state="hidden")
