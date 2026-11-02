@@ -91,6 +91,12 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
         assert sizes["scroll"] <= sizes["dialog"] + 1, sizes
         assert sizes["height"] >= 40, sizes
         secret.fill("TEST_cancel_only")
+        def confirm_discard(confirmation):
+            assert confirmation.type == "confirm"
+            assert confirmation.message == "放弃本次尚未保存的修改？"
+            confirmation.accept()
+
+        page.once("dialog", confirm_discard)
         page.keyboard.press("Escape")
         dialog.wait_for(state="hidden")
         # React Aria's native grid is one tab stop: keyboard restoration may target
