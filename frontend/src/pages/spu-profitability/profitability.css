@@ -24,25 +24,26 @@
 .erp-price-summary-table th, .erp-price-summary-table td { padding: 12px; border-bottom: 1px solid var(--rule); }
 .erp-price-summary-table { min-width: 400px; }
 .erp-overview { min-width: 0; }
-.erp-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.erp-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .erp-overview-grid > * { min-width: 0; }
 .erp-overview-profit { grid-column: 1 / -1; }
-.erp-overview .erp-profit-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; padding-block: 10px; }
+.erp-overview .erp-profit-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 20px; padding-block: 4px; }
 .erp-overview .erp-profit-metrics > div { border: 0; padding: 0; }
 .erp-overview .erp-profit-metrics dt { flex-wrap: wrap; }
-.erp-overview .erp-profit-metrics dd { margin-top: 2px; font-size: 18px; font-weight: 500; }
+.erp-overview .erp-metric-hint { width: 24px; min-width: 24px; height: 24px; padding: 0; }
+.erp-overview .erp-profit-metrics dd { margin-top: 2px; font-size: 18px; font-weight: 500; line-height: 1.4; }
 .erp-overview-primary .erp-profit-metrics dd { font-size: 30px; font-weight: 600; }
-.erp-overview-primary { border-bottom: 1px solid var(--rule); padding-bottom: 10px; }
-.erp-overview-prices { border-top: 1px solid var(--rule); padding-top: 10px; }
+.erp-overview-primary { border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+.erp-overview-prices { border-top: 1px solid var(--rule); padding-top: 6px; }
 .erp-overview .erp-price-summary-table { min-width: 0; width: 100%; font-size: 12px; }
-.erp-overview .erp-price-summary-table th, .erp-overview .erp-price-summary-table td { padding: 8px 4px; overflow-wrap: anywhere; }
+.erp-overview .erp-price-summary-table th, .erp-overview .erp-price-summary-table td { padding: 4px; overflow-wrap: anywhere; }
 .erp-overview-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .erp-overview-comparison > div { min-width: 0; }
 .erp-overview-comparison > div + div { border-left: 1px solid var(--rule); padding-left: 24px; }
 .erp-overview-comparison .erp-profit-metrics { grid-template-columns: minmax(0, 1fr); }
 .erp-overview-comparison .erp-overview-primary { border: 0; padding: 0; }
 .erp-overview-roi { width: 100%; table-layout: fixed; font-size: 13px; }
-.erp-overview-roi th, .erp-overview-roi td { padding: 10px 8px; text-align: right; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.erp-overview-roi th, .erp-overview-roi td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .erp-overview-roi th { font-weight: 500; }
 .erp-overview-roi thead { color: var(--muted); background: var(--table-heading); }
 .erp-overview-roi th:first-child { width: 50%; text-align: left; }
