@@ -53,6 +53,7 @@ from tts_erp_v2.api.v2 import (
     fx,
     intercept,
     llm_context,
+    media,
     monitor_health,
     oauth,
     order_sync,
@@ -96,6 +97,7 @@ def _build_routes(app: FastAPI) -> None:
         fx.router
     )  # cached exchange rates + local conversion (readonly; never dials upstream)
     app.include_router(spu_images.router)  # SPU image upload (presigned MinIO)
+    app.include_router(media.router)  # global media asset library + digital humans
     app.include_router(pages.router)
     app.include_router(llm_context.router)
     app.include_router(

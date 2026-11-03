@@ -29,6 +29,7 @@ SCHEMAS: tuple[str, ...] = (
     "plugin",
     "config",
     "publishing",
+    "media",
 )
 
 

@@ -118,6 +118,7 @@ OWNED_SCHEMAS = (
     "reporting",
     "security",
     "publishing",
+    "media",
 )
 
 

@@ -35,6 +35,7 @@ V2_SCHEMAS = (
     "fulfillment",
     "reporting",
     "security",
+    "media",
 )
 
 # 创建时间列(多选一,各表允许不同名)

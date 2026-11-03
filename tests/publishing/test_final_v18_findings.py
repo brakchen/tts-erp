@@ -235,7 +235,9 @@ def test_generated_schema_and_architecture_cover_publishing_head() -> None:
     assert "CREATE TABLE IF NOT EXISTS publishing.video_publish_tasks" in schema_sql
     assert "CREATE TABLE IF NOT EXISTS publishing.video_publish_attempts" in schema_sql
     assert "CREATE TABLE IF NOT EXISTS publishing.worker_heartbeats" in schema_sql
-    assert "14 schema SQLAlchemy" in process
+    # 同样不硬编码 schema 数：与 README 的 schema/表数断言同源推导，
+    # 避免新增业务 schema 后该断言过期（0068→0069 已教训一次）。
+    assert f"{schema_count} schema SQLAlchemy" in process
     assert "tts-erp-publish.service" in process
     assert "publishing.py" in process
 
