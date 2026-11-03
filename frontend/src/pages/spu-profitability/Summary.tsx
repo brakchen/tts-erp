@@ -3,9 +3,17 @@ import { Button, Card, Modal } from '@heroui/react';
 import { optionalRecord, text, type Overview, type RecordValue } from './contracts';
 import { displayDecimal } from '../ad-daily/query';
 
-export function displayValue(value: unknown): string { if (value == null || value === '' || !['string', 'number'].includes(typeof value) || !/^-?\d+(\.\d+)?$/.test(String(value))) return '—'; return displayDecimal(value as string | number); }
-export function displayPercent(value: unknown): string { if (value == null || value === '') return '—'; const number = Number(value); return Number.isFinite(number) ? `${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(number * 100)}%` : '—'; }
-export function priceValue(value: unknown, estimated: boolean): string { if (value == null || value === '') return '—'; const raw = String(value); if (!/^-?\d+(\.\d+)?$/.test(raw)) return '—'; const [whole, fraction = ''] = raw.split('.'); return `${estimated ? '≈' : ''}${whole}.${fraction.padEnd(4, '0')}`; }
+const decimalDisplay = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const percentDisplay = new Intl.NumberFormat('zh-CN', { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const priceDisplay = new Intl.NumberFormat('zh-CN', { useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function displayInput(value: unknown): string | undefined { return ['string', 'number'].includes(typeof value) && /^-?\d+(\.\d+)?$/.test(String(value)) ? String(value) : undefined; }
+/** Display-only rounding. Intl consumes exact decimal strings and defaults to halfExpand.
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/format
+ * ES2022 typings omit the native decimal-string overload; do not convert it to Number. */
+function roundedDisplay(formatter: Intl.NumberFormat, value: string): string { const format = formatter.format as (value: string | number | bigint) => string; return format(value).replace(/^-0\.00(?=%?$)/, '0.00'); }
+export function displayValue(value: unknown): string { const raw = displayInput(value); if (raw === undefined) return '—'; return raw.includes('.') ? roundedDisplay(decimalDisplay, raw) : displayDecimal(raw); }
+export function displayPercent(value: unknown): string { const raw = displayInput(value); return raw === undefined ? '—' : roundedDisplay(percentDisplay, raw); }
+export function priceValue(value: unknown, estimated: boolean): string { const raw = displayInput(value); return raw === undefined ? '—' : `${estimated ? '≈' : ''}${roundedDisplay(priceDisplay, raw)}`; }
 export const currentMetrics: [string, string, string, boolean?][] = [
   ['总单量', 'total_orders', 'sum-total-orders'], ['广告消耗', 'spend', 'sum-spend'], ['有效单量', 'effective_order_count', 'sum-orders'], ['有效销售', 'effective_sales', 'sum-sales'],
   ['退款数', 'refund_order_count', 'sum-refund-count'], ['退款率', 'refund_rate', 'sum-refund-rate', true], ['全损量', 'full_loss_order_count', 'sum-loss-qty'], ['全损率', 'full_loss_rate', 'sum-loss-rate', true],
@@ -82,7 +90,7 @@ export function PriceSummary({ data, supported, loading, error, kind }: { data?:
     <div className="erp-table-scroll"><table className="erp-table-content erp-price-summary-table"><thead><tr><th scope="col">价格</th><th scope="col">均价</th><th scope="col">中位数</th><th scope="col">覆盖</th></tr></thead><tbody>{Object.entries(priceLabels).filter(([metric]) => (metric === 'purchase') === (kind === 'purchase')).map(([metric, label]) => { const value = optionalRecord(all[metric]); return <tr key={metric}><th scope="row">{label} <Button size="sm" variant="ghost" data-price-tip={metric} aria-label={`查看${label}统计口径`} onPress={() => setTip(metric)}>?</Button></th>{['mean', 'median'].map((kind) => <td key={kind} id={`price-${metric}-${kind}`} className="erp-table-number">{loading ? '加载中…' : error ? '—' : priceValue(value[kind], metric === 'purchase' && value.estimated === true)}</td>)}<td id={`price-status-${metric}`}>{status(value.status)}</td></tr>; })}</tbody></table></div>
     <Modal.Backdrop isOpen={Boolean(tip)} onOpenChange={(open) => { if (!open) setTip(undefined); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog><Modal.CloseTrigger aria-label="关闭价格说明" /><Modal.Header><Modal.Heading>{tip ? priceLabels[tip] : ''}统计口径</Modal.Heading></Modal.Header><Modal.Body id="ops-tip" className="space-y-2">
       <p>来源：{tip === 'purchase' ? 'ROI 当前有效成本' : tip === 'originalSale' ? 'TikTok line_items.original_price' : 'TikTok line_items.sale_price'}。按件数加权平均值 / 中位数，当前经营窗口，已付款且排除赠品。</p>
-      <p>覆盖：{status(stats.status)} · {text(stats.observedQuantity)} / {text(stats.eligibleQuantity)} 件</p><p>币种：{text(meta.priceCurrency ?? 'CNY')} · 汇率快照：{text(fx.snapshotId ?? fx.snapshot_id)}</p><p>成本基准：{text(cost.basisFingerprint)} · 计算时间：{text(meta.calculatedAt ?? meta.calculated_at)}</p>{stats.estimated === true && <p>≈ 表示服务端估算成本，非人工登记成本。</p>}
+      <p>覆盖：{status(stats.status)} · {displayValue(stats.observedQuantity)} / {displayValue(stats.eligibleQuantity)} 件</p><p>币种：{text(meta.priceCurrency ?? 'CNY')} · 汇率快照：{text(fx.snapshotId ?? fx.snapshot_id)}</p><p>成本基准：{text(cost.basisFingerprint)} · 计算时间：{text(meta.calculatedAt ?? meta.calculated_at)}</p>{stats.estimated === true && <p>≈ 表示服务端估算成本，非人工登记成本。</p>}
     </Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
   </section>;
 }

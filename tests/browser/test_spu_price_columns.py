@@ -134,11 +134,13 @@ def test_price_content_is_only_shown_on_standard_roi_profile(frontend_browser_re
             assert page.locator(".tabulator-row").count() >= 1
             continue
         assert "采购价" in page.locator("#price-summary-purchase").inner_text()
-        assert "37.0000" in page.locator("#price-summary-purchase").inner_text()
-        assert "≈40.0000" in page.locator("#price-summary-purchase").inner_text()
+        assert page.locator("#price-purchase-mean").inner_text() == "≈37.00"
+        assert page.locator("#price-purchase-median").inner_text() == "≈40.00"
         expect(page.get_by_label("成本", exact=True).locator("#price-summary-purchase")).to_be_visible()
         expect(page.get_by_label("销售", exact=True).locator("#price-summary")).to_be_visible()
-        assert "0.0000" in page.locator(".tabulator-row").first.inner_text()
+        assert page.locator(
+            '.tabulator-row .tabulator-cell[tabulator-field="priceStats.paid.mean"]'
+        ).first.inner_text() == "0.00"
         assert page.locator('.tabulator-header [tabulator-field="priceStats.purchase.mean"]').count() == 1
         assert page.locator('.tabulator-header [tabulator-field="priceStats.originalSale.median"]').count() == 1
         assert page.locator('.tabulator-header [tabulator-field="priceStats.paid.mean"]').count() == 1
@@ -259,7 +261,7 @@ def test_price_error_can_retry_to_supported_payload(frontend_browser_renderer, m
     assert page.locator("#retry-link").is_visible()
     page.locator("#retry-link").click()
     page.locator("#price-summary").wait_for(state="visible")
-    assert page.locator("#price-purchase-mean").inner_text() == "≈37.0000"
+    assert page.locator("#price-purchase-mean").inner_text() == "≈37.00"
     assert "加载中…" not in page.locator("#price-summary-status").inner_text()
     assert attempts >= 2
 
@@ -303,7 +305,7 @@ def test_rapid_date_requests_keep_latest_price_payload(frontend_browser_renderer
         }"""
     )
     page.wait_for_timeout(550)
-    assert page.locator("#price-purchase-mean").inner_text() == "≈11.0000"
+    assert page.locator("#price-purchase-mean").inner_text() == "≈11.00"
 
 
 def test_rapid_shop_requests_keep_latest_price_payload(frontend_browser_renderer, monkeypatch):
@@ -341,7 +343,7 @@ def test_rapid_shop_requests_keep_latest_price_payload(frontend_browser_renderer
     buttons.nth(1).evaluate("button => button.click()")
     page.locator("#price-summary").wait_for(state="visible")
     page.wait_for_timeout(550)
-    assert page.locator("#price-purchase-mean").inner_text() == "≈8.0000"
+    assert page.locator("#price-purchase-mean").inner_text() == "≈8.00"
 
 
 def test_legacy_payload_hides_price_capability_without_fake_zeroes(frontend_browser_renderer):
@@ -459,7 +461,7 @@ def test_supported_price_payload_shows_loading_then_values_on_next_load(
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open("/v2/pages/spu-roi?shop_pk=7")
     page.locator("#price-summary").wait_for(state="visible")
-    assert page.locator("#price-purchase-mean").inner_text() == "≈37.0000"
+    assert page.locator("#price-purchase-mean").inner_text() == "≈37.00"
 
     page.add_init_script(_PRICE_FLASH_PROBE_JS)
     page.reload(wait_until="domcontentloaded")
@@ -476,7 +478,7 @@ def test_supported_price_payload_shows_loading_then_values_on_next_load(
         }"""
     )
     page.wait_for_function(
-        "() => document.getElementById('price-purchase-mean').textContent === '≈11.0000'"
+        "() => document.getElementById('price-purchase-mean').textContent === '≈11.00'"
     )
 
     probe = page.evaluate("() => window.__priceFlashProbe")
@@ -486,9 +488,9 @@ def test_supported_price_payload_shows_loading_then_values_on_next_load(
     assert any(not snap["hidden"] and snap["status"] == "加载中…" for snap in probe["snapshots"])
     timeline = probe["snapshots"]
     loading_at = max(i for i, s in enumerate(timeline) if s["status"] == "加载中…")
-    value_at = max(i for i, s in enumerate(timeline) if s["purchaseMean"] == "≈11.0000")
+    value_at = max(i for i, s in enumerate(timeline) if s["purchaseMean"] == "≈11.00")
     assert loading_at < value_at, timeline
-    assert page.locator("#price-purchase-mean").inner_text() == "≈11.0000"
+    assert page.locator("#price-purchase-mean").inner_text() == "≈11.00"
 
 
 # ── 已知 capability=false 后的一次 5xx 不得让价格 box 冒出来 ───────────────────
