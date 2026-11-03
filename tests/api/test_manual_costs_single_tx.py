@@ -34,6 +34,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -70,6 +71,7 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
             ),
             {"acct": acct_id, "ext": external_id},
         )
+        authorize_test_shop(sess, acct_id, "TEST_acct_mc_tx")
         sess.commit()
         cp_id = sess.execute(
             # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")

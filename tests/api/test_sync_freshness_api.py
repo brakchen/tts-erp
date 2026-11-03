@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.api.v2.sync_status import _freshness_severity
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.integration import SyncCursor, SyncJob
@@ -35,6 +36,8 @@ def freshness_shop(db_engine) -> Iterator[int]:
         _wipe(sess)
         shop = ChannelAccount(platform="tiktok", shop_id=SHOP_ID, account_name="TEST_freshness")
         sess.add(shop)
+        sess.flush()
+        authorize_test_shop(sess, shop.id, SHOP_ID)
         sess.commit()
         shop_pk = shop.id
     yield shop_pk
@@ -228,4 +231,4 @@ def test_freshness_falls_back_to_cursor_and_flags_failed_run(
 
 
 def _parse(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return datetime.fromisoformat(value)

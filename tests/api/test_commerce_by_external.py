@@ -43,7 +43,9 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import insert, text
+from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.db.base import Base
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -72,10 +74,14 @@ def seed_channel_account(db_engine):
                 status="active",
             )
         )
-        return conn.execute(
+        shop_pk = conn.execute(
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": EXT_ACCT},
         ).scalar_one()
+        with Session(bind=conn, join_transaction_mode="create_savepoint") as session:
+            authorize_test_shop(session, shop_pk, EXT_ACCT)
+            session.commit()
+        return shop_pk
 
 
 def _url(ext: str) -> str:
@@ -150,15 +156,18 @@ def test_by_external_rejects_tiktok_account_without_region(api_client, readonly_
     accounts_tbl = Base.metadata.tables["commerce.shops"]
     missing_region = "TEST_byext_missing_region"
     with db_engine.begin() as conn:
-        conn.execute(
+        shop_pk = conn.execute(
             insert(accounts_tbl).values(
                 platform="tiktok",
                 shop_id=missing_region,
                 account_name="TEST missing region",
                 region=None,
                 status="active",
-            )
-        )
+            ).returning(accounts_tbl.c.id)
+        ).scalar_one()
+        with Session(bind=conn, join_transaction_mode="create_savepoint") as session:
+            authorize_test_shop(session, shop_pk, missing_region)
+            session.commit()
 
     r = api_client.get(_url(missing_region), headers=_auth(readonly_key))
 

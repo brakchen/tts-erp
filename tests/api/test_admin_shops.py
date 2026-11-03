@@ -4,7 +4,7 @@ Pins the contract for ``POST /v2/admin/shops/register`` and
 Shop registration and metadata (legacy candidate endpoint retired):
 
   - admin/readwrite registers a plugin-only shop into ``commerce.shops``
-    with ``credential_id = NULL`` and ``status = 'active'`` — the row
+    with ``credential_id = NULL`` and unknown upstream ``status`` — the row
     exists purely for query association (spu-roi shop filter), NOT for
     sync scheduling
   - registration is idempotent: re-registering returns the existing row
@@ -90,7 +90,8 @@ def test_register_creates_plugin_only_shop(api_client, admin_key, db_engine):
     assert shop["account_name"] == "Bridge nook 2"
     assert shop["region"] == "VN"
     assert shop["opened_date"] == "2026-06-01"
-    assert shop["status"] == "active"  # 注册即完整店铺，无「待授权」中间态
+    assert shop["status"] is None  # 手工补录不伪造上游经营状态
+    assert shop["auth_state"] == "unauthorized"
     assert shop["credential_id"] is None
 
     from sqlalchemy.orm import Session
@@ -107,7 +108,7 @@ def test_register_creates_plugin_only_shop(api_client, admin_key, db_engine):
             .scalar_one()
         )
     assert row.credential_id is None
-    assert row.status == "active"
+    assert row.status is None
     assert str(row.opened_date) == "2026-06-01"
 
 
@@ -274,7 +275,7 @@ def _patch(api_client, key, shop_pk, **fields):
 
 
 def test_update_shop_metadata_full(api_client, admin_key, db_engine):
-    """PATCH 覆盖全部四个可编辑元信息字段（2026-09-28 扩展 name/region）。"""
+    """PATCH 维护开店日期和本店 App，保留首次采集的名称与区域。"""
     r = _register(api_client, admin_key, account_name="Old Name", region="VN")
     assert r.status_code == 200
     pk = r.json()["shop"]["id"]
@@ -283,8 +284,6 @@ def test_update_shop_metadata_full(api_client, admin_key, db_engine):
         api_client,
         admin_key,
         pk,
-        account_name="New Name",
-        region="TH",
         opened_date="2026-09-01",
         service_id=SERVICE_A,
         app_key="TEST_ADMIN_APP_KEY_123",
@@ -294,8 +293,8 @@ def test_update_shop_metadata_full(api_client, admin_key, db_engine):
     assert "TEST_ADMIN_APP_SECRET_123" not in r.text
     shop = r.json()["shop"]
     assert shop["id"] == pk
-    assert shop["account_name"] == "New Name"
-    assert shop["region"] == "TH"
+    assert shop["account_name"] == "Old Name"
+    assert shop["region"] == "VN"
     assert shop["opened_date"] == "2026-09-01"
     assert shop["service_id"] == SERVICE_A
     assert shop["app_credentials_configured"] is True
@@ -304,16 +303,16 @@ def test_update_shop_metadata_full(api_client, admin_key, db_engine):
             text(
                 "SELECT app_key, app_secret_ciphertext "
                 "FROM integration.tiktok_app_credentials "
-                "WHERE service_id = :service_id"
+                "WHERE shop_pk = :shop_pk AND service_id = :service_id"
             ),
-            {"service_id": SERVICE_A},
+            {"shop_pk": pk, "service_id": SERVICE_A},
         ).one()
     assert persisted.app_key == "TEST_ADMIN_APP_KEY_123"
     assert persisted.app_secret_ciphertext != b"TEST_ADMIN_APP_SECRET_123"
 
 
 def test_update_shop_partial_keeps_existing(api_client, admin_key):
-    """未传字段（null/缺省）保持原值 —— COALESCE 语义。"""
+    """缺省字段保持原值；显式 null 可以清空人工开店日期。"""
     r = _register(
         api_client,
         admin_key,
@@ -324,12 +323,15 @@ def test_update_shop_partial_keeps_existing(api_client, admin_key):
     assert r.status_code == 200
     pk = r.json()["shop"]["id"]
 
-    r = _patch(api_client, admin_key, pk, region="ID")
+    r = _patch(api_client, admin_key, pk)
     assert r.status_code == 200, r.text
     shop = r.json()["shop"]
-    assert shop["region"] == "ID"
+    assert shop["region"] == "VN"
     assert shop["account_name"] == "Keep Me"  # 未被清掉
     assert shop["opened_date"] == "2026-06-01"  # 未被清掉
+    cleared = _patch(api_client, admin_key, pk, opened_date=None)
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["shop"]["opened_date"] is None
 
 
 def test_update_shop_never_touches_credential_or_status(api_client, admin_key):
@@ -337,11 +339,26 @@ def test_update_shop_never_touches_credential_or_status(api_client, admin_key):
     r = _register(api_client, admin_key)
     pk = r.json()["shop"]["id"]
 
-    r = _patch(api_client, admin_key, pk, account_name="Renamed")
+    r = _patch(api_client, admin_key, pk, opened_date="2026-10-01")
     assert r.status_code == 200, r.text
     shop = r.json()["shop"]
     assert shop["credential_id"] is None
-    assert shop["status"] == "active"
+    assert shop["status"] is None
+
+
+@pytest.mark.parametrize("field,value", [("account_name", "TEST_renamed"), ("region", "TH")])
+def test_update_shop_rejects_immutable_metadata(api_client, admin_key, field, value):
+    created = _register(api_client, admin_key, account_name="TEST_original", region="VN")
+    pk = created.json()["shop"]["id"]
+    result = _patch(api_client, admin_key, pk, **{field: value})
+    assert result.status_code == 422, result.text
+    read = api_client.get(
+        f"/v2/commerce/channel-accounts/{pk}?view=management",
+        headers={"Authorization": f"Bearer {admin_key}"},
+    )
+    assert read.status_code == 200, read.text
+    assert read.json()["account_name"] == "TEST_original"
+    assert read.json()["region"] == "VN"
 
 
 def test_update_app_credentials_allow_readwrite(api_client, admin_key, readwrite_key):
@@ -365,7 +382,7 @@ def test_update_service_id_requires_resolvable_app_pair(api_client, admin_key):
     pk = r.json()["shop"]["id"]
     r = _patch(api_client, admin_key, pk, service_id=SERVICE_B)
     assert r.status_code == 409, r.text
-    assert "not configured" in r.text
+    assert "configure this shop" in r.json()["detail"]
 
 
 def test_update_app_key_secret_must_be_submitted_together(api_client, admin_key):
@@ -399,7 +416,7 @@ def test_update_invalid_app_secret_is_never_echoed(api_client, admin_key):
 
 
 def test_update_shop_not_found(api_client, admin_key):
-    r = _patch(api_client, admin_key, 999999999, account_name="Ghost")
+    r = _patch(api_client, admin_key, 999999999, opened_date="2026-10-01")
     assert r.status_code == 404, r.text
 
 
@@ -407,11 +424,11 @@ def test_update_shop_role_matrix(api_client, admin_key, readwrite_key, readonly_
     r = _register(api_client, admin_key, shop_id=SHOP_B)
     pk = r.json()["shop"]["id"]
 
-    r = _patch(api_client, readwrite_key, pk, account_name="RW Edit")
+    r = _patch(api_client, readwrite_key, pk, opened_date="2026-10-01")
     assert r.status_code == 200, r.text
-    assert r.json()["shop"]["account_name"] == "RW Edit"
+    assert r.json()["shop"]["opened_date"] == "2026-10-01"
 
-    r = _patch(api_client, readonly_key, pk, account_name="RO Edit")
+    r = _patch(api_client, readonly_key, pk, opened_date="2026-10-02")
     assert r.status_code == 403, (
         f"readonly should be 403, got {r.status_code}: {r.text}"
     )
@@ -420,7 +437,7 @@ def test_update_shop_role_matrix(api_client, admin_key, readwrite_key, readonly_
 def test_update_shop_anonymous_is_401(api_client, admin_key):
     r = _register(api_client, admin_key)
     pk = r.json()["shop"]["id"]
-    r = api_client.patch(f"/v2/admin/shops/{pk}", json={"account_name": "X"})
+    r = api_client.patch(f"/v2/admin/shops/{pk}", json={"opened_date": "2026-10-01"})
     assert r.status_code == 401
 
 
@@ -439,7 +456,7 @@ def test_channel_accounts_exposes_service_id(api_client, admin_key, readonly_key
     assert r.status_code == 200
 
     r = api_client.get(
-        "/v2/commerce/channel-accounts",
+        "/v2/commerce/channel-accounts?view=management",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -454,7 +471,7 @@ def test_channel_accounts_exposes_service_id(api_client, admin_key, readonly_key
 def test_channel_accounts_exposes_opened_date(api_client, admin_key, readonly_key):
     _register(api_client, admin_key, opened_date="2026-06-01")
     r = api_client.get(
-        "/v2/commerce/channel-accounts",
+        "/v2/commerce/channel-accounts?view=management",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -479,7 +496,7 @@ def test_cookie_shop_write_requires_csrf_even_with_bearer(
 ) -> None:
     pk = None
     if method == "PATCH":
-        created = _register(api_client, admin_key, account_name="TEST_original")
+        created = _register(api_client, admin_key, account_name="TEST_original", opened_date="2026-06-01")
         pk = created.json()["shop"]["id"]
     _login_p2_shop_operator(api_client, ua_user_factory)
     headers = {"Authorization": f"Bearer {admin_key}"}
@@ -492,15 +509,16 @@ def test_cookie_shop_write_requires_csrf_even_with_bearer(
         )
     else:
         response = api_client.patch(
-            f"/v2/admin/shops/{pk}", headers=headers, json={"account_name": "TEST_changed"},
+            f"/v2/admin/shops/{pk}", headers=headers, json={"opened_date": "2026-10-01"},
         )
     assert response.status_code == 403
     assert "X-Requested-With" in response.json()["detail"]
     if pk is not None:
-        row = api_client.get(f"/v2/commerce/channel-accounts/{pk}").json()
+        row = api_client.get(f"/v2/commerce/channel-accounts/{pk}?view=management").json()
         assert row["account_name"] == "TEST_original"
+        assert row["opened_date"] == "2026-06-01"
     else:
-        rows = api_client.get("/v2/commerce/channel-accounts?platform=tiktok&limit=500").json()
+        rows = api_client.get("/v2/commerce/channel-accounts?view=management&platform=tiktok&limit=500").json()
         assert all(row["shop_id"] != SHOP_A for row in rows)
 
 
@@ -519,8 +537,10 @@ def test_cookie_readwrite_keeps_app_pair_and_metadata_writes(
     assert row["app_credentials_configured"] is True
     assert "TEST_ADMIN_APP_SECRET_123" not in result.text
     updated = api_client.patch(
-        f"/v2/admin/shops/{row['id']}", headers=headers, json={"account_name": "TEST_updated"},
+        f"/v2/admin/shops/{row['id']}", headers=headers, json={"opened_date": "2026-10-01"},
     )
     assert updated.status_code == 200
-    read = api_client.get(f"/v2/commerce/channel-accounts/{row['id']}")
-    assert read.status_code == 200 and read.json()["account_name"] == "TEST_updated"
+    read = api_client.get(f"/v2/commerce/channel-accounts/{row['id']}?view=management")
+    assert read.status_code == 200
+    assert read.json()["account_name"] == "TEST_registered"
+    assert read.json()["opened_date"] == "2026-10-01"
