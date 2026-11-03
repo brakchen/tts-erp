@@ -24,6 +24,13 @@
 
 - 本机虚拟机测试服务器：`schan@192.168.47.129`（Ubuntu 26.04 LTS）；SSH 密钥位置、登录验证和适用边界见 `docs/ops/tts-erp.md` 的「本机虚拟机测试服务器（项目记忆）」。
 
+### 运行环境拓扑（2026-11-03 起）
+
+- **生产应用服务：`207.57.126.199`（SSH alias `tts-erp-prod`，Debian 13，HK）**。代码在 `/opt/tts-erp`，系统级 `tts-erp.service`（uvicorn `127.0.0.1:9878`，Python 3.13 venv）；日志 `/opt/tts-erp/logs/{stdout,stderr}.log`；重启 `ssh tts-erp-prod 'systemctl restart tts-erp'`。
+- **生产 nginx 也在 207**：`chen.daqiangplatform.com` 的 `/tts/*`（含 `/tts/static/`）回源本机 `127.0.0.1:9878`，经 `snippets/proxy-to-local-tts.conf`（`proxy_pass` 无尾斜杠契约不变）；`/minio/`、`/pi-web`、`/css|/js|/assets` 等其余 location 仍走 frp `:6008` 回 HP desk 网关。
+- **数据库与 MinIO 仍在 HP desk**（`schan-HP-ProDesk-400-G2-MINI`，192.168.1.2）：docker `postgres:18`（`tts_erp` 库）与 docker `minio`。207 应用经 frp 隧道回连：PG `127.0.0.1:6009`、MinIO `127.0.0.1:6005`，隧道定义在 HP desk `~/.config/frp/frpc-artemis.toml`（用户级 `frpc-artemis.service`）。
+- **HP desk 同时是测试机**：隔离测试仍只走 `bash scripts/test_isolated.sh ...`（§3 不变）。本机原有 systemd --user 服务（`tts-erp.service` :9877、`tts-erp-sync`、publish、pgbackup）暂未下线；Chrome 插件入口 `http://207.57.126.199:6007` 经 frp 仍指向 HP desk :9877，后续切换需另行登记 lane。
+
 ## 3. Non-negotiable safety boundaries
 
 - Never run tests against `tts_erp`, `tts_erp_prod`, or any prod-shaped database name.
