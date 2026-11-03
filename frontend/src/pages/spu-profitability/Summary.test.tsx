@@ -20,6 +20,13 @@ it('rounds displayed decimals to two places without losing large integer digits'
   expect(displayPercent(null)).toBe('—'); expect(displayPercent('NaN')).toBe('—');
 });
 
+it('renders null, empty and absent current or projected values as dashes', () => {
+  render(<Summary data={{ items: [], total: 0, totals: { net_profit: null, projected_net_revenue: '', projected_future_full_loss_qty: undefined }, meta: { projection: null } }} />);
+  for (const id of ['sum-gmv', 'sum-sales', 'sum-purchase-cost', 'sum-net-profit', 'sum-net-revenue', 'sum-refund-rate', 'sum-projected-net-revenue', 'sum-projected-future-loss-qty']) {
+    expect(document.getElementById(id)).toHaveTextContent(/^—$/);
+  }
+});
+
 it('groups the original server values into sales, costs and profit without deriving missing totals', () => {
   render(<Summary data={{ items: [], total: 0, totals: { gmv: '1234.5678', effective_sales: '661.9793', spend: '270.2993', net_profit: '14.6395', projected_net_revenue: '412.5134', projected_net_profit: '-33.7859', roi_real: '1.71', roi_breakeven: '1.62', projected_roi_real: '1.46', projected_roi_breakeven: '1.67', ad_system_breakeven_roi: '2.86', ad_system_breakeven_roi_status: 'estimated_known_costs' }, meta: {} }} />);
   const sales = screen.getByLabelText('销售'); const costs = screen.getByLabelText('成本'); const profit = screen.getByLabelText('利润');
