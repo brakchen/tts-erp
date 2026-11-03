@@ -90,10 +90,26 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
     if profile == 'spu-roi':
         bounds = page.locator('#btn-spu-apply').bounding_box()
         assert bounds and bounds['y'] < grid['y']
+    trigger = page.get_by_role('button', name='查看商品盈利详情 TEST_SPU_000', exact=True)
+    full_title = original('/v2/analytics/spu-roi')['items'][0]['title']
+    expect(trigger).to_have_text(full_title)
+    expect(trigger).to_have_attribute('title', full_title)
+    expect(trigger).to_have_attribute('aria-description', full_title)
+    product = trigger.evaluate('''title => {
+        const id = title.previousElementSibling;
+        const bounds = title.getBoundingClientRect();
+        const style = getComputedStyle(title);
+        return {id: id?.textContent, idBeforeTitle: id?.getBoundingClientRect().bottom <= bounds.top + 1,
+                clipped: title.scrollWidth > title.clientWidth, ellipsis: style.textOverflow,
+                height: bounds.height, lineHeight: parseFloat(style.lineHeight)};
+    }''')
+    assert product['id'] == 'TEST_SPU_000' and product['idBeforeTitle'], product
+    assert product['clipped'] and product['ellipsis'] == 'ellipsis', product
+    assert product['height'] <= product['lineHeight'] + 1, product
     screenshot_dir = Path(__file__).resolve().parents[2] / 'frontend/.cache/screenshots'
     screenshot_dir.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(screenshot_dir / f'TEST_spu_react_{profile}_{width}.png'), full_page=True)
-    trigger = page.get_by_role('button', name='查看商品盈利详情 TEST_SPU_000', exact=True)
+    page.locator('#rows').screenshot(path=str(screenshot_dir / f'TEST_spu_product_{profile}_{width}.png'))
     trigger.click()
     close = page.get_by_role('button', name='收起商品详情', exact=True)
     close.scroll_into_view_if_needed()
