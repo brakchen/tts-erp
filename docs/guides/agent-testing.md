@@ -64,6 +64,13 @@ Rules:
 
 Creating the worktree `.venv` link is required for the isolated runner, pi-lens, and other tooling discovery.
 
+Frontend selections also need Node within `frontend/package.json`'s engine range
+and a worktree-local `npm ci --prefix frontend` installation. Do not share writable
+`node_modules` or Vite caches between lanes. Component tests use two jsdom workers
+to fit the validation VM's memory budget. The component adapter and local Vite
+fixtures own their npm process groups and reclaim descendants on success, failure,
+or timeout; increasing test deadlines is not a substitute for process cleanup.
+
 ## 4. Template and shared database usage
 
 `bash scripts/test_isolated.sh ...` is parallel-safe for ordinary agent work: it serializes template refresh/clone through `/tmp/tts-erp-test-template.lock`, clones `tts_erp_test_template` to a unique `tts_erp_test_*` database, points the test process at that clone, and drops the clone on exit. Concurrent isolated runs do not delete each other's `TEST_` rows.

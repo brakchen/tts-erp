@@ -13,8 +13,23 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.owned_process import owned_process
+
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def assert_vite_stopped(port: int) -> None:
+    """Only the ephemeral loopback port reserved by this test may be probed."""
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                pass
+        except ConnectionRefusedError:
+            return
+        time.sleep(0.05)
+    pytest.fail("owned local Vite port still accepts connections after cleanup")
 
 
 def test_local_backend_page_supports_vite_hmr(frontend_browser_renderer, frontend_preview, tmp_path):
@@ -26,14 +41,16 @@ def test_local_backend_page_supports_vite_hmr(frontend_browser_renderer, fronten
     probe_dir.mkdir(exist_ok=True)
     probe = probe_dir / f"TEST_{uuid.uuid4().hex}.ts"
     first = 'export const value = "TEST_first"; if (import.meta.hot) import.meta.hot.accept(module => { window.__TEST_frontendHmr = module.value; });'
-    probe.write_text(first)
-    with (tmp_path / "TEST_vite.log").open("w") as log:
-        process = subprocess.Popen(
-            ["npm", "run", "dev", "--", "--port", str(port)],
-            cwd=ROOT / "frontend", stdout=log, stderr=subprocess.STDOUT,
-            env={**os.environ, "NODE_ENV": "development"},
-        )
-        try:
+    try:
+        probe.write_text(first)
+        with (
+            (tmp_path / "TEST_vite.log").open("w") as log,
+            owned_process(
+                ["npm", "run", "dev", "--", "--port", str(port)],
+                cwd=ROOT / "frontend", stdout=log, stderr=subprocess.STDOUT,
+                env={**os.environ, "NODE_ENV": "development"},
+            ) as process,
+        ):
             for _ in range(100):
                 assert process.poll() is None, "local Vite process exited"
                 try:
@@ -54,15 +71,10 @@ def test_local_backend_page_supports_vite_hmr(frontend_browser_renderer, fronten
                 page.wait_for_function("window.__TEST_frontendHmr === 'TEST_first'")
                 probe.write_text(first.replace("TEST_first", "TEST_second"))
                 page.wait_for_function("window.__TEST_frontendHmr === 'TEST_second'", timeout=15_000)
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-            probe.unlink(missing_ok=True)
-            try:
-                probe_dir.rmdir()
-            except OSError:
-                pass
+    finally:
+        probe.unlink(missing_ok=True)
+        try:
+            probe_dir.rmdir()
+        except OSError:
+            pass
+        assert_vite_stopped(port)

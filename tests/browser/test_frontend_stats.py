@@ -14,6 +14,8 @@ from fastapi import Request
 from render_support import overflow_report
 
 from tests.browser import conftest as browser_conftest
+from tests.browser.test_frontend_dev import assert_vite_stopped
+from tests.support.owned_process import owned_process
 from tts_erp_v2.api.v2 import frontend_pages
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
@@ -113,10 +115,14 @@ def test_dev_upstream_wrapper_strictmode_update_destroy(frontend_browser_rendere
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
     origin = f"http://127.0.0.1:{port}"
-    with (tmp_path / "TEST_stats_vite.log").open("w") as log:
-        process = subprocess.Popen(["npm", "run", "dev", "--", "--port", str(port)], cwd=ROOT / "frontend",
-                                   env={**os.environ, "NODE_ENV": "development"}, stdout=log, stderr=subprocess.STDOUT)
-        try:
+    try:
+        with (
+            (tmp_path / "TEST_stats_vite.log").open("w") as log,
+            owned_process(
+                ["npm", "run", "dev", "--", "--port", str(port)], cwd=ROOT / "frontend",
+                env={**os.environ, "NODE_ENV": "development"}, stdout=log, stderr=subprocess.STDOUT,
+            ) as process,
+        ):
             for _ in range(100):
                 assert process.poll() is None
                 try:
@@ -156,10 +162,5 @@ def test_dev_upstream_wrapper_strictmode_update_destroy(frontend_browser_rendere
                 }""")
                 assert result["strictCreates"] >= 2 and result["strictDestroys"] >= 1, result
                 assert result["updated"] and result["allDestroyed"], result
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+    finally:
+        assert_vite_stopped(port)

@@ -85,4 +85,50 @@
 - 交付前必须在整合锁内验证实际拟合并提交；其结果和 master push 回执由任务
   最终交付记录提供。本文件保存候选修复及失败分类证据，不替代该整合验证。
 
+## 测试子进程生命周期的后续修复
+
+`11b52586` 已提交并推送；拟合并 `9ec49652` 的完整 fast 再次仅出现组件
+adapter 的 180 秒超时（3371 项、3355 passed、15 skipped、1 failed，
+1637.264 秒）。这推翻了用单独复验转绿就结束该问题的判断；master 尚未推送，
+整合锁已释放，继续修复。原始日志 `/tmp/tts-erp-baseline-integration-fast.log`。
+
+已确认两个 npm dev harness 只停止 npm 父进程，adapter 超时也只杀 npm；
+读取 PID/PPID、启动标识、cwd 和入口路径后发现 **7 个**来自本任务两棵测试树的
+孤儿 Vite。清理仅限这七个已核验 PID，发信号前再次校验启动身份，未按进程名
+批量停止其它任务。是否足以解释所有超时须由后续验证确认，不能仅凭资源相关性
+宣称单一根因。
+
+三个 npm 调用改为共享的 `tests.support.owned_process` 启动/收尾 owner：
+自己创建独立 Linux session，不接受外部 PID/PGID；退出时对本组 TERM，
+有界宽限后仍存在则 KILL，回收直属进程并关闭自产管道。leader 已退出、后代
+忽略 TERM 或关闭 stdio 都不能绕过清理。原 180 秒上限、fork 隔离、断言和
+选择范围保持。实现复用标准库
+[Popen](https://docs.python.org/3.14/library/subprocess.html#subprocess.Popen) 与
+[killpg](https://docs.python.org/3.14/library/os.html#os.killpg)，无新依赖。
+
+旧 API-child helper 继续服务既有 uvicorn/nonce 生命周期，本次没有把 npm
+接到其依赖 leader 状态的清理路径，也没有扩大数据库/HTTP 绑定改动域。
+新增真实父孙进程回归及独立 session sentinel，并在两个 Vite 测试退出后检查
+本次临时端口拒绝连接；HMR、StrictMode 和图表像素断言保留。
+
+生命周期专项的四项真实进程回归及两个 Vite 测试均通过；同轮组件 adapter
+仍失败，不能把资源清理等同于已解决全部组件问题。后续确认并拆除了本任务
+测试树指向其它任务 `node_modules` 的链接，按 lockfile 独立安装，并显式使用
+满足 engine 的 Node 22.22.2。未改动被链接的其它任务依赖目录。
+
+Vitest 5.0.5 的默认并发在该 8 CPU、7.2 GiB 虚拟机上启动七个 jsdom fork。
+采用官方 [maxWorkers](https://vitest.dev/config/maxworkers) 将上限设为 2，
+保留文件隔离、原有 180 秒 adapter 上限及单项测试时限。完整组件窄测在
+124.22 秒内结束：705 项中 704 通过、1 失败；本任务 frontend 进程 RSS
+采样峰值约 1.38 GiB，宿主可用内存最低约 2.88 GiB。日志
+`/tmp/tts-erp-baseline-bounded-components.log`，完整内部输出保存在 pytest 的
+`TEST_components.log`，避免尾部截断遮蔽首个失败。
+
+唯一剩余失败为广告日报 HTTP 500 用例：固定真实等待 1100 毫秒后立即读取
+React 状态，观察到按钮仍 disabled。改用文件中已有的 fake timer + `act`
+模式，明确检查 999 毫秒时仍禁用、1001 毫秒时启用，两个阶段均无自动读取，
+只有显式刷新才增加 options/list 两次请求。四个 HTTP 状态继续保留安全错误
+显示及不暴露原响应断言。该文件通过隔离 adapter 复验退出 0，日志
+`/tmp/tts-erp-baseline-ad-clock.log`。没有增加重试、放宽断言或延长测试时限。
+
 未修改生产 schema、迁移、安全 guard、middleware 顺序或运行中服务。
