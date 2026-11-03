@@ -114,5 +114,42 @@ def test_only_explicit_test_objects_and_bounded_reads_are_allowed(monkeypatch):
     gate.check_request("POST", root + "/v2/admin/shops/register", {"shop_id": gate.shop_id, "account_name": "TEST_name", "platform": "tiktok"})
     gate.shop_pks.add(123)  # Real consumer adds only after independent TEST-row DB confirmation.
     gate.enum_pks.add(456)
-    gate.check_request("PATCH", root + "/v2/admin/shops/123", {"account_name": "TEST_edited"})
+    gate.check_request("PATCH", root + "/v2/admin/shops/123", {"opened_date": "2026-01-02"})
     gate.check_request("DELETE", root + "/v2/config/enum-map/456", None)
+
+
+@pytest.mark.parametrize("prefix", ["", "/tts"])
+def test_management_reads_and_authorization_are_fixed_to_owned_shop_pks(monkeypatch, prefix):
+    gate = fence(monkeypatch, prefix)
+    root = "http://127.0.0.1:12345" + prefix
+    listing = "/v2/commerce/channel-accounts?platform=tiktok&view=management&limit=50&offset=0"
+    assert gate.check_request("GET", root + listing, None) == "/v2/commerce/channel-accounts"
+    gate.shop_pks.add(123)
+    for path in ("/v2/commerce/channel-accounts/123?view=management", "/v2/oauth/tiktok/authorize?format=json&shop_pk=123"):
+        gate.check_request("GET", root + path, None)
+    for path in (
+        listing + "&q=REAL_shop",
+        listing.replace("limit=50", "limit=500"),
+        listing.replace("offset=0", "offset=50"),
+        "/v2/commerce/channel-accounts/124?view=management",
+        "/v2/commerce/channel-accounts/123?view=management&extra=true",
+        "/v2/oauth/tiktok/authorize?format=json&shop_pk=124",
+        "/v2/oauth/tiktok/authorize?format=json&shop_pk=123&service_id=TEST_service",
+        "/v2/oauth/tiktok/authorize?format=json&service_id=TEST_service",
+    ):
+        with pytest.raises(ValueError, match="^P2 browser request refused$"):
+            gate.check_request("GET", root + path, None)
+    for body in ({"account_name": "TEST_edited"}, {"region": "VN"}, {"opened_date": "2026-01-02", "unexpected": True}):
+        with pytest.raises(ValueError, match="^P2 browser request refused$"):
+            gate.check_request("PATCH", root + "/v2/admin/shops/123", body)
+
+
+def test_app_validation_fault_stays_on_one_owned_patch_and_does_not_change_the_draft(monkeypatch):
+    gate = fence(monkeypatch)
+    gate.shop_pks.add(123)
+    body = {"service_id": gate.service_id, "app_key": "TEST_key", "app_secret": "TEST_secret"}
+    gate.invalid_app_key_next = True
+    result = gate.request_body("PATCH", "/v2/admin/shops/123", body)
+    assert len(result["app_key"]) == 129 and body["app_key"] == "TEST_key"
+    assert not gate.invalid_app_key_next and gate.mutated == 1
+    assert gate.request_body("PATCH", "/v2/admin/shops/123", body) is body

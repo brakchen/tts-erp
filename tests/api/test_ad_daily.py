@@ -9,9 +9,12 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tests.api.test_frontend_pages import _bootstrap
 from tts_erp_v2.api.v2.ad_daily import _PAGE_HTML
+from tts_erp_v2.db.models import ChannelAccount
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -20,6 +23,14 @@ _ENDPOINT = "/oec_ads/shopping/v1/oec/stat/post_product_list"
 
 
 def _seed_rows(db_engine) -> None:
+    with Session(db_engine) as session:
+        shop = ChannelAccount(
+            platform="tiktok", shop_id=_SELLER, account_name="TEST ad daily shop"
+        )
+        session.add(shop)
+        session.flush()
+        authorize_test_shop(session, shop.id, _SELLER)
+        session.commit()
     rows = [
         {
             "advertiser_id": "TEST_ADV_A",
@@ -352,8 +363,8 @@ def test_ui_audit_mock_follows_current_ad_daily_contract():
     def code_only(path: str) -> str:
         """去掉 JS 注释再扫：注释里必须能写「已退役字段」的名字来解释历史。"""
         source = Path(path).read_text(encoding="utf-8")
-        source = re.sub(r"/\*.*?\*/", "", source, flags=re.S)
-        return re.sub(r"^\s*//.*$", "", source, flags=re.M)
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+        return re.sub(r"^\s*//.*$", "", source, flags=re.MULTILINE)
 
     shared = code_only("scripts/ui_audit_mocks.js")
     for key in (

@@ -36,7 +36,7 @@ def test_cookie_command_requires_header_before_any_database_access(monkeypatch, 
         if command == "register":
             admin.register_shop(request, admin.ShopRegisterBody(shop_id="8800000000000000099"))
         elif command == "patch":
-            admin.update_shop(request, 1, admin.ShopUpdateBody(account_name="TEST_updated"))
+            admin.update_shop(request, 1, admin.ShopUpdateBody(opened_date="2026-10-01"))
         elif command == "enum-put":
             config.upsert_enum_map(
                 config.EnumMapUpsert(enum_type="TEST_type", enum_value="TEST_value", label_zh="TEST_label"),

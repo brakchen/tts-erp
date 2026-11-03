@@ -4,3 +4,12 @@
 @import "../../tts_erp_v2/static/css/navigation.css";
 @import "./app/workspace.css";
 @import "./shared/tables.css";
+
+/* Tailwind utilities and preflight share the canonical project font stacks.
+ * https://tailwindcss.com/docs/font-family#customizing-your-theme
+ */
+@theme inline {
+  --font-sans: var(--sans);
+  --font-serif: var(--serif);
+  --font-mono: var(--mono);
+}

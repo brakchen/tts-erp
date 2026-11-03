@@ -191,10 +191,10 @@ def test_manual_native_write_preview_and_readback(
 
         row.get_by_role("button", name="编辑详情", exact=True).click()
         dialog = page.get_by_role("dialog")
-        expect(dialog.get_by_role("heading", name="编辑成本草稿", exact=True)).to_be_visible()
+        expect(dialog.get_by_role("heading", name="编辑商品成本", exact=True)).to_be_visible()
         dialog.get_by_label("单位成本", exact=True).fill(AMOUNT)
         dialog.get_by_label("备注", exact=True).fill(marker)
-        dialog.get_by_role("button", name="确认此行草稿", exact=True).click()
+        dialog.get_by_role("button", name="保存成本", exact=True).click()
 
         confirm = page.get_by_role("dialog")
         expect(confirm.get_by_role("heading", name="确认逐行写入", exact=True)).to_be_visible()

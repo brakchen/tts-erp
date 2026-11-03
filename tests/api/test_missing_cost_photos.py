@@ -21,6 +21,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
+
 
 @pytest.fixture()
 def seed_unmatched_active_product(db_engine):
@@ -55,6 +57,7 @@ def seed_unmatched_active_product(db_engine):
             ),
             {"acct": acct_id, "ext": ext_prod},
         )
+        authorize_test_shop(sess, acct_id, ext_acct)
         sess.commit()
     yield {"shop_pk": acct_id, "spu_id": ext_prod}
 
@@ -148,13 +151,16 @@ def test_response_shape_no_filter(api_client, readonly_key):
         assert "missing_photo" in row and isinstance(row["missing_photo"], bool)
 
 
-def test_shop_pk_filter_runs_without_error(api_client, readonly_key):
+def test_shop_pk_filter_runs_without_error(
+    api_client, readonly_key, seed_unmatched_active_product
+):
     """shop_pk=… is accepted; SQL executes successfully.
 
-    The query path must remain valid for arbitrary shop ids.
+    The query path must remain valid for an authorized shop.
     """
     r = api_client.get(
-        "/v2/reporting/missing-cost-products?shop_pk=1&limit=10",
+        "/v2/reporting/missing-cost-products"
+        f"?shop_pk={seed_unmatched_active_product['shop_pk']}&limit=10",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text
@@ -188,10 +194,13 @@ def test_total_missing_photo_consistent_with_items(api_client, readonly_key):
     assert body["total_missing_photo"] == actual
 
 
-def test_total_missing_photo_consistent_with_items_filtered(api_client, readonly_key):
+def test_total_missing_photo_consistent_with_items_filtered(
+    api_client, readonly_key, seed_unmatched_active_product
+):
     """Same consistency check under shop_pk= filter."""
     r = api_client.get(
-        "/v2/reporting/missing-cost-products?shop_pk=1&limit=200",
+        "/v2/reporting/missing-cost-products"
+        f"?shop_pk={seed_unmatched_active_product['shop_pk']}&limit=200",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 200, r.text

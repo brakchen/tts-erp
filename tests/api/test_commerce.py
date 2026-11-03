@@ -24,6 +24,10 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from tests._job_invocation import authorize_test_shop
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -63,6 +67,9 @@ def seed_commerce_rows(db_engine):
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
+        with Session(bind=sess, join_transaction_mode="create_savepoint") as authorization:
+            authorize_test_shop(authorization, acct_id, ext_acct)
+            authorization.commit()
 
         # pi-lens-ignore: python-sql-injection — literal SQL, only :acct/:ext bound
         sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
@@ -225,7 +232,10 @@ def test_list_shops_reports_backend_total(
     assert r.status_code == 200, r.text
     with db_engine.connect() as conn:
         expected = conn.execute(
-            text("SELECT COUNT(*) FROM commerce.shops WHERE platform = 'tiktok'")
+            text(
+                "SELECT COUNT(*) FROM commerce.shops WHERE platform = 'tiktok' AND "
+                + authorized_shop_clause()
+            )
         ).scalar_one()
     assert int(r.headers["X-Total-Count"]) == expected
     assert len(r.json()) == min(expected, 1)
@@ -253,20 +263,31 @@ def test_get_channel_account_200_with_row(api_client, readonly_key, seed_commerc
     assert body["shop_id"] == seed_commerce_rows["ext_acct"]
 
 
-def test_channel_account_order_stats_empty(
-    api_client, readonly_key, seed_commerce_rows
-):
-    """Lines 299-300: account with no orders → {0, '0'}.
-
-    The seeded account HAS orders, so use an unused account id instead.
-    """
+def test_channel_account_order_stats_unknown_shop_is_404(api_client, readonly_key):
+    """An unknown shop cannot expose business statistics."""
     r = api_client.get(
         "/v2/commerce/channel-accounts/999999998/order-stats",
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "Shop is not authorized"
+
+
+def test_channel_account_order_stats_empty(api_client, readonly_key, db_engine):
+    """An authorized shop with no orders retains the zero-statistics contract."""
+    product_id = _seed_spu(db_engine, "TEST_commerce_empty_stats")
+    with db_engine.connect() as conn:
+        shop_pk = conn.execute(
+            text("SELECT shop_pk FROM commerce.products_spu WHERE id = :id"),
+            {"id": product_id},
+        ).scalar_one()
+    r = api_client.get(
+        f"/v2/commerce/channel-accounts/{shop_pk}/order-stats",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["shop_pk"] == 999999998
+    assert body["shop_pk"] == shop_pk
     assert body["distinct_orders"] == 0
     # SUM of empty set → COALESCE → 0.0, serialized as Decimal str.
     assert body["total_payment_amount"] in ("0", "0.0000", "0.0")
@@ -604,6 +625,9 @@ def _seed_spu(db_engine, external_id: str) -> int:
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": external_id},
         ).scalar()
+        with Session(bind=sess, join_transaction_mode="create_savepoint") as authorization:
+            authorize_test_shop(authorization, acct_id, external_id)
+            authorization.commit()
         sess.execute(
             text(
                 "INSERT INTO commerce.products_spu "
@@ -646,6 +670,9 @@ def seed_spus_with_times(db_engine):
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
+        with Session(bind=sess, join_transaction_mode="create_savepoint") as authorization:
+            authorize_test_shop(authorization, acct_id, ext_acct)
+            authorization.commit()
         spu_ids = {}
         # spu_a: oldest created, mid updated, highest cost
         # spu_b: mid created, newest updated, lowest cost
@@ -825,6 +852,9 @@ def seed_spus_statuses(db_engine):
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
+        with Session(bind=sess, join_transaction_mode="create_savepoint") as authorization:
+            authorize_test_shop(authorization, acct_id, ext_acct)
+            authorization.commit()
         spu_ids = {}
         for ext, (title, status) in _STATUS_SPUS.items():
             sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
@@ -979,6 +1009,9 @@ def seed_spu_one_ordered(db_engine):
             text("SELECT id FROM commerce.shops WHERE shop_id = :ext"),
             {"ext": ext_acct},
         ).scalar()
+        with Session(bind=sess, join_transaction_mode="create_savepoint") as authorization:
+            authorize_test_shop(authorization, acct_id, ext_acct)
+            authorization.commit()
         for ext in (ext_sold, ext_never):
             sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict
                 text(

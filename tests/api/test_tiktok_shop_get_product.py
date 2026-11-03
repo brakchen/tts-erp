@@ -59,7 +59,8 @@ PRODUCT_ID = "1729592969712207008"
 class _ProxyStub:
     """Replaces ``products_api.get_product`` for one test."""
 
-    def __init__(self) -> None:
+    def __init__(self, shop_pk: int) -> None:
+        self.shop_pk = shop_pk
         self.calls: list[dict[str, Any]] = []
         self.return_value: dict[str, Any] = {"id": PRODUCT_ID, "title": "stub"}
         self.side_effect: BaseException | None = None
@@ -90,15 +91,50 @@ class _ProxyStub:
 
 
 @pytest.fixture()
-def proxy_stub(monkeypatch):
+def proxy_stub(monkeypatch, db_engine):
     """Replace ``products_api.get_product`` with a controllable stub."""
-    stub = _ProxyStub()
+    from sqlalchemy.orm import Session
+
+    from tests._job_invocation import authorize_test_shop
+    from tts_erp_v2.db.models.commerce import ChannelAccount
+
+    with Session(db_engine) as session:
+        shop = ChannelAccount(platform="tiktok", shop_id="TEST_GET_PRODUCT_API", account_name="TEST_product")
+        session.add(shop)
+        session.flush()
+        shop_pk = shop.id
+        authorize_test_shop(session, shop_pk, shop.shop_id)
+        session.commit()
+    stub = _ProxyStub(shop_pk)
     monkeypatch.setattr(products_api, "get_product", stub)
     return stub
 
 
 def _auth_headers(key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_get_product_requires_real_shop_authorization(api_client, readonly_key, proxy_stub, db_engine, existing):
+    from sqlalchemy.orm import Session
+
+    from tts_erp_v2.db.models.commerce import ChannelAccount
+
+    with Session(db_engine) as session:
+        shop = ChannelAccount(platform="tiktok", shop_id="TEST_GET_PRODUCT_UNAUTHORIZED")
+        session.add(shop)
+        session.flush()
+        shop_pk = shop.id
+        if not existing:
+            session.delete(shop)
+        session.commit()
+    response = api_client.get(
+        ENDPOINT.format(product_id=PRODUCT_ID), params={"shop_pk": shop_pk},
+        headers=_auth_headers(readonly_key),
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "Shop is not authorized"
+    assert proxy_stub.calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +147,7 @@ def test_get_product_returns_upstream_data(api_client, readonly_key, proxy_stub)
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 
@@ -125,7 +161,7 @@ def test_get_product_passes_query_params_to_proxy(api_client, readonly_key, prox
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
         params={
-            "shop_pk": 42,
+            "shop_pk": proxy_stub.shop_pk,
             "return_under_review_version": "true",
             "locale": "en-US",
         },
@@ -135,7 +171,7 @@ def test_get_product_passes_query_params_to_proxy(api_client, readonly_key, prox
     assert r.status_code == 200, r.text
     assert len(proxy_stub.calls) == 1
     call = proxy_stub.calls[0]
-    assert call["shop_pk"] == 42
+    assert call["shop_pk"] == proxy_stub.shop_pk
     assert call["product_id"] == PRODUCT_ID
     assert call["return_under_review_version"] is True
     assert call["return_draft_version"] is False
@@ -150,7 +186,7 @@ def test_get_product_passes_query_params_to_proxy(api_client, readonly_key, prox
 def test_get_product_401_without_key(api_client, proxy_stub):
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
     )
 
     assert r.status_code == 401, r.text
@@ -196,7 +232,7 @@ def test_get_product_422_mutually_exclusive_flags(api_client, readonly_key, prox
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
         params={
-            "shop_pk": 1,
+            "shop_pk": proxy_stub.shop_pk,
             "return_under_review_version": "true",
             "return_draft_version": "true",
         },
@@ -218,7 +254,7 @@ def test_get_product_404_channel_account_not_found(api_client, readonly_key, pro
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 42},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 
@@ -233,7 +269,7 @@ def test_get_product_404_credentials_missing(api_client, readonly_key, proxy_stu
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 
@@ -252,7 +288,7 @@ def test_get_product_502_upstream_business_error(api_client, readonly_key, proxy
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 
@@ -270,7 +306,7 @@ def test_get_product_502_authentication_error(api_client, readonly_key, proxy_st
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 
@@ -286,7 +322,7 @@ def test_get_product_429_rate_limited(api_client, readonly_key, proxy_stub):
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 
@@ -302,7 +338,7 @@ def test_get_product_502_upstream_http_error(api_client, readonly_key, proxy_stu
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 
@@ -316,7 +352,7 @@ def test_get_product_502_transient_error(api_client, readonly_key, proxy_stub):
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 
@@ -331,7 +367,7 @@ def test_get_product_500_signing_error(api_client, readonly_key, proxy_stub):
 
     r = api_client.get(
         ENDPOINT.format(product_id=PRODUCT_ID),
-        params={"shop_pk": 1},
+        params={"shop_pk": proxy_stub.shop_pk},
         headers=_auth_headers(readonly_key),
     )
 

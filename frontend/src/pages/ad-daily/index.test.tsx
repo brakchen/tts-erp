@@ -77,10 +77,19 @@ it('distinguishes null from zero, empty results and malformed successes', async 
   api({}); await mount(); expect(await screen.findByRole('alert')).toHaveTextContent('数据格式不符合约定');
 });
 it.each([401,403,429,500])('shows safe HTTP %s failure, manual retry only, never raw response detail', async (status) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
   const fetcher = vi.fn(async () => new Response(JSON.stringify({ detail: 'TEST_SECRET' }), { status, headers: { 'Retry-After': '1' } })); vi.stubGlobal('fetch', fetcher);
-  await mount(); expect(await screen.findAllByRole('alert')).not.toHaveLength(0); expect(document.body).not.toHaveTextContent('TEST_SECRET');
-  const count = fetcher.mock.calls.length; await new Promise((resolve) => setTimeout(resolve, 1100)); expect(fetcher).toHaveBeenCalledTimes(count);
+  await mount(); await act(async () => { await Promise.resolve(); });
+  expect(screen.getAllByRole('alert')).not.toHaveLength(0); expect(document.body).not.toHaveTextContent('TEST_SECRET');
+  const count = fetcher.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+  expect(screen.getByRole('button', { name: '刷新数据' })).toBeDisabled(); expect(fetcher).toHaveBeenCalledTimes(count);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2); });
   expect(screen.getByRole('button', { name: '刷新数据' })).toBeEnabled();
+  expect(fetcher).toHaveBeenCalledTimes(count);
+  fireEvent.click(screen.getByRole('button', { name: '刷新数据' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(fetcher).toHaveBeenCalledTimes(count + 2);
 });
 it('honors the full Retry-After across refresh, sorts, and history changes without auto fetch', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });

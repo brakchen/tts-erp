@@ -28,6 +28,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
+
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 
@@ -189,6 +191,7 @@ def test_profit_daily_one_row_aliases_all_fields(api_client, readwrite_key, db_e
             ),
             {"cp": cp_id},
         )
+        authorize_test_shop(seed_sess, acct_id, "TEST_acct_pf")
         seed_sess.commit()
 
     # 2. GET via the API and find the row by spu_pk.

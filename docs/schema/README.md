@@ -19,7 +19,7 @@
    ```
    `scripts/regen_schema.py` 只读不写库；它剥掉序列/`\restrict` 等噪音、给
    `CREATE TABLE`/`CREATE FUNCTION` 加 `IF NOT EXISTS`，使快照可重复执行。
-2. **生成源必须在当前 alembic head**（当前 head：`0070_monitor_health`）：
+2. **生成源必须在当前 alembic head**（当前 head：`0072_shop_app_credentials`）：
    ```bash
    docker exec postgres psql -U postgres -tAc "SELECT version_num FROM alembic_version" -d tts_erp_test_template
    ```
@@ -30,7 +30,7 @@
 4. 历史漂移教训（2026-08-25）：手维护的 schema.sql 曾漏 7 张表、列名写错，
    healthz/sync/db 三处互相矛盾——**只有"生成 + 同步"这条路是可靠的**。
 
-## 3. 数据结构索引（截至 migration 0070）
+## 3. 数据结构索引（截至 migration 0072）
 
 领域模型与表间关系见 [`docs/architecture/data-model-target-v3.md`](../architecture/data-model-target-v3.md)；
 「业务概念 ↔ 物理表字段」映射见 [`docs/business/spu-profitability.md`](../business/spu-profitability.md) 附录 A；
@@ -41,7 +41,7 @@
 ### commerce —— TikTok 商品与销售（6 表）
 | 表 | 含义 |
 | --- | --- |
-| `shops` | 店铺注册表；`credential_id` 是否为空区分 API / plugin 两条采集链路 |
+| `shops` | 店铺接入事实；`shop_code`、`discovered_at`、`plugin_metadata` 记录插件发现信息。业务查询资格由本店 credential、Service ID、App 与 revision 的完整关联决定，不只看 `credential_id` 是否为空 |
 | `products_spu` / `products_sku` | 商品维度（SPU / SKU）；`spu_pk` 是全库 ROI、成本、广告关联的枢纽 |
 | `sales_orders` / `sales_order_lines` | 订单头 / 订单行；行 GMV = `quantity × unit_price`（客户实付）；窗口归属用 `COALESCE(order_time, paid_at)` |
 | `sales_order_line_price_observations` | 订单行价格观测快照（来源版本 + 抓取时间 + 语义哈希去重） |
@@ -90,6 +90,10 @@
 ### integration —— 上游接入与同步（7 表）
 `credentials / tiktok_app_credentials / oauth_states`（凭证，只经 `tts_erp_v2.proxy.token_service`）、
 `sync_jobs / sync_cursors / sync_issues`（同步任务/游标/异常）、`raw_records`（原始报文留证）。
+
+`tiktok_app_credentials` 使用独立 `id` 主键，`shop_pk` 关联店铺，
+`(shop_pk, service_id)` 唯一；`revision` 标识本店 App 配置版本，OAuth state
+绑定目标店铺、Service ID 和该版本，拒绝过期配置的回调。
 
 ### config —— 运行配置（4 表）
 `enum_map`（枚举翻译）、`runtime_config_items / runtime_config_revisions / runtime_config_secrets`

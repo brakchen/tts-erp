@@ -1,184 +1,118 @@
-# TikTok Shop seller authorization（新店授权 / OAuth onboarding）
+# TikTok Shop 逐店授权
 
-**Single-source spec** for `/v2/oauth/tiktok/*`. 协议事实以
-`tts-partner-api-docs/Authorization overview.md` + `Seller authorization guide.md`
-为准（授权域/参数名/grant_type 全部照搬，不要"修正"）；本文件只写我们这侧
-的端点契约与落地行为。
+现行合同与 [店铺接入管理技术方案](../plans/2026-10-31-shop-onboarding-design.md) 一致。
+本服务从已经存在的店铺发起授权；每店独立配置 Service ID、App Key 和 App Secret。
+`tts_erp_v2/api/v2/oauth.py` 与 `tts_erp_v2/proxy/tiktok_oauth.py` 是接口及编排实现。
 
-Lane E 落地：v1 独立服务 `oauth-receiver` 的 `/authorize` + `/callback` 职责迁入
-v2 app（oauth-receiver 库已于 2026-09-05 DROP）。sync worker **不**负责授权——
-它只消费结果（对 `integration.credentials` 行 fan-out 跑数据 job）。
+## 操作流程
 
-## 流程总览
+插件发现或人工补录店铺 → 在店铺管理配置本店 App → 针对该店生成授权链接 →
+卖家同意 → 回调校验目标和 App 版本 → 更新原店铺的授权凭据 → 定时同步自动接管。
 
-```text
-操作者(admin)                    TikTok Seller Center               tts-erp
-─────────────                    ───────────────────                ───────
-GET /v2/oauth/tiktok/authorize ───────────────────────────────► 按 service_id 解析 App 凭证
-   ◄── {authorize_url, state}                                    注册一次性 state
-                                                                (存 sha256+service_id, TTL 45min)
-浏览器打开 authorize_url ──► seller 登录/同意
-                              └─► redirect → /v2/oauth/tiktok/callback?code&state
-                                                              ► pop_state(单次消费)
-                                                              ► token/get 换 token(用户级)
-                                                              ► Get Authorized Shops(每店 shop_id+cipher)
-                                                              ► 每店 upsert credentials+commerce.shops
-                                                              ► HTML/JSON 结果页
-   ◄── 授权成功，下个 tick 数据 job 自动接管
+已有店铺的内部主键不变；授权不会自动创建其他店铺，也不会覆盖已有店名、区域或开店日期。
+未授权店铺只在店铺管理的 `view=management` 读取面出现，业务读取仍按当前授权资格过滤。
+
+## 发起授权
+
+`GET /v2/oauth/tiktok/authorize?shop_pk=<内部主键>&format=json`
+
+- 权限：`readwrite` 或以上；readonly 返回 403。
+- `shop_pk` 必填且大于零；未传或非法值返回 422，目标店铺不存在返回 404。
+- 店铺必须已经选择 `service_id`，并在 `integration.tiktok_app_credentials` 中配置本店 App。
+  缺少 Service 或 App 返回 422；全局环境变量和其他店铺的配置不能补足它。
+- `format=json` 返回 JSON；省略时返回含授权链接的 HTML。
+- `redirect_to` 只是展示提示，不决定回调目标。
+
+成功响应：
+
+```json
+{
+  "ok": true,
+  "authorize_url": "https://services.tiktokshop.com/open/authorize?service_id=...&state=...",
+  "shop_id": "目标上游店铺ID",
+  "service_id": "该店Service",
+  "state": "原始一次性随机值",
+  "state_expires_at": "2026-11-03T12:34:56+00:00",
+  "hint": "..."
+}
 ```
 
-## 端点契约
+服务器只保存 state 的 SHA-256，TTL 为 45 分钟。
+`integration.oauth_states.extra` 绑定 `expected_shop_pk`、`expected_shop_id`、
+`service_id`、`app_revision` 和发起身份 `created_by`，不存 App Secret。
+每次发起生成新 state；授权成功、上游失败或验证失败后都不能重复使用已消费的 state。
 
-### `GET /v2/oauth/tiktok/onboard` — 新店授权控制台页（浏览器 UI）
+## 回调
 
-- **Role**: readonly（`_READONLY_EXACT` 精确豁免行；HTML 壳页本身无数据/无副作用）。
-  未登录浏览器 GET → 302 `/v2/auth/login?next=/v2/oauth/tiktok/onboard`。
-- **行为**: 内联 JS 探测 `/v2/auth/me`，readwrite 及以上可以点「生成授权链接」
-  调 `GET /v2/oauth/tiktok/authorize?format=json` → 展示新链接（复制 / 新窗口打开 / 到期时间）。
-  readonly 用户按钮可点但服务端会回 403，JS 把 inline `<div id="role-gate">` 解锁
-  并禁用按钮。每次生成 = 新 state（45min、单次使用），**不缓存链接**。
+`GET /v2/oauth/tiktok/callback?code=...&state=...[&app_key=...][&format=json]`
 
-### `GET /v2/oauth/tiktok/authorize` — 发起授权（readwrite 及以上）
+这是公开的 TikTok 重定向目标，无需 API key；仍经过限流。
 
-- **Role**: `readwrite` 及以上（handler `require_role_at_least(request, "readwrite")`；
-  middleware 对未知路径默认 admin，handler 内显式降到 readwrite）。
-  浏览器会话需带 `X-Requested-With: tts-erp`。
-  生成操作本身只插一行 `integration.oauth_states`（state sha256），无破坏性
-  数据变更（真正的写入在 `callback`，由 public 握手驱动）；因此从 admin
-  降到 readwrite 比 `linkage overrides`（业务数据覆写，留 admin）更合理。
-- **Query**: 无必选。`format=json` → JSON；否则 HTML（含可直接点的链接）。
-- **响应 200 (json)**:
+1. 原子校验并消费 state；未知、过期、重用或缺少目标绑定的 state 失败关闭。
+2. 核对原店铺 ID、当前 Service 及本店 App revision；配置变化必须重新生成链接。
+3. 如 callback 提供 `app_key`，必须与 state 对应本店 App 匹配。
+4. 使用本店 App 交换 code，要求卖家 `user_type` 属于 `{0, 4, 5}`。
+5. 使用用户级 token 调用 Get Authorized Shops。返回必须**恰好一店**，且 ID 与目标一致；
+   空列表、多店、缺少 ID 或另一店铺均失败，不创建或更新任何凭据。
+6. 目标必须有 shop cipher。再次锁定并核对目标与 App 后，通过 `token_service` 加密保存凭据。
+   设置原店铺的 `credential_id` 和授权事实；空白元数据可补齐，已有值保持。
 
-  ```json
-  {
-    "ok": true,
-    "authorize_url": "https://services.tiktokshop.com/open/authorize?service_id=...&state=...",
-    "state": "<raw single-use token>",
-    "state_expires_at": "2026-09-05T12:34:56+00:00",
-    "hint": "..."
-  }
-  ```
+成功返回 `200`：
 
-- **错误**: `500`（service_id 无对应 App Key/App Secret、`TIKTOK_SERVICE_ID`
-  未配置、authorize host 非 http(s)）、`401/403`（无 key / role < readwrite）。
-- **副作用**: `integration.oauth_states` 插一行（只存 `sha256(state)`；
-  `extra.service_id` 始终写入有效 service_id，不存 App Secret）。
-
-### `GET /v2/oauth/tiktok/callback` — TikTok 重定向目标（public）
-
-- **Role**: **public**（`middleware/auth.py` `EXEMPT_PATHS` 精确豁免；
-  这是 TikTok 重定向 seller 浏览器的地方，没有 API key 可带）。仍走
-  RateLimit（按 IP 分桶）。
-- **Query**: `code`（一次性 auth_code，30 分钟有效）、`state`（上一步返回的
-  raw token）、`error`（seller 拒绝时为 `auth_denied`）、`format=json`（可选）。
-- **行为顺序**: 校验并**原子消费** state（single-use；未知/过期/重用全部
-  fail-closed，且不触发上游调用）→ 按 state 中的 `service_id` 解密对应 App
-  Key/App Secret，并校验 TikTok callback 的 `app_key` 一致 → 消费成功才调
-  `GET auth.tiktok-shops.com/api/v2/token/get?app_key&app_secret&auth_code&grant_type=authorized_code`
-  拿**用户级 token**（open_id/seller_*，**无 shop 身份**）→ `user_type ∈ {0,4,5}`
-  （seller / global-selling；creator=1 / partner=2,3 拒绝）→ 调
-  `GET open-api.tiktokglobalshop.com/authorization/202309/shops`（HMAC 签名 +
-  `x-tts-access-token`）枚举授权店铺（每店含 shop_id + shop_cipher）→ **每店**
-  upsert credentials + commerce.shops → commit。
-- **落库**（同一事务，**一店一对行**；多店 seller 自动逐店落）:
-  - `integration.credentials`：key `(provider='tiktok', external_account_id=shop_id)`；
-    envelope 存 `access_token/refresh_token/shop_cipher`（Fernet；token 为用户级共享，
-    shop_cipher 为该店专属），并用独立列 `service_id` 固化**签发应用**；
-    `account_label=店名`，`expires_at`，`granted_scopes`。
-  - `integration.tiktok_app_credentials`：key `service_id`；`app_key` 明文标识，
-    `app_secret_ciphertext` Fernet 加密。多个店铺可以共享同一 service_id。
-  - `commerce.shops`：`(platform='tiktok', shop_id)` upsert →
-    `account_name/region/seller_type/status='active'/credential_id` 关联。
-  - **幂等**：同一 shop 重复授权 = 续期路径，两行原地更新，不产生重复。
-  - 授权响应中店铺列表为空 → `kind=no_authorized_shop`（不落任何行）。
-- **响应**: 默认 HTML 结果页（浏览器展示 shop_id/name/region/scopes）；
-  `format=json`:
-  - 成功 → `200 {"ok": true, "kind": "authorized", "result": {"shops": [{shop_id,
-    credential_id, account_id, account_name, region, seller_type, expires_at, granted_scopes}]}}`
-  - seller 拒绝 → `200 {"ok": false, "kind": "denied", "error": "auth_denied"}`
-  - state 无效/过期 → `400 kind=state_invalid`；重用 → `400 kind=state_reused`
-  - callback app_key 与 service_id 配置不一致 → `400 kind=app_key_mismatch`；
-    `user_type` 不支持 → `400 kind=user_type`；店铺列表为空 → `400 kind=no_authorized_shop`
-  - 店铺条目缺 `shop_id`/`shop_cipher` → `400 kind=missing_shop_id` / `missing_shop_cipher`
-    （跨境路由/签名必需，宁可不落库；错误附条目 raw keys 可当场判断上游改版）
-  - 上游 token/get 拒绝（如 code 已用过）→ `502 kind=upstream`（state 已消费，
-    需重新发起 authorize）
-  - 无 `code` 裸访问 → `400 kind=missing_code`
-- **副作用**: state 消费置 `consumed_at`；成功后 sync worker 下一 tick 自动
-  把新 shop 纳入（`scheduler._enumerate_tiktok_shops` 读 credentials 表）。
-
-## 环境变量
-
-| 变量 | 必需 | 说明 |
-| --- | --- | --- |
-| `TIKTOK_SERVICE_ID` | 兼容旧店 | 单应用部署的默认 service_id；新店优先使用 `commerce.shops.service_id` |
-| `TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET` | 兼容旧店 | 仅当请求的 service_id **精确等于** `TIKTOK_SERVICE_ID` 时作为旧配置 fallback；多应用凭证存 `integration.tiktok_app_credentials` |
-| `TIKTOK_AUTHORIZE_HOST` | 可选 | 授权域名。默认 ROW `https://services.tiktokshop.com`；US 市场设 `https://services.us.tiktokshop.com` |
-| `TIKTOK_AUTH_HOST` | 可选 | token 域名，默认 `https://auth.tiktok-shops.com`（已有） |
-| `TIKTOK_API_HOST` | ✅ 回调 | Get Authorized Shops 域名，默认 `https://open-api.tiktokglobalshop.com`（已有） |
-| `TIKTOK_REDIRECT_URI` | 可选 | 仅展示/文档用。Partner Center 里配的实际 Redirect URL 才是生效值 |
-
-## Migration 0039 部署（人类操作）
-
-代码合并并拉取后，由人工在项目根目录执行：
-
-```bash
-ALLOW_PROD_DESTRUCTIVE=1 \
-  bash scripts/oneoff_migrate_0039_tiktok_app_credentials.sh --confirm --restart
+```json
+{"ok":true,"kind":"authorized","result":{"shops":[{"shop_id":"目标ID","credential_id":123,"account_id":314,"account_name":"店名","region":"VN","seller_type":"CROSS_BORDER","expires_at":"...","granted_scopes":[]}]}}
 ```
 
-脚本会调用共享 production guard、只升级到
-`0039_tiktok_app_credentials`、验证表/列/revision，并在显式 `--restart`
-时重启 API 与 sync worker。脚本不会自动设置 `ALLOW_PROD_DESTRUCTIVE`，也不会
-读取或输出任何 App Secret 密文。
+`result.shops` 为保留的响应容器，成功时只有目标店铺这一项。省略 `format=json` 返回 HTML 结果页。
 
-## Partner Center 一次性配置（人类操作，agent 不代办）
+| 情况 | HTTP / kind |
+| --- | --- |
+| 卖家拒绝，回调含 `error=auth_denied` | 200 / `denied`，`ok=false` |
+| 缺少 code | 400 / `missing_code` |
+| state 未知、过期或缺少目标绑定 | 400 / `state_invalid` |
+| state 已用 | 400 / `state_reused` |
+| 目标店铺、Service 或 App revision 变化 | 400 / `configuration_changed` |
+| callback App Key 不匹配 | 400 / `app_key_mismatch` |
+| 非卖家授权 | 400 / `user_type` |
+| 店铺列表不是恰好目标一店 | 400 / `shop_mismatch` |
+| 目标缺少 cipher | 400 / `missing_shop_cipher` |
+| 上游 HTTP/业务拒绝 | 502 / `upstream` |
+| 其他代理错误 | 502 / `proxy` |
 
-1. App **App & Service** 页取得 `service_id`、App Key、App Secret；在店铺注册台
-   对该店一次性保存三者。App Secret 只进入 Fernet 加密列，不回显。旧单应用店可
-   暂时继续使用 `.env TIKTOK_SERVICE_ID/TIKTOK_APP_KEY/TIKTOK_APP_SECRET`。
-2. **Redirect URL** 填公网可达的 callback —— **必须带外部前缀 `/tts`**（nginx
-   只把 `/tts/*` 转给 :9877 API，无前缀的 `daqiang.nat100.top/v2/...` 会落在
-   ProfitLens 前端 404 页）：
-   `https://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`（前缀取
-   `TTS_ERP_EXTERNAL_PREFIX` 实际值，当前 `/tts`；app 以它为 `root_path`，
-   middleware 按 `scope["root_path"]` 派生 route-relative 路径做豁免匹配）。
-3. 确认 scope（`seller.*` 读类）已勾选；勾太多影响审核与授权率。
-4. 测试用 Seller Center **test account / Development Shops**，不要在开发期用
-   线上 seller 真号授权。
+失败不写入半成品凭据；state 已消费时操作者须重新发起授权。
 
-## 上游契约确认（shop_id / shop_cipher 从哪来）—— 已实测定稿
+## 凭据及续期
 
-**实测结论（2026-09-06 live 验证）**：service_id 授权流的 `token/get` 返回的是
-**用户级 token**：`data` 只有 `access_token / access_token_expire_in / refresh_token /
-refresh_token_expire_in / open_id / seller_name / seller_base_region / user_type /
-granted_scopes`——**没有 shop_id、没有 shop_cipher**（Authorization overview 字段表
-在此是准确的）。v1 时代 token/get 能直接读到 shop 字段，是因为旧 app_key 授权流与
-service_id 流不同（v1 生产凭证来自旧流）。
+- `integration.tiktok_app_credentials` 按 `(shop_pk, service_id)` 唯一，更新密钥增加 revision。
+  历史无 shop_pk 的 App 行保留用于迁移审计，运行时不能借用。
+- `integration.credentials` 按 `(provider, external_account_id)` 关联目标 shop_id；加密 envelope
+  保存 token 和该店 cipher，独立列 `service_id` 固定签发应用，`extra.app_revision` 绑定版本。
+- 同一店重新授权原地更新凭据和原店铺，不产生重复店铺。
+- 同步、刷新和代理调用经统一凭据服务解析本店配置；不得回退到全局 App 或跨店配置。
+- 卖家取消授权不会自动删除店铺或历史业务事实。
 
-因此每店的 `shop_id` + `shop_cipher` 来自 **Get Authorized Shops**
-（`GET {TIKTOK_API_HOST}/authorization/202309/shops`，HMAC 签名——只含 app_key+
-timestamp，无 shop_cipher；头带 `x-tts-access-token`；响应 `data.shops[]` 每项含
-`id/cipher/name/region/seller_type`，解析容错 `id|shop_id`、`cipher|shop_cipher`、
-`name|shop_name`、`region|shop_region`，首次真实调用的 raw keys 记入日志）。
+## Partner Center 与环境
 
-**防御仍在**：店铺条目缺 shop_id/shop_cipher → 该次授权 `missing_shop_id` /
-`missing_shop_cipher` 显式失败且不落半残行；店铺列表为空 → `no_authorized_shop`。
-错误均附 raw keys 供当场判断——不要弱化校验。
+由人工在 Partner Center 配置应用和授权范围，并在店铺管理保存该店的 Service/App。
+App Secret 只进入 Fernet 加密列，不回显。
+Redirect URL 应使用部署实际公网前缀；当前配置示例为
+`https://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`，前缀由实际 `TTS_ERP_EXTERNAL_PREFIX` 决定。
+部署、生产迁移及服务重启由人工执行，本文不提供自动迁移入口。
 
-## 生命周期备注
+| 变量 | 作用 |
+| --- | --- |
+| `TIKTOK_AUTHORIZE_HOST` | 授权域名；默认 `https://services.tiktokshop.com` |
+| `TIKTOK_AUTH_HOST` | token 域名；默认 `https://auth.tiktok-shops.com` |
+| `TIKTOK_API_HOST` | Get Authorized Shops 的 API 域名 |
+| `TIKTOK_REDIRECT_URI` | 展示提示；Partner Center 配置才决定重定向目标 |
 
-- **签名与 token 续期**：每个 token 使用 `integration.credentials.service_id`
-  绑定的 App 凭证；修改店铺下一次授权目标不会把旧 token 与新 App 混用。App Secret
-  轮换后新 client cache key 自动生效。旧 token 若 service_id=NULL，仅可走精确的
-  环境默认 fallback，重新授权后会固化绑定。
-- **续期**：授权将到期 → 让 seller 重新点一次 authorize link（同一 shop_id →
-  幂等更新）。30 天前 TikTok 会推 "Upcoming authorization expiration" webhook
-  —— v2 尚未订阅 webhook（无接收端点），续期靠人工/监控 token.refresh 失败告警。
-- **取消授权**：seller 在 Seller Center 取消后，token.refresh 会持续失败 →
-  `integration.sync_issues` 累积 + `proxy_call` 报 "re-authorize via /callback"。
-  v2 未接 "Seller deauthorization" webhook，取消不会自动删行（当前无删除端点，
-  需要时人工清或后续补 webhook 接收）。
-- **测试**：`tests/proxy/test_tiktok_oauth.py`（HTTP 单测）、
-  `tests/proxy/test_oauth_flow.py`（state + 编排，DB 集成）、
-  `tests/api/test_oauth_api.py`（契约，TestClient + admin key，`format=json`）。
+`TIKTOK_SERVICE_ID` / `TIKTOK_APP_KEY` / `TIKTOK_APP_SECRET` 不再是逐店授权的配置来源。
+
+## 页面与验证
+
+店铺管理页提供带目标上下文的授权入口。旧 `/v2/oauth/tiktok/onboard` HTML 壳仍存在，
+其旧按钮尚未携带必填 shop_pk；它不能证明现行授权链可用，后续另行迁移。
+
+测试覆盖：`tests/proxy/test_tiktok_oauth.py`（上游 HTTP 解析）、
+`tests/proxy/test_oauth_flow.py`（state 与单目标编排）、`tests/api/test_oauth_api.py`（HTTP 合同）。
+数据库测试统一通过 `bash scripts/test_isolated.sh fast <测试文件>`，每次使用独立临时克隆库。
