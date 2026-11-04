@@ -8,14 +8,14 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs
 
 import pytest
 from playwright.sync_api import expect
-
-import conftest as browser_conftest
 from render_support import overflow_report
 from test_spu_price_columns import _nested_payload
+
+import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
@@ -149,7 +149,7 @@ def _enable_canned_writer(page):
             return match.group(1) + json.dumps(value, ensure_ascii=False) + match.group(3)
 
         body, count = re.subn(r'(<script id="frontend-bootstrap"[^>]*>)(.*?)(</script>)',
-                             bootstrap, body, flags=re.S)
+                             bootstrap, body, flags=re.DOTALL)
         assert count == 1
         route.fulfill(response=response, body=body)
 
@@ -206,10 +206,12 @@ def test_focused_explicit_add_and_remove_never_replace_the_collection(
 
     page.route('**/v2/reporting/focused-spus/7', patch)
     page.get_by_label('按 SPU ID / 标题搜索').fill('TEST_FOCUS_C')
-    checkbox = page.locator('#focused-spu-select input[type="checkbox"]')
+    checkbox = page.locator('#focused-spu-select').get_by_role('checkbox')
     expect(checkbox).to_have_count(3)
-    target = page.locator('#focused-spu-select label').filter(has_text='TEST_FOCUS_C').get_by_role('checkbox')
-    target.click()  # Controlled membership changes only after the PATCH receipt.
+    target = page.locator('#focused-spu-select').get_by_role('checkbox', name=re.compile('TEST_FOCUS_C'))
+    # HeroUI keeps its native input visually hidden; click the visible label as
+    # an operator would, then verify the checkbox's semantic state.
+    page.locator('#focused-spu-select').get_by_text(re.compile('TEST_FOCUS_C')).click()
     expect(target).to_be_checked()
     expect(page.locator('#spu-selection-count')).to_have_text('已关注 3 个')
     assert commands == [{'addSpuIds': ['TEST_FOCUS_C'], 'removeSpuIds': []}]

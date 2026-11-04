@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@heroui/react';
 import { pathFor } from '../../shared/api/paths';
 import { optionalRecord, text, type ProfitRow, type RecordValue } from './contracts';
 import { displayPercent, displayValue, priceValue } from './Summary';
@@ -103,6 +104,6 @@ export function ProfitabilityTable({ root, rows, sort, order, prices, meta, load
     void instance.replaceData(rows).then(() => setFailed('')).catch(() => setFailed('表格更新失败，请刷新重试'));
   }, [ready, rows, sort, order, prices]);
   return <div className="min-w-0 space-y-2"><div id="rows" ref={host} className="erp-profit-grid" role="grid" aria-label="SPU 盈利明细表" />
-    {loading && <p role="status">加载中…</p>}{(error || failed) && <div role="alert"><p>{error ?? failed}</p><button type="button" id="retry-link" disabled={blocked || loading} onClick={() => { if (blocked || loading) return; if (failed) setAttempt((value) => value + 1); else onRetry(); }}>重试</button></div>}
+    {loading && <p role="status">加载中…</p>}{(error || failed) && <div role="alert"><p>{error ?? failed}</p><Button type="button" id="retry-link" isDisabled={blocked || loading} onPress={() => { if (blocked || loading) return; if (failed) setAttempt((value) => value + 1); else onRetry(); }}>重试</Button></div>}
   </div>;
 }

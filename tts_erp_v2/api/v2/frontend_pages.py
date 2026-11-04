@@ -195,19 +195,11 @@ def render_frontend_page(
             headers=_CACHE_CONTROL,
         )
     root_path = request.scope.get("root_path", "").rstrip("/")
-    dev_origin = os.getenv("TTS_ERP_FRONTEND_DEV_ORIGIN")
     try:
-        if dev_origin is not None:
-            origin = _development_origin(dev_origin)
-            assets = _Assets("dev", f"{origin}/src/main.tsx", (), ())
-        else:
-            origin = None
-            assets = _production_assets(root_path)
+        assets, origin = _load_assets(root_path)
     except (OSError, ValueError, TypeError) as error:
         raise HTTPException(
-            status_code=503,
-            detail="Frontend assets unavailable",
-            headers=_CACHE_CONTROL,
+            status_code=503, detail="Frontend assets unavailable", headers=_CACHE_CONTROL,
         ) from error
 
     allowed = user_pages_var.get()
@@ -232,6 +224,27 @@ def render_frontend_page(
     }
     if public_login:
         bootstrap["loginNextPath"] = login_next_path
+    return _render_document(bootstrap, assets, origin)
+
+
+def _load_assets(root_path: str) -> tuple[_Assets, str | None]:
+    dev_origin = os.getenv("TTS_ERP_FRONTEND_DEV_ORIGIN")
+    if dev_origin is not None:
+        origin = _development_origin(dev_origin)
+        return _Assets("dev", f"{origin}/src/main.tsx", (), ()), origin
+    return _production_assets(root_path), None
+
+
+def _render_document(
+    bootstrap: dict[str, Any], assets: _Assets, origin: str | None, *,
+    status_code: int = 200, initial_content: str | None = None,
+) -> HTMLResponse:
+    # initial_content is generated only by our escaped structured-message renderer.
+    # It is never accepted from HTTP input or placed into React as raw HTML.
+    if initial_content is None:
+        initial_content = ('<section id="frontend-startup" role="status" aria-live="polite">'
+            '<h1>正在加载页面</h1><p>若持续显示此提示，前端资源可能加载失败。请刷新页面；如仍失败，请联系管理员。</p>'
+            '<a href="">刷新页面</a></section>')
     links = [
         f'<link rel="stylesheet" href="{escape(href, quote=True)}">'
         for href in assets.css
@@ -251,23 +264,107 @@ window.$RefreshSig$ = () => (type) => type;
 window.__vite_plugin_react_preamble_installed__ = true;
 </script>
 <script type="module" src="{escape(origin, quote=True)}/@vite/client"></script>'''
+    page_data = bootstrap.get("pageData")
+    document_title = (page_data.get("title", "新店接入授权")
+        if isinstance(page_data, dict) else "tts-erp")
+    entry_script = (f'<script type="module" src="{escape(assets.entry, quote=True)}"></script>'
+        if assets.entry else "")
     html = f'''<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tts-erp</title>
+<title>{escape(document_title)}</title>
 {"\n".join(links)}
 </head>
 <body>
-<div id="frontend-root"><section id="frontend-startup" role="status" aria-live="polite">
-<h1>正在加载页面</h1>
-<p>若持续显示此提示，前端资源可能加载失败。请刷新页面；如仍失败，请联系管理员。</p>
-<a href="">刷新页面</a>
-</section></div>
+<div id="frontend-root">{initial_content}</div>
 <script id="frontend-bootstrap" type="application/json">{_safe_json(bootstrap)}</script>
 {development}
-<script type="module" src="{escape(assets.entry, quote=True)}"></script>
+{entry_script}
 </body>
 </html>'''
-    return HTMLResponse(html, headers=_CACHE_CONTROL)
+    return HTMLResponse(html, status_code=status_code, headers=_CACHE_CONTROL)
+
+
+# Auxiliary document metadata never adds permissions or navigation to PAGES.
+# OAuth callbacks and denials must remain visible without an authenticated session.
+_AUXILIARY_PAGE_IDS = frozenset({"message", "oauth-onboard"})
+_MESSAGE_TONES = frozenset({"success", "danger", "warning", "default"})
+_MESSAGE_ACTIONS = {"shops": ("/v2/pages/shops", "前往店铺注册台"),
+    "login": ("/v2/auth/login", "返回登录页"),
+    "onboard": ("/v2/oauth/tiktok/onboard", "重新开始授权")}
+
+
+def _auxiliary_document(
+    root_path: str, page_id: str, data: dict[str, Any], *,
+    status_code: int, initial_content: str,
+) -> HTMLResponse:
+    if page_id not in _AUXILIARY_PAGE_IDS:
+        raise ValueError("Unknown auxiliary frontend page")
+    try:
+        assets, origin = _load_assets(root_path)
+    except (OSError, ValueError, TypeError):
+        # Deliberate exception for result documents: a missing JS release cannot
+        # replace a 403/400/502, or hide a completed single-use OAuth callback.
+        # The same escaped facts remain readable without JS/CSS. When CSS exists,
+        # the server content uses HeroUI 3.2.6 public component classes, not a skin.
+        # No request is replayed; hydration only displays this completed result.
+        assets, origin = _Assets("unavailable", "", (), ()), None
+    bootstrap = {
+        "rootPath": root_path, "pageId": page_id, "navigation": [],
+        "releaseId": assets.release_id,
+        "roleCapabilities": {"readwrite": False, "admin": False},
+        "pageData": data,
+    }
+    return _render_document(bootstrap, assets, origin, status_code=status_code,
+        initial_content=initial_content)
+
+
+def render_oauth_onboard_page(request: Request) -> HTMLResponse:
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    # The shop workbench owns shop-bound authorization and command recovery.
+    # The former onboard script called authorize without its required shop_pk.
+    # Reuse its owner rather than copying that mutable workflow into this page.
+    content = ('<main class="p-6"><section class="card card--default">'
+        '<h1 class="card__title">新店接入授权</h1>'
+        '<p>先在店铺注册台选择店铺、配置 App，再获取该店铺的授权链接。</p>'
+        '<p>只读账号可查看说明；生成链接需要 readwrite 及以上权限和店铺页面访问权限。</p>'
+        f'<a class="button button--primary" href="{escape(root_path, quote=True)}/v2/pages/shops">前往店铺注册台</a>'
+        '<p>请使用目标店铺的卖家账号完成授权。授权完成后，同步任务会在下次运行时接管。</p>'
+        f'<p>Partner Center 回调地址：<code>{escape(root_path)}/v2/oauth/tiktok/callback</code></p>'
+        '</section></main>')
+    return _auxiliary_document(root_path, "oauth-onboard", {"kind": "oauth-onboard"},
+        status_code=200, initial_content=content)
+
+
+def render_message_page(
+    root_path: str, *, title: str, message: str, tone: str,
+    status_code: int, action: str = "shops",
+    sections: list[dict[str, Any]] | None = None,
+    authorization: dict[str, str] | None = None,
+) -> HTMLResponse:
+    if tone not in _MESSAGE_TONES or action not in _MESSAGE_ACTIONS:
+        raise ValueError("Invalid auxiliary message metadata")
+    data: dict[str, Any] = {"kind": "message", "title": title,
+        "message": message, "tone": tone, "action": action, "sections": sections or []}
+    content = [f'<main class="p-6"><section class="card card--default"><h1 class="card__title">{escape(title)}</h1>',
+        f'<p>{escape(message)}</p>']
+    if authorization is not None:
+        url = authorization["url"]
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("Invalid authorization link")
+        data["authorization"] = {"url": url, "expiresAt": authorization["expiresAt"]}
+        content.append(f'<p>链接有效至 {escape(authorization["expiresAt"])}</p>'
+            f'<p class="break-all"><code>{escape(url)}</code></p>'
+            f'<a class="button button--primary" href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">打开授权页面</a>')
+    for section in data["sections"]:
+        content.append(f'<section><h2>{escape(section["title"])}</h2><dl>')
+        for fact in section["facts"]:
+            content.append(f'<dt>{escape(fact["label"])}</dt><dd class="break-all">{escape(fact["value"])}</dd>')
+        content.append('</dl></section>')
+    path, label = _MESSAGE_ACTIONS[action]
+    content.append(f'<a class="button button--secondary" href="{escape(root_path + path, quote=True)}">{label}</a></section></main>')
+    return _auxiliary_document(root_path, "message", data, status_code=status_code,
+        initial_content="".join(content))

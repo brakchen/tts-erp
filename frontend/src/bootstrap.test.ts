@@ -35,3 +35,32 @@ describe('readBootstrap', () => {
     inject(value); expect(() => readBootstrap()).toThrow();
   });
 });
+
+
+const auxiliary = { rootPath: '/tts', pageId: 'message', releaseId: 'TEST_auxiliary',
+  navigation: [], roleCapabilities: { readwrite: false, admin: false },
+  pageData: { kind: 'message', title: 'TEST_result', message: 'TEST_completed', tone: 'success', action: 'shops', sections: [] } };
+
+describe('auxiliary display bootstrap', () => {
+  it('validates public result facts without enabling navigation or writes', () => {
+    inject(auxiliary);
+    expect(readBootstrap()).toEqual(auxiliary);
+  });
+  it('accepts the explicit onboard metadata without adding a permission', () => {
+    const value = { ...auxiliary, pageId: 'oauth-onboard', pageData: { kind: 'oauth-onboard' } };
+    inject(value); expect(readBootstrap()).toEqual(value);
+  });
+  it.each([
+    { ...auxiliary, navigation: valid.navigation },
+    { ...auxiliary, roleCapabilities: { readwrite: true, admin: false } },
+    { ...auxiliary, pageData: undefined },
+    { ...auxiliary, pageData: { ...auxiliary.pageData, kind: 'oauth-onboard' } },
+    { ...auxiliary, pageData: { ...auxiliary.pageData, tone: 'invented' } },
+    { ...auxiliary, pageData: { ...auxiliary.pageData, action: 'https://evil.test' } },
+    { ...auxiliary, pageData: { ...auxiliary.pageData, sections: [{ title: 'TEST', facts: [{ label: 'TEST', value: {} }] }] } },
+    { ...auxiliary, pageData: { ...auxiliary.pageData, authorization: { url: 'javascript:alert(1)', expiresAt: 'TEST' } } },
+    { ...auxiliary, pageData: { ...auxiliary.pageData, authorization: { url: 'https://user:secret@example.test', expiresAt: 'TEST' } } },
+  ])('rejects unsafe or malformed auxiliary documents %#', (value) => {
+    inject(value); expect(() => readBootstrap()).toThrow();
+  });
+});

@@ -14,6 +14,7 @@ exists before the module-scoped ``clone`` child starts.
 """
 from __future__ import annotations
 
+import re
 import secrets
 from decimal import Decimal
 from pathlib import Path
@@ -174,8 +175,10 @@ def test_manual_native_write_preview_and_readback(
         assert logins == 1, "TEST manual native: the UI login issued more than one request"
 
         # 5. The shop the UI actually selected, validated against the owned PKs.
-        shop_select = page.get_by_label("当前店铺", exact=True)
-        selected_value = shop_select.input_value()
+        shop_select = page.get_by_role("button", name=re.compile("当前店铺"))
+        selected_pk = re.search(r" · #(\d+)(?:\s|$)", shop_select.inner_text())
+        assert selected_pk is not None, "TEST manual native: selected shop PK is not displayed"
+        selected_value = selected_pk.group(1)
         selected_ok = selected_value in {str(pk) for pk in owned_shop_pks}
         assert selected_ok, "TEST manual native: the selected shop is not an owned shop"
         default_contract = selected_value == str(first_visible_pk)

@@ -20,6 +20,7 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   'media-assets': () => import('../pages/media-assets'),
   'digital-humans': () => import('../pages/digital-humans'),
   login: () => import('../pages/login'),
+  'oauth-onboard': () => import('../pages/oauth-onboard'),
 };
 
 /** Code mapping only: page metadata and permissions remain backend-owned. */

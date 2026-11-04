@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 
 const modulePath = './index';
@@ -38,7 +38,6 @@ async function fillApp(user: ReturnType<typeof userEvent.setup>, dialog: HTMLEle
   await user.type(within(dialog).getByLabelText('App Secret', { exact: true }), secret);
 }
 const save = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: /^保存(?:中…)?$/ });
-beforeEach(() => { vi.spyOn(window, 'confirm').mockReturnValue(true); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('shops content', () => {
@@ -173,7 +172,12 @@ describe('shops content', () => {
     expect(within(dialog).getByText(/配置仅用于当前店铺/)).toBeVisible();
     await user.type(within(dialog).getByLabelText('App Secret', { exact: true }), 'TEST_cancel');
     await user.click(within(dialog).getByRole('button', { name: '取消' }));
-    expect(window.confirm).toHaveBeenCalledWith('放弃本次尚未保存的修改？');
+    let confirmation = screen.getByRole('dialog', { name: '放弃本次尚未保存的修改？' });
+    await user.click(within(confirmation).getByRole('button', { name: '继续编辑' }));
+    expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('TEST_cancel');
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    confirmation = screen.getByRole('dialog', { name: '放弃本次尚未保存的修改？' });
+    await user.click(within(confirmation).getByRole('button', { name: '放弃修改' }));
     dialog = await openApp(user); expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('');
   });
 

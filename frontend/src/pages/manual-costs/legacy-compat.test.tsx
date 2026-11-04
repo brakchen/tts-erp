@@ -33,6 +33,18 @@ function catalogueQuery(fetcher: ReturnType<typeof setup>) {
   const calls = fetcher.mock.calls.filter(([url]) => url.includes('channel-products?'));
   return new URL(calls.at(-1)![0], 'https://test.invalid').searchParams;
 }
+const selectOptionLabels: Record<string, string> = {
+  DELETED: '下架', SELLER_DEACTIVATED: '停售', ACTIVATE: '在售',
+  unit_cost: '成本', created_at: '创建时间', updated_at: '更新时间', desc: '降序',
+};
+async function chooseOption(user: ReturnType<typeof userEvent.setup>, label: string, option: string) {
+  // Select includes both its aria-label and visible Label in the trigger name.
+  // Limit catalogue controls to their form so 50 rows' actions are not scanned.
+  const scope = label === '当前店铺' ? screen : within(screen.getByRole('form', { name: '工作台筛选' }));
+  await user.click(scope.getByRole('button', { name: (name) => name === label || name.endsWith(` ${label}`)
+    || (['排序字段', '排序方向'].includes(label) && name.includes(label)) }));
+  await user.click(await screen.findByRole('option', { name: option }));
+}
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('manual-costs active replacements for retained legacy contracts', () => {
@@ -62,7 +74,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     fetcher.mockImplementationOnce(async () => json([shop, other]));
     const user = userEvent.setup(); render(<ManualCosts bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} />);
     await screen.findByText(`TEST 店铺 ${shop.id}`);
-    await user.selectOptions(screen.getByRole('combobox', { name: '当前店铺' }), other.id);
+    await chooseOption(user, '当前店铺', `${other.account_name} · ${other.shop_id} · #${other.id}`);
     const row = (await screen.findByText(`TEST 店铺 ${other.id}`)).closest('tr')!;
     expect(catalogueQuery(fetcher).get('shop_pk')).toBe(other.id);
     expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled();
@@ -85,22 +97,25 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
   ])('sends %s=%s to the server before pagination and resets a nonzero offset', async (key, value, label) => {
     const fetcher = setup((query) => Array.from({ length: Number(query.get('limit')) }, (_, index) => ({ ...product(index), title: `TEST server ${query.get('offset')} row ${index}` })));
     const user = userEvent.setup(); render(<ManualCosts {...props} />);
+    const filters = () => within(screen.getByRole('form', { name: '工作台筛选' }));
+    const pagination = () => within(screen.getByLabelText('分页'));
     await screen.findByText('TEST server 0 row 0');
     expect(catalogueQuery(fetcher).get('sort')).toBe('status');
     expect(catalogueQuery(fetcher).get('order')).toBe('asc');
-    await user.selectOptions(screen.getByRole('combobox', { name: '每页行数' }), '25');
+    await chooseOption(user, '每页行数', '25');
     await waitFor(() => expect(catalogueQuery(fetcher).get('limit')).toBe('25'));
-    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(pagination().getByRole('button', { name: '下一页' })).toBeEnabled());
+    await user.click(pagination().getByRole('button', { name: '下一页' }));
     await screen.findByText('TEST server 25 row 0');
     expect(catalogueQuery(fetcher).get('offset')).toBe('25');
     if (key === 'q') {
-      fireEvent.change(screen.getByRole('textbox', { name: label }), { target: { value } });
+      fireEvent.change(filters().getByRole('textbox', { name: label }), { target: { value } });
       expect(catalogueQuery(fetcher).has('q')).toBe(false); // Explicit search, not a local row filter.
-      await user.click(screen.getByRole('button', { name: '搜索' }));
+      await user.click(filters().getByRole('button', { name: '搜索' }));
     } else if (key === 'has_orders' || key === 'missing_manual_cost') {
-      await user.click(screen.getByRole('checkbox', { name: label }));
+      await user.click(filters().getByRole('checkbox', { name: label }));
     } else {
-      await user.selectOptions(screen.getByRole('combobox', { name: label }), value);
+      await chooseOption(user, label, selectOptionLabels[value] ?? value);
     }
     await screen.findByText('TEST server 0 row 0');
     const query = catalogueQuery(fetcher);
@@ -111,8 +126,8 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(within(screen.getByRole('region', { name: 'SPU 表格滚动区域' })).getAllByText('在售')).toHaveLength(Number(query.get('limit')));
     expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
     if (key === 'status' || key === 'has_orders' || key === 'missing_manual_cost') {
-      if (key === 'status') await user.selectOptions(screen.getByRole('combobox', { name: label }), '');
-      else await user.click(screen.getByRole('checkbox', { name: label }));
+      if (key === 'status') await chooseOption(user, label, '全部');
+      else await user.click(filters().getByRole('checkbox', { name: label }));
       await waitFor(() => expect(catalogueQuery(fetcher).has(key)).toBe(false));
     }
     expect(fetcher.mock.calls.every(([url, init]) => url.startsWith('/tts/v2/') && init.method === 'GET')).toBe(true);

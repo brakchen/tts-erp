@@ -54,7 +54,7 @@ def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
     page = (root / "frontend/src/pages/spu-profitability/index.tsx").read_text(encoding="utf-8")
 
     assert 'id={focused ? \'focused-spu-select\' : \'filter-spu-ids\'}' in selection
-    assert 'type="checkbox"' in selection
+    assert "<Checkbox" in selection and "isSelected={draft.includes(item.spu_id)}" in selection
     assert "addSpuIds: add" in selection and "removeSpuIds: remove" in selection
     assert "/v2/reporting/focused-spus/" in selection and "method: 'PATCH'" in selection
     assert "resolvePaste" in selection and "parseIds(paste)" in selection

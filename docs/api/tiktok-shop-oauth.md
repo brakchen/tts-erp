@@ -20,7 +20,7 @@
 - `shop_pk` 必填且大于零；未传或非法值返回 422，目标店铺不存在返回 404。
 - 店铺必须已经选择 `service_id`，并在 `integration.tiktok_app_credentials` 中配置本店 App。
   缺少 Service 或 App 返回 422；全局环境变量和其他店铺的配置不能补足它。
-- `format=json` 返回 JSON；省略时返回含授权链接的 HTML。
+- `format=json` 返回 JSON；省略时使用共享 HeroUI 结果页展示授权链接及到期时间。
 - `redirect_to` 只是展示提示，不决定回调目标。
 
 成功响应：
@@ -63,7 +63,7 @@
 {"ok":true,"kind":"authorized","result":{"shops":[{"shop_id":"目标ID","credential_id":123,"account_id":314,"account_name":"店名","region":"VN","seller_type":"CROSS_BORDER","expires_at":"...","granted_scopes":[]}]}}
 ```
 
-`result.shops` 为保留的响应容器，成功时只有目标店铺这一项。省略 `format=json` 返回 HTML 结果页。
+`result.shops` 为保留的响应容器，成功时只有目标店铺这一项。省略 `format=json` 返回共享 HeroUI 结果页。结果页直接显示服务器已处理的结果，不自动重复发起授权或提交回调。
 
 | 情况 | HTTP / kind |
 | --- | --- |
@@ -110,8 +110,9 @@ Redirect URL 应使用部署实际公网前缀；当前配置示例为
 
 ## 页面与验证
 
-店铺管理页提供带目标上下文的授权入口。旧 `/v2/oauth/tiktok/onboard` HTML 壳仍存在，
-其旧按钮尚未携带必填 shop_pk；它不能证明现行授权链可用，后续另行迁移。
+店铺管理页提供带目标上下文的授权入口。`GET /v2/oauth/tiktok/onboard` 使用共享
+React 页面和 HeroUI，展示接入说明、回调配置地址和店铺管理入口。只读用户可阅读说明，
+未登录浏览器进入登录页。授权链接由具备相应权限的用户在店铺管理页为指定店铺生成。
 
 测试覆盖：`tests/proxy/test_tiktok_oauth.py`（上游 HTTP 解析）、
 `tests/proxy/test_oauth_flow.py`（state 与单目标编排）、`tests/api/test_oauth_api.py`（HTTP 合同）。

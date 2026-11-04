@@ -1,4 +1,4 @@
-import { Button } from '@heroui/react';
+import { Button, Disclosure } from '@heroui/react';
 import type { Detail } from './contracts';
 import JsonEditor from './JsonEditor';
 import { stringifyRuntime } from './json';
@@ -19,9 +19,9 @@ export default function ConfigWorkspace({ detail, editing, text, disabled, dirty
       {detail.hasDraft && <p>另有一份已保存、尚未发布的草稿；下方展示当前生效内容。</p>}
       {detail.publishedPayload === null ? <p>业务暂时无法通过运行快照读取此配置。</p> : <JsonEditor key="published-content" label="当前生效内容" readOnly value={stringifyRuntime(detail.publishedPayload, 2)} />}
       <div className="flex flex-wrap gap-3">{!detail.retiredAt && <Button isDisabled={disabled} onPress={edit}>{detail.publishedVersion === null ? '完成配置并发布' : detail.hasDraft ? '继续编辑草稿' : '修改配置'}</Button>}<Button variant="secondary" isDisabled={disabled} onPress={history}>查看发布历史</Button>
-        <details><summary>更多操作</summary><Button variant="secondary" isDisabled={disabled} onPress={lifecycle}>{detail.retiredAt ? '重新启用配置' : '停用配置'}</Button></details>
+        <Disclosure><Disclosure.Heading><Disclosure.Trigger type="button">更多操作<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body><Button variant="secondary" isDisabled={disabled} onPress={lifecycle}>{detail.retiredAt ? '重新启用配置' : '停用配置'}</Button></Disclosure.Body></Disclosure.Content></Disclosure>
       </div>
     </>}
-    <details><summary>高级信息：配置键与校验规则</summary><code className="block break-all">{detail.configKey}</code><p>校验规则在创建后不可修改。</p><pre className="whitespace-pre-wrap break-all">{stringifyRuntime(detail.jsonSchema, 2)}</pre></details>
+    <Disclosure><Disclosure.Heading><Disclosure.Trigger type="button">高级信息：配置键与校验规则<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body><code className="block break-all">{detail.configKey}</code><p>校验规则在创建后不可修改。</p><pre className="whitespace-pre-wrap break-all">{stringifyRuntime(detail.jsonSchema, 2)}</pre></Disclosure.Body></Disclosure.Content></Disclosure>
   </section>;
 }
