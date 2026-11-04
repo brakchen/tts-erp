@@ -24,7 +24,9 @@ and the many-to-many persona link are covered.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from unittest.mock import MagicMock
 
 import pytest
@@ -226,6 +228,23 @@ def _upload_one(api_client_focused, key: str, **body) -> int:
     return int(r.json()["asset_id"])
 
 
+def test_failed_ticket_signing_does_not_leave_an_asset(
+    api_client_focused, readwrite_key, fake_store
+):
+    fake_store.presign_put.side_effect = RuntimeError("TEST upload signing unavailable")
+    filename = "TEST_ticket_signing_failure.jpg"
+    with pytest.raises(RuntimeError, match="TEST upload signing unavailable"):
+        _upload_one(api_client_focused, readwrite_key, filename=filename)
+
+    listing = api_client_focused.get(
+        "/v2/media/assets",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+        params={"keyword": filename},
+    )
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 0
+
+
 def test_confirm_marks_ready(api_client_focused, readwrite_key):
     asset_id = _upload_one(api_client_focused, readwrite_key)
     r = api_client_focused.post(
@@ -234,6 +253,74 @@ def test_confirm_marks_ready(api_client_focused, readwrite_key):
     )
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "ready"
+
+
+def test_confirm_retry_survives_storage_and_preview_failures(
+    api_client_focused, readwrite_key, fake_store
+):
+    from tts_erp_v2.media.object_store import ObjectNotFound
+
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    path = f"/v2/media/assets/{asset_id}"
+    fake_store.stat.side_effect = ObjectNotFound("TEST_upload_pending")
+    missing = api_client_focused.post(f"{path}/confirm", headers=headers)
+    assert missing.status_code == 409
+    assert missing.json()["detail"] == "UPLOAD_NOT_FOUND"
+
+    fake_store.stat.side_effect = None
+    fake_store.presign_get.side_effect = RuntimeError(
+        "TEST preview signing unavailable"
+    )
+    confirmed = api_client_focused.post(f"{path}/confirm", headers=headers)
+    assert confirmed.status_code == 200
+    assert confirmed.json()["asset_id"] == asset_id
+    assert confirmed.json()["status"] == "ready"
+    assert confirmed.json()["url"] is None
+    before = api_client_focused.get(path, headers=headers).json()
+    assert before["uploaded_at"] is not None
+    assert before["failure_reason"] is None
+
+    fake_store.stat.side_effect = ObjectNotFound("TEST replay must not HEAD")
+    replayed = api_client_focused.post(f"{path}/confirm", headers=headers)
+    assert replayed.status_code == 200
+    assert replayed.json()["status"] == "ready"
+    assert fake_store.stat.call_count == 2
+    after = api_client_focused.get(path, headers=headers).json()
+    assert after["uploaded_at"] == before["uploaded_at"]
+
+
+def test_concurrent_missing_result_does_not_downgrade_confirmed_asset(
+    api_client_focused, readwrite_key, fake_store
+):
+    from tts_erp_v2.media.object_store import ObjectNotFound
+
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    path = f"/v2/media/assets/{asset_id}/confirm"
+    started = Event()
+    release = Event()
+
+    def stat(_object_key: str) -> dict[str, int]:
+        if started.is_set():
+            return {"size": 1024}
+        started.set()
+        assert release.wait(timeout=10), "TEST concurrent confirmation did not finish"
+        raise ObjectNotFound("TEST stale missing result")
+
+    fake_store.stat.side_effect = stat
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        stale = executor.submit(api_client_focused.post, path, headers=headers)
+        try:
+            assert started.wait(timeout=10), "TEST first confirmation did not start"
+            confirmed = api_client_focused.post(path, headers=headers)
+            assert confirmed.status_code == 200
+        finally:
+            release.set()
+        replayed = stale.result(timeout=10)
+
+    assert replayed.status_code == 200
+    assert replayed.json()["status"] == "ready"
 
 
 def test_confirm_rejects_size_mismatch(api_client_focused, readwrite_key, fake_store):
@@ -404,6 +491,11 @@ def test_update_and_delete_digital_human(api_client_focused, readwrite_key):
 
 def test_link_and_unlink_asset(api_client_focused, readwrite_key):
     asset_id = _upload_one(api_client_focused, readwrite_key)
+    confirmed = api_client_focused.post(
+        f"/v2/media/assets/{asset_id}/confirm",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
     created = api_client_focused.post(
         "/v2/media/digital-humans",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -439,6 +531,82 @@ def test_link_and_unlink_asset(api_client_focused, readwrite_key):
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert after.json()["asset_ids"] == []
+
+
+def test_ready_filter_and_association_reject_new_pending_link(
+    api_client_focused, readwrite_key
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    prefix = "TEST_link_readiness"
+    ready_id = _upload_one(
+        api_client_focused, readwrite_key, filename=f"{prefix}_ready.jpg"
+    )
+    confirmed = api_client_focused.post(
+        f"/v2/media/assets/{ready_id}/confirm", headers=headers
+    )
+    assert confirmed.status_code == 200
+    pending_id = _upload_one(
+        api_client_focused, readwrite_key, filename=f"{prefix}_pending.jpg"
+    )
+    created = api_client_focused.post(
+        "/v2/media/digital-humans", headers=headers, json={"name": prefix}
+    )
+    human_path = f"/v2/media/digital-humans/{created.json()['digital_human_id']}"
+
+    candidate_params = {"keyword": prefix, "limit": 1}
+    default_page = api_client_focused.get(
+        "/v2/media/assets", headers=headers, params=candidate_params
+    )
+    assert default_page.json()["total"] == 2
+    assert [asset["asset_id"] for asset in default_page.json()["items"]] == [pending_id]
+    ready_page = api_client_focused.get(
+        "/v2/media/assets",
+        headers=headers,
+        params={**candidate_params, "status": "ready"},
+    )
+    assert ready_page.json()["total"] == 1
+    assert [asset["asset_id"] for asset in ready_page.json()["items"]] == [ready_id]
+
+    rejected = api_client_focused.post(
+        f"{human_path}/assets", headers=headers, json={"assetId": pending_id}
+    )
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"] == "ASSET_NOT_READY"
+    assert api_client_focused.get(human_path, headers=headers).json()["asset_ids"] == []
+
+
+def test_pending_legacy_link_can_be_replayed_and_removed(
+    api_client_focused, readwrite_key, db_engine
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    human_id = api_client_focused.post(
+        "/v2/media/digital-humans",
+        headers=headers,
+        json={"name": "TEST_legacy_pending_link"},
+    ).json()["digital_human_id"]
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO media.digital_human_assets (digital_human_id, asset_id) "
+                "VALUES (:human_id, :asset_id)"
+            ),
+            {"human_id": human_id, "asset_id": asset_id},
+        )
+
+    human_path = f"/v2/media/digital-humans/{human_id}"
+    replayed = api_client_focused.post(
+        f"{human_path}/assets", headers=headers, json={"assetId": asset_id}
+    )
+    assert replayed.status_code == 200
+    assert replayed.json()["asset_ids"] == [asset_id]
+    assert (
+        api_client_focused.delete(
+            f"{human_path}/assets/{asset_id}", headers=headers
+        ).status_code
+        == 204
+    )
+    assert api_client_focused.get(human_path, headers=headers).json()["asset_ids"] == []
 
 
 def test_link_unknown_asset_is_404(api_client_focused, readwrite_key):
@@ -569,3 +737,88 @@ def test_deleted_asset_is_not_counted_as_a_persona_attachment(api_client_focused
     row = next(item for item in listing if item["digital_human_id"] == human_id)
     assert detail["assets"] == []
     assert (detail["asset_ids"], row["asset_ids"]) == ([], [])
+
+
+def test_shared_asset_usage_tracks_archive_restore_and_removal(
+    api_client_focused, readwrite_key
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    humans_url = "/v2/media/digital-humans"
+    prefix = "TEST_shared_reference"
+    asset_id = _upload_one(api_client_focused, readwrite_key, filename=f"{prefix}.jpg")
+    asset_path = f"/v2/media/assets/{asset_id}"
+    assert (
+        api_client_focused.post(f"{asset_path}/confirm", headers=headers).status_code
+        == 200
+    )
+    first_id, second_id = [
+        api_client_focused.post(
+            humans_url, headers=headers, json={"name": f"{prefix}_{suffix}"}
+        ).json()["digital_human_id"]
+        for suffix in ("a", "b")
+    ]
+    first_path, second_path = f"{humans_url}/{first_id}", f"{humans_url}/{second_id}"
+    for human_path in (first_path, second_path):
+        linked = api_client_focused.post(
+            f"{human_path}/assets", headers=headers, json={"assetId": asset_id}
+        )
+        assert linked.status_code == 200
+
+    def human_ids_by_status(status: str) -> list[int]:
+        listing = api_client_focused.get(
+            humans_url, headers=headers, params={"keyword": prefix, "status": status}
+        )
+        assert listing.status_code == 200
+        return [human["digital_human_id"] for human in listing.json()]
+
+    archived = api_client_focused.patch(
+        second_path, headers=headers, json={"status": "archived"}
+    )
+    assert archived.json()["asset_ids"] == [asset_id]
+    assert human_ids_by_status("active") == [first_id]
+    assert human_ids_by_status("archived") == [second_id]
+    usage = api_client_focused.get(asset_path, headers=headers).json()["used_by"]
+    assert usage == [
+        {"digital_human_id": first_id, "name": f"{prefix}_a", "status": "active"},
+        {"digital_human_id": second_id, "name": f"{prefix}_b", "status": "archived"},
+    ]
+
+    new_name = f"{prefix}_renamed.jpg"
+    edited = api_client_focused.patch(
+        asset_path, headers=headers, json={"filename": new_name}
+    )
+    assert edited.status_code == 200
+    for human_path in (first_path, second_path):
+        assert (
+            api_client_focused.get(human_path, headers=headers).json()["assets"][0][
+                "filename"
+            ]
+            == new_name
+        )
+
+    restored = api_client_focused.patch(
+        second_path, headers=headers, json={"status": "active"}
+    )
+    assert restored.json()["asset_ids"] == [asset_id]
+    assert human_ids_by_status("archived") == []
+    assert human_ids_by_status("active") == [second_id, first_id]
+
+    assert (
+        api_client_focused.delete(
+            f"{first_path}/assets/{asset_id}", headers=headers
+        ).status_code
+        == 204
+    )
+    assert api_client_focused.get(first_path, headers=headers).json()["asset_ids"] == []
+    usage = api_client_focused.get(asset_path, headers=headers).json()["used_by"]
+    assert usage == [
+        {"digital_human_id": second_id, "name": f"{prefix}_b", "status": "active"}
+    ]
+    assert api_client_focused.get(second_path, headers=headers).json()["asset_ids"] == [
+        asset_id
+    ]
+
+    assert api_client_focused.delete(second_path, headers=headers).status_code == 204
+    retained = api_client_focused.get(asset_path, headers=headers)
+    assert retained.status_code == 200
+    assert retained.json()["used_by"] == []

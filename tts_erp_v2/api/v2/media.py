@@ -45,7 +45,6 @@ from tts_erp_v2.media.domain import (
     AssetStatus,
     DigitalHumanStatus,
     allowed_content_types,
-    build_object_key,
     kind_for_content_type,
     max_bytes_for,
 )
@@ -113,6 +112,16 @@ class AssetOut(BaseModel):
     created_at: datetime
     url: str | None = None
     url_expires_at: datetime | None = None
+
+
+class DigitalHumanReferenceOut(BaseModel):
+    digital_human_id: int
+    name: str
+    status: DigitalHumanStatus
+
+
+class AssetDetailOut(AssetOut):
+    used_by: list[DigitalHumanReferenceOut]
 
 
 class AssetListOut(BaseModel):
@@ -228,14 +237,23 @@ def _required_store() -> MediaObjectStore:
         ) from error
 
 
-def _asset_with_preview(asset: MediaAsset) -> AssetOut:
+def _asset_preview(asset: MediaAsset) -> tuple[str | None, datetime | None]:
     if asset.status != AssetStatus.READY.value:
-        return _asset_out(asset, None, None)
+        return None, None
     try:
-        url, expires_at = _presigned_get(get_store(), asset.object_key)
+        return _presigned_get(get_store(), asset.object_key)
     except MinioConfigError:
-        url, expires_at = None, None
-    return _asset_out(asset, url, expires_at)
+        return None, None
+    except Exception as error:  # noqa: BLE001 — a preview is optional after persistence
+        logger.warning(
+            "media preview URL unavailable",
+            extra={"asset_id": asset.id, "error_type": type(error).__name__},
+        )
+        return None, None
+
+
+def _asset_with_preview(asset: MediaAsset) -> AssetOut:
+    return _asset_out(asset, *_asset_preview(asset))
 
 
 # --- POST /assets/upload-url ------------------------------------------------
@@ -280,27 +298,20 @@ def create_upload_url(
         content_type=body.content_type,
         size_bytes=body.size_bytes,
         bucket=store.bucket(),
-        object_key="placeholder",
         uploaded_by_key_id=key_id,
         uploaded_by_prefix=key_prefix,
     )
-    target = build_object_key(
-        bucket=store.bucket(),
-        asset_id=asset.id,
-        filename=body.filename,
-        content_type=body.content_type,
-    )
-    repository.replace_object_key(sess, asset.id, target.key)
-
-    upload_url = store.presign_put(target.key, body.content_type)
+    upload_url = store.presign_put(asset.object_key, body.content_type)
     expires_at = datetime.now(UTC) + store.default_expiry
-    return UploadUrlOut(
+    ticket = UploadUrlOut(
         asset_id=asset.id,
-        object_key=target.key,
+        object_key=asset.object_key,
         upload_url=upload_url,
         upload_expires_at=expires_at,
         required_headers={"Content-Type": body.content_type},
     )
+    sess.commit()
+    return ticket
 
 
 # --- POST /assets/{id}/confirm ----------------------------------------------
@@ -323,36 +334,32 @@ def confirm_upload(
             f"asset not found: {asset_id}",
         )
 
-    store = _required_store()
-    try:
-        meta = store.stat(asset.object_key)
-    except ObjectNotFound as e:
-        repository.mark_asset_failed(sess, asset_id, "object not found in object storage")
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "UPLOAD_NOT_FOUND",
-        ) from e
+    if asset.status != AssetStatus.READY.value:
+        store = _required_store()
+        failure_reason = None
+        failure_code = None
+        try:
+            meta = store.stat(asset.object_key)
+        except ObjectNotFound:
+            failure_reason = "object not found in object storage"
+            failure_code = "UPLOAD_NOT_FOUND"
+        else:
+            if meta["size"] != asset.size_bytes:
+                failure_reason = "size mismatch"
+                failure_code = "SIZE_MISMATCH"
+        asset = repository.record_upload_verification(sess, asset_id, failure_reason)
+        if asset is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"asset not found: {asset_id}")
+        if failure_code is not None and asset.status != AssetStatus.READY.value:
+            raise HTTPException(status.HTTP_409_CONFLICT, failure_code)
 
-    if meta["size"] != asset.size_bytes:
-        repository.mark_asset_failed(sess, asset_id, "size mismatch")
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "SIZE_MISMATCH",
-        )
-
-    ready = repository.mark_asset_ready(sess, asset_id)
-    if ready is None:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "failed to mark asset ready",
-        )
-    url, expires_at = _presigned_get(store, ready.object_key)
+    url, expires_at = _asset_preview(asset)
     return ConfirmOut(
-        asset_id=ready.id,
-        status=ready.status,
-        object_key=ready.object_key,
-        size_bytes=ready.size_bytes,
-        content_type=ready.content_type,
+        asset_id=asset.id,
+        status=asset.status,
+        object_key=asset.object_key,
+        size_bytes=asset.size_bytes,
+        content_type=asset.content_type,
         url=url,
         url_expires_at=expires_at,
     )
@@ -366,6 +373,7 @@ def list_assets(
     request: Request,
     sess: Annotated[Session, Depends(get_session)],
     kind: str | None = Query(default=None),
+    asset_status: Annotated[AssetStatus | None, Query(alias="status")] = None,
     keyword: str | None = Query(default=None, max_length=120),
     tag: str | None = Query(default=None, max_length=64),
     digital_human_id: int | None = Query(default=None, ge=1, alias="digitalHumanId"),
@@ -396,6 +404,7 @@ def list_assets(
             tag=tag,
             digital_human_id=digital_human_id,
             exclude_digital_human_id=exclude_digital_human_id,
+            status=asset_status,
             limit=limit,
             offset=offset,
         ),
@@ -407,13 +416,13 @@ def list_assets(
 # --- GET /assets/{id} --------------------------------------------------------
 
 
-@router.get("/assets/{asset_id}", response_model=AssetOut)
+@router.get("/assets/{asset_id}", response_model=AssetDetailOut)
 def get_asset_detail(
     asset_id: int,
     request: Request,
     sess: Annotated[Session, Depends(get_session)],
-) -> AssetOut:
-    """Return one asset with a read URL."""
+) -> AssetDetailOut:
+    """Return one asset with a read URL and its live persona references."""
     require_role_at_least(request, "readonly")
     asset = repository.get_asset(sess, asset_id)
     if asset is None:
@@ -421,7 +430,17 @@ def get_asset_detail(
             status.HTTP_404_NOT_FOUND,
             f"asset not found: {asset_id}",
         )
-    return _asset_with_preview(asset)
+    return AssetDetailOut(
+        **_asset_with_preview(asset).model_dump(),
+        used_by=[
+            DigitalHumanReferenceOut(
+                digital_human_id=human.id,
+                name=human.name,
+                status=DigitalHumanStatus(human.status),
+            )
+            for human in repository.digital_humans_for_asset(sess, asset_id)
+        ],
+    )
 
 
 # --- PATCH /assets/{id} ------------------------------------------------------
@@ -486,13 +505,14 @@ def list_digital_humans(
     request: Request,
     sess: Annotated[Session, Depends(get_session)],
     keyword: str | None = Query(default=None, max_length=120),
+    human_status: Annotated[DigitalHumanStatus | None, Query(alias="status")] = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> list[DigitalHumanOut]:
     """List live personas with their linked asset ids."""
     require_role_at_least(request, "readonly")
     humans = repository.list_digital_humans(
-        sess, keyword=keyword, limit=limit, offset=offset
+        sess, keyword=keyword, status=human_status, limit=limit, offset=offset
     )
     return [
         DigitalHumanOut(
@@ -648,19 +668,19 @@ def link_asset(
     """Attach one asset to one persona. Idempotent."""
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    human = repository.get_digital_human(sess, digital_human_id)
-    if human is None:
+    human = repository.link_asset_to_digital_human(sess, digital_human_id, body.asset_id)
+    if human is repository.LinkAssetError.HUMAN_NOT_FOUND:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"digital human not found: {digital_human_id}",
         )
-    if not repository.link_asset_to_digital_human(
-        sess, digital_human_id, body.asset_id
-    ):
+    if human is repository.LinkAssetError.ASSET_NOT_FOUND:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"asset not found: {body.asset_id}",
         )
+    if human is repository.LinkAssetError.ASSET_NOT_READY:
+        raise HTTPException(status.HTTP_409_CONFLICT, "ASSET_NOT_READY")
     return DigitalHumanOut(
         digital_human_id=human.id,
         name=human.name,
