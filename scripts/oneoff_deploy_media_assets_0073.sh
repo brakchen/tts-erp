@@ -178,14 +178,15 @@ if [[ -f "$DEPLOY_DIR/alembic/versions/0073_media_assets.py" && -d "$DEPLOY_DIR/
   ok "本功能代码已在部署目录"
 fi
 
-# 本脚本只负责 0073。若 master 上已经有其它待迁移版本，upgrade head 会把它们一并应用
-# （超出本脚本授权），因此在这里停下并交人工判断。
+# 仓库里若已有其它 lane 的待迁移版本，本脚本只授权迁移到 $EXPECTED_POST（定向升级，
+# 不会顺带应用它们）。这里只提示，不阻断。
 repo_head="$("$DEPLOY_DIR/.venv/bin/alembic" heads 2>/dev/null | tr -d '[:space:]' | cut -d' ' -f1)"
-if [[ "$repo_head" != "$EXPECTED_POST" ]]; then
-  die "仓库 alembic head 是 '$repo_head'，本脚本只授权迁移到 $EXPECTED_POST。\
-master 上还有其它待迁移版本，upgrade head 会一并应用——请先人工评估并使用对应 lane 的上线脚本。"
+if [[ "$repo_head" == "$EXPECTED_POST" ]]; then
+  ok "仓库 alembic head = $EXPECTED_POST"
+else
+  warn "仓库 alembic head 是 '$repo_head'（master 上还有其它 lane 的待迁移版本）。"
+  info "本脚本只迁移到 $EXPECTED_POST，不会顺带应用其它版本。"
 fi
-ok "仓库 alembic head = $EXPECTED_POST（无其它待迁移版本）"
 
 # 节点工具链（前端构建用）
 if (( SKIP_FRONTEND_BUILD )); then
@@ -219,7 +220,9 @@ else
   confirm_db
   # DB URL 走环境变量导出，绝不出现在命令行（dry-run 会打印命令）——否则连接串含密码会泄露到日志。
   export TTS_ERP_DB_URL="$DB_URL"
-  run env ALLOW_PROD_DESTRUCTIVE=1 "$DEPLOY_DIR/.venv/bin/alembic" upgrade head
+  # 只迁移到 $EXPECTED_POST（而非 head）：master 上若已有其它 lane 的待迁移版本，
+  # upgrade head 会把它们一并应用——超出本脚本授权。定向升级只应用本功能这一步。
+  run env ALLOW_PROD_DESTRUCTIVE=1 "$DEPLOY_DIR/.venv/bin/alembic" upgrade "$EXPECTED_POST"
   NEW="$(prod_version)"
   if (( DRY_RUN )); then
     info "（dry-run：未真正迁移，跳过版本/表结构断言）"
