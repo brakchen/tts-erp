@@ -491,6 +491,26 @@ def users_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   return _render_page("users.html", current_page="users")
 
 
+@router.get("/media-assets", response_class=HTMLResponse)
+def media_assets_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
+  """Global media asset library: upload, browse, preview and delete media."""
+  if "media-assets" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "media-assets")
+  return _render_page("media-assets.html", current_page="media-assets")
+
+
+@router.get("/digital-humans", response_class=HTMLResponse)
+def digital_humans_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
+  """Digital human (persona) console: manage personas and their assets."""
+  if "digital-humans" in frontend_pages.MIGRATED_PAGE_IDS:
+    if request is None:
+      raise RuntimeError("Migrated pages require a request")
+    return frontend_pages.render_frontend_page(request, "digital-humans")
+  return _render_page("digital-humans.html", current_page="digital-humans")
+
+
 
 
 

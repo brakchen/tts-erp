@@ -103,6 +103,10 @@ def required_role(method: str, route_path: str) -> Role | None:
         return Role.READWRITE
     if normalized_method == "DELETE" and path.startswith("/v2/spu-images/"):
         return Role.READWRITE
+    if path.startswith("/v2/media/"):
+        if normalized_method in {"GET", "HEAD", "OPTIONS"}:
+            return Role.READONLY
+        return Role.READWRITE
     if path in _READONLY_EXACT or path.startswith(_READONLY_PREFIXES):
         return Role.READONLY
     return Role.ADMIN

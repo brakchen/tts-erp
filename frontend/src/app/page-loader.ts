@@ -17,6 +17,8 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   'spu-profit-deterioration': () => import('../pages/spu-profit-deterioration'),
   'manual-costs': () => import('../pages/manual-costs'),
   'video-publish': () => import('../pages/video-publish'),
+  'media-assets': () => import('../pages/media-assets'),
+  'digital-humans': () => import('../pages/digital-humans'),
   login: () => import('../pages/login'),
 };
 
