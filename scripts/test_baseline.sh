@@ -156,6 +156,8 @@ if [[ "$SCOPED" -eq 1 ]]; then
   "$SELECT_PYTHON" scripts/_test_selection.py --scope "$SCOPE" --base "$BASE" "${SCENARIOS[@]}" >"$RUN_TMP/plan.json"
   cat "$RUN_TMP/plan.json"
   BASE="$("$SELECT_PYTHON" -c 'import json, sys; print(json.load(sys.stdin)["base"])' <"$RUN_TMP/plan.json")"
+  HEAD_SHA="$("$SELECT_PYTHON" -c 'import json, sys; print(json.load(sys.stdin)["head"])' <"$RUN_TMP/plan.json")"
+  git diff --check "$BASE" "$HEAD_SHA" --
   if "$SELECT_PYTHON" -c 'import json, sys; p = json.load(sys.stdin); sys.exit(any(p[k] for k in ("frontend", "backend", "backend_all", "checks", "scenarios", "browser_mock")))' <"$RUN_TMP/plan.json"; then
     echo '[test-baseline] no application tests selected; perform any indicated documentation checks'
     exit 0
@@ -169,7 +171,7 @@ if [[ "$SCOPED" -eq 1 ]]; then
   options=()
   if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then options+=(--refresh-template); fi
   rc=0
-  bash scripts/test_isolated.sh "${options[@]}" selected --scope "$SCOPE" --base "$BASE" --report "$RUN_TMP/report.json" \
+  bash scripts/test_isolated.sh "${options[@]}" selected --scope "$SCOPE" --base "$BASE" --head "$HEAD_SHA" --report "$RUN_TMP/report.json" \
     "${SCENARIOS[@]}" >"$RUN_LOG" 2>&1 || rc=$?
   cat "$RUN_LOG"
   "$SELECT_PYTHON" - "$RUN_TMP/report.json" "$RUN_TMP/target-baseline.txt" "$rc" <<'PYTHON'

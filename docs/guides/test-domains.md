@@ -83,7 +83,7 @@ There is no agent `all` or `coverage` path. Those selections include historical 
 
 | Layer | Location | Isolated command | Protects |
 | --- | --- | --- | --- |
-| Static lint | `tests/api/test_style_tokens.py` | `bash scripts/test_isolated.sh fast` | Unapproved font-family literals |
+| Static lint | `tests/frontend/test_style_tokens.py` | `bash scripts/test_isolated.sh fast` | Unapproved font-family literals |
 | Browser | `tests/browser/` | `bash scripts/test_isolated.sh browser` | Multi-viewport overflow and computed font stacks |
 | Live e2e | `tests/e2e/` | `bash scripts/test_isolated.sh e2e` | Read-only deployed contracts |
 

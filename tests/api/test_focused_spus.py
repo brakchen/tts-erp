@@ -46,28 +46,6 @@ def _seed_shop_and_products(db_engine):
     return int(shop_a), int(shop_b)
 
 
-def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
-    """Focused editing remains immediate; selection UI now belongs to React."""
-    root = Path(__file__).resolve().parents[2]
-    selection = (root / "frontend/src/pages/spu-profitability/Selection.tsx").read_text(encoding="utf-8")
-    query = (root / "frontend/src/pages/spu-profitability/query.ts").read_text(encoding="utf-8")
-    page = (root / "frontend/src/pages/spu-profitability/index.tsx").read_text(encoding="utf-8")
-
-    assert 'id={focused ? \'focused-spu-select\' : \'filter-spu-ids\'}' in selection
-    assert "<Checkbox" in selection and "isSelected={draft.includes(item.spu_id)}" in selection
-    assert "addSpuIds: add" in selection and "removeSpuIds: remove" in selection
-    assert "/v2/reporting/focused-spus/" in selection and "method: 'PATCH'" in selection
-    assert "resolvePaste" in selection and "parseIds(paste)" in selection
-    assert "focused && !canWrite" in selection
-    assert "修改后实时保存" in selection and "已实时保存" in selection
-    assert "{!focused &&" in selection and 'id="btn-spu-apply"' in selection
-    assert "focusedCallback.current(total)" in selection
-    assert "focusedCount !== null" in page
-    assert "params.set('scope', 'focused')" in query
-    assert "TomSelect" not in selection
-    assert "编辑关注 SPU" not in selection and "保存修改" not in selection
-
-
 def test_focused_spus_page_uses_shared_profitability_kernel(api_client, readonly_key):
     from tests.api.test_frontend_pages import _bootstrap
 

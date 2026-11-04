@@ -79,5 +79,29 @@ def test_explicit_side_stays_independent_of_git_diff():
 def test_registered_api_with_multiple_consumers_runs_all_its_pages():
     plan = select(["tts_erp_v2/api/v2/media.py"])
     assert plan.backend == ["tests/api/test_media_api.py"]
-    assert plan.vitest == ["src/pages/digital-humans/", "src/pages/media-assets/"]
+    assert plan.vitest == ["src/pages/media-assets/", "src/pages/media-assets/workflows.test.tsx"]
     assert not plan.build
+
+
+def test_auth_selection_covers_session_and_middleware_contracts():
+    plan = select(["tts_erp_v2/middleware/auth.py"])
+    assert "tests/api/test_user_auth.py" in plan.backend
+    assert "tests/api/test_middleware.py" in plan.backend
+    assert not plan.build
+
+
+def test_api_contract_selection_keeps_enum_and_roi_consumers():
+    config = select(["tts_erp_v2/api/v2/config.py"])
+    assert "tests/api/test_enum_map.py" in config.backend
+    assert "src/pages/enum-map/" in config.vitest
+    analytics = select(["tts_erp_v2/api/v2/analytics.py"])
+    assert "tests/api/test_spu_price_stats.py" in analytics.backend
+    assert "tests/api/test_spu_roi_fee_rate.py" in analytics.backend
+
+
+def test_deleted_test_is_not_collected_and_browser_fixture_change_gets_a_browser_check():
+    deleted = "tests/browser/test_obsolete.py"
+    plan = select([deleted, "tests/browser/conftest.py"], deleted=frozenset({deleted}))
+    assert deleted not in plan.checks
+    assert plan.browser_mock == ["tests/browser/test_frontend_dashboard_layout.py"]
+    assert plan.frontend and plan.build

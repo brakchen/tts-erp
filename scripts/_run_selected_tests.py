@@ -16,30 +16,35 @@ from _test_selection import (
     LEGACY_FRONTEND,
     ROOT,
     SCENARIOS,
-    changed_paths,
     git,
     resolve_commit,
-    select,
+    select_commits,
 )
 
 BACKEND_EXCLUDED_DIRS = {"browser", "e2e", "fixtures", "frontend", "support", "integration", "__pycache__"}
 SAFE_MARKS = "not slow and not requires_service and not domain_migration"
 
 
-def run(base: str, report: str, scenarios: list[str], scope: str) -> int:
+def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> int:
     if git("status", "--porcelain", "-z", "--untracked-files=all"):
         raise ValueError("selected execution requires a clean committed worktree")
-    base, head = resolve_commit(base), resolve_commit("HEAD")
+    base, head = resolve_commit(base), resolve_commit(head)
+    if head != resolve_commit("HEAD"):
+        raise ValueError("HEAD changed after test selection")
     git("merge-base", "--is-ancestor", base, head)
-    plan = select(changed_paths(base, head), scenarios, scope=scope)
+    plan = select_commits(base, head, scenarios, scope)
     print(json.dumps({"base": base, "head": head, **asdict(plan)}, indent=2), flush=True)
     live = [SCENARIOS[name] for name in plan.scenarios]
     targets = [*plan.backend, *plan.checks, *plan.browser_mock, *live]
     if plan.frontend:
         targets.append(COMPONENTS)
         if not plan.vitest:
-            targets.extend((*LEGACY_FRONTEND, "tests/frontend/test_ad_daily_legacy.py"))
+            targets.extend(LEGACY_FRONTEND)
+            targets.extend(
+                path.relative_to(ROOT).as_posix() for path in sorted((ROOT / "tests/frontend").glob("test_*.py"))
+            )
     required = list(dict.fromkeys(targets))
+    targets = required
     if plan.backend_all:
         roots = [
             path.relative_to(ROOT).as_posix()
@@ -90,11 +95,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
     parser.add_argument("--scope", choices=("auto", "frontend", "backend"), default="auto")
+    parser.add_argument("--head", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), action="append", default=[])
     args = parser.parse_args()
     try:
-        return run(args.base, args.report, args.scenario, args.scope)
+        return run(args.base, args.head, args.report, args.scenario, args.scope)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f"selected tests: {exc}", file=sys.stderr)
         return 2

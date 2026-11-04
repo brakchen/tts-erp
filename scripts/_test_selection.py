@@ -11,8 +11,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE_PREFIX = "frontend/src/pages/"
+PAGE_TEST_FILTERS = {"digital-humans": "src/pages/media-assets/workflows.test.tsx"}
 COMPONENTS = "tests/frontend/test_components.py"
 PACKAGER = "tests/frontend/test_build_package.py"
+SOURCE_CONTRACTS = "tests/frontend/test_source_contracts.py"
+STYLE_TOKENS = "tests/frontend/test_style_tokens.py"
 SELECTOR_TESTS = "tests/scripts/test_test_selection.py"
 LEGACY_FRONTEND = (
     "tests/publishing/test_polling_channels.py",
@@ -23,8 +26,18 @@ LEGACY_FRONTEND = (
 # Only map a domain narrowly when its provider and consumer tests are known.
 API_CONTRACTS = {
     "ad_daily": (("ad-daily",), ("tests/api/test_ad_daily.py",)),
-    "analytics": (("spu-profitability",), ("tests/api/test_spu_roi_api.py",)),
-    "config": (("runtime-configs",), ("tests/api/test_runtime_config.py", "tests/api/test_runtime_config_review.py")),
+    "analytics": (
+        ("dashboard", "spu-profitability"),
+        (
+            "tests/api/test_analytics_coverage.py", "tests/api/test_analytics_dumps_v4.py",
+            "tests/api/test_analytics_v2_contract.py", "tests/api/test_analytics_v2_errors.py",
+            "tests/api/test_spu_roi_api.py", "tests/api/test_spu_price_stats.py", "tests/api/test_spu_roi_fee_rate.py",
+        ),
+    ),
+    "config": (
+        ("enum-map", "runtime-configs"),
+        ("tests/api/test_enum_map.py", "tests/api/test_runtime_config.py", "tests/api/test_runtime_config_review.py"),
+    ),
     "focused_spus": (("spu-profitability",), ("tests/api/test_focused_spus.py",)),
     "intercept": (
         ("intercept-configs", "intercept-requests", "intercept-stats"),
@@ -51,7 +64,7 @@ MOCK_BROWSER = {
 SCENARIOS = {
     "page-assets": "tests/api/test_spu_roi_api.py::test_spu_roi_page_cache_busts_css_and_js_from_their_own_content",
     "account-page": "tests/scripts/test_frontend_p2_accounts.py::test_real_cookie_roles_page_access_scope_and_revocation_use_same_clone",
-    "login-cookie": "tests/browser/test_frontend_remaining_auth_native.py::test_native_enter_cookie_next_logout_and_blank_login_capture[1440]",
+    "login-cookie": "tests/browser/test_frontend_remaining_auth_native.py::test_native_enter_cookie_next_logout_and_blank_login_capture",
 }
 PAGE_ASSETS = {
     "scripts/build_frontend.sh",
@@ -83,7 +96,7 @@ class Selection:
 
 def _page(selection: Selection, page: str) -> None:
     if not selection.frontend or selection.vitest:
-        selection.vitest.append(f"src/pages/{page}/")
+        selection.vitest.append(PAGE_TEST_FILTERS.get(page, f"src/pages/{page}/"))
     selection.frontend = True
 
 
@@ -114,7 +127,10 @@ def _classify(selection: Selection, path: str) -> str:
         return "registered API provider and consumer"
     if path in {"tts_erp_v2/api/v2/auth.py", "tts_erp_v2/api/v2/oauth.py", "tts_erp_v2/middleware/auth.py"}:
         _frontend_all(selection)
-        selection.backend.extend(("tests/api/test_auth_login.py", "tests/api/test_oauth_api.py"))
+        selection.backend.extend((
+            "tests/api/test_auth_login.py", "tests/api/test_cookie_csrf.py", "tests/api/test_middleware.py",
+            "tests/api/test_oauth_api.py", "tests/api/test_user_auth.py",
+        ))
         return "auth contract; add a named browser scenario if browser behavior changes"
     if path.startswith(("tts_erp_v2/api/", "frontend/src/shared/api/")) or path in {
         "frontend/src/bootstrap.ts", "frontend/src/shared/contracts.ts", "tts_erp_v2/app.py",
@@ -125,7 +141,10 @@ def _classify(selection: Selection, path: str) -> str:
     if path.startswith(PAGE_PREFIX) and "/" in path[len(PAGE_PREFIX):]:
         page = path[len(PAGE_PREFIX):].split("/", 1)[0]
         _page(selection, page)
+        if page in {"dashboard", "shops", "spu-profitability", "spu-profit-deterioration", "sync-jobs"}:
+            selection.checks.append(SOURCE_CONTRACTS)
         if path.endswith(".css"):
+            selection.checks.append(STYLE_TOKENS)
             selection.browser_mock.extend(MOCK_BROWSER.get(page, ()))
             if page not in MOCK_BROWSER:
                 return f"frontend page {page}; review the unregistered layout check"
@@ -139,6 +158,7 @@ def _classify(selection: Selection, path: str) -> str:
     if path.startswith(("frontend/", "tests/frontend/", "tts_erp_v2/static/css/", "tts_erp_v2/static/js/")):
         _frontend_all(selection)
         if path.endswith(".css"):
+            selection.checks.extend((SOURCE_CONTRACTS, STYLE_TOKENS))
             selection.browser_mock.extend(MOCK_BROWSER["dashboard"] + MOCK_BROWSER["spu-profitability"])
         if path in {"frontend/vite.config.ts", "frontend/package.json", "frontend/package-lock.json"}:
             selection.build = True
@@ -153,12 +173,18 @@ def _classify(selection: Selection, path: str) -> str:
     }:
         selection.backend.append("tests/analytics/test_spu_profitability_formula.py")
         return "backend profitability formula"
+    if path == "tts_erp_v2/analytics/spu_roi.py":
+        _contract(selection, "analytics")
+        return "SPU ROI API provider and consumer"
     if path.startswith("tts_erp_v2/analytics/"):
         selection.backend_all = True
         return "backend analytics"
     if path.startswith("tts_erp_v2/"):
         selection.backend_all = True
         return "backend"
+    if path == "tests/browser/conftest.py":
+        selection.browser_mock.extend(MOCK_BROWSER["dashboard"])
+        return "changed browser fixtures; check representative mock browser"
     if path.startswith("tests/browser/") and Path(path).name.startswith("test_"):
         if any(path == target.split("::", 1)[0] for files in MOCK_BROWSER.values() for target in files):
             selection.browser_mock.append(path)
@@ -171,14 +197,18 @@ def _classify(selection: Selection, path: str) -> str:
         selection.scenarios.append("page-assets" if path.startswith("tests/api/") else "account-page")
         return "changed backend test file with an explicit asset-dependent case"
     if path.startswith("tests/") and path.endswith(".py") and path != "tests/conftest.py":
-        if path.startswith(("tests/e2e/", "tests/support/")) or path.endswith("/conftest.py"):
+        if path.startswith("tests/e2e/"):
+            return "explicit smoke change; validate affected smoke separately in its approved environment"
+        if path.startswith("tests/support/") or path.endswith("/conftest.py"):
             selection.backend_all = True
             _frontend_all(selection)
             return "shared test or explicit smoke surface"
         selection.backend_all = True
         return "backend test"
     if path.startswith("scripts/test") or path in {"scripts/_test_selection.py", "AGENTS.md"}:
-        selection.backend.append(SELECTOR_TESTS)
+        selection.backend.extend((
+            SELECTOR_TESTS, "tests/test_test_template_refresh.py", "tests/test_test_run_binding.py",
+        ))
         _frontend_all(selection)
         return "test infrastructure"
     if path.endswith(".md") and not path.startswith(("docs/api/", "docs/testing/", "docs/guides/agent-")):
@@ -189,11 +219,21 @@ def _classify(selection: Selection, path: str) -> str:
     return "unclassified; both browser-free suites"
 
 
-def select(paths: list[str], scenarios: list[str] | None = None, *, scope: str = "auto") -> Selection:
+def select(
+    paths: list[str], scenarios: list[str] | None = None, *,
+    scope: str = "auto", deleted: frozenset[str] = frozenset(),
+) -> Selection:
     selection = Selection(frontend=scope == "frontend", backend_all=scope == "backend")
     if scope == "auto":
         for path in sorted(set(paths)):
-            selection.reasons[path] = _classify(selection, path)
+            if path in deleted and path.startswith(("tests/frontend/", "tests/browser/")):
+                _frontend_all(selection)
+                selection.reasons[path] = "removed test; validate remaining frontend coverage"
+            elif path in deleted and path.startswith("tests/") and path.endswith(".py"):
+                selection.backend_all = True
+                selection.reasons[path] = "removed test; validate remaining backend coverage"
+            else:
+                selection.reasons[path] = _classify(selection, path)
     else:
         selection.reasons["scope"] = f"explicit {scope} suite"
     selection.scenarios.extend(scenarios or ())
@@ -205,11 +245,26 @@ def git(*args: str) -> bytes:
     return subprocess.check_output(("git", *args), cwd=ROOT)
 
 
-def changed_paths(base: str, head: str) -> list[str]:
-    raw = git("diff", "--name-only", "-z", "--no-renames", base, head, "--")
+def _git_paths(raw: bytes) -> list[str]:
     if raw and not raw.endswith(b"\0"):
         raise ValueError("Git path output was incomplete")
     return [path.decode("utf-8", errors="surrogateescape") for path in raw.split(b"\0")[:-1]]
+
+
+def select_commits(base: str, head: str, scenarios: list[str] | None, scope: str) -> Selection:
+    fields = _git_paths(git("diff", "--name-status", "-z", "--no-renames", base, head, "--"))
+    if len(fields) % 2:
+        raise ValueError("Git status output was incomplete")
+    changes = dict(zip(fields[1::2], fields[::2], strict=True))
+    deleted = frozenset(path for path, status in changes.items() if status == "D")
+    plan = select(list(changes), scenarios, scope=scope, deleted=deleted)
+    if plan.vitest:
+        files = _git_paths(git("ls-tree", "-r", "--name-only", "-z", head, "--", "frontend/src"))
+        tests = [path.removeprefix("frontend/") for path in files if path.endswith((".test.ts", ".test.tsx"))]
+        if any(not any(test.startswith(pattern) for test in tests) for pattern in plan.vitest):
+            _frontend_all(plan)
+            plan.reasons["vitest"] = "unmapped page tests; run full frontend component suite"
+    return plan
 
 
 def resolve_commit(revision: str) -> str:
@@ -226,7 +281,7 @@ def main() -> None:
     try:
         base, head = resolve_commit(args.base), resolve_commit(args.head)
         git("merge-base", "--is-ancestor", base, head)
-        plan = select(changed_paths(base, head), args.scenario, scope=args.scope)
+        plan = select_commits(base, head, args.scenario, args.scope)
     except (ValueError, subprocess.CalledProcessError) as exc:
         parser.exit(2, f"test selection: {exc}\n")
     print(json.dumps({"base": base, "head": head, **asdict(plan)}, indent=2))
