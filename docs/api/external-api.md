@@ -54,7 +54,7 @@ credential kinds:
 | SPU 盈利表现对比 | `GET /v2/analytics/spu-profit-deterioration` | readonly — 7 天主参考、3 天辅助；现行契约见本文同名章节及 [技术设计](../spu-profit-deterioration/02-technical-design.md) |
 | SPU 盈利表现对比页面 (HTML) | `GET /v2/pages/spu-profit-deterioration` | readonly (browser → 302 login)；保留既有页面入口与权限点，不再提供告警配置编辑 |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
-| Media asset library | `GET /v2/media/assets[?kind=&keyword=&tag=&digitalHumanId=&excludeDigitalHumanId=]`, `GET/PATCH/DELETE /v2/media/assets/{id}`, `POST /v2/media/assets/upload-url`, `POST /v2/media/assets/{id}/confirm` | readonly / readwrite |
+| Media asset library | `GET /v2/media/assets[?kind=&status=&keyword=&tag=&digitalHumanId=&excludeDigitalHumanId=]`, `GET/PATCH/DELETE /v2/media/assets/{id}`, `POST /v2/media/assets/upload-url`, `POST /v2/media/assets/{id}/confirm` | readonly / readwrite |
 | Digital humans (personas) | `GET/POST /v2/media/digital-humans`, `GET/PATCH/DELETE /v2/media/digital-humans/{id}`, `POST /v2/media/digital-humans/{id}/assets`, `DELETE /v2/media/digital-humans/{id}/assets/{assetId}` | readonly / readwrite |
 | Media asset / digital human pages (HTML) | `GET /v2/pages/media-assets`, `GET /v2/pages/digital-humans` | readonly (browser → 302 login)；页面权限点 `page:media-assets` / `page:digital-humans` |
 | TikTok video publish workflow | `GET /v2/pages/video-publish`, `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, replace-upload, verify, `/cleanup/retry`, `POST /v2/video-publish/tasks/{id}/confirm-published`, `PATCH /v2/video-publish/tasks/{id}/settings` | session: page:video-publish + readonly/readwrite action tier; API key: admin by default; page-level scope (every task in the workspace) |
@@ -536,21 +536,30 @@ with a presigned URL. Design:
 2. Browser PUTs the file to `upload_url` directly with `required_headers`.
 3. `POST /v2/media/assets/{asset_id}/confirm` (readwrite) — server HEAD-verifies
    the object; a size mismatch → 409 `SIZE_MISMATCH`, a missing object → 409
-   `UPLOAD_NOT_FOUND`. Success → `{status: "ready", url, ...}`.
+   `UPLOAD_NOT_FOUND`. Success → `{status: "ready", url, ...}`. Reconfirming an
+   already-ready ticket preserves the original `uploaded_at`. Preview signing
+   is independent of the durable confirmation result.
 4. `GET /v2/media/assets` (readonly) — optional `kind` (`image`/`video`),
-   `keyword`, `tag`, `digitalHumanId` (linked to this persona), and
+   `status` (`awaiting_upload`/`ready`/`failed`), `keyword`, `tag`,
+   `digitalHumanId` (linked to this persona), and
    `excludeDigitalHumanId` (unlinked to this persona) filters; returns
    `{items, total, limit, offset}`. Asset metadata remains readable when MinIO
    is unconfigured. Preview URLs are nullable and only issued for ready assets.
    Upload URL generation and confirmation return HTTP 503 when MinIO is unconfigured.
 5. `GET/PATCH/DELETE /v2/media/assets/{asset_id}` — detail / metadata edit /
    soft-delete (204, idempotent; the stored object is removed best-effort).
+   Detail includes `used_by: [{digital_human_id, name, status}]` for current
+   persona references, including archived personas.
 6. `GET/POST /v2/media/digital-humans` (readonly / readwrite) — list /
-   create. Returned `asset_ids` exclude soft-deleted assets.
+   create. List accepts optional `status=active|archived`. Returned
+   `asset_ids` exclude soft-deleted assets.
 7. `GET/PATCH/DELETE /v2/media/digital-humans/{digital_human_id}` — detail
-   (including the referenced assets) / edit / soft-delete. Deleting a persona
-   never deletes its assets.
-8. `POST /v2/media/digital-humans/{id}/assets` — attach an asset (idempotent);
+   (including the referenced assets) / edit / soft-delete. Archiving via
+   `status=archived` preserves the references and allows maintenance and
+   restoration via `status=active`. Deleting a persona preserves its assets.
+8. `POST /v2/media/digital-humans/{id}/assets` — attach a ready asset
+   (idempotent). New links to unconfirmed assets return 409 `ASSET_NOT_READY`.
+   Existing links can be read, replayed, or detached.
    `DELETE /v2/media/digital-humans/{id}/assets/{asset_id}` — detach
    (idempotent).
 
