@@ -49,7 +49,7 @@
 
 ## Secret 引用
 
-页面/API 只接受和展示 `secret://<name>`，不会回读明文。保存 secret 时使用 `token_service.encrypt()` 加密；列表仅返回引用、截短 fingerprint 和更新时间。HTTP snapshot 同样保持引用；HTTP 端点和通用 resolver 均不返回 secret 明文。受控业务消费者 `tts_erp_v2.plugin.monitor_health.notifications.webhook()` 仅为服务端健康告警读取已发布配置引用的活动 secret，并经 `token_service.decrypt()` 解密使用，不向 HTTP 或插件暴露明文。
+页面/API 只接受和展示 `secret://<name>`，不会回读明文。保存 secret 时使用 `token_service.encrypt()` 加密；列表仅返回引用、截短 fingerprint 和更新时间。HTTP snapshot 同样保持引用；HTTP 端点和通用 resolver 均不返回 secret 明文。
 
 先保存 secret，再在配置草稿或 payload 中引用它。发布时服务验证所有引用均存在且未归档；`secret://` 后必须是非空的小写名称（字母、数字、点、下划线或短横线）。
 
@@ -59,7 +59,7 @@
 
 服务端按 `config_key` + `published_version` 直接读取已发布 revision（例如 `tts_erp_v2.analytics.spu_deterioration_alert.read.effective_config_details`）。对外读取一律使用 snapshot 端点。
 
-Monitor 健康告警固定读取 `plugin.monitor_health.v1`，已发布 payload 为 `{"feishuWebhook":"secret://monitor-health-feishu"}`。先通过现有凭证管理保存该命名 secret，再发布配置；secret 明文应为官方 HTTPS 飞书机器人 Webhook。系统不会自动写入真实配置；未发布、已归档、secret 不可用或遗留非空 rollout 均明确失败。插件不持有这份 Webhook，健康上报持久化也不以飞书配置可用为前提。具体行为见[最小探活需求](../plugins/monitor/04-health-reporting-requirements.md)。
+ERP 已退役 Monitor 健康告警。历史 `plugin.monitor_health.v1` 配置已无运行时消费者。
 
 ## 权限与页面
 

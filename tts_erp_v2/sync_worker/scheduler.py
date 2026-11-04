@@ -79,8 +79,6 @@ class JobSpec:
     entrypoint: str = "run"
     #: token.refresh only: pass a real refresher registry into the entrypoint.
     needs_token_registry: bool = False
-    #: None retains the caller's global jitter; deadline-bound jobs may use 0.
-    jitter_seconds: int | None = None
 
 
 # Intervals match the legacy ``sync_cron.py`` cadence (see
@@ -263,13 +261,6 @@ JOBS: dict[str, JobSpec] = {
         interval_seconds=86400,
         is_tiktok=False,
         entrypoint="run_scheduled",
-    ),
-    "plugin.monitor_health": JobSpec(
-        job_name="plugin.monitor_health",
-        module_path="tts_erp_v2.plugin.monitor_health.job",
-        interval_seconds=15,
-        is_tiktok=False,
-        jitter_seconds=0,
     ),
 }
 
@@ -697,11 +688,7 @@ def build_scheduler(
             _make_executor(spec, session_factory),
             trigger=IntervalTrigger(
                 seconds=spec.interval_seconds,
-                jitter=(
-                    spec.jitter_seconds
-                    if spec.jitter_seconds is not None
-                    else jitter_seconds
-                ),
+                jitter=jitter_seconds,
             ),
             id=name,
             name=name,
