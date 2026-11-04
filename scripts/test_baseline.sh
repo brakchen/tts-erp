@@ -149,6 +149,10 @@ if [[ "$SCOPE" == auto ]]; then
   fi
   git show "$BASE:$BASELINE_FILE" >"$RUN_TMP/target-baseline.txt" ||
     fail 'trusted target baseline is unavailable'
+  if "$SELECT_PYTHON" -c 'import json, sys; sys.exit(not json.load(sys.stdin)["refresh_template"])' <"$RUN_TMP/plan.json" &&
+    [[ "$REFRESH_TEMPLATE" -ne 1 ]]; then
+    fail 'schema changes require --refresh-template'
+  fi
   options=()
   if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then options+=(--refresh-template); fi
   rc=0
