@@ -117,8 +117,8 @@ systemctl --user restart tts-erp.service
 sleep 2
 systemctl --user is-active tts-erp.service | grep -q '^active$' \
   || dl_die "tts-erp.service 重启后未 active，请查 journalctl --user -u tts-erp -n 50"
-dl_wait_healthz "$ORIGIN" 90 \
-  || dl_die "tts-erp.service 重启后 90 秒内 healthz 未就绪，请查 journalctl --user -u tts-erp -n 50"
+dl_wait_healthz "$ORIGIN" 60 \
+  || dl_die "tts-erp.service 重启后 60 秒内 healthz 未就绪，请查 journalctl --user -u tts-erp -n 50"
 
 # sync / publish worker 运行的是主 worktree 代码
 MAIN_HEAD="$(git -C "$MAIN_DIR" rev-parse HEAD 2>/dev/null || true)"

@@ -19,17 +19,17 @@ dl_log()  { printf '[deploy] %s\n' "$*" >&2; }
 dl_warn() { printf '[deploy][警告] %s\n' "$*" >&2; }
 dl_die()  { printf '[deploy][错误] %s\n' "$*" >&2; exit 1; }
 
-# 等待 healthz 就绪（服务重启后 uvicorn 启动需要数秒到数十秒）。
-# 用法: dl_wait_healthz <origin> [超时秒数，默认 90]
+# 等待 healthz 就绪（服务重启后持续探活，默认 60 秒窗口、每 10 秒一次）。
+# 用法: dl_wait_healthz <origin> [超时秒数，默认 60]
 dl_wait_healthz() {
-  local origin="$1" timeout="${2:-90}" waited=0
+  local origin="$1" timeout="${2:-60}" waited=0
   while [ "$waited" -lt "$timeout" ]; do
     if curl -fsS --max-time 5 "$origin/healthz" >/dev/null 2>&1; then
       dl_log "$origin 已就绪（等待 ${waited}s）"
       return 0
     fi
-    sleep 3
-    waited=$((waited + 3))
+    sleep 10
+    waited=$((waited + 10))
   done
   return 1
 }
