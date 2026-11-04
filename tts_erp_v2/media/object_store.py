@@ -13,7 +13,11 @@ import os
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from tts_erp_v2.storage.minio_client import MinioClient, ObjectNotFound
+from tts_erp_v2.storage.minio_client import (
+    MinioClient,
+    MinioConfigError,
+    ObjectNotFound,
+)
 
 #: Bucket used when ``MEDIA_MINIO_BUCKET`` is not configured.
 DEFAULT_MEDIA_BUCKET = "tts-erp-media"
@@ -84,7 +88,7 @@ def media_store_from_env() -> MinioMediaStore:
     """
     bucket = os.environ.get("MEDIA_MINIO_BUCKET", DEFAULT_MEDIA_BUCKET).strip()
     if not bucket:
-        raise ValueError("MEDIA_MINIO_BUCKET must not be empty")
+        raise MinioConfigError("MEDIA_MINIO_BUCKET must not be empty")
     return MinioMediaStore(MinioClient.from_env().with_bucket(bucket))
 
 
