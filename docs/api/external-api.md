@@ -545,7 +545,7 @@ with a presigned URL. Design:
    `excludeDigitalHumanId` (unlinked to this persona) filters; returns
    `{items, total, limit, offset}`. Asset metadata remains readable when MinIO
    is unconfigured. Preview URLs are nullable and only issued for ready assets.
-   Upload URL generation and confirmation return HTTP 503 when MinIO is unconfigured.
+   Upload URL generation and confirmation of a pending ticket return HTTP 503 when MinIO is unconfigured.
 5. `GET/PATCH/DELETE /v2/media/assets/{asset_id}` — detail / metadata edit /
    soft-delete (204, idempotent; the stored object is removed best-effort).
    Detail includes `used_by: [{digital_human_id, name, status}]` for current
