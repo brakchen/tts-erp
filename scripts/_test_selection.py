@@ -155,6 +155,14 @@ def _classify(selection: Selection, path: str) -> str:
         _frontend_all(selection)
         selection.checks.append(path)
         return "changed frontend test"
+    if path == "tts_erp_v2/static/css/video-publish.css":
+        _page(selection, "video-publish")
+        selection.checks.extend((
+            STYLE_TOKENS,
+            "tests/publishing/test_contracts.py::test_publish_responsive_accessibility_contract_uses_existing_css",
+            "tests/publishing/test_contracts.py::test_publish_confirm_dialog_layout_and_copy_match_design_spec",
+        ))
+        return "legacy video-publish stylesheet and accessibility contract"
     if path.startswith(("frontend/", "tests/frontend/", "tts_erp_v2/static/css/", "tts_erp_v2/static/js/")):
         _frontend_all(selection)
         if path.endswith(".css"):

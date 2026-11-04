@@ -109,6 +109,16 @@ case "$SCOPE" in
       exec "${PYTHON:-python3}" scripts/_test_selection.py --scope "$SCOPE" --base "$BASE" "${SCENARIOS[@]}"
     fi
     ;;
+  fast)
+    [[ "$PLAN" -eq 0 && "${#SCENARIOS[@]}" -eq 0 ]] ||
+      fail 'fast does not accept --plan or --scenario'
+    if [[ -n "$BASE" || "$REFRESH_TEMPLATE" -eq 1 ]]; then
+      [[ "$MODE" == compare ]] || fail 'fast with --base or --refresh-template requires compare mode'
+    fi
+    ;;
+  all|coverage|migration|domain_migration)
+    fail 'historical migration suites are not supported by the baseline driver'
+    ;;
   *)
     [[ "$PLAN" -eq 0 && -z "$BASE" && "$REFRESH_TEMPLATE" -eq 0 && "${#SCENARIOS[@]}" -eq 0 ]] ||
       fail '--base, --plan and --refresh-template require a scoped run'
@@ -207,6 +217,16 @@ case "$MODE" in
     ;;
 esac
 
+TRUSTED_BASELINE="$BASELINE_FILE"
+if [[ -n "$BASE" ]]; then
+  BASE="$(git rev-parse --verify --end-of-options "${BASE}^{commit}")"
+  git merge-base --is-ancestor "$BASE" HEAD || fail 'base must be an ancestor of HEAD'
+  TRUSTED_BASELINE="$RUN_TMP/target-baseline.txt"
+  git show "$BASE:$BASELINE_FILE" >"$TRUSTED_BASELINE" || fail 'trusted target baseline is unavailable'
+fi
+options=()
+if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then options+=(--refresh-template); fi
+
 echo "[test-baseline] running scope '$SCOPE' once through the isolated runner"
 echo "[test-baseline] this single run replaces the old capture-baseline + rerun-the-suite procedure"
 
@@ -214,7 +234,7 @@ echo "[test-baseline] this single run replaces the old capture-baseline + rerun-
 # do not let `set -e` abort before we get to read the summary.
 rc=0
 # shellcheck disable=SC2086
-bash scripts/test_isolated.sh "$SCOPE" -p no:cacheprovider >"$RUN_LOG" 2>&1 || rc=$?
+bash scripts/test_isolated.sh "${options[@]}" "$SCOPE" -p no:cacheprovider >"$RUN_LOG" 2>&1 || rc=$?
 
 pytest_failure_ids "$RUN_LOG" >"$RUN_TMP/current.txt"
 
@@ -224,7 +244,10 @@ pytest_failure_ids "$RUN_LOG" >"$RUN_TMP/current.txt"
 # means the run aborted (collection error, wrapper failure) and any diff we
 # computed from it would be silently empty — which would read as "zero new
 # failures" and wrongly pass the DoD.
-if ! grep -qE "short test summary info|slowest .* durations|no tests ran" "$RUN_LOG"; then
+if [[ "$rc" -gt 1 ]] ||
+  [[ "$rc" -eq 1 && ! -s "$RUN_TMP/current.txt" ]] ||
+  grep -qE '^\[isolated-test\] ERROR:|no tests ran' "$RUN_LOG" ||
+  ! grep -qE "short test summary info|slowest .* durations" "$RUN_LOG"; then
   fail "the suite did not produce a recognizable pytest summary; inspect the run output"
 fi
 
@@ -258,7 +281,7 @@ if [[ "$MODE" == "update" ]]; then
 fi
 
 # compare mode
-baseline_ids "$BASELINE_FILE" >"$RUN_TMP/base.txt"
+baseline_ids "$TRUSTED_BASELINE" >"$RUN_TMP/base.txt"
 
 LC_ALL=C comm -13 "$RUN_TMP/base.txt" "$RUN_TMP/current.txt" >"$RUN_TMP/new.txt"
 LC_ALL=C comm -23 "$RUN_TMP/base.txt" "$RUN_TMP/current.txt" >"$RUN_TMP/fixed.txt"
