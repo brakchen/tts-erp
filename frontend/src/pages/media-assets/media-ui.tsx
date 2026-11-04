@@ -116,7 +116,7 @@ export function recordLink(bootstrap: FrontendBootstrap, page: string, parameter
 export function ReadStatus({ title, loading, error, onRetry }: {
   title: string; loading: boolean; error?: string; onRetry: () => void;
 }) {
-  if (error) return <Alert status="danger"><Alert.Content>
+  if (error) return <Alert role="alert" status="danger"><Alert.Content>
     <Alert.Title>{title}不可用</Alert.Title><Alert.Description>{error}</Alert.Description>
     <Button variant="secondary" onPress={onRetry}>重试{title}</Button>
   </Alert.Content></Alert>;
@@ -125,7 +125,7 @@ export function ReadStatus({ title, loading, error, onRetry }: {
 }
 
 export function ActionError({ message }: { message: string }) {
-  return message ? <Alert status="danger"><Alert.Content>
+  return message ? <Alert role="alert" status="danger"><Alert.Content>
     <Alert.Title>需要处理</Alert.Title><Alert.Description>{message}</Alert.Description>
   </Alert.Content></Alert> : null;
 }
