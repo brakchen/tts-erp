@@ -19,6 +19,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from playwright.sync_api import Locator, Page, Response, expect, sync_playwright
+from render_support import overflow_report
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -296,7 +297,7 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
     dialog(page).get_by_label(re.compile(r"^标签")).fill("TEST_shared_tag")
     gate.fail("PATCH", f"{ASSETS}/{aid}", 500)
     button(dialog(page), "保存资料").click()
-    expect(dialog(page).get_by_role("alert").filter(has_text=re.compile("失败|未完成"))).to_be_visible()
+    expect(dialog(page).get_by_role("alert").filter(has_text=re.compile("未能确认操作结果"))).to_be_visible()
     expect(dialog(page).get_by_label("显示名称", exact=True)).to_have_value(renamed)
     expect(dialog(page).get_by_label("说明", exact=True)).to_have_value("TEST_shared_note")
     assert media_run.asset_id(original) == aid
@@ -371,9 +372,10 @@ def test_confirm_and_attach_recovery_on_the_original_target(media_run: MediaRun,
     asset = media_run.name("attached.png")
     media_run.goto("digital-humans")
     create_persona(page, person)
-    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    expect(button(dialog(page), "上传新资产")).to_be_visible()
     page.screenshot(path=tmp_path / "TEST_digital_human_375.png")
+    dimensions = overflow_report(page)
+    assert dimensions["scrollWidth"] <= dimensions["clientWidth"], dimensions
+    expect(button(dialog(page), "上传新资产")).to_be_visible()
     hid = media_run.human_id(person)
     attach_path = f"{HUMANS}/{hid}/assets"
     button(dialog(page), "上传新资产").click()
