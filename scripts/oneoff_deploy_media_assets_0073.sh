@@ -13,10 +13,8 @@
 #
 # 前置条件（脚本会逐条检查，缺哪条就停在哪条）：
 #   1) 本功能已合并到 origin/master（含 alembic/versions/0073_media_assets.py）；
-#   2) 部署目录 /home/schan/tts-erp（services 的 WorkingDirectory）已同步到该 master：
-#        cd /home/schan/tts-erp && git pull --ff-only origin master
-#      （脚本自身在被 pull 的树里，运行中自改文件会破坏 bash 的增量读取，
-#        因此脚本不自动 pull，只检查并给出明确指令）
+#   2) 部署目录 /home/schan/tts-erp（services 的 WorkingDirectory）已同步到该 master
+#      —— 本脚本会自己完成同步（第 0 步），无需操作者手动 pull；
 #   3) .env 存在且含 TTS_ERP_DB_URL；对象存储凭据沿用既有 MINIO_* 变量。
 #
 # 用法：
@@ -27,7 +25,7 @@
 #   bash scripts/oneoff_deploy_media_assets_0073.sh --skip-frontend-build
 #
 # 步骤：
-#   0 预检     部署目录 / .env / venv / docker / node / 代码同步状态
+#   0 预检     部署目录 / .env / venv / docker / node / 同步代码到 origin/master
 #   1 迁移     alembic upgrade head（0072 → 0073，纯增量；逐字确认库名）
 #   2 权限     accounts.cli sync-permissions（幂等）→ 校验两个权限点已授权
 #   3 对象存储  确保 bucket tts-erp-media 存在（幂等，加法操作）
@@ -94,6 +92,8 @@ confirm_db() { # 逐字输入目标库名
 }
 
 # ---------- 选项 ----------
+# 先存下原始参数：下面的 shift 会清空 "$@"，而第 0 步 pull 后要原样 re-exec 自己。
+ORIGINAL_ARGS=("$@")
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --yes|-y) ASSUME_YES=1 ;;
@@ -139,13 +139,33 @@ ok "目标库：$DB_NAME（连接串不回显）"
 # 连接串只通过环境变量传给子进程，绝不进入命令行（dry-run 会打印命令）。
 export TTS_ERP_DB_URL="$DB_URL"
 
-# 代码同步：脚本自身在被 pull 的树里，运行中自改文件会破坏 bash 的增量读取，
-# 因此这里只检查并给出明确指令，不自动 pull。
+# 代码同步：本脚本自己把部署目录同步到 origin/master。
+#
+# 为什么必须自同步：脚本自己就住在被 pull 的树里（scripts/oneoff_deploy_media_assets_0073.sh
+# 与 alembic/versions/0073_media_assets.py 都只在 master 上）。若要求操作者先手动
+# pull，「脚本不存在 → 跑不了」会变成死循环（No such file or directory）。
+#
+# 为什么 pull 后要重新 exec 自己：bash 按字节增量读取脚本文件，运行中 pull 改写脚本
+# 本体会让 bash 从错误的偏移继续读。pull 完成后用新文件重新 exec 一次，避免读到半截内容。
+#
+# 安全性：git pull --ff-only 只快进，不会产生合并提交，也不会覆盖工作区改动；
+# 若工作区有会被本次更新覆盖的本地修改，git 自己会拒绝（此时脚本中止并提示）。
 if git -C "$DEPLOY_DIR" fetch origin -q 2>/dev/null; then
   if git -C "$DEPLOY_DIR" merge-base --is-ancestor origin/master HEAD; then
     ok "部署目录已同步 origin/master（HEAD=$(git -C "$DEPLOY_DIR" rev-parse --short HEAD)）"
   else
-    fail_pre "部署目录落后 origin/master。请先执行：cd $DEPLOY_DIR && git pull --ff-only origin master"
+    info "部署目录落后 origin/master，正在同步（fast-forward）…"
+    if (( DRY_RUN )); then
+      info "（dry-run：跳过 pull）"
+    else
+      git -C "$DEPLOY_DIR" merge --ff-only origin/master \
+        || die "git pull --ff-only 失败（可能有本地改动会被覆盖）。请先处理：git -C $DEPLOY_DIR status"
+      ok "已同步到 $(git -C "$DEPLOY_DIR" rev-parse --short HEAD)"
+      # 重新 exec：让 bash 从更新后的脚本文件重新开始（避免增量读取半截内容）。
+      # ${ORIGINAL_ARGS[@]+...} 避免 set -u 下空数组展开报错。
+      exec bash "$DEPLOY_DIR/scripts/oneoff_deploy_media_assets_0073.sh" \
+        ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
+    fi
   fi
 else
   warn "git fetch 失败（离线？）——继续，但请确认代码已含 alembic/versions/0073_media_assets.py"
