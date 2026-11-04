@@ -33,7 +33,7 @@
   ├─ PUT  文件 ──────────────────────────────────────> MinIO (tts-erp-media)
   ├─ POST /v2/media/assets/{id}/confirm ──> ttsERP ──> HEAD 校验 size ──> ready
   │
-  ├─ GET  /v2/media/assets[?kind=&keyword=&tag=&digitalHumanId=]
+  ├─ GET  /v2/media/assets[?kind=&keyword=&tag=&digitalHumanId=&excludeDigitalHumanId=]
   ├─ GET/PATCH/DELETE /v2/media/assets/{id}
   │
   └─ /v2/media/digital-humans[/{id}[/assets[/{assetId}]]]
@@ -54,7 +54,7 @@
 - `media_asset_status_check`：状态只有 `awaiting_upload` / `ready` / `failed`。
 - `media_asset_size_check`：`size_bytes > 0`。
 - 三张表都挂 `public.fn_touch_updated_at()` BEFORE UPDATE 触发器（仓库既有约定）。
-- 资产删除是**软删**（`deleted_at`）+ 对象存储 best-effort 删除，**永不**删除数字人以外的资产行。
+- 资产删除是**软删**（`deleted_at`）+ 对象存储 best-effort 删除。已删除资产从数字人的资产列表和计数中排除。
 - 删除数字人只软删数字人并解绑链接，**资产本身保留在全局池**。
 
 ## 4. 对象键布局
@@ -72,11 +72,13 @@ assets/<YYYY-MM-DD>/<asset_id>-<slug>.<ext>
 1. `POST /v2/media/assets/upload-url`：
    - 服务端先校验 `content_type` 在白名单内、`size_bytes` 不超过该类型的上限；不合规 → 400。
    - 插入 `awaiting_upload` 行 → 用行 id 组成对象键 → 回写 → 返回预签名 PUT URL。
-2. 浏览器 PUT 文件到 MinIO。
+2. 浏览器携带票据的 `required_headers`，PUT 文件到 MinIO。
 3. `POST /v2/media/assets/{id}/confirm`：
    - HEAD 对象。对象不存在 → 标记 `failed`，返回 409 `UPLOAD_NOT_FOUND`。
    - `size` 与申报值不符 → 标记 `failed`，返回 409 `SIZE_MISMATCH`（防篡改上传）。
    - 一致 → 置 `ready`，返回预签名 GET URL。
+
+MinIO 未配置时，资产和数字人详情仍可读取元数据，预览 URL 返回空值。未就绪的资产同样没有预览 URL。需要对象存储的上传和确认接口返回 HTTP 503。
 
 ## 6. 访问控制
 
@@ -97,11 +99,15 @@ assets/<YYYY-MM-DD>/<asset_id>-<slug>.<ext>
 - `frontend/src/pages/media-assets/` — 上传（XHR 直传，带进度）、类型/关键字筛选、预览（`<img>` / `<video>`）、元数据编辑、删除。
 - `frontend/src/pages/digital-humans/` — 创建/编辑/归档/删除数字人、挂载与解绑资产。
 
+两页删除前均显示目标名称和影响范围，确认后才发送请求。数字人创建请求进行中会锁定创建表单，防止重复提交。
+
 注册链路：`accounts/pages.py` → `alembic` 权限种子 → `frontend/src/app/page-loader.ts` → `api/v2/frontend_pages.py` `MIGRATED_PAGE_IDS` → `api/v2/pages.py` 路由。
 
 前端只做展示性派生（字节数格式化）。授权、状态、筛选口径均由服务端决定。
 
 ## 8. 运维
+
+- **本机前端包**：服务代码新增 React 页面后需重新构建并发布本机前端包（`bash scripts/build_frontend.sh`）。如果两页同时显示「页面加载失败」，先确认当前 `release.json` 对应的 Vite manifest 同时包含 `media-assets` 和 `digital-humans`。
 
 - **新建 bucket**（一次性，加法操作）：
 

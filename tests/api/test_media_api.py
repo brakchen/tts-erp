@@ -31,7 +31,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 # 与其他 tests/api 用例一致：归入 domain_api，否则 `scripts/test.sh api <file>`
 # 的 `-m domain_api` 过滤会把本文件整体静默反选（exit 5）。
@@ -478,3 +477,95 @@ def test_digital_human_create_requires_readwrite(api_client_focused, readonly_ke
         json={"name": "TEST_nope"},
     )
     assert r.status_code == 403, r.text
+
+
+def test_metadata_is_available_without_configured_object_storage(
+    api_client_focused, readwrite_key, monkeypatch
+):
+    from tts_erp_v2.api.v2 import media
+    from tts_erp_v2.storage.minio_client import MinioConfigError
+
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    confirmed = api_client_focused.post(f"/v2/media/assets/{asset_id}/confirm", headers=headers)
+    assert confirmed.status_code == 200
+    human_id = api_client_focused.post(
+        "/v2/media/digital-humans", headers=headers, json={"name": "TEST_storage_down"}
+    ).json()["digital_human_id"]
+    assert api_client_focused.post(
+        f"/v2/media/digital-humans/{human_id}/assets", headers=headers, json={"assetId": asset_id}
+    ).status_code == 200
+
+    def unavailable():
+        raise MinioConfigError("TEST storage not configured")
+
+    monkeypatch.setattr(media, "get_store", unavailable)
+    listing = api_client_focused.get("/v2/media/assets", headers=headers)
+    assert listing.status_code == 200
+    row = next(row for row in listing.json()["items"] if row["asset_id"] == asset_id)
+    assert row["url"] is None and row["status"] == "ready"
+    detail = api_client_focused.get(f"/v2/media/digital-humans/{human_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["assets"][0]["asset_id"] == asset_id
+    assert detail.json()["assets"][0]["url"] is None
+    changed = api_client_focused.patch(
+        f"/v2/media/assets/{asset_id}", headers=headers, json={"filename": "TEST_renamed.png"}
+    )
+    assert changed.status_code == 200 and changed.json()["filename"] == "TEST_renamed.png"
+    upload = api_client_focused.post(
+        "/v2/media/assets/upload-url",
+        headers=headers,
+        json={"filename": "TEST_unavailable.jpg", "contentType": "image/jpeg", "sizeBytes": 1024},
+    )
+    assert upload.status_code == 503
+
+
+def test_asset_candidates_exclude_only_the_selected_personas_links(
+    api_client_focused, readwrite_key
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    linked_id = _upload_one(api_client_focused, readwrite_key, filename="TEST_candidate_linked.jpg")
+    other_id = _upload_one(api_client_focused, readwrite_key, filename="TEST_candidate_other.jpg")
+    for asset_id in (linked_id, other_id):
+        assert api_client_focused.post(f"/v2/media/assets/{asset_id}/confirm", headers=headers).status_code == 200
+    human_ids = [
+        api_client_focused.post(
+            "/v2/media/digital-humans", headers=headers, json={"name": f"TEST_candidate_{index}"}
+        ).json()["digital_human_id"]
+        for index in (1, 2)
+    ]
+    for human_id, asset_id in zip(human_ids, (linked_id, other_id), strict=True):
+        assert api_client_focused.post(
+            f"/v2/media/digital-humans/{human_id}/assets", headers=headers, json={"assetId": asset_id}
+        ).status_code == 200
+
+    candidates = api_client_focused.get(
+        "/v2/media/assets", headers=headers,
+        params={"excludeDigitalHumanId": human_ids[0], "keyword": "TEST_candidate", "limit": 1},
+    )
+    assert candidates.status_code == 200
+    assert candidates.json()["total"] == 1
+    assert [row["asset_id"] for row in candidates.json()["items"]] == [other_id]
+    linked = api_client_focused.get(
+        "/v2/media/assets", headers=headers, params={"digitalHumanId": human_ids[0]}
+    )
+    assert [row["asset_id"] for row in linked.json()["items"]] == [linked_id]
+
+
+def test_deleted_asset_is_not_counted_as_a_persona_attachment(api_client_focused, readwrite_key):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    assert api_client_focused.post(f"/v2/media/assets/{asset_id}/confirm", headers=headers).status_code == 200
+    human_id = api_client_focused.post(
+        "/v2/media/digital-humans", headers=headers, json={"name": "TEST_deleted_asset_count"}
+    ).json()["digital_human_id"]
+    path = f"/v2/media/digital-humans/{human_id}"
+    assert api_client_focused.post(
+        f"{path}/assets", headers=headers, json={"assetId": asset_id}
+    ).status_code == 200
+    assert api_client_focused.delete(f"/v2/media/assets/{asset_id}", headers=headers).status_code == 204
+    detail = api_client_focused.get(path, headers=headers).json()
+    listing = api_client_focused.get("/v2/media/digital-humans", headers=headers).json()
+    row = next(item for item in listing if item["digital_human_id"] == human_id)
+    assert detail["assets"] == []
+    assert (detail["asset_ids"], row["asset_ids"]) == ([], [])
