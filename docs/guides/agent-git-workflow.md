@@ -161,7 +161,7 @@ git merge --no-edit origin/master
 Resolve both sides' intent, never blanket `--ours`, `--theirs`, or `-X theirs`. Abort and ask if intent is unclear. Then:
 
 1. Run diagnostics/link/path checks and the narrowest relevant safe tests.
-2. For ordinary code/test changes, run `bash scripts/test_baseline.sh --scope auto --base "$synced_master"` against the exact synchronized master SHA. Record the selected scope and any named scenarios. Changes to test execution or global collection use `--scope fast --base "$synced_master"` according to the [testing guide](agent-testing.md). Zero new stable failures are required.
+2. For ordinary code/test changes, run `bash scripts/test_baseline.sh --scope auto --base "$synced_master"` against the exact synchronized master SHA. Record the selected scope and any named scenarios. Changes to test execution or global collection use `--scope fast --base "$synced_master"` according to the [testing guide](agent-testing.md). Both scopes run application tests through `scripts/test_isolated.sh`. Zero new stable failures are required.
 3. Review `git diff --check`, branch diff and staged file list; exclude secrets and foreign WIP.
 4. Push the synchronized lane branch. Record full HEAD and `origin/master` SHA, exact validation evidence and a fresh UTC `readyAt` in its full ready record.
 
