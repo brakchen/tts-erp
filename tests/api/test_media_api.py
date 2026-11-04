@@ -550,3 +550,22 @@ def test_asset_candidates_exclude_only_the_selected_personas_links(
         "/v2/media/assets", headers=headers, params={"digitalHumanId": human_ids[0]}
     )
     assert [row["asset_id"] for row in linked.json()["items"]] == [linked_id]
+
+
+def test_deleted_asset_is_not_counted_as_a_persona_attachment(api_client_focused, readwrite_key):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    assert api_client_focused.post(f"/v2/media/assets/{asset_id}/confirm", headers=headers).status_code == 200
+    human_id = api_client_focused.post(
+        "/v2/media/digital-humans", headers=headers, json={"name": "TEST_deleted_asset_count"}
+    ).json()["digital_human_id"]
+    path = f"/v2/media/digital-humans/{human_id}"
+    assert api_client_focused.post(
+        f"{path}/assets", headers=headers, json={"assetId": asset_id}
+    ).status_code == 200
+    assert api_client_focused.delete(f"/v2/media/assets/{asset_id}", headers=headers).status_code == 204
+    detail = api_client_focused.get(path, headers=headers).json()
+    listing = api_client_focused.get("/v2/media/digital-humans", headers=headers).json()
+    row = next(item for item in listing if item["digital_human_id"] == human_id)
+    assert detail["assets"] == []
+    assert (detail["asset_ids"], row["asset_ids"]) == ([], [])

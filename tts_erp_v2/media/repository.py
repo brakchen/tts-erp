@@ -214,10 +214,14 @@ def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
 def asset_ids_for_digital_human(
     session: Session, digital_human_id: int
 ) -> list[int]:
-    """Return the asset ids linked to one persona, newest link first."""
+    """Return live asset ids linked to one persona, newest link first."""
     rows = session.scalars(
         select(DigitalHumanAsset.asset_id)
-        .where(DigitalHumanAsset.digital_human_id == digital_human_id)
+        .join(MediaAsset, MediaAsset.id == DigitalHumanAsset.asset_id)
+        .where(
+            DigitalHumanAsset.digital_human_id == digital_human_id,
+            MediaAsset.deleted_at.is_(None),
+        )
         .order_by(DigitalHumanAsset.created_at.desc(), DigitalHumanAsset.id.desc())
     ).all()
     return list(rows)

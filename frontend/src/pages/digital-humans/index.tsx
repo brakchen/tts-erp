@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Input, Label, TextArea, TextField } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
 import { ApiError, requestJson } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
+import DeleteConfirmation from '../media-assets/DeleteConfirmation';
 import {
   decodeAssetList,
   decodeDigitalHuman,
@@ -51,9 +52,13 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   const [detailError, setDetailError] = useState('');
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
+  const [creating, setCreating] = useState(false);
+  const createInFlight = useRef(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [notice, setNotice] = useState('');
+  const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const [attachId, setAttachId] = useState('');
   const [candidateResult, setCandidateResult] = useState<{ humanId: string; assets: Asset[] }>();
   const candidates = candidateResult?.humanId === selectedId ? candidateResult.assets : undefined;
@@ -114,7 +119,9 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   }, [root, selectedId, detailRevision]);
 
   async function createHuman() {
-    if (!canWrite || !newName.trim()) return;
+    if (!canWrite || !newName.trim() || createInFlight.current) return;
+    createInFlight.current = true;
+    setCreating(true);
     setNotice('');
     try {
       const created = await requestJson<unknown>(
@@ -133,14 +140,19 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`创建未完成：${writeFailure(error)}`);
+    } finally {
+      createInFlight.current = false;
+      setCreating(false);
     }
   }
 
   async function saveHuman() {
-    if (!detail || !canWrite) return;
+    if (!detail || !canWrite || !name.trim() || saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSaving(true);
     setNotice('');
     try {
-      await requestJson<unknown>(
+      const updated = await requestJson<unknown>(
         root,
         `${api}/digital-humans/${detail.digitalHumanId}`,
         {
@@ -151,12 +163,17 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
           }),
         },
         parseIdentityJson,
-      );
+      ).then((result) => decodeDigitalHuman(result.data));
+      setDetail((current) => current?.digitalHumanId === updated.digitalHumanId
+        ? { ...current, ...updated }
+        : current);
       setNotice('数字人信息已保存。');
-      setDetailRevision((value) => value + 1);
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`保存未完成：${writeFailure(error)}`);
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
     }
   }
 
@@ -186,8 +203,8 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         method: 'DELETE',
       });
       setNotice('数字人已删除；其资产仍保留在资产库中。');
-      setSelectedId(null);
-      setDetail(null);
+      setSelectedId((current) => current === detail.digitalHumanId ? null : current);
+      setDetail((current) => current?.digitalHumanId === detail.digitalHumanId ? null : current);
       if (humans.length === 1 && humans[0].digitalHumanId === detail.digitalHumanId) {
         setOffset(Math.max(0, offset - pageSize));
       }
@@ -260,16 +277,16 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
       <div className="erp-panel space-y-3">
         <h2 className="text-xl font-semibold">新建数字人</h2>
         <p>数字人是人设档案容器，用来组织它引用的图片与视频资产。</p>
-        <TextField value={newName} isDisabled={!canWrite} onChange={setNewName}>
+        <TextField value={newName} isDisabled={!canWrite || creating} onChange={setNewName}>
           <Label>名称</Label>
-          <Input />
+          <Input maxLength={120} />
         </TextField>
-        <TextField value={newDescription} isDisabled={!canWrite} onChange={setNewDescription}>
+        <TextField value={newDescription} isDisabled={!canWrite || creating} onChange={setNewDescription}>
           <Label>人设说明</Label>
-          <TextArea rows={3} autoComplete="off" />
+          <TextArea rows={3} autoComplete="off" maxLength={2000} />
         </TextField>
-        <Button isDisabled={!canWrite || !newName.trim()} onPress={() => void createHuman()}>
-          创建数字人
+        <Button isDisabled={!canWrite || !newName.trim()} isPending={creating} onPress={() => void createHuman()}>
+          {creating ? '创建中…' : '创建数字人'}
         </Button>
       </div>
 
@@ -329,24 +346,29 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
               <p>
                 {detail.name} · {detail.status === 'archived' ? '已归档' : '启用中'}
               </p>
-              <TextField value={name} isDisabled={!canWrite} onChange={setName}>
+              <TextField value={name} isDisabled={!canWrite || saving} onChange={setName}>
                 <Label>名称</Label>
-                <Input />
+                <Input maxLength={120} />
               </TextField>
-              <TextField value={description} isDisabled={!canWrite} onChange={setDescription}>
+              <TextField value={description} isDisabled={!canWrite || saving} onChange={setDescription}>
                 <Label>人设说明</Label>
-                <TextArea rows={3} autoComplete="off" />
+                <TextArea rows={3} autoComplete="off" maxLength={2000} />
               </TextField>
               <div className="flex flex-wrap gap-2">
-                <Button isDisabled={!canWrite || !name.trim()} onPress={() => void saveHuman()}>
-                  保存
+                <Button isDisabled={!canWrite || !name.trim()} isPending={saving} onPress={() => void saveHuman()}>
+                  {saving ? '保存中…' : '保存'}
                 </Button>
-                <Button variant="secondary" isDisabled={!canWrite} onPress={() => void archiveHuman()}>
+                <Button variant="secondary" isDisabled={!canWrite || saving} onPress={() => void archiveHuman()}>
                   归档
                 </Button>
-                <Button variant="danger" isDisabled={!canWrite} onPress={() => void removeHuman()}>
-                  删除
-                </Button>
+                <DeleteConfirmation
+                  key={detail.digitalHumanId}
+                  label="删除数字人"
+                  name={detail.name}
+                  description="删除后，数字人将从列表移除。它引用的资产仍保留在资产库。"
+                  isDisabled={!canWrite || saving}
+                  onConfirm={removeHuman}
+                />
               </div>
 
               <h3 className="text-lg font-semibold">引用资产</h3>
@@ -360,7 +382,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
                     </span>
                     <Button
                       variant="secondary"
-                      isDisabled={!canWrite}
+                      isDisabled={!canWrite || saving}
                       onPress={() => void detachAsset(asset.assetId)}
                     >
                       解绑
@@ -381,7 +403,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
                     onChange={(event) => setAttachId(event.target.value)}
                   />
                 </label>
-                <Button isDisabled={!canWrite || !attachId.trim()} onPress={() => void attachAsset()}>
+                <Button isDisabled={!canWrite || saving || !attachId.trim()} onPress={() => void attachAsset()}>
                   挂载
                 </Button>
                 <Button variant="secondary" isDisabled={!canWrite} onPress={() => void listUnattachedAssets()}>

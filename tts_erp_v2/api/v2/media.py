@@ -569,7 +569,7 @@ def get_digital_human(
         description=human.description,
         status=human.status,
         created_at=human.created_at,
-        asset_ids=asset_ids,
+        asset_ids=[asset.asset_id for asset in assets],
         assets=assets,
     )
 

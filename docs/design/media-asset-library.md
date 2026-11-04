@@ -54,7 +54,7 @@
 - `media_asset_status_check`：状态只有 `awaiting_upload` / `ready` / `failed`。
 - `media_asset_size_check`：`size_bytes > 0`。
 - 三张表都挂 `public.fn_touch_updated_at()` BEFORE UPDATE 触发器（仓库既有约定）。
-- 资产删除是**软删**（`deleted_at`）+ 对象存储 best-effort 删除，**永不**删除数字人以外的资产行。
+- 资产删除是**软删**（`deleted_at`）+ 对象存储 best-effort 删除。已删除资产从数字人的资产列表和计数中排除。
 - 删除数字人只软删数字人并解绑链接，**资产本身保留在全局池**。
 
 ## 4. 对象键布局
@@ -98,6 +98,8 @@ MinIO 未配置时，资产和数字人详情仍可读取元数据，预览 URL 
 
 - `frontend/src/pages/media-assets/` — 上传（XHR 直传，带进度）、类型/关键字筛选、预览（`<img>` / `<video>`）、元数据编辑、删除。
 - `frontend/src/pages/digital-humans/` — 创建/编辑/归档/删除数字人、挂载与解绑资产。
+
+两页删除前均显示目标名称和影响范围，确认后才发送请求。数字人创建请求进行中会锁定创建表单，防止重复提交。
 
 注册链路：`accounts/pages.py` → `alembic` 权限种子 → `frontend/src/app/page-loader.ts` → `api/v2/frontend_pages.py` `MIGRATED_PAGE_IDS` → `api/v2/pages.py` 路由。
 

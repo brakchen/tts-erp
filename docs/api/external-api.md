@@ -546,7 +546,7 @@ with a presigned URL. Design:
 5. `GET/PATCH/DELETE /v2/media/assets/{asset_id}` — detail / metadata edit /
    soft-delete (204, idempotent; the stored object is removed best-effort).
 6. `GET/POST /v2/media/digital-humans` (readonly / readwrite) — list /
-   create.
+   create. Returned `asset_ids` exclude soft-deleted assets.
 7. `GET/PATCH/DELETE /v2/media/digital-humans/{digital_human_id}` — detail
    (including the referenced assets) / edit / soft-delete. Deleting a persona
    never deletes its assets.

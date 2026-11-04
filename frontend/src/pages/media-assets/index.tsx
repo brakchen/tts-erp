@@ -3,6 +3,7 @@ import { Alert, Button, Input, Label, TextArea, TextField } from '@heroui/react'
 import type { PageProps } from '../../shared/contracts';
 import { ApiError, requestJson, retryAfterSeconds } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
+import DeleteConfirmation from './DeleteConfirmation';
 import {
   assetKinds,
   decodeAsset,
@@ -77,6 +78,8 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   const [editDescription, setEditDescription] = useState('');
   const [editTags, setEditTags] = useState('');
   const [notice, setNotice] = useState('');
+  const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const [file, setFile] = useState<File>();
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -213,7 +216,9 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   }
 
   async function saveDetail() {
-    if (!detail || !canWrite) return;
+    if (!detail || !canWrite || !editName.trim() || saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSaving(true);
     setNotice('');
     try {
       const updated = await requestJson<unknown>(
@@ -232,11 +237,14 @@ export default function MediaAssets({ bootstrap }: PageProps) {
         },
         parseIdentityJson,
       ).then((result) => decodeAsset(result.data));
-      setDetail(updated);
+      setDetail((current) => current?.assetId === updated.assetId ? updated : current);
       setNotice('资产信息已保存。');
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`保存未完成：${writeFailure(error)}`);
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
     }
   }
 
@@ -248,8 +256,8 @@ export default function MediaAssets({ bootstrap }: PageProps) {
         method: 'DELETE',
       });
       setNotice('资产已删除。');
-      setSelectedId(null);
-      setDetail(undefined);
+      setSelectedId((current) => current === detail.assetId ? null : current);
+      setDetail((current) => current?.assetId === detail.assetId ? undefined : current);
       if (assets.length === 1 && assets[0].assetId === detail.assetId) {
         setOffset(Math.max(0, offset - pageSize));
       }
@@ -384,39 +392,40 @@ export default function MediaAssets({ bootstrap }: PageProps) {
               )}
               <TextField
                 value={editName}
-                isDisabled={!canWrite}
+                isDisabled={!canWrite || saving}
                 onChange={setEditName}
               >
                 <Label>文件名</Label>
-                <Input />
+                <Input maxLength={255} />
               </TextField>
               <TextField
                 value={editDescription}
-                isDisabled={!canWrite}
+                isDisabled={!canWrite || saving}
                 onChange={setEditDescription}
               >
                 <Label>说明</Label>
-                <TextArea rows={3} autoComplete="off" />
+                <TextArea rows={3} autoComplete="off" maxLength={2000} />
               </TextField>
               <TextField
                 value={editTags}
-                isDisabled={!canWrite}
+                isDisabled={!canWrite || saving}
                 onChange={setEditTags}
               >
                 <Label>标签（顿号或逗号分隔）</Label>
                 <Input />
               </TextField>
               <div className="flex flex-wrap gap-2">
-                <Button isDisabled={!canWrite} onPress={() => void saveDetail()}>
-                  保存
+                <Button isDisabled={!canWrite || !editName.trim()} isPending={saving} onPress={() => void saveDetail()}>
+                  {saving ? '保存中…' : '保存'}
                 </Button>
-                <Button
-                  variant="danger"
-                  isDisabled={!canWrite}
-                  onPress={() => void removeAsset()}
-                >
-                  删除资产
-                </Button>
+                <DeleteConfirmation
+                  key={detail.assetId}
+                  label="删除资产"
+                  name={detail.filename}
+                  description="删除后，资产将从资产库和引用它的数字人中移除。"
+                  isDisabled={!canWrite || saving}
+                  onConfirm={removeAsset}
+                />
               </div>
             </>
           )}
