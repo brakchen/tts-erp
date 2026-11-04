@@ -47,3 +47,22 @@ def test_empty_and_docs_only_select_no_application_test():
     for changes in ([], ["docs/README.md"]):
         plan = select(changes)
         assert not (plan.frontend or plan.backend_all or plan.backend or plan.build)
+
+
+def test_changed_test_runs_even_when_it_needs_the_frontend_build():
+    packager = select(["tests/frontend/test_build_package.py"])
+    assert packager.checks == ["tests/frontend/test_build_package.py"]
+    assert not packager.build
+
+    account = select(["tests/scripts/test_frontend_p2_accounts.py"])
+    assert account.scenarios == ["account-page"] and account.build
+
+
+def test_browser_test_edits_are_scoped_to_the_changed_test_file():
+    plan = select(["tests/browser/test_frontend_p2_live.py"])
+    assert plan.checks == ["tests/browser/test_frontend_p2_live.py"]
+    assert plan.build and not (plan.backend_all or plan.frontend or plan.scenarios)
+
+
+def test_contract_fixture_selects_its_provider_and_consumer():
+    assert select(["tests/fixtures/ad_daily_summary.json"]).contracts == ["ad_daily"]

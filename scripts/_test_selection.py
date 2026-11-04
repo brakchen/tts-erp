@@ -14,6 +14,11 @@ PAGE_PREFIX = "frontend/src/pages/"
 COMPONENTS = "tests/frontend/test_components.py"
 PACKAGER = "tests/frontend/test_build_package.py"
 SELECTOR_TESTS = "tests/scripts/test_test_selection.py"
+LEGACY_FRONTEND = (
+    "tests/publishing/test_polling_channels.py",
+    "tests/publishing/test_upload_cancellation.py",
+    "tests/publishing/test_video_publish_frontend.py",
+)
 
 # Only map a domain narrowly when its provider and consumer tests are known.
 API_CONTRACTS = {
@@ -33,6 +38,7 @@ MOCK_BROWSER = {
 
 SCENARIOS = {
     "page-assets": "tests/api/test_spu_roi_api.py::test_spu_roi_page_cache_busts_css_and_js_from_their_own_content",
+    "account-page": "tests/scripts/test_frontend_p2_accounts.py::test_real_cookie_roles_page_access_scope_and_revocation_use_same_clone",
     "login-cookie": "tests/browser/test_frontend_remaining_auth_native.py::test_native_enter_cookie_next_logout_and_blank_login_capture",
 }
 PAGE_ASSETS = {
@@ -48,6 +54,7 @@ class Selection:
     vitest: list[str] = field(default_factory=list)
     backend_all: bool = False
     backend: list[str] = field(default_factory=list)
+    checks: list[str] = field(default_factory=list)
     contracts: list[str] = field(default_factory=list)
     browser_mock: list[str] = field(default_factory=list)
     scenarios: list[str] = field(default_factory=list)
@@ -57,7 +64,7 @@ class Selection:
     reasons: dict[str, str] = field(default_factory=dict)
 
     def finish(self) -> None:
-        for items in (self.vitest, self.backend, self.contracts, self.browser_mock, self.scenarios):
+        for items in (self.vitest, self.backend, self.checks, self.contracts, self.browser_mock, self.scenarios):
             items[:] = sorted(set(items))
         self.build = bool(self.browser_mock or self.scenarios or self.build)
 
@@ -83,7 +90,7 @@ def _contract(selection: Selection, api: str) -> None:
 def _classify(selection: Selection, path: str) -> str:
     if path in PAGE_ASSETS:
         _frontend_all(selection)
-        selection.backend.append(PACKAGER)
+        selection.checks.append(PACKAGER)
         selection.scenarios.append("page-assets")
         return "page assets and serving contract"
     if path == "tests/fixtures/ad_daily_summary.json":
@@ -110,13 +117,19 @@ def _classify(selection: Selection, path: str) -> str:
             if page not in MOCK_BROWSER:
                 return f"frontend page {page}; review the unregistered layout check"
         return f"frontend page {page}"
+    if path in LEGACY_FRONTEND or (
+        path.startswith("tests/frontend/") and Path(path).name.startswith("test_")
+    ):
+        _frontend_all(selection)
+        selection.checks.append(path)
+        return "changed frontend test"
     if path.startswith(("frontend/", "tests/frontend/", "tts_erp_v2/static/css/", "tts_erp_v2/static/js/")):
         _frontend_all(selection)
         if path.endswith(".css"):
             selection.browser_mock.extend(MOCK_BROWSER["dashboard"] + MOCK_BROWSER["spu-profitability"])
         if path in {"frontend/vite.config.ts", "frontend/package.json", "frontend/package-lock.json"}:
             selection.build = True
-            selection.backend.append(PACKAGER)
+            selection.checks.append(PACKAGER)
         return "frontend"
     if path.startswith(("alembic/", "docs/schema/")) or path == "alembic.ini":
         selection.backend_all = True
@@ -133,13 +146,17 @@ def _classify(selection: Selection, path: str) -> str:
     if path.startswith("tts_erp_v2/"):
         selection.backend_all = True
         return "backend"
-    if path.startswith("tests/browser/"):
+    if path.startswith("tests/browser/") and Path(path).name.startswith("test_"):
         if any(path == target.split("::", 1)[0] for files in MOCK_BROWSER.values() for target in files):
             selection.browser_mock.append(path)
-            return "mocked browser regression"
-        _frontend_all(selection)
-        selection.backend_all = True
-        return "browser test outside the registered scenarios; review its targeted invocation"
+            return "changed mocked browser regression"
+        selection.checks.append(path)
+        selection.build = True
+        return "changed browser test; run that file only"
+    if path in {"tests/api/test_spu_roi_api.py", "tests/scripts/test_frontend_p2_accounts.py"}:
+        selection.backend.append(path)
+        selection.scenarios.append("page-assets" if path.startswith("tests/api/") else "account-page")
+        return "changed backend test file with an explicit asset-dependent case"
     if path.startswith("tests/") and path.endswith(".py") and path != "tests/conftest.py":
         if path.startswith(("tests/e2e/", "tests/support/")) or path.endswith("/conftest.py"):
             selection.backend_all = True

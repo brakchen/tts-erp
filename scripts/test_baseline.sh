@@ -143,7 +143,7 @@ if [[ "$SCOPE" == auto ]]; then
   "$SELECT_PYTHON" scripts/_test_selection.py --base "$BASE" "${SCENARIOS[@]}" >"$RUN_TMP/plan.json"
   cat "$RUN_TMP/plan.json"
   BASE="$("$SELECT_PYTHON" -c 'import json, sys; print(json.load(sys.stdin)["base"])' <"$RUN_TMP/plan.json")"
-  if "$SELECT_PYTHON" -c 'import json, sys; p = json.load(sys.stdin); sys.exit(any(p[k] for k in ("frontend", "backend", "backend_all", "scenarios", "browser_mock")))' <"$RUN_TMP/plan.json"; then
+  if "$SELECT_PYTHON" -c 'import json, sys; p = json.load(sys.stdin); sys.exit(any(p[k] for k in ("frontend", "backend", "backend_all", "checks", "scenarios", "browser_mock")))' <"$RUN_TMP/plan.json"; then
     echo '[test-baseline] no application tests selected; perform any indicated documentation checks'
     exit 0
   fi

@@ -11,14 +11,9 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from _test_selection import COMPONENTS, PACKAGER, ROOT, SCENARIOS, changed_paths, git, resolve_commit, select
+from _test_selection import COMPONENTS, LEGACY_FRONTEND, ROOT, SCENARIOS, changed_paths, git, resolve_commit, select
 
-LEGACY_FRONTEND = (
-    "tests/publishing/test_polling_channels.py",
-    "tests/publishing/test_upload_cancellation.py",
-    "tests/publishing/test_video_publish_frontend.py",
-)
-BACKEND_EXCLUSIONS = ("tests/browser", "tests/e2e", "tests/frontend", *LEGACY_FRONTEND)
+BACKEND_EXCLUDED_DIRS = {"browser", "e2e", "fixtures", "frontend", "support", "integration", "__pycache__"}
 SAFE_MARKS = "not slow and not requires_service and not domain_migration"
 
 
@@ -30,17 +25,24 @@ def run(base: str, report: str, scenarios: list[str]) -> int:
     plan = select(changed_paths(base, head), scenarios)
     print(json.dumps({"base": base, "head": head, **asdict(plan)}, indent=2), flush=True)
     live = [SCENARIOS[name] for name in plan.scenarios]
-    targets = [*plan.backend, *plan.browser_mock, *live]
+    targets = [*plan.backend, *plan.checks, *plan.browser_mock, *live]
     if plan.frontend:
         targets.append(COMPONENTS)
         if not plan.vitest:
             targets.extend((*LEGACY_FRONTEND, "tests/frontend/test_ad_daily_legacy.py"))
     required = list(dict.fromkeys(targets))
     if plan.backend_all:
-        targets = ["tests", *(
+        roots = [
+            path.relative_to(ROOT).as_posix()
+            for path in (ROOT / "tests").iterdir()
+            if (path.is_dir() and path.name not in BACKEND_EXCLUDED_DIRS and not path.name.startswith("."))
+            or path.match("test_*.py")
+        ]
+        targets = sorted(roots) + [
             target for target in required
-            if any(target == path or target.startswith((path + "/", path + "::")) for path in BACKEND_EXCLUSIONS)
-        )]
+            if not any(target == root or target.startswith((root + "/", root + "::")) for root in roots)
+            or target in LEGACY_FRONTEND
+        ]
     if not targets:
         return 5
     if plan.refresh_template and os.environ.get("TTS_ERP_TEST_REFRESHED_FOR_SELECTION") != "1":
@@ -61,7 +63,7 @@ def run(base: str, report: str, scenarios: list[str]) -> int:
         "-p", "no:cacheprovider", "-m", SAFE_MARKS,
     ]
     if plan.backend_all:
-        args.extend(f"--ignore={path}" for path in BACKEND_EXCLUSIONS)
+        args.extend(f"--ignore={path}" for path in LEGACY_FRONTEND)
     if plan.build:
         lock_path = ROOT / Path(os.fsdecode(git("rev-parse", "--git-path", "tts-test-frontend.lock")).strip())
         with lock_path.open("a") as lock:
