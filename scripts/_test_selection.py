@@ -238,7 +238,11 @@ def select(
     paths: list[str], scenarios: list[str] | None = None, *,
     scope: str = "auto", deleted: frozenset[str] = frozenset(),
 ) -> Selection:
-    selection = Selection(frontend=scope == "frontend", backend_all=scope == "backend")
+    selection = Selection(
+        frontend=scope in {"frontend", "fast"},
+        backend_all=scope in {"backend", "fast"},
+        build=scope == "fast",
+    )
     if scope == "auto":
         for path in sorted(set(paths)):
             if path in deleted and path.startswith(("tests/frontend/", "tests/browser/")):
@@ -289,7 +293,7 @@ def resolve_commit(revision: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
-    parser.add_argument("--scope", choices=("auto", "frontend", "backend"), default="auto")
+    parser.add_argument("--scope", choices=("auto", "frontend", "backend", "fast"), default="auto")
     parser.add_argument("--head", default="HEAD", help="inspect a historical commit without checking it out")
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), action="append")
     args = parser.parse_args()

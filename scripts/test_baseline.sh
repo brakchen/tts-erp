@@ -115,6 +115,7 @@ case "$SCOPE" in
     if [[ -n "$BASE" || "$REFRESH_TEMPLATE" -eq 1 ]]; then
       [[ "$MODE" == compare ]] || fail 'fast with --base or --refresh-template requires compare mode'
     fi
+    if [[ -n "$BASE" ]]; then SCOPED=1; fi
     ;;
   all|coverage|migration|domain_migration)
     fail 'historical migration suites are not supported by the baseline driver'
@@ -183,7 +184,7 @@ if [[ "$SCOPED" -eq 1 ]]; then
   rc=0
   bash scripts/test_isolated.sh "${options[@]}" selected --scope "$SCOPE" --base "$BASE" --head "$HEAD_SHA" --report "$RUN_TMP/report.json" \
     "${SCENARIOS[@]}" >"$RUN_LOG" 2>&1 || rc=$?
-  cat "$RUN_LOG"
+  if [[ "$SCOPE" != fast || "$rc" -ne 0 ]]; then cat "$RUN_LOG"; fi
   "$SELECT_PYTHON" - "$RUN_TMP/report.json" "$RUN_TMP/target-baseline.txt" "$rc" <<'PYTHON'
 import json
 import sys

@@ -108,3 +108,10 @@ def test_deleted_test_is_not_collected_and_browser_fixture_change_gets_a_browser
     assert deleted not in plan.checks
     assert plan.browser_mock == ["tests/browser/test_frontend_dashboard_layout.py"]
     assert plan.frontend and plan.build
+
+
+
+def test_pinned_fast_requests_full_frontend_backend_and_build():
+    plan = select([], scope="fast")
+    assert plan.frontend and plan.backend_all and plan.build
+    assert not plan.vitest

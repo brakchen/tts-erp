@@ -17,6 +17,8 @@ def _matches(node: str, target: str) -> bool:
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     live = json.loads(os.environ["TTS_ERP_TEST_SELECTED_LIVE"])
+    if live is None:
+        return
     deselected = [
         item
         for item in items

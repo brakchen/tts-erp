@@ -33,7 +33,7 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
         raise ValueError("HEAD changed after test selection")
     git("merge-base", "--is-ancestor", base, head)
     plan = select_commits(base, head, scenarios, scope)
-    print(json.dumps({"base": base, "head": head, **asdict(plan)}, indent=2), flush=True)
+    print(json.dumps({"base": base, "head": head, "scope": scope, **asdict(plan)}, indent=2), flush=True)
     live = [SCENARIOS[name] for name in plan.scenarios]
     targets = [*plan.backend, *plan.checks, *plan.browser_mock, *live]
     if plan.frontend:
@@ -45,7 +45,10 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
             )
     required = list(dict.fromkeys(targets))
     targets = required
-    if plan.backend_all:
+    if scope == "fast":
+        required = [COMPONENTS, "tests/browser"]
+        targets = ["tests"]
+    elif plan.backend_all:
         roots = [
             path.relative_to(ROOT).as_posix()
             for path in (ROOT / "tests").iterdir()
@@ -68,15 +71,17 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
         TTS_ERP_TEST_SELECTION_REPORT=report,
         TTS_ERP_TEST_VITEST_SELECTION=json.dumps(plan.vitest),
         TTS_ERP_TEST_SELECTED_NO_BUILD="0" if plan.build else "1",
-        TTS_ERP_TEST_SELECTED_LIVE=json.dumps(live),
+        TTS_ERP_TEST_SELECTED_LIVE=json.dumps(None if scope == "fast" else live),
         TTS_ERP_TEST_SELECTION_REQUIRED=json.dumps(required),
         TTS_ERP_TEST_SELECTION_BACKEND_ALL="1" if plan.backend_all else "0",
     )
     args = [
-        sys.executable, "-m", "pytest", "-q", "-rP", "-p", "tests.support.selected_test_report",
+        sys.executable, "-m", "pytest", "-q", "-p", "tests.support.selected_test_report",
         "-p", "no:cacheprovider", "-m", SAFE_MARKS,
     ]
-    if plan.backend_all:
+    if scope != "fast":
+        args.append("-rP")
+    if plan.backend_all and scope != "fast":
         args.extend(f"--ignore={path}" for path in LEGACY_FRONTEND)
     if plan.build:
         lock_path = ROOT / Path(os.fsdecode(git("rev-parse", "--git-path", "tts-test-frontend.lock")).strip())
@@ -94,7 +99,7 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
-    parser.add_argument("--scope", choices=("auto", "frontend", "backend"), default="auto")
+    parser.add_argument("--scope", choices=("auto", "frontend", "backend", "fast"), default="auto")
     parser.add_argument("--head", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), action="append", default=[])
