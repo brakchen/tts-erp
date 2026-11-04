@@ -242,13 +242,10 @@ def denied_register(page, probe, gate, *, csrf):
 
 
 def discard_shop_dialog(page, dialog):
-    def confirm_discard(confirmation):
-        assert confirmation.type == "confirm"
-        assert confirmation.message == "放弃本次尚未保存的修改？"
-        confirmation.accept()
-
-    page.once("dialog", confirm_discard)
     dialog.get_by_role("button", name="取消", exact=True).click()
+    confirmation = page.get_by_role("dialog", name="放弃本次尚未保存的修改？", exact=True)
+    confirmation.get_by_role("button", name="放弃修改", exact=True).click()
+    expect(confirmation).to_be_hidden()
     dialog.wait_for(state="hidden")
 
 

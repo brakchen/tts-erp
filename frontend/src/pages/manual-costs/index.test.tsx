@@ -134,10 +134,11 @@ describe('manual-costs server-total pagination', () => {
     fetcher.mockImplementation(async (url: string) => url.includes('channel-accounts?') ? json([shop])
       : json(new URL(url, 'https://test.invalid').searchParams.get('offset') === '0' ? pageRows() : [product('1050', 'TEST last unknown')]));
     const user = userEvent.setup(); await openView('all', user); await screen.findByText('TEST page 0 row 0');
+    const next = () => within(screen.getByLabelText('分页')).getByRole('button', { name: '下一页' });
     expect(screen.getByText(/服务端总数：未知/)).toBeVisible();
-    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '下一页' })); await screen.findByText('TEST last unknown');
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(next()).toBeEnabled();
+    await user.click(next()); await screen.findByText('TEST last unknown');
+    expect(next()).toBeDisabled();
   });
   it('keeps missing-candidate paging on raw rows, not the photo total or current-page display filter', async () => {
     const fetcher = setupPages('all', '50'); const user = userEvent.setup(); await openView('all', user); await screen.findByText('TEST page 0 row 0');
@@ -145,12 +146,13 @@ describe('manual-costs server-total pagination', () => {
       const offset = Number(new URL(url, 'https://test.invalid').searchParams.get('offset'));
       return json({ items: (offset === 0 ? pageRows() : pageRows(offset).slice(0, 1)).map(({ id, ...row }) => ({ ...row, spu_pk: id, missing_photo: false })), total_missing_photo: '9007199254740997' });
     });
-    await user.click(screen.getByRole('button', { name: '缺成本候选' })); await screen.findByText(/服务端缺图总数：9007199254740997/);
-    await user.click(screen.getByRole('checkbox', { name: /仅显示本页 missing_photo/ })); await screen.findByText('当前页暂无候选');
-    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '下一页' }));
+    const next = () => within(screen.getByLabelText('分页')).getByRole('button', { name: '下一页' });
+    await user.click(within(screen.getByLabelText('工作台视图')).getByRole('button', { name: '缺成本候选' })); await screen.findByText(/服务端缺图总数：9007199254740997/);
+    await user.click(within(screen.getByRole('form', { name: '工作台筛选' })).getByRole('checkbox', { name: /仅显示本页 missing_photo/ })); await screen.findByText('当前页暂无候选');
+    expect(next()).toBeEnabled();
+    await user.click(next());
     await screen.findByText(/服务端缺图总数：9007199254740997/);
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(next()).toBeDisabled();
     expect(screen.queryByText(/服务端总数：/)).toBeNull();
     expect(fetcher.mock.calls.some(([url]) => url.includes('missing-cost-products?') && url.includes('offset=50') && !url.includes('q='))).toBe(true);
   });
