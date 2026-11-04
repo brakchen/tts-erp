@@ -13,7 +13,7 @@ zabbix_export:
     macros:
     - macro: '{$TTS.MONITOR.TRAPPER.HOSTS}'
       value: 127.0.0.1
-      description: 填写 Zabbix Web 前端向 server 发送 history.push 时使用的源地址。
+      description: 填写 history.push 的 HTTP 客户端地址及 Zabbix Web 连接 Server 时的源地址。
     - macro: '{$TTS.MONITOR.OFFLINE}'
       value: 135s
       description: 失联判定窗口。
