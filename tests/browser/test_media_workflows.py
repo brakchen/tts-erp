@@ -196,11 +196,15 @@ def pick_file(page: Page, name: str) -> None:
     })
 
 
-def create_persona(page: Page, name: str) -> None:
+def create_persona(page: Page, name: str, *, detail_fails: bool = False) -> None:
     button(page, "新建数字人").click()
     dialog(page).get_by_label("名称", exact=True).fill(name)
     dialog(page).get_by_label("人设说明", exact=True).fill("TEST_persona_description")
     button(dialog(page), "创建数字人").click()
+    if detail_fails:
+        button(dialog(page), "重试数字人详情").wait_for()
+        expect(dialog(page).get_by_text(re.compile("已创建数字人")).first).to_be_visible()
+        button(dialog(page), "重试数字人详情").click()
     heading(page, name)
     button(dialog(page), "选择已有资产").wait_for()
 
@@ -236,7 +240,14 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
     button(page, "上传资产").click()
     pick_file(page, original)
     assert gate.calls["POST", ASSETS + "/upload-url"] == gate.store.puts == 0
+    gate.fail("GET", re.compile(rf"{ASSETS}/[1-9][0-9]*"), 503)
     button(dialog(page), "开始上传").click()
+    button(dialog(page), "重试资产详情").wait_for()
+    expect(dialog(page).get_by_text(re.compile("已入库")).first).to_be_visible()
+    with db() as session:
+        asset = session.scalar(select(MediaAsset).where(MediaAsset.filename == original))
+        assert asset is not None and asset.status == "ready"
+    button(dialog(page), "重试资产详情").click()
     heading(page, original)
     image = dialog(page).get_by_role("img").first
     expect(image).to_be_visible()
@@ -251,7 +262,9 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
 
     media_run.goto("digital-humans")
     search(page, "搜索数字人", media_run.name("unmatched"))
-    create_persona(page, first)
+    gate.fail("GET", re.compile(rf"{HUMANS}/[1-9][0-9]*"), 503)
+    create_persona(page, first, detail_fails=True)
+    assert gate.calls["POST", HUMANS] == 1
     attach(page, original)
     aid, first_id = media_run.asset_id(original), media_run.human_id(first)
     assert media_run.links(first_id) == {aid}
@@ -310,11 +323,19 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
     with db() as session:
         assert session.get(DigitalHuman, second_id).status == "archived"
     assert media_run.links(second_id) == {aid}
+    close(page)
+    expect(button(page, "查看 " + second)).to_have_count(0)
+    page.get_by_role("button", name=re.compile("档案状态")).click()
+    page.get_by_role("option", name="已归档", exact=True).click()
+    open_record(page, second)
+    text(dialog(page), renamed)
     button(dialog(page), "恢复为启用").click()
     button(dialog(page), "归档数字人").wait_for()
     with db() as session:
         assert session.get(DigitalHuman, second_id).status == "active"
     close(page)
+    page.get_by_role("button", name=re.compile("档案状态")).click()
+    page.get_by_role("option", name="启用中", exact=True).click()
 
     # Deleting an actual linked persona leaves its asset globally available.
     open_record(page, first)
