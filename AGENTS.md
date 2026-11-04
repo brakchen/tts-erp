@@ -129,6 +129,8 @@ Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md
 | Refresh isolated test template | `bash scripts/test_isolated.sh --refresh-template fast` |
 | 测试前置依赖体检 / 安装 | `bash scripts/envsetup/install-test-deps.sh --check` / `sudo bash scripts/envsetup/install-test-deps.sh` |
 | API restart | `bash restart.sh` |
+| 部署 HP desk 测试环境（前端构建 + release worktree checkout + 重启校验） | `bash scripts/test_deploy.sh [ref]` |
+| 部署 207 生产环境（tar 同步 + 原子替换 + 重启校验，需逐字确认） | `bash scripts/prod_deploy.sh [--yes] [origin/master]` |
 | Sync-worker restart after `tts_erp_v2/jobs/`, `tts_erp_v2/sync_worker/`, or `tts_erp_v2/analytics/` changes (the worker imports job modules and their analytics deps at load time; without a restart the running process keeps the old code) | `systemctl --user restart tts-erp-sync.service` |
 | Service status | `systemctl --user status tts-erp{,-sync}.service` |
 | API logs | `journalctl --user -u tts-erp -n 50` |
