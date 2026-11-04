@@ -101,7 +101,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   return <>
     <RecordDialog title={asset ? (draft ? '编辑资料 · ' : '资产详情 · ') + asset.filename : '资产详情'}
       pending={action.pending} onClose={() => exit('close')}>
-      {notice && !draft && <p role="status">{notice}</p>}
+      {notice && !draft && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
       {!asset && <ReadStatus title="资产详情" loading={read.loading} error={read.error} onRetry={read.retry} />}
       {asset && (draft ? <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <p>这里修改显示名称、说明和标签。此处暂不支持替换文件。</p>
@@ -188,7 +188,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
       {canWrite && <Button onPress={() => { setNotice(''); setUpload(true); }}>上传资产</Button>}
     </PageIntro>
     {!canWrite && <p>你可以查看资产资料和预览。上传或修改需要编辑权限。</p>}
-    {notice && !selected && <p role="status">{notice}</p>}
+    {notice && !selected && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
     <section className="erp-panel space-y-4" aria-label="资产列表">
       <h2 className="text-xl font-semibold">资产列表</h2>
       <form className="erp-filter-row" onSubmit={search}>

@@ -85,7 +85,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
         request.withCredentials = false;
         Object.entries(current.requiredHeaders).forEach(([key, value]) => request.setRequestHeader(key, value));
         request.upload.onprogress = (event) => {
-          if (event.lengthComputable && event.total > 0) setProgress(Math.round(100 * event.loaded / event.total));
+          if (event.lengthComputable && event.total > 0) setProgress(Math.min(100, Math.floor(100 * event.loaded / event.total)));
         };
         request.onload = () => request.status >= 200 && request.status < 300 ? resolve() :
           reject(new ApiError('文件传输失败', request.status, retryAfterSeconds(request.getResponseHeader('Retry-After'))));
@@ -166,10 +166,10 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
         <Button variant="secondary" onPress={() => xhr.current?.abort()}>中止传输</Button>
       </>}
       {phase === 'confirming' && <p role="status">正在确认入库…</p>}
-      {phase === 'attaching' && <p role="status">资产已入库，正在添加到 {target?.name}…</p>}
+      {phase === 'attaching' && <p role="status" className="[overflow-wrap:anywhere]">资产已入库，正在添加到 {target?.name}…</p>}
       {phase === 'send-error' && <p>文件传输结果尚未确认。先检查原记录是否可以入库，也可重试同一个上传。</p>}
       {phase === 'confirm-error' && <p>已发送文件，入库状态待核对。重试确认会继续处理原记录。</p>}
-      {phase === 'attach-error' && <p role="status">资产「{filename}」已入库，但尚未确认添加到「{target?.name}」。重试只会添加这项资产。</p>}
+      {phase === 'attach-error' && <p role="status" className="[overflow-wrap:anywhere]">资产「{filename}」已入库，但尚未确认添加到「{target?.name}」。重试只会添加这项资产。</p>}
       <ActionError message={error} />
       {phase === 'prepare-error' && prepareUncertain && <p>上传准备结果未确认。再次开始前请在资产库核对同名记录。{href && <> <a className="underline" href={href} target="_blank" rel="noreferrer">在新标签页核对资产库</a></>}</p>}
       <div className="flex flex-wrap gap-2">

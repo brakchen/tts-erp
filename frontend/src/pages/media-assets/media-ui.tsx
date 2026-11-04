@@ -117,7 +117,7 @@ export function ReadStatus({ title, loading, error, onRetry }: {
   title: string; loading: boolean; error?: string; onRetry: () => void;
 }) {
   if (error) return <Alert role="alert" status="danger"><Alert.Content>
-    <Alert.Title>{title}不可用</Alert.Title><Alert.Description>{error}</Alert.Description>
+    <Alert.Title>{title}不可用</Alert.Title><Alert.Description className="[overflow-wrap:anywhere]">{error}</Alert.Description>
     <Button variant="secondary" onPress={onRetry}>重试{title}</Button>
   </Alert.Content></Alert>;
   if (loading) return <p role="status">正在加载{title}…</p>;
@@ -126,7 +126,7 @@ export function ReadStatus({ title, loading, error, onRetry }: {
 
 export function ActionError({ message }: { message: string }) {
   return message ? <Alert role="alert" status="danger"><Alert.Content>
-    <Alert.Title>需要处理</Alert.Title><Alert.Description>{message}</Alert.Description>
+    <Alert.Title>需要处理</Alert.Title><Alert.Description className="[overflow-wrap:anywhere]">{message}</Alert.Description>
   </Alert.Content></Alert> : null;
 }
 
@@ -137,7 +137,7 @@ export function RecordDialog({ title, pending = false, onClose, children }: {
     onOpenChange={(open) => { if (!open && !pending) onClose(); }}>
     <Modal.Container size="lg" scroll="inside"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭窗口" isDisabled={pending} />
-      <Modal.Header><Modal.Heading className="break-words">{title}</Modal.Heading></Modal.Header>
+      <Modal.Header><Modal.Heading className="[overflow-wrap:anywhere]">{title}</Modal.Heading></Modal.Header>
       <Modal.Body className="space-y-4">{children}</Modal.Body>
     </Modal.Dialog></Modal.Container>
   </Modal.Backdrop>;

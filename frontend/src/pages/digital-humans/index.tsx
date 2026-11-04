@@ -212,7 +212,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   return <>
     <RecordDialog title={human ? (draft ? '编辑资料 · ' : '数字人详情 · ') + human.name : '数字人详情'}
       pending={action.pending} onClose={() => leave('close')}>
-      {notice && !draft && <p role="status">{notice}</p>}
+      {notice && !draft && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
       <ReadStatus title="数字人详情" loading={read.loading} error={read.error} onRetry={read.retry} />
       {human && (draft ? <>
         <p>在此修改档案名称与人设说明。素材在详情的「引用资产」中管理。</p>
@@ -231,7 +231,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         <ActionError message={action.error} />
         {canWrite && <div className="flex flex-wrap gap-2">
           <Button variant="secondary" isDisabled={action.pending || read.loading} onPress={edit}>编辑资料</Button>
-          <Button variant="secondary" isPending={action.pending} isDisabled={read.loading} onPress={archive}>
+          <Button variant={human.status === 'archived' ? 'primary' : 'secondary'} isPending={action.pending} isDisabled={read.loading} onPress={archive}>
             {human.status === 'archived' ? '恢复为启用' : '归档数字人'}
           </Button>
           <DeleteConfirmation label="删除数字人" name={human.name} isDisabled={action.pending || read.loading}
@@ -313,7 +313,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
       {canWrite && <Button onPress={() => { setNotice(''); setCreating(true); }}>新建数字人</Button>}
     </PageIntro>
     {!canWrite && <p>你可以查看档案和引用资产。创建或修改档案需要编辑权限。</p>}
-    {notice && !selected && <p role="status">{notice}</p>}
+    {notice && !selected && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
     <section className="erp-panel space-y-4" aria-label="数字人列表">
       <h2 className="text-xl font-semibold">数字人列表</h2>
       <form className="erp-filter-row" onSubmit={(event) => { event.preventDefault(); setQuery(keyword.trim()); setOffset(0); setNotice(''); }}>

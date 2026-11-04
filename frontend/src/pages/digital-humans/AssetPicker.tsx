@@ -34,7 +34,7 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
         onChange={(value) => { setKind(value); setOffset(0); setPreview(undefined); }} />
       <Button type="submit" isDisabled={pending}>搜索</Button>
     </form>
-    {notice && <p role="status">{notice}</p>}
+    {notice && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
     <ActionError message={error ? '添加未完成。' + error : ''} />
     <ReadStatus title="可选资产" loading={read.loading} error={read.error} onRetry={read.retry} />
     {!read.loading && !read.error && !rows.length && <p>{query || kind ? '没有匹配的已入库资产。请调整搜索条件。' : '还没有已入库资产。返回档案后可以上传新资产。'}</p>}
