@@ -306,8 +306,11 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
     assert media_run.asset_id(original) == aid
     button(dialog(page), "保存资料").click()
     heading(page, renamed)
-    text(dialog(page), "TEST_shared_tag")
-    assert media_run.asset_id(renamed) == aid
+    text(dialog(page), "标签：TEST_shared_tag")
+    with db() as session:
+        saved = session.get(MediaAsset, aid)
+        assert saved is not None
+        assert (saved.filename, saved.description, saved.tags) == (renamed, "TEST_shared_note", ["TEST_shared_tag"])
     close(page)
     search(page, "搜索资产", renamed)
     button(page, "查看 " + renamed).wait_for()
