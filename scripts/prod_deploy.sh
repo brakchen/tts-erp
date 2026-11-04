@@ -163,13 +163,13 @@ port="$(grep -E '^TTS_ERP_PORT=' .env 2>/dev/null | cut -d= -f2)"; port="${port:
 systemctl restart tts-erp.service
 sleep 2
 systemctl is-active tts-erp.service | grep -q '^active$' || { echo "[207][错误] 重启后未 active" >&2; exit 1; }
-# uvicorn 启动需要时间，轮询 healthz 最多 90 秒
+# uvicorn 启动需要时间，持续探活 60 秒、每 10 秒一次
 waited=0
-while [ "$waited" -lt 90 ]; do
+while [ "$waited" -lt 60 ]; do
   curl -fsS --max-time 5 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1 && { echo "[207] 服务已就绪（等待 ${waited}s）"; exit 0; }
-  sleep 3; waited=$((waited + 3))
+  sleep 10; waited=$((waited + 10))
 done
-echo "[207][错误] 90 秒内 healthz 未就绪" >&2
+echo "[207][错误] 60 秒内 healthz 未就绪" >&2
 exit 1
 REMOTE_RESTART
 
