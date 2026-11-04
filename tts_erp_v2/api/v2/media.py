@@ -38,9 +38,11 @@ from tts_erp_v2.api.deps import (
     require_destructive_guard,
     require_role_at_least,
 )
+from tts_erp_v2.db.models.media import MediaAsset
 from tts_erp_v2.media import repository
 from tts_erp_v2.media.domain import (
     AssetKind,
+    AssetStatus,
     DigitalHumanStatus,
     allowed_content_types,
     build_object_key,
@@ -52,6 +54,7 @@ from tts_erp_v2.media.object_store import (
     ObjectNotFound,
     media_store_from_env,
 )
+from tts_erp_v2.storage.minio_client import MinioConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +189,7 @@ def _actor(request: Request) -> str:
     return str(key_hash)[:12] if key_hash else "system"
 
 
-def _asset_out(asset, url: str | None, expires_at: datetime | None) -> AssetOut:
+def _asset_out(asset: MediaAsset, url: str | None, expires_at: datetime | None) -> AssetOut:
     return AssetOut(
         asset_id=asset.id,
         kind=asset.kind,
@@ -214,6 +217,25 @@ def _presigned_get(
         return public_url, None
     url, expires_at = store.presign_get(object_key)
     return url, expires_at
+
+
+def _required_store() -> MediaObjectStore:
+    try:
+        return get_store()
+    except MinioConfigError as error:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Media object storage is unavailable"
+        ) from error
+
+
+def _asset_with_preview(asset: MediaAsset) -> AssetOut:
+    if asset.status != AssetStatus.READY.value:
+        return _asset_out(asset, None, None)
+    try:
+        url, expires_at = _presigned_get(get_store(), asset.object_key)
+    except MinioConfigError:
+        url, expires_at = None, None
+    return _asset_out(asset, url, expires_at)
 
 
 # --- POST /assets/upload-url ------------------------------------------------
@@ -247,7 +269,7 @@ def create_upload_url(
             f"size_bytes exceeds {cap} ({kind.value} cap)",
         )
 
-    store = get_store()
+    store = _required_store()
     key_id = request.scope.get("api_key_id")
     key_prefix = request.scope.get("api_key_prefix") or ""
 
@@ -301,7 +323,7 @@ def confirm_upload(
             f"asset not found: {asset_id}",
         )
 
-    store = get_store()
+    store = _required_store()
     try:
         meta = store.stat(asset.object_key)
     except ObjectNotFound as e:
@@ -347,6 +369,9 @@ def list_assets(
     keyword: str | None = Query(default=None, max_length=120),
     tag: str | None = Query(default=None, max_length=64),
     digital_human_id: int | None = Query(default=None, ge=1, alias="digitalHumanId"),
+    exclude_digital_human_id: int | None = Query(
+        default=None, ge=1, alias="excludeDigitalHumanId"
+    ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> AssetListOut:
@@ -370,15 +395,12 @@ def list_assets(
             keyword=keyword,
             tag=tag,
             digital_human_id=digital_human_id,
+            exclude_digital_human_id=exclude_digital_human_id,
             limit=limit,
             offset=offset,
         ),
     )
-    store = get_store()
-    items: list[AssetOut] = []
-    for asset in page.items:
-        url, expires_at = _presigned_get(store, asset.object_key)
-        items.append(_asset_out(asset, url, expires_at))
+    items = [_asset_with_preview(asset) for asset in page.items]
     return AssetListOut(items=items, total=page.total, limit=limit, offset=offset)
 
 
@@ -399,9 +421,7 @@ def get_asset_detail(
             status.HTTP_404_NOT_FOUND,
             f"asset not found: {asset_id}",
         )
-    store = get_store()
-    url, expires_at = _presigned_get(store, asset.object_key)
-    return _asset_out(asset, url, expires_at)
+    return _asset_with_preview(asset)
 
 
 # --- PATCH /assets/{id} ------------------------------------------------------
@@ -429,9 +449,7 @@ def update_asset(
             status.HTTP_404_NOT_FOUND,
             f"asset not found: {asset_id}",
         )
-    store = get_store()
-    url, expires_at = _presigned_get(store, asset.object_key)
-    return _asset_out(asset, url, expires_at)
+    return _asset_with_preview(asset)
 
 
 # --- DELETE /assets/{id} -----------------------------------------------------
@@ -450,9 +468,8 @@ def delete_asset(
 
     asset = repository.soft_delete_asset(sess, asset_id)
     if asset is not None:
-        store = get_store()
         try:
-            store.remove(asset.object_key)
+            get_store().remove(asset.object_key)
         except Exception as e:  # noqa: BLE001 — best-effort
             logger.warning(
                 "object removal failed for soft-deleted asset",
@@ -539,15 +556,13 @@ def get_digital_human(
             status.HTTP_404_NOT_FOUND,
             f"digital human not found: {digital_human_id}",
         )
-    store = get_store()
     asset_ids = repository.asset_ids_for_digital_human(sess, human.id)
     assets: list[AssetOut] = []
     for asset_id in asset_ids:
         asset = repository.get_asset(sess, asset_id)
         if asset is None:
             continue
-        url, expires_at = _presigned_get(store, asset.object_key)
-        assets.append(_asset_out(asset, url, expires_at))
+        assets.append(_asset_with_preview(asset))
     return DigitalHumanDetailOut(
         digital_human_id=human.id,
         name=human.name,

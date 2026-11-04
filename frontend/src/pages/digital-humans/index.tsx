@@ -5,14 +5,17 @@ import { ApiError, requestJson } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
 import {
   decodeAssetList,
+  decodeDigitalHuman,
   decodeDigitalHumanDetail,
   decodeDigitalHumanList,
   displayBytes,
   type Asset,
   type DigitalHuman,
+  type DigitalHumanDetail,
 } from '../media-assets/contracts';
 
 const api = '/v2/media';
+const pageSize = 50;
 
 function readFailure(error: unknown): string {
   if (!(error instanceof ApiError)) return '读取未完成，请手动重试';
@@ -36,30 +39,40 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   const root = bootstrap.rootPath;
   const canWrite = bootstrap.roleCapabilities?.readwrite === true;
   const [revision, setRevision] = useState(0);
+  const [detailRevision, setDetailRevision] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
   const [humans, setHumans] = useState<DigitalHuman[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<DigitalHuman | null>(null);
-  const [detailAssets, setDetailAssets] = useState<Asset[]>([]);
+  const [loadedDetail, setDetail] = useState<DigitalHumanDetail | null>(null);
+  const detail = loadedDetail?.digitalHumanId === selectedId ? loadedDetail : null;
   const [detailError, setDetailError] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newDescription, setNewDescription] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [notice, setNotice] = useState('');
   const [attachId, setAttachId] = useState('');
+  const [candidateResult, setCandidateResult] = useState<{ humanId: string; assets: Asset[] }>();
+  const candidates = candidateResult?.humanId === selectedId ? candidateResult.assets : undefined;
 
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
     setLoading(true);
     setListError('');
-    void requestJson<unknown>(root, `${api}/digital-humans`, { signal: controller.signal }, parseIdentityJson)
+    void requestJson<unknown>(root, `${api}/digital-humans?limit=${pageSize + 1}&offset=${offset}`, { signal: controller.signal }, parseIdentityJson)
       .then((result) => {
         if (!active) return;
-        setHumans(decodeDigitalHumanList(result.data));
+        const rows = decodeDigitalHumanList(result.data);
+        setHasNext(rows.length > pageSize);
+        setHumans(rows.slice(0, pageSize));
       })
       .catch((error: unknown) => {
         if (!active) return;
+        setHasNext(false);
         setHumans([]);
         setListError(readFailure(error));
       })
@@ -70,12 +83,11 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
       active = false;
       controller.abort();
     };
-  }, [root, revision]);
+  }, [root, revision, offset]);
 
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
-      setDetailAssets([]);
       setDetailError('');
       return;
     }
@@ -87,24 +99,22 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         if (!active) return;
         const row = decodeDigitalHumanDetail(result.data);
         setDetail(row);
-        setDetailAssets(row.assets);
         setName(row.name);
         setDescription(row.description ?? '');
       })
       .catch((error: unknown) => {
         if (!active) return;
         setDetail(null);
-        setDetailAssets([]);
         setDetailError(readFailure(error));
       });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [root, selectedId, revision]);
+  }, [root, selectedId, detailRevision]);
 
   async function createHuman() {
-    if (!canWrite || !name.trim()) return;
+    if (!canWrite || !newName.trim()) return;
     setNotice('');
     try {
       const created = await requestJson<unknown>(
@@ -112,13 +122,14 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         `${api}/digital-humans`,
         {
           method: 'POST',
-          body: JSON.stringify({ name: name.trim(), description: description.trim() || null }),
+          body: JSON.stringify({ name: newName.trim(), description: newDescription.trim() || null }),
         },
         parseIdentityJson,
-      ).then((result) => decodeDigitalHumanDetail(result.data));
+      ).then((result) => decodeDigitalHuman(result.data));
       setNotice(`已创建数字人：${created.name}`);
-      setName('');
-      setDescription('');
+      setNewName('');
+      setNewDescription('');
+      setOffset(0);
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`创建未完成：${writeFailure(error)}`);
@@ -136,12 +147,13 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
           method: 'PATCH',
           body: JSON.stringify({
             name: name.trim(),
-            description: description.trim() || null,
+            description: description.trim(),
           }),
         },
         parseIdentityJson,
       );
       setNotice('数字人信息已保存。');
+      setDetailRevision((value) => value + 1);
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`保存未完成：${writeFailure(error)}`);
@@ -159,6 +171,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         parseIdentityJson,
       );
       setNotice('数字人已归档。');
+      setDetailRevision((value) => value + 1);
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`归档未完成：${writeFailure(error)}`);
@@ -175,6 +188,9 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
       setNotice('数字人已删除；其资产仍保留在资产库中。');
       setSelectedId(null);
       setDetail(null);
+      if (humans.length === 1 && humans[0].digitalHumanId === detail.digitalHumanId) {
+        setOffset(Math.max(0, offset - pageSize));
+      }
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`删除未完成：${writeFailure(error)}`);
@@ -193,6 +209,8 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
       );
       setNotice('资产已挂载。');
       setAttachId('');
+      setCandidateResult(undefined);
+      setDetailRevision((value) => value + 1);
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`挂载未完成：${writeFailure(error)}`);
@@ -209,6 +227,8 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         { method: 'DELETE' },
       );
       setNotice('资产已解绑。');
+      setCandidateResult(undefined);
+      setDetailRevision((value) => value + 1);
       setRevision((value) => value + 1);
     } catch (error: unknown) {
       setNotice(`解绑未完成：${writeFailure(error)}`);
@@ -223,25 +243,13 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         (
           await requestJson<unknown>(
             root,
-            `${api}/assets?digitalHumanId=${detail.digitalHumanId}&limit=200`,
+            `${api}/assets?excludeDigitalHumanId=${detail.digitalHumanId}&limit=200`,
             {},
             parseIdentityJson,
           )
         ).data,
       );
-      const attached = new Set(detail.assetIds);
-      const candidates = page.items.filter((asset) => !attached.has(asset.assetId));
-      if (candidates.length === 0) {
-        setNotice('资产库中没有未挂载的资产。');
-        return;
-      }
-      setAttachId(candidates[0].assetId);
-      setNotice(
-        `候选资产：${candidates
-          .slice(0, 5)
-          .map((asset) => `${asset.assetId} ${asset.filename}`)
-          .join('；')}`,
-      );
+      setCandidateResult({ humanId: detail.digitalHumanId, assets: page.items });
     } catch (error: unknown) {
       setNotice(`候选读取失败：${readFailure(error)}`);
     }
@@ -252,15 +260,15 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
       <div className="erp-panel space-y-3">
         <h2 className="text-xl font-semibold">新建数字人</h2>
         <p>数字人是人设档案容器，用来组织它引用的图片与视频资产。</p>
-        <TextField value={name} isDisabled={!canWrite} onChange={setName}>
+        <TextField value={newName} isDisabled={!canWrite} onChange={setNewName}>
           <Label>名称</Label>
           <Input />
         </TextField>
-        <TextField value={description} isDisabled={!canWrite} onChange={setDescription}>
+        <TextField value={newDescription} isDisabled={!canWrite} onChange={setNewDescription}>
           <Label>人设说明</Label>
           <TextArea rows={3} autoComplete="off" />
         </TextField>
-        <Button isDisabled={!canWrite || !name.trim()} onPress={() => void createHuman()}>
+        <Button isDisabled={!canWrite || !newName.trim()} onPress={() => void createHuman()}>
           创建数字人
         </Button>
       </div>
@@ -273,13 +281,18 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
             <Alert.Content>
               <Alert.Title>数字人列表不可用</Alert.Title>
               <Alert.Description>{listError}</Alert.Description>
+              <Button variant="secondary" onPress={() => setRevision((value) => value + 1)}>重试列表</Button>
             </Alert.Content>
           </Alert>
         )}
         <ul className="space-y-2">
           {humans.map((human) => (
             <li key={human.digitalHumanId} className="flex flex-wrap items-center gap-3">
-              <Button variant="secondary" onPress={() => setSelectedId(human.digitalHumanId)}>
+              <Button variant="secondary" onPress={() => {
+                setAttachId('');
+                setCandidateResult(undefined);
+                setSelectedId(human.digitalHumanId);
+              }}>
                 查看 {human.name}
               </Button>
               <span>
@@ -289,17 +302,25 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
             </li>
           ))}
         </ul>
+        {(offset > 0 || hasNext) && (
+          <nav aria-label="数字人分页" className="flex flex-wrap gap-2">
+            <Button variant="secondary" isDisabled={loading || offset === 0} onPress={() => setOffset(offset - pageSize)}>上一页</Button>
+            <Button variant="secondary" isDisabled={loading || !hasNext} onPress={() => setOffset(offset + pageSize)}>下一页</Button>
+          </nav>
+        )}
         {!loading && !listError && humans.length === 0 && <p>当前还没有数字人。</p>}
       </div>
 
       {selectedId && (
         <div className="erp-panel space-y-3">
           <h2 className="text-xl font-semibold">数字人详情</h2>
+          {!detail && !detailError && <p role="status">加载数字人详情中…</p>}
           {detailError && (
             <Alert status="danger">
               <Alert.Content>
                 <Alert.Title>详情不可用</Alert.Title>
                 <Alert.Description>{detailError}</Alert.Description>
+                <Button variant="secondary" onPress={() => setDetailRevision((value) => value + 1)}>重试详情</Button>
               </Alert.Content>
             </Alert>
           )}
@@ -330,7 +351,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
 
               <h3 className="text-lg font-semibold">引用资产</h3>
               <ul className="space-y-2">
-                {detailAssets.map((asset) => (
+                {detail.assets.map((asset) => (
                   <li key={asset.assetId} className="flex flex-wrap items-center gap-3">
                     <span>
                       {asset.filename} ·{' '}
@@ -347,7 +368,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
                   </li>
                 ))}
               </ul>
-              {!detailAssets.length && <p>当前数字人还没有引用资产。</p>}
+              {!detail.assets.length && <p>当前数字人还没有引用资产。</p>}
 
               <div className="erp-filter-row">
                 <label className="erp-field">
@@ -367,6 +388,23 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
                   列出可挂载资产
                 </Button>
               </div>
+              {candidates && (candidates.length > 0 ? (
+                <label className="erp-field">
+                  可挂载资产
+                  <select
+                    className="erp-select"
+                    value={candidates.some((asset) => asset.assetId === attachId) ? attachId : ''}
+                    onChange={(event) => setAttachId(event.target.value)}
+                  >
+                    <option value="">请选择资产</option>
+                    {candidates.map((asset) => (
+                      <option key={asset.assetId} value={asset.assetId}>
+                        {asset.filename}（#{asset.assetId}）
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : <p role="status">资产库中没有未挂载的资产。</p>)}
             </>
           )}
         </div>

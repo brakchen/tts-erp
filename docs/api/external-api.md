@@ -54,7 +54,7 @@ credential kinds:
 | SPU 盈利表现对比 | `GET /v2/analytics/spu-profit-deterioration` | readonly — 7 天主参考、3 天辅助；现行契约见本文同名章节及 [技术设计](../spu-profit-deterioration/02-technical-design.md) |
 | SPU 盈利表现对比页面 (HTML) | `GET /v2/pages/spu-profit-deterioration` | readonly (browser → 302 login)；保留既有页面入口与权限点，不再提供告警配置编辑 |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
-| Media asset library | `GET /v2/media/assets[?kind=&keyword=&tag=&digitalHumanId=]`, `GET/PATCH/DELETE /v2/media/assets/{id}`, `POST /v2/media/assets/upload-url`, `POST /v2/media/assets/{id}/confirm` | readonly / readwrite |
+| Media asset library | `GET /v2/media/assets[?kind=&keyword=&tag=&digitalHumanId=&excludeDigitalHumanId=]`, `GET/PATCH/DELETE /v2/media/assets/{id}`, `POST /v2/media/assets/upload-url`, `POST /v2/media/assets/{id}/confirm` | readonly / readwrite |
 | Digital humans (personas) | `GET/POST /v2/media/digital-humans`, `GET/PATCH/DELETE /v2/media/digital-humans/{id}`, `POST /v2/media/digital-humans/{id}/assets`, `DELETE /v2/media/digital-humans/{id}/assets/{assetId}` | readonly / readwrite |
 | Media asset / digital human pages (HTML) | `GET /v2/pages/media-assets`, `GET /v2/pages/digital-humans` | readonly (browser → 302 login)；页面权限点 `page:media-assets` / `page:digital-humans` |
 | TikTok video publish workflow | `GET /v2/pages/video-publish`, `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, replace-upload, verify, `/cleanup/retry`, `POST /v2/video-publish/tasks/{id}/confirm-published`, `PATCH /v2/video-publish/tasks/{id}/settings` | session: page:video-publish + readonly/readwrite action tier; API key: admin by default; page-level scope (every task in the workspace) |
@@ -529,17 +529,20 @@ with a presigned URL. Design:
 [`media-asset-library.md`](../design/media-asset-library.md).
 
 1. `POST /v2/media/assets/upload-url` (readwrite) — body
-   `{"filename", "content_type", "size_bytes"}`. `content_type` must be one of
+   `{"filename", "contentType", "sizeBytes"}`. `contentType` must be one of
    `image/jpeg|png|webp|gif` (≤20 MiB) or `video/mp4|webm|quicktime`
    (≤200 MiB); anything else → 400. → 201
    `{asset_id, object_key, upload_url, upload_expires_at, required_headers}`.
-2. Browser PUTs the file to `upload_url` directly.
+2. Browser PUTs the file to `upload_url` directly with `required_headers`.
 3. `POST /v2/media/assets/{asset_id}/confirm` (readwrite) — server HEAD-verifies
    the object; a size mismatch → 409 `SIZE_MISMATCH`, a missing object → 409
    `UPLOAD_NOT_FOUND`. Success → `{status: "ready", url, ...}`.
 4. `GET /v2/media/assets` (readonly) — optional `kind` (`image`/`video`),
-   `keyword`, `tag`, `digital_human_id` filters; returns
-   `{items, total, limit, offset}` with presigned GET URLs.
+   `keyword`, `tag`, `digitalHumanId` (linked to this persona), and
+   `excludeDigitalHumanId` (unlinked to this persona) filters; returns
+   `{items, total, limit, offset}`. Asset metadata remains readable when MinIO
+   is unconfigured. Preview URLs are nullable and only issued for ready assets.
+   Upload URL generation and confirmation return HTTP 503 when MinIO is unconfigured.
 5. `GET/PATCH/DELETE /v2/media/assets/{asset_id}` — detail / metadata edit /
    soft-delete (204, idempotent; the stored object is removed best-effort).
 6. `GET/POST /v2/media/digital-humans` (readonly / readwrite) — list /

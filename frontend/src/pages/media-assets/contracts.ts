@@ -107,6 +107,12 @@ export function decodeAssetList(value: unknown): AssetList {
   };
 }
 
+export function decodeUploadConfirmation(value: unknown, expectedAssetId: string): Count {
+  const row = object(value);
+  if (identity(row.asset_id) !== expectedAssetId || row.status !== 'ready') return invalid();
+  return count(row.size_bytes);
+}
+
 export function decodeUploadTicket(value: unknown): UploadTicket {
   const row = object(value);
   const headers = object(row.required_headers);
