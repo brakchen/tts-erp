@@ -17,6 +17,7 @@
 # -----
 #   bash scripts/test_baseline.sh                 # run fast once, compare, verdict
 #   bash scripts/test_baseline.sh --scope unit    # any test_isolated.sh selection
+#   bash scripts/test_baseline.sh --scope auto --base REV [--plan]  # scoped run or preview
 #   bash scripts/test_baseline.sh --show          # print the committed baseline
 #   bash scripts/test_baseline.sh --update        # regenerate the baseline (master only)
 #   bash scripts/test_baseline.sh --keep-log PATH # also save the raw pytest output
@@ -36,6 +37,10 @@ BASELINE_FILE="docs/testing/baseline-fast.txt"
 SCOPE="fast"
 MODE="compare"
 KEEP_LOG=""
+BASE=""
+PLAN=0
+REFRESH_TEMPLATE=0
+SCENARIOS=()
 RUN_LOG=""
 RUN_TMP=""
 
@@ -47,6 +52,18 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope)
       SCOPE="${2:-}"
+      shift 2
+      ;;
+    --base)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      BASE="$2"
+      shift 2
+      ;;
+    --plan) PLAN=1; shift ;;
+    --refresh-template) REFRESH_TEMPLATE=1; shift ;;
+    --scenario)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      SCENARIOS+=(--scenario "$2")
       shift 2
       ;;
     --update) MODE="update"; shift ;;
@@ -77,6 +94,14 @@ fail() {
   exit 2
 }
 
+if [[ "$SCOPE" == auto || "$PLAN" -eq 1 || -n "$BASE" || "$REFRESH_TEMPLATE" -eq 1 || "${#SCENARIOS[@]}" -gt 0 ]]; then
+  [[ "$SCOPE" == auto && "$MODE" == compare && -n "$BASE" ]] ||
+    fail '--base and --scenario require --scope auto in compare mode'
+  if [[ "$PLAN" -eq 1 ]]; then
+    exec "${PYTHON:-python3}" scripts/_test_selection.py --base "$BASE" "${SCENARIOS[@]}"
+  fi
+fi
+
 RUN_TMP="$(mktemp -d)"
 RUN_LOG="$RUN_TMP/pytest.log"
 cleanup() {
@@ -84,9 +109,8 @@ cleanup() {
   if [[ -n "$KEEP_LOG" ]]; then
     cp "$RUN_LOG" "$KEEP_LOG" 2>/dev/null || true
     echo "[test-baseline] raw pytest output: $KEEP_LOG"
-  else
-    rm -rf "$RUN_TMP"
   fi
+  rm -rf "$RUN_TMP"
   exit "$rc"
 }
 trap cleanup EXIT
@@ -111,6 +135,45 @@ pytest_failure_ids() {
 baseline_ids() {
   sed -n -E '/^[^#]/ { /^tests\/[^ ]*::[^ ]+$/ p }' "$1" | LC_ALL=C sort -u
 }
+
+if [[ "$SCOPE" == auto ]]; then
+  SELECT_PYTHON="${PYTHON:-python3}"
+  [[ -z "$(git status --porcelain --untracked-files=all)" ]] ||
+    fail 'auto requires a clean committed worktree'
+  "$SELECT_PYTHON" scripts/_test_selection.py --base "$BASE" "${SCENARIOS[@]}" >"$RUN_TMP/plan.json"
+  cat "$RUN_TMP/plan.json"
+  BASE="$("$SELECT_PYTHON" -c 'import json, sys; print(json.load(sys.stdin)["base"])' <"$RUN_TMP/plan.json")"
+  if "$SELECT_PYTHON" -c 'import json, sys; p = json.load(sys.stdin); sys.exit(any(p[k] for k in ("frontend", "backend", "backend_all", "scenarios", "browser_mock")))' <"$RUN_TMP/plan.json"; then
+    echo '[test-baseline] no application tests selected; perform any indicated documentation checks'
+    exit 0
+  fi
+  git show "$BASE:$BASELINE_FILE" >"$RUN_TMP/target-baseline.txt" ||
+    fail 'trusted target baseline is unavailable'
+  options=()
+  if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then options+=(--refresh-template); fi
+  rc=0
+  bash scripts/test_isolated.sh "${options[@]}" selected --base "$BASE" --report "$RUN_TMP/report.json" \
+    "${SCENARIOS[@]}" >"$RUN_LOG" 2>&1 || rc=$?
+  cat "$RUN_LOG"
+  "$SELECT_PYTHON" - "$RUN_TMP/report.json" "$RUN_TMP/target-baseline.txt" "$rc" <<'PYTHON'
+import json
+import sys
+from pathlib import Path
+
+result, baseline, status = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+if status not in {0, 1} or not result.is_file():
+    sys.exit(f"[test-baseline] scoped runner failed or produced no results (exit {status})")
+report = json.loads(result.read_text(encoding="utf-8"))
+if report["status"] != status or not report["ran"] or report["missing"] or bool(report["failed"]) != bool(status):
+    sys.exit(f"[test-baseline] selected tests incomplete: {report}")
+known = {line for line in baseline.read_text(encoding="utf-8").splitlines() if line.startswith("tests/")}
+new = sorted(set(report["failed"]) - known)
+if new:
+    sys.exit("[test-baseline] new failures:\n" + "\n".join(new))
+print(f"[test-baseline] {report['ran']} selected cases executed; no new failures")
+PYTHON
+  exit 0
+fi
 
 case "$MODE" in
   show)

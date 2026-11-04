@@ -75,6 +75,7 @@ markers = [
     "requires_db: needs TTS_ERP_DB_URL env var",
     "requires_service: needs live :9877 service running",
     "requires_browser: 需要 playwright + chromium（缺失时用例 skip，可用 -m 'not requires_browser' 排除)",
+    "requires_frontend_build: selected runs need a real bundled frontend for this test",
     # Misc.
     "slow: takes >1s per test — skipped by `-m 'not slow'`",
 ]

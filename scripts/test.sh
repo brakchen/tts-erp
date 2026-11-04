@@ -71,6 +71,10 @@ run_domain() {
 }
 
 case "${1:-default}" in
+selected)
+  shift
+  exec .venv/bin/python scripts/_run_selected_tests.py "$@"
+  ;;
 unit)
   shift
   run_unit "$@"

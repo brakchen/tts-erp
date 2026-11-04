@@ -37,6 +37,27 @@ installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` firs
 
 Domain names may be passed with or without the `domain_` prefix.
 
+### Opt-in selection experiment
+
+Use an explicit synchronized base revision to see the tests selected for a
+committed candidate. The preview only reads Git. The experimental run compares
+the selected pytest outcomes with the baseline committed at that base. The
+existing fast baseline remains the completion and merge check during the
+experiment.
+
+```bash
+bash scripts/test_baseline.sh --scope auto --base origin/master --plan
+bash scripts/test_baseline.sh --scope auto --base origin/master --keep-log /tmp/selection.log
+```
+
+Known pages and API contracts narrow the scope. Unclassified application paths
+select both browser-free suites. An explicit browser scenario can be added
+with `--scenario login-cookie` or `--scenario page-assets`. A schema change
+requires the documented template preparation via `--refresh-template`. Use a
+clean committed checkout to execute a plan. Browser-bearing scopes still use
+the isolated runner and build current assets when needed.
+
+
 Agents must not invoke the underlying test framework or low-level wrapper directly, and must not select `all`, `coverage`, or archived migration domains. Those paths can include production-touching historical behavior.
 
 ## 3. Worktree prerequisites

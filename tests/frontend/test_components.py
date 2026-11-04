@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -20,8 +21,9 @@ def test_frontend_components(tmp_path: Path) -> None:
         "Frontend dependencies missing: run npm ci --prefix frontend before isolated tests"
     )
     args = ["npm", "run", "test:unit", "--"]
-    selection = os.environ.get("FRONTEND_TEST_FILTER")
-    if selection:
+    planned = os.environ.get("TTS_ERP_TEST_VITEST_SELECTION")
+    filters = json.loads(planned) if planned is not None else [os.environ.get("FRONTEND_TEST_FILTER")]
+    for selection in filter(None, filters):
         candidate = Path(selection)
         assert not candidate.is_absolute() and ".." not in candidate.parts
         args.append(selection)
@@ -36,4 +38,6 @@ def test_frontend_components(tmp_path: Path) -> None:
         output = stdout + stderr
         log = tmp_path / "TEST_components.log"
         log.write_text(output)
+        if planned is not None:
+            print(output)
         assert process.returncode == 0, f"Full component output: {log}\n{output[-24000:]}"

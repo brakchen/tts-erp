@@ -1,0 +1,202 @@
+"""Build a test selection from an explicit, synchronized Git comparison."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PAGE_PREFIX = "frontend/src/pages/"
+COMPONENTS = "tests/frontend/test_components.py"
+PACKAGER = "tests/frontend/test_build_package.py"
+SELECTOR_TESTS = "tests/scripts/test_test_selection.py"
+
+# Only map a domain narrowly when its provider and consumer tests are known.
+API_CONTRACTS = {
+    "ad_daily": ("ad-daily", "test_ad_daily"),
+    "analytics": ("spu-profitability", "test_spu_roi_api"),
+    "focused_spus": ("spu-profitability", "test_focused_spus"),
+    "spu_deterioration_alert": ("spu-profit-deterioration", "test_spu_deterioration_alert_api"),
+}
+
+MOCK_BROWSER = {
+    "ad-daily": ("tests/browser/test_frontend_ad_daily_filters.py",),
+    "dashboard": ("tests/browser/test_frontend_dashboard_layout.py",),
+    "shops": ("tests/browser/test_frontend_shops.py",),
+    "spu-profitability": ("tests/browser/test_spu_react_workspace.py",),
+    "spu-profit-deterioration": ("tests/browser/test_spu_deterioration_alert_page.py",),
+}
+
+SCENARIOS = {
+    "page-assets": "tests/api/test_spu_roi_api.py::test_spu_roi_page_cache_busts_css_and_js_from_their_own_content",
+    "login-cookie": "tests/browser/test_frontend_remaining_auth_native.py::test_native_enter_cookie_next_logout_and_blank_login_capture",
+}
+PAGE_ASSETS = {
+    "scripts/build_frontend.sh",
+    "frontend/scripts/package-build.mjs",
+    "tts_erp_v2/api/v2/frontend_pages.py",
+}
+
+
+@dataclass
+class Selection:
+    frontend: bool = False
+    vitest: list[str] = field(default_factory=list)
+    backend_all: bool = False
+    backend: list[str] = field(default_factory=list)
+    contracts: list[str] = field(default_factory=list)
+    browser_mock: list[str] = field(default_factory=list)
+    scenarios: list[str] = field(default_factory=list)
+    build: bool = False
+    refresh_template: bool = False
+    docs: bool = False
+    reasons: dict[str, str] = field(default_factory=dict)
+
+    def finish(self) -> None:
+        for items in (self.vitest, self.backend, self.contracts, self.browser_mock, self.scenarios):
+            items[:] = sorted(set(items))
+        self.build = bool(self.browser_mock or self.scenarios or self.build)
+
+
+def _page(selection: Selection, page: str) -> None:
+    if not selection.frontend or selection.vitest:
+        selection.vitest.append(f"src/pages/{page}/")
+    selection.frontend = True
+
+
+def _frontend_all(selection: Selection) -> None:
+    selection.frontend = True
+    selection.vitest.clear()
+
+
+def _contract(selection: Selection, api: str) -> None:
+    page, test = API_CONTRACTS[api]
+    _page(selection, page)
+    selection.backend.append(f"tests/api/{test}.py")
+    selection.contracts.append(api)
+
+
+def _classify(selection: Selection, path: str) -> str:
+    if path in PAGE_ASSETS:
+        _frontend_all(selection)
+        selection.backend.append(PACKAGER)
+        selection.scenarios.append("page-assets")
+        return "page assets and serving contract"
+    if path == "tests/fixtures/ad_daily_summary.json":
+        _contract(selection, "ad_daily")
+        return "ad-daily shared contract sample"
+    if path.startswith("tts_erp_v2/api/v2/") and Path(path).stem in API_CONTRACTS:
+        _contract(selection, Path(path).stem)
+        return "registered API provider and consumer"
+    if path in {"tts_erp_v2/api/v2/auth.py", "tts_erp_v2/api/v2/oauth.py", "tts_erp_v2/middleware/auth.py"}:
+        _frontend_all(selection)
+        selection.backend.extend(("tests/api/test_auth_login.py", "tests/api/test_oauth_api.py"))
+        return "auth contract; add a named browser scenario if browser behavior changes"
+    if path.startswith(("tts_erp_v2/api/", "frontend/src/shared/api/")) or path in {
+        "frontend/src/bootstrap.ts", "frontend/src/shared/contracts.ts", "tts_erp_v2/app.py",
+    }:
+        _frontend_all(selection)
+        selection.backend_all = True
+        return "shared boundary; both browser-free suites"
+    if path.startswith(PAGE_PREFIX) and "/" in path[len(PAGE_PREFIX):]:
+        page = path[len(PAGE_PREFIX):].split("/", 1)[0]
+        _page(selection, page)
+        if path.endswith(".css"):
+            selection.browser_mock.extend(MOCK_BROWSER.get(page, ()))
+            if page not in MOCK_BROWSER:
+                return f"frontend page {page}; review the unregistered layout check"
+        return f"frontend page {page}"
+    if path.startswith(("frontend/", "tests/frontend/", "tts_erp_v2/static/css/", "tts_erp_v2/static/js/")):
+        _frontend_all(selection)
+        if path.endswith(".css"):
+            selection.browser_mock.extend(MOCK_BROWSER["dashboard"] + MOCK_BROWSER["spu-profitability"])
+        if path in {"frontend/vite.config.ts", "frontend/package.json", "frontend/package-lock.json"}:
+            selection.build = True
+            selection.backend.append(PACKAGER)
+        return "frontend"
+    if path.startswith(("alembic/", "docs/schema/")) or path == "alembic.ini":
+        selection.backend_all = True
+        selection.refresh_template = True
+        return "database schema"
+    if path.startswith("tts_erp_v2/analytics/spu_profitability/") and Path(path).name in {
+        "_formula_v10.py", "_projection.py",
+    }:
+        selection.backend.append("tests/analytics/test_spu_profitability_formula.py")
+        return "backend profitability formula"
+    if path.startswith("tts_erp_v2/analytics/"):
+        selection.backend_all = True
+        return "backend analytics"
+    if path.startswith("tts_erp_v2/"):
+        selection.backend_all = True
+        return "backend"
+    if path.startswith("tests/browser/"):
+        if any(path == target.split("::", 1)[0] for files in MOCK_BROWSER.values() for target in files):
+            selection.browser_mock.append(path)
+            return "mocked browser regression"
+        _frontend_all(selection)
+        selection.backend_all = True
+        return "browser test outside the registered scenarios; review its targeted invocation"
+    if path.startswith("tests/") and path.endswith(".py") and path != "tests/conftest.py":
+        if path.startswith(("tests/e2e/", "tests/support/")) or path.endswith("/conftest.py"):
+            selection.backend_all = True
+            _frontend_all(selection)
+            return "shared test or explicit smoke surface"
+        selection.backend_all = True
+        return "backend test"
+    if path.startswith("scripts/test") or path in {"scripts/_test_selection.py", "AGENTS.md"}:
+        selection.backend.append(SELECTOR_TESTS)
+        _frontend_all(selection)
+        return "test infrastructure"
+    if path.endswith(".md") and not path.startswith(("docs/api/", "docs/testing/", "docs/guides/agent-")):
+        selection.docs = True
+        return "documentation"
+    selection.backend_all = True
+    _frontend_all(selection)
+    return "unclassified; both browser-free suites"
+
+
+def select(paths: list[str], scenarios: list[str] | None = None) -> Selection:
+    selection = Selection()
+    for path in sorted(set(paths)):
+        selection.reasons[path] = _classify(selection, path)
+    selection.scenarios.extend(scenarios or ())
+    selection.finish()
+    return selection
+
+
+def git(*args: str) -> bytes:
+    return subprocess.check_output(("git", *args), cwd=ROOT)
+
+
+def changed_paths(base: str, head: str) -> list[str]:
+    raw = git("diff", "--name-only", "-z", "--no-renames", base, head, "--")
+    if raw and not raw.endswith(b"\0"):
+        raise ValueError("Git path output was incomplete")
+    return [path.decode("utf-8", errors="surrogateescape") for path in raw.split(b"\0")[:-1]]
+
+
+def resolve_commit(revision: str) -> str:
+    return git("rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}").decode().strip()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base", required=True)
+    parser.add_argument("--head", default="HEAD", help="inspect a historical commit without checking it out")
+    parser.add_argument("--scenario", choices=sorted(SCENARIOS), action="append")
+    args = parser.parse_args()
+    try:
+        base, head = resolve_commit(args.base), resolve_commit(args.head)
+        git("merge-base", "--is-ancestor", base, head)
+        plan = select(changed_paths(base, head), args.scenario)
+    except (ValueError, subprocess.CalledProcessError) as exc:
+        parser.exit(2, f"test selection: {exc}\n")
+    print(json.dumps({"base": base, "head": head, **asdict(plan)}, indent=2))
+
+
+if __name__ == "__main__":
+    main()

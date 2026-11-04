@@ -4022,6 +4022,7 @@ def test_spu_roi_page_shell_contract(api_client, readonly_key):
         assert handler not in body
 
 
+@pytest.mark.requires_frontend_build
 def test_spu_roi_page_cache_busts_css_and_js_from_their_own_content(api_client, readonly_key):
     """Selected release and Vite manifest own script and stylesheet identities."""
     from tts_erp_v2.api.v2 import frontend_pages

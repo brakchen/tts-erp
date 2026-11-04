@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 from collections.abc import Iterator
@@ -461,6 +462,11 @@ class _Handler(BaseHTTPRequestHandler):
 @pytest.fixture(scope="session")
 def frontend_build() -> None:
     """Current source must build; never skip React coverage for missing artifacts."""
+    prepared = os.environ.get("TTS_ERP_TEST_PREPARED_RELEASE")
+    if prepared is not None:
+        release = REPO_ROOT / "tts_erp_v2/static/frontend/release.json"
+        assert json.loads(release.read_text(encoding="utf-8"))["releaseId"] == prepared
+        return
     result = subprocess.run(["bash", "scripts/build_frontend.sh"], cwd=REPO_ROOT, capture_output=True, text=True, timeout=180, check=False)
     assert result.returncode == 0, (result.stdout + result.stderr)[-18000:]
 
