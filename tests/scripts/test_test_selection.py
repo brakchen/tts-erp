@@ -87,6 +87,9 @@ def test_auth_selection_covers_session_and_middleware_contracts():
     plan = select(["tts_erp_v2/middleware/auth.py"])
     assert "tests/api/test_user_auth.py" in plan.backend
     assert "tests/api/test_middleware.py" in plan.backend
+    assert "src/pages/login/" in plan.vitest
+    assert "src/shared/api/" in plan.vitest
+    assert "src/pages/manual-costs/" not in plan.vitest
     assert not plan.build
 
 

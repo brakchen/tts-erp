@@ -94,10 +94,14 @@ class Selection:
         self.build = bool(self.browser_mock or self.scenarios or self.build)
 
 
-def _page(selection: Selection, page: str) -> None:
+def _frontend_filters(selection: Selection, *patterns: str) -> None:
     if not selection.frontend or selection.vitest:
-        selection.vitest.append(PAGE_TEST_FILTERS.get(page, f"src/pages/{page}/"))
+        selection.vitest.extend(patterns)
     selection.frontend = True
+
+
+def _page(selection: Selection, page: str) -> None:
+    _frontend_filters(selection, PAGE_TEST_FILTERS.get(page, f"src/pages/{page}/"))
 
 
 def _frontend_all(selection: Selection) -> None:
@@ -126,7 +130,10 @@ def _classify(selection: Selection, path: str) -> str:
         _contract(selection, Path(path).stem)
         return "registered API provider and consumer"
     if path in {"tts_erp_v2/api/v2/auth.py", "tts_erp_v2/api/v2/oauth.py", "tts_erp_v2/middleware/auth.py"}:
-        _frontend_all(selection)
+        _frontend_filters(
+            selection, "src/app/", "src/bootstrap-login.test.ts", "src/pages/login/",
+            "src/pages/oauth-onboard/", "src/shared/api/",
+        )
         selection.backend.extend((
             "tests/api/test_auth_login.py", "tests/api/test_cookie_csrf.py", "tests/api/test_middleware.py",
             "tests/api/test_oauth_api.py", "tests/api/test_user_auth.py",
