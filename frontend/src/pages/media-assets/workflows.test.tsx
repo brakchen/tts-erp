@@ -245,11 +245,15 @@ it('asks before discarding asset A and never applies its draft to asset B', asyn
 it('shows named fresh deletion impact and keeps the dialog open when deletion is denied', async () => {
   const user = userEvent.setup();
   let detailReads = 0;
+  let finishImpact!: (response: Response) => void;
+  const impact = new Promise<Response>((resolve) => { finishImpact = resolve; });
   const fetcher = vi.fn(async (url: string, init: RequestInit) => {
     if (init.method === 'DELETE') return json({}, 403);
-    if (url.endsWith(assetPath)) return json({ ...asset, used_by: ++detailReads === 1 ? [] : [
-      { digital_human_id: 1, name: human.name, status: 'active' },
-    ] });
+    if (url.endsWith(assetPath)) {
+      if (++detailReads === 1) return json({ ...asset, used_by: [] });
+      if (detailReads === 2) return impact;
+      return json({ ...asset, used_by: [{ digital_human_id: 1, name: human.name, status: 'active' }] });
+    }
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
@@ -257,11 +261,18 @@ it('shows named fresh deletion impact and keeps the dialog open when deletion is
   await user.click(await findButton('查看 ' + asset.filename));
   await user.click(await findButton('从资产库删除'));
   const confirmation = within(await screen.findByRole('alertdialog'));
+  const confirm = confirmation.getByRole('button', { name: '确认删除' });
+  expect(confirm).toBeDisabled();
+  finishImpact(json({}, 503));
+  expect(await confirmation.findByText('当前引用不可用')).toBeVisible();
+  expect(confirm).toBeDisabled();
+  await user.click(confirmation.getByRole('button', { name: '重试当前引用' }));
   expect(await confirmation.findByText(/TEST_数字人/)).toBeVisible();
+  expect(confirm).toBeEnabled();
   expect(fetcher.mock.calls.some(([, init]) => init.method === 'DELETE')).toBe(false);
   await user.click(confirmation.getByRole('button', { name: '确认删除' }));
   expect(await confirmation.findByText('你没有权限执行此操作。')).toBeVisible();
-  expect(detailReads).toBe(2);
+  expect(detailReads).toBe(3);
 });
 
 it('distinguishes denied reads from empty results and renews a failed preview', async () => {

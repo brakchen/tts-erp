@@ -71,7 +71,7 @@ function CreateHuman({ root, onClose, onCreated }: {
       {action.uncertain && <p>再次提交前，请核对是否已经创建同名档案。 <a className="underline"
         href={pathFor(root, '/v2/pages/digital-humans')} target="_blank" rel="noreferrer">在新标签页核对档案</a></p>}
       <HumanForm draft={draft} setDraft={setDraft} pending={action.pending}
-        error={action.error ? '创建未完成。' + action.error : ''} submitLabel="创建数字人" cancelLabel="取消创建"
+        error={action.error && (action.uncertain ? action.error : '创建未完成。' + action.error)} submitLabel="创建数字人" cancelLabel="取消创建"
         onSubmit={create} onCancel={close} />
     </RecordDialog>
     <DiscardDialog open={discard} description="尚未保存的档案资料将清除。" onKeep={() => setDiscard(false)} onDiscard={onClose} />
@@ -217,7 +217,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
       {human && (draft ? <>
         <p>在此修改档案名称与人设说明。素材在详情的「引用资产」中管理。</p>
         <HumanForm draft={draft} setDraft={setDraft} pending={action.pending} unchanged={!dirty}
-          error={action.error ? '保存未完成。' + action.error : ''} submitLabel="保存资料" cancelLabel="取消编辑"
+          error={action.error && (action.uncertain ? action.error : '保存未完成。' + action.error)} submitLabel="保存资料" cancelLabel="取消编辑"
           onSubmit={save} onCancel={() => leave('view')} />
       </> : <>
         <div className="space-y-2">

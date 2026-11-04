@@ -38,11 +38,15 @@ export function mediaError(error: unknown, writing = false) {
   return '操作失败（HTTP ' + error.status + '），请重试。';
 }
 
-export function useMediaRead<T>(root: string, path: string, decode: (data: unknown) => T, revision = 0) {
-  type State = { path: string; data?: T; error?: string; loading: boolean };
-  const [state, setState] = useState<State>({ path, loading: true });
+export function useMediaRead<T>(root: string, path: string | null, decode: (data: unknown) => T, revision = 0) {
+  type State = { path: string | null; data?: T; error?: string; loading: boolean };
+  const [state, setState] = useState<State>({ path, loading: path !== null });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (path === null) {
+      setState({ path, loading: false });
+      return;
+    }
     const controller = new AbortController();
     let current = true;
     setState((previous) => ({ path, loading: true, data: previous.path === path ? previous.data : undefined }));
@@ -52,7 +56,7 @@ export function useMediaRead<T>(root: string, path: string, decode: (data: unkno
     return () => { current = false; controller.abort(); };
   }, [root, path, decode, revision, attempt]);
   return {
-    ...(state.path === path ? state : { path, loading: true } as State),
+    ...(state.path === path ? state : { path, loading: path !== null } as State),
     retry: () => setAttempt((value) => value + 1),
   };
 }

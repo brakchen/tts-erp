@@ -31,10 +31,18 @@ function draftFor(asset: Asset) {
   return { filename: asset.filename, description: asset.description ?? '', tags: asset.tags.join('、') };
 }
 
-function DeletionUsage({ bootstrap, id }: PageProps & { id: string }) {
-  const read = useMediaRead(bootstrap.rootPath, '/assets/' + id, decodeAsset);
-  if (read.data) return <Usage asset={read.data} bootstrap={bootstrap} links={false} />;
-  return <ReadStatus title="当前引用" loading={read.loading} error={read.error} onRetry={read.retry} />;
+function DeleteAsset({ bootstrap, asset, onConfirm }: PageProps & { asset: Asset; onConfirm: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const read = useMediaRead(bootstrap.rootPath, open ? '/assets/' + asset.assetId : null, decodeAsset);
+  const current = read.data?.assetId === asset.assetId && read.data.usedBy ? read.data : undefined;
+  return <DeleteConfirmation label="从资产库删除" name={asset.filename} onVisibilityChange={setOpen}
+    confirmDisabled={!current || read.loading} onConfirm={onConfirm} description={<>
+      <p>资产将从全局资产库及所有引用它的数字人中移除。数字人档案会保留。</p>
+      {current && !read.loading ? <Usage asset={current} bootstrap={bootstrap} links={false} />
+        : <ReadStatus title="当前引用" loading={read.loading}
+          error={read.error ?? (!read.loading ? '无法确认哪些数字人引用此资产。请重试后再删除。' : undefined)}
+          onRetry={read.retry} />}
+    </>} />;
 }
 
 function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDeleted }: PageProps & {
@@ -108,7 +116,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         <TextField value={draft.tags} isDisabled={action.pending} onChange={(tags) => setDraft({ ...draft, tags })}>
           <Label>标签（顿号或逗号分隔）</Label><Input />
         </TextField>
-        <ActionError message={action.error ? '保存未完成。' + action.error : ''} />
+        <ActionError message={action.error && (action.uncertain ? action.error : '保存未完成。' + action.error)} />
         <div className="flex flex-wrap gap-2">
           <Button type="submit" isDisabled={!dirty || !draft.filename.trim()} isPending={action.pending}>保存资料</Button>
           <Button variant="secondary" isDisabled={action.pending} onPress={() => exit('view')}>取消编辑</Button>
@@ -122,11 +130,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         </section>
         {canWrite && <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onPress={() => { setNotice(''); setDraft(draftFor(asset)); }}>编辑资料</Button>
-          <DeleteConfirmation label="从资产库删除" name={asset.filename}
-            description={<>
-              <p>资产将从全局资产库及所有引用它的数字人中移除。数字人档案会保留。</p>
-              <DeletionUsage bootstrap={bootstrap} id={id} />
-            </>} onConfirm={remove} />
+          <DeleteAsset asset={asset} bootstrap={bootstrap} onConfirm={remove} />
         </div>}
       </>)}
     </RecordDialog>
