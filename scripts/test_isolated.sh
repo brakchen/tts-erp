@@ -160,13 +160,15 @@ issue_run_binding() {
     --base-db "${connection_fields[0]}" --template-db "$TEMPLATE_DB" --run-db "$RUN_DB" \
     --run-id "$RUN_ID" --owner-pid "$$" --proof-file "$RUN_PROOF_PATH"
 }
+cleanup_status=1
+if [[ "${1:-}" == selected ]]; then cleanup_status=70; fi
 cleanup() {
   local rc=$?
   # keep-db preserves data for diagnosis, never current-run write provenance.
   if [[ -n "$RUN_PROOF_DIR" ]]; then
     if ! rm -f -- "$RUN_PROOF_PATH" || ! rmdir -- "$RUN_PROOF_DIR"; then
       echo '[isolated-test] ERROR: run proof cleanup failed' >&2
-      if [[ "$rc" -eq 0 ]]; then rc=1; fi
+      if [[ "$rc" -eq 0 || "$cleanup_status" -ne 1 ]]; then rc="$cleanup_status"; fi
     fi
   fi
   if [[ "$RUN_CREATED" -eq 1 ]]; then
@@ -175,16 +177,19 @@ cleanup() {
       echo "[isolated-test] dropping ephemeral DB: $RUN_DB"
       if ! drop_run_db; then
         echo "[isolated-test] ERROR: ephemeral cleanup failed: $RUN_DB" >&2
-        if [[ "$rc" -eq 0 ]]; then rc=1; fi
+        if [[ "$rc" -eq 0 || "$cleanup_status" -ne 1 ]]; then rc="$cleanup_status"; fi
       fi
     fi
   fi
   exit "$rc"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 prepare_template_and_clone
 issue_run_binding
 if [[ "$TEMPLATE_CREATED_OR_REFRESHED" -eq 0 ]]; then echo "[isolated-test] using existing template DB: $TEMPLATE_DB"; fi
 echo "[isolated-test] running: bash scripts/test.sh ${*:-}"
 TTS_ERP_DB_URL_TEST="$RUN_URL" TTS_ERP_TEST_RUN_PROOF="$RUN_PROOF_PATH" \
-  TTS_ERP_TEST_RUN_ID="$RUN_ID" bash scripts/test.sh "$@"
+  TTS_ERP_TEST_RUN_ID="$RUN_ID" TTS_ERP_TEST_REFRESHED_FOR_SELECTION="$REFRESH_TEMPLATE" \
+  bash scripts/test.sh "$@"

@@ -253,15 +253,19 @@ Agent 测试的唯一入口是 `scripts/test_isolated.sh`。它从只维护 sche
 执行后删除 clone；没有共享数据库或直接底层 runner 的降级路径。
 
 ```bash
-# 日常快速套件
-bash scripts/test_isolated.sh fast
+# 日常验收，target_sha 为精确同步的目标 master SHA
+bash scripts/test_baseline.sh --scope auto --base "$target_sha"
+bash scripts/test_baseline.sh --scope auto --base "$target_sha" --plan
+
+# 选测、隔离和全局收集基础设施改动的综合回归
+bash scripts/test_baseline.sh --scope fast --base "$target_sha"
 
 # 单域 / 单文件
 bash scripts/test_isolated.sh api
 bash scripts/test_isolated.sh fast tests/api/test_pages.py
 
-# migration/schema 变化后先刷新模板
-bash scripts/test_isolated.sh --refresh-template fast
+# migration/schema 变化时刷新模板并执行本次验收
+bash scripts/test_baseline.sh --scope auto --base "$target_sha" --refresh-template
 ```
 
 安全规则：

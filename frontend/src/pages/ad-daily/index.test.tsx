@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
+import summaryContract from '../../../../tests/fixtures/ad_daily_summary.json';
 import AdDaily from './index';
 const row = { id: 7, seller_id: '900719925474099312345', shop_pk: null, shop_name: null, advertiser_id: 'TEST_ADV', campaign_id: 'TEST_CAMPAIGN', product_id: 'TEST_PRODUCT', product_title: null, endpoint: '/TEST/a?x=1&y=2', day: '2026-09-03', mixed_real_cost: '9999999999999999.9999', onsite_roi2_shopping_sku: 0, onsite_roi2_shopping_value: '0.0000', onsite_mixed_real_roi2_shopping: null, metrics_extra: { clicks: 0 }, created_at: '2026-09-03T00:00:00+00:00', updated_at: '2026-09-03T00:00:00+00:00' };
 const payload = { items: [row], total: 1, limit: 50, offset: 0, summary: { row_count: 1, spend: row.mixed_real_cost, attributed_orders: 0, attributed_gmv: '0.0000', weighted_roi: null, currency: 'USD' } };
@@ -19,6 +20,14 @@ function api(data: unknown = payload) {
   vi.stubGlobal('fetch', fetcher); return fetcher;
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); history.replaceState(null, '', '/'); });
+it('renders the provider-verified summary contract', async () => {
+  api({ ...payload, summary: summaryContract });
+  await mount();
+  const summary = await screen.findByRole('region', { name: '全部筛选结果汇总' });
+  expect(summary).toHaveTextContent(summaryContract.spend);
+  expect(summary).toHaveTextContent(summaryContract.attributed_gmv);
+  expect(summary).toHaveTextContent(summaryContract.weighted_roi + '×');
+});
 it('preserves every source decimal digit in React spend and server full-filter summary', async () => {
   api({ ...payload, summary: { ...payload.summary, row_count: 999, weighted_roi: '7.1234' } }); await mount();
   expect(await screen.findAllByText('9,999,999,999,999,999.9999')).toHaveLength(2);

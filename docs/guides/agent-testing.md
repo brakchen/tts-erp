@@ -24,7 +24,8 @@ installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` firs
 
 | Scope | Command |
 | --- | --- |
-| **DoD validation (one run, diffed vs committed master baseline)** | `bash scripts/test_baseline.sh` |
+| **DoD validation (one selected run against the target baseline)** | `bash scripts/test_baseline.sh --scope auto --base "$target_sha"` |
+| Full regression for test infrastructure changes | `bash scripts/test_baseline.sh --scope fast --base "$target_sha"` |
 | Show the committed master baseline | `bash scripts/test_baseline.sh --show` |
 | Refresh the master baseline (master worktree only) | `bash scripts/test_baseline.sh --update` |
 | Fast suite (raw, no baseline diff) | `bash scripts/test_isolated.sh fast` |
@@ -36,6 +37,40 @@ installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` firs
 | Check / install test prerequisites | `bash scripts/envsetup/install-test-deps.sh --check` · `sudo bash scripts/envsetup/install-test-deps.sh` |
 
 Domain names may be passed with or without the `domain_` prefix.
+
+### Committed candidate selection
+
+Use the exact synchronized master SHA as `target_sha`. On a prospective merge
+commit it is the first parent. `--plan` reads Git and prints the affected
+groups and reasons. An ordinary run uses a clean committed worktree and
+compares the executed tests with the baseline from that target commit.
+
+```bash
+bash scripts/test_baseline.sh --scope auto --base "$target_sha" --plan
+bash scripts/test_baseline.sh --scope auto --base "$target_sha" --keep-log /tmp/selection.log
+bash scripts/test_baseline.sh --scope frontend
+bash scripts/test_baseline.sh --scope backend
+```
+
+Known pages and API contracts narrow the scope. Unclassified application paths
+select both browser-free suites. Inspect the plan when a change affects real
+browser behavior. Append `--scenario login-cookie` for browser login and cookies,
+`--scenario page-assets` for the bundled assets serving contract, or
+`--scenario account-page` for the isolated account page contract. A schema change
+requires `--refresh-template`. Browser scopes build current assets when needed.
+
+Use `--scope fast --base "$target_sha"` when changing selection, the baseline
+driver, test execution or isolation, result reporting, or global test collection
+and fixtures. This includes `scripts/test*.sh`, `scripts/_test_selection.py`,
+`scripts/_run_selected_tests.py`, `tests/support/selected_test_report.py`, and
+changes to global pytest collection or `tests/conftest.py`. Fast remains an explicit
+regression command. An auto run counts as the baseline comparison for an ordinary
+change, so a second full run is unnecessary.
+
+Changes to `tests/e2e/` require separate evidence from the affected explicit
+smoke command in its approved environment. Keep deployment-dependent smoke runs
+outside the automatic gate. For docs-only changes, validate links, referenced
+paths and Markdown in addition to the diff check.
 
 Agents must not invoke the underlying test framework or low-level wrapper directly, and must not select `all`, `coverage`, or archived migration domains. Those paths can include production-touching historical behavior.
 
@@ -104,9 +139,9 @@ If template cloning or PostgreSQL client tooling is unavailable, stop and repair
 ## 5. Selecting validation scope
 
 - Documentation-only change: validate links, referenced paths, and Markdown structure; application tests are not normally required.
-- Single-domain code change: run that domain first, then the fast suite before merge.
-- Shared fixture, middleware, database model, schema, scheduler, or cross-domain change: run the narrow tests first and then the fast suite.
-- Migration change: validate with `scripts/test_isolated.sh --refresh-template ...` or another test-shaped ephemeral DB; never run the production migration.
+- Ordinary code change: use the narrowest relevant tests and the committed candidate selection above.
+- Shared change: inspect the automatic plan and add an affected named scenario when needed. Changes to the global test infrastructure use the explicit fast rule above.
+- Migration change: pass `--refresh-template` to the isolated baseline command so the schema and tests use an ephemeral clone.
 - Service-dependent tests must use the documented service setup and remain bounded by a timeout.
 
 ## 6. Failure classification
@@ -119,9 +154,10 @@ it. `scripts/test_baseline.sh` runs the suite once and produces the diff
 mechanically:
 
 ```bash
-bash scripts/test_baseline.sh              # run fast once, diff vs baseline, exit 0 = pass
+bash scripts/test_baseline.sh --scope auto --base "$target_sha"
+bash scripts/test_baseline.sh --scope fast --base "$target_sha"  # test infrastructure
 bash scripts/test_baseline.sh --show       # print the committed baseline
-bash scripts/test_baseline.sh --keep-log /tmp/lane.log   # also keep raw pytest output
+bash scripts/test_baseline.sh --scope auto --base "$target_sha" --keep-log /tmp/lane.log
 ```
 
 Exit codes: `0` zero new stable failures (DoD pass), `1` new failures present,

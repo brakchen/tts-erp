@@ -121,7 +121,8 @@ Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md
 
 | Task | Command |
 | --- | --- |
-| DoD validation (run once + diff vs committed master baseline) | `bash scripts/test_baseline.sh` |
+| DoD validation (select once from the synchronized target SHA) | `bash scripts/test_baseline.sh --scope auto --base "$target_sha"` |
+| Full regression for test infrastructure changes | `bash scripts/test_baseline.sh --scope fast --base "$target_sha"` |
 | Show / refresh the committed master baseline | `bash scripts/test_baseline.sh --show` · `--update` (master only) |
 | Fast test suite (isolated DB) | `bash scripts/test_isolated.sh fast` |
 | One test domain (isolated DB) | `bash scripts/test_isolated.sh <domain>` |
@@ -213,7 +214,7 @@ conn.execute(text("..."))
 Definition of done:
 
 1. Run the narrowest relevant test command.
-2. For code/test changes, run `bash scripts/test_baseline.sh`. This runs the fast suite **once** and mechanically diffs it against the committed master baseline in `docs/testing/baseline-fast.txt`; exit 0 means zero new stable failures. Do not re-run the suite to capture a baseline — the baseline is a property of master and is already committed. Regenerating it (`--update`) is a master-only operation.
+2. For ordinary code/test changes, run `bash scripts/test_baseline.sh --scope auto --base "$target_sha"` on the committed candidate. Use the exact synchronized master SHA, and for integration use the prospective merge's first parent. Add a named `--scenario` when the change affects a real browser boundary. For changes to the selector, baseline driver, isolated runner, result reporting, or global test collection, run `--scope fast --base "$target_sha"` instead. See the testing guide for the full regression rule and explicit E2E checks. The target baseline is already committed. Regenerate it only from a clean master worktree.
 3. The default requirement is zero failures. If master has an explicitly recorded stable baseline, the change must introduce zero new stable failures; isolate and rerun only the individual failing tests once to distinguish flakes.
 4. A lane needs **one** suite execution in the normal case. If the tool reports new failures, rerun the smallest failing selection — never the whole suite — to classify them. Repeated full-suite runs are what previously pushed worker sessions past their wall-clock cap.
 4. Update contracts and operational documentation affected by the change.
