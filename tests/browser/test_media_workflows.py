@@ -41,10 +41,13 @@ def png() -> bytes:
     def chunk(kind: bytes, payload: bytes) -> bytes:
         return struct.pack("!I", len(payload)) + kind + payload + struct.pack("!I", zlib.crc32(kind + payload))
 
+    left = b"\x12\x74\xb4" * 128
+    right = b"\xf5\xb5\x3a" * 128
+    rows = (b"\x00" + left + right) * 64 + (b"\x00" + right + left) * 64
     return (
         b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack("!IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(b"\x00\x12\x74\xb4"))
+        + chunk(b"IHDR", struct.pack("!IIBBBBB", 256, 128, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(rows))
         + chunk(b"IEND", b"")
     )
 
@@ -252,7 +255,7 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
     heading(page, original)
     image = dialog(page).get_by_role("img").first
     expect(image).to_be_visible()
-    page.wait_for_function("img => img.complete && img.naturalWidth === 1", arg=image.element_handle())
+    page.wait_for_function("img => img.complete && img.naturalWidth === 256 && img.naturalHeight === 128", arg=image.element_handle())
     assert gate.calls["POST", ASSETS + "/upload-url"] == gate.store.puts == 1
     close(page)
     expect(page.get_by_text("已清除筛选并返回第一页。", exact=False)).to_be_visible()
@@ -285,7 +288,7 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
         page.set_viewport_size({"width": width, "height": 1000})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         expect(button(dialog(page), "编辑资料")).to_be_visible()
-        page.screenshot(path=tmp_path / f"TEST_asset_detail_{width}.png")
+        page.screenshot(path=tmp_path / f"TEST_asset_detail_{width}.png", animations="disabled")
     dialog(page).get_by_role("link", name=first, exact=True).click()
     heading(page, first)
     text(dialog(page), original)
@@ -372,7 +375,7 @@ def test_confirm_and_attach_recovery_on_the_original_target(media_run: MediaRun,
     asset = media_run.name("attached.png")
     media_run.goto("digital-humans")
     create_persona(page, person)
-    page.screenshot(path=tmp_path / "TEST_digital_human_375.png")
+    page.screenshot(path=tmp_path / "TEST_digital_human_375.png", animations="disabled")
     dimensions = overflow_report(page)
     assert dimensions["scrollWidth"] <= dimensions["clientWidth"], dimensions
     expect(button(dialog(page), "上传新资产")).to_be_visible()
@@ -412,7 +415,7 @@ def test_confirm_and_attach_recovery_on_the_original_target(media_run: MediaRun,
     button(dialog(page), "重新获取预览").click()
     image = dialog(page).get_by_role("img").first
     expect(image).to_be_visible()
-    page.wait_for_function("img => img.complete && img.naturalWidth === 1", arg=image.element_handle())
+    page.wait_for_function("img => img.complete && img.naturalWidth === 256 && img.naturalHeight === 128", arg=image.element_handle())
 
     media_run.goto("digital-humans")
     other = media_run.name("other_persona")
