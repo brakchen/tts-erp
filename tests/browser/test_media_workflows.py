@@ -20,13 +20,14 @@ import pytest
 from fastapi.testclient import TestClient
 from playwright.sync_api import Locator, Page, Response, expect, sync_playwright
 from sqlalchemy import delete, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from tests.support.frontend_p2_binding import checked_session, current_binding, validate_application
 from tests.support.frontend_p2_browser import fill_sensitive
 from tests.support.media_browser import APP, ASSETS, HUMANS, LOGIN, ME, MediaBrowserBridge, MediaBytes
 from tts_erp_v2.accounts import service
-from tts_erp_v2.accounts.models import User
+from tts_erp_v2.accounts.models import Role, User
 from tts_erp_v2.api.v2 import media
 from tts_erp_v2.app import build_app
 from tts_erp_v2.db.base import get_engine, get_session_factory
@@ -114,7 +115,7 @@ def media_run(request, frontend_build, monkeypatch) -> Iterator[MediaRun]:
     monkeypatch.setenv("TTS_ERP_EXTERNAL_PREFIX", prefix)
     monkeypatch.delenv("TTS_ERP_FRONTEND_DEV_ORIGIN", raising=False)
     marker = "TEST_media_" + uuid4().hex
-    username = marker.lower()
+    username = "test_media_" + uuid4().hex[:16]
     password = "TEST_Media_9!" + uuid4().hex
     store = MediaBytes()
     monkeypatch.setattr(media, "get_store", lambda: store)
@@ -124,10 +125,16 @@ def media_run(request, frontend_build, monkeypatch) -> Iterator[MediaRun]:
         # No filtering of real API responses and no visibility into foreign rows.
         assert session.scalar(select(MediaAsset.id).where(MediaAsset.deleted_at.is_(None)).limit(1)) is None
         assert session.scalar(select(DigitalHuman.id).where(DigitalHuman.deleted_at.is_(None)).limit(1)) is None
-        user_id = service.create_user(
-            session, username=username, password=password, display_name=marker, roles=[role], actor=marker,
-        ).id
-    client = TestClient(app, base_url=APP, follow_redirects=False, raise_server_exceptions=False)
+        assert session.get(Role, role) is not None, f"TEST clone is missing the builtin {role} role"
+        try:
+            user_id = service.create_user(
+                session, username=username, password=password, display_name=marker, roles=[role], actor=marker,
+            ).id
+        except (ValueError, SQLAlchemyError) as error:
+            pytest.fail(f"TEST media account setup failed ({type(error).__name__})", pytrace=False)
+    client = TestClient(
+        app, base_url=APP, follow_redirects=False, raise_server_exceptions=False, client=("127.0.0.27", 50000),
+    )
     gate = MediaBrowserBridge(client, store, marker, username, prefix=prefix)
     try:
         with sync_playwright() as playwright:
@@ -314,6 +321,7 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
     attach(page, renamed)
     button(dialog(page), "删除数字人").click()
     button(dialog(page), "确认删除").click()
+    expect(dialog(page)).to_have_count(0)
     expect(button(page, "查看 " + first)).to_have_count(0)
     with db() as session:
         assert session.get(DigitalHuman, first_id).deleted_at is not None
@@ -325,6 +333,7 @@ def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path)
     button(dialog(page), "从资产库删除").click()
     expect(dialog(page).get_by_text(re.compile(re.escape(second))).first).to_be_visible()
     button(dialog(page), "确认删除").click()
+    expect(dialog(page)).to_have_count(0)
     expect(button(page, "查看 " + renamed)).to_have_count(0)
     with db() as session:
         assert session.get(MediaAsset, aid).deleted_at is not None
