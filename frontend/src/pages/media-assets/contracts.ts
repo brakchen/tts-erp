@@ -17,6 +17,13 @@ export interface Asset {
   createdAt: string;
   url: string | null;
   urlExpiresAt: string | null;
+  usedBy: AssetReference[] | null;
+}
+
+export interface AssetReference {
+  id: string;
+  name: string;
+  status: string;
 }
 
 export interface AssetList {
@@ -76,6 +83,15 @@ function tags(value: unknown): string[] {
   return value.map((item) => text(item));
 }
 
+function decodeReferences(value: unknown): AssetReference[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value)) return invalid();
+  return value.map((entry) => {
+    const row = object(entry);
+    return { id: identity(row.digital_human_id), name: text(row.name), status: text(row.status) };
+  });
+}
+
 export function decodeAsset(value: unknown): Asset {
   const row = object(value);
   return {
@@ -93,6 +109,7 @@ export function decodeAsset(value: unknown): Asset {
     createdAt: text(row.created_at),
     url: nullableText(row.url),
     urlExpiresAt: nullableText(row.url_expires_at),
+    usedBy: decodeReferences(row.used_by),
   };
 }
 
