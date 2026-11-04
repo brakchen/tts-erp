@@ -22,10 +22,22 @@ LEGACY_FRONTEND = (
 
 # Only map a domain narrowly when its provider and consumer tests are known.
 API_CONTRACTS = {
-    "ad_daily": ("ad-daily", "test_ad_daily"),
-    "analytics": ("spu-profitability", "test_spu_roi_api"),
-    "focused_spus": ("spu-profitability", "test_focused_spus"),
-    "spu_deterioration_alert": ("spu-profit-deterioration", "test_spu_deterioration_alert_api"),
+    "ad_daily": (("ad-daily",), ("tests/api/test_ad_daily.py",)),
+    "analytics": (("spu-profitability",), ("tests/api/test_spu_roi_api.py",)),
+    "config": (("runtime-configs",), ("tests/api/test_runtime_config.py", "tests/api/test_runtime_config_review.py")),
+    "focused_spus": (("spu-profitability",), ("tests/api/test_focused_spus.py",)),
+    "intercept": (
+        ("intercept-configs", "intercept-requests", "intercept-stats"),
+        ("tests/api/test_intercept_configs.py", "tests/api/test_intercept_sync.py"),
+    ),
+    "media": (("digital-humans", "media-assets"), ("tests/api/test_media_api.py",)),
+    "spu_deterioration_alert": (("spu-profit-deterioration",), ("tests/api/test_spu_deterioration_alert_api.py",)),
+    "sync_status": (
+        ("dashboard", "sync-jobs"),
+        ("tests/api/test_sync_status_api.py", "tests/api/test_sync_job_management.py"),
+    ),
+    "users": (("users",), ("tests/api/test_user_auth.py", "tests/api/test_frontend_remaining_cookie_writes.py")),
+    "video_publish": (("video-publish",), ("tests/publishing/test_http_contracts.py",)),
 }
 
 MOCK_BROWSER = {
@@ -39,7 +51,7 @@ MOCK_BROWSER = {
 SCENARIOS = {
     "page-assets": "tests/api/test_spu_roi_api.py::test_spu_roi_page_cache_busts_css_and_js_from_their_own_content",
     "account-page": "tests/scripts/test_frontend_p2_accounts.py::test_real_cookie_roles_page_access_scope_and_revocation_use_same_clone",
-    "login-cookie": "tests/browser/test_frontend_remaining_auth_native.py::test_native_enter_cookie_next_logout_and_blank_login_capture",
+    "login-cookie": "tests/browser/test_frontend_remaining_auth_native.py::test_native_enter_cookie_next_logout_and_blank_login_capture[1440]",
 }
 PAGE_ASSETS = {
     "scripts/build_frontend.sh",
@@ -81,9 +93,10 @@ def _frontend_all(selection: Selection) -> None:
 
 
 def _contract(selection: Selection, api: str) -> None:
-    page, test = API_CONTRACTS[api]
-    _page(selection, page)
-    selection.backend.append(f"tests/api/{test}.py")
+    pages, tests = API_CONTRACTS[api]
+    for page in pages:
+        _page(selection, page)
+    selection.backend.extend(tests)
     selection.contracts.append(api)
 
 
@@ -176,10 +189,13 @@ def _classify(selection: Selection, path: str) -> str:
     return "unclassified; both browser-free suites"
 
 
-def select(paths: list[str], scenarios: list[str] | None = None) -> Selection:
-    selection = Selection()
-    for path in sorted(set(paths)):
-        selection.reasons[path] = _classify(selection, path)
+def select(paths: list[str], scenarios: list[str] | None = None, *, scope: str = "auto") -> Selection:
+    selection = Selection(frontend=scope == "frontend", backend_all=scope == "backend")
+    if scope == "auto":
+        for path in sorted(set(paths)):
+            selection.reasons[path] = _classify(selection, path)
+    else:
+        selection.reasons["scope"] = f"explicit {scope} suite"
     selection.scenarios.extend(scenarios or ())
     selection.finish()
     return selection
@@ -203,13 +219,14 @@ def resolve_commit(revision: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
+    parser.add_argument("--scope", choices=("auto", "frontend", "backend"), default="auto")
     parser.add_argument("--head", default="HEAD", help="inspect a historical commit without checking it out")
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), action="append")
     args = parser.parse_args()
     try:
         base, head = resolve_commit(args.base), resolve_commit(args.head)
         git("merge-base", "--is-ancestor", base, head)
-        plan = select(changed_paths(base, head), args.scenario)
+        plan = select(changed_paths(base, head), args.scenario, scope=args.scope)
     except (ValueError, subprocess.CalledProcessError) as exc:
         parser.exit(2, f"test selection: {exc}\n")
     print(json.dumps({"base": base, "head": head, **asdict(plan)}, indent=2))

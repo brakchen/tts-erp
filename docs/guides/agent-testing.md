@@ -48,6 +48,8 @@ experiment.
 ```bash
 bash scripts/test_baseline.sh --scope auto --base origin/master --plan
 bash scripts/test_baseline.sh --scope auto --base origin/master --keep-log /tmp/selection.log
+bash scripts/test_baseline.sh --scope frontend
+bash scripts/test_baseline.sh --scope backend
 ```
 
 Known pages and API contracts narrow the scope. Unclassified application paths

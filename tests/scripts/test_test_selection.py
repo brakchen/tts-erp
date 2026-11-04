@@ -66,3 +66,18 @@ def test_browser_test_edits_are_scoped_to_the_changed_test_file():
 
 def test_contract_fixture_selects_its_provider_and_consumer():
     assert select(["tests/fixtures/ad_daily_summary.json"]).contracts == ["ad_daily"]
+
+
+def test_explicit_side_stays_independent_of_git_diff():
+    paths = ["tts_erp_v2/api/v2/frontend_pages.py"]
+    front = select(paths, scope="frontend")
+    back = select(paths, scope="backend")
+    assert front.frontend and not (front.backend_all or front.build)
+    assert back.backend_all and not (back.frontend or back.build)
+
+
+def test_registered_api_with_multiple_consumers_runs_all_its_pages():
+    plan = select(["tts_erp_v2/api/v2/media.py"])
+    assert plan.backend == ["tests/api/test_media_api.py"]
+    assert plan.vitest == ["src/pages/digital-humans/", "src/pages/media-assets/"]
+    assert not plan.build

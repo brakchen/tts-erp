@@ -11,18 +11,27 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from _test_selection import COMPONENTS, LEGACY_FRONTEND, ROOT, SCENARIOS, changed_paths, git, resolve_commit, select
+from _test_selection import (
+    COMPONENTS,
+    LEGACY_FRONTEND,
+    ROOT,
+    SCENARIOS,
+    changed_paths,
+    git,
+    resolve_commit,
+    select,
+)
 
 BACKEND_EXCLUDED_DIRS = {"browser", "e2e", "fixtures", "frontend", "support", "integration", "__pycache__"}
 SAFE_MARKS = "not slow and not requires_service and not domain_migration"
 
 
-def run(base: str, report: str, scenarios: list[str]) -> int:
+def run(base: str, report: str, scenarios: list[str], scope: str) -> int:
     if git("status", "--porcelain", "-z", "--untracked-files=all"):
         raise ValueError("selected execution requires a clean committed worktree")
     base, head = resolve_commit(base), resolve_commit("HEAD")
     git("merge-base", "--is-ancestor", base, head)
-    plan = select(changed_paths(base, head), scenarios)
+    plan = select(changed_paths(base, head), scenarios, scope=scope)
     print(json.dumps({"base": base, "head": head, **asdict(plan)}, indent=2), flush=True)
     live = [SCENARIOS[name] for name in plan.scenarios]
     targets = [*plan.backend, *plan.checks, *plan.browser_mock, *live]
@@ -80,11 +89,12 @@ def run(base: str, report: str, scenarios: list[str]) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
+    parser.add_argument("--scope", choices=("auto", "frontend", "backend"), default="auto")
     parser.add_argument("--report", required=True)
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), action="append", default=[])
     args = parser.parse_args()
     try:
-        return run(args.base, args.report, args.scenario)
+        return run(args.base, args.report, args.scenario, args.scope)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f"selected tests: {exc}", file=sys.stderr)
         return 2

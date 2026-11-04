@@ -94,13 +94,26 @@ fail() {
   exit 2
 }
 
-if [[ "$SCOPE" == auto || "$PLAN" -eq 1 || -n "$BASE" || "$REFRESH_TEMPLATE" -eq 1 || "${#SCENARIOS[@]}" -gt 0 ]]; then
-  [[ "$SCOPE" == auto && "$MODE" == compare && -n "$BASE" ]] ||
-    fail '--base and --scenario require --scope auto in compare mode'
-  if [[ "$PLAN" -eq 1 ]]; then
-    exec "${PYTHON:-python3}" scripts/_test_selection.py --base "$BASE" "${SCENARIOS[@]}"
-  fi
-fi
+SCOPED=0
+case "$SCOPE" in
+  auto|frontend|backend)
+    [[ "$MODE" == compare ]] || fail 'scoped runs require compare mode'
+    if [[ "$SCOPE" == auto ]]; then
+      [[ -n "$BASE" ]] || fail 'auto requires --base'
+    else
+      BASE="${BASE:-origin/master}"
+      [[ "${#SCENARIOS[@]}" -eq 0 ]] || fail '--scenario requires --scope auto'
+    fi
+    SCOPED=1
+    if [[ "$PLAN" -eq 1 ]]; then
+      exec "${PYTHON:-python3}" scripts/_test_selection.py --scope "$SCOPE" --base "$BASE" "${SCENARIOS[@]}"
+    fi
+    ;;
+  *)
+    [[ "$PLAN" -eq 0 && -z "$BASE" && "$REFRESH_TEMPLATE" -eq 0 && "${#SCENARIOS[@]}" -eq 0 ]] ||
+      fail '--base, --plan and --refresh-template require a scoped run'
+    ;;
+esac
 
 RUN_TMP="$(mktemp -d)"
 RUN_LOG="$RUN_TMP/pytest.log"
@@ -136,11 +149,11 @@ baseline_ids() {
   sed -n -E '/^[^#]/ { /^tests\/[^ ]*::[^ ]+$/ p }' "$1" | LC_ALL=C sort -u
 }
 
-if [[ "$SCOPE" == auto ]]; then
+if [[ "$SCOPED" -eq 1 ]]; then
   SELECT_PYTHON="${PYTHON:-python3}"
   [[ -z "$(git status --porcelain --untracked-files=all)" ]] ||
-    fail 'auto requires a clean committed worktree'
-  "$SELECT_PYTHON" scripts/_test_selection.py --base "$BASE" "${SCENARIOS[@]}" >"$RUN_TMP/plan.json"
+    fail 'scoped runs require a clean committed worktree'
+  "$SELECT_PYTHON" scripts/_test_selection.py --scope "$SCOPE" --base "$BASE" "${SCENARIOS[@]}" >"$RUN_TMP/plan.json"
   cat "$RUN_TMP/plan.json"
   BASE="$("$SELECT_PYTHON" -c 'import json, sys; print(json.load(sys.stdin)["base"])' <"$RUN_TMP/plan.json")"
   if "$SELECT_PYTHON" -c 'import json, sys; p = json.load(sys.stdin); sys.exit(any(p[k] for k in ("frontend", "backend", "backend_all", "checks", "scenarios", "browser_mock")))' <"$RUN_TMP/plan.json"; then
@@ -156,7 +169,7 @@ if [[ "$SCOPE" == auto ]]; then
   options=()
   if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then options+=(--refresh-template); fi
   rc=0
-  bash scripts/test_isolated.sh "${options[@]}" selected --base "$BASE" --report "$RUN_TMP/report.json" \
+  bash scripts/test_isolated.sh "${options[@]}" selected --scope "$SCOPE" --base "$BASE" --report "$RUN_TMP/report.json" \
     "${SCENARIOS[@]}" >"$RUN_LOG" 2>&1 || rc=$?
   cat "$RUN_LOG"
   "$SELECT_PYTHON" - "$RUN_TMP/report.json" "$RUN_TMP/target-baseline.txt" "$rc" <<'PYTHON'
