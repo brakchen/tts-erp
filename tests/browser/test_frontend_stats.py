@@ -14,6 +14,8 @@ from fastapi import Request
 from render_support import overflow_report
 
 from tests.browser import conftest as browser_conftest
+from tests.browser.test_frontend_dev import assert_vite_stopped
+from tests.support.owned_process import owned_process
 from tts_erp_v2.api.v2 import frontend_pages
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
@@ -55,18 +57,25 @@ def test_compiled_stats_native_chart_and_table(stats_renderer, prefix, width):
     page.get_by_role("grid", name="每日请求（UTC）").get_by_text("2026-10-23", exact=True).wait_for()
     page.locator(".uplot canvas").wait_for()
     assert page.locator(".uplot").count() == 1
-    assert page.locator("canvas").evaluate("canvas => { const p=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data; for(let i=0;i<p.length;i+=4) if(p[i]===37&&p[i+1]===99&&p[i+2]===235&&p[i+3]>0) return true; return false; }")
-    widths = page.locator("canvas").evaluate("""canvas => {
+    # Sample the canonical accent through the browser's color parser rather than
+    # pinning a historical palette; keep the actual rendered-pixel oracle.
+    accent = page.evaluate("""() => {
+      const context = document.createElement('canvas').getContext('2d');
+      context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+    }""")
+    widths = page.locator("canvas").evaluate("""(canvas, accent) => {
       const {width,height}=canvas,p=canvas.getContext('2d').getImageData(0,0,width,height).data,groups=[];
       let start=null;
       for(let x=0;x<=width;x++) {
-        let blue=false;
-        if(x<width) for(let y=0;y<height;y++) {const i=(y*width+x)*4;if(p[i]===37&&p[i+1]===99&&p[i+2]===235&&p[i+3]>0){blue=true;break;}}
-        if(blue&&start===null)start=x;
-        if(!blue&&start!==null){groups.push(x-start);start=null;}
+        let bar=false;
+        if(x<width) for(let y=0;y<height;y++) {const i=(y*width+x)*4;if(p[i]===accent[0]&&p[i+1]===accent[1]&&p[i+2]===accent[2]&&p[i+3]>0){bar=true;break;}}
+        if(bar&&start===null)start=x;
+        if(!bar&&start!==null){groups.push(x-start);start=null;}
       }
       return groups;
-    }""")
+    }""", accent)
     assert len(widths) == 3 and max(widths) - min(widths) <= 2, widths
     assert requests == ["GET"]
     refresh = page.get_by_role("button", name="刷新统计")
@@ -106,10 +115,14 @@ def test_dev_upstream_wrapper_strictmode_update_destroy(frontend_browser_rendere
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
     origin = f"http://127.0.0.1:{port}"
-    with (tmp_path / "TEST_stats_vite.log").open("w") as log:
-        process = subprocess.Popen(["npm", "run", "dev", "--", "--port", str(port)], cwd=ROOT / "frontend",
-                                   env={**os.environ, "NODE_ENV": "development"}, stdout=log, stderr=subprocess.STDOUT)
-        try:
+    try:
+        with (
+            (tmp_path / "TEST_stats_vite.log").open("w") as log,
+            owned_process(
+                ["npm", "run", "dev", "--", "--port", str(port)], cwd=ROOT / "frontend",
+                env={**os.environ, "NODE_ENV": "development"}, stdout=log, stderr=subprocess.STDOUT,
+            ) as process,
+        ):
             for _ in range(100):
                 assert process.poll() is None
                 try:
@@ -149,10 +162,5 @@ def test_dev_upstream_wrapper_strictmode_update_destroy(frontend_browser_rendere
                 }""")
                 assert result["strictCreates"] >= 2 and result["strictDestroys"] >= 1, result
                 assert result["updated"] and result["allDestroyed"], result
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+    finally:
+        assert_vite_stopped(port)

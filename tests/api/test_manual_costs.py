@@ -21,6 +21,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
+
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 
@@ -53,6 +55,7 @@ def _seed_channel_product(db_engine, external_id: str) -> int:
             ),
             {"acct": acct_id, "ext": external_id},
         )
+        authorize_test_shop(sess, acct_id, "TEST_acct_for_costs")
         sess.commit()
         cp_id = sess.execute(  # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() + :param bound-param dict (see AGENTS.md "Critical Context")
             text("SELECT id FROM commerce.products_spu WHERE spu_id = :ext"),

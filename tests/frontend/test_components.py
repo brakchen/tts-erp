@@ -8,11 +8,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.owned_process import owned_process
+
 pytestmark = [pytest.mark.domain_frontend, pytest.mark.layer_unit]
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_frontend_components() -> None:
+def test_frontend_components(tmp_path: Path) -> None:
     frontend = ROOT / "frontend"
     assert (frontend / "node_modules" / "vitest").is_dir(), (
         "Frontend dependencies missing: run npm ci --prefix frontend before isolated tests"
@@ -23,17 +25,15 @@ def test_frontend_components() -> None:
         candidate = Path(selection)
         assert not candidate.is_absolute() and ".." not in candidate.parts
         args.append(selection)
-    result = subprocess.run(
+    with owned_process(
         args,
         cwd=frontend,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         env={**os.environ, "CI": "1", "NODE_ENV": "test"},
-    )
-    output = result.stdout + result.stderr
-    log = frontend / ".cache" / "vitest.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text(output, encoding="utf-8")
-    assert result.returncode == 0, output[-24000:]
+    ) as process:
+        stdout, stderr = process.communicate(timeout=180)
+        output = stdout + stderr
+        log = tmp_path / "TEST_components.log"
+        log.write_text(output)
+        assert process.returncode == 0, f"Full component output: {log}\n{output[-24000:]}"

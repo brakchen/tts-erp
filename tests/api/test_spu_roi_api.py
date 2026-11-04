@@ -4242,10 +4242,8 @@ def test_spu_roi_projection_render_tolerates_stale_html_shell():
     """React creates projection nodes; absent values no longer depend on legacy hooks."""
     summary = _react_profitability_source("Summary.tsx")
     contracts = _react_profitability_source("contracts.ts")
-    display_value = summary.split("export function displayValue(", 1)[1].split("\n", 1)[0]
-    assert re.search(
-        r"if \(value == null \|\| value === ''(?: \|\| .+)?\) return '—';", display_value
-    )
+    # Summary.test.tsx exercises null/empty/absent values in the rendered component.
+    # This boundary guards projection ownership, without pinning formatter internals.
     assert "optionalRecord(data.meta.projection)" in summary
     assert "status[String(data.totals.projection_status)] ?? text(data.totals.projection_status)" in summary
     assert "values[field]" in summary and "id={prefix + id}" in summary

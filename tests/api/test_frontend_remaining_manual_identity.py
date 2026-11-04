@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.db.models import ChannelAccount, ChannelProduct, ManualProductCost
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -28,6 +29,8 @@ def products(db_engine):
         ]
         session.add_all(shops)
         session.flush()
+        for shop in shops:
+            authorize_test_shop(session, shop.id, shop.shop_id)
         rows = [
             ChannelProduct(
                 shop_pk=shop.id,

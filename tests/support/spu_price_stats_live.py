@@ -160,12 +160,17 @@ class MetricStat:
         return "complete"
 
     def display(self, metric: str, kind: str) -> str:
-        """页面呈现：空样本 → `—`；采购价估算样本加 `≈`；否则四位小数。"""
+        """页面呈现：空样本 → `—`；采购价估算样本加 `≈`；小数展示两位。"""
         value = self.mean if kind == "mean" else self.median
         if value is None:
             return "—"
         prefix = "≈" if metric == "purchase" and self.estimated else ""
-        return prefix + value
+        with localcontext() as ctx:
+            ctx.prec = 80
+            display_value = Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if display_value.is_zero():
+                display_value = abs(display_value)
+            return prefix + format(display_value, "f")
 
 
 @dataclass(frozen=True)

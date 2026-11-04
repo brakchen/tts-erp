@@ -14,8 +14,11 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
+from tests._job_invocation import authorize_test_shop
 from tts_erp_v2.api.v2.intercept import _distribution_payload
+from tts_erp_v2.db.models import ChannelAccount
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -37,6 +40,20 @@ def _cleanup_sync_data(db_engine):
     with db_engine.begin() as conn:
         for stmt in _CLEANUP_SQL:
             conn.execute(text(stmt))
+    with Session(db_engine) as session:
+        for seller_id in (
+            SELLER,
+            "TEST_EXTRACTED_seller_abc123",
+            "TEST_fallback_seller_xyz",
+            "TEST_BODY_seller_should_win",
+        ):
+            shop = ChannelAccount(
+                platform="tiktok", shop_id=seller_id, account_name="TEST intercept shop"
+            )
+            session.add(shop)
+            session.flush()
+            authorize_test_shop(session, shop.id, seller_id)
+        session.commit()
     yield
     with db_engine.begin() as conn:
         for stmt in _CLEANUP_SQL:
@@ -554,7 +571,7 @@ def test_sync_extracts_seller_id_from_oec_seller_id_query_param(
     # 关键：URL 含 oec_seller_id，body 里 sellerId = None
     body["requests"][0]["url"] = (
         "https://api16-normal-sg.tiktokshopglobalselling.com/api/v1/pay/statement/order/list"
-        "?oec_seller_id=EXTRACTED_seller_abc123"
+        "?oec_seller_id=TEST_EXTRACTED_seller_abc123"
     )
     body["requests"][0]["sellerId"] = None
 
@@ -567,7 +584,7 @@ def test_sync_extracts_seller_id_from_oec_seller_id_query_param(
 
     # 验证回填：list 接口 filter by seller_id 应该能找到
     list_resp = api_client.get(
-        "/v2/intercept/requests?seller_id=EXTRACTED_seller_abc123&limit=10",
+        "/v2/intercept/requests?seller_id=TEST_EXTRACTED_seller_abc123&limit=10",
         headers=_auth_header(readwrite_key),
     )
     assert list_resp.status_code == 200
@@ -582,14 +599,14 @@ def test_sync_extracts_seller_id_from_oec_seller_id_query_param(
         None,
     )
     assert matched is not None
-    assert matched["seller_id"] == "EXTRACTED_seller_abc123"
+    assert matched["seller_id"] == "TEST_EXTRACTED_seller_abc123"
 
 
 def test_sync_falls_back_to_seller_id_query_param(api_client, readwrite_key):
     """URL 只有 seller_id（无 oec_seller_id）时也能提取。"""
     body = _sync_body(request_id=f"TEST_req-{uuid.uuid4().hex[:8]}")
     body["requests"][0]["url"] = (
-        "https://example.com/api/x?seller_id=fallback_seller_xyz"
+        "https://example.com/api/x?seller_id=TEST_fallback_seller_xyz"
     )
     body["requests"][0]["sellerId"] = None
 
@@ -599,7 +616,7 @@ def test_sync_falls_back_to_seller_id_query_param(api_client, readwrite_key):
     assert resp.status_code == 200
 
     list_resp = api_client.get(
-        "/v2/intercept/requests?seller_id=fallback_seller_xyz&limit=10",
+        "/v2/intercept/requests?seller_id=TEST_fallback_seller_xyz&limit=10",
         headers=_auth_header(readwrite_key),
     )
     assert list_resp.status_code == 200
@@ -610,9 +627,9 @@ def test_sync_keeps_explicit_seller_id_over_url_extraction(api_client, readwrite
     """body 显式传了 sellerId 时优先用它，不被 URL 提取覆盖。"""
     body = _sync_body(request_id=f"TEST_req-{uuid.uuid4().hex[:8]}")
     body["requests"][0]["url"] = (
-        "https://example.com/api/x?oec_seller_id=URL_seller_should_lose"
+        "https://example.com/api/x?oec_seller_id=TEST_URL_seller_should_lose"
     )
-    body["requests"][0]["sellerId"] = "BODY_seller_should_win"
+    body["requests"][0]["sellerId"] = "TEST_BODY_seller_should_win"
 
     resp = api_client.post(
         "/v2/intercept/sync", json=body, headers=_auth_header(readwrite_key)
@@ -620,7 +637,7 @@ def test_sync_keeps_explicit_seller_id_over_url_extraction(api_client, readwrite
     assert resp.status_code == 200
 
     list_resp = api_client.get(
-        "/v2/intercept/requests?seller_id=BODY_seller_should_win&limit=10",
+        "/v2/intercept/requests?seller_id=TEST_BODY_seller_should_win&limit=10",
         headers=_auth_header(readwrite_key),
     )
     assert list_resp.status_code == 200
@@ -634,7 +651,7 @@ def test_sync_keeps_explicit_seller_id_over_url_extraction(api_client, readwrite
         ),
         None,
     )
-    assert matched["seller_id"] == "BODY_seller_should_win"
+    assert matched["seller_id"] == "TEST_BODY_seller_should_win"
 
 
 def test_sync_url_without_seller_id_leaves_seller_id_null(api_client, readwrite_key):

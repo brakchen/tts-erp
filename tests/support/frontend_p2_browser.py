@@ -7,13 +7,13 @@ No raw request/body/query/console, credentials, trace or screenshots are saved.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-import re
 from typing import Literal
-from uuid import UUID
 from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Locator, Page, Route, sync_playwright
@@ -22,13 +22,18 @@ from tests.support.frontend_p2_accounts import SeedAccount
 from tests.support.frontend_p2_binding import NONCE_HEADER, verify_attestation
 from tests.support.frontend_p2_canary import (
     VerifiedDataProbe,
+    _bound_json,
     _require_child,
     require_data_probe,
-    _bound_json,
 )
-
 from tests.support.frontend_remaining_targets import (
-    REMAINING_PAGES, STORE_PATH, ManualTarget, TaskTarget, RemainingTargets, remaining_request, manual_pk_operand,
+    REMAINING_PAGES,
+    STORE_PATH,
+    ManualTarget,
+    RemainingTargets,
+    TaskTarget,
+    manual_pk_operand,
+    remaining_request,
 )
 
 REFUSAL = "P2 browser request refused"
@@ -50,6 +55,7 @@ class BrowserFence:
     lost: int = 0
     closing: bool = False
     invalid_region_next: bool = False
+    invalid_app_key_next: bool = False
     mutated: int = 0
     error_next: tuple[str, str, int, int] | None = None
     responses: list[tuple[str, str, int]] = field(default_factory=list)
@@ -96,12 +102,14 @@ class BrowserFence:
     def _validate_remaining(self, method: str = "", path: str = "", body: object = None, query: dict | None = None) -> None:
         t = self.remaining
         if not isinstance(t, RemainingTargets):
-            raise ValueError(REFUSAL)
+            # The fence keeps one exception type and public refusal diagnostic.
+            raise ValueError(REFUSAL)  # noqa: TRY004
         value, binding = require_data_probe(self.probe)
         # Actual original-nonce-bound fixed metadata, never caller dataclass state.
         self._profile_metadata()
         from sqlalchemy import create_engine, select
         from sqlalchemy.orm import sessionmaker
+
         from tests.support.frontend_p2_binding import checked_session
         from tts_erp_v2.accounts.models import User
         from tts_erp_v2.db.models.commerce import ChannelAccount, ChannelProduct
@@ -191,7 +199,7 @@ class BrowserFence:
                 or headers.get("content-length") != str(size) or "transfer-encoding" in headers):
             raise ValueError(REFUSAL)
         if request.method == "OPTIONS" and (headers.get("access-control-request-method") != "PUT" or
-                set(part.strip().lower() for part in headers.get("access-control-request-headers", "").split(",") if part.strip()) - {"content-type"}):
+                {part.strip().lower() for part in headers.get("access-control-request-headers", "").split(",") if part.strip()} - {"content-type"}):
             raise ValueError(REFUSAL)
         self.native_stages["accepted"] += 1
         route.continue_()  # Native browser owns CORS/streaming/progress/abort.
@@ -260,11 +268,17 @@ class BrowserFence:
                 return path
             if path == "/v2/commerce/channel-accounts" and query == {"platform": ["tiktok"], "limit": ["500"]}:
                 return path
+            if path == "/v2/commerce/channel-accounts" and query == {
+                "platform": ["tiktok"], "view": ["management"], "limit": ["50"], "offset": ["0"],
+            }:
+                return path
             if not query and path == "/v2/config/enum-map/list":
                 return path
-            if not query and path in {f"/v2/commerce/channel-accounts/{pk}" for pk in self.shop_pks}:
+            if query == {"view": ["management"]} and path in {f"/v2/commerce/channel-accounts/{pk}" for pk in self.shop_pks}:
                 return path
-            if path == "/v2/oauth/tiktok/authorize" and query == {"format": ["json"], "service_id": [self.service_id]}:
+            if path == "/v2/oauth/tiktok/authorize" and query in (
+                {"format": ["json"], "shop_pk": [str(pk)]} for pk in self.shop_pks
+            ):
                 return path
         if method == "POST" and not query and path == "/v2/auth/login" and isinstance(body, dict) and body.get("username") == self.username:
             return path
@@ -274,14 +288,16 @@ class BrowserFence:
             register = method == "POST" and path == "/v2/admin/shops/register"
             patch = method == "PATCH" and path in {f"/v2/admin/shops/{pk}" for pk in self.shop_pks}
             if register or patch:
-                allowed = {"account_name", "region", "opened_date", "service_id", "app_key", "app_secret"}
+                allowed = {"opened_date", "service_id", "app_key", "app_secret"}
                 if register:
-                    allowed |= {"platform", "shop_id"}
+                    allowed |= {"platform", "shop_id", "account_name", "region"}
                 safe = set(body) <= allowed
                 safe = safe and (not register or body.get("shop_id") == self.shop_id and body.get("platform") == "tiktok")
                 safe = safe and all(isinstance(body[key], str) and body[key].startswith("TEST_") for key in ("account_name", "app_key", "app_secret") if key in body)
-                services = {self.service_id, self.service_id + "_conflict"} if register else {self.service_id}
+                services = {self.service_id, self.service_id + "_conflict"}
                 safe = safe and ("service_id" not in body or body["service_id"] in services)
+                safe = safe and ("opened_date" not in body or body["opened_date"] is None
+                                 or body["opened_date"] in {"2026-01-02", "2026-02-03", "2026-03-04"})
                 if safe:
                     return path
             if (method == "PUT" and path == "/v2/config/enum-map" and set(body) == {"enum_type", "enum_value", "label_zh", "sort_order"}
@@ -307,6 +323,13 @@ class BrowserFence:
             body = {**body, "region": "TEST_region_exceeds_16"}
             self.check_request(method, self.probe.child.base + self.probe.prefix + path, body)
             self.invalid_region_next = False
+            self.mutated += 1
+        if self.invalid_app_key_next and method == "PATCH" and path in {f"/v2/admin/shops/{pk}" for pk in self.shop_pks}:
+            if not isinstance(body, dict) or "app_key" not in body:
+                raise ValueError(REFUSAL)
+            body = {**body, "app_key": "TEST_" + "x" * 124}
+            self.check_request(method, self.probe.child.base + self.probe.prefix + path, body)
+            self.invalid_app_key_next = False
             self.mutated += 1
         return body
 

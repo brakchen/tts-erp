@@ -13,6 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import URL
@@ -443,10 +445,12 @@ def test_main_never_echoes_untrusted_exception(monkeypatch, capsys):
     assert "secret://" not in output.out + output.err
 
 
-def test_existing_0070_probe_on_authorized_clone(db_engine):
+def test_probe_reports_current_head_on_authorized_clone(db_engine):
     # db_engine is fenced by the canonical conftest's current-run binding.
     assert db_engine.url.database.startswith("tts_erp_test_")
-    assert script.probe(db_engine.url) == script.TARGET
+    config = Config(str(SCRIPT.parents[1] / "alembic.ini"))
+    config.set_main_option("script_location", str(SCRIPT.parents[1] / "alembic"))
+    assert script.probe(db_engine.url) == ScriptDirectory.from_config(config).get_current_head()
 
 
 def test_env_file_routing_override_is_refused(tmp_path):

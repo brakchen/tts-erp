@@ -284,7 +284,8 @@ describe('shops content', () => {
     expect(writes).toBe(1); expect(reads).toBe(1); expect(screen.getByRole('button', { name: '刷新店铺' })).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(599000); }); expect(reads).toBe(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(screen.getByRole('button', { name: '刷新店铺' })).toBeEnabled(); expect(writes).toBe(1);
+    expect(screen.getByRole('button', { name: '刷新店铺' })).toBeEnabled(); expect(writes).toBe(1); expect(reads).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: '刷新店铺' })); await act(async () => {}); expect(reads).toBe(2);
     view.unmount();
   });
 
@@ -300,7 +301,7 @@ describe('shops content', () => {
     fireEvent.submit(within(dialog).getByRole('form', { name: '店铺表单' })); await act(async () => {});
     const check = within(dialog).getByRole('button', { name: '读取当前记录核对' }); expect(check).toBeDisabled(); fireEvent.click(check); expect(reads).toBe(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(599000); }); expect(check).toBeDisabled(); expect(reads).toBe(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(check).toBeEnabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(check).toBeEnabled(); expect(reads).toBe(1);
     fireEvent.click(check); await act(async () => {});
     expect(reads).toBeGreaterThan(1); expect(writes).toBe(1); expect(within(dialog).getByRole('button', { name: '核对后重新保存' })).toBeEnabled();
     const beforeUnmount = reads; view.unmount(); await act(async () => { await vi.advanceTimersByTimeAsync(600000); }); expect(reads).toBe(beforeUnmount);

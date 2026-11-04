@@ -3,9 +3,17 @@ import { Button, Card, Disclosure, Modal, Table } from '@heroui/react';
 import { optionalRecord, text, type Overview, type RecordValue } from './contracts';
 import { displayDecimal } from '../ad-daily/query';
 
-export function displayValue(value: unknown): string { if (value == null || value === '' || !['string', 'number'].includes(typeof value) || !/^-?\d+(\.\d+)?$/.test(String(value))) return '—'; return displayDecimal(value as string | number); }
-export function displayPercent(value: unknown): string { if (value == null || value === '') return '—'; const number = Number(value); return Number.isFinite(number) ? `${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(number * 100)}%` : '—'; }
-export function priceValue(value: unknown, estimated: boolean): string { if (value == null || value === '') return '—'; const raw = String(value); if (!/^-?\d+(\.\d+)?$/.test(raw)) return '—'; const [whole, fraction = ''] = raw.split('.'); return `${estimated ? '≈' : ''}${whole}.${fraction.padEnd(4, '0')}`; }
+const decimalDisplay = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const percentDisplay = new Intl.NumberFormat('zh-CN', { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const priceDisplay = new Intl.NumberFormat('zh-CN', { useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function displayInput(value: unknown): string | undefined { return ['string', 'number'].includes(typeof value) && /^-?\d+(\.\d+)?$/.test(String(value)) ? String(value) : undefined; }
+/** Display-only rounding. Intl consumes exact decimal strings and defaults to halfExpand.
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/format
+ * ES2022 typings omit the native decimal-string overload; do not convert it to Number. */
+function roundedDisplay(formatter: Intl.NumberFormat, value: string): string { const format = formatter.format as (value: string | number | bigint) => string; return format(value).replace(/^-0\.00(?=%?$)/, '0.00'); }
+export function displayValue(value: unknown): string { const raw = displayInput(value); if (raw === undefined) return '—'; return raw.includes('.') ? roundedDisplay(decimalDisplay, raw) : displayDecimal(raw); }
+export function displayPercent(value: unknown): string { const raw = displayInput(value); return raw === undefined ? '—' : roundedDisplay(percentDisplay, raw); }
+export function priceValue(value: unknown, estimated: boolean): string { const raw = displayInput(value); return raw === undefined ? '—' : `${estimated ? '≈' : ''}${roundedDisplay(priceDisplay, raw)}`; }
 export const currentMetrics: [string, string, string, boolean?][] = [
   ['总单量', 'total_orders', 'sum-total-orders'], ['广告消耗', 'spend', 'sum-spend'], ['有效单量', 'effective_order_count', 'sum-orders'], ['有效销售', 'effective_sales', 'sum-sales'],
   ['退款数', 'refund_order_count', 'sum-refund-count'], ['退款率', 'refund_rate', 'sum-refund-rate', true], ['全损量', 'full_loss_order_count', 'sum-loss-qty'], ['全损率', 'full_loss_rate', 'sum-loss-rate', true],
@@ -30,7 +38,7 @@ export const metricHints: Record<string, string> = {
 };
 export function Metrics({ values, metrics = currentMetrics, prefix = '', meta = {}, labels = {} }: { values: RecordValue; metrics?: typeof currentMetrics; prefix?: string; meta?: RecordValue; labels?: Record<string, string> }) {
   const [hint, setHint] = useState<{ label: string; body: string }>(); const presentation = optionalRecord(meta.presentation); const hints = optionalRecord(presentation.summary_hints); const pnl = optionalRecord(presentation.pnl_hints);
-  return <><dl className="erp-profit-metrics">{metrics.map(([originalLabel, field, id, percent]) => { const label = labels[field] ?? originalLabel; return <div key={field}><dt className="flex items-center gap-1">{label}<Button size="sm" variant="ghost" aria-label={`查看${label}口径`} onPress={() => setHint({ label, body: text(hints[field] ?? (field === 'net_profit' ? pnl.net_profit : field === 'spend' ? pnl.ad_spend : undefined) ?? metricHints[field]) })}>?</Button></dt><dd id={prefix + id} className={(field === 'net_profit' && values.profit_status === 'loss') || (field === 'projected_net_profit' && String(values[field]).startsWith('-')) ? 'text-danger' : field === 'net_profit' && values.profit_status === 'profit' ? 'text-accent' : undefined}>{field === 'ad_system_breakeven_roi' && values.ad_system_breakeven_roi_status === 'estimated_known_costs' && values[field] != null ? '≈' : ''}{percent ? displayPercent(values[field]) : displayValue(values[field])}</dd></div>; })}</dl>
+  return <><dl className="erp-profit-metrics">{metrics.map(([originalLabel, field, id, percent]) => { const label = labels[field] ?? originalLabel; return <div key={field}><dt className="flex items-center gap-1">{label}<Button size="sm" variant="ghost" className="erp-metric-hint" aria-label={`查看${label}口径`} onPress={() => setHint({ label, body: text(hints[field] ?? (field === 'net_profit' ? pnl.net_profit : field === 'spend' ? pnl.ad_spend : undefined) ?? metricHints[field]) })}>?</Button></dt><dd id={prefix + id} className={(field === 'net_profit' && values.profit_status === 'loss') || (field === 'projected_net_profit' && String(values[field]).startsWith('-')) ? 'text-danger' : field === 'net_profit' && values.profit_status === 'profit' ? 'text-accent' : undefined}>{field === 'ad_system_breakeven_roi' && values.ad_system_breakeven_roi_status === 'estimated_known_costs' && values[field] != null ? '≈' : ''}{percent ? displayPercent(values[field]) : displayValue(values[field])}</dd></div>; })}</dl>
     <Modal.Backdrop isOpen={Boolean(hint)} onOpenChange={(open) => { if (!open) setHint(undefined); }}><Modal.Container><Modal.Dialog><Modal.CloseTrigger aria-label="关闭指标说明" /><Modal.Header><Modal.Heading>{hint?.label}口径</Modal.Heading></Modal.Header><Modal.Body><p>{hint?.body}</p></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop></>;
 }
 const overviewLabels = { spend: '广告成本', effective_sales: '有效 GMV', projected_future_full_loss_qty: '预计新增全损', unsettled_order_count: '未结算', delivered_unsettled_order_count: '已送达未结算', full_loss_exposure_unsettled_order_count: '待完结风险' };
@@ -86,7 +94,7 @@ function PriceTip({ metric, stats, meta }: { metric: string; stats: RecordValue;
     <Button size="sm" variant="ghost" data-price-tip={metric} aria-label={`查看${priceLabels[metric]}统计口径`}>{priceLabels[metric]}口径</Button>
     <Modal.Backdrop><Modal.Container size="lg" scroll="inside"><Modal.Dialog><Modal.CloseTrigger aria-label="关闭价格说明" /><Modal.Header><Modal.Heading>{priceLabels[metric]}统计口径</Modal.Heading></Modal.Header><Modal.Body id="ops-tip" className="space-y-2">
       <p>来源：{metric === 'purchase' ? 'ROI 当前有效成本' : metric === 'originalSale' ? 'TikTok line_items.original_price' : 'TikTok line_items.sale_price'}。按件数加权平均值 / 中位数，当前经营窗口，已付款且排除赠品。</p>
-      <p>覆盖：{priceStatus(stats.status)} · {text(stats.observedQuantity)} / {text(stats.eligibleQuantity)} 件</p><p>币种：{text(meta.priceCurrency ?? 'CNY')} · 汇率快照：{text(fx.snapshotId ?? fx.snapshot_id)}</p><p>成本基准：{text(cost.basisFingerprint)} · 计算时间：{text(meta.calculatedAt ?? meta.calculated_at)}</p>{stats.estimated === true && <p>≈ 表示服务端估算成本，非人工登记成本。</p>}
+      <p>覆盖：{priceStatus(stats.status)} · {displayValue(stats.observedQuantity)} / {displayValue(stats.eligibleQuantity)} 件</p><p>币种：{text(meta.priceCurrency ?? 'CNY')} · 汇率快照：{text(fx.snapshotId ?? fx.snapshot_id)}</p><p>成本基准：{text(cost.basisFingerprint)} · 计算时间：{text(meta.calculatedAt ?? meta.calculated_at)}</p>{stats.estimated === true && <p>≈ 表示服务端估算成本，非人工登记成本。</p>}
     </Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop>
   </Modal.Root>;
 }

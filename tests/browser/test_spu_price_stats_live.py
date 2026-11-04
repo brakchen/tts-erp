@@ -165,14 +165,14 @@ def test_spu_roi_price_summary_and_columns_render_real_weighted_stats(
     """
     shop = price_scene.shop_a
     expected = shop.stats((DAY_D1,))
-    # oracle 自检：设计 §7.1 加权样例（行均值会得到 25.0000，非加权实现会被抓）
+    # oracle 自检：设计 §7.1 加权样例（行均值会得到 25.00，非加权实现会被抓）
     assert expected.cells() == {
-        "purchase.mean": "≈37.0000",
-        "purchase.median": "≈40.0000",
-        "originalSale.mean": "47.0000",
-        "originalSale.median": "50.0000",
-        "paid.mean": "42.3000",
-        "paid.median": "45.0000",
+        "purchase.mean": "≈37.00",
+        "purchase.median": "≈40.00",
+        "originalSale.mean": "47.00",
+        "originalSale.median": "50.00",
+        "paid.mean": "42.30",
+        "paid.median": "45.00",
     }
 
     # ── leg 1：真实登录 cookie 会话（无 Authorization 头）──
@@ -188,7 +188,7 @@ def test_spu_roi_price_summary_and_columns_render_real_weighted_stats(
     assert session_page.auth_identity() == price_scene.login_username
     assert session_page.summary_status() == expected.summary_status()
     assert session_page.price_cells() == expected.cells()
-    assert session_page.row_cell(SPU_A1, "priceStats.purchase.mean") == "10.0000"
+    assert session_page.row_cell(SPU_A1, "priceStats.purchase.mean") == "10.00"
     for field in PRICE_FIELDS:
         assert session_page.price_field_count(field) == 1, field
 
@@ -205,11 +205,11 @@ def test_spu_roi_price_summary_and_columns_render_real_weighted_stats(
         assert page.price_field_count(field) == 1, field
 
     page.wait_rows((SPU_A1, SPU_A2))
-    assert page.row_cell(SPU_A1, "priceStats.purchase.mean") == "10.0000"
+    assert page.row_cell(SPU_A1, "priceStats.purchase.mean") == "10.00"
     # A2 无人工成本 → K1(40 CNY) 估算样本，页面上必须带 ≈ 而不是伪装成实测
-    assert page.row_cell(SPU_A2, "priceStats.purchase.mean") == "≈40.0000"
+    assert page.row_cell(SPU_A2, "priceStats.purchase.mean") == "≈40.00"
     # 200000 VND 原生价 × (6.5/26000) = 50 CNY：价格确实走了同快照换算
-    assert page.row_cell(SPU_A2, "priceStats.originalSale.mean") == "50.0000"
+    assert page.row_cell(SPU_A2, "priceStats.originalSale.mean") == "50.00"
 
     # 两条 leg 必须看到同一组真实价格（cookie 会话不降级、不旁路）
     assert session_page.price_cells() == page.price_cells()
@@ -230,12 +230,12 @@ def test_focused_spus_profile_matches_spu_roi_price_totals(
     shop = price_scene.shop_a
     expected = shop.stats((DAY_D1, DAY_D2))
     assert expected.cells() == {
-        "purchase.mean": "≈34.5455",
-        "purchase.median": "≈40.0000",
-        "originalSale.mean": "122.7273",
-        "originalSale.median": "50.0000",
-        "paid.mean": "111.1818",
-        "paid.median": "45.0000",
+        "purchase.mean": "≈34.55",
+        "purchase.median": "≈40.00",
+        "originalSale.mean": "122.73",
+        "originalSale.median": "50.00",
+        "paid.mean": "111.18",
+        "paid.median": "45.00",
     }
 
     roi = live.open(spu_roi_path(shop.pk))
@@ -347,7 +347,7 @@ def test_date_window_switch_refetches_price_stats(
     second_day = shop.stats((DAY_D2,))
     page.set_window(DAY_D2, DAY_D2)
     page.wait_price_state(second_day.cells(), second_day.summary_status())
-    assert second_day.cells()["purchase.mean"] == "10.0000"  # 有实测成本 → 无 ≈
+    assert second_day.cells()["purchase.mean"] == "10.00"  # 有实测成本 → 无 ≈
 
     first_day = shop.stats((DAY_D1,))
     page.set_window(DAY_D1, DAY_D1)
@@ -369,7 +369,7 @@ def test_date_window_switch_refetches_price_stats(
 def test_partial_and_missing_price_samples_render_dash_not_zero(
     live: LiveBrowser, price_scene: PriceScene
 ) -> None:
-    """无观察 → 六格 `—`；只有 paid 有价 → originalSale 两格 `—`（绝不 0.0000）。"""
+    """无观察 → 六格 `—`；只有 paid 有价 → originalSale 两格 `—`（绝不 0.00）。"""
     shop_b = price_scene.shop_b
     window = (DAY_D1,)
     expected = shop_b.stats(window)
@@ -387,7 +387,7 @@ def test_partial_and_missing_price_samples_render_dash_not_zero(
     assert partial.metric("originalSale").status == "no_samples"
     assert page.row_cell(SPU_B3, "priceStats.originalSale.mean") == "—"
     assert page.row_cell(SPU_B3, "priceStats.originalSale.median") == "—"
-    assert page.row_cell(SPU_B3, "priceStats.paid.mean") == "70.0000"
+    assert page.row_cell(SPU_B3, "priceStats.paid.mean") == "70.00"
 
 
 # ─── 5. 价格 tooltip（口径 + 同一读快照的 FX/成本基准）─────────────────

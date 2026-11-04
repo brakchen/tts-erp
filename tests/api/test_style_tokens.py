@@ -59,8 +59,10 @@ def _load(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _root_declarations(css: str) -> dict[str, str]:
-    """返回 ``:root`` 规则里声明的自定义属性名 -> 值。
+def _custom_property_declarations(
+    css: str, *, selector: str | None = None
+) -> dict[str, str]:
+    """返回自定义属性名 -> 值；可限定选择器检查 canonical palette。
 
     用 tinycss2 按浏览器语义解析，而不是正则匹配 —— 正则看不出注释被提前闭合。
     """
@@ -70,8 +72,7 @@ def _root_declarations(css: str) -> dict[str, str]:
         # tinycss2 的类型标签是 'qualified-rule'（不是 'qualified'）
         if rule.type != "qualified-rule":
             continue
-        selector = tinycss2.serialize(rule.prelude).strip()
-        if selector != ":root":
+        if selector is not None and tinycss2.serialize(rule.prelude).strip() != selector:
             continue
         for decl in tinycss2.parse_declaration_list(
             rule.content, skip_comments=True, skip_whitespace=True
@@ -82,13 +83,13 @@ def _root_declarations(css: str) -> dict[str, str]:
 
 
 def _declared_tokens() -> dict[str, str]:
-    """全站可解析到的令牌（tokens.css 的 :root + 各文件的局部 :root）。"""
+    """已声明的属性名，包括导航等组件作用域；不模拟 CSS 继承/级联。"""
     out: dict[str, str] = {}
     for path in sorted(CSS_DIR.glob("*.css")):
-        out.update(_root_declarations(_load(path)))
+        out.update(_custom_property_declarations(_load(path)))
     # Python 内嵌页面里的局部 :root
     for path in sorted(API_DIR.glob("*.py")):
-        out.update(_root_declarations(_load(path)))
+        out.update(_custom_property_declarations(_load(path)))
     return out
 
 
@@ -99,7 +100,7 @@ def test_tokens_css_produces_a_root_rule_with_the_full_palette():
     令牌数变 0，这条断言立即失败。
     """
     css = _load(CSS_DIR / "tokens.css")
-    declared = _root_declarations(css)
+    declared = _custom_property_declarations(css, selector=":root")
 
     assert declared, (
         "tokens.css 解析不出任何 :root 令牌 —— 大概率是 CSS 注释被提前闭合"
@@ -111,6 +112,12 @@ def test_tokens_css_produces_a_root_rule_with_the_full_palette():
     # 关键令牌必须有非空值（防止写成 `--paper: ;` 这类空值）
     for name in ("--paper", "--ink", "--accent", "--sans", "--radius"):
         assert declared[name], f"{name} 的值为空"
+
+
+def test_component_properties_do_not_count_as_root_palette():
+    css = ":root { --accent: green; } .navigation { --sidebar-rule: white; }"
+    assert set(_custom_property_declarations(css)) == {"--accent", "--sidebar-rule"}
+    assert set(_custom_property_declarations(css, selector=":root")) == {"--accent"}
 
 
 def test_tokens_css_top_level_rules_look_like_css():
@@ -224,9 +231,9 @@ def test_font_declarations_only_reference_token_stacks():
             continue
         text = _load(path)
         # 去注释：注释里必须能写反例（如「uplot 自带 system-ui/Arial」）来解释历史
-        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-        text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
-        text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+        text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+        text = re.sub(r"^\s*//.*$", "", text, flags=re.MULTILINE)
         for match in re.finditer(r"(?<![-\w])(font-family|font)\s*:\s*([^;}\n]+)", text):
             prop, value = match.group(1), match.group(2).strip()
             value = re.sub(r"\s*!important\s*$", "", value).strip()

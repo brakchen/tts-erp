@@ -241,15 +241,26 @@ def denied_register(page, probe, gate, *, csrf):
         assert session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == gate.shop_id)) is None
 
 
+def discard_shop_dialog(page, dialog):
+    def confirm_discard(confirmation):
+        assert confirmation.type == "confirm"
+        assert confirmation.message == "放弃本次尚未保存的修改？"
+        confirmation.accept()
+
+    page.once("dialog", confirm_discard)
+    dialog.get_by_role("button", name="取消", exact=True).click()
+    dialog.wait_for(state="hidden")
+
+
 def shop_task(page, gate, probe):
     denied_register(page, probe, gate, csrf=False)
     count = command_count(gate, "POST", "/v2/admin/shops/register")
-    page.get_by_role("button", name="注册店铺", exact=True).click()
+    page.get_by_role("button", name="手工补录", exact=True).click()
     dialog = page.get_by_role("dialog")
     dialog.get_by_label("店铺 ID", exact=True).fill(gate.shop_id)
     dialog.get_by_label("店铺名称", exact=True).fill("TEST_native_shop")
     dialog.get_by_label("区域", exact=True).fill("VN")
-    dialog.get_by_role("button", name="保存店铺", exact=True).click()
+    dialog.get_by_role("button", name="保存", exact=True).click()
     dialog.wait_for(state="hidden")
     row = page.get_by_role("row").filter(has=page.get_by_text(gate.shop_id, exact=True))
     row.wait_for()
@@ -259,17 +270,18 @@ def shop_task(page, gate, probe):
         assert shop is not None and shop.account_name == "TEST_native_shop" and shop.credential_id is None
         shop_pk = shop.id
         gate.shop_pks.add(shop_pk)  # Only after same-clone TEST identity confirmation.
-    snapshot = public_get(probe, f"/v2/commerce/channel-accounts/{shop_pk}")
+    snapshot = public_get(probe, f"/v2/commerce/channel-accounts/{shop_pk}?view=management")
     assert isinstance(snapshot, dict) and snapshot["shop_id"] == gate.shop_id
-    row.get_by_role("button", name="编辑元信息", exact=True).click()
-    dialog.get_by_label("店铺名称", exact=True).fill("TEST_native_edited")
+    row.get_by_role("button", name="编辑信息", exact=True).click()
+    expect(dialog.get_by_label("店铺名称", exact=True)).to_have_count(0)
+    expect(dialog.get_by_label("区域", exact=True)).to_have_count(0)
     dialog.get_by_label("开店日期", exact=True).fill("2026-01-02")
-    dialog.get_by_role("button", name="保存店铺", exact=True).click()
+    dialog.get_by_role("button", name="保存", exact=True).click()
     dialog.wait_for(state="hidden")
-    expect(row.get_by_text("TEST_native_edited", exact=True)).to_be_visible()
+    expect(row.get_by_text("2026-01-02", exact=True)).to_be_visible()
     with independent(probe) as session:
         shop = session.get(ChannelAccount, shop_pk)
-        assert shop is not None and shop.account_name == "TEST_native_edited"
+        assert shop is not None and shop.account_name == "TEST_native_shop" and shop.region == "VN"
         assert str(shop.opened_date) == "2026-01-02"
     app_key, secret = "TEST_key_" + secrets.token_hex(8), "TEST_secret_9_" + secrets.token_hex(16)
     row.get_by_role("button", name="配置 App", exact=True).click()
@@ -279,11 +291,11 @@ def shop_task(page, gate, probe):
     dialog.get_by_label("Service ID", exact=True).fill(gate.service_id)
     fill_sensitive(dialog.get_by_label("App Key", exact=True), app_key)
     fill_sensitive(field, secret)
-    dialog.get_by_role("button", name="保存店铺", exact=True).click()
+    dialog.get_by_role("button", name="保存", exact=True).click()
     dialog.wait_for(state="hidden")
     expect(row.get_by_text("已配置", exact=True)).to_be_visible()
     with independent(probe) as session:
-        credentials = token_service.resolve_tiktok_app_credentials(session, service_id=gate.service_id)
+        credentials = token_service.resolve_tiktok_app_credentials(session, shop_pk=shop_pk, service_id=gate.service_id)
         pair_matches = hmac.compare_digest(credentials.app_key, app_key) and hmac.compare_digest(credentials.app_secret, secret)
         assert pair_matches  # Never include credential values in assertion output.
     before = command_count(gate, "PATCH", f"/v2/admin/shops/{shop_pk}")
@@ -293,22 +305,23 @@ def shop_task(page, gate, probe):
     fill_sensitive(dialog.get_by_label("App Secret", exact=True), rotated)
     lost_before = gate.lost
     gate.drop_next = ("PATCH", f"/v2/admin/shops/{shop_pk}")
-    dialog.get_by_role("button", name="保存店铺", exact=True).click()
-    expect(dialog.get_by_role("button", name="查询核对", exact=True)).to_be_visible()
-    expect(dialog.get_by_role("button", name="保存店铺", exact=True)).to_be_disabled()
+    dialog.get_by_role("button", name="保存", exact=True).click()
+    expect(dialog.get_by_role("button", name="读取当前记录核对", exact=True)).to_be_visible()
+    expect(dialog.get_by_role("button", name="保存", exact=True)).to_be_disabled()
     assert gate.lost == lost_before + 1 and gate.drop_next is None
     draft_preserved = dialog.get_by_label("App Secret", exact=True).input_value() == rotated
     assert draft_preserved
     with independent(probe) as session:
-        credentials = token_service.resolve_tiktok_app_credentials(session, service_id=gate.service_id)
+        credentials = token_service.resolve_tiktok_app_credentials(session, shop_pk=shop_pk, service_id=gate.service_id)
         rotation_matches = hmac.compare_digest(credentials.app_secret, rotated)
         assert rotation_matches
-    dialog.get_by_role("button", name="查询核对", exact=True).click()
-    expect(dialog.get_by_text("公开记录已读取，仅供核对，不代表原提交已确认。", exact=True)).to_be_visible()
-    expect(dialog.get_by_role("button", name="核对后明确重新提交", exact=True)).to_be_enabled()
+    dialog.get_by_role("button", name="读取当前记录核对", exact=True).click()
+    expect(dialog.get_by_text("已读取当前记录，请核对后再决定是否提交。", exact=True)).to_be_visible()
+    expect(dialog.get_by_text("读取结果不会显示密钥；再次保存会重新写入配置。", exact=True)).to_be_visible()
+    expect(dialog.get_by_role("button", name="核对后重新保存", exact=True)).to_be_enabled()
     page.wait_for_load_state("networkidle")
     assert command_count(gate, "PATCH", f"/v2/admin/shops/{shop_pk}") == before + 1
-    dialog.get_by_role("button", name="取消", exact=True).click()
+    discard_shop_dialog(page, dialog)
     trigger = row.get_by_role("button", name="配置 App", exact=True)
     page.wait_for_function("nodes => document.activeElement === nodes[0] || document.activeElement === nodes[1]",
                            arg=[trigger.element_handle(), row.element_handle()])
@@ -320,17 +333,18 @@ def shop_task(page, gate, probe):
     expect(row.get_by_text("已配置", exact=True)).to_be_visible()
     assert command_count(gate, "PATCH", f"/v2/admin/shops/{shop_pk}") == before + 1
     row.get_by_role("button", name="获取授权链接", exact=True).click()
-    expect(page.get_by_role("region", name="授权链接")).to_be_visible()
+    expect(dialog.get_by_role("heading", name="为当前店铺授权", exact=True)).to_be_visible()
     assert command_count(gate, "GET", "/v2/oauth/tiktok/authorize") == 1
     with independent(probe) as session:
         states = list(session.scalars(select(OAuthState).where(OAuthState.extra["service_id"].astext == gate.service_id)))
         assert len(states) == 1 and states[0].consumed_at is None
     page.reload(wait_until="networkidle")
-    expect(row.get_by_text("TEST_native_edited", exact=True)).to_be_visible()
+    expect(row.get_by_text("TEST_native_shop", exact=True)).to_be_visible()
     expect(row.get_by_text("已配置", exact=True)).to_be_visible()
     assert command_count(gate, "GET", "/v2/oauth/tiktok/authorize") == 1
-    snapshot = public_get(probe, f"/v2/commerce/channel-accounts/{shop_pk}")
-    assert isinstance(snapshot, dict) and snapshot["account_name"] == "TEST_native_edited"
+    snapshot = public_get(probe, f"/v2/commerce/channel-accounts/{shop_pk}?view=management")
+    assert isinstance(snapshot, dict) and snapshot["account_name"] == "TEST_native_shop"
+    assert snapshot["opened_date"] == "2026-01-02" and snapshot["credential_id"] is None
 
 
 def enum_task(page, gate, probe):

@@ -209,11 +209,24 @@ def test_get_product_default_client_uses_token_bound_service_app_pair(
     acct_id = _seed_account(db_session)
     upsert_tiktok_app_credentials(
         db_session,
+        shop_pk=acct_id,
         service_id=service_id,
         app_key="TEST_PRODUCT_APP_KEY",
         plaintext_app_secret="TEST_PRODUCT_APP_SECRET",
     )
     _seed_credentials(db_session, service_id=service_id)
+    from sqlalchemy import select
+
+    from tts_erp_v2.db.models.commerce import ChannelAccount
+    from tts_erp_v2.db.models.integration import Credentials
+
+    account = db_session.get(ChannelAccount, acct_id)
+    account.service_id = service_id
+    account.credential_id = db_session.scalar(
+        select(Credentials.id).where(
+            Credentials.provider == "tiktok", Credentials.external_account_id == SHOP_ID,
+        )
+    )
     db_session.flush()
 
     data = {"id": PRODUCT_ID, "title": "Test Tee"}

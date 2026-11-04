@@ -68,7 +68,7 @@ def arrived(page: Page, clone: OwnedClone, target: str) -> None:
     page.wait_for_url(clone.child.base + clone.prefix + target)
     expect(page.get_by_role("button", name="退出登录", exact=True)).to_be_visible()
     if target == "/v2/pages/shops":
-        expect(page.get_by_role("button", name="注册店铺", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="手工补录", exact=True)).to_be_visible()
     else:
         expect(page.get_by_role("button", name="新增映射", exact=True)).to_be_visible()
     page.wait_for_load_state("networkidle")

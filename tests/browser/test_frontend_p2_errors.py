@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from tests.browser.test_frontend_p2_live import (
     command_count,
+    discard_shop_dialog,
     independent,
     owned_command_facts,
     public_get,
@@ -31,14 +32,11 @@ REGISTER = "/v2/admin/shops/register"
 ENUM = "/v2/config/enum-map"
 
 
-def fill_registration(page, gate, secret, *, conflict=False):
-    page.get_by_role("button", name="注册店铺", exact=True).click()
+def fill_registration(page, gate):
+    page.get_by_role("button", name="手工补录", exact=True).click()
     dialog = page.get_by_role("dialog")
-    for label, value in (("店铺 ID", gate.shop_id), ("店铺名称", "TEST_error_shop"), ("区域", "VN"),
-                         ("Service ID", gate.service_id + ("_conflict" if conflict else ""))):
+    for label, value in (("店铺 ID", gate.shop_id), ("店铺名称", "TEST_error_shop"), ("区域", "VN")):
         dialog.get_by_label(label, exact=True).fill(value)
-    fill_sensitive(dialog.get_by_label("App Key", exact=True), "TEST_error_key")
-    fill_sensitive(dialog.get_by_label("App Secret", exact=True), secret)
     return dialog
 
 
@@ -49,7 +47,7 @@ def cooldown(page, gate, path, button, writer):
     gate.inject_next("GET", path, 429, retry_after=600)
     refresh = page.get_by_role("button", name=button, exact=True)
     refresh.click()
-    page.get_by_text("列表不可用", exact=True).wait_for()
+    page.get_by_text("列表读取失败" if path == "/v2/commerce/channel-accounts" else "列表不可用", exact=True).wait_for()
     assert gate.injected[-1] == ("GET", path, 429) and gate.error_next is None
     reads = command_count(gate, "GET", path)
     writer()  # Confirmed write must not bypass the prior read deadline.
@@ -93,69 +91,85 @@ def test_real_http_rejection_and_wire_error_recovery(frontend_build, monkeypatch
                     page.get_by_role("button", name="登录", exact=True).click()
                     page.wait_for_url(child.base + prefix + "/v2/pages/shops")
                     secret = "TEST_error_secret_9_" + secrets.token_hex(12)
-                    dialog = fill_registration(page, gate, secret)
+                    dialog = fill_registration(page, gate)
                     gate.invalid_region_next = True
-                    dialog.get_by_role("button", name="保存店铺", exact=True).click()
+                    dialog.get_by_role("button", name="保存", exact=True).click()
                     expect(dialog.get_by_text("校验未通过，请检查输入（HTTP 422）", exact=True)).to_be_visible()
                     assert gate.mutated == 1 and ("POST", REGISTER, 422) in gate.responses
                     assert dialog.get_by_label("区域", exact=True).input_value() == "VN"
-                    retained = dialog.get_by_label("App Secret", exact=True).input_value() == secret
-                    assert retained
+                    assert dialog.get_by_label("店铺名称", exact=True).input_value() == "TEST_error_shop"
+                    expect(dialog.get_by_label("App Secret", exact=True)).to_have_count(0)
                     with independent(probe) as session:
                         assert session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)) is None
                     assert command_count(gate, "POST", REGISTER) == 1
                     dialog.get_by_label("区域", exact=True).fill("TH")
                     validity = dialog.locator("input").evaluate_all("els => els.map(e => ({name:e.name,valid:e.validity.valid}))")
                     assert all(item["valid"] for item in validity), validity
-                    dialog.get_by_role("button", name="保存店铺", exact=True).click()
+                    dialog.get_by_role("button", name="保存", exact=True).click()
                     dialog.wait_for(state="hidden")
                     row = page.get_by_role("row").filter(has=page.get_by_text(shop_id, exact=True))
                     row.wait_for()
                     with independent(probe) as session:
                         shop = session.scalar(select(ChannelAccount).where(ChannelAccount.shop_id == shop_id))
-                        assert shop is not None and shop.service_id == gate.service_id
+                        assert shop is not None and shop.service_id is None and shop.credential_id is None
                         shop_pk = shop.id
                         gate.shop_pks.add(shop_pk)
-                    dialog = fill_registration(page, gate, secret, conflict=True)
-                    dialog.get_by_role("button", name="保存店铺", exact=True).click()
-                    expect(dialog.get_by_text("数据冲突，请查询核对后再提交（HTTP 409）", exact=True)).to_be_visible()
-                    assert ("POST", REGISTER, 409) in gate.responses
+                    patch = f"/v2/admin/shops/{shop_pk}"
+                    row.get_by_role("button", name="配置 App", exact=True).click()
+                    dialog.get_by_label("Service ID", exact=True).fill(gate.service_id)
+                    fill_sensitive(dialog.get_by_label("App Key", exact=True), "TEST_error_key")
+                    fill_sensitive(dialog.get_by_label("App Secret", exact=True), secret)
+                    gate.invalid_app_key_next = True
+                    dialog.get_by_role("button", name="保存", exact=True).click()
+                    expect(dialog.get_by_text("校验未通过，请检查输入（HTTP 422）", exact=True)).to_be_visible()
+                    assert gate.mutated == 2 and ("PATCH", patch, 422) in gate.responses
                     retained = dialog.get_by_label("App Secret", exact=True).input_value() == secret
-                    assert retained and dialog.get_by_label("Service ID", exact=True).input_value() == gate.service_id + "_conflict"
+                    assert retained and dialog.get_by_label("Service ID", exact=True).input_value() == gate.service_id
                     with independent(probe) as session:
-                        credentials = token_service.resolve_tiktok_app_credentials(session, service_id=gate.service_id)
+                        shop = session.get(ChannelAccount, shop_pk)
+                        assert shop is not None and shop.service_id is None
+                    fill_sensitive(dialog.get_by_label("App Key", exact=True), "TEST_error_key_retry")
+                    dialog.get_by_role("button", name="保存", exact=True).click()
+                    dialog.wait_for(state="hidden")
+                    expect(row.get_by_text("已配置", exact=True)).to_be_visible()
+                    row.get_by_role("button", name="配置 App", exact=True).click()
+                    dialog.get_by_label("Service ID", exact=True).fill(gate.service_id + "_conflict")
+                    dialog.get_by_role("button", name="保存", exact=True).click()
+                    expect(dialog.get_by_text("当前店铺的此 Service ID 尚未配置，请填写 App Key 和 App Secret 后保存", exact=True)).to_be_visible()
+                    assert ("PATCH", patch, 409) in gate.responses
+                    assert dialog.get_by_label("Service ID", exact=True).input_value() == gate.service_id + "_conflict"
+                    with independent(probe) as session:
+                        shop = session.get(ChannelAccount, shop_pk)
+                        assert shop is not None and shop.service_id == gate.service_id
+                        credentials = token_service.resolve_tiktok_app_credentials(session, shop_pk=shop_pk, service_id=gate.service_id)
                         matches = hmac.compare_digest(credentials.app_secret, secret)
                         assert matches
-                    dialog.get_by_role("button", name="取消", exact=True).click()
+                    discard_shop_dialog(page, dialog)
 
                     def revisit_shop():
-                        page.get_by_role("button", name="注册店铺", exact=True).click()
-                        form = page.get_by_role("dialog")
-                        form.get_by_label("店铺 ID", exact=True).fill(shop_id)
-                        form.get_by_label("店铺名称", exact=True).fill("TEST_revisit")
-                        form.get_by_role("button", name="保存店铺", exact=True).click()
+                        form = fill_registration(page, gate)
+                        form.get_by_role("button", name="保存", exact=True).click()
                         form.wait_for(state="hidden")
-                        expect(page.get_by_text("店铺保存已确认", exact=True)).to_be_visible()
+                        expect(page.get_by_text("店铺信息已保存", exact=True)).to_be_visible()
 
                     cooldown(page, gate, "/v2/commerce/channel-accounts", "刷新店铺", revisit_shop)
                     row.wait_for()
-                    row.get_by_role("button", name="编辑元信息", exact=True).click()
-                    dialog.get_by_label("店铺名称", exact=True).fill("TEST_wire500_committed")
-                    patch = f"/v2/admin/shops/{shop_pk}"
+                    row.get_by_role("button", name="编辑信息", exact=True).click()
+                    dialog.get_by_label("开店日期", exact=True).fill("2026-02-03")
                     before = command_count(gate, "PATCH", patch)
                     gate.inject_next("PATCH", patch, 500)
-                    dialog.get_by_role("button", name="保存店铺", exact=True).click()
-                    expect(dialog.get_by_role("button", name="查询核对", exact=True)).to_be_visible()
+                    dialog.get_by_role("button", name="保存", exact=True).click()
+                    expect(dialog.get_by_role("button", name="读取当前记录核对", exact=True)).to_be_visible()
                     assert gate.injected[-1] == ("PATCH", patch, 500) and ("PATCH", patch, 200) in gate.responses
-                    expect(dialog.get_by_role("button", name="保存店铺", exact=True)).to_be_disabled()
+                    expect(dialog.get_by_role("button", name="保存", exact=True)).to_be_disabled()
                     with independent(probe) as session:
                         shop = session.get(ChannelAccount, shop_pk)
-                        assert shop is not None and shop.account_name == "TEST_wire500_committed"
-                    dialog.get_by_role("button", name="查询核对", exact=True).click()
-                    expect(dialog.get_by_role("button", name="核对后明确重新提交", exact=True)).to_be_enabled()
-                    dialog.get_by_role("button", name="取消", exact=True).click()
+                        assert shop is not None and shop.account_name == "TEST_error_shop" and str(shop.opened_date) == "2026-02-03"
+                    dialog.get_by_role("button", name="读取当前记录核对", exact=True).click()
+                    expect(dialog.get_by_role("button", name="核对后重新保存", exact=True)).to_be_enabled()
+                    discard_shop_dialog(page, dialog)
                     page.reload(wait_until="networkidle")
-                    expect(row.get_by_text("TEST_wire500_committed", exact=True)).to_be_visible()
+                    expect(row.get_by_text("2026-02-03", exact=True)).to_be_visible()
                     assert command_count(gate, "PATCH", patch) == before + 1
                     page.goto(child.base + prefix + "/v2/pages/enum-map", wait_until="networkidle")
                     page.get_by_role("button", name=re.compile(" 分类$")).click()

@@ -79,7 +79,7 @@ export default function Shops({ bootstrap }: PageProps) {
         if (error instanceof ApiError) blockReads((error.retryAfter ?? 0) * 1000);
       });
     return () => controller.abort();
-  }, [bootstrap.rootPath, filters, offset, refresh, blockReads, readBlocked]);
+  }, [bootstrap.rootPath, filters, offset, refresh, blockReads]);
   function blocked(key: string) {
     return !canWrite || pending[key] || cooldown[key] || (recoveries[key] !== undefined && recoveries[key]?.phase !== 'checked');
   }
@@ -208,7 +208,7 @@ export default function Shops({ bootstrap }: PageProps) {
       <Button variant="secondary" className="h-11" isDisabled={readBlocked || list.loading} onPress={() => setRefresh((value) => value + 1)}>刷新店铺</Button>
       <Button className="h-11" isDisabled={blocked('register')} onPress={() => open('register')}>手工补录</Button>
     </PageIntro>
-    <form aria-label="店铺筛选" className="erp-panel shops-filters" onSubmit={(event) => { event.preventDefault(); updateFilter('q', search); }}>
+    <form aria-label="店铺筛选" className="erp-filters shops-filters" onSubmit={(event) => { event.preventDefault(); updateFilter('q', search); }}>
       <TextField className="min-w-0" value={search} onChange={setSearch}>
         <Label>店铺搜索</Label><Input fullWidth className="h-11" type="search" placeholder="店铺名称 / ID / 编码" />
       </TextField>
