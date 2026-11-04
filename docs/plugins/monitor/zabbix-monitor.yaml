@@ -1,0 +1,147 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+  - uuid: 7d4af52269da43cb9498102cfeeaf0f8
+    name: Templates/TTS Monitor
+  templates:
+  - uuid: d6782bccccd8417ab0ab33570dfdd3dd
+    template: TTS Monitor
+    name: TTS Monitor
+    description: 按 Seller ID 监控 TTS Monitor Chrome 插件的在线和业务进展。
+    groups:
+    - name: Templates/TTS Monitor
+    macros:
+    - macro: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      value: 127.0.0.1
+      description: 填写 Zabbix Web 前端向 server 发送 history.push 时使用的源地址。
+    - macro: '{$TTS.MONITOR.OFFLINE}'
+      value: 135s
+      description: 失联判定窗口。
+    - macro: '{$TTS.MONITOR.STALL}'
+      value: 180s
+      description: 业务节点无实际进展窗口。
+    items:
+    - uuid: 35770cf805a140dfa827cd32914c1e9f
+      name: 插件心跳和监控开关
+      type: TRAP
+      key: monitor.heartbeat
+      delay: '0'
+      history: 7d
+      trends: '0'
+      allowed_hosts: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      description: 0 为主动停止，1 为运行。两个值都表示插件在线。
+    - uuid: b65eeb2ffb2c4299a88c46ddf5634528
+      name: 插件上报的店名
+      type: TRAP
+      key: monitor.shop.name
+      delay: '0'
+      history: 7d
+      trends: '0'
+      allowed_hosts: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      value_type: TEXT
+      description: 展示字段。店铺身份使用 Zabbix 主机技术名称中的 Seller ID。
+    - uuid: 667df2796160427aa74771d84de6d9a9
+      name: 扫描阶段观察起点或真实进展
+      type: TRAP
+      key: monitor.stage.activity[scan]
+      delay: '0'
+      history: 7d
+      trends: '0'
+      allowed_hosts: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      description: 0 为无需观察，1 为进入观察或取得真实进展。
+    - uuid: e7537937ffce4cf992b187d82a088896
+      name: 扫描阶段真实进展
+      type: TRAP
+      key: monitor.stage.progress[scan]
+      delay: '0'
+      history: 7d
+      trends: '0'
+      allowed_hosts: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      description: 仅在有真实进展时推送 1。
+    - uuid: bd05e9cf67e84e25b463952e9d4f45f7
+      name: 规则评估阶段观察起点或真实进展
+      type: TRAP
+      key: monitor.stage.activity[evaluate]
+      delay: '0'
+      history: 7d
+      trends: '0'
+      allowed_hosts: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      description: 0 为无需观察，1 为进入观察或取得真实进展。
+    - uuid: 511bb73aa89e404eb0996f4b80c74b00
+      name: 规则评估阶段真实进展
+      type: TRAP
+      key: monitor.stage.progress[evaluate]
+      delay: '0'
+      history: 7d
+      trends: '0'
+      allowed_hosts: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      description: 仅在有真实进展时推送 1。
+    - uuid: 938216807ba14a5381e6dd4e8cfef422
+      name: 关停阶段观察起点或真实进展
+      type: TRAP
+      key: monitor.stage.activity[close]
+      delay: '0'
+      history: 7d
+      trends: '0'
+      allowed_hosts: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      description: 0 为无需观察，1 为进入观察或取得真实进展。
+    - uuid: c6c217bc8982476fa64aab4579092d19
+      name: 关停阶段真实进展
+      type: TRAP
+      key: monitor.stage.progress[close]
+      delay: '0'
+      history: 7d
+      trends: '0'
+      allowed_hosts: '{$TTS.MONITOR.TRAPPER.HOSTS}'
+      description: 仅在有真实进展时推送 1。
+  triggers:
+  - uuid: 0dadc418b5214344a5888c04554451a2
+    name: Monitor 插件失联
+    expression: nodata(/TTS Monitor/monitor.heartbeat,{$TTS.MONITOR.OFFLINE},"strict")=1 and last(/TTS Monitor/monitor.heartbeat)>=0
+    recovery_mode: RECOVERY_EXPRESSION
+    recovery_expression: nodata(/TTS Monitor/monitor.heartbeat,{$TTS.MONITOR.OFFLINE},"strict")=0
+    priority: HIGH
+    tags:
+    - tag: service
+      value: tts-monitor
+    - tag: signal
+      value: heartbeat
+  - uuid: 88f77b34c52e489cbe1d52cf3fbac86b
+    name: Monitor 扫描阶段无进展
+    expression: last(/TTS Monitor/monitor.heartbeat)=1 and nodata(/TTS Monitor/monitor.heartbeat,{$TTS.MONITOR.OFFLINE},"strict")=0
+      and last(/TTS Monitor/monitor.stage.activity[scan])=1 and nodata(/TTS Monitor/monitor.stage.activity[scan],{$TTS.MONITOR.STALL},"strict")=1
+    recovery_mode: RECOVERY_EXPRESSION
+    recovery_expression: last(/TTS Monitor/monitor.heartbeat)=1 and nodata(/TTS Monitor/monitor.heartbeat,{$TTS.MONITOR.OFFLINE},"strict")=0
+      and nodata(/TTS Monitor/monitor.stage.progress[scan],45s,"strict")=0
+    priority: AVERAGE
+    tags:
+    - tag: service
+      value: tts-monitor
+    - tag: signal
+      value: scan
+  - uuid: 278396769ae7411aa746901515447aee
+    name: Monitor 规则评估阶段无进展
+    expression: last(/TTS Monitor/monitor.heartbeat)=1 and nodata(/TTS Monitor/monitor.heartbeat,{$TTS.MONITOR.OFFLINE},"strict")=0
+      and last(/TTS Monitor/monitor.stage.activity[evaluate])=1 and nodata(/TTS Monitor/monitor.stage.activity[evaluate],{$TTS.MONITOR.STALL},"strict")=1
+    recovery_mode: RECOVERY_EXPRESSION
+    recovery_expression: last(/TTS Monitor/monitor.heartbeat)=1 and nodata(/TTS Monitor/monitor.heartbeat,{$TTS.MONITOR.OFFLINE},"strict")=0
+      and nodata(/TTS Monitor/monitor.stage.progress[evaluate],45s,"strict")=0
+    priority: AVERAGE
+    tags:
+    - tag: service
+      value: tts-monitor
+    - tag: signal
+      value: evaluate
+  - uuid: 93740ed150614373bd1b04891fd4e4e3
+    name: Monitor 关停阶段无进展
+    expression: last(/TTS Monitor/monitor.heartbeat)=1 and nodata(/TTS Monitor/monitor.heartbeat,{$TTS.MONITOR.OFFLINE},"strict")=0
+      and last(/TTS Monitor/monitor.stage.activity[close])=1 and nodata(/TTS Monitor/monitor.stage.activity[close],{$TTS.MONITOR.STALL},"strict")=1
+    recovery_mode: RECOVERY_EXPRESSION
+    recovery_expression: last(/TTS Monitor/monitor.heartbeat)=1 and nodata(/TTS Monitor/monitor.heartbeat,{$TTS.MONITOR.OFFLINE},"strict")=0
+      and nodata(/TTS Monitor/monitor.stage.progress[close],45s,"strict")=0
+    priority: AVERAGE
+    tags:
+    - tag: service
+      value: tts-monitor
+    - tag: signal
+      value: close
