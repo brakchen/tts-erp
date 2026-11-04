@@ -215,6 +215,10 @@ _SCHEMAS: list[tuple[str, str]] = [
         "Cached exchange rates: exchange_rate_snapshots + exchange_rates (USD-base snapshot, local currency conversion — read-only, upstream quota-billed)",
     ),
     ("security", "API keys: api_keys"),
+    (
+        "media",
+        "Global media asset library + digital humans: media_assets, digital_humans, digital_human_assets",
+    ),
 ]
 
 
@@ -238,7 +242,7 @@ def _introspect_schemas(session: Session) -> str:
                 "FROM information_schema.tables "
                 "WHERE table_schema IN ("
                 "  'integration','commerce','procurement','fulfillment',"
-                "  'after_sales','finance','reporting','security','fx'"
+                "  'after_sales','finance','reporting','security','fx','media'"
                 ") AND table_type = 'BASE TABLE' "
                 "ORDER BY table_schema, table_name"
             )
@@ -250,7 +254,7 @@ def _introspect_schemas(session: Session) -> str:
                 "FROM pg_stat_user_tables "
                 "WHERE schemaname IN ("
                 "  'integration','commerce','procurement','fulfillment',"
-                "  'after_sales','finance','reporting','security','fx'"
+                "  'after_sales','finance','reporting','security','fx','media'"
                 ")"
             )
         ).all()

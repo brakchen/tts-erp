@@ -59,6 +59,11 @@ from tts_erp_v2.db.models.intercept import (
     InterceptSession,
     InterceptSyncCursor,
 )
+from tts_erp_v2.db.models.media import (
+    DigitalHuman,
+    DigitalHumanAsset,
+    MediaAsset,
+)
 from tts_erp_v2.db.models.miaoshou import (
     MiaoshouPackage,
     MiaoshouPackageGiftItem,
@@ -122,6 +127,8 @@ __all__ = [
     "ChromeShipment",
     "ChromeTrackingEvent",
     "Credentials",
+    "DigitalHuman",
+    "DigitalHumanAsset",
     "EnumMap",
     "ExchangeRate",
     "ExchangeRateSnapshot",
@@ -131,6 +138,7 @@ __all__ = [
     "InterceptSyncCursor",
     "InterceptedRequest",
     "ManualProductCost",
+    "MediaAsset",
     "MiaoshouPackage",
     "MiaoshouPackageGiftItem",
     "MiaoshouPackageItem",

@@ -39,6 +39,8 @@ PAGES: tuple[PageDef, ...] = (
     PageDef("intercept-requests", "录", "拦截记录", "数据工具"),
     PageDef("intercept-stats", "计", "拦截统计", "数据工具"),
     PageDef("video-publish", "发", "视频发布", "数据工具"),
+    PageDef("media-assets", "资", "资产管理", "内容资产"),
+    PageDef("digital-humans", "人", "数字人", "内容资产"),
 )
 
 PAGE_BY_ID: dict[str, PageDef] = {p.page_id: p for p in PAGES}
@@ -83,6 +85,8 @@ PAGE_MIN_WRITE_TIER: dict[str, str] = {
     "intercept-configs": "readwrite",
     "intercept-requests": "readwrite",
     "video-publish": "readwrite",
+    "media-assets": "readwrite",
+    "digital-humans": "readwrite",
 }
 
 
