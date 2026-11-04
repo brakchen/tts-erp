@@ -154,11 +154,24 @@ if [ "${DEPS_CHANGED:-0}" = "1" ]; then
   fi
 fi
 
-dl_log "重启 207 tts-erp.service …"
-ssh "${SSH_OPTS[@]}" "$PROD_HOST" \
-  'systemctl restart tts-erp.service && sleep 3 && systemctl is-active tts-erp.service' \
-  | grep -q '^active$' \
-  || dl_die "207 服务重启后未 active，请查 ssh $PROD_HOST journalctl -u tts-erp -n 50"
+dl_log "重启 207 tts-erp.service 并等待就绪 …"
+ssh "${SSH_OPTS[@]}" "$PROD_HOST" "PROD_DIR='$PROD_DIR' bash -s" <<'REMOTE_RESTART' \
+  || dl_die "207 服务重启后未就绪，请查 ssh $PROD_HOST journalctl -u tts-erp -n 50"
+set -u
+cd "$PROD_DIR"
+port="$(grep -E '^TTS_ERP_PORT=' .env 2>/dev/null | cut -d= -f2)"; port="${port:-9878}"
+systemctl restart tts-erp.service
+sleep 2
+systemctl is-active tts-erp.service | grep -q '^active$' || { echo "[207][错误] 重启后未 active" >&2; exit 1; }
+# uvicorn 启动需要时间，轮询 healthz 最多 90 秒
+waited=0
+while [ "$waited" -lt 90 ]; do
+  curl -fsS --max-time 5 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1 && { echo "[207] 服务已就绪（等待 ${waited}s）"; exit 0; }
+  sleep 3; waited=$((waited + 3))
+done
+echo "[207][错误] 90 秒内 healthz 未就绪" >&2
+exit 1
+REMOTE_RESTART
 
 remote_verify "$RELEASE_ID" || dl_die "207 本机校验未通过"
 dl_verify "公网" "$PUBLIC_ORIGIN" "$RELEASE_ID" || dl_die "公网校验未通过（nginx 回源或缓存问题）"
