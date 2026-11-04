@@ -1,6 +1,6 @@
 # Monitor 接入 Zabbix 7.4
 
-先发布 ERP 健康接口退役版本，确认公网和 HP Desk 的 `GET /endpoints` 均不再列出 `POST /v2/plugin/monitor/health`，并确认 HP Desk 同步 worker 已从同一发布版本重启。店铺名册仍由 ERP 店铺登记维护。
+先发布 ERP 健康接口退役版本，确认公网和 HP Desk 的 `GET /endpoints` 均不再列出 `POST /v2/plugin/monitor/health`，并确认 HP Desk 同步 worker 已从同一发布版本重启。店铺名册仍由 ERP 店铺登记维护。人工发布、旧接口验收和生产网关配置见[公网 HTTPS 接入与切换](zabbix-https-cutover.md)。
 
 ## 导入模板和登记店铺
 
