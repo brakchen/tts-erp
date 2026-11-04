@@ -178,6 +178,15 @@ if [[ -f "$DEPLOY_DIR/alembic/versions/0073_media_assets.py" && -d "$DEPLOY_DIR/
   ok "本功能代码已在部署目录"
 fi
 
+# 本脚本只负责 0073。若 master 上已经有其它待迁移版本，upgrade head 会把它们一并应用
+# （超出本脚本授权），因此在这里停下并交人工判断。
+repo_head="$("$DEPLOY_DIR/.venv/bin/alembic" heads 2>/dev/null | tr -d '[:space:]' | cut -d' ' -f1)"
+if [[ "$repo_head" != "$EXPECTED_POST" ]]; then
+  die "仓库 alembic head 是 '$repo_head'，本脚本只授权迁移到 $EXPECTED_POST。\
+master 上还有其它待迁移版本，upgrade head 会一并应用——请先人工评估并使用对应 lane 的上线脚本。"
+fi
+ok "仓库 alembic head = $EXPECTED_POST（无其它待迁移版本）"
+
 # 节点工具链（前端构建用）
 if (( SKIP_FRONTEND_BUILD )); then
   info "跳过前端构建（--skip-frontend-build）"
