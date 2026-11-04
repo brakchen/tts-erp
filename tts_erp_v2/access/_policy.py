@@ -35,7 +35,6 @@ _READONLY_PREFIXES = (
 )
 
 _READWRITE_EXACT = {
-    "/v2/plugin/monitor/health",
     "/v2/reporting/manual-costs",
 }
 

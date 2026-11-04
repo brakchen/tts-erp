@@ -1,5 +1,7 @@
 # Monitor 最小探活实施计划
 
+> 历史记录。ERP 已退役 `POST /v2/plugin/monitor/health` 和对应的告警任务。
+
 ## 1. Goal / Architecture / Tech Stack
 
 - **Goal**：按已批准的[四字段需求](04-health-reporting-requirements.md)，实现插件独立心跳与内部业务埋点、ERP 持久化与定时扫描、统一飞书群首报和恢复通知。电脑端完全停止后仍能由服务器发现。
