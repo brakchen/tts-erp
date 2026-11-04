@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '@heroui/react';
+import { Button, Disclosure, Label, TextArea, TextField } from '@heroui/react';
 import { createJSONEditor, Mode, type Content, type JSONParser } from 'vanilla-jsoneditor';
 import { stringify } from 'lossless-json';
 import { parseRuntime, stringifyRuntime } from './json';
@@ -72,7 +72,7 @@ export default function JsonEditor({ label, value, onChange, readOnly = false, d
       <Button size="sm" variant="secondary" isDisabled={locked.current} onPress={() => format()}>{label} 压缩</Button>
     </div>
     <div ref={host} className="h-80 min-w-0 overflow-auto" />
-    <details><summary>无障碍 JSON 文本编辑</summary><label className="block"><span>{label} JSON 文本</span><textarea aria-label={`${label} JSON 文本`} className="h-48 w-full font-mono" value={value} readOnly={locked.current} onChange={(event) => { if (!locked.current) onChange?.(event.target.value); }} spellCheck={false} /></label></details>
+    <Disclosure><Disclosure.Heading><Disclosure.Trigger type="button">无障碍 JSON 文本编辑<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body><TextField value={value} isReadOnly={locked.current} onChange={(text) => { if (!locked.current) onChange?.(text); }}><Label>{label} JSON 文本</Label><TextArea className="h-48 w-full font-mono" spellCheck={false} /></TextField></Disclosure.Body></Disclosure.Content></Disclosure>
     {error && <p role="alert">{error}</p>}
   </section>;
 }

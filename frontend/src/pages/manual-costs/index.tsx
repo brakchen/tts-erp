@@ -1,6 +1,6 @@
 import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Input, Modal, Table } from '@heroui/react';
+import { Alert, Button, Checkbox, Input, Label, ListBox, Modal, Select, Table } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
@@ -179,22 +179,32 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     <section className="erp-panel erp-filter-workspace" aria-label="采购范围与筛选">
     <div className="erp-filter-row">
     <div className="erp-filter-row">
-      <label className="erp-shop-picker">当前店铺<select className="erp-select" aria-label="当前店铺" value={shopId} disabled={pending || !shops?.length} onChange={(event) => changeScope(() => setShopId(event.target.value))}>{shops?.map((shop) => <option key={shop.id} value={shop.id}>{shop.account_name ?? shop.shop_id} · {shop.shop_id} · #{shop.id}</option>)}</select></label>
+      <Select className="erp-shop-picker" value={shopId || null} isDisabled={pending || !shops?.length} onChange={(key) => { if (typeof key === 'string') changeScope(() => setShopId(key)); }}>
+        <Label>当前店铺</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{shops?.map((shop) => <ListBox.Item key={shop.id} id={shop.id} textValue={`${shop.account_name ?? shop.shop_id} · ${shop.shop_id} · #${shop.id}`}>{shop.account_name ?? shop.shop_id} · {shop.shop_id} · #{shop.id}</ListBox.Item>)}</ListBox></Select.Popover>
+      </Select>
       <Button variant="secondary" isDisabled={cooldown || pending} onPress={() => { setShopRefresh((value) => value + 1); setRefresh((value) => value + 1); }}>刷新店铺与列表</Button>
     </div>
     <div aria-label="工作台视图" className="erp-tabs">{([['all', '全部 SPU'], ['missing', '缺成本候选'], ['recent', '最近提交']] as const).map(([value, label]) => <Button key={value} variant={view === value ? 'primary' : 'ghost'} aria-pressed={view === value} isDisabled={pending} onPress={() => changeScope(() => setView(value))}>{label}</Button>)}</div>
     </div>
     <form aria-label="工作台筛选" className="erp-filter-row" onSubmit={(event) => { event.preventDefault(); changeScope(() => setQuery(searchInput)); }}>
       {view !== 'missing' && <><label>搜索<Input aria-label="按 SPU 或标题搜索" maxLength={200} value={searchInput} disabled={pending} onChange={(event) => setSearchInput(event.target.value)} /></label><Button type="submit" isDisabled={pending || cooldown}>搜索</Button></>}
-      <label>每页行数<select className="erp-select" aria-label="每页行数" value={limit} disabled={pending} onChange={(event) => changeScope(() => setLimit(Number(event.target.value)))}>{[25, 50, 100].map((value) => <option key={value}>{value}</option>)}</select></label>
+      <Select className="erp-field erp-field-short" value={String(limit)} isDisabled={pending} onChange={(key) => { if (typeof key === 'string') changeScope(() => setLimit(Number(key))); }}>
+        <Label>每页行数</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[25, 50, 100].map((value) => <ListBox.Item key={value} id={String(value)} textValue={String(value)}>{value}</ListBox.Item>)}</ListBox></Select.Popover>
+      </Select>
       {view === 'all' && <>
-        <label>状态<select className="erp-select" aria-label="状态" value={status} disabled={pending} onChange={(event) => changeScope(() => setStatus(event.target.value))}><option value="">全部</option>{Object.entries(statuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label><input type="checkbox" checked={hasOrders} disabled={pending} onChange={(event) => changeScope(() => setHasOrders(event.target.checked))} />仅看有单</label>
-        <label><input type="checkbox" checked={missingManual} disabled={pending} onChange={(event) => changeScope(() => setMissingManual(event.target.checked))} />仅展示未登记 SPU</label>
-        <label>排序<select className="erp-select" aria-label="排序字段" value={sort} disabled={pending} onChange={(event) => changeScope(() => setSort(event.target.value))}>{[['status', '状态'], ['unit_cost', '成本'], ['created_at', '创建时间'], ['updated_at', '更新时间']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label>方向<select className="erp-select" aria-label="排序方向" value={order} disabled={pending} onChange={(event) => changeScope(() => setOrder(event.target.value))}><option value="asc">升序</option><option value="desc">降序</option></select></label>
+        <Select className="erp-field" value={`choice:${status}`} isDisabled={pending} onChange={(key) => { if (typeof key === 'string') changeScope(() => setStatus(key.slice(7))); }}>
+          <Label>状态</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[['', '全部'], ...Object.entries(statuses)].map(([value, label]) => <ListBox.Item key={value} id={`choice:${value}`} textValue={label}>{label}</ListBox.Item>)}</ListBox></Select.Popover>
+        </Select>
+        <Checkbox isSelected={hasOrders} isDisabled={pending} onChange={(checked) => changeScope(() => setHasOrders(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅看有单</Checkbox.Content></Checkbox>
+        <Checkbox isSelected={missingManual} isDisabled={pending} onChange={(checked) => changeScope(() => setMissingManual(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅展示未登记 SPU</Checkbox.Content></Checkbox>
+        <Select className="erp-field" aria-label="排序字段" value={sort} isDisabled={pending} onChange={(key) => { if (typeof key === 'string') changeScope(() => setSort(key)); }}>
+          <Label>排序</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[['status', '状态'], ['unit_cost', '成本'], ['created_at', '创建时间'], ['updated_at', '更新时间']].map(([value, label]) => <ListBox.Item key={value} id={value} textValue={label}>{label}</ListBox.Item>)}</ListBox></Select.Popover>
+        </Select>
+        <Select className="erp-field erp-field-short" aria-label="排序方向" value={order} isDisabled={pending} onChange={(key) => { if (typeof key === 'string') changeScope(() => setOrder(key)); }}>
+          <Label>方向</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="asc" textValue="升序">升序</ListBox.Item><ListBox.Item id="desc" textValue="降序">降序</ListBox.Item></ListBox></Select.Popover>
+        </Select>
       </>}
-      {view === 'missing' && <label><input type="checkbox" checked={onlyPhoto} disabled={pending} onChange={(event) => setOnlyPhoto(event.target.checked)} />仅显示本页 missing_photo 候选（展示筛选）</label>}
+      {view === 'missing' && <Checkbox isSelected={onlyPhoto} isDisabled={pending} onChange={setOnlyPhoto}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅显示本页 missing_photo 候选（展示筛选）</Checkbox.Content></Checkbox>}
       <Button variant="secondary" isDisabled={cooldown || pending || !shopId} onPress={() => setRefresh((value) => value + 1)}>刷新当前列表</Button>
     </form>
     {!shops && !shopError && <p role="status">加载店铺中…</p>}{shops?.length === 0 && <p>暂无可选店铺</p>}

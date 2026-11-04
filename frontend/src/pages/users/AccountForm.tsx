@@ -40,8 +40,7 @@ export function AccountForm({ kind, draft, role, catalog, pending, blocked, erro
       {catalog.roles.length === 0 && <p>暂无角色</p>}
       {catalog.roles.map((item) => <Checkbox key={item.code} isSelected={draft.roles.includes(item.code)}
         isDisabled={pending} onChange={(checked) => toggle('roles', item.code, checked)}>
-        <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-        <Checkbox.Content>{item.name}（{item.code}）</Checkbox.Content>
+        <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>{item.name}（{item.code}）</Checkbox.Content>
       </Checkbox>)}
       {errors.roles && <p>{errors.roles}</p>}
     </fieldset>}
@@ -62,8 +61,7 @@ export function AccountForm({ kind, draft, role, catalog, pending, blocked, erro
           {catalog.allPermissions.filter((p) => p.group === group).map((p) => <Checkbox key={p.code}
             isSelected={draft.permissions.includes(p.code)} isDisabled={pending}
             onChange={(checked) => toggle('permissions', p.code, checked)}>
-            <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-            <Checkbox.Content>{p.label}（{p.code}）</Checkbox.Content>
+            <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>{p.label}（{p.code}）</Checkbox.Content>
           </Checkbox>)}
         </fieldset>)}
       </div>

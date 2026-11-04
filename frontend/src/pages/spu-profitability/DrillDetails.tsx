@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Tabs } from '@heroui/react';
+import { Button, Table, Tabs } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
@@ -43,21 +43,21 @@ export default function DrillDetails({ root, row, meta, enums, start, end, cache
       {tab === 'pnl' ? <>
         {row.has_unsettled_orders === true && <p role="note">≈ {text(presentation.unsettled_alert_message ?? '含未结算订单，使用服务端提供的估算结果。')}</p>}
         <Metrics values={row} meta={meta} prefix={`detail-${row.spu_pk}-`} />
-        <div className="erp-table-scroll"><table className="erp-table-content"><thead><tr><th scope="col" className="erp-table-column">利润层级</th><th scope="col" className="erp-table-column erp-table-number">金额 CNY</th><th scope="col" className="erp-table-column">服务端依据</th></tr></thead><tbody>{pnlRows.map(([label, field, hint]) => <tr key={field}><th scope="row" className="erp-table-cell">{label}{field === 'cogs_sold' && row.units_sold != null && row.unit_cost_used != null && <p className="erp-table-meta">{displayValue(row.units_sold)} 件 × {displayValue(row.unit_cost_used)}</p>}{field === 'cogs_full_loss_cancelled' && row.full_loss_cancelled_qty != null && row.unit_cost_used != null && <p className="erp-table-meta">{displayValue(row.full_loss_cancelled_qty)} 件 × {displayValue(row.unit_cost_used)}</p>}</th><td className="erp-table-cell erp-table-number">{displayValue(row[field])}</td><td className="erp-table-cell">{text(hints[hint])}</td></tr>)}</tbody></table></div>
+        <Table variant="secondary"><Table.ScrollContainer className="erp-table-scroll"><Table.Content className="erp-table-content" aria-label="利润层级"><Table.Header><Table.Column isRowHeader className="erp-table-column">利润层级</Table.Column><Table.Column className="erp-table-column erp-table-number">金额 CNY</Table.Column><Table.Column className="erp-table-column">服务端依据</Table.Column></Table.Header><Table.Body>{pnlRows.map(([label, field, hint]) => <Table.Row key={field} id={field}><Table.Cell className="erp-table-cell">{label}{field === 'cogs_sold' && row.units_sold != null && row.unit_cost_used != null && <p className="erp-table-meta">{displayValue(row.units_sold)} 件 × {displayValue(row.unit_cost_used)}</p>}{field === 'cogs_full_loss_cancelled' && row.full_loss_cancelled_qty != null && row.unit_cost_used != null && <p className="erp-table-meta">{displayValue(row.full_loss_cancelled_qty)} 件 × {displayValue(row.unit_cost_used)}</p>}</Table.Cell><Table.Cell className="erp-table-cell erp-table-number">{displayValue(row[field])}</Table.Cell><Table.Cell className="erp-table-cell">{text(hints[hint])}</Table.Cell></Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>
       </> : <>
         {(state.key !== key || state.loading) && <p role="status">加载明细中…</p>}{state.key === key && state.error && <div role="alert"><p>{state.error}</p><Button variant="secondary" isDisabled={blocked} onPress={() => { if (performance.now() >= fence.current) setRevision((value) => value + 1); }}>重试明细</Button></div>}
         {tab === 'settlements' && <p>本 SPU 占单比：本 SPU 行金额 ÷ 整单金额，与给平台分摊多少钱无关。</p>}
         {data && <><p>证据时间：{text(detailMeta.computed_at)} · {text(detailMeta.rubric_version)} · {text(optionalRecord(detailMeta.currency).display ?? 'CNY')}</p>{detailMeta.orders_truncated === true && <p role="note">订单明细已截断，最多展示 500 条。</p>}{detailMeta.note != null && <p>{text(detailMeta.note)}</p>}
-          {!rows.length ? <p>{tab === 'settlements' ? '暂无结算；未结算订单不展示，估算结果见利润构成。' : tab === 'ads' ? '无广告投放' : '暂无明细'}</p> : <div className="erp-table-scroll" role="region" aria-label={`${tabs.find(([id]) => id === tab)?.[1]}表格`} tabIndex={0}>
-            <table className="erp-table-content erp-profit-evidence"><thead><tr>{(tab === 'orders' ? ['订单号', '状态', '件', '已结算', '已到海外', '全损'] : tab === 'settlements' ? ['订单号', '订单状态', '结算金额 CNY', '本 SPU 占单比', '对账单时间'] : tab === 'cases' ? ['售后单号', '订单号', '类型', '状态', '退款 CNY'] : ['计划 ID', '消耗 CNY', '订单', '日期范围']).map((label) => <th key={label} scope="col" className="erp-table-column">{label}</th>)}</tr></thead>
-              <tbody>{rows.map((raw, index) => { const item = record(raw); const components = Array.isArray(item.components) ? item.components.map(optionalRecord) : []; const settlement = components.find((entry) => entry.code === 'SETTLEMENT');
+          {!rows.length ? <p>{tab === 'settlements' ? '暂无结算；未结算订单不展示，估算结果见利润构成。' : tab === 'ads' ? '无广告投放' : '暂无明细'}</p> : <Table variant="secondary"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label={`${tabs.find(([id]) => id === tab)?.[1]}表格滚动区域`} tabIndex={0}>
+            <Table.Content key={tab} aria-label={`${tabs.find(([id]) => id === tab)?.[1]}表格`} className="erp-table-content erp-profit-evidence"><Table.Header>{(tab === 'orders' ? ['订单号', '状态', '件', '已结算', '已到海外', '全损'] : tab === 'settlements' ? ['订单号', '订单状态', '结算金额 CNY', '本 SPU 占单比', '对账单时间'] : tab === 'cases' ? ['售后单号', '订单号', '类型', '状态', '退款 CNY'] : ['计划 ID', '消耗 CNY', '订单', '日期范围']).map((label, index) => <Table.Column key={label} isRowHeader={index === 0} className="erp-table-column">{label}</Table.Column>)}</Table.Header>
+              <Table.Body>{rows.map((raw, index) => { const item = record(raw); const components = Array.isArray(item.components) ? item.components.map(optionalRecord) : []; const settlement = components.find((entry) => entry.code === 'SETTLEMENT');
                 const cells = tab === 'orders' ? [text(item.order_id), tr('order_status', item.status), displayValue(item.qty), item.is_settled === true ? '是' : '否', item.arrived_overseas === true ? '是' : '否', item.full_loss === true ? '是' : '否']
                   : tab === 'settlements' ? [text(item.order_id), tr('order_status', item.status), settlement ? displayValue(settlement.amount) + (String(settlement.amount) === '0' || /^0\.0+$/.test(String(settlement.amount)) ? item.status === 'CANCELLED' ? '（已取消 / 冲销）' : '（无入账）' : '') : '—', displayPercent(item.share_ratio), text(item.statement_time)]
                     : tab === 'cases' ? [text(item.case_id), text(item.order_id), tr('case_type', item.type), tr('case_status', item.status), displayValue(item.refund_amount)]
                       : [text(item.campaign_id), displayValue(item.spend), displayValue(item.orders), `${text(item.first_day)} ~ ${text(item.last_day)}`];
-                return <tr key={index} className="erp-table-row">{cells.map((value, column) => <td key={column} className="erp-table-cell">{value}</td>)}</tr>;
-              })}</tbody></table>
-          </div>}
+                return <Table.Row key={index} id={String(index)} className="erp-table-row">{cells.map((value, column) => <Table.Cell key={column} className="erp-table-cell">{value}</Table.Cell>)}</Table.Row>;
+              })}</Table.Body></Table.Content>
+          </Table.ScrollContainer></Table>}
         </>}
       </>}
     </Tabs.Panel></Tabs>

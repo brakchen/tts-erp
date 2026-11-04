@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Page from './index';
 import type { FrontendBootstrap } from '../../shared/contracts';
@@ -16,6 +17,17 @@ let overviewTotal: number;
 let shopRows: typeof shop[];
 let limitedFocusedShop: string | undefined;
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }); }
+async function clickWithFakeTimers(user: ReturnType<typeof userEvent.setup>, target: HTMLElement) {
+  await act(async () => {
+    let completed = false;
+    const click = user.click(target).then(() => { completed = true; });
+    // userEvent advances its delays; RTL's asyncWrapper also schedules a 0ms
+    // drain which it auto-advances only under Jest, not Vitest's fake timers.
+    await vi.advanceTimersByTimeAsync(0);
+    if (!completed) await vi.advanceTimersByTimeAsync(1);
+    await click;
+  });
+}
 beforeEach(() => {
   calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; overviewTotal = 1; shopRows = [shop]; limitedFocusedShop = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -156,13 +168,18 @@ it('clear cancels a standard bulk lookup and ignores its late response', async (
 });
 it('removing a focused item on the last page resets offset before refreshing the smaller scope', async () => {
   overviewTotal = 101; stored = Array.from({ length: 101 }, (_, index) => ({ spuId: `TEST_PAGE_${index}`, title: `TEST 商品 ${index}` }));
-  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  // All fetches in this case resolve immediately. Flush their collection work
+  // before starting user assertions rather than racing a 101-tag initial mount.
+  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />); });
+  const pagination = () => within(screen.getByRole('navigation', { name: 'SPU ROI 分页' }));
   await screen.findByText('TEST_RESULT');
-  fireEvent.click(screen.getByRole('button', { name: '下一页' }));
-  await screen.findByText('第 2 页 · 共 2 页');
-  expect(within(screen.getByRole('group', { name: 'SPU 搜索与已选标签' })).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(101);
-  fireEvent.click(screen.getByRole('button', { name: '移除 SPU TEST_PAGE_0' }));
-  await screen.findByText('第 1 页 · 共 1 页');
+  await act(async () => { fireEvent.click(pagination().getByRole('button', { name: '下一页' })); });
+  await pagination().findByText('第 2 页 · 共 2 页');
+  const selected = within(screen.getByRole('group', { name: 'SPU 搜索与已选标签' }));
+  expect(selected.getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(101);
+  const firstTag = within(selected.getByRole('row', { name: 'TEST_PAGE_0' }));
+  await act(async () => { fireEvent.click(firstTag.getByRole('button', { name: '移除 SPU TEST_PAGE_0' })); });
+  await pagination().findByText('第 1 页 · 共 1 页');
   await screen.findByText('TEST_RESULT');
   const last = calls.filter((call) => call.url.includes('/analytics/spu-roi?')).at(-1)!;
   expect(new URL(last.url, location.origin).searchParams.get('offset')).toBe('0');
@@ -186,7 +203,9 @@ it('changing shop retains the selection Retry-After fence and requires explicit 
   render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await act(async () => { await vi.advanceTimersByTimeAsync(1); });
   expect(screen.getByRole('button', { name: '重新读取关注事实' })).toBeDisabled();
-  fireEvent.change(screen.getByLabelText('当前店铺'), { target: { value: '8' } });
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  await clickWithFakeTimers(user, screen.getByRole('button', { name: (name) => name.includes('当前店铺') }));
+  await clickWithFakeTimers(user, screen.getByRole('option', { name: 'TEST 店铺八 · TEST_SHOP_EIGHT' }));
   await act(async () => { await vi.advanceTimersByTimeAsync(1); });
   const readsForEight = () => calls.filter((call) => call.url.includes('/reporting/focused-spus/8?'));
   expect(readsForEight()).toHaveLength(0);

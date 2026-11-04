@@ -934,8 +934,11 @@ class LivePage:
     def apply_all_history_preset(self) -> None:
         self.page.locator('[data-date-preset="all"]').click()
 
-    def select_shop(self, shop_pk: int) -> None:
-        self.page.select_option("#shop-switcher", str(shop_pk))
+    def select_shop(self, shop: SeededShop) -> None:
+        self.page.locator("#shop-switcher").click()
+        self.page.get_by_role(
+            "option", name=f"{shop.spec.account_name} · {shop.spec.seller}", exact=True
+        ).click()
 
     # --- 价格断言帮手 ---
 

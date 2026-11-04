@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { Button } from '@heroui/react';
+import { Button, Link, Table } from '@heroui/react';
 import { pathFor } from '../../shared/api/paths';
 import type { Comparison, ComparisonItem } from './contracts';
 export function displayValue(value: string | number | null): string { return value === null ? '—' : String(value); }
@@ -49,12 +49,12 @@ function drilldownHref(root: string, item: ComparisonItem): string | undefined {
 }
 function DetailLink({ root, item }: { root: string; item: ComparisonItem }) {
   const href = drilldownHref(root, item);
-  return href ? <a className="underline" href={href}>本期盈利详情（{item.drilldown.startDate} 至 {item.drilldown.endDate}）</a> : <p>盈利详情链接不可用</p>;
+  return href ? <Link href={href}>本期盈利详情（{item.drilldown.startDate} 至 {item.drilldown.endDate}）</Link> : <p>盈利详情链接不可用</p>;
 }
 function Expanded({ item, meta, root, close }: { item: ComparisonItem; meta: Comparison['meta']; root: string; close: () => void }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus(); }, []);
-  return <section role="region" aria-labelledby={`detail-title-${item.spuPk}`} className="erp-panel space-y-4 p-3" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); close(); } }}>
+  return <section id={`detail-${item.spuPk}`} role="region" aria-labelledby={`detail-title-${item.spuPk}`} className="erp-panel space-y-4 p-3" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); close(); } }}>
     <h2 ref={heading} tabIndex={-1} id={`detail-title-${item.spuPk}`}>SPU {item.spuId} 对比明细</h2>
     <Button variant="secondary" onPress={close}>关闭 SPU 明细</Button>
     <p>店铺 {item.shopPk} · 内部编号 {item.spuPk} · {item.windowDays} 天 · 截至日 {item.anchorDate}</p>
@@ -63,23 +63,43 @@ function Expanded({ item, meta, root, close }: { item: ComparisonItem; meta: Com
     <Facts item={item} /><DetailLink item={item} root={root} /><p>可通过浏览器返回原查询；估值时点不同不保证两处逐分相同。</p>
   </section>;
 }
-function Row({ item, meta, root }: { item: ComparisonItem; meta: Comparison['meta']; root: string }) {
-  const [expanded, setExpanded] = useState(false); const trigger = useRef<HTMLButtonElement>(null);
-  const close = () => { setExpanded(false); trigger.current?.focus(); };
-  return <><tr className="border-b align-top erp-table-row">
-    <th scope="row" className="p-3 text-left erp-table-cell erp-table-row-heading"><div className="min-w-48 space-y-3"><strong className="break-all">{item.spuId}</strong><p>内部编号 {item.spuPk} · 店铺 {item.shopPk}</p>
-      <Button className="erp-table-action" ref={trigger} size="sm" variant="secondary" aria-expanded={expanded} aria-controls={`detail-${item.spuPk}`} aria-label={`查看对比明细 ${item.spuId}`} onPress={() => expanded ? close() : setExpanded(true)}>查看对比明细</Button><p><DetailLink item={item} root={root} /></p></div></th>
-    <td className="min-w-48 p-3 erp-table-cell"><Metric label="ROI（比率）" previous={item.previousRoi} current={item.currentRoi} previousReason={item.previousRoiUnavailableReason} currentReason={item.currentRoiUnavailableReason} change /></td>
-    <td className="min-w-48 p-3 erp-table-cell"><Metric label="净利润（CNY）" previous={item.previousNetProfitCny} current={item.currentNetProfitCny} change unit="CNY" /></td>
-    <td className="min-w-32 p-3 erp-table-cell"><Metric label="订单数" previous={item.previousOrderCount} current={item.currentOrderCount} /></td>
-    <td className="min-w-48 p-3 erp-table-cell"><Metric label="广告消耗（CNY）" previous={item.previousSpendCny} current={item.currentSpendCny} /></td>
-    <td className="min-w-64 p-3 erp-table-cell"><Facts item={item} /></td>
-  </tr>{expanded && <tr className="erp-table-row"><td className="erp-table-cell" colSpan={6} id={`detail-${item.spuPk}`}><Expanded item={item} meta={meta} root={root} close={close} /></td></tr>}</>;
-}
 export default function ComparisonTable({ data, root }: { data: Comparison; root: string }) {
-  return <div role="region" aria-label="SPU 对比表格滚动区域" tabIndex={0} className="erp-table erp-table-scroll">
-    <table className="w-full text-sm erp-table-content" aria-label="SPU 两期盈利对比"><thead className="erp-table-head"><tr className="erp-table-row">{['SPU / 查证', 'ROI（比率）', '净利润（CNY）', '订单数', '广告消耗（CNY）', '事实与限制'].map((label) => <th key={label} scope="col" className="p-3 text-left whitespace-nowrap erp-table-column">{label}</th>)}</tr></thead>
-      <tbody className="erp-table-body">{data.items.map((item) => <Row key={String(item.spuPk)} item={item} meta={data.meta} root={root} />)}</tbody>
-    </table>
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const triggers = useRef(new Map<string, HTMLButtonElement>());
+  const returningFocus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const id = returningFocus.current;
+    if (id === undefined || expanded.has(id)) return;
+    returningFocus.current = undefined;
+    // Re-entering the grid may restore its row first. Its collection has now
+    // committed the collapsed state, so restore the exact opener afterwards.
+    triggers.current.get(id)?.focus();
+  }, [expanded]);
+  function close(id: string) {
+    returningFocus.current = id;
+    setExpanded((previous) => { const next = new Set(previous); next.delete(id); return next; });
+    triggers.current.get(id)?.focus();
+  }
+  function toggle(id: string) {
+    if (expanded.has(id)) close(id);
+    else setExpanded((previous) => new Set([...previous, id]));
+  }
+  return <div className="space-y-4">
+    <Table variant="secondary" className="erp-table"><Table.ScrollContainer role="region" aria-label="SPU 对比表格滚动区域" tabIndex={0} className="erp-table-scroll">
+      <Table.Content className="w-full text-sm erp-table-content" aria-label="SPU 两期盈利对比"><Table.Header className="erp-table-head">{['SPU / 查证', 'ROI（比率）', '净利润（CNY）', '订单数', '广告消耗（CNY）', '事实与限制'].map((label, index) => <Table.Column key={label} isRowHeader={index === 0} className="p-3 text-left whitespace-nowrap erp-table-column">{label}</Table.Column>)}</Table.Header>
+        <Table.Body className="erp-table-body">{data.items.map((item) => <Table.Row key={String(item.spuPk)} id={String(item.spuPk)} className="border-b align-top erp-table-row">
+          <Table.Cell className="p-3 text-left erp-table-cell erp-table-row-heading" focusMode="child"><div className="min-w-48 space-y-3"><strong className="break-all">{item.spuId}</strong><p>内部编号 {item.spuPk} · 店铺 {item.shopPk}</p>
+            <Button className="erp-table-action" ref={(element) => { if (element) triggers.current.set(String(item.spuPk), element); else triggers.current.delete(String(item.spuPk)); }} size="sm" variant="secondary" aria-expanded={expanded.has(String(item.spuPk))} aria-controls={`detail-${item.spuPk}`} aria-label={`查看对比明细 ${item.spuId}`} onPress={() => toggle(String(item.spuPk))}>查看对比明细</Button><p><DetailLink item={item} root={root} /></p></div></Table.Cell>
+          <Table.Cell className="min-w-48 p-3 erp-table-cell"><Metric label="ROI（比率）" previous={item.previousRoi} current={item.currentRoi} previousReason={item.previousRoiUnavailableReason} currentReason={item.currentRoiUnavailableReason} change /></Table.Cell>
+          <Table.Cell className="min-w-48 p-3 erp-table-cell"><Metric label="净利润（CNY）" previous={item.previousNetProfitCny} current={item.currentNetProfitCny} change unit="CNY" /></Table.Cell>
+          <Table.Cell className="min-w-32 p-3 erp-table-cell"><Metric label="订单数" previous={item.previousOrderCount} current={item.currentOrderCount} /></Table.Cell>
+          <Table.Cell className="min-w-48 p-3 erp-table-cell"><Metric label="广告消耗（CNY）" previous={item.previousSpendCny} current={item.currentSpendCny} /></Table.Cell>
+          <Table.Cell className="min-w-64 p-3 erp-table-cell"><Facts item={item} /></Table.Cell>
+        </Table.Row>)}</Table.Body>
+      </Table.Content>
+    </Table.ScrollContainer></Table>
+    {/* Keep the table collection rectangular and the complete expanded facts
+        next to it. Multiple records can stay open, with independent focus return. */}
+    {data.items.filter((item) => expanded.has(String(item.spuPk))).map((item) => <Expanded key={String(item.spuPk)} item={item} meta={data.meta} root={root} close={() => close(String(item.spuPk))} />)}
   </div>;
 }

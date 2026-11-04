@@ -102,6 +102,7 @@ describe('manual-costs server-total pagination', () => {
     const fetcher = setupPages(view, '100'); const user = userEvent.setup(); await openView(view, user);
     // Resolve the live controls each time without scanning all 50 rows' actions.
     const pagingControls = () => within(screen.getByLabelText('分页'));
+    const filterControls = () => within(screen.getByRole('form', { name: '工作台筛选' }));
     await screen.findByText('TEST page 0 row 0');
     expect(pagingControls().getByRole('button', { name: '上一页' })).toBeDisabled();
     expect(pagingControls().getByRole('button', { name: '下一页' })).toBeEnabled();
@@ -112,7 +113,7 @@ describe('manual-costs server-total pagination', () => {
     await user.click(pagingControls().getByRole('button', { name: '下一页' })); expect(fetcher.mock.calls).toHaveLength(calls);
     await user.click(pagingControls().getByRole('button', { name: '上一页' })); await screen.findByText('TEST page 0 row 0');
     fetcher.mockImplementationOnce(async () => view === 'all' ? json(pageRows(), 200, { 'X-Total-Count': '50' }) : json({ items: historyRows(pageRows()), total: 50 }));
-    await user.click(screen.getByRole('button', { name: '刷新当前列表' })); await screen.findByText(/服务端总数：50/);
+    await user.click(filterControls().getByRole('button', { name: '刷新当前列表' })); await screen.findByText(/服务端总数：50/);
     expect(pagingControls().getByRole('button', { name: '下一页' })).toBeDisabled();
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=50') && url.includes(view === 'all' ? 'channel-products?' : '/reporting/manual-costs?'))).toBe(true);
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=100'))).toBe(false);
@@ -133,10 +134,11 @@ describe('manual-costs server-total pagination', () => {
     fetcher.mockImplementation(async (url: string) => url.includes('channel-accounts?') ? json([shop])
       : json(new URL(url, 'https://test.invalid').searchParams.get('offset') === '0' ? pageRows() : [product('1050', 'TEST last unknown')]));
     const user = userEvent.setup(); await openView('all', user); await screen.findByText('TEST page 0 row 0');
+    const next = () => within(screen.getByLabelText('分页')).getByRole('button', { name: '下一页' });
     expect(screen.getByText(/服务端总数：未知/)).toBeVisible();
-    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '下一页' })); await screen.findByText('TEST last unknown');
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(next()).toBeEnabled();
+    await user.click(next()); await screen.findByText('TEST last unknown');
+    expect(next()).toBeDisabled();
   });
   it('keeps missing-candidate paging on raw rows, not the photo total or current-page display filter', async () => {
     const fetcher = setupPages('all', '50'); const user = userEvent.setup(); await openView('all', user); await screen.findByText('TEST page 0 row 0');
@@ -144,12 +146,13 @@ describe('manual-costs server-total pagination', () => {
       const offset = Number(new URL(url, 'https://test.invalid').searchParams.get('offset'));
       return json({ items: (offset === 0 ? pageRows() : pageRows(offset).slice(0, 1)).map(({ id, ...row }) => ({ ...row, spu_pk: id, missing_photo: false })), total_missing_photo: '9007199254740997' });
     });
-    await user.click(screen.getByRole('button', { name: '缺成本候选' })); await screen.findByText(/服务端缺图总数：9007199254740997/);
-    await user.click(screen.getByRole('checkbox', { name: /仅显示本页 missing_photo/ })); await screen.findByText('当前页暂无候选');
-    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '下一页' }));
+    const next = () => within(screen.getByLabelText('分页')).getByRole('button', { name: '下一页' });
+    await user.click(within(screen.getByLabelText('工作台视图')).getByRole('button', { name: '缺成本候选' })); await screen.findByText(/服务端缺图总数：9007199254740997/);
+    await user.click(within(screen.getByRole('form', { name: '工作台筛选' })).getByRole('checkbox', { name: /仅显示本页 missing_photo/ })); await screen.findByText('当前页暂无候选');
+    expect(next()).toBeEnabled();
+    await user.click(next());
     await screen.findByText(/服务端缺图总数：9007199254740997/);
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(next()).toBeDisabled();
     expect(screen.queryByText(/服务端总数：/)).toBeNull();
     expect(fetcher.mock.calls.some(([url]) => url.includes('missing-cost-products?') && url.includes('offset=50') && !url.includes('q='))).toBe(true);
   });
@@ -302,7 +305,9 @@ describe('manual-costs read fences and cancellation', () => {
       return json([{ ...product('9007199254740996', 'TEST 别店商品'), shop_pk: other.id }]);
     });
     vi.stubGlobal('fetch', fetcher); const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost('22.2000');
-    await user.click(screen.getByRole('button', { name: '刷新当前列表' })); await user.selectOptions(screen.getByRole('combobox', { name: '当前店铺' }), other.id);
+    await user.click(screen.getByRole('button', { name: '刷新当前列表' }));
+    await user.click(screen.getByRole('button', { name: /当前店铺/ }));
+    await user.click(await screen.findByRole('option', { name: /TEST 别店/ }));
     await screen.findByText('TEST 别店商品'); await act(async () => stale(json([product('9007199254740997', 'TEST stale')])));
     expect(screen.queryByText('TEST stale')).toBeNull(); expect(screen.getByText('TEST 别店商品')).toBeVisible();
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();

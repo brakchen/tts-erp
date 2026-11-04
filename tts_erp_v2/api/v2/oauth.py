@@ -7,9 +7,8 @@ next normal scheduling tick.
 
 from __future__ import annotations
 
-import html as _html
-import json
 import logging
+from datetime import datetime
 from typing import Any
 
 from fastapi import (
@@ -18,16 +17,15 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
-    status,
 )
-from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.db.models.commerce import ChannelAccount
-
 from tts_erp_v2.api.deps import get_session, require_role_at_least
+from tts_erp_v2.api.v2 import frontend_pages
+from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.proxy.errors import ProxyError, SigningError, UpstreamHttpError
 from tts_erp_v2.proxy.tiktok_auth import build_authorize_url
 from tts_erp_v2.proxy.tiktok_oauth import (
@@ -46,56 +44,6 @@ log = logging.getLogger("tts_erp_v2.oauth")
 # them from the redirect query string.
 
 _CALLBACK_PATH = "/v2/oauth/tiktok/callback"  # must match middleware EXEMPT_PATHS
-
-
-# ─── HTML rendering (minimal, mirrors api/v2/auth.py style) ─────────
-
-
-def _page(title: str, body_html: str, *, status_line: str = "") -> str:
-    # 暖纸编辑体：接入 tokens.css / common.css，不再自养灰蓝 GitHub 配色与
-    # -apple-system 字体栈（全站字体只允许 var(--mono|sans|serif)）。
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_html.escape(title)}</title>
-<link rel="stylesheet" href="../../static/css/tokens.css">
-<link rel="stylesheet" href="../../static/css/common.css">
-<style>
-  body {{ display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
-  .card {{ background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); padding: 24px 28px; width: 480px; max-width: 92vw; }}
-  h1 {{ font-family: var(--serif); font-size: 20px; font-weight: 600; margin: 0 0 6px; }}
-  .status {{ font-family: var(--mono); font-size: 13px; font-weight: 600; margin: 0 0 14px; }}
-  .ok .status {{ color: var(--ok); }}
-  .err .status {{ color: var(--danger); }}
-  p {{ font-size: 14px; line-height: 1.5; margin: 6px 0; }}
-  code {{ font-family: var(--mono); background: var(--paper-deep); border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 1px 5px; font-size: 12px; }}
-  pre {{ font-family: var(--mono); background: var(--paper-deep); border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 10px; font-size: 12px; overflow: auto; }}
-  table {{ border-collapse: collapse; font-size: 13px; width: 100%; margin: 8px 0; }}
-  td, th {{ border: 1px solid var(--rule-soft); padding: 5px 8px; text-align: left; }}
-  th {{ background: var(--paper-deep); font-weight: 600; }}
-</style>
-</head>
-<body>
-<div class="card {_html.escape("ok" if "success" in title.lower() else "err")}">
-  <p class="status">{status_line}</p>
-  {body_html}
-</div>
-</body>
-</html>
-"""
-
-
-def _err_page(title: str, detail: str) -> HTMLResponse:
-    return HTMLResponse(
-        content=_page(
-            title,
-            f"<p>{_html.escape(detail)}</p>",
-            status_line=_html.escape(title),
-        ),
-        status_code=status.HTTP_400_BAD_REQUEST,
-    )
 
 
 def _json(*, ok: bool, http_status: int, **fields: Any) -> JSONResponse:
@@ -162,22 +110,11 @@ def authorize(
     }
     if request.query_params.get("format") == "json":
         return _json(ok=True, http_status=200, **payload)
-    body = (
-        "<h1>Authorize a new TikTok shop</h1>"
-        f"<p>State registered (single-use, expires "
-        f"<code>{_html.escape(payload['state_expires_at'])}</code> UTC).</p>"
-        "<p><strong>Open this link in a browser</strong> and approve as the "
-        "seller:</p>"
-        f'<p><a href="{_html.escape(authorize_url)}">Open authorization link</a></p>'
-        f"<p><code>{_html.escape(authorize_url)}</code></p>"
-        "<p>After approval, TikTok redirects here with "
-        "<code>?code=...&amp;state=...</code> and this page shows the result.</p>"
-    )
-    return HTMLResponse(
-        content=_page(
-            "tts-erp · authorize", body, status_line="Authorization link ready"
-        ),
-        status_code=status.HTTP_200_OK,
+    return frontend_pages.render_message_page(
+        request.scope.get("root_path", "").rstrip("/"), title="授权链接已生成",
+        message="请使用目标店铺的卖家账号打开授权页面；链接仅可使用一次，过期后需重新获取。",
+        tone="success", status_code=200,
+        authorization={"url": authorize_url, "expiresAt": payload["state_expires_at"]},
     )
 
 
@@ -227,6 +164,7 @@ def callback(
             sess=sess,
         )
     return _handle_html(
+        request=request,
         code=code,
         state=state,
         error=error,
@@ -322,332 +260,92 @@ def _handle_json(
 
 def _handle_html(
     *,
+    request: Request,
     code: str | None,
     state: str | None,
     error: str | None,
     callback_app_key: str | None,
     sess: Any,
 ) -> HTMLResponse:
+    # Presentation consumes the existing flow once. React only displays its result;
+    # it never calls callback/authorize or retries an exchanged single-use code.
+    root_path = request.scope.get("root_path", "").rstrip("/")
     code_pfx = (code or "")[:10]
     state_present = bool(state)
     if error:
         if state:
             pop_state(sess, state)
-        return HTMLResponse(
-            content=_page(
-                "tts-erp · authorization not granted",
-                f"<p>TikTok reports: <code>{_html.escape(error)}</code>.</p>"
-                "<p>The seller did not grant access. Start a fresh "
-                "<code>/v2/oauth/tiktok/authorize</code> when ready.</p>",
-                status_line="Authorization not granted",
-            ),
-            status_code=status.HTTP_200_OK,
-        )
+        return frontend_pages.render_message_page(root_path,
+            title="未完成授权", tone="warning", status_code=200, action="onboard",
+            message="卖家未授予访问权限。准备好后，请重新获取授权链接。")
     if not code:
-        return HTMLResponse(
-            content=_page(
-                "tts-erp · callback",
-                "<p>This is the OAuth redirect target — it was opened "
-                "without a <code>?code</code>.</p>"
-                "<p>Start the flow from "
-                "<code>/v2/oauth/tiktok/authorize</code>.</p>",
-                status_line="No authorization code",
-            ),
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+        return frontend_pages.render_message_page(root_path,
+            title="缺少授权码", tone="warning", status_code=400, action="onboard",
+            message="此地址用于接收 TikTok 的授权结果。请从店铺注册台重新开始授权。")
     try:
         out = complete_tiktok_authorization(
-            sess,
-            code=code,
-            state=state or "",
-            callback_app_key=callback_app_key,
+            sess, code=code, state=state or "", callback_app_key=callback_app_key,
         )
     except OAuthFlowError as exc:
         log.warning(
             "oauth callback rejected: kind=%s code_prefix=%s state_present=%s msg=%s",
-            exc.kind,
-            code_pfx,
-            state_present,
-            exc.message,
+            exc.kind, code_pfx, state_present, exc.message,
         )
-        return _err_page("Authorization failed", exc.message)
+        # Only known public descriptions cross the presentation boundary. The
+        # exception message may contain an upstream payload; it is not page data.
+        messages = {
+            "state_reused": "此链接已使用，请重新获取授权链接。",
+            "state_invalid": "此链接无效或已过期，请重新获取授权链接。",
+            "configuration_changed": "店铺 App 配置已变化，请重新获取授权链接。",
+            "app_key_mismatch": "回调应用与该店铺的 App 配置不一致，请核对后重新授权。",
+            "user_type": "请使用目标 TikTok Shop 店铺的卖家账号授权。",
+            "shop_mismatch": "授权店铺与目标店铺不一致，未更新店铺。请核对后重新授权。",
+            "missing_shop_cipher": "授权结果缺少必要店铺信息，请重新授权或联系管理员。",
+        }
+        return frontend_pages.render_message_page(root_path,
+            title="授权失败", tone="danger", status_code=400, action="onboard",
+            message=messages.get(exc.kind, "授权结果未通过校验，请重新授权或联系管理员。"))
     except UpstreamHttpError as exc:
         log.error(
             "oauth callback upstream failure: code_prefix=%s upstream_code=%s %s",
-            code_pfx,
-            getattr(exc, "upstream_code", None),
-            exc,
+            code_pfx, getattr(exc, "upstream_code", None), exc,
         )
-        return HTMLResponse(
-            content=_page(
-                "Authorization failed",
-                f"<p>Token exchange was rejected upstream: "
-                f"<code>{_html.escape(str(exc))}</code></p>"
-                "<p>The one-time auth code is now spent — run "
-                "<code>/v2/oauth/tiktok/authorize</code> again for a fresh link.</p>",
-                status_line="Upstream token exchange failed",
-            ),
-            status_code=status.HTTP_502_BAD_GATEWAY,
-        )
+        return frontend_pages.render_message_page(root_path,
+            title="授权失败", tone="danger", status_code=502, action="onboard",
+            message="上游令牌交换失败。一次性授权码已使用，请重新获取授权链接。")
     except ProxyError as exc:
         log.error("oauth callback proxy failure: code_prefix=%s %s", code_pfx, exc)
-        return HTMLResponse(
-            content=_page(
-                "Authorization failed",
-                f"<p><code>{_html.escape(str(exc))}</code></p>",
-                status_line="Proxy error",
-            ),
-            status_code=status.HTTP_502_BAD_GATEWAY,
-        )
+        return frontend_pages.render_message_page(root_path,
+            title="授权失败", tone="danger", status_code=502, action="onboard",
+            message="授权服务暂时不可用，请重新获取授权链接或联系管理员。")
 
-    shops = out.get("shops") or []
-    for shop in shops:
+    def displayed(value: Any) -> str:
+        # Never stringify nested objects from the result into browser content.
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value) if isinstance(value, (str, int, float)) else "—"
+
+    sections = []
+    for shop in out.get("shops") or []:
         log.info(
             "oauth callback: shop=%s authorized (html) credential_id=%s account_id=%s",
-            shop.get("shop_id"),
-            shop.get("credential_id"),
-            shop.get("account_id"),
+            shop.get("shop_id"), shop.get("credential_id"), shop.get("account_id"),
         )
-    sections = []
-    for shop in shops:
-        rows = []
-        for label, value in (
-            ("Shop id", shop.get("shop_id")),
-            ("Seller name", shop.get("account_name")),
-            ("Region", shop.get("region")),
-            ("Seller type", shop.get("seller_type")),
-            ("Credentials row", shop.get("credential_id")),
-            ("Channel account row", shop.get("account_id")),
-            ("Access token expires", shop.get("expires_at")),
-        ):
-            rows.append(
-                f"<tr><th>{_html.escape(label)}</th>"
-                f"<td><code>{_html.escape(str(value))}</code></td></tr>"
-            )
-        scopes = ", ".join(shop.get("granted_scopes") or [])
-        sections.append(
-            "<table>"
-            + "".join(rows)
-            + "</table>"
-            + f"<p>Granted scopes: <code>{_html.escape(scopes)}</code></p>"
-        )
-    n = len(shops)
-    body = (
-        "<p>The shop is authorized. Sync jobs pick it up automatically "
-        "on their next tick.</p>" + "<hr>".join(sections)
-    )
-    return HTMLResponse(
-        content=_page(
-            "tts-erp · shop authorized",
-            body,
-            status_line=f"Shop {shops[0].get('shop_id')} authorized"
-            if n == 1
-            else f"{n} shops authorized",
-        ),
-        status_code=status.HTTP_200_OK,
-    )
-
-
-# ─── operator console: 新店授权控制台页 ──────────────────────────────
-# Self-contained HTML shell (inline CSS/JS, no vendor assets) served at
-# GET /v2/oauth/tiktok/onboard (readonly-classified in middleware/auth.py
-# so an unauthenticated browser 302s to the login page like /v2/pages/*).
-# Behaviour lives in the inline script: probe /v2/auth/me → role-gate
-# (readwrite+ may generate, readonly is shown a 403 hint) → on click
-# call GET /v2/oauth/tiktok/authorize?format=json (readwrite-gated) and
-# window.open the returned link in a new tab. Every click = fresh state
-# (45-min, single-use); the URL itself is never cached client-side.
-
-_ONBOARD_PAGE_HTML = """<!doctype html>
-<html lang="zh-Hans">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>新店授权 · tts-erp</title>
-<link rel="stylesheet" href="../../static/css/tokens.css">
-<link rel="stylesheet" href="../../static/css/common.css">
-<style>
-  /* 密度覆盖：基础文档流规则见 common.css */
-  html, body { font-size: 14px; line-height: 1.5; }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 24px 48px; }
-  header.ops { border-bottom: 1px solid var(--rule); padding-bottom: 14px;
-    margin-bottom: 22px; display: flex; justify-content: space-between;
-    align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
-    text-transform: uppercase; color: var(--muted); }
-  h1 { font-size: 22px; margin: 4px 0 0; font-weight: 650; letter-spacing: .01em; }
-  #identity { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  .card { background: #FCF9F1; border: 1px solid var(--rule);
-    padding: 18px 20px; margin-bottom: 16px; }
-  .card h2 { font-size: 13px; font-family: var(--mono); font-weight: 600;
-    letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft);
-    margin: 0 0 12px; }
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  button { font: inherit; background: var(--ink); color: var(--paper);
-    border: 0; padding: 8px 16px; cursor: pointer; }
-  button:hover { background: var(--ink-soft); }
-  button:disabled { opacity: .45; cursor: wait; }
-  .btn-ghost { background: transparent; color: var(--accent);
-    border: 1px solid var(--accent); }
-  .btn-ghost:hover { background: rgba(184,57,14,.06); }
-  .met  .ok { color: var(--ok); } .err { color: var(--danger); }
-  .status { font-size: 13px; min-height: 20px; }
-  ol.steps { padding-left: 20px; margin: 8px 0 0; }
-  ol.steps li { margin: 6px 0; }
-  code { font-family: var(--mono); background: var(--paper-deep);
-    padding: 0 5px; font-size: 12px; }
-  .hide { display: none; }
-  #redirect-hint { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <header class="ops">
-    <div>
-      <div class="eyebrow">TikTok Shop · Seller OAuth</div>
-      <h1>新店接入授权</h1>
-    </div>
-    <div id="identity">…</div>
-  </header>
-
-  <div class="card">
-    <h2>授权链接</h2>
-    <div class="row">
-      <button id="btn-gen" type="button">授权新店</button>
-      <span class="meta">点一次即可 · 自动新窗口打开 TikTok 授权页 · state 单次使用 · 45 分钟内有效</span>
-    </div>
-    <div class="status" id="status"></div>
-    <div id="role-gate" class="hide">
-      <p class="status err">当前会话没有 <code>readwrite</code> 或以上角色 — 「授权新店」需要 readwrite 及以上。
-        换用更高权限账号登录后重试。</p>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>操作步骤</h2>
-    <ol class="steps">
-      <li>点「<strong>授权新店</strong>」—— 自动在新窗口打开 TikTok 授权页（state 单次使用 · 45 分钟内有效）。</li>
-      <li>以要接入的 <strong>卖家账号</strong> 登录 TikTok Seller Center 并同意授权。</li>
-      <li>TikTok 会把浏览器带回回调地址，页面会显示授权结果（店名 / 地区 / 授权范围）。</li>
-      <li>落库成功即完成 —— 下个同步 tick 会自动把新店纳入数据同步
-        （<code>integration.credentials</code> + <code>commerce.shops</code>，含每店 shop_cipher）。</li>
-    </ol>
-    <p class="meta" style="margin-bottom:4px">前置条件：</p>
-    <ul class="steps">
-      <li>Partner Center 的 Redirect URL 已配成公网形式：<br>
-        <span id="redirect-hint"></span></li>
-      <li><code>TIKTOK_SERVICE_ID</code> 已配置、app 已过审（生成接口会直接提示缺什么）。</li>
-    </ul>
-  </div>
-</div>
-
-<noscript><p style="text-align:center">此页面需要 JavaScript。</p></noscript>
-<script>
-(() => {
-  'use strict';
-  var PREFIX = location.pathname.replace(/\\/v2\\/oauth\\/tiktok\\/.*$/, "");
-  if (!/^\\/[a-z0-9/_-]*$/i.test(PREFIX)) PREFIX = "";
-  function $(s) { return document.querySelector(s); }
-  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
-  function html(el, m) { el.innerHTML = m; } // pi-lens-ignore: no-inner-html-js
-  function loginUrl() {
-    return PREFIX + "/v2/auth/login?next=" + PREFIX + "/v2/oauth/tiktok/onboard";
-  }
-  function api(path) {
-    return fetch(PREFIX + path, { credentials: "include", headers: {} })
-      .then(function (r) {
-        if (r.status === 401) { window.location.href = loginUrl(); return null; } // pi-lens-ignore: no-open-redirect-js
-        return r;
-      });
-  }
-  var statusEl = $("#status");
-  function setStatus(cls, msg) { if (!statusEl) return; statusEl.className = "status" + (cls ? " " + cls : ""); statusEl.textContent = msg || ""; }
-  function openAuth(url, expiresAt) {
-    // window.open must be called in a user-gesture context; the click
-    // handler's .then() chain qualifies for Chrome; Firefox may still
-    // block — fall back to an inline link in that case.
-    var w = window.open(url, "_blank", "noopener,noreferrer");
-    if (w) {
-      var t = expiresAt ? expiresAt.replace("T", " ").replace(/\\.\\d+Z$/, "Z") : "";
-      setStatus("ok", "已在新标签页打开授权页" + (t ? " · 有效至 " + t + " UTC" : "") + "（单次使用；被用过或过期后重新点「授权新店」）。");
-    } else {
-      // popup blocked — render an inline clickable fallback
-      statusEl.innerHTML = '浏览器拦截了新窗口，请<a href="' + esc(url) + '" target="_blank" rel="noopener">点这里打开授权页</a>（单次使用 · 45 分钟内有效）。';
-      statusEl.className = "status err";
-    }
-  }
-  function gate() {
-    var g = $("#role-gate"); if (g) g.classList.remove("hide");
-    var b = $("#btn-gen"); if (b) b.disabled = true;
-    setStatus("", "");
-  }
-  function generate() {
-    var b = $("#btn-gen"); if (!b) return;
-    b.disabled = true; var oldLabel = b.textContent; b.textContent = "生成中…";
-    setStatus("", "正在向 TikTok 注册一次性 state…");
-    api("/v2/oauth/tiktok/authorize?format=json")
-      .then(function (r) {
-        if (!r) return null;
-        if (r.status === 403) { gate(); return null; }
-        if (!r.ok) { return r.json().catch(function () { return {}; }); }
-        return r.json();
-      })
-      .then(function (d) {
-        if (!d) return;
-        if (d.ok && d.authorize_url) {
-          openAuth(d.authorize_url, d.state_expires_at);
-        } else {
-          var msg = (d && (d.error || d.detail)) || ("HTTP " + (d && d.status_code || "错误"));
-          setStatus("err", "生成失败：" + msg + " — 检查服务端日志可定位（缺 TIKTOK_SERVICE_ID 会在此报配置错误）。");
-        }
-      })
-      .catch(function (e) { setStatus("err", "请求失败：" + (e && e.message || e)); })
-      .then(function () { if (b) { b.disabled = false; b.textContent = oldLabel; } });
-  }
-  var gen = $("#btn-gen");
-  if (gen) gen.addEventListener("click", generate);
-  function boot() {
-    var redir = $("#redirect-hint");
-    if (redir) redir.textContent = window.__REDIRECT_HINT__ || "";
-    api("/v2/auth/me").then(function (r) { return r ? r.json() : null; }).then(function (me) {
-      var id = $("#identity"); if (!id) return;
-      if (me && me.authenticated) {
-        var key = me.key_prefix || "session";
-        html(id, "操作员 <code>" + esc(key) + "</code> · " + esc(me.role || "") + ' · <a href="' + PREFIX + '/v2/auth/logout">退出</a>');
-      } else { html(id, '<a href="' + loginUrl() + '">登录</a>'); return; }
-      // Only gate users who lack the generate privilege; do NOT
-      // auto-generate on page load (would auto-open a TikTok tab
-      // every time admin/readwrite visits the page — intrusive).
-      if (me.role !== "admin" && me.role !== "readwrite") { gate(); }
-    }).catch(function () { /* not fatal */ });
-  }
-  boot();
-})();
-</script>
-</body>
-</html>
-"""
+        facts = [{"label": label, "value": displayed(shop.get(key))} for label, key in (
+            ("店铺 ID", "shop_id"), ("店铺名称", "account_name"), ("地区", "region"),
+            ("卖家类型", "seller_type"), ("凭据记录 ID", "credential_id"),
+            ("店铺记录 ID", "account_id"), ("访问令牌到期时间", "expires_at"),
+        )]
+        scopes = shop.get("granted_scopes")
+        facts.append({"label": "授权范围", "value": ", ".join(
+            scope for scope in scopes if isinstance(scope, str)) if isinstance(scopes, list) else "—"})
+        sections.append({"title": f"店铺 {displayed(shop.get('shop_id'))}", "facts": facts})
+    return frontend_pages.render_message_page(root_path,
+        title="店铺授权成功", tone="success", status_code=200,
+        message="店铺已完成授权。同步任务会在下次运行时自动接管。", sections=sections)
 
 
 @router.get("/onboard", response_class=HTMLResponse, summary="新店授权控制台页 (HTML)")
 def onboard_page(request: Request) -> HTMLResponse:
-    """Operator console for onboarding a new TikTok shop (browser UI).
-
-    Readonly HTML shell (``/v2/oauth/tiktok/onboard`` in the auth
-    middleware's ``_READONLY_EXACT`` so an unauthenticated browser GET is
-    302-redirected to the login page). The page's inline JS probes
-    ``/v2/auth/me``; a ``readwrite``-or-above session may click the
-    button, which calls ``GET /v2/oauth/tiktok/authorize?format=json``
-    (readwrite-gated) and ``window.open``-s the returned link in a new
-    tab. Readonly sessions see an inline 403 hint instead. No shop/DB
-    data is rendered server-side; the shell is static.
-    """
-    prefix = request.scope.get("root_path", "")
-    redirect_hint = f"{prefix}/v2/oauth/tiktok/callback"
-    return HTMLResponse(
-        _ONBOARD_PAGE_HTML.replace(
-            'window.__REDIRECT_HINT__ || ""',
-            f'window.__REDIRECT_HINT__ = {json.dumps(redirect_hint)} || ""',
-        )
-    )
+    """Readonly instructions; the existing shop workbench owns authorization."""
+    return frontend_pages.render_oauth_onboard_page(request)

@@ -15,8 +15,10 @@ def test_ad_filters_fit_and_align(frontend_browser_renderer, width):
     page = frontend_browser_renderer.open("/v2/pages/ad-daily", width=width)
     form = page.get_by_role("form", name="广告筛选")
     expect(form.get_by_role("button", name="应用筛选")).to_be_enabled()
-    controls = [form.get_by_label(label, exact=True) for label in [
-        "店铺（外部 Seller ID）", "广告账户", "数据接口", "开始日期", "结束日期", "计划 / 商品 ID 搜索",
+    controls = [form.get_by_role("button", name=re.compile(re.escape(label))) for label in [
+        "店铺（外部 Seller ID）", "广告账户", "数据接口",
+    ]] + [form.get_by_label(label, exact=True) for label in [
+        "开始日期", "结束日期", "计划 / 商品 ID 搜索",
     ]]
     boxes = [control.bounding_box() for control in controls]
     assert all(box is not None for box in boxes)
@@ -26,8 +28,8 @@ def test_ad_filters_fit_and_align(frontend_browser_renderer, width):
     assert all(43 <= box["height"] <= 45 for box in boxes)
     for control in controls:
         layout = control.evaluate("""el => {
-            const field = el.closest('label, [data-slot="textfield"]');
-            const label = field.querySelector('span, label');
+            const field = el.closest('.ad-filter-field');
+            const label = field.querySelector(':scope > .label');
             return {labelBottom: label.getBoundingClientRect().bottom,
                     inputTop: el.getBoundingClientRect().top,
                     fieldWidth: field.getBoundingClientRect().width,
@@ -49,5 +51,18 @@ def test_ad_filters_submit_by_enter_and_reset(frontend_browser_renderer):
     expect(form.get_by_role("button", name="重置筛选")).to_be_enabled()
     form.get_by_role("button", name="重置筛选").click()
     expect(search).to_have_value("")
-    expect(form.get_by_label("每页行数")).to_have_value("50")
+    expect(form.get_by_role("button", name=re.compile("每页行数"))).to_contain_text("50 条 / 页")
     expect(page).not_to_have_url(re.compile(r"[?&]q="))
+
+
+def test_ad_details_escape_restores_the_invoking_button(frontend_browser_renderer):
+    page = frontend_browser_renderer.open("/v2/pages/ad-daily", width=1440)
+    trigger = page.get_by_role("button", name=re.compile(r"^更多详情 ")).first
+    trigger.click()
+    heading = page.get_by_role("heading", name=re.compile(r"^记录详情 "))
+    expect(heading).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(heading).to_have_count(0)
+    expect(trigger).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(heading).to_be_focused()

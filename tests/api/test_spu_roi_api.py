@@ -4312,7 +4312,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     assert "广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗" in summary
     assert "广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费" in summary
     assert 'id="sum-projection-status"' in summary
-    assert "metrics={projectedMetrics.filter(" in summary and "<details" in summary
+    assert "metrics={projectedMetrics.filter(" in summary and "<Disclosure" in summary
     assert "ad_system_breakeven_roi_status === 'estimated_known_costs'" in summary
     for retired in ("sum-n", "sum-projected-terminal-loss-qty", "预计拒收金额率", "预计财务ROI"):
         assert f"'{retired}'" not in summary and f'id="{retired}"' not in summary
@@ -4442,8 +4442,8 @@ def test_spu_roi_frontend_only_displays_backend_profitability():
 def test_spu_roi_js_shop_switch_listener_before_early_return():
     """Both picker surfaces work while no valid shop has been selected."""
     page = _react_profitability_source("index.tsx")
-    assert "value={shop?.id ?? ''}" in page
-    assert "onChange={(event) => changeShop(event.target.value)}" in page
+    assert "value={`choice:${shop?.id ?? ''}`}" in page
+    assert "typeof key === 'string'" in page and "changeShop(key.slice(7))" in page
     assert "Boolean(shops.data && !shop)" in page and "onPress={() => changeShop(row.id)}" in page
     assert "url.searchParams.set('shop_pk', id)" in page and "url.searchParams.delete('spu_ids')" in page
     assert "shopPk: id, spuIds: []" in page and "query.datesTouched" in page

@@ -96,59 +96,21 @@ def _prefix_of(key: str | None) -> str:
 
 
 def _deny_response(
-    status: int, message: str, *, accepts_html: bool = False
+    status: int, message: str, *, accepts_html: bool = False, root_path: str = ""
 ) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
     if accepts_html and status == 403:
-        # 浏览器页面请求的 403：返回友好 HTML（API 调用仍收 JSON）。
-        body = _FORBIDDEN_HTML.format(
-            message=_escape_html(message),
-        ).encode()
-        headers: list[tuple[bytes, bytes]] = [
-            (b"content-type", b"text/html; charset=utf-8")
-        ]
-        return status, headers, body
+        # Lazy import keeps the access adapter independent during initialization.
+        # The renderer preserves 403 and readable facts even without a JS release.
+        from tts_erp_v2.api.v2.frontend_pages import render_message_page
+
+        response = render_message_page(root_path, title="无权访问该页面",
+            message=message, tone="danger", status_code=403, action="login")
+        return status, list(response.raw_headers), bytes(response.body)
     body = json.dumps({"detail": message}).encode()
     headers = [(b"content-type", b"application/json")]
     if status == 401:
         headers.append((b"www-authenticate", b"Bearer"))
     return status, headers, body
-
-
-def _escape_html(value: str) -> str:
-    return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-
-
-_FORBIDDEN_HTML = """<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>403 · 无权访问</title>
-<style>
-  body {{ margin: 0; font-family: ui-monospace, monospace; background: #F4EFE4; color: #1B1814; }}
-  .box {{ max-width: 520px; margin: 12vh auto; padding: 2.5rem; background: #EAE3D2;
-         border: 1px solid #C9BFA8; box-shadow: 4px 4px 0 #C9BFA8; }}
-  h1 {{ font-size: 2.2rem; margin: 0 0 0.5rem; }}
-  .code {{ color: #B8390E; font-size: 0.85rem; letter-spacing: 0.12em; text-transform: uppercase; }}
-  p {{ line-height: 1.7; margin: 0.6rem 0 1.4rem; }}
-  a {{ color: #B8390E; text-decoration: none; border-bottom: 1px solid #B8390E; }}
-</style>
-</head>
-<body>
-  <div class="box">
-    <div class="code">HTTP 403</div>
-    <h1>无权访问该页面</h1>
-    <p>{message}</p>
-    <p><a href="./login">返回登录页</a></p>
-  </div>
-</body>
-</html>
-"""
 
 
 def _auth_mode() -> AuthMode:
@@ -277,7 +239,7 @@ class AuthMiddleware:
             f"from {client} key_prefix={_prefix_of(attempted_key)}\n"
         )
         response_status, headers, body = _deny_response(
-            status, detail, accepts_html=_accept_text_html(scope)
+            status, detail, accepts_html=_accept_text_html(scope), root_path=canonical.root_path
         )
         await send(
             {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Label, Modal, TextArea, TextField } from '@heroui/react';
+import { Button, Label, ListBox, Modal, ProgressBar, Select, TextArea, TextField } from '@heroui/react';
 import { ApiError, requestJson, retryAfterSeconds } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
@@ -166,7 +166,7 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     <h2 className="text-xl font-semibold">新建发布任务 / 继续上传</h2>
     <p>上传前确认完整文案与设备；二进制完成后须明确确认入队。任务可能立即开始，以服务端允许操作为准。</p>
     {resume && <div className="space-y-2"><p>待续传：{resume.taskId} · {resume.filename}。接受将替换当前本地文件与文案，请先保留需要的草稿。</p><Button isDisabled={locked || checking || command.needsCheck || command.cooldown} onPress={() => { void acceptResume(); }}>确认替换草稿并续传此任务</Button><Button variant="secondary" onPress={onResumeAccepted}>保留当前草稿</Button></div>}
-    <label className="block">选择 MP4 视频<input ref={picker} type="file" accept="video/mp4,.mp4" disabled={locked} onChange={(event) => pick(event.target.files?.[0])} /></label>
+    <input ref={picker} type="file" hidden aria-label="选择 MP4 视频" accept="video/mp4,.mp4" disabled={locked} onChange={(event) => pick(event.target.files?.[0])} /><Button type="button" variant="secondary" isDisabled={locked} onPress={() => picker.current?.click()}>选择 MP4 视频</Button>
     {file && <><p className="break-all">{file.name} · {file.size} 字节</p><Button variant="secondary" isDisabled={locked} onPress={() => picker.current?.click()}>重新选择文件</Button></>}
     {preview && <video src={preview} aria-label="本地视频预览" controls muted playsInline className="max-h-64 max-w-full" onLoadedMetadata={(event) => { const video = event.currentTarget; setMetadata(`${Number.isFinite(video.duration) ? Math.round(video.duration) : '未知'} 秒 · ${video.videoWidth}×${video.videoHeight}`); }} />}
     {metadata && <p>{metadata}</p>}
@@ -174,7 +174,7 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     {captured && caption !== captured.caption && <p>本地草稿与原请求不同；重试使用确认对话框中展示的原始文案，不覆盖你的草稿。</p>}
     <p>{Array.from(caption).length} / {config?.maxCaptionCharacters ?? '加载中'} 字符 · 文件上限 {config?.maxVideoBytes ?? '加载中'} 字节</p>
     {command.failure?.fieldErrors.caption && <p role="alert">{command.failure.fieldErrors.caption}</p>}
-    <div className="erp-filter-row"><label className="erp-field">目标设备<select className="erp-select" aria-label="创建目标设备" value={device} disabled={locked || Boolean(task)} onChange={(event) => { setDevice(event.target.value); selectedDevice.current = devices.find((row) => row.serial === event.target.value); edit(); }}><option value="">默认 · {config?.target.deviceSerialMasked ?? '未配置'}</option>{device && !devices.some((row) => row.serial === device) && <option value={device}>{selectedDevice.current?.serialMasked ?? '当前选择'}（本次列表未返回；提交时由服务端校验）</option>}{devices.map((row) => <option key={row.serial} value={row.serial}>{row.serialMasked} · {row.model || row.product} · {row.state}{row.isBusy ? ' · 忙' : ''}{row.isEmulator ? ' · 模拟器' : ''}</option>)}</select></label>
+    <div className="erp-filter-row"><Select className="w-full max-w-xl" aria-label="创建目标设备" value={`device:${device}`} isDisabled={locked || Boolean(task)} onChange={(key) => { if (typeof key !== 'string') return; const serial = key.slice('device:'.length); setDevice(serial); selectedDevice.current = devices.find((row) => row.serial === serial); edit(); }}><Label>目标设备</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="device:" textValue={`默认 · ${config?.target.deviceSerialMasked ?? '未配置'}`}>默认 · {config?.target.deviceSerialMasked ?? '未配置'}</ListBox.Item>{device && !devices.some((row) => row.serial === device) ? <ListBox.Item id={`device:${device}`} textValue={`${selectedDevice.current?.serialMasked ?? '当前选择'}（本次列表未返回；提交时由服务端校验）`}>{selectedDevice.current?.serialMasked ?? '当前选择'}（本次列表未返回；提交时由服务端校验）</ListBox.Item> : null}{devices.map((row) => <ListBox.Item key={row.serial} id={`device:${row.serial}`} textValue={`${row.serialMasked} · ${row.model || row.product} · ${row.state}${row.isBusy ? ' · 忙' : ''}${row.isEmulator ? ' · 模拟器' : ''}`}>{row.serialMasked} · {row.model || row.product} · {row.state}{row.isBusy ? ' · 忙' : ''}{row.isEmulator ? ' · 模拟器' : ''}</ListBox.Item>)}</ListBox></Select.Popover></Select>
     <Button variant="secondary" isDisabled={checking || command.cooldown} onPress={() => { void loadDevices(); }}>加载设备列表</Button></div>{deviceNotice && <p role="status">{deviceNotice}</p>}
     {!canWrite && <p>{task ? '继续上传与确认入队需要 readwrite 能力提示，以服务端校验为准。' : config?.writeBlockReason ?? '服务端创建条件尚不可用。'}</p>}
     {task && <Facts items={[[ '上传任务 ID', task.taskId ], ['上传 rowVersion', task.rowVersion], ['当前服务端阶段', task.stageLabel], ['原 clientRequestId', task.clientRequestId]]} />}
@@ -187,7 +187,7 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
       <Button variant="secondary" isDisabled={locked || command.needsCheck || command.cooldown} onPress={() => setAbandon(true)}>清除选择 / 放弃续传</Button>
       {uploading && <Button variant="danger" onPress={() => xhr.current?.abort()}>取消上传</Button>}
     </div>
-    {uploading && <progress aria-label="视频上传进度" max={100} value={progress}>{progress}%</progress>}
+    {uploading && <ProgressBar aria-label="视频上传进度" maxValue={100} value={progress}><ProgressBar.Output /><ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track></ProgressBar>}
     {message && <p role="status">{message}</p>}
     {facts && <Facts items={[[ '核对任务', facts.taskId ], ['核对状态', facts.statusLabel], ['核对阶段', facts.stageLabel], ['核对版本', facts.rowVersion], ['核对允许操作', facts.allowedActions.join('、')]]} />}
     <Modal.Backdrop isOpen={Boolean(confirmation)} onOpenChange={(open) => { if (!open) setConfirmation(undefined); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog><Modal.Header><Modal.Heading>确认加入发布队列</Modal.Heading></Modal.Header><Modal.Body>

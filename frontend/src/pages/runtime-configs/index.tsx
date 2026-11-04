@@ -1,6 +1,6 @@
 import PageIntro from '../../shared/PageIntro';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Modal } from '@heroui/react';
+import { Alert, Button, Checkbox, Label, Modal } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
 import { decodeDetail, decodeItem, decodeList, decodeReview, decodeRevision, decodeSecret, record, type Detail, type Item, type Revision, type Secret } from './contracts';
 import { parseObject, parseRuntime, stringifyRuntime } from './json';
@@ -230,7 +230,7 @@ export default function RuntimeConfigs({ bootstrap }: PageProps) {
     <div className="erp-toolbar">
     <h2 ref={heading} tabIndex={-1} className="text-lg font-semibold break-all">{detail && !['list', 'create', 'secrets'].includes(state.view) ? `${detail.displayName} / ${viewTitles[state.view]}` : viewTitles[state.view]}</h2>
       {state.view === 'list' ? <><p className="text-sm text-muted">管理业务使用的配置；修改确认发布后才会生效。</p><Button variant="secondary" isDisabled={disabled} onPress={() => protect(() => navigate('secrets'))}>管理凭证</Button><Button isDisabled={disabled} onPress={() => protect(() => navigate('create'))}>新建配置</Button></> : <Button variant="secondary" isDisabled={commands.pending || loading} onPress={() => protect(() => navigate(editing || state.view === 'review' || state.view === 'history' ? 'overview' : 'list'))}>{editing || state.view === 'review' || state.view === 'history' ? '返回配置概览' : '返回配置列表'}</Button>}
-    {(state.view === 'list' || state.view === 'secrets') && <div className="erp-toolbar"><Button variant="secondary" isDisabled={disabled} onPress={() => { if (state.view === 'list') void loadList(); else void loadSecrets(); }}>刷新{state.view === 'list' ? '配置列表' : '凭证列表'}</Button><label><input type="checkbox" checked={state.view === 'list' ? configRetired : secretRetired} disabled={disabled} onChange={(e) => { const value = e.target.checked; if (state.view === 'list') { setConfigRetired(value); void loadList(value); } else { setSecretRetired(value); void loadSecrets(value); } }} /> 显示已{state.view === 'list' ? '停用配置' : '归档凭证'}</label></div>}
+    {(state.view === 'list' || state.view === 'secrets') && <div className="erp-toolbar"><Button variant="secondary" isDisabled={disabled} onPress={() => { if (state.view === 'list') void loadList(); else void loadSecrets(); }}>刷新{state.view === 'list' ? '配置列表' : '凭证列表'}</Button><Checkbox isSelected={state.view === 'list' ? configRetired : secretRetired} isDisabled={disabled} onChange={(value) => { if (state.view === 'list') { setConfigRetired(value); void loadList(value); } else { setSecretRetired(value); void loadSecrets(value); } }}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><Label>显示已{state.view === 'list' ? '停用配置' : '归档凭证'}</Label></Checkbox.Content></Checkbox></div>}
     </div>
     {detail && (state.view === 'review' || state.view === 'history') && <code className="block break-all text-muted">{detail.configKey}</code>}
     {!leave && feedback}
