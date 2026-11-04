@@ -6,7 +6,6 @@ interaction and persistence check, not evidence about MinIO or native CORS.
 from __future__ import annotations
 
 import re
-from re import Pattern
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
@@ -118,16 +117,16 @@ class MediaBrowserBridge:
         self.humans: set[int] = set()
         self.calls: Counter[tuple[str, str]] = Counter()
         self.refusals: list[str] = []
-        self.fail_next: tuple[str, str, int] | None = None
-        self.hold_next: tuple[str, Pattern[str]] | None = None
+        self.fail_next: tuple[str, re.Pattern[str], int] | None = None
+        self.hold_next: tuple[str, re.Pattern[str]] | None = None
         self.held: tuple[Route, str, str] | None = None
         self.closing = False
 
-    def fail(self, method: str, path: str, status: int) -> None:
+    def fail(self, method: str, path: str | re.Pattern[str], status: int) -> None:
         assert self.fail_next is None
-        self.fail_next = method, path, status
+        self.fail_next = method, re.compile(re.escape(path)) if isinstance(path, str) else path, status
 
-    def hold(self, method: str, path: Pattern[str]) -> None:
+    def hold(self, method: str, path: re.Pattern[str]) -> None:
         assert self.hold_next is None and self.held is None
         self.hold_next = method, path
 
@@ -242,7 +241,7 @@ class MediaBrowserBridge:
             body = request.post_data_json if request.post_data_buffer else None
             if self.allows(request.method, path, query, body):
                 self.calls[request.method, path] += 1
-                if self.fail_next and self.fail_next[:2] == (request.method, path):
+                if self.fail_next and self.fail_next[0] == request.method and self.fail_next[1].fullmatch(path):
                     _method, _path, code = self.fail_next
                     self.fail_next = None
                     route.fulfill(status=code, json={"detail": "TEST_injected_failure"})
