@@ -28,6 +28,7 @@ dist/
 *.egg-info/
 .eggs/
 pip-wheel-metadata/
+/uv.lock
 
 # ─── Test artifacts ─────────────────────────────────
 .pytest_cache/
