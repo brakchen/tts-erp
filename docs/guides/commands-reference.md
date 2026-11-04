@@ -54,7 +54,30 @@ bash restart.sh
 systemctl --user restart tts-erp-sync.service
 ```
 
-## 4. 浏览器渲染回归与端到端测试
+## 4. 部署（一键脚本）
+
+```bash
+# HP desk 测试环境：构建前端 → release worktree checkout → 重启 API
+# （主 worktree HEAD 一致时连带重启 sync/publish worker）→ 本机校验
+bash scripts/test_deploy.sh            # 部署当前 HEAD
+bash scripts/test_deploy.sh <ref>      # 部署指定分支/tag/commit
+bash scripts/test_deploy.sh --dry-run  # 只看计划不改动
+
+# 207 生产环境（207.57.126.199）：构建 → tar 管道同步（tts_erp_v2 原子替换、
+# 留 tts_erp_v2.prev 回滚副本）→ 重启系统服务 → 207 本机 + 公网校验
+bash scripts/prod_deploy.sh                  # 部署 origin/master（先 fetch），需逐字输入 207.57.126.199 确认
+bash scripts/prod_deploy.sh --yes <ref>      # 跳过交互确认（脚本/CI）
+bash scripts/prod_deploy.sh --dry-run        # 只看计划不改动
+bash scripts/prod_deploy.sh --verify-only    # 只读校验当前线上状态
+
+# 依赖清单（pyproject.toml 等）有变化时默认只警告，确认后加 --sync-deps 安装
+```
+
+> 两个脚本都只部署**已提交**的 commit（在临时 worktree 里构建前端），永不执行数据库迁移
+> （检测到新 alembic 迁移只警告，迁移一律人工），不覆盖目标机的 `.env` / `.venv` / `logs`。
+> 目标目录/主机可用环境变量覆盖，详见脚本头部注释。
+
+## 5. 浏览器渲染回归与端到端测试
 
 ```bash
 # 浏览器渲染回归（无需服务；fast 默认就跑，单独跑用这条）
@@ -71,7 +94,7 @@ bash scripts/test_isolated.sh e2e
 bash prod-switch/postswitch-smoke.sh
 ```
 
-## 5. 监控和日志
+## 6. 监控和日志
 
 ```bash
 # 进程状态
@@ -84,7 +107,7 @@ journalctl --user -u tts-erp -n 50
 # watchdog 巡检发现看 logs/watchdog.log（约定 agent 定时扫，代告警）
 ```
 
-## 6. Schema 变更
+## 7. Schema 变更
 
 ```bash
 # 流程：改 tts_erp_v2/db/models/ → 重新生成 → 应用；每个 migration 合入后都要重新生成快照
@@ -103,7 +126,7 @@ python3 scripts/configure_miaoshou_web_session.py \
 ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh --confirm
 ```
 
-## 7. API key 管理
+## 8. API key 管理
 
 ```bash
 # key 管理 CLI
@@ -111,7 +134,7 @@ python3 api_keys.py create/list/revoke/rotate
 # --prefix 定位；明文只创建时打印一次
 ```
 
-## 8. 签名调试
+## 9. 签名调试
 
 ```bash
 # TikTok 签名调试
@@ -122,7 +145,7 @@ MIAOSHOU_DEBUG_SIGN=1
 # 在 stderr 打 canonical
 ```
 
-## 9. 测试规范
+## 10. 测试规范
 
 - **TDD**：先写测试再实现
 - **共享 fixtures**：在 `tests/conftest.py`（事务回滚隔离、`TEST_%` 哨兵数据）
