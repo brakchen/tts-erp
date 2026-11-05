@@ -10,14 +10,15 @@ import yaml
 
 def validate_template(source: str) -> None:
     export = yaml.safe_load(source)["zabbix_export"]
-    assert isinstance(export["version"], str)
+    assert isinstance(export, dict)
+    assert isinstance(export["version"], str) and export["version"]
     groups = {group["name"] for group in export["template_groups"]}
     assert groups and all(isinstance(name, str) and name for name in groups)
     templates = export["templates"]
     assert isinstance(templates, list) and templates
-    identifiers = []
+    identifiers = [group["uuid"] for group in export["template_groups"]]
     for template in templates:
-        assert template["template"] and template["name"]
+        assert all(isinstance(template[key], str) and template[key] for key in ("template", "name"))
         assert all(group["name"] in groups for group in template["groups"])
         items = template["items"]
         assert isinstance(items, list) and items
@@ -27,8 +28,9 @@ def validate_template(source: str) -> None:
         identifiers.append(template["uuid"])
         identifiers.extend(item["uuid"] for item in items)
     for trigger in export["triggers"]:
-        assert trigger["name"] and trigger["expression"]
-        assert trigger.get("recovery_mode") != "RECOVERY_EXPRESSION" or trigger["recovery_expression"]
+        assert all(isinstance(trigger[key], str) and trigger[key] for key in ("name", "expression"))
+        if trigger.get("recovery_mode") == "RECOVERY_EXPRESSION":
+            assert isinstance(trigger["recovery_expression"], str) and trigger["recovery_expression"]
         identifiers.append(trigger["uuid"])
     assert all(isinstance(value, str) and value for value in identifiers)
     assert len(identifiers) == len(set(identifiers))

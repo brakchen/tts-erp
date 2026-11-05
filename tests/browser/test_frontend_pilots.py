@@ -43,10 +43,13 @@ def test_navigation_drawer_theme_and_focus(frontend_browser_renderer, prefix):
     assert dialog.locator(".drawer__body").evaluate(
         "el => getComputedStyle(el).color"
     ) == colors["muted"]
-    assert dialog.evaluate("el => el.contains(document.activeElement)")
+    page.wait_for_function("el => el.contains(document.activeElement)", arg=dialog.element_handle())
     for _ in range(3):
         page.keyboard.press("Tab")
         assert dialog.evaluate("el => el.contains(document.activeElement)")
+    dialog.get_by_role("link").last.focus()
+    page.keyboard.press("Tab")
+    assert dialog.evaluate("el => el.contains(document.activeElement)")
     page.keyboard.press("Escape")
     dialog.wait_for(state="hidden")
     page.wait_for_function("el => document.activeElement === el", arg=trigger.element_handle())
