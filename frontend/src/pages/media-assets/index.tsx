@@ -119,7 +119,8 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
           <Label>说明</Label><TextArea rows={3} maxLength={2000} />
         </TextField>
         <TagEditor root={root} selected={draft.tags} input={draft.tagInput} disabled={action.pending}
-          onChange={(tags) => setDraft({ ...draft, tags })} onInput={(tagInput) => setDraft({ ...draft, tagInput })} />
+          onChange={(tags) => setDraft((previous) => previous && { ...previous, tags })}
+          onInput={(tagInput) => setDraft((previous) => previous && { ...previous, tagInput })} />
         <ActionError message={action.error && (action.uncertain ? action.error : '保存未完成。' + action.error)} />
         <div className="flex flex-wrap gap-2">
           <Button type="submit" isDisabled={!dirty || !draft.filename.trim()} isPending={action.pending}>保存资料</Button>
