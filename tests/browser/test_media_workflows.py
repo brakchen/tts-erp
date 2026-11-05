@@ -461,10 +461,12 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
 def test_tag_editor_upload_pending_input_failed_save_and_shared_chips(media_run: MediaRun) -> None:
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
-    existing_tag = run.name("existing_tag")
+    existing_tag = run.name("existing tag")
     run.seed_asset("tag_candidate.png", tags=[existing_tag])
+    search(page, run.name("unmatched_filter"))
     filename = run.name("tagged_upload.png")
-    comma_tag = run.name("comma,stays_one")
+    comma_tag = run.name("comma,stays_one_" + "长标签" * 25)
+    assert len(comma_tag) > 64
     pending_tag = run.name("upload_pending")
     button(main(page), "上传素材").click()
     heading(page, "上传素材")
@@ -491,6 +493,10 @@ def test_tag_editor_upload_pending_input_failed_save_and_shared_chips(media_run:
     entry.fill(" " + comma_tag + " ")
     button(main(page), "添加标签").click()
     expect(main(page).get_by_role("row", name=comma_tag, exact=True)).to_have_count(1)
+    entry.fill("  " + existing_tag.replace("existing tag", "existing\u00a0 \u3000tag") + "  ")
+    button(main(page), "添加标签").click()
+    expect(main(page).get_by_role("row", name=existing_tag, exact=True)).to_have_count(1)
+    expect(existing).to_have_attribute("aria-selected", "true")
     entry.fill("  " + pending_tag + "  ")  # Save/upload must consume an input not explicitly added.
     gate.fail("POST", ASSETS + "/upload-url", 400)
     button(main(page), "开始上传").click()
@@ -500,6 +506,7 @@ def test_tag_editor_upload_pending_input_failed_save_and_shared_chips(media_run:
     assert pending_tag not in tags(run)
     button(main(page), "开始上传").click()
     heading(page, "素材详情 · " + filename)
+    expect(main(page).get_by_text("已清除筛选并返回第一页。", exact=False)).to_be_visible()
     asset_id = run.asset_id(filename)
     expected = {existing_tag, comma_tag, pending_tag}
     with db() as session:
@@ -510,6 +517,10 @@ def test_tag_editor_upload_pending_input_failed_save_and_shared_chips(media_run:
     assert expected <= set(tags(run))
     ticket_request = [item for item in gate.requests if item.path == ASSETS + "/upload-url"][-1]
     assert set(ticket_request.body["tags"]) == expected
+    button(main(page), "返回素材库").click()
+    expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value("")
+    button(main(page), "查看 " + filename).wait_for()
+    open_asset(page, filename)
 
     button(main(page), "编辑资料").click()
     heading(page, "编辑素材 · " + filename)
