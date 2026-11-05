@@ -435,6 +435,14 @@ it('uses tag arrays, prevents Enter submitting, and retains the pending tag afte
   await user.type(input, ' TEST_有,标点 {Enter}');
   expect(patchCount).toBe(0);
   expect(screen.getByRole('row', { name: 'TEST_有,标点' })).toHaveAttribute('aria-selected', 'true');
+  expect(input).toHaveValue('');
+  await user.type(input, 'TEST_按钮标签');
+  await user.click(button('添加标签'));
+  expect(screen.getByRole('row', { name: 'TEST_按钮标签' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('row', { name: 'TEST_有,标点' })).toHaveAttribute('aria-selected', 'true');
+  expect(input).toHaveValue('');
+  expect(patchCount).toBe(0);
+  await user.click(screen.getByRole('row', { name: 'TEST_按钮标签' }));
   await user.type(input, 'TEST_有,标点{Enter}');
   expect(screen.getAllByRole('row', { name: 'TEST_有,标点' })).toHaveLength(1);
   await user.type(input, ' TEST_待保存 ');
