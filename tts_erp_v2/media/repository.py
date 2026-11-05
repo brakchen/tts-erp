@@ -7,6 +7,7 @@ digital human may reference the same asset from several personas.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -14,6 +15,7 @@ from enum import Enum
 from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from tts_erp_v2.db.models.media import (
     DigitalHuman,
@@ -56,6 +58,23 @@ class LinkAssetError(Enum):
     ASSET_NOT_READY = "asset_not_ready"
 
 
+class DeleteAssetError(Enum):
+    ASSET_IN_USE = "asset_in_use"
+
+
+def normalize_tags(tags: Iterable[str]) -> list[str]:
+    """Keep distinct, nonempty labels with consistent whitespace, in input order."""
+    return list(
+        dict.fromkeys(tag for value in tags if (tag := " ".join(value.split())))
+    )
+
+
+def _normalized_asset_tag() -> ColumnElement[str]:
+    """Expand each stored label, including metadata saved before normalization."""
+    tag = func.unnest(MediaAsset.tags).column_valued("asset_tag", joins_implicitly=True)
+    return func.btrim(func.regexp_replace(tag, r"\s+", " ", "g"))
+
+
 def _asset_base_query() -> Select:
     return select(MediaAsset).where(MediaAsset.deleted_at.is_(None))
 
@@ -74,6 +93,7 @@ def create_asset(
     bucket: str,
     uploaded_by_key_id: str | None,
     uploaded_by_prefix: str | None,
+    tags: list[str] | None = None,
 ) -> MediaAsset:
     """Stage a ticket row with its final object key. The caller commits it after signing."""
     asset = MediaAsset(
@@ -86,7 +106,7 @@ def create_asset(
         status=AssetStatus.AWAITING_UPLOAD.value,
         uploaded_by_key_id=uploaded_by_key_id,
         uploaded_by_prefix=uploaded_by_prefix,
-        tags=[],
+        tags=normalize_tags(tags or []),
     )
     session.add(asset)
     session.flush()
@@ -145,7 +165,7 @@ def update_asset_metadata(
     if description is not None:
         values["description"] = description
     if tags is not None:
-        values["tags"] = tags
+        values["tags"] = normalize_tags(tags)
     if values:
         session.execute(
             update(MediaAsset)
@@ -159,11 +179,33 @@ def update_asset_metadata(
     return get_asset(session, asset_id)
 
 
-def soft_delete_asset(session: Session, asset_id: int) -> MediaAsset | None:
-    """Soft-delete one asset and return the row that carried the object key."""
-    asset = get_asset(session, asset_id)
+def soft_delete_asset(
+    session: Session, asset_id: int
+) -> MediaAsset | DeleteAssetError | None:
+    """Delete only an unreferenced asset, serialized with concurrent linking."""
+    # link_asset_to_digital_human takes FOR SHARE on this same row. Once this
+    # lock is held, no new reference can commit between the check and deletion.
+    asset = session.scalar(
+        _asset_base_query()
+        .where(MediaAsset.id == asset_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if asset is None:
         return None
+    in_use = session.scalar(
+        select(
+            select(DigitalHumanAsset.id)
+            .join(DigitalHuman, DigitalHuman.id == DigitalHumanAsset.digital_human_id)
+            .where(
+                DigitalHumanAsset.asset_id == asset_id,
+                DigitalHuman.deleted_at.is_(None),
+            )
+            .exists()
+        )
+    )
+    if in_use:
+        return DeleteAssetError.ASSET_IN_USE
     session.execute(
         update(MediaAsset)
         .where(MediaAsset.id == asset_id)
@@ -182,14 +224,26 @@ def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
         conditions.append(MediaAsset.status == filters.status.value)
     if filters.keyword:
         pattern = f"%{filters.keyword}%"
+        matching_tag = (
+            select(1)
+            .where(_normalized_asset_tag().ilike(pattern))
+            .correlate(MediaAsset)
+            .exists()
+        )
         conditions.append(
             or_(
                 MediaAsset.filename.ilike(pattern),
                 MediaAsset.description.ilike(pattern),
+                matching_tag,
             )
         )
     if filters.tag:
-        conditions.append(MediaAsset.tags.any(filters.tag))
+        conditions.append(
+            select(1)
+            .where(_normalized_asset_tag() == " ".join(filters.tag.split()))
+            .correlate(MediaAsset)
+            .exists()
+        )
     if filters.digital_human_id is not None:
         linked = select(DigitalHumanAsset.asset_id).where(
             DigitalHumanAsset.digital_human_id == filters.digital_human_id
@@ -214,9 +268,39 @@ def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
     return AssetPage(items=list(rows), total=total or 0)
 
 
-def asset_ids_for_digital_human(
-    session: Session, digital_human_id: int
-) -> list[int]:
+def list_asset_tags(session: Session) -> list[str]:
+    """Read candidate labels from live ready assets without creating records."""
+    tags = session.scalars(
+        select(_normalized_asset_tag())
+        .select_from(MediaAsset)
+        .where(
+            MediaAsset.deleted_at.is_(None),
+            MediaAsset.status == AssetStatus.READY.value,
+        )
+        .distinct()
+    ).all()
+    return sorted(normalize_tags(tags))
+
+
+def usage_counts_for_assets(session: Session, asset_ids: list[int]) -> dict[int, int]:
+    """Count live persona references, including archived personas, in one query."""
+    if not asset_ids:
+        return {}
+    counts = dict.fromkeys(asset_ids, 0)
+    rows = session.execute(
+        select(DigitalHumanAsset.asset_id, func.count())
+        .join(DigitalHuman, DigitalHuman.id == DigitalHumanAsset.digital_human_id)
+        .where(
+            DigitalHumanAsset.asset_id.in_(asset_ids),
+            DigitalHuman.deleted_at.is_(None),
+        )
+        .group_by(DigitalHumanAsset.asset_id)
+    ).all()
+    counts.update({asset_id: count for asset_id, count in rows})
+    return counts
+
+
+def asset_ids_for_digital_human(session: Session, digital_human_id: int) -> list[int]:
     """Return live asset ids linked to one persona, newest link first."""
     rows = session.scalars(
         select(DigitalHumanAsset.asset_id)
@@ -411,6 +495,7 @@ def unlink_asset_from_digital_human(
 __all__ = [
     "AssetFilter",
     "AssetPage",
+    "DeleteAssetError",
     "LinkAssetError",
     "asset_ids_for_digital_human",
     "create_asset",
@@ -419,12 +504,15 @@ __all__ = [
     "get_asset",
     "get_digital_human",
     "link_asset_to_digital_human",
+    "list_asset_tags",
     "list_assets",
     "list_digital_humans",
+    "normalize_tags",
     "record_upload_verification",
     "soft_delete_asset",
     "soft_delete_digital_human",
     "unlink_asset_from_digital_human",
     "update_asset_metadata",
     "update_digital_human",
+    "usage_counts_for_assets",
 ]
