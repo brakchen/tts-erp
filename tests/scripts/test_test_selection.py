@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts._test_selection import select
+from scripts._test_selection import DRAWER_BROWSER, ZABBIX_CHECK, select
 
 
 def test_page_without_layout_change_runs_only_frontend():
@@ -115,3 +115,22 @@ def test_pinned_fast_requests_full_frontend_backend_and_build():
     plan = select([], scope="fast")
     assert plan.frontend and plan.backend_all and plan.build
     assert not plan.vitest
+
+
+def test_zabbix_template_selects_validation_without_application_suites():
+    plan = select(["docs/plugins/monitor/zabbix-monitor.yaml", "docs/plugins/monitor/zabbix-monitor.md"])
+    assert plan.checks == [ZABBIX_CHECK]
+    assert not (plan.frontend or plan.backend_all or plan.backend or plan.build or plan.scenarios)
+    assert select(["docs/unknown.yaml"]).backend_all
+
+
+def test_drawer_has_a_relevant_browser_check_and_keeps_named_scenarios():
+    path = "frontend/src/app/navigation-drawer.css"
+    drawer = select([path])
+    assert drawer.vitest == ["src/app/AppShell.test.tsx", "src/app/SessionActions.test.tsx"]
+    assert drawer.browser_mock == [DRAWER_BROWSER]
+    assert drawer.build and not (drawer.backend_all or drawer.backend or drawer.scenarios)
+    assert select([path], ["login-cookie"]).scenarios == ["login-cookie"]
+    shared = select(["frontend/src/app/workspace.css", path])
+    assert not shared.vitest
+    assert "tests/browser/test_frontend_dashboard_layout.py" in shared.browser_mock

@@ -14,6 +14,48 @@ pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
 
 @pytest.mark.parametrize("prefix", ["", "/tts"])
+def test_navigation_drawer_theme_and_focus(frontend_browser_renderer, prefix):
+    page = frontend_browser_renderer.open(f"{prefix}/v2/pages/intercept-requests", width=390)
+    trigger = page.get_by_role("button", name="打开主导航")
+    trigger.focus()
+    page.keyboard.press("Enter")
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+    colors = page.evaluate("""() => {
+        const probe = document.createElement('span');
+        probe.style.backgroundColor = 'var(--accent-deep)';
+        probe.style.color = 'var(--navigation-foreground)';
+        document.body.append(probe);
+        const style = getComputedStyle(probe);
+        const result = { background: style.backgroundColor, foreground: style.color };
+        probe.style.color = 'var(--navigation-muted)';
+        result.muted = getComputedStyle(probe).color;
+        probe.remove();
+        return result;
+    }""")
+    assert dialog.evaluate("el => getComputedStyle(el).backgroundColor") == colors["background"]
+    assert dialog.get_by_role("heading", name="主导航").evaluate(
+        "el => getComputedStyle(el).color"
+    ) == colors["foreground"]
+    assert dialog.get_by_role("button", name="关闭主导航").evaluate(
+        "el => getComputedStyle(el).color"
+    ) == colors["foreground"]
+    assert dialog.locator(".drawer__body").evaluate(
+        "el => getComputedStyle(el).color"
+    ) == colors["muted"]
+    page.wait_for_function("el => el.contains(document.activeElement)", arg=dialog.element_handle())
+    for _ in range(3):
+        page.keyboard.press("Tab")
+        assert dialog.evaluate("el => el.contains(document.activeElement)")
+    dialog.get_by_role("link").last.focus()
+    page.keyboard.press("Tab")
+    assert dialog.evaluate("el => el.contains(document.activeElement)")
+    page.keyboard.press("Escape")
+    dialog.wait_for(state="hidden")
+    page.wait_for_function("el => document.activeElement === el", arg=trigger.element_handle())
+
+
+@pytest.mark.parametrize("prefix", ["", "/tts"])
 @pytest.mark.parametrize("width", [375, 1440, 2560])
 @pytest.mark.parametrize("slug,title", [
     (page.page_id, page.label) for page in PAGES
