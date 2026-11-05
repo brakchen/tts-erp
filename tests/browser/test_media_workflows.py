@@ -223,7 +223,8 @@ def attach(page: Page, name: str) -> None:
     search(dialog(page), "搜索资产", name)
     button(dialog(page), "预览 " + name).click()
     expect(dialog(page).get_by_role("img").first).to_be_visible()
-    dialog(page).get_by_role("checkbox", name=name, exact=True).click()
+    dialog(page).get_by_text(name, exact=True).click()
+    expect(dialog(page).get_by_role("checkbox", name=name, exact=True)).to_be_checked()
     button(dialog(page), "添加选中的资产（1）").click()
     expect(button(dialog(page), "选择已有资产")).to_be_visible()
     text(dialog(page), name)
@@ -250,7 +251,8 @@ def test_picker_submits_multiple_assets(media_run: MediaRun) -> None:
         expect(dialog(page).get_by_role("checkbox", name=name, exact=True)).to_be_visible()
     for name in filenames:
         search(dialog(page), "搜索资产", name)
-        dialog(page).get_by_role("checkbox", name=name, exact=True).click()
+        dialog(page).get_by_text(name, exact=True).click()
+        expect(dialog(page).get_by_role("checkbox", name=name, exact=True)).to_be_checked()
     assert gate.calls["POST", path] == 0
     assert media_run.links(human_id) == set()
 
