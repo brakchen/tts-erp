@@ -858,6 +858,7 @@ def test_create_and_read_digital_human(api_client_focused, readwrite_key):
     )
     assert detail.status_code == 200, detail.text
     assert detail.json()["name"] == "TEST_digital_human_a"
+    assert detail.json()["assets"] == []
 
 
 def test_update_and_delete_digital_human(api_client_focused, readwrite_key):
@@ -897,6 +898,13 @@ def test_link_and_unlink_asset(api_client_focused, readwrite_key):
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert confirmed.status_code == 200, confirmed.text
+    assert (
+        api_client_focused.get(
+            f"/v2/media/assets/{asset_id}",
+            headers={"Authorization": f"Bearer {readwrite_key}"},
+        ).json()["usageCount"]
+        == 0
+    )
     created = api_client_focused.post(
         "/v2/media/digital-humans",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -911,6 +919,11 @@ def test_link_and_unlink_asset(api_client_focused, readwrite_key):
     )
     assert linked.status_code == 200, linked.text
     assert linked.json()["asset_ids"] == [asset_id]
+    detail = api_client_focused.get(
+        f"/v2/media/digital-humans/{human_id}",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+    )
+    assert detail.json()["assets"][0]["usageCount"] == 1
 
     # Linking twice is idempotent.
     again = api_client_focused.post(
@@ -932,6 +945,14 @@ def test_link_and_unlink_asset(api_client_focused, readwrite_key):
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert after.json()["asset_ids"] == []
+    assert after.json()["assets"] == []
+    assert (
+        api_client_focused.get(
+            f"/v2/media/assets/{asset_id}",
+            headers={"Authorization": f"Bearer {readwrite_key}"},
+        ).json()["usageCount"]
+        == 0
+    )
 
 
 def test_ready_filter_and_association_reject_new_pending_link(
@@ -1253,12 +1274,10 @@ def test_shared_asset_usage_tracks_archive_restore_and_removal(
     )
     assert edited.status_code == 200
     for human_path in (first_path, second_path):
-        assert (
-            api_client_focused.get(human_path, headers=headers).json()["assets"][0][
-                "filename"
-            ]
-            == new_name
-        )
+        embedded = api_client_focused.get(human_path, headers=headers).json()["assets"]
+        assert len(embedded) == 1
+        assert embedded[0]["filename"] == new_name
+        assert embedded[0]["usageCount"] == 2
 
     restored = api_client_focused.patch(
         second_path, headers=headers, json={"status": "active"}
@@ -1273,16 +1292,18 @@ def test_shared_asset_usage_tracks_archive_restore_and_removal(
         ).status_code
         == 204
     )
-    assert api_client_focused.get(first_path, headers=headers).json()["asset_ids"] == []
+    first_detail = api_client_focused.get(first_path, headers=headers).json()
+    assert first_detail["asset_ids"] == []
+    assert first_detail["assets"] == []
     asset_detail = api_client_focused.get(asset_path, headers=headers).json()
     assert asset_detail["usageCount"] == 1
     usage = asset_detail["used_by"]
     assert usage == [
         {"digital_human_id": second_id, "name": f"{prefix}_b", "status": "active"}
     ]
-    assert api_client_focused.get(second_path, headers=headers).json()["asset_ids"] == [
-        asset_id
-    ]
+    second_detail = api_client_focused.get(second_path, headers=headers).json()
+    assert second_detail["asset_ids"] == [asset_id]
+    assert second_detail["assets"][0]["usageCount"] == 1
 
     assert api_client_focused.delete(second_path, headers=headers).status_code == 204
     retained = api_client_focused.get(asset_path, headers=headers)
