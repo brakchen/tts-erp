@@ -40,29 +40,35 @@ export function mediaError(error: unknown, writing = false) {
 }
 
 export function useMediaRead<T>(root: string, path: string | null, decode: (data: unknown) => T, revision = 0) {
-  type State = { path: string | null; data?: T; error?: string; loading: boolean };
-  const [state, setState] = useState<State>({ path, loading: path !== null });
+  type State = { path: string | null; revision: number; attempt: number; data?: T; error?: string; loading: boolean };
+  const [state, setState] = useState<State>({ path, revision, attempt: 0, loading: path !== null });
   const [attempt, setAttempt] = useState(0);
+  const latestAttempt = useRef(0);
   useEffect(() => {
+    const identity = { path, revision, attempt };
     if (path === null) {
-      setState({ path, loading: false });
+      setState({ ...identity, loading: false });
       return;
     }
     const controller = new AbortController();
     let current = true;
-    setState((previous) => ({ path, loading: true, data: previous.path === path ? previous.data : undefined }));
+    setState((previous) => ({ ...identity, loading: true,
+      data: previous.path === path && previous.revision === revision ? previous.data : undefined }));
     void withinRequestLifetime(controller, (signal) => mediaRequest(root, path, decode, { signal }))
-      .then((data) => { if (current) setState({ path, data, loading: false }); })
-      .catch((error: unknown) => { if (current) setState({ path, error: mediaError(error), loading: false }); });
+      .then((data) => { if (current && latestAttempt.current === attempt) setState({ ...identity, data, loading: false }); })
+      .catch((error: unknown) => { if (current && latestAttempt.current === attempt) setState({ ...identity, error: mediaError(error), loading: false }); });
     return () => { current = false; controller.abort(); };
   }, [root, path, decode, revision, attempt]);
   return {
-    ...(state.path === path ? state : { path, loading: path !== null } as State),
+    ...(state.path === path && state.revision === revision && state.attempt === attempt
+      ? state : { path, revision, attempt, loading: path !== null } as State),
     retry: () => {
-      // Consumers must see the read gate in the same event as retry(), before
-      // the effect starts its request, so writes cannot race an older snapshot.
-      setState((previous) => ({ path, loading: path !== null, data: previous.path === path ? previous.data : undefined }));
-      setAttempt((value) => value + 1);
+      // Allocate this request's identity now. A prior response cannot acquire
+      // a newer identity during the retry-to-effect window.
+      const nextAttempt = ++latestAttempt.current;
+      setState((previous) => ({ path, revision, attempt: nextAttempt, loading: path !== null,
+        data: previous.path === path && previous.revision === revision ? previous.data : undefined }));
+      setAttempt(nextAttempt);
     },
   };
 }
@@ -72,14 +78,20 @@ export function useMediaAction() {
   const [error, setError] = useState('');
   const [uncertain, setUncertain] = useState(false);
   const lock = useRef(false);
-  async function run(operation: () => Promise<void>) {
-    if (lock.current) return;
+  async function run(operation: () => Promise<void>, propagate = false) {
+    if (lock.current) {
+      if (propagate) throw new Error('另一个操作尚未完成');
+      return;
+    }
     lock.current = true;
     setPending(true);
     setError('');
     setUncertain(false);
     try { await operation(); }
-    catch (failure) { setError(mediaError(failure, true)); setUncertain(uncertainResult(failure)); }
+    catch (failure) {
+      setError(mediaError(failure, true)); setUncertain(uncertainResult(failure));
+      if (propagate) throw failure;
+    }
     finally { lock.current = false; setPending(false); }
   }
   return { pending, error, uncertain, clearError: () => { setError(''); setUncertain(false); }, run };
