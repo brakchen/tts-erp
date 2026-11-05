@@ -1,0 +1,6 @@
+.erp-drawer { background: var(--accent-deep); color: var(--navigation-foreground); }
+/* The visible dialog surface shares the navigation theme with its container. */
+.erp-drawer .drawer__dialog { background: var(--accent-deep); color: var(--navigation-foreground); }
+.erp-drawer .drawer__heading { color: var(--navigation-foreground); }
+.erp-drawer .drawer__body { color: var(--navigation-muted); }
+.erp-drawer .drawer__close-trigger { color: var(--navigation-foreground); }
