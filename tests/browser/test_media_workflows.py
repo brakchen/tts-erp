@@ -246,10 +246,22 @@ def kind(page: Page, label: str) -> None:
         page.get_by_role("option", name=label, exact=True).click()
 
 
-def pick_file(page: Page, name: str) -> None:
+def pick_file(run: MediaRun, name: str) -> None:
+    page, gate = run.page, run.gate
+    tickets_before = gate.calls["POST", ASSETS + "/upload-url"]
+    puts_before = gate.store.puts
     main(page).locator('input[type="file"]').set_input_files({
         "name": name, "mimeType": "image/png", "buffer": png(),
     })
+    preview = main(page).get_by_role("img", name="本地图片预览 " + name, exact=True)
+    expect(preview).to_be_visible()
+    expect(preview).to_have_attribute("src", re.compile(r"^blob:"))
+    page.wait_for_function(
+        "img => img.complete && img.naturalWidth === 256 && img.naturalHeight === 128",
+        arg=preview.element_handle(),
+    )
+    assert gate.calls["POST", ASSETS + "/upload-url"] == tickets_before
+    assert gate.store.puts == puts_before
 
 
 def image_ready(page: Page, name: str) -> None:
@@ -438,7 +450,7 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     text(main(page), "本次新增 2 项")
     button(main(page), "上传新素材").click()
     uploaded = run.name("uploaded_C.png")
-    pick_file(page, uploaded)
+    pick_file(run, uploaded)
     before_assets = set(gate.assets)
     before_tickets = gate.calls["POST", ASSETS + "/upload-url"]
     before_puts = gate.store.puts
@@ -495,7 +507,7 @@ def test_tag_editor_upload_pending_input_failed_save_and_shared_chips(media_run:
     assert cancelled_upload not in tags(run)
     button(main(page), "上传素材").click()
     expect(main(page).get_by_role("row", name=cancelled_upload, exact=True)).to_have_count(0)
-    pick_file(page, filename)
+    pick_file(run, filename)
     existing = main(page).get_by_role("row", name=existing_tag, exact=True)
     existing.click()
     expect(existing).to_have_attribute("aria-selected", "true")
