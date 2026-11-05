@@ -395,7 +395,7 @@ it('preserves A/B, query and type while C is uploaded and associated from the pi
   await finishTransfer();
   expect(await screen.findByText(/原有 2 项待添加选择已保留/)).toBeVisible();
   expect(screen.getByLabelText('搜索素材')).toHaveValue('TEST_');
-  expect(button('确认添加(2)')).toBeEnabled();
+  await waitFor(() => expect(button('确认添加(2)')).toBeEnabled());
   expect(await screen.findByRole('checkbox', { name: asset.filename })).toBeChecked();
   expect(screen.getByRole('checkbox', { name: second.filename })).toBeChecked();
   expect(writes).toEqual(['4']);
@@ -481,4 +481,71 @@ it('includes an uncommitted upload tag in its ticket and cancelling never writes
   await waitFor(() => expect(Upload.last).toBeDefined());
   await finishTransfer();
   expect(await screen.findByText(/已入库：/)).toBeVisible();
+});
+
+it.each([false, true])('waits for the post-upload profile read before a partial add (refresh failure: %s)', async (failRefresh) => {
+  const user = userEvent.setup();
+  vi.stubGlobal('XMLHttpRequest', Upload);
+  const second = { ...asset, asset_id: 3, filename: 'TEST_delayed_B.png' };
+  const third = { ...asset, asset_id: 4, filename: 'TEST_delayed_C.png' };
+  const linked: number[] = [];
+  const writes: string[] = [];
+  let detailReads = 0;
+  let failedB = false;
+  let capturedRefresh: Response | undefined;
+  let releaseRefresh!: (response: Response) => void;
+  const delayedRefresh = new Promise<Response>((resolve) => { releaseRefresh = resolve; });
+  const fetcher = apiFetch(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/upload-url')) return json({ ...ticket, asset_id: 4 }, 201);
+    if (url.endsWith('/confirm')) return json({ ...confirmed, asset_id: 4 });
+    if (url.endsWith(humanPath + '/assets')) {
+      const { assetId } = JSON.parse(String(init.body));
+      writes.push(assetId);
+      if (assetId === '3' && !failedB) { failedB = true; return json({}, 503); }
+      linked.push(Number(assetId));
+      return json({ ...human, asset_ids: [...linked] });
+    }
+    if (url.endsWith(humanPath)) {
+      const snapshot = json({ ...human, asset_ids: [...linked], assets: [asset, second, third].filter((row) => linked.includes(row.asset_id)) });
+      if (++detailReads === 2) { capturedRefresh = snapshot; return delayedRefresh; }
+      return snapshot;
+    }
+    if (url.includes('/assets?')) return json(page([asset, second, third].filter((row) => !linked.includes(row.asset_id))));
+    return json([human]);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<DigitalHumans bootstrap={bootstrap} />);
+  await user.click(await findButton('添加素材 ' + human.name));
+  await user.click(await screen.findByRole('checkbox', { name: asset.filename }));
+  await user.click(screen.getByRole('checkbox', { name: second.filename }));
+  await user.click(button('上传新素材'));
+  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['abc'], third.filename, { type: 'image/png' })] } });
+  await user.click(button('开始上传并添加'));
+  await finishTransfer();
+  await waitFor(() => expect(capturedRefresh).toBeDefined());
+  expect(await screen.findByText('正在加载目标档案…')).toBeVisible();
+  expect(button('确认添加(2)')).toBeDisabled();
+  expect(button('上传新素材')).toBeDisabled();
+  await user.click(button('确认添加(2)'));
+  expect(writes).toEqual(['4']);
+
+  await act(async () => releaseRefresh(failRefresh ? json({}, 503) : capturedRefresh!));
+  if (failRefresh) {
+    expect(await screen.findByText('目标档案不可用')).toBeVisible();
+    expect(button('确认添加(2)')).toBeDisabled();
+    expect(writes).toEqual(['4']);
+    await user.click(button('重试目标档案'));
+  }
+  await waitFor(() => expect(button('确认添加(2)')).toBeEnabled());
+  await user.click(button('确认添加(2)'));
+  expect(await screen.findByText(/待添加的勾选已保留/)).toBeVisible();
+  expect(writes).toEqual(['4', '2', '3']);
+  expect(button('确认添加(1)')).toBeEnabled();
+  expect(await screen.findByRole('checkbox', { name: second.filename })).toBeChecked();
+  await waitFor(() => expect(screen.queryByRole('checkbox', { name: asset.filename })).not.toBeInTheDocument());
+  await user.click(button('确认添加(1)'));
+  expect(await screen.findByRole('heading', { name: '数字人档案 · ' + human.name })).toBeVisible();
+  for (const row of [asset, second, third]) expect(screen.getByRole('heading', { name: row.filename })).toBeVisible();
+  expect(writes).toEqual(['4', '2', '3', '3']);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/upload-url'))).toHaveLength(1);
 });
