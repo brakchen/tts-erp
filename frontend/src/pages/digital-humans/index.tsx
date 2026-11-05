@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button, Card, Input, Label, TextArea, TextField } from '@heroui/react';
 import { pathFor } from '../../shared/api/paths';
 import type { PageProps } from '../../shared/contracts';
@@ -83,9 +83,9 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
 }) {
   const root = bootstrap.rootPath;
   const canWrite = bootstrap.roleCapabilities?.readwrite === true;
-  const read = useMediaRead(root, '/digital-humans/' + id, decodeDigitalHumanDetail);
+  const [snapshot, setSnapshot] = useState<{ revision: number; acknowledged?: DigitalHumanDetail }>({ revision: 0 });
+  const read = useMediaRead(root, '/digital-humans/' + id, decodeDigitalHumanDetail, snapshot.revision);
   const action = useMediaAction();
-  const [override, setOverride] = useState<DigitalHumanDetail>();
   const [mode, setMode] = useState<'view' | 'pick' | 'upload'>(initialMode);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [discard, setDiscard] = useState<'view' | 'close'>();
@@ -93,8 +93,12 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   const [uploadOrigin, setUploadOrigin] = useState<'view' | 'pick'>('view');
   const [notice, setNotice] = useState(initialNotice);
   const [pickerNotice, setPickerNotice] = useState('');
-  useEffect(() => { if (read.data) setOverride(undefined); }, [read.data]);
-  const human = override ?? read.data;
+  // A read can replace an acknowledged write only in that write's generation.
+  // Advancing the generation hides older reads synchronously, before effects.
+  const human = read.data ?? snapshot.acknowledged;
+  function acknowledge(value: DigitalHumanDetail) {
+    setSnapshot((previous) => ({ revision: previous.revision + 1, acknowledged: value }));
+  }
   const dirty = Boolean(draft && human && (draft.name !== human.name || draft.description !== (human.description ?? '')));
   useLeaveGuard(dirty || action.pending || pickerDraft.selected.some((asset) => !human?.assetIds.includes(asset.assetId)));
 
@@ -128,7 +132,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         ...(draft.description !== (human.description ?? '') && { description: draft.description.trim() }),
       });
       if (updated.digitalHumanId !== id) throw new Error('保存结果不符');
-      setOverride({ ...human, ...updated });
+      acknowledge({ ...human, ...updated });
       setDraft(null);
       setNotice('数字人资料已保存。');
       onChanged();
@@ -143,7 +147,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         status: archived ? 'archived' : 'active',
       });
       if (updated.digitalHumanId !== id) throw new Error('归档状态结果不符');
-      setOverride({ ...human, ...updated });
+      acknowledge({ ...human, ...updated });
       setNotice(archived ? '已归档。资产引用已保留，可在「已归档」列表找到此档案。' : '已恢复为启用，可在「启用中」列表找到此档案。');
       onChanged();
     });
@@ -151,8 +155,10 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
 
   async function remove() {
     if (!human || !canWrite) return;
-    await mediaWrite(root, '/digital-humans/' + id, 'DELETE', () => undefined);
-    onDeleted(human.name);
+    await action.run(async () => {
+      await mediaWrite(root, '/digital-humans/' + id, 'DELETE', () => undefined);
+      onDeleted(human.name);
+    }, true);
   }
 
   function attach(assets: readonly Asset[]) {
@@ -167,7 +173,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
           const updated = await mediaWrite(root, '/digital-humans/' + id + '/assets', 'POST', decodeDigitalHuman, { assetId: asset.assetId });
           if (updated.digitalHumanId !== id || !updated.assetIds.includes(asset.assetId)) throw new Error('添加结果不符');
           current = { ...current, ...updated, assets: [...current.assets, asset] };
-          setOverride(current);
+          acknowledge(current);
           added += 1;
         }
       } finally {
@@ -185,13 +191,15 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
 
   async function detach(asset: Asset) {
     if (!human || !canWrite) return;
-    await mediaWrite(root, '/digital-humans/' + id + '/assets/' + asset.assetId, 'DELETE', () => undefined);
-    setOverride({
-      ...human, assets: human.assets.filter((item) => item.assetId !== asset.assetId),
-      assetIds: human.assetIds.filter((item) => item !== asset.assetId),
-    });
-    setNotice('已从当前数字人移除「' + asset.filename + '」。资产库中的文件和其他引用仍可使用。');
-    onChanged();
+    await action.run(async () => {
+      await mediaWrite(root, '/digital-humans/' + id + '/assets/' + asset.assetId, 'DELETE', () => undefined);
+      acknowledge({
+        ...human, assets: human.assets.filter((item) => item.assetId !== asset.assetId),
+        assetIds: human.assetIds.filter((item) => item !== asset.assetId),
+      });
+      setNotice('已从当前数字人移除「' + asset.filename + '」。资产库中的文件和其他引用仍可使用。');
+      onChanged();
+    }, true);
   }
 
   function begin(next: 'pick' | 'upload') {
@@ -227,8 +235,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
       }}
       onComplete={(assetId, filename) => {
         // Preserve A/B and the picker query while recording C's successful association.
-        setOverride({ ...human, assetIds: [...new Set([...human.assetIds, assetId])] });
-        read.retry();
+        acknowledge({ ...human, assetIds: [...new Set([...human.assetIds, assetId])] });
         setMode(uploadOrigin);
         onChanged();
         const message = '「' + filename + '」已入库并添加到此档案。' + (selectedCount ? '原有 ' + selectedCount + ' 项待添加选择已保留，请继续确认。' : '');

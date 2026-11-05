@@ -171,7 +171,7 @@ it('keeps selections across searches and retries only the remaining asset after 
       const candidates = params.get('keyword') === second.filename ? [second] : [asset];
       return json(page(params.has('excludeDigitalHumanId') ? candidates.filter((row) => !linkedIds.includes(row.asset_id)) : candidates));
     }
-    if (url.endsWith(humanPath)) return json({ ...human, assets: [] });
+    if (url.endsWith(humanPath)) return json({ ...human, asset_ids: [...linkedIds], assets: [asset, second].filter((row) => linkedIds.includes(row.asset_id)) });
     return json([human]);
   });
   vi.stubGlobal('fetch', fetcher);
@@ -187,6 +187,7 @@ it('keeps selections across searches and retries only the remaining asset after 
   expect(writes).toEqual([]);
   await user.click(button('确认添加(2)'));
   expect(await screen.findByText(/待添加的勾选已保留/)).toBeVisible();
+  await waitFor(() => expect(button('确认添加(1)')).toBeEnabled());
   expect(screen.getByRole('checkbox', { name: second.filename })).toBeChecked();
   expect(writes).toEqual(['2', '3']);
 
@@ -542,7 +543,7 @@ it.each([false, true])('waits for the post-upload profile read before a partial 
   await user.click(button('确认添加(2)'));
   expect(await screen.findByText(/待添加的勾选已保留/)).toBeVisible();
   expect(writes).toEqual(['4', '2', '3']);
-  expect(button('确认添加(1)')).toBeEnabled();
+  await waitFor(() => expect(button('确认添加(1)')).toBeEnabled());
   expect(await screen.findByRole('checkbox', { name: second.filename })).toBeChecked();
   await waitFor(() => expect(screen.queryByRole('checkbox', { name: asset.filename })).not.toBeInTheDocument());
   await user.click(button('确认添加(1)'));
@@ -550,4 +551,99 @@ it.each([false, true])('waits for the post-upload profile read before a partial 
   for (const row of [asset, second, third]) expect(screen.getByRole('heading', { name: row.filename })).toBeVisible();
   expect(writes).toEqual(['4', '2', '3', '3']);
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/upload-url'))).toHaveLength(1);
+});
+
+it.each(['archive', 'save'] as const)('keeps the acknowledged %s when an older retry finishes after the write', async (operation) => {
+  const user = userEvent.setup();
+  vi.stubGlobal('XMLHttpRequest', Upload);
+  const third = { ...asset, asset_id: 4, filename: 'TEST_snapshot_C.png' };
+  let stored = { ...human, asset_ids: [2], assets: [asset] };
+  let detailReads = 0;
+  let capturedRead: Response | undefined;
+  let releaseRead!: (response: Response) => void;
+  let releaseWrite!: (response: Response) => void;
+  const delayedRead = new Promise<Response>((resolve) => { releaseRead = resolve; });
+  const delayedWrite = new Promise<Response>((resolve) => { releaseWrite = resolve; });
+  const fetcher = apiFetch(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/upload-url')) return json({ ...ticket, asset_id: 4 }, 201);
+    if (url.endsWith('/confirm')) return json({ ...confirmed, asset_id: 4 });
+    if (url.endsWith(humanPath + '/assets')) {
+      stored = { ...stored, asset_ids: [2, 4], assets: [asset, third] };
+      return json(stored);
+    }
+    if (url.endsWith(humanPath)) {
+      if (init.method === 'PATCH') return delayedWrite;
+      if (++detailReads === 2) return json({}, 503);
+      const response = json(stored);
+      if (detailReads === 3) { capturedRead = response; return delayedRead; }
+      return response;
+    }
+    return json([human]);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<DigitalHumans bootstrap={bootstrap} />);
+  await user.click(await findButton('查看档案 ' + human.name));
+  await user.click(await findButton('上传新素材'));
+  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['abc'], third.filename, { type: 'image/png' })] } });
+  await user.click(button('开始上传并添加'));
+  await finishTransfer();
+  expect(await screen.findByText('数字人档案不可用')).toBeVisible();
+  if (operation === 'archive') {
+    await user.click(button('归档数字人'));
+    await user.click(button('重试数字人档案'));
+  } else {
+    await user.click(button('编辑资料'));
+    await user.clear(screen.getByLabelText('名称'));
+    await user.type(screen.getByLabelText('名称'), 'TEST_已保存档案');
+    await user.click(button('重试数字人档案'));
+    await user.click(button('保存资料'));
+  }
+  await waitFor(() => expect(capturedRead).toBeDefined());
+  stored = operation === 'archive' ? { ...stored, status: 'archived' } : { ...stored, name: 'TEST_已保存档案' };
+  await act(async () => releaseWrite(json(stored)));
+  expect(await screen.findByText(operation === 'archive' ? /已归档。资产引用已保留/ : '数字人资料已保存。')).toBeVisible();
+  await waitFor(() => expect(detailReads).toBeGreaterThanOrEqual(4));
+  await act(async () => releaseRead(capturedRead!));
+  if (operation === 'archive') {
+    expect(await findButton('恢复为启用')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '归档数字人' })).not.toBeInTheDocument();
+  } else {
+    expect(await screen.findByRole('heading', { name: '数字人档案 · TEST_已保存档案' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: '数字人档案 · ' + human.name })).not.toBeInTheDocument();
+  }
+  expect(fetcher.mock.calls.filter(([, init]) => init.method === 'PATCH')).toHaveLength(1);
+});
+
+it('holds the same profile write lock while removing an association and retains its failures', async () => {
+  const user = userEvent.setup();
+  let attached = true;
+  let attempts = 0;
+  let releaseRemoval!: (response: Response) => void;
+  const removal = new Promise<Response>((resolve) => { releaseRemoval = resolve; });
+  const fetcher = apiFetch(async (url: string, init: RequestInit) => {
+    if (url.endsWith(humanPath + '/assets/2') && init.method === 'DELETE') {
+      if (++attempts === 1) return json({}, 403);
+      return removal;
+    }
+    if (url.endsWith(humanPath)) return json({ ...human, asset_ids: attached ? [2] : [], assets: attached ? [asset] : [] });
+    return json([human]);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<DigitalHumans bootstrap={bootstrap} />);
+  await user.click(await findButton('查看档案 ' + human.name));
+  await user.click(await findButton('从当前数字人移除 ' + asset.filename));
+  const confirmation = within(await screen.findByRole('alertdialog'));
+  await user.click(confirmation.getByRole('button', { name: '确认移除' }));
+  expect(await confirmation.findByRole('alert')).toHaveTextContent('你没有权限执行此操作。');
+  expect(screen.getByText('归档数字人').closest('button')).toBeEnabled();
+  await user.click(confirmation.getByRole('button', { name: '确认移除' }));
+  await waitFor(() => expect(attempts).toBe(2));
+  expect(screen.getByText('归档数字人').closest('button')).toBeDisabled();
+  expect(screen.getByText('编辑资料').closest('button')).toBeDisabled();
+  attached = false;
+  await act(async () => releaseRemoval(json({})));
+  expect(await screen.findByText(/已从当前数字人移除/)).toBeVisible();
+  await waitFor(() => expect(screen.queryByRole('heading', { name: asset.filename })).not.toBeInTheDocument());
+  expect(await findButton('归档数字人')).toBeEnabled();
+  expect(fetcher.mock.calls.some(([, init]) => init.method === 'PATCH')).toBe(false);
 });
