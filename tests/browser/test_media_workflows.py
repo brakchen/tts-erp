@@ -160,7 +160,9 @@ def media_run(request, frontend_build, monkeypatch) -> Iterator[MediaRun]:
     monkeypatch.setenv("TTS_ERP_SESSION_SECURE", "1")
     monkeypatch.setenv("TTS_ERP_EXTERNAL_PREFIX", prefix)
     monkeypatch.delenv("TTS_ERP_FRONTEND_DEV_ORIGIN", raising=False)
-    marker = "TEST_media_" + uuid4().hex
+    fixture_id = uuid4()
+    marker = "TEST_media_" + fixture_id.hex
+    client_ip = f"127.{fixture_id.bytes[0]}.{fixture_id.bytes[1]}.{fixture_id.bytes[2] % 254 + 1}"
     username = "test_media_" + uuid4().hex[:16]
     password = "TEST_Media_9!" + uuid4().hex
     store = MediaBytes()
@@ -179,7 +181,7 @@ def media_run(request, frontend_build, monkeypatch) -> Iterator[MediaRun]:
         except (ValueError, SQLAlchemyError) as error:
             pytest.fail(f"TEST media account setup failed ({type(error).__name__})", pytrace=False)
     client = TestClient(
-        app, base_url=APP, follow_redirects=False, raise_server_exceptions=False, client=("127.0.0.27", 50000),
+        app, base_url=APP, follow_redirects=False, raise_server_exceptions=False, client=(client_ip, 50000),
     )
     gate = MediaBrowserBridge(client, store, marker, username, prefix=prefix)
     try:
@@ -838,6 +840,7 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     submit_selection(page, 1)
     heading(page, "数字人档案 · " + person)
     assert video_ready(page, filename) == local_metadata
+    text(main(page).get_by_role("region", name="引用素材", exact=True), "1 个数字人引用")
     assert run.links(human_id) == {asset_id} and gate.calls["POST", attach_path] == 1
     assert_layout(page, tmp_path, "shared_video_detail")
 
