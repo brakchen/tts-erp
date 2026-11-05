@@ -90,7 +90,7 @@ class MediaRun:
         result = self.page.evaluate("""async ({method, path, payload}) => {
             const response = await fetch(path, {
                 method, credentials: 'same-origin',
-                headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+                headers: {'Content-Type': 'application/json', 'X-Requested-With': 'tts-erp'},
                 ...(payload === null ? {} : {body: JSON.stringify(payload)}),
             });
             const value = await response.text();
