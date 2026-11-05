@@ -130,8 +130,8 @@ export function ActionError({ message }: { message: string }) {
   </Alert.Content></Alert> : null;
 }
 
-export function RecordDialog({ title, pending = false, onClose, children }: {
-  title: string; pending?: boolean; onClose: () => void; children: ReactNode;
+export function RecordDialog({ title, pending = false, onClose, children, footer }: {
+  title: string; pending?: boolean; onClose: () => void; children: ReactNode; footer?: ReactNode;
 }) {
   return <Modal.Backdrop isOpen isDismissable={false} isKeyboardDismissDisabled={pending}
     onOpenChange={(open) => { if (!open && !pending) onClose(); }}>
@@ -139,6 +139,7 @@ export function RecordDialog({ title, pending = false, onClose, children }: {
       <Modal.CloseTrigger aria-label="关闭窗口" isDisabled={pending} />
       <Modal.Header><Modal.Heading className="[overflow-wrap:anywhere]">{title}</Modal.Heading></Modal.Header>
       <Modal.Body className="space-y-4">{children}</Modal.Body>
+      {footer && <Modal.Footer>{footer}</Modal.Footer>}
     </Modal.Dialog></Modal.Container>
   </Modal.Backdrop>;
 }

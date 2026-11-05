@@ -153,16 +153,30 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
     onDeleted(human.name);
   }
 
-  function attach(asset: Asset) {
-    if (!human || !canWrite || human.assetIds.includes(asset.assetId)) return;
-    setPickerNotice('');
+  function attach(assets: readonly Asset[]) {
+    if (!human || !canWrite || !assets.length) return;
     void action.run(async () => {
-      const updated = await mediaWrite(root, '/digital-humans/' + id + '/assets', 'POST', decodeDigitalHuman, { assetId: asset.assetId });
-      if (updated.digitalHumanId !== id || !updated.assetIds.includes(asset.assetId)) throw new Error('添加结果不符');
-      setOverride({ ...human, ...updated, assets: [...human.assets, asset] });
-      setPickerNotice('已添加「' + asset.filename + '」。');
-      setNotice('已添加「' + asset.filename + '」。');
-      onChanged();
+      setPickerNotice('');
+      let current = human;
+      let added = 0;
+      try {
+        for (const asset of assets) {
+          if (current.assetIds.includes(asset.assetId)) continue;
+          const updated = await mediaWrite(root, '/digital-humans/' + id + '/assets', 'POST', decodeDigitalHuman, { assetId: asset.assetId });
+          if (updated.digitalHumanId !== id || !updated.assetIds.includes(asset.assetId)) throw new Error('添加结果不符');
+          current = { ...current, ...updated, assets: [...current.assets, asset] };
+          setOverride(current);
+          added += 1;
+        }
+      } finally {
+        if (added) {
+          const message = '已添加 ' + added + ' 项资产。';
+          setPickerNotice(message);
+          setNotice(message);
+          onChanged();
+        }
+      }
+      setMode('view');
     });
   }
 
