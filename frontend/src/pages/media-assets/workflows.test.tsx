@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 import DigitalHumans from '../digital-humans';
 import MediaAssets from './index';
@@ -45,6 +45,12 @@ class Upload {
   send() { Upload.last = this; }
   abort() {}
 }
+
+beforeEach(() => {
+  let nextUrl = 0;
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:TEST_local_' + ++nextUrl) });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -651,4 +657,36 @@ it('holds the same profile write lock while removing an association and retains 
   await waitFor(() => expect(screen.queryByRole('heading', { name: asset.filename })).not.toBeInTheDocument());
   expect(await findButton('归档数字人')).toBeEnabled();
   expect(fetcher.mock.calls.some(([, init]) => init.method === 'PATCH')).toBe(false);
+});
+
+it('previews the selected local file before upload and releases URLs on replacement and departure', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('XMLHttpRequest', Upload);
+  const fetcher = apiFetch(async () => json(page()));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<MediaAssets bootstrap={bootstrap} />);
+  await user.click(button('上传素材'));
+  const image = new File(['abc'], 'TEST_local.png', { type: 'image/png' });
+  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [image] } });
+  expect(await screen.findByRole('img', { name: '本地图片预览 ' + image.name })).toHaveAttribute('src', 'blob:TEST_local_1');
+  expect(URL.createObjectURL).toHaveBeenCalledWith(image);
+  expect(Upload.last).toBeUndefined();
+  expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
+
+  const video = new File(['video'], 'TEST_local.mp4', { type: 'video/mp4' });
+  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [video] } });
+  const preview = await screen.findByLabelText('本地视频预览 ' + video.name);
+  expect(preview).toHaveAttribute('src', 'blob:TEST_local_2');
+  expect(preview).toHaveAttribute('controls');
+  expect(preview).toHaveAttribute('preload', 'metadata');
+  expect(preview).toHaveAttribute('playsinline');
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:TEST_local_1');
+  fireEvent.error(preview);
+  expect(screen.getByText('暂时无法预览所选文件。你可以继续上传，或重新选择文件。')).toBeVisible();
+  expect(button('开始上传')).toBeEnabled();
+  expect(Upload.last).toBeUndefined();
+  expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
+  view.unmount();
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:TEST_local_2');
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
 });
