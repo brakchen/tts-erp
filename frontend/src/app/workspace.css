@@ -35,13 +35,6 @@ body { font-family: var(--sans); background: var(--paper); color: var(--ink); }
 .erp-table { width: 100%; min-width: 0; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); }
 .erp-section-heading { font-size: 16px; font-weight: 600; }
 .erp-empty { padding: 48px 24px; text-align: center; color: var(--muted); }
-.erp-drawer { background: var(--accent-deep); color: var(--navigation-foreground); }
-/* HeroUI 可见表面在内部 .drawer__dialog 上（默认 var(--overlay) 白色），必须同步深色导航主题，
-   否则移动端抽屉变成白底 + 浅色导航文字不可读。 */
-.erp-drawer .drawer__dialog { background: var(--accent-deep); color: var(--navigation-foreground); }
-.erp-drawer .drawer__heading { color: var(--navigation-foreground); }
-.erp-drawer .drawer__body { color: var(--navigation-muted); }
-.erp-drawer .drawer__close-trigger { color: var(--navigation-foreground); }
 .erp-scope { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 18px; padding: 22px 24px; border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 16px; background: var(--surface); }
 .erp-shop-picker { display: grid; width: min(100%, 480px); min-width: 0; gap: 8px; color: var(--muted); font-size: 12px; }
 .erp-list-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
