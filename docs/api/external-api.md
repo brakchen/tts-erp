@@ -1139,6 +1139,8 @@ proxies), `GET /orders/{id}/*`, `GET /finance/*`, `POST /sync/*`,
 
 ### 店铺接入管理
 
+Monitor 使用 `POST /v2/plugin/shops/{sellerId}/telemetry`，要求 readwrite 和对应店铺 scope。请求为 `{"items":[{"key":"monitor.heartbeat","value":0}]}`。ERP 自动登记 Zabbix 监控主机并转发，每项确认后返回 204；未完成 Monitor 店铺登记返回 409，上游不可用或部分拒收返回 503。请求不接受 Zabbix 凭据、主机或时间字段。协议与服务端凭据配置见 [Monitor 经 ERP 接入 Zabbix](../plugins/monitor/zabbix-monitor.md)。
+
 `GET /v2/commerce/channel-accounts?view=management` 展示全部登记店铺；默认列表及业务查询仅展示已授权店铺。管理列表支持 `q/source/app_state/auth_state/limit/offset`，总数见 `X-Total-Count`。
 
 `GET /v2/oauth/tiktok/authorize?shop_pk=...&format=json` 为指定店铺生成一次性链接。回调只接受唯一且匹配目标的店铺，并检查本店 App 配置版本；成功后自动进入下一轮定时同步。

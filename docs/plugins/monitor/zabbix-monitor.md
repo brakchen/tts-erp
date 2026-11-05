@@ -1,4 +1,22 @@
-# Monitor 接入 Zabbix 7.4
+# Monitor 经 ERP 接入 Zabbix 7.4
+
+## 方案 2 的接入契约
+
+插件只保存现有 ERP 地址和 API Key。绑定后沿用 `POST /v2/plugin/shops/discover` 自动登记店铺，随后向 `POST /v2/plugin/shops/{sellerId}/telemetry` 提交当前观察值。ERP 验证 readwrite 权限、店铺 scope 和 Monitor 登记，自动创建或匹配 `tts-monitor-<sellerId>` 并链接模板，再通过 Zabbix 官方 Python SDK `zabbix-utils==2.0.4` 转发 `history.push`。SDK 为 MIT 许可证，来源为 [官方仓库](https://github.com/zabbix/python-zabbix-utils)。
+
+上报请求仅有 `items` 数组，每项为 `key` 和 `value`。允许下文的 8 个项键，禁止指定主机、时间、Token 或任意 Zabbix 方法。心跳和活动值只能是数字 0/1，进展值只能是数字 1，店名为不超过 200 字符的文本。重复项键、额外字段和超过 16KiB 的请求被拒绝。ERP 按已鉴权的 Seller ID 构造 Zabbix 主机名。
+
+全部项在 Zabbix 获得逐项成功确认后返回 204。未登记的 Monitor 店铺返回 409，Zabbix 超时、部分拒收或配置缺失返回 503。插件保留 2 秒超时及独立 30 秒心跳，不重放历史心跳。上报失败不参与扫描、规则判断和关停结果。
+
+Zabbix 继续拥有失联、业务停滞、事件去重、恢复和飞书通知。ERP 不保存心跳或重建告警状态。旧 `POST /v2/plugin/monitor/health` 保持 404。
+
+服务端配置 `TTS_ERP_ZABBIX_URL`，使用 HTTPS 或回环 HTTP 地址。服务凭据通过 `token_service.upsert_credentials` 写入加密凭据库，provider 为 `zabbix`，external_account_id 为 `monitor-relay`。运行时仅通过 `load_credentials` 读取。专用 Zabbix 服务账号需要 Monitor 主机组读写权限、模板组读取权限，以及 `host.get/create/update`、`hostgroup.get`、`template.get`、`history.push` 的 API 权限。已有主机被停用、归属错误或缺少模板时交由运维处理。
+
+模板与飞书动作在服务器配置一次。每家新登记店铺由第一次上报自动建主机，重复请求和并发首次上报复用唯一技术名称。浏览器不再需要 Zabbix Token。上线前需要部署 ERP 转发版本并配置上述服务账号，随后使用新插件传输方式。
+
+## 原直连方案的部署记录
+
+以下内容记录原直连协议和既有隔离验证。方案 2 沿用监控项和触发器定义，客户端连接配置改由上述 ERP 入口承接。
 
 先发布 ERP 健康接口退役版本，确认公网和 HP Desk 的 `GET /endpoints` 均不再列出 `POST /v2/plugin/monitor/health`，并确认 HP Desk 同步 worker 已从同一发布版本重启。店铺名册仍由 ERP 店铺登记维护。人工发布、旧接口验收和生产网关配置见[公网 HTTPS 接入与切换](zabbix-https-cutover.md)。
 
