@@ -535,6 +535,61 @@ def test_tag_candidates_are_readonly_deduplicated_and_ready_only(
     assert [row["asset_id"] for row in keyword.json()["items"]] == [ready_ids[1]]
 
 
+def test_legacy_unicode_tag_whitespace_has_matching_candidates_and_filters(
+    api_client_focused, readwrite_key, readonly_key, db_engine
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(
+        api_client_focused, readwrite_key, filename="TEST_unicode_whitespace.jpg"
+    )
+    asset_path = f"/v2/media/assets/{asset_id}"
+    assert (
+        api_client_focused.post(f"{asset_path}/confirm", headers=headers).status_code
+        == 200
+    )
+    raw_tags = [
+        "\x1c TEST_legacy\x1ccontrol \x1c",
+        "\u00a0TEST_legacy\u00a0nbsp\u00a0",
+        "\tTEST_legacy\t tab\t",
+        "\u00a0TEST_legacy\x1ccontrol\t",
+        "\x1c\u00a0\t",
+    ]
+    # Bypass write normalization to exercise labels stored by older versions.
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE media.media_assets SET tags = :tags WHERE id = :id"),
+            {"tags": raw_tags, "id": asset_id},
+        )
+
+    expected = ["TEST_legacy control", "TEST_legacy nbsp", "TEST_legacy tab"]
+    readonly_headers = {"Authorization": f"Bearer {readonly_key}"}
+    candidates = api_client_focused.get(
+        "/v2/media/assets/tags", headers=readonly_headers
+    )
+    assert candidates.status_code == 200, candidates.text
+    assert candidates.json() == expected
+    assert (
+        api_client_focused.get(asset_path, headers=readonly_headers).json()["tags"]
+        == expected
+    )
+    for normalized, raw in zip(expected, raw_tags, strict=False):
+        for name, value in (("tag", normalized), ("tag", raw), ("keyword", normalized)):
+            filtered = api_client_focused.get(
+                "/v2/media/assets", headers=readonly_headers, params={name: value}
+            )
+            assert filtered.status_code == 200, filtered.text
+            assert filtered.json()["total"] == 1, (name, value, filtered.json())
+            assert [row["asset_id"] for row in filtered.json()["items"]] == [asset_id]
+    with db_engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text("SELECT tags FROM media.media_assets WHERE id = :id"),
+                {"id": asset_id},
+            )
+            == raw_tags
+        )
+
+
 # ---------------------------------------------------------------------------
 # PATCH / DELETE /v2/media/assets/{id}
 # ---------------------------------------------------------------------------
