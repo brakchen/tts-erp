@@ -3,7 +3,7 @@ import { Button } from '@heroui/react';
 import { decodeAsset, type Asset } from './contracts';
 import { mediaRequest, useMediaAction } from './media-ui';
 
-export default function AssetPreview({ asset, root }: { asset: Asset; root: string }) {
+export default function AssetPreview({ asset, root, compact = false }: { asset: Asset; root: string; compact?: boolean }) {
   const [replacement, setReplacement] = useState<Asset>();
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const action = useMediaAction();
@@ -21,11 +21,11 @@ export default function AssetPreview({ asset, root }: { asset: Asset; root: stri
     {source.status === 'ready' && <Button variant="secondary" isPending={action.pending} onPress={retry}>重新获取预览</Button>}
     {action.error && <p role="alert">{action.error}</p>}
   </div>;
-  return <div className="flex min-w-0 justify-center rounded-lg bg-default/40 p-2">
+  return <div className={'flex min-w-0 items-center justify-center rounded-lg bg-default/40 p-2 ' + (compact ? 'aspect-video' : '')}>
     {source.kind === 'video'
       ? <video key={url} src={url} aria-label={'视频预览 ' + source.filename} controls preload="metadata" playsInline
-          className="max-h-72 max-w-full" onError={() => setFailedUrl(url)} />
-      : <img key={url} src={url} alt={'图片预览 ' + source.filename} className="max-h-72 max-w-full object-contain"
+          className={compact ? 'h-full max-w-full object-contain' : 'max-h-96 max-w-full'} onError={() => setFailedUrl(url)} />
+      : <img key={url} src={url} alt={'图片预览 ' + source.filename} className={compact ? 'h-full max-w-full object-contain' : 'max-h-96 max-w-full object-contain'}
           onError={() => setFailedUrl(url)} />}
   </div>;
 }
