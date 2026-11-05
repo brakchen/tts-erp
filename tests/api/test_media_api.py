@@ -572,7 +572,7 @@ def test_legacy_unicode_tag_whitespace_has_matching_candidates_and_filters(
         api_client_focused.get(asset_path, headers=readonly_headers).json()["tags"]
         == expected
     )
-    for normalized, raw in zip(expected, raw_tags, strict=False):
+    for normalized, raw in zip(expected, raw_tags[:3], strict=True):
         for name, value in (("tag", normalized), ("tag", raw), ("keyword", normalized)):
             filtered = api_client_focused.get(
                 "/v2/media/assets", headers=readonly_headers, params={name: value}
@@ -737,18 +737,20 @@ def test_asset_link_and_delete_lock_each_other_in_both_directions(
 
     # Holding commit leaves the actual operation's lock open. A bounded DB
     # timeout proves contention, without timing-dependent thread sleeps.
-    for holder_operation, waiting_operation in (
+    for holder_operation, waiting_operation, expected_after_commit in (
         (
             lambda session: repository.link_asset_to_digital_human(
                 session, human_id, asset_id
             ),
             lambda session: repository.soft_delete_asset(session, asset_id),
+            repository.DeleteAssetError.ASSET_IN_USE,
         ),
         (
             lambda session: repository.soft_delete_asset(session, asset_id),
             lambda session: repository.link_asset_to_digital_human(
                 session, human_id, asset_id
             ),
+            repository.LinkAssetError.ASSET_NOT_FOUND,
         ),
     ):
         with Session(db_engine) as holder, Session(db_engine) as waiter:
@@ -763,7 +765,34 @@ def test_asset_link_and_delete_lock_each_other_in_both_directions(
                 waiting_operation(waiter)
             assert getattr(blocked.value.orig, "sqlstate", None) == "55P03"
             waiter.rollback()
-            holder.rollback()
+            holder.commit()
+
+        # A fresh transaction after the winning commit must observe its result,
+        # rather than deleting a newly referenced asset or linking a deleted one.
+        with Session(db_engine) as resumed:
+            assert waiting_operation(resumed) is expected_after_commit
+        with db_engine.connect() as conn:
+            deleted_at = conn.scalar(
+                text("SELECT deleted_at FROM media.media_assets WHERE id = :id"),
+                {"id": asset_id},
+            )
+            links = conn.scalar(
+                text(
+                    "SELECT count(*) FROM media.digital_human_assets WHERE asset_id = :id"
+                ),
+                {"id": asset_id},
+            )
+        if expected_after_commit is repository.DeleteAssetError.ASSET_IN_USE:
+            assert deleted_at is None
+            assert links == 1
+            # Clear the first winner's reference before exercising delete-first.
+            with Session(db_engine) as cleanup:
+                assert repository.unlink_asset_from_digital_human(
+                    cleanup, human_id, asset_id
+                )
+        else:
+            assert deleted_at is not None
+            assert links == 0
 
 
 def test_deleted_persona_legacy_reference_is_not_counted_or_a_delete_blocker(
