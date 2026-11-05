@@ -616,12 +616,13 @@ def get_digital_human(
             f"digital human not found: {digital_human_id}",
         )
     asset_ids = repository.asset_ids_for_digital_human(sess, human.id)
+    usage_counts = repository.usage_counts_for_assets(sess, asset_ids)
     assets: list[AssetOut] = []
     for asset_id in asset_ids:
         asset = repository.get_asset(sess, asset_id)
         if asset is None:
             continue
-        assets.append(_asset_with_preview(asset))
+        assets.append(_asset_with_preview(asset, usage_count=usage_counts[asset.id]))
     return DigitalHumanDetailOut(
         digital_human_id=human.id,
         name=human.name,
