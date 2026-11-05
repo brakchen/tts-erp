@@ -58,7 +58,6 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
         targets = sorted(roots) + [
             target for target in required
             if not any(target == root or target.startswith((root + "/", root + "::")) for root in roots)
-            or target in LEGACY_FRONTEND
         ]
     if not targets:
         return 5
@@ -82,7 +81,7 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
     if scope != "fast":
         args.append("-rP")
     if plan.backend_all and scope != "fast":
-        args.extend(f"--ignore={path}" for path in LEGACY_FRONTEND)
+        args.extend(f"--ignore={path}" for path in LEGACY_FRONTEND if path not in required)
     if plan.build:
         lock_path = ROOT / Path(os.fsdecode(git("rev-parse", "--git-path", "tts-test-frontend.lock")).strip())
         with lock_path.open("a") as lock:

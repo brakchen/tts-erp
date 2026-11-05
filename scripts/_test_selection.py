@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -17,6 +16,9 @@ PACKAGER = "tests/frontend/test_build_package.py"
 SOURCE_CONTRACTS = "tests/frontend/test_source_contracts.py"
 STYLE_TOKENS = "tests/frontend/test_style_tokens.py"
 SELECTOR_TESTS = "tests/scripts/test_test_selection.py"
+ZABBIX_TEMPLATE = "docs/plugins/monitor/zabbix-monitor.yaml"
+ZABBIX_CHECK = "tests/scripts/test_zabbix_monitor_template.py"
+DRAWER_BROWSER = "tests/browser/test_frontend_pilots.py::test_navigation_drawer_theme_and_focus"
 LEGACY_FRONTEND = (
     "tests/publishing/test_polling_channels.py",
     "tests/publishing/test_upload_cancellation.py",
@@ -118,6 +120,14 @@ def _contract(selection: Selection, api: str) -> None:
 
 
 def _classify(selection: Selection, path: str) -> str:
+    if path in {ZABBIX_TEMPLATE, ZABBIX_CHECK}:
+        selection.checks.append(ZABBIX_CHECK)
+        return "Zabbix template syntax and structure"
+    if path == "frontend/src/app/navigation-drawer.css":
+        _frontend_filters(selection, "src/app/AppShell.test.tsx", "src/app/SessionActions.test.tsx")
+        selection.checks.append(STYLE_TOKENS)
+        selection.browser_mock.append(DRAWER_BROWSER)
+        return "mobile navigation drawer theme and focus"
     if path in PAGE_ASSETS:
         _frontend_all(selection)
         selection.checks.append(PACKAGER)

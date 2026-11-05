@@ -59,6 +59,14 @@ browser behavior. Append `--scenario login-cookie` for browser login and cookies
 `--scenario account-page` for the isolated account page contract. A schema change
 requires `--refresh-template`. Browser scopes build current assets when needed.
 
+The Monitor Zabbix export selects its YAML syntax and structure checks through
+the isolated runner. These checks do not validate a live Zabbix import. Other YAML
+paths keep their existing fallback. Mobile navigation rules live in
+`frontend/src/app/navigation-drawer.css` and select the application-shell component
+tests and the two-prefix mobile drawer color/focus browser check. Shared
+`workspace.css` changes keep their broader layout coverage. Named browser scenarios
+are added to either plan when requested.
+
 Use `--scope fast --base "$target_sha"` when changing selection, the baseline
 driver, test execution or isolation, result reporting, or global test collection
 and fixtures. This includes `scripts/test*.sh`, `scripts/_test_selection.py`,
