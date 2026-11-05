@@ -840,6 +840,7 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     submit_selection(page, 1)
     heading(page, "数字人档案 · " + person)
     assert video_ready(page, filename) == local_metadata
+    text(main(page).get_by_role("region", name="引用素材", exact=True), "1 个数字人引用")
     assert run.links(human_id) == {asset_id} and gate.calls["POST", attach_path] == 1
     assert_layout(page, tmp_path, "shared_video_detail")
 
