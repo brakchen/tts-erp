@@ -54,7 +54,7 @@ credential kinds:
 | SPU 盈利表现对比 | `GET /v2/analytics/spu-profit-deterioration` | readonly — 7 天主参考、3 天辅助；现行契约见本文同名章节及 [技术设计](../spu-profit-deterioration/02-technical-design.md) |
 | SPU 盈利表现对比页面 (HTML) | `GET /v2/pages/spu-profit-deterioration` | readonly (browser → 302 login)；保留既有页面入口与权限点，不再提供告警配置编辑 |
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
-| Media asset library | `GET /v2/media/assets[?kind=&status=&keyword=&tag=&digitalHumanId=&excludeDigitalHumanId=]`, `GET/PATCH/DELETE /v2/media/assets/{id}`, `POST /v2/media/assets/upload-url`, `POST /v2/media/assets/{id}/confirm` | readonly / readwrite |
+| Media asset library | `GET /v2/media/assets[?kind=&status=&keyword=&tag=&digitalHumanId=&excludeDigitalHumanId=]`, `GET /v2/media/assets/tags`, `GET/PATCH/DELETE /v2/media/assets/{id}`, `POST /v2/media/assets/upload-url`, `POST /v2/media/assets/{id}/confirm` | readonly / readwrite |
 | Digital humans (personas) | `GET/POST /v2/media/digital-humans`, `GET/PATCH/DELETE /v2/media/digital-humans/{id}`, `POST /v2/media/digital-humans/{id}/assets`, `DELETE /v2/media/digital-humans/{id}/assets/{assetId}` | readonly / readwrite |
 | Media asset / digital human pages (HTML) | `GET /v2/pages/media-assets`, `GET /v2/pages/digital-humans` | readonly (browser → 302 login)；页面权限点 `page:media-assets` / `page:digital-humans` |
 | TikTok video publish workflow | `GET /v2/pages/video-publish`, `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, replace-upload, verify, `/cleanup/retry`, `POST /v2/video-publish/tasks/{id}/confirm-published`, `PATCH /v2/video-publish/tasks/{id}/settings` | session: page:video-publish + readonly/readwrite action tier; API key: admin by default; page-level scope (every task in the workspace) |
@@ -481,7 +481,9 @@ with a presigned URL. Design:
 [`media-asset-library.md`](../design/media-asset-library.md).
 
 1. `POST /v2/media/assets/upload-url` (readwrite) — body
-   `{"filename", "contentType", "sizeBytes"}`. `contentType` must be one of
+   `{"filename", "contentType", "sizeBytes"}` with optional `tags: string[]`
+   (default `[]`). Tags are stored with the staged ticket in the same transaction
+   as upload URL signing; a signing failure leaves no ticket. `contentType` must be one of
    `image/jpeg|png|webp|gif` (≤20 MiB) or `video/mp4|webm|quicktime`
    (≤200 MiB); anything else → 400. → 201
    `{asset_id, object_key, upload_url, upload_expires_at, required_headers}`.
@@ -495,13 +497,25 @@ with a presigned URL. Design:
    `status` (`awaiting_upload`/`ready`/`failed`), `keyword`, `tag`,
    `digitalHumanId` (linked to this persona), and
    `excludeDigitalHumanId` (unlinked to this persona) filters; returns
-   `{items, total, limit, offset}`. Asset metadata remains readable when MinIO
+   `{items, total, limit, offset}`. `keyword` matches filename, description, or
+   a tag substring, case-insensitively; `tag` matches one complete normalized
+   label and accepts saved labels of any length. Exclusions apply before both
+   pagination and the total count. Each item includes server-calculated
+   `usageCount`, counting references from undeleted personas, including archived
+   personas. Asset metadata remains readable when MinIO
    is unconfigured. Preview URLs are nullable and only issued for ready assets.
    Upload URL generation and confirmation of a pending ticket return HTTP 503 when MinIO is unconfigured.
 5. `GET/PATCH/DELETE /v2/media/assets/{asset_id}` — detail / metadata edit /
    soft-delete (204, idempotent; the stored object is removed best-effort).
+   DELETE returns 409 `ASSET_IN_USE` while any undeleted persona references the
+   asset, including archived personas; metadata, references, and object bytes
+   are preserved. There is no force-delete option. Reference checking and
+   deletion hold the asset's exclusive row lock, serializing concurrent links.
    Detail includes `used_by: [{digital_human_id, name, status}]` for current
-   persona references, including archived personas.
+   persona references, including archived personas, and matching `usageCount`.
+   Existing snake_case response fields remain unchanged; only `usageCount`
+   uses camelCase. In PATCH responses or embedded asset records where usage
+   has not been calculated, `usageCount` is null.
 6. `GET/POST /v2/media/digital-humans` (readonly / readwrite) — list /
    create. List accepts optional `status=active|archived`. Returned
    `asset_ids` exclude soft-deleted assets.
@@ -514,6 +528,15 @@ with a presigned URL. Design:
    Existing links can be read, replayed, or detached.
    `DELETE /v2/media/digital-humans/{id}/assets/{asset_id}` — detach
    (idempotent).
+9. `GET /v2/media/assets/tags` (readonly) — a deduplicated, sorted `string[]`
+   of tags saved on ready, undeleted assets. Pending, failed, and soft-deleted
+   assets contribute no candidates. This read does not create tag records.
+
+Upload and metadata PATCH trim leading/trailing whitespace, collapse repeated
+whitespace, remove empty labels, and deduplicate tags while preserving input
+order. Reading and exact filtering apply the same normalization to historical
+metadata; labels are never truncated. Candidate tags come from saved assets,
+so unsaved custom labels remain a client's local draft until submission.
 
 ### LLM context
 
