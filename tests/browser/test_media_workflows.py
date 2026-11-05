@@ -468,7 +468,7 @@ def test_tag_editor_upload_pending_input_failed_save_and_shared_chips(media_run:
     pending_tag = run.name("upload_pending")
     button(main(page), "上传素材").click()
     heading(page, "上传素材")
-    cancelled_upload = run.name("cancelled_upload_candidate")
+    cancelled_upload = run.name("cancel_upload")
     main(page).get_by_role("textbox", name="新增标签", exact=True).fill(cancelled_upload)
     button(main(page), "添加标签").click()
     button(main(page), "取消上传").click()
