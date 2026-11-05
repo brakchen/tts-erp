@@ -332,6 +332,7 @@ it('keeps the detail and refreshes references when a concurrent association reje
   await waitFor(() => expect(confirmation.getByRole('button', { name: '确认删除' })).toBeEnabled());
   await user.click(confirmation.getByRole('button', { name: '确认删除' }));
   expect(await confirmation.findByRole('link', { name: human.name })).toBeVisible();
+  expect(confirmation.getByRole('alert')).toHaveTextContent('此素材仍被数字人引用。请先解除全部引用，再从素材库删除。');
   expect(confirmation.getByRole('button', { name: '确认删除' })).toBeDisabled();
   await user.click(confirmation.getByRole('button', { name: '取消' }));
   expect(screen.getByRole('heading', { name: '素材详情 · ' + asset.filename })).toBeVisible();
