@@ -17,6 +17,7 @@
 # -----
 #   bash scripts/test_baseline.sh                 # run fast once, compare, verdict
 #   bash scripts/test_baseline.sh --scope unit    # any test_isolated.sh selection
+#   bash scripts/test_baseline.sh --scope auto --base REV [--plan]  # scoped run or preview
 #   bash scripts/test_baseline.sh --show          # print the committed baseline
 #   bash scripts/test_baseline.sh --update        # regenerate the baseline (master only)
 #   bash scripts/test_baseline.sh --keep-log PATH # also save the raw pytest output
@@ -36,6 +37,10 @@ BASELINE_FILE="docs/testing/baseline-fast.txt"
 SCOPE="fast"
 MODE="compare"
 KEEP_LOG=""
+BASE=""
+PLAN=0
+REFRESH_TEMPLATE=0
+SCENARIOS=()
 RUN_LOG=""
 RUN_TMP=""
 
@@ -47,6 +52,18 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope)
       SCOPE="${2:-}"
+      shift 2
+      ;;
+    --base)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      BASE="$2"
+      shift 2
+      ;;
+    --plan) PLAN=1; shift ;;
+    --refresh-template) REFRESH_TEMPLATE=1; shift ;;
+    --scenario)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      SCENARIOS+=(--scenario "$2")
       shift 2
       ;;
     --update) MODE="update"; shift ;;
@@ -77,6 +94,38 @@ fail() {
   exit 2
 }
 
+SCOPED=0
+case "$SCOPE" in
+  auto|frontend|backend)
+    [[ "$MODE" == compare ]] || fail 'scoped runs require compare mode'
+    if [[ "$SCOPE" == auto ]]; then
+      [[ -n "$BASE" ]] || fail 'auto requires --base'
+    else
+      BASE="${BASE:-origin/master}"
+      [[ "${#SCENARIOS[@]}" -eq 0 ]] || fail '--scenario requires --scope auto'
+    fi
+    SCOPED=1
+    if [[ "$PLAN" -eq 1 ]]; then
+      exec "${PYTHON:-python3}" scripts/_test_selection.py --scope "$SCOPE" --base "$BASE" "${SCENARIOS[@]}"
+    fi
+    ;;
+  fast)
+    [[ "$PLAN" -eq 0 && "${#SCENARIOS[@]}" -eq 0 ]] ||
+      fail 'fast does not accept --plan or --scenario'
+    if [[ -n "$BASE" || "$REFRESH_TEMPLATE" -eq 1 ]]; then
+      [[ "$MODE" == compare ]] || fail 'fast with --base or --refresh-template requires compare mode'
+    fi
+    if [[ -n "$BASE" ]]; then SCOPED=1; fi
+    ;;
+  all|coverage|migration|domain_migration)
+    fail 'historical migration suites are not supported by the baseline driver'
+    ;;
+  *)
+    [[ "$PLAN" -eq 0 && -z "$BASE" && "$REFRESH_TEMPLATE" -eq 0 && "${#SCENARIOS[@]}" -eq 0 ]] ||
+      fail '--base, --plan and --refresh-template require a scoped run'
+    ;;
+esac
+
 RUN_TMP="$(mktemp -d)"
 RUN_LOG="$RUN_TMP/pytest.log"
 cleanup() {
@@ -84,9 +133,8 @@ cleanup() {
   if [[ -n "$KEEP_LOG" ]]; then
     cp "$RUN_LOG" "$KEEP_LOG" 2>/dev/null || true
     echo "[test-baseline] raw pytest output: $KEEP_LOG"
-  else
-    rm -rf "$RUN_TMP"
   fi
+  rm -rf "$RUN_TMP"
   exit "$rc"
 }
 trap cleanup EXIT
@@ -112,6 +160,51 @@ baseline_ids() {
   sed -n -E '/^[^#]/ { /^tests\/[^ ]*::[^ ]+$/ p }' "$1" | LC_ALL=C sort -u
 }
 
+if [[ "$SCOPED" -eq 1 ]]; then
+  SELECT_PYTHON="${PYTHON:-python3}"
+  [[ -z "$(git status --porcelain --untracked-files=all)" ]] ||
+    fail 'scoped runs require a clean committed worktree'
+  "$SELECT_PYTHON" scripts/_test_selection.py --scope "$SCOPE" --base "$BASE" "${SCENARIOS[@]}" >"$RUN_TMP/plan.json"
+  cat "$RUN_TMP/plan.json"
+  BASE="$("$SELECT_PYTHON" -c 'import json, sys; print(json.load(sys.stdin)["base"])' <"$RUN_TMP/plan.json")"
+  HEAD_SHA="$("$SELECT_PYTHON" -c 'import json, sys; print(json.load(sys.stdin)["head"])' <"$RUN_TMP/plan.json")"
+  git diff --check "$BASE" "$HEAD_SHA" --
+  if "$SELECT_PYTHON" -c 'import json, sys; p = json.load(sys.stdin); sys.exit(any(p[k] for k in ("frontend", "backend", "backend_all", "checks", "scenarios", "browser_mock")))' <"$RUN_TMP/plan.json"; then
+    echo '[test-baseline] no application tests selected; perform any indicated documentation checks'
+    exit 0
+  fi
+  git show "$BASE:$BASELINE_FILE" >"$RUN_TMP/target-baseline.txt" ||
+    fail 'trusted target baseline is unavailable'
+  if "$SELECT_PYTHON" -c 'import json, sys; sys.exit(not json.load(sys.stdin)["refresh_template"])' <"$RUN_TMP/plan.json" &&
+    [[ "$REFRESH_TEMPLATE" -ne 1 ]]; then
+    fail 'schema changes require --refresh-template'
+  fi
+  options=()
+  if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then options+=(--refresh-template); fi
+  rc=0
+  bash scripts/test_isolated.sh "${options[@]}" selected --scope "$SCOPE" --base "$BASE" --head "$HEAD_SHA" --report "$RUN_TMP/report.json" \
+    "${SCENARIOS[@]}" >"$RUN_LOG" 2>&1 || rc=$?
+  if [[ "$SCOPE" != fast || "$rc" -ne 0 ]]; then cat "$RUN_LOG"; fi
+  "$SELECT_PYTHON" - "$RUN_TMP/report.json" "$RUN_TMP/target-baseline.txt" "$rc" <<'PYTHON'
+import json
+import sys
+from pathlib import Path
+
+result, baseline, status = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+if status not in {0, 1} or not result.is_file():
+    sys.exit(f"[test-baseline] scoped runner failed or produced no results (exit {status})")
+report = json.loads(result.read_text(encoding="utf-8"))
+if report["status"] != status or not report["ran"] or report["missing"] or bool(report["failed"]) != bool(status):
+    sys.exit(f"[test-baseline] selected tests incomplete: {report}")
+known = {line for line in baseline.read_text(encoding="utf-8").splitlines() if line.startswith("tests/")}
+new = sorted(set(report["failed"]) - known)
+if new:
+    sys.exit("[test-baseline] new failures:\n" + "\n".join(new))
+print(f"[test-baseline] {report['ran']} selected cases executed; no new failures")
+PYTHON
+  exit 0
+fi
+
 case "$MODE" in
   show)
     [[ -f "$BASELINE_FILE" ]] || fail "baseline not found: $BASELINE_FILE"
@@ -125,6 +218,16 @@ case "$MODE" in
     ;;
 esac
 
+TRUSTED_BASELINE="$BASELINE_FILE"
+if [[ -n "$BASE" ]]; then
+  BASE="$(git rev-parse --verify --end-of-options "${BASE}^{commit}")"
+  git merge-base --is-ancestor "$BASE" HEAD || fail 'base must be an ancestor of HEAD'
+  TRUSTED_BASELINE="$RUN_TMP/target-baseline.txt"
+  git show "$BASE:$BASELINE_FILE" >"$TRUSTED_BASELINE" || fail 'trusted target baseline is unavailable'
+fi
+options=()
+if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then options+=(--refresh-template); fi
+
 echo "[test-baseline] running scope '$SCOPE' once through the isolated runner"
 echo "[test-baseline] this single run replaces the old capture-baseline + rerun-the-suite procedure"
 
@@ -132,7 +235,7 @@ echo "[test-baseline] this single run replaces the old capture-baseline + rerun-
 # do not let `set -e` abort before we get to read the summary.
 rc=0
 # shellcheck disable=SC2086
-bash scripts/test_isolated.sh "$SCOPE" -p no:cacheprovider >"$RUN_LOG" 2>&1 || rc=$?
+bash scripts/test_isolated.sh "${options[@]}" "$SCOPE" -p no:cacheprovider >"$RUN_LOG" 2>&1 || rc=$?
 
 pytest_failure_ids "$RUN_LOG" >"$RUN_TMP/current.txt"
 
@@ -142,7 +245,10 @@ pytest_failure_ids "$RUN_LOG" >"$RUN_TMP/current.txt"
 # means the run aborted (collection error, wrapper failure) and any diff we
 # computed from it would be silently empty — which would read as "zero new
 # failures" and wrongly pass the DoD.
-if ! grep -qE "short test summary info|slowest .* durations|no tests ran" "$RUN_LOG"; then
+if [[ "$rc" -gt 1 ]] ||
+  [[ "$rc" -eq 1 && ! -s "$RUN_TMP/current.txt" ]] ||
+  grep -qE '^\[isolated-test\] ERROR:|no tests ran' "$RUN_LOG" ||
+  ! grep -qE "short test summary info|slowest .* durations" "$RUN_LOG"; then
   fail "the suite did not produce a recognizable pytest summary; inspect the run output"
 fi
 
@@ -176,7 +282,7 @@ if [[ "$MODE" == "update" ]]; then
 fi
 
 # compare mode
-baseline_ids "$BASELINE_FILE" >"$RUN_TMP/base.txt"
+baseline_ids "$TRUSTED_BASELINE" >"$RUN_TMP/base.txt"
 
 LC_ALL=C comm -13 "$RUN_TMP/base.txt" "$RUN_TMP/current.txt" >"$RUN_TMP/new.txt"
 LC_ALL=C comm -23 "$RUN_TMP/base.txt" "$RUN_TMP/current.txt" >"$RUN_TMP/fixed.txt"

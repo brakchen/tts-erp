@@ -157,6 +157,7 @@ def bound_request(probe, client, method, path, **kwargs):
 
 
 @pytest.mark.parametrize("prefix", ["", "/tts"])
+@pytest.mark.requires_frontend_build
 def test_real_cookie_roles_page_access_scope_and_revocation_use_same_clone(prefix):
     support = importlib.import_module(MODULE)
     from tts_erp_v2.accounts.models import User, UserRole, UserSession

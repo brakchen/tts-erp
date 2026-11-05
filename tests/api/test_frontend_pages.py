@@ -33,44 +33,6 @@ def _bootstrap(body: str) -> dict:
     return json.loads(match[1])
 
 
-@pytest.fixture
-def release(tmp_path, monkeypatch):
-    root = tmp_path / "frontend"
-    release_root = root / "TEST_release"
-    (release_root / ".vite").mkdir(parents=True)
-    (release_root / "assets").mkdir()
-    manifest = {
-        "src/main.tsx": {
-            "file": "assets/main.js",
-            "isEntry": True,
-            "imports": ["_shared.js"],
-            "dynamicImports": ["src/pages/dashboard.tsx"],
-            "css": ["assets/main.css"],
-        },
-        "_shared.js": {
-            "file": "assets/shared.js",
-            "css": ["assets/shared.css"],
-            "assets": ["assets/font.woff2"],
-        },
-        "src/pages/dashboard.tsx": {"file": "assets/dashboard.js"},
-    }
-    for name in (
-        "main.js",
-        "shared.js",
-        "dashboard.js",
-        "main.css",
-        "shared.css",
-        "font.woff2",
-    ):
-        (release_root / "assets" / name).write_text("/* TEST_asset */")
-    (root / "release.json").write_text(json.dumps({"releaseId": "TEST_release"}))
-    manifest_path = release_root / ".vite/manifest.json"
-    manifest_path.write_text(json.dumps(manifest))
-    monkeypatch.setattr(frontend_pages, "_FRONTEND_DIR", root)
-    monkeypatch.delenv("TTS_ERP_FRONTEND_DEV_ORIGIN", raising=False)
-    return root, manifest_path, manifest
-
-
 @pytest.mark.parametrize("prefix", ["", "/tts"])
 def test_document_bootstrap_and_recursive_assets(release, prefix):
     response = frontend_pages.render_frontend_page(_request(prefix), "dashboard")

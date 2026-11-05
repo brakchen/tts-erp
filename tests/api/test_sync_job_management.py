@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 from sqlalchemy import delete
@@ -162,45 +161,6 @@ def test_legacy_sync_jobs_page_is_removed(api_client, readonly_key) -> None:
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert r.status_code == 404, r.text
-
-
-def test_sync_jobs_js_uses_prefix_aware_api_paths() -> None:
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "sync-jobs.js"
-    ).read_text(encoding="utf-8")
-
-    assert "const API = `${rootPrefix}/v2`;" in src
-    assert "api('/sync/jobs')" in src
-    assert "api('/auth/me')" in src
-    assert "CSS.escape" not in src
-    assert "state.canAdmin" in src
-    assert "state.canTrigger" in src
-    assert "disabled" in src
-    assert "window.confirm" in src
-    assert "window.alert" in src
-    assert "data-label=\"任务\"" in src
-    assert "is-busy" in src
-
-
-def test_sync_jobs_css_has_mobile_card_layout_and_disabled_cursor() -> None:
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "sync-jobs.css"
-    ).read_text(encoding="utf-8")
-
-    assert "button:disabled" in src
-    assert "cursor: not-allowed" in src
-    assert "button.is-busy:disabled" in src
-    assert ".jobs-table thead { display: none; }" in src
-    assert "content: attr(data-label)" in src
-    assert ".scope-select { width: 100%;" in src
 
 
 def test_sync_jobs_includes_latest_status(api_client, readonly_key, db_engine) -> None:

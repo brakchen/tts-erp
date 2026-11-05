@@ -161,7 +161,7 @@ git merge --no-edit origin/master
 Resolve both sides' intent, never blanket `--ours`, `--theirs`, or `-X theirs`. Abort and ask if intent is unclear. Then:
 
 1. Run diagnostics/link/path checks and the narrowest relevant safe tests.
-2. For code/test changes, run `bash scripts/test_baseline.sh`; all tests use `scripts/test_isolated.sh` as required by the testing guide. Zero new stable failures are required.
+2. For ordinary code/test changes, run `bash scripts/test_baseline.sh --scope auto --base "$synced_master"` against the exact synchronized master SHA. Record the selected scope and any named scenarios. Changes to test execution or global collection use `--scope fast --base "$synced_master"` according to the [testing guide](agent-testing.md). Both scopes run application tests through `scripts/test_isolated.sh`. Zero new stable failures are required.
 3. Review `git diff --check`, branch diff and staged file list; exclude secrets and foreign WIP.
 4. Push the synchronized lane branch. Record full HEAD and `origin/master` SHA, exact validation evidence and a fresh UTC `readyAt` in its full ready record.
 
@@ -194,7 +194,7 @@ git worktree add --detach .worktrees/.integrate-<slug> origin/master
 git -C .worktrees/.integrate-<slug> merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"
 ```
 
-Validate that exact prospective commit. Documentation-only integration confirms no application/test changes and repeats documentation checks. Code/test integration runs the required isolated fast-suite baseline; if lanes overlap in a module, textual conflict freedom does not waive that check.
+Validate that exact prospective commit. Documentation-only integration confirms no application/test changes and repeats documentation checks. For ordinary code/test integration, run `bash scripts/test_baseline.sh --scope auto --base "$synced_master"` inside the locked integration worktree. Verify that the prospective commit's first parent equals `$synced_master`, the locked target SHA. Carry over applicable named scenarios and add any that the merge itself requires. Use `--scope fast --base "$synced_master"` for the testing guide's full regression cases. Overlap without a textual conflict still requires validation of the prospective commit.
 
 Push only the validated commit, without force:
 

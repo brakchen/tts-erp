@@ -206,43 +206,6 @@ def test_workspace_navigation_has_one_stylesheet_owner():
     assert '#sidebar .nav-link' not in _SIDEBAR_CSS
 
 
-def test_profitability_pages_do_not_keep_a_separate_palette():
-    """The shared React page consumes the approved theme and table tokens."""
-    root = Path(__file__).resolve().parents[2]
-    styles = (root / "frontend/src/styles.css").read_text(encoding="utf-8")
-    shared_tables = (root / "frontend/src/shared/tables.css").read_text(encoding="utf-8")
-    page_css = (root / "frontend/src/pages/spu-profitability/profitability.css").read_text(encoding="utf-8")
-    assert "static/css/tokens.css" in styles
-    assert "static/css/navigation.css" in styles
-    assert "./app/workspace.css" in styles and "./shared/tables.css" in styles
-    assert ":root" not in page_css
-    assert "rgba(184, 57, 14" not in page_css
-    assert "var(--table-heading)" in page_css
-    assert "var(--surface)" in page_css
-    assert "var(--rule)" in page_css
-    assert "var(--table-hover)" in shared_tables
-    assert ".erp-sidebar" not in page_css and ".erp-nav-link" not in page_css
-
-
-def test_dashboard_consumes_backend_owned_summary_fields():
-    """Dashboard cards must not count list rows in browser JavaScript."""
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "frontend"
-        / "src"
-        / "pages"
-        / "dashboard"
-        / "index.tsx"
-    ).read_text(encoding="utf-8")
-
-    assert "/v2/reporting/coverage" in src
-    assert "/v2/reporting/missing-cost-products" not in src
-    assert "value.missing_cost_spus" in src
-    assert "value.total_spus" in src
-    assert "X-Total-Count" in src
-    assert "value: total" in src
-
-
 def test_dashboard_links_to_runtime_config_console(api_client, readonly_key):
     response = api_client.get("/v2/pages/dashboard", headers={"X-API-Key": readonly_key})
     assert response.status_code == 200
@@ -362,21 +325,6 @@ def test_shops_page_returns_200_with_html(api_client, readonly_key):
     assert _bootstrap(body)["roleCapabilities"] == {"readwrite": False, "admin": False}
     assert 'id="frontend-root"' in body
     assert "shops.js" not in body and "bootstrap.min.css" not in body
-
-
-def test_shops_page_js_manages_service_app_credentials() -> None:
-    source = Path("tts_erp_v2/static/js/shops.js").read_text()
-    assert "app_secret: appSecret || null" in source
-    assert (
-        'configBtn.className = "shop-action shop-action--credentials btn-config-app"'
-        in source
-    )
-    assert 'authBtn.className = "shop-action shop-action--authorize btn-auth"' in source
-    assert 'setActionContent(configBtn, "⚙", "配置 App")' in source
-    assert "shop-action:focus-visible" in source
-    assert "app_credentials_configured" in source
-    assert "bindAppCredentialsDialog();" in source
-    assert "admin 会话" in source
 
 
 def test_shops_page_requires_some_auth(api_client):
@@ -502,20 +450,6 @@ def test_spu_profit_deterioration_page_registry_entry():
     assert body.index("利润劣化告警") < body.index("广告日明细")
 
 
-def test_spu_profit_deterioration_page_assets_are_readonly_comparison():
-    """PRD v3 retires config writes and frontend business decisions."""
-    root = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
-    js = (root / "js" / "spu-profit-deterioration.js").read_text(encoding="utf-8")
-    assert "/analytics/spu-profit-deterioration" in js
-    for forbidden in (
-        "/config/runtime/items/",
-        "meta.effectiveConfig",
-        "calculateRoi",
-        "net_profit =",
-    ):
-        assert forbidden not in js, forbidden
-    # User-visible state/keyboard/race assertions belong in browser tests,
-    # not CSS substring assertions that fossilize one visual technique.
 
 
 def test_endpoints_index_lists_included_router_routes(api_client):

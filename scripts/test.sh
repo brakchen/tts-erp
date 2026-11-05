@@ -57,7 +57,15 @@ prepare_frontend() {
       echo "[tests] missing frontend toolchain: npm ci --include=dev --prefix frontend" >&2
       return 1
     }
+    local lock_path
+    lock_path="$(git rev-parse --git-path tts-test-frontend.lock)"
+    exec {frontend_lock_fd}>"$lock_path"
+    flock -x "$frontend_lock_fd"
     bash scripts/build_frontend.sh
+    TTS_ERP_TEST_PREPARED_RELEASE="$(
+      .venv/bin/python -c 'import json; print(json.load(open("tts_erp_v2/static/frontend/release.json"))["releaseId"])'
+    )"
+    export TTS_ERP_TEST_PREPARED_RELEASE
   fi
 }
 run_unit() { prepare_frontend; "$PYTEST" -q -m "layer_unit and not slow" "$@"; }
@@ -71,6 +79,10 @@ run_domain() {
 }
 
 case "${1:-default}" in
+selected)
+  shift
+  exec .venv/bin/python scripts/_run_selected_tests.py "$@"
+  ;;
 unit)
   shift
   run_unit "$@"

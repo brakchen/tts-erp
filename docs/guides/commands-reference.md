@@ -7,20 +7,23 @@
 
 ```bash
 # DoD 验证：只跑一次套件，并与已提交的 master 失败基线做机械差分（退出 0 = 通过）
-bash scripts/test_baseline.sh
+bash scripts/test_baseline.sh --scope auto --base "$target_sha"
+bash scripts/test_baseline.sh --scope auto --base "$target_sha" --plan
+# 选测器、隔离 runner 或全局测试收集等基础设施改动
+bash scripts/test_baseline.sh --scope fast --base "$target_sha"
 
 # 查看 / 重建已提交的 master 基线（--update 仅限干净 master 工作区）
 bash scripts/test_baseline.sh --show
 bash scripts/test_baseline.sh --update
 
-# 日常全量测试（不差分；每个 session 克隆独立临时测试库，避免并发互删 TEST_ 行）
+# 显式全量测试（不差分；每个 session 克隆独立临时测试库，避免并发互删 TEST_ 行）
 bash scripts/test_isolated.sh fast
 
 # 单域/单文件/单测试都走 isolated wrapper
 bash scripts/test_isolated.sh api tests/api/test_auth_login.py::test_login_sets_cookie
 
 # schema/migration 改动后刷新模板库，再跑验证
-bash scripts/test_isolated.sh --refresh-template fast
+bash scripts/test_baseline.sh --scope auto --base "$target_sha" --refresh-template
 
 # 测试前置依赖体检 / 安装（PostgreSQL 客户端、pytest、.env.test）
 bash scripts/envsetup/install-test-deps.sh --check
@@ -29,7 +32,7 @@ sudo bash scripts/envsetup/install-test-deps.sh
 
 > `scripts/test_isolated.sh` 是 agent 的**唯一测试入口**。如果 isolated 前置依赖不可用，先运行依赖检查/安装；不得降级到共享数据库或绕过 wrapper。`TTS_ERP_TEST_OFF=1` 对 agent 永久禁用。
 
-> **一条 lane 只需一次套件运行。** master 的失败基线是 master 的属性，已提交在 `docs/testing/baseline-fast.txt`，不需要每条 lane 重新采集。旧的「采基线 + 合并后再跑 + 每个失败再复跑」流程要跑 2 轮以上全量套件，正是 worker 会撞上 30 分钟上限的主因。现在用 `scripts/test_baseline.sh`：它跑一次套件并输出归一化差分，退出码 0 即为「零新增稳定失败」。**lane 不得用 `--update` 重建基线来让自己变绿。**
+> **一条 lane 只需一次套件运行。** master 的失败基线是 master 的属性，已提交在 `docs/testing/baseline-fast.txt`，不需要每条 lane 重新采集。旧的「采基线 + 合并后再跑 + 每个失败再复跑」流程要跑 2 轮以上全量套件，正是 worker 会撞上 30 分钟上限的主因。日常 DoD 通过 `--scope auto` 比较精确同步的目标 master SHA 所提交的基线。拟合并提交使用锁内确认的第一父提交。选测与隔离基础设施改动显式跑 `--scope fast`。**lane 不得用 `--update` 重建基线来让自己变绿。**
 
 ## 2. 数据导入
 

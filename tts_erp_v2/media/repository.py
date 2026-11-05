@@ -1,6 +1,6 @@
 """Persistence for the media asset library.
 
-Every function here is a short transaction over the request-scoped session.
+Writes use short transactions over the request-scoped session.
 The library is global (no shop partition): assets may be unattached, and a
 digital human may reference the same asset from several personas.
 """
@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 
 from sqlalchemy import Select, and_, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.media import (
@@ -18,7 +20,12 @@ from tts_erp_v2.db.models.media import (
     DigitalHumanAsset,
     MediaAsset,
 )
-from tts_erp_v2.media.domain import AssetKind, AssetStatus, DigitalHumanStatus
+from tts_erp_v2.media.domain import (
+    AssetKind,
+    AssetStatus,
+    DigitalHumanStatus,
+    build_object_key,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +39,7 @@ class AssetFilter:
     limit: int = 50
     offset: int = 0
     exclude_digital_human_id: int | None = None
+    status: AssetStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +50,18 @@ class AssetPage:
     total: int
 
 
+class LinkAssetError(Enum):
+    HUMAN_NOT_FOUND = "human_not_found"
+    ASSET_NOT_FOUND = "asset_not_found"
+    ASSET_NOT_READY = "asset_not_ready"
+
+
 def _asset_base_query() -> Select:
     return select(MediaAsset).where(MediaAsset.deleted_at.is_(None))
+
+
+def _human_base_query() -> Select:
+    return select(DigitalHuman).where(DigitalHuman.deleted_at.is_(None))
 
 
 def create_asset(
@@ -54,37 +72,28 @@ def create_asset(
     content_type: str,
     size_bytes: int,
     bucket: str,
-    object_key: str,
     uploaded_by_key_id: str | None,
     uploaded_by_prefix: str | None,
 ) -> MediaAsset:
-    """Insert an ``awaiting_upload`` asset row and return it."""
+    """Stage a ticket row with its final object key. The caller commits it after signing."""
     asset = MediaAsset(
         kind=kind.value,
         filename=filename,
         content_type=content_type,
         size_bytes=size_bytes,
         bucket=bucket,
-        object_key=object_key,
+        object_key="placeholder",
         status=AssetStatus.AWAITING_UPLOAD.value,
         uploaded_by_key_id=uploaded_by_key_id,
         uploaded_by_prefix=uploaded_by_prefix,
         tags=[],
     )
     session.add(asset)
-    session.commit()
-    session.refresh(asset)
+    session.flush()
+    asset.object_key = build_object_key(
+        bucket=bucket, asset_id=asset.id, filename=filename, content_type=content_type
+    ).key
     return asset
-
-
-def replace_object_key(session: Session, asset_id: int, object_key: str) -> None:
-    """Patch the object key once the id-based key can be composed."""
-    session.execute(
-        update(MediaAsset)
-        .where(MediaAsset.id == asset_id)
-        .values(object_key=object_key),
-    )
-    session.commit()
 
 
 def get_asset(session: Session, asset_id: int) -> MediaAsset | None:
@@ -94,35 +103,27 @@ def get_asset(session: Session, asset_id: int) -> MediaAsset | None:
     )
 
 
-def mark_asset_ready(session: Session, asset_id: int) -> MediaAsset | None:
-    """Flip an asset to ``ready`` and stamp the upload time."""
-    session.execute(
-        update(MediaAsset)
-        .where(
-            MediaAsset.id == asset_id,
-            MediaAsset.deleted_at.is_(None),
-        )
-        .values(
-            status=AssetStatus.READY.value,
-            failure_reason=None,
-            uploaded_at=datetime.now(UTC),
-        ),
+def record_upload_verification(
+    session: Session, asset_id: int, failure_reason: str | None
+) -> MediaAsset | None:
+    """Record a storage check without overwriting a concurrent success."""
+    asset = session.scalar(
+        _asset_base_query()
+        .where(MediaAsset.id == asset_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
+    if asset is None:
+        return None
+    if asset.status != AssetStatus.READY.value:
+        asset.failure_reason = failure_reason
+        if failure_reason is None:
+            asset.status = AssetStatus.READY.value
+            asset.uploaded_at = datetime.now(UTC)
+        else:
+            asset.status = AssetStatus.FAILED.value
     session.commit()
-    return get_asset(session, asset_id)
-
-
-def mark_asset_failed(session: Session, asset_id: int, reason: str) -> None:
-    """Flip an asset to ``failed`` and keep the reason for the operator."""
-    session.execute(
-        update(MediaAsset)
-        .where(
-            MediaAsset.id == asset_id,
-            MediaAsset.deleted_at.is_(None),
-        )
-        .values(status=AssetStatus.FAILED.value, failure_reason=reason),
-    )
-    session.commit()
+    return asset
 
 
 def update_asset_metadata(
@@ -177,6 +178,8 @@ def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
     conditions = [MediaAsset.deleted_at.is_(None)]
     if filters.kind is not None:
         conditions.append(MediaAsset.kind == filters.kind.value)
+    if filters.status is not None:
+        conditions.append(MediaAsset.status == filters.status.value)
     if filters.keyword:
         pattern = f"%{filters.keyword}%"
         conditions.append(
@@ -227,6 +230,17 @@ def asset_ids_for_digital_human(
     return list(rows)
 
 
+def digital_humans_for_asset(session: Session, asset_id: int) -> list[DigitalHuman]:
+    """Return the live personas that reference an asset, including archived ones."""
+    rows = session.scalars(
+        _human_base_query()
+        .join(DigitalHumanAsset, DigitalHumanAsset.digital_human_id == DigitalHuman.id)
+        .where(DigitalHumanAsset.asset_id == asset_id)
+        .order_by(DigitalHuman.name, DigitalHuman.id)
+    ).all()
+    return list(rows)
+
+
 # --- digital humans ---------------------------------------------------------
 
 
@@ -253,10 +267,7 @@ def create_digital_human(
 def get_digital_human(session: Session, digital_human_id: int) -> DigitalHuman | None:
     """Return one live persona record, or ``None``."""
     return session.scalar(
-        select(DigitalHuman).where(
-            DigitalHuman.id == digital_human_id,
-            DigitalHuman.deleted_at.is_(None),
-        )
+        _human_base_query().where(DigitalHuman.id == digital_human_id)
     )
 
 
@@ -264,11 +275,14 @@ def list_digital_humans(
     session: Session,
     *,
     keyword: str | None = None,
+    status: DigitalHumanStatus | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[DigitalHuman]:
     """List live personas, newest first."""
-    query = select(DigitalHuman).where(DigitalHuman.deleted_at.is_(None))
+    query = _human_base_query()
+    if status is not None:
+        query = query.where(DigitalHuman.status == status.value)
     if keyword:
         pattern = f"%{keyword}%"
         query = query.where(
@@ -338,28 +352,44 @@ def link_asset_to_digital_human(
     session: Session,
     digital_human_id: int,
     asset_id: int,
-) -> bool:
-    """Attach one asset to one persona. Idempotent; ``False`` when unknown."""
-    if get_digital_human(session, digital_human_id) is None:
-        return False
-    if get_asset(session, asset_id) is None:
-        return False
-    existing = session.scalar(
-        select(DigitalHumanAsset.id).where(
-            DigitalHumanAsset.digital_human_id == digital_human_id,
-            DigitalHumanAsset.asset_id == asset_id,
-        )
+) -> DigitalHuman | LinkAssetError:
+    """Attach a ready asset or acknowledge a legacy link, including on retries."""
+    # Shared row locks serialize this decision with soft deletes. The unique
+    # pair constraint still allows concurrent attempts to converge on one link.
+    human = session.scalar(
+        _human_base_query()
+        .where(DigitalHuman.id == digital_human_id)
+        .with_for_update(read=True)
     )
-    if existing is not None:
-        return True
-    session.add(
-        DigitalHumanAsset(
-            digital_human_id=digital_human_id,
-            asset_id=asset_id,
+    if human is None:
+        return LinkAssetError.HUMAN_NOT_FOUND
+    asset = session.scalar(
+        _asset_base_query().where(MediaAsset.id == asset_id).with_for_update(read=True)
+    )
+    if asset is None:
+        return LinkAssetError.ASSET_NOT_FOUND
+    if asset.status != AssetStatus.READY.value:
+        existing = session.scalar(
+            select(DigitalHumanAsset.id)
+            .where(
+                DigitalHumanAsset.digital_human_id == digital_human_id,
+                DigitalHumanAsset.asset_id == asset_id,
+            )
+            .with_for_update(read=True)
+        )
+        return human if existing is not None else LinkAssetError.ASSET_NOT_READY
+    session.execute(
+        insert(DigitalHumanAsset)
+        .values(digital_human_id=digital_human_id, asset_id=asset_id)
+        .on_conflict_do_nothing(
+            index_elements=[
+                DigitalHumanAsset.digital_human_id,
+                DigitalHumanAsset.asset_id,
+            ]
         )
     )
     session.commit()
-    return True
+    return human
 
 
 def unlink_asset_from_digital_human(
@@ -381,17 +411,17 @@ def unlink_asset_from_digital_human(
 __all__ = [
     "AssetFilter",
     "AssetPage",
+    "LinkAssetError",
     "asset_ids_for_digital_human",
     "create_asset",
     "create_digital_human",
+    "digital_humans_for_asset",
     "get_asset",
     "get_digital_human",
     "link_asset_to_digital_human",
     "list_assets",
     "list_digital_humans",
-    "mark_asset_failed",
-    "mark_asset_ready",
-    "replace_object_key",
+    "record_upload_verification",
     "soft_delete_asset",
     "soft_delete_digital_human",
     "unlink_asset_from_digital_human",
