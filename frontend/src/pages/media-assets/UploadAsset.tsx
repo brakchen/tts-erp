@@ -9,6 +9,29 @@ import { ActionError, DiscardDialog, RecordPage, mediaError, mediaWrite, recordL
 const types = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime';
 type Phase = 'draft' | 'preparing' | 'sending' | 'confirming' | 'attaching' | 'prepare-error' | 'send-error' | 'confirm-error' | 'restart' | 'attach-error';
 
+function LocalFilePreview({ file }: { file: File }) {
+  const [preview, setPreview] = useState<{ file: File; url: string | null; failed: boolean }>();
+  useEffect(() => {
+    let url: string;
+    try { url = URL.createObjectURL(file); }
+    catch { setPreview({ file, url: null, failed: true }); return; }
+    setPreview({ file, url, failed: false });
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  const current = preview?.file === file ? preview : undefined;
+  function failed() { setPreview((previous) => previous?.file === file ? { ...previous, failed: true } : previous); }
+  return <section aria-label="上传前本地预览" className="space-y-2">
+    <h3 className="font-semibold">上传前预览</h3>
+    {!current ? <p role="status">正在准备本地预览…</p> : current.failed || !current.url
+      ? <p role="status">暂时无法预览所选文件。你可以继续上传，或重新选择文件。</p>
+      : <div className="flex min-w-0 justify-center rounded-lg bg-default/40 p-2">
+          {file.type.startsWith('video/')
+            ? <video src={current.url} aria-label={'本地视频预览 ' + file.name} controls preload="metadata" playsInline className="max-h-96 max-w-full" onError={failed} />
+            : <img src={current.url} alt={'本地图片预览 ' + file.name} className="max-h-96 max-w-full object-contain" onError={failed} />}
+        </div>}
+  </section>;
+}
+
 export default function UploadAsset({ bootstrap, target, onClose, onComplete, backLabel = '返回素材库', selectionCount = 0 }: {
   bootstrap: FrontendBootstrap;
   target?: { id: string; name: string };
@@ -158,6 +181,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, ba
       <p className="text-sm text-muted">图片最大 20 MiB，视频最大 200 MiB。</p>
       {file && <>
         <p className="break-words">所选文件：{file.name} · {displayBytes(file.size)}</p>
+        <LocalFilePreview file={file} />
         <TextField value={filename} onChange={setFilename} isDisabled={!editable}>
           <Label>显示名称</Label><Input maxLength={255} />
         </TextField>
