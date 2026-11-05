@@ -7,6 +7,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.v2 import plugin_shops
@@ -35,6 +36,8 @@ def monitor_shop(db_engine):
 @pytest.fixture
 def forwarded(monkeypatch):
     forward = Mock()
+    forward.seen = []
+    forward.side_effect = lambda session, shop, items: forward.seen.append((shop.shop_id, items))
     monkeypatch.setattr(plugin_shops, "forward_observations", forward)
     return forward
 
@@ -48,8 +51,7 @@ def test_existing_erp_key_forwards_without_browser_zabbix_credentials(request, f
     assert response.status_code == 204, response.text
     assert not response.content
     assert response.headers["cache-control"] == "no-store"
-    _, shop, items = forwarded.call_args.args
-    assert shop.shop_id == monitor_shop and items == ITEMS
+    assert forwarded.seen == [(monitor_shop, ITEMS)]
 
 
 def test_readonly_key_cannot_send_telemetry(api_client, readonly_key, monitor_shop, forwarded):
@@ -83,3 +85,10 @@ def test_partial_or_failed_upstream_is_an_http_failure(api_client, readwrite_key
     forwarded.side_effect = MonitorRelayError("Zabbix did not accept every observation")
     response = api_client.post(f"/v2/plugin/shops/{monitor_shop}/telemetry", headers={"X-API-Key": readwrite_key}, json={"items": ITEMS})
     assert response.status_code == 503
+
+
+def test_shop_scope_is_checked_before_forwarding():
+    request = Request({"type": "http", "api_key_role": "readwrite", "api_key_scopes": ["seller:111"]})
+    with pytest.raises(HTTPException) as error:
+        plugin_shops._require_shop_scope(request, "222")
+    assert error.value.status_code == 403
