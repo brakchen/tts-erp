@@ -220,7 +220,7 @@ def button(scope: Page | Locator, name: str) -> Locator:
 
 
 def text(scope: Page | Locator, value: str) -> None:
-    expect(scope.get_by_text(value, exact=True).first).to_be_visible()
+    expect(scope.get_by_text(value, exact=True).filter(visible=True).first).to_be_visible()
 
 
 def main(page: Page) -> Locator:
@@ -278,11 +278,29 @@ def picker(page: Page, name: str, *, from_list: bool = False) -> None:
     expect(main(page).get_by_role("checkbox", name="隐藏已选内容", exact=True)).to_be_checked()
 
 
+def set_checkbox(page: Page, name: str, selected: bool, *, keyboard: bool = False) -> None:
+    checkbox = main(page).get_by_role("checkbox", name=name, exact=True)
+    expect(checkbox).to_be_visible()
+    expect(checkbox).to_be_enabled()
+    if checkbox.is_checked() != selected:
+        if keyboard:
+            checkbox.focus()
+            expect(checkbox).to_be_focused()
+            checkbox.press("Space")
+        else:
+            # HeroUI Checkbox.Content is the visible label; its SVG overlaps the native input.
+            label = main(page).locator("label").filter(has=page.get_by_role("checkbox", name=name, exact=True))
+            expect(label).to_be_visible()
+            label.click()
+    if selected:
+        expect(checkbox).to_be_checked()
+    else:
+        expect(checkbox).not_to_be_checked()
+
+
 def choose(page: Page, name: str) -> None:
     search(page, name)
-    checkbox = main(page).get_by_role("checkbox", name=name, exact=True)
-    checkbox.check()
-    expect(checkbox).to_be_checked()
+    set_checkbox(page, name, True)
 
 
 def submit_selection(page: Page, count: int) -> None:
@@ -349,7 +367,7 @@ def test_picker_preserves_selection_and_uses_server_exclusion(media_run: MediaRu
 
     search(page, run.name("description_only"))
     expect(main(page).get_by_role("checkbox", name=first_name, exact=True)).to_be_visible()
-    main(page).get_by_role("checkbox", name=first_name, exact=True).check()
+    set_checkbox(page, first_name, True, keyboard=True)
     # The switch hides server-side references, never this unsaved local selection.
     expect(main(page).get_by_role("checkbox", name=first_name, exact=True)).to_be_checked()
     search(page, "")
@@ -363,22 +381,21 @@ def test_picker_preserves_selection_and_uses_server_exclusion(media_run: MediaRu
     second = last_page["items"][0]
     second_name, second_id = second["filename"], second["asset_id"]
     assert second_id != first_id
-    main(page).get_by_role("checkbox", name=second_name, exact=True).check()
+    set_checkbox(page, second_name, True)
     kind(page, "视频")
     text(main(page), "本次新增 2 项")
     expect(main(page).get_by_role("checkbox", name=first_name, exact=True)).to_have_count(0)
     kind(page, "图片")
     choose(page, first_name)
 
-    hide = main(page).get_by_role("checkbox", name="隐藏已选内容", exact=True)
-    hide.uncheck()
+    set_checkbox(page, "隐藏已选内容", False)
     search(page, existing[0][0])
     linked = main(page).get_by_role("checkbox", name=existing[0][0], exact=True)
     expect(linked).to_be_checked()
     expect(linked).to_be_disabled()
     text(main(page), "已添加至「" + human + "」")
     assert "excludeDigitalHumanId" not in [item for item in gate.requests if item.path == ASSETS][-1].query
-    hide.check()
+    set_checkbox(page, "隐藏已选内容", True, keyboard=True)
     choose(page, first_name)
     text(main(page), "本次新增 2 项")
     path = f"{HUMANS}/{human_id}/assets"
@@ -745,8 +762,7 @@ def test_media_pages_share_shell_and_render_real_previews_at_supported_widths(me
     text(main(page), "本次新增 0 项")
     expect(button(main(page), "确认添加(0)")).to_be_disabled()
     expect(main(page).get_by_role("checkbox", name=filename, exact=True)).to_have_count(0)
-    hide = main(page).get_by_role("checkbox", name="隐藏已选内容", exact=True)
-    hide.uncheck()
+    set_checkbox(page, "隐藏已选内容", False)
     expect(main(page).get_by_role("checkbox", name=filename, exact=True)).to_be_disabled()
     image_ready(page, filename)
     assert_layout(page, tmp_path, "asset_picker")
