@@ -12,9 +12,10 @@ from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
 from zabbix_utils import ZabbixAPI
-from zabbix_utils.exceptions import APIRequestError
+from zabbix_utils.exceptions import APIRequestError, ModuleBaseException
 
 from tts_erp_v2.db.models.commerce import ChannelAccount
+from tts_erp_v2.proxy.errors import ProxyError
 from tts_erp_v2.proxy.token_service import load_credentials
 
 GROUP = "TTS Monitor shops"
@@ -93,6 +94,6 @@ def forward_observations(session: Session, shop: ChannelAccount, items: list[dic
             raise MonitorRelayError("Zabbix did not accept every observation")
     except MonitorRelayError:
         raise
-    except Exception:
+    except (ModuleBaseException, OSError, ValueError, KeyError, TypeError, ProxyError):
         # SDK/transport errors can contain credential-bearing upstream details.
         raise MonitorRelayError("Zabbix relay is temporarily unavailable") from None
