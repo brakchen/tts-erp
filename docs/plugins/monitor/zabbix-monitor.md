@@ -14,6 +14,8 @@ Zabbix 继续拥有失联、业务停滞、事件去重、恢复和飞书通知�
 
 模板与飞书动作在服务器配置一次。每家新登记店铺由第一次上报自动建主机，重复请求和并发首次上报复用唯一技术名称。浏览器不再需要 Zabbix Token。上线前需要部署 ERP 转发版本并配置上述服务账号，随后使用新插件传输方式。
 
+正式模板的 `{$TTS.MONITOR.TRAPPER.HOSTS}` 使用 `172.18.0.1,zabbix-web-1`。第一项为当前 Docker 网桥网关，第二项为 Web 容器在专用 Docker 网络中的稳定 DNS 别名，避免容器重建导致 Web IP 变化后拒收。部署时用 `docker exec zabbix-server-1 getent hosts zabbix-web-1` 核对解析；网络重建或服务改名后重新核对网关和别名。Zabbix 官方支持在 [Allowed hosts 中使用 DNS 名称](https://www.zabbix.com/documentation/7.4/en/manual/config/items/itemtypes/trapper)。新建主机及宏更新后，配置缓存可能需要约 60 秒生效，这期间上报返回 503，插件下一次心跳继续尝试。
+
 ## 原直连方案的部署记录
 
 以下内容记录原直连协议和既有隔离验证。方案 2 沿用监控项和触发器定义，客户端连接配置改由上述 ERP 入口承接。
@@ -24,7 +26,7 @@ Zabbix 继续拥有失联、业务停滞、事件去重、恢复和飞书通知�
 
 1. 在 Zabbix 导入 [TTS Monitor 模板](zabbix-monitor.yaml)，保留「删除缺失」选项关闭。导入模板后，只有链接模板的主机才有监控项。
 2. 从 ERP 的 `GET /v2/commerce/channel-accounts?view=management&platform=tiktok&source=monitor` 分页读取登记店铺。每个 Seller ID 创建或匹配主机技术名称 `tts-monitor-<sellerId>`，显示名使用 `店名 · Seller ID`，空名称用 Seller ID。Zabbix 要求显示名唯一，保留 Seller ID 后缀可以区分同名店铺。主机放入专用组 `TTS Monitor shops` 并链接模板。名册为空时等待真实店铺登记。
-3. 模板宏 `{$TTS.MONITOR.TRAPPER.HOSTS}` 须同时包含 Zabbix Web 看到的 HTTP 客户端地址（PHP 的 `REMOTE_ADDR`），以及 Web 向 Zabbix Server 发起连接时的源地址。HP Desk 当前分别为 FRP 入口看到的 `172.18.0.1` 和 Web 容器的 `172.18.0.3`。启用最终 HTTPS 路径或容器重建后，复核这两个地址，再用受限 Token 验证写入。
+3. 模板宏 `{$TTS.MONITOR.TRAPPER.HOSTS}` 须同时包含 Zabbix Web 看到的 HTTP 客户端地址（PHP 的 `REMOTE_ADDR`），以及 Web 向 Zabbix Server 发起连接时的源地址。初次隔离验证为 `172.18.0.1` 和 `172.18.0.3`；正式部署已按上文使用网关地址及 Web 容器 DNS 别名。启用最终 HTTPS 路径或网络重建后，复核允许来源，再验证写入。
 4. 通过生产 HTTPS 网关提供独立的 Zabbix 上报路径，转发到 HP Desk 的 Zabbix Web API。浏览器配置使用仅允许 `history.push` 且只授权 Monitor 主机范围的 Token。优先按单店授权，使其他店的 Seller ID 无法被同一凭据写入。Token 在插件本地连接设置中保存，且排除在配置导出和日志之外。
 
 ## 上报协议
