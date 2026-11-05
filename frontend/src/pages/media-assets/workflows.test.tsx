@@ -133,11 +133,22 @@ it('retries a failed association without creating or uploading another asset', a
   expect(attempts).toBe(2);
 });
 
-it('searches ready assets and identifies an already-added result by name', async () => {
+it('keeps selections across searches and retries only the remaining asset after a partial submission', async () => {
   const user = userEvent.setup();
-  const fetcher = vi.fn(async (url: string) => {
-    if (url.endsWith(humanPath + '/assets')) return json({ ...human, asset_ids: [2] });
-    if (url.includes('/assets?')) return json(page());
+  const second = { ...asset, asset_id: 3, filename: 'TEST_第二张.png' };
+  const writes: string[] = [];
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith(humanPath + '/assets')) {
+      const { assetId } = JSON.parse(String(init.body));
+      writes.push(assetId);
+      if (writes.length === 2) return json({}, 503);
+      return json({ ...human, asset_ids: writes.length === 1 ? [2] : [2, 3] });
+    }
+    if (url.includes('/assets?')) {
+      const params = new URL(url, window.location.origin).searchParams;
+      expect(params.get('status')).toBe('ready');
+      return json(page(params.get('keyword') === second.filename ? [second] : [asset]));
+    }
     if (url.endsWith(humanPath)) return json({ ...human, assets: [] });
     return json([human]);
   });
@@ -145,20 +156,28 @@ it('searches ready assets and identifies an already-added result by name', async
   render(<DigitalHumans bootstrap={bootstrap} />);
   await user.click(await findButton('查看 ' + human.name));
   await user.click(await findButton('选择已有资产'));
-  await user.type(screen.getByLabelText('搜索资产'), 'TEST_图片');
-  await user.click(button('搜索'));
-  await waitFor(() => {
-    const url = new URL(fetcher.mock.lastCall![0], window.location.origin);
-    expect(url.searchParams.get('status')).toBe('ready');
-    expect(url.searchParams.get('keyword')).toBe('TEST_图片');
-  });
+  expect(button('添加选中的资产')).toBeDisabled();
   await user.click(await findButton('预览 ' + asset.filename));
   expect(screen.getByRole('img', { name: '图片预览 ' + asset.filename })).toBeVisible();
-  await user.click(button('添加 ' + asset.filename));
+  await user.click(screen.getByRole('checkbox', { name: asset.filename }));
+  await user.type(screen.getByLabelText('搜索资产'), second.filename);
+  await user.click(button('搜索'));
+  await user.click(await screen.findByRole('checkbox', { name: second.filename }));
+  expect(writes).toEqual([]);
+  await user.click(button('添加选中的资产（2）'));
+  expect(await screen.findByText(/待添加的勾选已保留/)).toBeVisible();
+  expect(screen.getByRole('checkbox', { name: second.filename })).toBeChecked();
+  expect(writes).toEqual(['2', '3']);
+
+  await user.clear(screen.getByLabelText('搜索资产'));
+  await user.click(button('搜索'));
   expect(await screen.findByText('已添加', { exact: true })).toBeVisible();
+  expect(screen.queryByRole('checkbox', { name: asset.filename })).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/资产 ID/)).not.toBeInTheDocument();
-  await user.click(button('返回档案'));
-  expect(screen.getByRole('heading', { name: asset.filename })).toBeVisible();
+  await user.click(button('添加选中的资产（1）'));
+  expect(await screen.findByRole('heading', { name: asset.filename })).toBeVisible();
+  expect(screen.getByRole('heading', { name: second.filename })).toBeVisible();
+  expect(writes).toEqual(['2', '3', '3']);
 });
 
 it('opens the returned persona and retains write success if its detail fails to load', async () => {

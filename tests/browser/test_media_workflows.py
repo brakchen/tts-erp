@@ -223,10 +223,43 @@ def attach(page: Page, name: str) -> None:
     search(dialog(page), "搜索资产", name)
     button(dialog(page), "预览 " + name).click()
     expect(dialog(page).get_by_role("img").first).to_be_visible()
-    button(dialog(page), "添加 " + name).click()
-    expect(dialog(page).get_by_text("已添加", exact=True).first).to_be_visible()
-    close(page)
+    dialog(page).get_by_role("checkbox", name=name, exact=True).click()
+    button(dialog(page), "添加选中的资产（1）").click()
+    expect(button(dialog(page), "选择已有资产")).to_be_visible()
     text(dialog(page), name)
+
+
+def test_picker_submits_multiple_assets(media_run: MediaRun) -> None:
+    page, gate = media_run.page, media_run.gate
+    filenames = [media_run.name("first.png"), media_run.name("second.png")]
+    media_run.goto("media-assets")
+    for name in filenames:
+        button(page, "上传资产").click()
+        pick_file(page, name)
+        button(dialog(page), "开始上传").click()
+        heading(page, name)
+        close(page)
+    media_run.goto("digital-humans")
+    persona = media_run.name("multiselect")
+    create_persona(page, persona)
+    human_id = media_run.human_id(persona)
+    path = f"{HUMANS}/{human_id}/assets"
+
+    button(dialog(page), "选择已有资产").click()
+    for name in filenames:
+        expect(dialog(page).get_by_role("checkbox", name=name, exact=True)).to_be_visible()
+    for name in filenames:
+        search(dialog(page), "搜索资产", name)
+        dialog(page).get_by_role("checkbox", name=name, exact=True).click()
+    assert gate.calls["POST", path] == 0
+    assert media_run.links(human_id) == set()
+
+    button(dialog(page), "添加选中的资产（2）").click()
+    expect(dialog(page).get_by_text("已添加 2 项资产。", exact=True)).to_be_visible()
+    for name in filenames:
+        text(dialog(page), name)
+    assert gate.calls["POST", path] == 2
+    assert media_run.links(human_id) == {media_run.asset_id(name) for name in filenames}
 
 
 def test_shared_asset_and_persona_lifecycle(media_run: MediaRun, tmp_path: Path) -> None:
