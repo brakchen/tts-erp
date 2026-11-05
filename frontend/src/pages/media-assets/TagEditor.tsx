@@ -4,7 +4,7 @@ import { ReadStatus, useMediaRead } from './media-ui';
 
 /** Each input is one tag, including punctuation. Candidates stay server-owned. */
 export function withPendingTag(selected: readonly string[], input: string): string[] {
-  return [...new Set([...selected, input].map((tag) => tag.trim()).filter(Boolean))];
+  return [...new Set([...selected, input].map((tag) => tag.trim().replace(/\s+/gu, ' ')).filter(Boolean))];
 }
 
 export default function TagEditor({ root, selected, input, onChange, onInput, disabled = false }: {
@@ -12,14 +12,14 @@ export default function TagEditor({ root, selected, input, onChange, onInput, di
   onInput: (value: string) => void; disabled?: boolean;
 }) {
   const read = useMediaRead(root, '/assets/tags', decodeTags);
-  const choices = [...new Set([...(read.data ?? []), ...selected])];
+  const choices = withPendingTag([...(read.data ?? []), ...selected], '');
   function add() {
     if (!input.trim() || disabled) return;
     onChange(withPendingTag(selected, input));
     onInput('');
   }
   return <div className="space-y-3">
-    <TagGroup aria-label="选择素材标签" selectionMode="multiple" selectedKeys={new Set(selected)}
+    <TagGroup aria-label="选择素材标签" selectionMode="multiple" selectedKeys={new Set(withPendingTag(selected, ''))}
       disabledKeys={disabled ? choices : []}
       onSelectionChange={(keys) => onChange(keys === 'all' ? choices : Array.from(keys, String))}>
       <Label>标签（可多选）</Label>
@@ -30,7 +30,7 @@ export default function TagEditor({ root, selected, input, onChange, onInput, di
     <ReadStatus title="已有标签" loading={read.loading} error={read.error} onRetry={read.retry} />
     <div className="flex flex-wrap items-end gap-2">
       <TextField value={input} onChange={onInput} isDisabled={disabled} className="min-w-0 flex-1">
-        <Label>新增标签</Label><Input maxLength={64} placeholder="输入一个标签，按 Enter 添加" onKeyDown={(event) => {
+        <Label>新增标签</Label><Input placeholder="输入一个标签，按 Enter 添加" onKeyDown={(event) => {
           if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!event.nativeEvent.isComposing) add(); }
         }} />
       </TextField>

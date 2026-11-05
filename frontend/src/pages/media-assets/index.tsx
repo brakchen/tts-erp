@@ -171,7 +171,8 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   }
   function reset() { setFilters(emptyFilters); setApplied(emptyFilters); setOffset(0); }
   function uploaded(id: string, filename: string) {
-    setUpload(false); refresh(); setNotice('已入库：' + filename + '。'); select(id);
+    const resetMessage = filtered || offset ? '已清除筛选并返回第一页。' : '';
+    setUpload(false); reset(); refresh(); setNotice('已入库：' + filename + '。' + resetMessage); select(id);
   }
   if (upload) return <div className="erp-page"><UploadAsset bootstrap={bootstrap} backLabel="返回素材库" onClose={() => setUpload(false)} onComplete={uploaded} /></div>;
   if (selected) return <div className="erp-page"><AssetDetail key={selected} bootstrap={bootstrap} id={selected} initialNotice={notice} onClose={() => { select(null); setNotice(''); }}

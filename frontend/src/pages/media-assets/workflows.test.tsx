@@ -76,10 +76,15 @@ it('requires explicit upload, separates 100% transfer from confirmation, and ret
     if (url.endsWith('/upload-url')) return json(ticket, 201);
     if (url.endsWith('/confirm')) return ++confirms === 1 ? firstConfirm : json(confirmed);
     if (url.endsWith(assetPath)) return json(asset);
-    return json(page());
+    return json({ ...page(), total: 25 });
   });
   vi.stubGlobal('fetch', fetcher);
   render(<MediaAssets bootstrap={bootstrap} />);
+  await user.type(screen.getByLabelText('搜索素材'), 'TEST_filter');
+  await user.click(button('搜索'));
+  await waitFor(() => expect(button('下一页')).toBeEnabled());
+  await user.click(button('下一页'));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => new URL(url, location.origin).searchParams.get('offset') === '24')).toBe(true));
   await user.click(button('上传素材'));
   chooseFile();
   expect(fetcher.mock.calls.some(([url]) => url.endsWith('/upload-url'))).toBe(false);
@@ -96,9 +101,19 @@ it('requires explicit upload, separates 100% transfer from confirmation, and ret
   finishConfirm(json({}, 503));
   await user.click(await findButton('重试入库确认'));
   expect(await screen.findByText(/已入库：TEST_图片.png/)).toBeVisible();
+  expect(screen.getByText(/已清除筛选并返回第一页/)).toBeVisible();
   expect(await screen.findByRole('img', { name: '图片预览 ' + asset.filename })).toBeVisible();
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/upload-url'))).toHaveLength(1);
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/assets/2/confirm'))).toHaveLength(2);
+  await user.click(button('返回素材库'));
+  expect(screen.getByLabelText('搜索素材')).toHaveValue('');
+  expect(screen.getByText('第 1 页')).toBeVisible();
+  await waitFor(() => {
+    const listReads = fetcher.mock.calls.filter(([url]) => url.includes('/assets?'));
+    const latest = new URL(listReads.at(-1)![0], location.origin).searchParams;
+    expect(latest.has('keyword')).toBe(false);
+    expect(latest.has('offset')).toBe(false);
+  });
 });
 
 it('retries a failed association without creating or uploading another asset', async () => {
@@ -395,7 +410,7 @@ it('uses tag arrays, prevents Enter submitting, and retains the pending tag afte
   let patchCount = 0;
   const savedTags = ['TEST_有,标点', 'TEST_待保存'];
   const fetcher = vi.fn(async (url: string, init: RequestInit) => {
-    if (url.endsWith('/assets/tags')) return json(['TEST_有,标点', 'TEST_复用']);
+    if (url.endsWith('/assets/tags')) return json(['TEST_有,标点', 'TEST_复用', 'TEST_a b']);
     if (init.method === 'PATCH') {
       patchCount += 1;
       expect(JSON.parse(String(init.body))).toEqual({ tags: savedTags });
@@ -409,6 +424,14 @@ it('uses tag arrays, prevents Enter submitting, and retains the pending tag afte
   await user.click(await findButton('查看 ' + asset.filename));
   await user.click(button('编辑资料'));
   const input = screen.getByLabelText('新增标签');
+  expect(input).not.toHaveAttribute('maxlength');
+  fireEvent.change(input, { target: { value: '  TEST_a  \t b  ' } });
+  await user.click(input);
+  await user.keyboard('{Enter}');
+  expect(screen.getAllByRole('row', { name: 'TEST_a b' })).toHaveLength(1);
+  expect(screen.getByRole('row', { name: 'TEST_a b' })).toHaveAttribute('aria-selected', 'true');
+  expect(patchCount).toBe(0);
+  await user.click(screen.getByRole('row', { name: 'TEST_a b' }));
   await user.type(input, ' TEST_有,标点 {Enter}');
   expect(patchCount).toBe(0);
   expect(screen.getByRole('row', { name: 'TEST_有,标点' })).toHaveAttribute('aria-selected', 'true');
