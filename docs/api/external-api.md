@@ -535,8 +535,10 @@ with a presigned URL. Design:
 Upload and metadata PATCH trim leading/trailing whitespace, collapse repeated
 whitespace, remove empty labels, and deduplicate tags while preserving input
 order. Reading and exact filtering apply the same normalization to historical
-metadata; labels are never truncated. Candidate tags come from saved assets,
-so unsaved custom labels remain a client's local draft until submission.
+metadata using the same explicit Unicode whitespace set in Python and SQL,
+independent of the database locale; labels are never truncated. Candidate tags
+come from saved assets, so unsaved custom labels remain a client's local draft
+until submission.
 
 ### LLM context
 

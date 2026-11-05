@@ -29,6 +29,16 @@ from tts_erp_v2.media.domain import (
     build_object_key,
 )
 
+# Share Python's Unicode whitespace set explicitly with SQL. PostgreSQL's
+# regex \s depends on its locale and can disagree for historical labels.
+_TAG_WHITESPACE = (
+    "\t\n\v\f\r\x1c\x1d\x1e\x1f \x85\xa0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000"
+)
+_TAG_SPACES = " " * len(_TAG_WHITESPACE)
+_TAG_WHITESPACE_TRANSLATION = str.maketrans(_TAG_WHITESPACE, _TAG_SPACES)
+
 
 @dataclass(frozen=True, slots=True)
 class AssetFilter:
@@ -64,15 +74,20 @@ class DeleteAssetError(Enum):
 
 def normalize_tags(tags: Iterable[str]) -> list[str]:
     """Keep distinct, nonempty labels with consistent whitespace, in input order."""
-    return list(
-        dict.fromkeys(tag for value in tags if (tag := " ".join(value.split())))
+    return list(dict.fromkeys(tag for value in tags if (tag := _normalize_tag(value))))
+
+
+def _normalize_tag(value: str) -> str:
+    return " ".join(
+        part for part in value.translate(_TAG_WHITESPACE_TRANSLATION).split(" ") if part
     )
 
 
 def _normalized_asset_tag() -> ColumnElement[str]:
     """Expand each stored label, including metadata saved before normalization."""
     tag = func.unnest(MediaAsset.tags).column_valued("asset_tag", joins_implicitly=True)
-    return func.btrim(func.regexp_replace(tag, r"\s+", " ", "g"))
+    translated = func.translate(tag, _TAG_WHITESPACE, _TAG_SPACES)
+    return func.btrim(func.regexp_replace(translated, " +", " ", "g"))
 
 
 def _asset_base_query() -> Select:
@@ -240,7 +255,7 @@ def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
     if filters.tag:
         conditions.append(
             select(1)
-            .where(_normalized_asset_tag() == " ".join(filters.tag.split()))
+            .where(_normalized_asset_tag() == _normalize_tag(filters.tag))
             .correlate(MediaAsset)
             .exists()
         )
