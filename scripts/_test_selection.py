@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
