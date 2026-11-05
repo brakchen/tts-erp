@@ -514,13 +514,14 @@ with a presigned URL. Design:
    Detail includes `used_by: [{digital_human_id, name, status}]` for current
    persona references, including archived personas, and matching `usageCount`.
    Existing snake_case response fields remain unchanged; only `usageCount`
-   uses camelCase. In PATCH responses or embedded asset records where usage
-   has not been calculated, `usageCount` is null.
+   uses camelCase. In PATCH responses where usage has not been calculated,
+   `usageCount` is null.
 6. `GET/POST /v2/media/digital-humans` (readonly / readwrite) — list /
    create. List accepts optional `status=active|archived`. Returned
    `asset_ids` exclude soft-deleted assets.
 7. `GET/PATCH/DELETE /v2/media/digital-humans/{digital_human_id}` — detail
-   (including the referenced assets) / edit / soft-delete. Archiving via
+   (including the referenced assets, each with its server-calculated
+   `usageCount` including archived references) / edit / soft-delete. Archiving via
    `status=archived` preserves the references and allows maintenance and
    restoration via `status=active`. Deleting a persona preserves its assets.
 8. `POST /v2/media/digital-humans/{id}/assets` — attach a ready asset
