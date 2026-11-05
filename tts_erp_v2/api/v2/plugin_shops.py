@@ -167,7 +167,7 @@ def get_plugin_shop(
 @router.post("/{shop_id}/telemetry", status_code=204)
 def monitor_telemetry(
     request: Request,
-    shop_id: Annotated[str, Path(pattern=r"^\d{1,64}$")],
+    shop_id: Annotated[str, Path(pattern=r"^[0-9]{1,64}$")],
     body: Annotated[MonitorTelemetry, Depends(_telemetry_body)],
     session: Annotated[Session, Depends(get_session)],
 ) -> Response:

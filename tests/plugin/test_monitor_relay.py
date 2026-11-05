@@ -54,3 +54,11 @@ def test_disabled_host_is_not_reenabled_by_heartbeat(api):
         relay.forward_observations(None, SimpleNamespace(shop_id="123", account_name="TEST_shop"), [{"key": "monitor.heartbeat", "value": 0}])
     api.host.update.assert_not_called()
     api.history.push.assert_not_called()
+
+
+def test_long_shop_names_preserve_unique_seller_suffix(api):
+    api.host.get.return_value = []
+    seller = "9" * 64
+    relay.forward_observations(None, SimpleNamespace(shop_id=seller, account_name="TEST_" + "店" * 195), [{"key": "monitor.heartbeat", "value": 0}])
+    visible_name = api.host.create.call_args.kwargs["name"]
+    assert len(visible_name) == 128 and visible_name.endswith(" · " + seller)
