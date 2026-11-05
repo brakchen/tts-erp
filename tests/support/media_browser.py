@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -35,6 +36,7 @@ class MediaBytes:
         self.previews: dict[str, str] = {}
         self.objects: dict[str, tuple[str, bytes]] = {}
         self.puts = 0
+        self.removes = 0
         self.break_next_preview = False
 
     def bucket(self) -> str:
@@ -61,6 +63,7 @@ class MediaBytes:
         return {"size": len(payload), "content_type": content_type}
 
     def remove(self, key: str) -> None:
+        self.removes += 1
         self.objects.pop(key, None)
 
     def handle(self, route: Route, path: str) -> bool:
@@ -98,6 +101,14 @@ class MediaBytes:
         return False
 
 
+@dataclass(frozen=True)
+class MediaRequest:
+    method: str
+    path: str
+    query: dict[str, list[str]]
+    body: object
+
+
 class MediaBrowserBridge:
     """An exact-purpose gate for current-run media tests.
 
@@ -116,15 +127,19 @@ class MediaBrowserBridge:
         self.assets: set[int] = set()
         self.humans: set[int] = set()
         self.calls: Counter[tuple[str, str]] = Counter()
+        self.requests: list[MediaRequest] = []
+        self.responses: list[tuple[str, str, int]] = []
+        self.asset_pages: list[dict] = []
         self.refusals: list[str] = []
-        self.fail_next: tuple[str, re.Pattern[str], int] | None = None
+        self.fail_next: tuple[str, re.Pattern[str], int, int] | None = None
         self.hold_next: tuple[str, re.Pattern[str]] | None = None
         self.held: tuple[Route, str, str] | None = None
         self.closing = False
 
-    def fail(self, method: str, path: str | re.Pattern[str], status: int) -> None:
+    def fail(self, method: str, path: str | re.Pattern[str], status: int, *, after: int = 0) -> None:
         assert self.fail_next is None
-        self.fail_next = method, re.compile(re.escape(path)) if isinstance(path, str) else path, status
+        assert after >= 0
+        self.fail_next = method, re.compile(re.escape(path)) if isinstance(path, str) else path, status, after
 
     def hold(self, method: str, path: re.Pattern[str]) -> None:
         assert self.hold_next is None and self.held is None
@@ -164,6 +179,8 @@ class MediaBrowserBridge:
             return True
         if method == "POST" and not query and path == LOGIN:
             return isinstance(body, dict) and body.get("username") == self.username
+        if method == "GET" and not query and path == ASSETS + "/tags":
+            return True
         if method == "GET" and path in {ASSETS, HUMANS}:
             if set(query) - {"keyword", "kind", "limit", "offset", "status", "tag", "digitalHumanId", "excludeDigitalHumanId"}:
                 return False
@@ -212,6 +229,9 @@ class MediaBrowserBridge:
             )
         finally:
             self.client.cookies.clear()
+        self.responses.append((request.method, path, response.status_code))
+        if request.method == "GET" and path == ASSETS and response.status_code == 200:
+            self.asset_pages.append(response.json())
         if response.status_code == 201 and request.method == "POST":
             if path == ASSETS + "/upload-url":
                 self.assets.add(response.json()["asset_id"])
@@ -241,11 +261,16 @@ class MediaBrowserBridge:
             body = request.post_data_json if request.post_data_buffer else None
             if self.allows(request.method, path, query, body):
                 self.calls[request.method, path] += 1
+                if path.startswith("/v2/media/"):
+                    self.requests.append(MediaRequest(request.method, path, query, body))
                 if self.fail_next and self.fail_next[0] == request.method and self.fail_next[1].fullmatch(path):
-                    _method, _path, code = self.fail_next
-                    self.fail_next = None
-                    route.fulfill(status=code, json={"detail": "TEST_injected_failure"})
-                    return
+                    _method, _path, code, remaining = self.fail_next
+                    if remaining:
+                        self.fail_next = _method, _path, code, remaining - 1
+                    else:
+                        self.fail_next = None
+                        route.fulfill(status=code, json={"detail": "TEST_injected_failure"})
+                        return
                 target = parsed.path + ("?" + parsed.query if parsed.query else "")
                 if self.hold_next and self.hold_next[0] == request.method and self.hold_next[1].fullmatch(path):
                     self.hold_next = None

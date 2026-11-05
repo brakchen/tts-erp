@@ -3,19 +3,47 @@ import { Button, Input, Label, ProgressBar, TextField } from '@heroui/react';
 import { ApiError, retryAfterSeconds } from '../../shared/api/client';
 import type { FrontendBootstrap } from '../../shared/contracts';
 import { decodeDigitalHuman, decodeUploadConfirmation, decodeUploadTicket, displayBytes, type UploadTicket } from './contracts';
-import { ActionError, DiscardDialog, RecordDialog, mediaError, mediaWrite, recordLink, uncertainResult, useLeaveGuard } from './media-ui';
+import TagEditor, { withPendingTag } from './TagEditor';
+import { ActionError, DiscardDialog, RecordPage, mediaError, mediaWrite, recordLink, uncertainResult, useLeaveGuard } from './media-ui';
 
 const types = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime';
 type Phase = 'draft' | 'preparing' | 'sending' | 'confirming' | 'attaching' | 'prepare-error' | 'send-error' | 'confirm-error' | 'restart' | 'attach-error';
 
-export default function UploadAsset({ bootstrap, target, onClose, onComplete }: {
+function LocalFilePreview({ file }: { file: File }) {
+  const [preview, setPreview] = useState<{ file: File; url: string | null; failed: boolean }>();
+  useEffect(() => {
+    let url: string;
+    try { url = URL.createObjectURL(file); }
+    catch { setPreview({ file, url: null, failed: true }); return; }
+    setPreview({ file, url, failed: false });
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  const current = preview?.file === file ? preview : undefined;
+  function failed() { setPreview((previous) => previous?.file === file ? { ...previous, failed: true } : previous); }
+  return <section aria-label="上传前本地预览" className="space-y-2">
+    <h3 className="font-semibold">上传前预览</h3>
+    {!current ? <p role="status">正在准备本地预览…</p> : current.failed || !current.url
+      ? <p role="status">暂时无法预览所选文件。你可以继续上传，或重新选择文件。</p>
+      : <div className="flex min-w-0 justify-center rounded-lg bg-default/40 p-2">
+          {file.type.startsWith('video/')
+            ? <video src={current.url} aria-label={'本地视频预览 ' + file.name} controls preload="metadata" playsInline className="max-h-96 max-w-full" onError={failed} />
+            : <img src={current.url} alt={'本地图片预览 ' + file.name} className="max-h-96 max-w-full object-contain" onError={failed} />}
+        </div>}
+  </section>;
+}
+
+export default function UploadAsset({ bootstrap, target, onClose, onComplete, backLabel = '返回素材库', selectionCount = 0 }: {
   bootstrap: FrontendBootstrap;
   target?: { id: string; name: string };
   onClose: (completedAssetId?: string) => void;
   onComplete: (assetId: string, filename: string) => void;
+  backLabel?: string;
+  selectionCount?: number;
 }) {
   const [file, setFile] = useState<File>();
   const [filename, setFilename] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
   const [ticket, setTicket] = useState<UploadTicket>();
   const [phase, setPhase] = useState<Phase>('draft');
   const [progress, setProgress] = useState(0);
@@ -30,12 +58,12 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
   const href = recordLink(bootstrap, 'media-assets', 'asset', readyAsset);
   const root = bootstrap.rootPath;
 
-  useLeaveGuard(Boolean(file) || pending);
+  useLeaveGuard(Boolean(file || tags.length || tagInput.trim()) || pending);
   useEffect(() => () => xhr.current?.abort(), []);
 
   function close() {
     if (busy.current) return;
-    if (file) setDiscard(true);
+    if (file || tags.length || tagInput.trim()) setDiscard(true);
     else onClose();
   }
 
@@ -111,7 +139,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
     let next: UploadTicket;
     try {
       next = await mediaWrite(root, '/assets/upload-url', 'POST', decodeUploadTicket, {
-        filename: filename.trim(), contentType: file.type, sizeBytes: file.size,
+        filename: filename.trim(), contentType: file.type, sizeBytes: file.size, tags: withPendingTag(tags, tagInput),
       });
     } catch (failure) {
       setPrepareUncertain(uncertainResult(failure));
@@ -132,10 +160,11 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
   }
 
   const editable = phase === 'draft' || phase === 'prepare-error' || phase === 'restart';
-  const title = target ? '上传资产并添加到 ' + target.name : '上传资产';
+  const title = target ? '上传素材并添加到 ' + target.name : '上传素材';
   return <>
-    <RecordDialog title={title} pending={pending} onClose={close}>
+    <RecordPage title={title} target={target?.name} backLabel={backLabel} pending={pending} onClose={close}>
       <p>{target ? '文件入库后会添加到此数字人，也可以在全局资产库中找到。' : '文件上传并通过入库确认后，就可以在资产库中查看。'}</p>
+      {selectionCount > 0 && <p role="status">选择页待添加的 {selectionCount} 项素材已保留。上传完成后返回继续确认添加。</p>}
       {editable && <label className="block space-y-2">
         <span className="block">选择文件</span>
         <input type="file" accept={types} onChange={(event) => {
@@ -152,11 +181,13 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
       <p className="text-sm text-muted">图片最大 20 MiB，视频最大 200 MiB。</p>
       {file && <>
         <p className="break-words">所选文件：{file.name} · {displayBytes(file.size)}</p>
+        <LocalFilePreview file={file} />
         <TextField value={filename} onChange={setFilename} isDisabled={!editable}>
           <Label>显示名称</Label><Input maxLength={255} />
         </TextField>
-        {editable && <p className="text-sm text-muted">名称默认使用文件名，说明和标签可以在资产入库后补充。</p>}
+        {editable && <p className="text-sm text-muted">名称默认使用文件名，说明可以在素材入库后补充。</p>}
       </>}
+      <TagEditor root={root} selected={tags} input={tagInput} onChange={setTags} onInput={setTagInput} disabled={!editable} />
       {phase === 'preparing' && <p role="status">正在准备上传…</p>}
       {phase === 'sending' && <>
         <p role="status">{progress === 100 ? '文件已发送，等待存储响应…' : '正在上传文件…'}</p>
@@ -191,7 +222,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
         {readyAsset && href && <a className="self-center underline" href={href} target="_blank" rel="noreferrer">在新标签页查看已入库资产</a>}
         {!pending && <Button variant="secondary" onPress={close}>{readyAsset ? '保留资产并返回档案' : '取消上传'}</Button>}
       </div>
-    </RecordDialog>
+    </RecordPage>
     <DiscardDialog open={discard} onKeep={() => setDiscard(false)} onDiscard={() => onClose(readyAsset)}
       description={readyAsset ? '已入库的资产会保留，你可以稍后通过「选择已有资产」添加。'
         : ticket ? '结束后会丢弃本次上传的本地进度。请在资产库核对已完成的记录。' : '所选文件和填写的名称将清除。'} />

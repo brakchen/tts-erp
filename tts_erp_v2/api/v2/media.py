@@ -11,8 +11,8 @@ and no shop partition):
 2. ``POST /v2/media/assets/{id}/confirm`` HEADs the object; a size match flips
    the row to ``ready``.
 3. ``GET /v2/media/assets`` lists live assets with filters.
-4. ``DELETE /v2/media/assets/{id}`` soft-deletes the row and best-effort
-   removes the object from the bucket.
+4. ``DELETE /v2/media/assets/{id}`` rejects referenced assets; otherwise it
+   soft-deletes the row and best-effort removes the object from the bucket.
 
 Digital humans are persona records. An asset may stay unattached (global
 pool) and may be attached to several personas at once.
@@ -77,6 +77,7 @@ class UploadUrlIn(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(min_length=1, max_length=127, alias="contentType")
     size_bytes: int = Field(ge=1, alias="sizeBytes")
+    tags: list[str] = Field(default_factory=list)
 
 
 class UploadUrlOut(BaseModel):
@@ -98,6 +99,8 @@ class ConfirmOut(BaseModel):
 
 
 class AssetOut(BaseModel):
+    model_config = {"populate_by_name": True}
+
     asset_id: int
     kind: str
     filename: str
@@ -112,6 +115,7 @@ class AssetOut(BaseModel):
     created_at: datetime
     url: str | None = None
     url_expires_at: datetime | None = None
+    usage_count: int | None = Field(default=None, alias="usageCount")
 
 
 class DigitalHumanReferenceOut(BaseModel):
@@ -198,7 +202,13 @@ def _actor(request: Request) -> str:
     return str(key_hash)[:12] if key_hash else "system"
 
 
-def _asset_out(asset: MediaAsset, url: str | None, expires_at: datetime | None) -> AssetOut:
+def _asset_out(
+    asset: MediaAsset,
+    url: str | None,
+    expires_at: datetime | None,
+    *,
+    usage_count: int | None = None,
+) -> AssetOut:
     return AssetOut(
         asset_id=asset.id,
         kind=asset.kind,
@@ -206,7 +216,7 @@ def _asset_out(asset: MediaAsset, url: str | None, expires_at: datetime | None) 
         content_type=asset.content_type,
         size_bytes=asset.size_bytes,
         description=asset.description,
-        tags=list(asset.tags or []),
+        tags=repository.normalize_tags(asset.tags or []),
         status=asset.status,
         failure_reason=asset.failure_reason,
         uploaded_at=asset.uploaded_at,
@@ -214,6 +224,7 @@ def _asset_out(asset: MediaAsset, url: str | None, expires_at: datetime | None) 
         created_at=asset.created_at,
         url=url,
         url_expires_at=expires_at,
+        usage_count=usage_count,
     )
 
 
@@ -252,8 +263,10 @@ def _asset_preview(asset: MediaAsset) -> tuple[str | None, datetime | None]:
         return None, None
 
 
-def _asset_with_preview(asset: MediaAsset) -> AssetOut:
-    return _asset_out(asset, *_asset_preview(asset))
+def _asset_with_preview(
+    asset: MediaAsset, *, usage_count: int | None = None
+) -> AssetOut:
+    return _asset_out(asset, *_asset_preview(asset), usage_count=usage_count)
 
 
 # --- POST /assets/upload-url ------------------------------------------------
@@ -300,6 +313,7 @@ def create_upload_url(
         bucket=store.bucket(),
         uploaded_by_key_id=key_id,
         uploaded_by_prefix=key_prefix,
+        tags=body.tags,
     )
     upload_url = store.presign_put(asset.object_key, body.content_type)
     expires_at = datetime.now(UTC) + store.default_expiry
@@ -349,7 +363,9 @@ def confirm_upload(
                 failure_code = "SIZE_MISMATCH"
         asset = repository.record_upload_verification(sess, asset_id, failure_reason)
         if asset is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, f"asset not found: {asset_id}")
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"asset not found: {asset_id}"
+            )
         if failure_code is not None and asset.status != AssetStatus.READY.value:
             raise HTTPException(status.HTTP_409_CONFLICT, failure_code)
 
@@ -375,7 +391,7 @@ def list_assets(
     kind: str | None = Query(default=None),
     asset_status: Annotated[AssetStatus | None, Query(alias="status")] = None,
     keyword: str | None = Query(default=None, max_length=120),
-    tag: str | None = Query(default=None, max_length=64),
+    tag: str | None = Query(default=None),
     digital_human_id: int | None = Query(default=None, ge=1, alias="digitalHumanId"),
     exclude_digital_human_id: int | None = Query(
         default=None, ge=1, alias="excludeDigitalHumanId"
@@ -409,8 +425,24 @@ def list_assets(
             offset=offset,
         ),
     )
-    items = [_asset_with_preview(asset) for asset in page.items]
+    usage_counts = repository.usage_counts_for_assets(
+        sess, [asset.id for asset in page.items]
+    )
+    items = [
+        _asset_with_preview(asset, usage_count=usage_counts[asset.id])
+        for asset in page.items
+    ]
     return AssetListOut(items=items, total=page.total, limit=limit, offset=offset)
+
+
+@router.get("/assets/tags", response_model=list[str])
+def list_asset_tags(
+    request: Request,
+    sess: Annotated[Session, Depends(get_session)],
+) -> list[str]:
+    """Read tag candidates from ready, undeleted assets."""
+    require_role_at_least(request, "readonly")
+    return repository.list_asset_tags(sess)
 
 
 # --- GET /assets/{id} --------------------------------------------------------
@@ -430,15 +462,16 @@ def get_asset_detail(
             status.HTTP_404_NOT_FOUND,
             f"asset not found: {asset_id}",
         )
+    humans = repository.digital_humans_for_asset(sess, asset_id)
     return AssetDetailOut(
-        **_asset_with_preview(asset).model_dump(),
+        **_asset_with_preview(asset, usage_count=len(humans)).model_dump(),
         used_by=[
             DigitalHumanReferenceOut(
                 digital_human_id=human.id,
                 name=human.name,
                 status=DigitalHumanStatus(human.status),
             )
-            for human in repository.digital_humans_for_asset(sess, asset_id)
+            for human in humans
         ],
     )
 
@@ -480,19 +513,25 @@ def delete_asset(
     request: Request,
     sess: Annotated[Session, Depends(get_session)],
 ) -> Response:
-    """Soft-delete the asset and best-effort remove the stored object."""
+    """Reject referenced assets, otherwise delete their metadata and object."""
     require_role_at_least(request, "readwrite")
     _csrf(request)
     require_destructive_guard(request, op_name="media_asset.delete")
 
     asset = repository.soft_delete_asset(sess, asset_id)
+    if asset is repository.DeleteAssetError.ASSET_IN_USE:
+        raise HTTPException(status.HTTP_409_CONFLICT, "ASSET_IN_USE")
     if asset is not None:
         try:
             get_store().remove(asset.object_key)
         except Exception as e:  # noqa: BLE001 — best-effort
             logger.warning(
                 "object removal failed for soft-deleted asset",
-                extra={"asset_id": asset_id, "object_key": asset.object_key, "error": str(e)},
+                extra={
+                    "asset_id": asset_id,
+                    "object_key": asset.object_key,
+                    "error": str(e),
+                },
             )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -577,12 +616,13 @@ def get_digital_human(
             f"digital human not found: {digital_human_id}",
         )
     asset_ids = repository.asset_ids_for_digital_human(sess, human.id)
+    usage_counts = repository.usage_counts_for_assets(sess, asset_ids)
     assets: list[AssetOut] = []
     for asset_id in asset_ids:
         asset = repository.get_asset(sess, asset_id)
         if asset is None:
             continue
-        assets.append(_asset_with_preview(asset))
+        assets.append(_asset_with_preview(asset, usage_count=usage_counts[asset.id]))
     return DigitalHumanDetailOut(
         digital_human_id=human.id,
         name=human.name,
@@ -668,7 +708,9 @@ def link_asset(
     """Attach one asset to one persona. Idempotent."""
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    human = repository.link_asset_to_digital_human(sess, digital_human_id, body.asset_id)
+    human = repository.link_asset_to_digital_human(
+        sess, digital_human_id, body.asset_id
+    )
     if human is repository.LinkAssetError.HUMAN_NOT_FOUND:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,

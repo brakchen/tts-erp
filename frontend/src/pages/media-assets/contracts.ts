@@ -18,6 +18,7 @@ export interface Asset {
   url: string | null;
   urlExpiresAt: string | null;
   usedBy: AssetReference[] | null;
+  usageCount: Count | null;
 }
 
 export interface AssetReference {
@@ -110,7 +111,12 @@ export function decodeAsset(value: unknown): Asset {
     url: nullableText(row.url),
     urlExpiresAt: nullableText(row.url_expires_at),
     usedBy: decodeReferences(row.used_by),
+    usageCount: row.usageCount === null || row.usageCount === undefined ? null : count(row.usageCount),
   };
+}
+
+export function decodeTags(value: unknown): string[] {
+  return tags(value);
 }
 
 export function decodeAssetList(value: unknown): AssetList {

@@ -5,6 +5,7 @@ The router exposes the global media asset library and digital humans:
 - ``POST   /v2/media/assets/upload-url``              → readwrite → 201 + presigned PUT
 - ``POST   /v2/media/assets/{id}/confirm``             → readwrite → 200 + presigned GET
 - ``GET    /v2/media/assets``                          → readonly  → 200 + page
+- ``GET    /v2/media/assets/tags``                     → readonly  → 200 + labels
 - ``GET    /v2/media/assets/{id}``                     → readonly  → 200
 - ``PATCH  /v2/media/assets/{id}``                     → readwrite → 200
 - ``DELETE /v2/media/assets/{id}``                     → readwrite → 204
@@ -27,12 +28,14 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Event
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 # 与其他 tests/api 用例一致：归入 domain_api，否则 `scripts/test.sh api <file>`
 # 的 `-m domain_api` 过滤会把本文件整体静默反选（exit 5）。
@@ -52,6 +55,7 @@ def _wipe_media_test_rows(db_engine):
     that existed when it was written; the media schema is new, so this file
     owns its own cleanup instead of widening that shared contract.
     """
+
     def wipe() -> None:
         with db_engine.begin() as conn:
             conn.execute(
@@ -107,7 +111,11 @@ def fake_store() -> MagicMock:
         datetime.now(UTC) + timedelta(minutes=15),
     )
     store.public_url_or_none.return_value = None
-    store.stat.return_value = {"size": 1024, "content_type": "image/jpeg", "etag": "abc"}
+    store.stat.return_value = {
+        "size": 1024,
+        "content_type": "image/jpeg",
+        "etag": "abc",
+    }
     store.remove.return_value = None
     store.ensure_bucket.return_value = None
     return store
@@ -234,7 +242,12 @@ def test_failed_ticket_signing_does_not_leave_an_asset(
     fake_store.presign_put.side_effect = RuntimeError("TEST upload signing unavailable")
     filename = "TEST_ticket_signing_failure.jpg"
     with pytest.raises(RuntimeError, match="TEST upload signing unavailable"):
-        _upload_one(api_client_focused, readwrite_key, filename=filename)
+        _upload_one(
+            api_client_focused,
+            readwrite_key,
+            filename=filename,
+            tags=["TEST_ticket_orphan"],
+        )
 
     listing = api_client_focused.get(
         "/v2/media/assets",
@@ -243,6 +256,36 @@ def test_failed_ticket_signing_does_not_leave_an_asset(
     )
     assert listing.status_code == 200
     assert listing.json()["total"] == 0
+
+
+def test_upload_ticket_saves_normalized_tags_before_confirmation(
+    api_client_focused, readwrite_key, db_engine
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(
+        api_client_focused,
+        readwrite_key,
+        tags=["  TEST_upload  tag ", "TEST_upload\ttag", "", "  ", "TEST_second"],
+    )
+    expected = ["TEST_upload tag", "TEST_second"]
+    with db_engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text("SELECT tags FROM media.media_assets WHERE id = :id"),
+                {"id": asset_id},
+            )
+            == expected
+        )
+    path = f"/v2/media/assets/{asset_id}"
+    pending = api_client_focused.get(path, headers=headers)
+    assert pending.json()["tags"] == expected
+    assert pending.json()["status"] == "awaiting_upload"
+    assert (
+        api_client_focused.post(f"{path}/confirm", headers=headers).status_code == 200
+    )
+    confirmed = api_client_focused.get(path, headers=headers).json()
+    assert confirmed["status"] == "ready"
+    assert confirmed["tags"] == expected
 
 
 def test_confirm_marks_ready(api_client_focused, readwrite_key):
@@ -387,6 +430,166 @@ def test_list_assets_rejects_unknown_kind(api_client_focused, readwrite_key):
     assert r.status_code == 400, r.text
 
 
+def test_tag_candidates_are_readonly_deduplicated_and_ready_only(
+    api_client_focused, readwrite_key, readonly_key, fake_store, db_engine
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    long_tag = "TEST_" + "long_label_" * 15
+    ready_ids = [
+        _upload_one(
+            api_client_focused,
+            readwrite_key,
+            filename=f"TEST_tag_candidate_{index}.jpg",
+            tags=tags,
+        )
+        for index, tags in enumerate(
+            ([" TEST_shared ", "TEST_shared", "TEST_multi\t line", ""], [long_tag])
+        )
+    ]
+    for asset_id in ready_ids:
+        assert (
+            api_client_focused.post(
+                f"/v2/media/assets/{asset_id}/confirm", headers=headers
+            ).status_code
+            == 200
+        )
+    # Historical tags are normalized for reading/filtering without a migration.
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE media.media_assets SET tags = :tags WHERE id = :id"),
+            {
+                "tags": [long_tag, "  TEST_legacy\t tag ", "TEST_shared", " "],
+                "id": ready_ids[1],
+            },
+        )
+    _upload_one(api_client_focused, readwrite_key, tags=["TEST_pending_only"])
+    failed_id = _upload_one(
+        api_client_focused, readwrite_key, tags=["TEST_failed_only"]
+    )
+    fake_store.stat.return_value = {"size": 999}
+    assert (
+        api_client_focused.post(
+            f"/v2/media/assets/{failed_id}/confirm", headers=headers
+        ).status_code
+        == 409
+    )
+    fake_store.stat.return_value = {"size": 1024}
+    deleted_id = _upload_one(
+        api_client_focused, readwrite_key, tags=["TEST_deleted_only"]
+    )
+    assert (
+        api_client_focused.post(
+            f"/v2/media/assets/{deleted_id}/confirm", headers=headers
+        ).status_code
+        == 200
+    )
+    assert (
+        api_client_focused.delete(
+            f"/v2/media/assets/{deleted_id}", headers=headers
+        ).status_code
+        == 204
+    )
+
+    def saved_rows():
+        with db_engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT id, tags, status, deleted_at FROM media.media_assets ORDER BY id"
+                )
+            ).all()
+
+    before = saved_rows()
+    fake_store.reset_mock()
+    readonly_headers = {"Authorization": f"Bearer {readonly_key}"}
+    for _ in range(2):
+        candidates = api_client_focused.get(
+            "/v2/media/assets/tags", headers=readonly_headers
+        )
+        assert candidates.status_code == 200, candidates.text
+        assert candidates.json() == sorted(
+            [long_tag, "TEST_shared", "TEST_multi line", "TEST_legacy tag"]
+        )
+    assert saved_rows() == before
+    assert fake_store.mock_calls == []
+
+    exact = api_client_focused.get(
+        "/v2/media/assets", headers=readonly_headers, params={"tag": long_tag}
+    )
+    assert exact.status_code == 200, exact.text
+    assert exact.json()["total"] == 1
+    assert [row["asset_id"] for row in exact.json()["items"]] == [ready_ids[1]]
+    legacy = api_client_focused.get(
+        "/v2/media/assets", headers=readonly_headers, params={"tag": "TEST_legacy tag"}
+    )
+    assert legacy.json()["total"] == 1
+    assert legacy.json()["items"][0]["tags"] == [
+        long_tag,
+        "TEST_legacy tag",
+        "TEST_shared",
+    ]
+    keyword = api_client_focused.get(
+        "/v2/media/assets", headers=readonly_headers, params={"keyword": "legacy"}
+    )
+    assert keyword.status_code == 200, keyword.text
+    assert keyword.json()["total"] == 1
+    assert [row["asset_id"] for row in keyword.json()["items"]] == [ready_ids[1]]
+
+
+def test_legacy_unicode_tag_whitespace_has_matching_candidates_and_filters(
+    api_client_focused, readwrite_key, readonly_key, db_engine
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(
+        api_client_focused, readwrite_key, filename="TEST_unicode_whitespace.jpg"
+    )
+    asset_path = f"/v2/media/assets/{asset_id}"
+    assert (
+        api_client_focused.post(f"{asset_path}/confirm", headers=headers).status_code
+        == 200
+    )
+    raw_tags = [
+        "\x1c TEST_legacy\x1ccontrol \x1c",
+        "\u00a0TEST_legacy\u00a0nbsp\u00a0",
+        "\tTEST_legacy\t tab\t",
+        "\u00a0TEST_legacy\x1ccontrol\t",
+        "\x1c\u00a0\t",
+    ]
+    # Bypass write normalization to exercise labels stored by older versions.
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE media.media_assets SET tags = :tags WHERE id = :id"),
+            {"tags": raw_tags, "id": asset_id},
+        )
+
+    expected = ["TEST_legacy control", "TEST_legacy nbsp", "TEST_legacy tab"]
+    readonly_headers = {"Authorization": f"Bearer {readonly_key}"}
+    candidates = api_client_focused.get(
+        "/v2/media/assets/tags", headers=readonly_headers
+    )
+    assert candidates.status_code == 200, candidates.text
+    assert candidates.json() == expected
+    assert (
+        api_client_focused.get(asset_path, headers=readonly_headers).json()["tags"]
+        == expected
+    )
+    for normalized, raw in zip(expected, raw_tags[:3], strict=True):
+        for name, value in (("tag", normalized), ("tag", raw), ("keyword", normalized)):
+            filtered = api_client_focused.get(
+                "/v2/media/assets", headers=readonly_headers, params={name: value}
+            )
+            assert filtered.status_code == 200, filtered.text
+            assert filtered.json()["total"] == 1, (name, value, filtered.json())
+            assert [row["asset_id"] for row in filtered.json()["items"]] == [asset_id]
+    with db_engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text("SELECT tags FROM media.media_assets WHERE id = :id"),
+                {"id": asset_id},
+            )
+            == raw_tags
+        )
+
+
 # ---------------------------------------------------------------------------
 # PATCH / DELETE /v2/media/assets/{id}
 # ---------------------------------------------------------------------------
@@ -397,13 +600,18 @@ def test_update_asset_metadata(api_client_focused, readwrite_key):
     r = api_client_focused.patch(
         f"/v2/media/assets/{asset_id}",
         headers={"Authorization": f"Bearer {readwrite_key}"},
-        json={"filename": "TEST_renamed.jpg", "description": "TEST 说明", "tags": ["a", "b"]},
+        json={
+            "filename": "TEST_renamed.jpg",
+            "description": "TEST 说明",
+            "tags": [" a ", "b\t c", "a", "", "  "],
+        },
     )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["filename"] == "TEST_renamed.jpg"
     assert body["description"] == "TEST 说明"
-    assert body["tags"] == ["a", "b"]
+    assert body["tags"] == ["a", "b c"]
+    assert body["usageCount"] is None
 
 
 def test_update_unknown_asset_is_404(api_client_focused, readwrite_key):
@@ -430,9 +638,202 @@ def test_delete_asset_is_soft_and_removes_object(
         "/v2/media/assets",
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
-    assert all(
-        item["asset_id"] != asset_id for item in listed.json()["items"]
+    assert all(item["asset_id"] != asset_id for item in listed.json()["items"])
+    assert (
+        api_client_focused.delete(
+            f"/v2/media/assets/{asset_id}",
+            headers={"Authorization": f"Bearer {readwrite_key}"},
+        ).status_code
+        == 204
     )
+    assert fake_store.remove.call_count == 1
+
+
+def test_referenced_asset_cannot_be_deleted_until_the_last_reference_is_removed(
+    api_client_focused, readwrite_key, fake_store, db_engine
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    asset_path = f"/v2/media/assets/{asset_id}"
+    confirmed = api_client_focused.post(f"{asset_path}/confirm", headers=headers)
+    object_key = confirmed.json()["object_key"]
+    stored_bytes = {object_key: b"TEST_original_object_bytes"}
+    fake_store.remove.side_effect = stored_bytes.pop
+    human_ids = [
+        api_client_focused.post(
+            "/v2/media/digital-humans",
+            headers=headers,
+            json={"name": f"TEST_delete_reference_{index}"},
+        ).json()["digital_human_id"]
+        for index in (1, 2)
+    ]
+    human_paths = [f"/v2/media/digital-humans/{human_id}" for human_id in human_ids]
+    for path in human_paths:
+        assert (
+            api_client_focused.post(
+                f"{path}/assets", headers=headers, json={"assetId": asset_id}
+            ).status_code
+            == 200
+        )
+    assert (
+        api_client_focused.patch(
+            human_paths[1], headers=headers, json={"status": "archived"}
+        ).status_code
+        == 200
+    )
+
+    for remaining in (2, 1):
+        rejected = api_client_focused.delete(asset_path, headers=headers)
+        assert rejected.status_code == 409, rejected.text
+        assert rejected.json()["detail"] == "ASSET_IN_USE"
+        assert fake_store.remove.call_count == 0
+        assert stored_bytes == {object_key: b"TEST_original_object_bytes"}
+        with db_engine.connect() as conn:
+            assert (
+                conn.scalar(
+                    text("SELECT deleted_at FROM media.media_assets WHERE id = :id"),
+                    {"id": asset_id},
+                )
+                is None
+            )
+        detail = api_client_focused.get(asset_path, headers=headers).json()
+        assert detail["usageCount"] == remaining
+        assert len(detail["used_by"]) == remaining
+        assert api_client_focused.get(human_paths[1], headers=headers).json()[
+            "asset_ids"
+        ] == [asset_id]
+        assert (
+            api_client_focused.delete(
+                f"{human_paths[2 - remaining]}/assets/{asset_id}", headers=headers
+            ).status_code
+            == 204
+        )
+
+    assert api_client_focused.get(asset_path, headers=headers).json()["usageCount"] == 0
+    assert api_client_focused.delete(asset_path, headers=headers).status_code == 204
+    assert stored_bytes == {}
+    assert fake_store.remove.call_count == 1
+
+
+def test_asset_link_and_delete_lock_each_other_in_both_directions(
+    api_client_focused, readwrite_key, db_engine
+):
+    """Real repository operations must contend on the same asset row."""
+    from tts_erp_v2.media import repository
+
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    assert (
+        api_client_focused.post(
+            f"/v2/media/assets/{asset_id}/confirm", headers=headers
+        ).status_code
+        == 200
+    )
+    human_id = api_client_focused.post(
+        "/v2/media/digital-humans",
+        headers=headers,
+        json={"name": "TEST_link_delete_locks"},
+    ).json()["digital_human_id"]
+
+    # Holding commit leaves the actual operation's lock open. A bounded DB
+    # timeout proves contention, without timing-dependent thread sleeps.
+    for holder_operation, waiting_operation, expected_after_commit in (
+        (
+            lambda session: repository.link_asset_to_digital_human(
+                session, human_id, asset_id
+            ),
+            lambda session: repository.soft_delete_asset(session, asset_id),
+            repository.DeleteAssetError.ASSET_IN_USE,
+        ),
+        (
+            lambda session: repository.soft_delete_asset(session, asset_id),
+            lambda session: repository.link_asset_to_digital_human(
+                session, human_id, asset_id
+            ),
+            repository.LinkAssetError.ASSET_NOT_FOUND,
+        ),
+    ):
+        with Session(db_engine) as holder, Session(db_engine) as waiter:
+            with patch.object(holder, "commit"):
+                result = holder_operation(holder)
+            assert result is not None
+            assert not isinstance(
+                result, (repository.LinkAssetError, repository.DeleteAssetError)
+            )
+            waiter.execute(text("SET LOCAL lock_timeout = '250ms'"))
+            with pytest.raises(OperationalError) as blocked:
+                waiting_operation(waiter)
+            assert getattr(blocked.value.orig, "sqlstate", None) == "55P03"
+            waiter.rollback()
+            holder.commit()
+
+        # A fresh transaction after the winning commit must observe its result,
+        # rather than deleting a newly referenced asset or linking a deleted one.
+        with Session(db_engine) as resumed:
+            assert waiting_operation(resumed) is expected_after_commit
+        with db_engine.connect() as conn:
+            deleted_at = conn.scalar(
+                text("SELECT deleted_at FROM media.media_assets WHERE id = :id"),
+                {"id": asset_id},
+            )
+            links = conn.scalar(
+                text(
+                    "SELECT count(*) FROM media.digital_human_assets WHERE asset_id = :id"
+                ),
+                {"id": asset_id},
+            )
+        if expected_after_commit is repository.DeleteAssetError.ASSET_IN_USE:
+            assert deleted_at is None
+            assert links == 1
+            # Clear the first winner's reference before exercising delete-first.
+            with Session(db_engine) as cleanup:
+                assert repository.unlink_asset_from_digital_human(
+                    cleanup, human_id, asset_id
+                )
+        else:
+            assert deleted_at is not None
+            assert links == 0
+
+
+def test_deleted_persona_legacy_reference_is_not_counted_or_a_delete_blocker(
+    api_client_focused, readwrite_key, db_engine
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    asset_id = _upload_one(api_client_focused, readwrite_key)
+    asset_path = f"/v2/media/assets/{asset_id}"
+    assert (
+        api_client_focused.post(f"{asset_path}/confirm", headers=headers).status_code
+        == 200
+    )
+    human_id = api_client_focused.post(
+        "/v2/media/digital-humans",
+        headers=headers,
+        json={"name": "TEST_deleted_persona_link"},
+    ).json()["digital_human_id"]
+    assert (
+        api_client_focused.post(
+            f"/v2/media/digital-humans/{human_id}/assets",
+            headers=headers,
+            json={"assetId": asset_id},
+        ).status_code
+        == 200
+    )
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE media.digital_humans SET deleted_at = now() WHERE id = :id"),
+            {"id": human_id},
+        )
+    detail = api_client_focused.get(asset_path, headers=headers).json()
+    assert detail["used_by"] == []
+    assert detail["usageCount"] == 0
+    listing = api_client_focused.get("/v2/media/assets", headers=headers).json()
+    assert (
+        next(row for row in listing["items"] if row["asset_id"] == asset_id)[
+            "usageCount"
+        ]
+        == 0
+    )
+    assert api_client_focused.delete(asset_path, headers=headers).status_code == 204
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +858,7 @@ def test_create_and_read_digital_human(api_client_focused, readwrite_key):
     )
     assert detail.status_code == 200, detail.text
     assert detail.json()["name"] == "TEST_digital_human_a"
+    assert detail.json()["assets"] == []
 
 
 def test_update_and_delete_digital_human(api_client_focused, readwrite_key):
@@ -496,6 +898,13 @@ def test_link_and_unlink_asset(api_client_focused, readwrite_key):
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert confirmed.status_code == 200, confirmed.text
+    assert (
+        api_client_focused.get(
+            f"/v2/media/assets/{asset_id}",
+            headers={"Authorization": f"Bearer {readwrite_key}"},
+        ).json()["usageCount"]
+        == 0
+    )
     created = api_client_focused.post(
         "/v2/media/digital-humans",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -510,6 +919,11 @@ def test_link_and_unlink_asset(api_client_focused, readwrite_key):
     )
     assert linked.status_code == 200, linked.text
     assert linked.json()["asset_ids"] == [asset_id]
+    detail = api_client_focused.get(
+        f"/v2/media/digital-humans/{human_id}",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+    )
+    assert detail.json()["assets"][0]["usageCount"] == 1
 
     # Linking twice is idempotent.
     again = api_client_focused.post(
@@ -531,6 +945,14 @@ def test_link_and_unlink_asset(api_client_focused, readwrite_key):
         headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert after.json()["asset_ids"] == []
+    assert after.json()["assets"] == []
+    assert (
+        api_client_focused.get(
+            f"/v2/media/assets/{asset_id}",
+            headers={"Authorization": f"Bearer {readwrite_key}"},
+        ).json()["usageCount"]
+        == 0
+    )
 
 
 def test_ready_filter_and_association_reject_new_pending_link(
@@ -655,14 +1077,21 @@ def test_metadata_is_available_without_configured_object_storage(
 
     headers = {"Authorization": f"Bearer {readwrite_key}"}
     asset_id = _upload_one(api_client_focused, readwrite_key)
-    confirmed = api_client_focused.post(f"/v2/media/assets/{asset_id}/confirm", headers=headers)
+    confirmed = api_client_focused.post(
+        f"/v2/media/assets/{asset_id}/confirm", headers=headers
+    )
     assert confirmed.status_code == 200
     human_id = api_client_focused.post(
         "/v2/media/digital-humans", headers=headers, json={"name": "TEST_storage_down"}
     ).json()["digital_human_id"]
-    assert api_client_focused.post(
-        f"/v2/media/digital-humans/{human_id}/assets", headers=headers, json={"assetId": asset_id}
-    ).status_code == 200
+    assert (
+        api_client_focused.post(
+            f"/v2/media/digital-humans/{human_id}/assets",
+            headers=headers,
+            json={"assetId": asset_id},
+        ).status_code
+        == 200
+    )
 
     def unavailable():
         raise MinioConfigError("TEST storage not configured")
@@ -672,18 +1101,28 @@ def test_metadata_is_available_without_configured_object_storage(
     assert listing.status_code == 200
     row = next(row for row in listing.json()["items"] if row["asset_id"] == asset_id)
     assert row["url"] is None and row["status"] == "ready"
-    detail = api_client_focused.get(f"/v2/media/digital-humans/{human_id}", headers=headers)
+    detail = api_client_focused.get(
+        f"/v2/media/digital-humans/{human_id}", headers=headers
+    )
     assert detail.status_code == 200
     assert detail.json()["assets"][0]["asset_id"] == asset_id
     assert detail.json()["assets"][0]["url"] is None
     changed = api_client_focused.patch(
-        f"/v2/media/assets/{asset_id}", headers=headers, json={"filename": "TEST_renamed.png"}
+        f"/v2/media/assets/{asset_id}",
+        headers=headers,
+        json={"filename": "TEST_renamed.png"},
     )
-    assert changed.status_code == 200 and changed.json()["filename"] == "TEST_renamed.png"
+    assert (
+        changed.status_code == 200 and changed.json()["filename"] == "TEST_renamed.png"
+    )
     upload = api_client_focused.post(
         "/v2/media/assets/upload-url",
         headers=headers,
-        json={"filename": "TEST_unavailable.jpg", "contentType": "image/jpeg", "sizeBytes": 1024},
+        json={
+            "filename": "TEST_unavailable.jpg",
+            "contentType": "image/jpeg",
+            "sizeBytes": 1024,
+        },
     )
     assert upload.status_code == 503
 
@@ -692,46 +1131,86 @@ def test_asset_candidates_exclude_only_the_selected_personas_links(
     api_client_focused, readwrite_key
 ):
     headers = {"Authorization": f"Bearer {readwrite_key}"}
-    linked_id = _upload_one(api_client_focused, readwrite_key, filename="TEST_candidate_linked.jpg")
-    other_id = _upload_one(api_client_focused, readwrite_key, filename="TEST_candidate_other.jpg")
+    linked_id = _upload_one(
+        api_client_focused, readwrite_key, filename="TEST_candidate_linked.jpg"
+    )
+    other_id = _upload_one(
+        api_client_focused, readwrite_key, filename="TEST_candidate_other.jpg"
+    )
     for asset_id in (linked_id, other_id):
-        assert api_client_focused.post(f"/v2/media/assets/{asset_id}/confirm", headers=headers).status_code == 200
+        assert (
+            api_client_focused.post(
+                f"/v2/media/assets/{asset_id}/confirm", headers=headers
+            ).status_code
+            == 200
+        )
     human_ids = [
         api_client_focused.post(
-            "/v2/media/digital-humans", headers=headers, json={"name": f"TEST_candidate_{index}"}
+            "/v2/media/digital-humans",
+            headers=headers,
+            json={"name": f"TEST_candidate_{index}"},
         ).json()["digital_human_id"]
         for index in (1, 2)
     ]
     for human_id, asset_id in zip(human_ids, (linked_id, other_id), strict=True):
-        assert api_client_focused.post(
-            f"/v2/media/digital-humans/{human_id}/assets", headers=headers, json={"assetId": asset_id}
-        ).status_code == 200
+        assert (
+            api_client_focused.post(
+                f"/v2/media/digital-humans/{human_id}/assets",
+                headers=headers,
+                json={"assetId": asset_id},
+            ).status_code
+            == 200
+        )
 
     candidates = api_client_focused.get(
-        "/v2/media/assets", headers=headers,
-        params={"excludeDigitalHumanId": human_ids[0], "keyword": "TEST_candidate", "limit": 1},
+        "/v2/media/assets",
+        headers=headers,
+        params={
+            "excludeDigitalHumanId": human_ids[0],
+            "keyword": "TEST_candidate",
+            "limit": 1,
+        },
     )
     assert candidates.status_code == 200
     assert candidates.json()["total"] == 1
     assert [row["asset_id"] for row in candidates.json()["items"]] == [other_id]
+    assert candidates.json()["items"][0]["usageCount"] == 1
     linked = api_client_focused.get(
         "/v2/media/assets", headers=headers, params={"digitalHumanId": human_ids[0]}
     )
     assert [row["asset_id"] for row in linked.json()["items"]] == [linked_id]
 
 
-def test_deleted_asset_is_not_counted_as_a_persona_attachment(api_client_focused, readwrite_key):
+def test_deleted_asset_is_not_counted_as_a_persona_attachment(
+    api_client_focused, readwrite_key, db_engine
+):
     headers = {"Authorization": f"Bearer {readwrite_key}"}
     asset_id = _upload_one(api_client_focused, readwrite_key)
-    assert api_client_focused.post(f"/v2/media/assets/{asset_id}/confirm", headers=headers).status_code == 200
+    assert (
+        api_client_focused.post(
+            f"/v2/media/assets/{asset_id}/confirm", headers=headers
+        ).status_code
+        == 200
+    )
     human_id = api_client_focused.post(
-        "/v2/media/digital-humans", headers=headers, json={"name": "TEST_deleted_asset_count"}
+        "/v2/media/digital-humans",
+        headers=headers,
+        json={"name": "TEST_deleted_asset_count"},
     ).json()["digital_human_id"]
     path = f"/v2/media/digital-humans/{human_id}"
-    assert api_client_focused.post(
-        f"{path}/assets", headers=headers, json={"assetId": asset_id}
-    ).status_code == 200
-    assert api_client_focused.delete(f"/v2/media/assets/{asset_id}", headers=headers).status_code == 204
+    assert (
+        api_client_focused.post(
+            f"{path}/assets", headers=headers, json={"assetId": asset_id}
+        ).status_code
+        == 200
+    )
+    # Preserve support for historical soft-deleted rows. The public DELETE
+    # endpoint now prevents creating this state while a live reference exists.
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE media.media_assets SET deleted_at = now() WHERE id = :id"),
+            {"id": asset_id},
+        )
     detail = api_client_focused.get(path, headers=headers).json()
     listing = api_client_focused.get("/v2/media/digital-humans", headers=headers).json()
     row = next(item for item in listing if item["digital_human_id"] == human_id)
@@ -777,11 +1256,17 @@ def test_shared_asset_usage_tracks_archive_restore_and_removal(
     assert archived.json()["asset_ids"] == [asset_id]
     assert human_ids_by_status("active") == [first_id]
     assert human_ids_by_status("archived") == [second_id]
-    usage = api_client_focused.get(asset_path, headers=headers).json()["used_by"]
+    asset_detail = api_client_focused.get(asset_path, headers=headers).json()
+    assert asset_detail["usageCount"] == 2
+    usage = asset_detail["used_by"]
     assert usage == [
         {"digital_human_id": first_id, "name": f"{prefix}_a", "status": "active"},
         {"digital_human_id": second_id, "name": f"{prefix}_b", "status": "archived"},
     ]
+    listing = api_client_focused.get(
+        "/v2/media/assets", headers=headers, params={"keyword": prefix}
+    ).json()
+    assert listing["items"][0]["usageCount"] == 2
 
     new_name = f"{prefix}_renamed.jpg"
     edited = api_client_focused.patch(
@@ -789,12 +1274,10 @@ def test_shared_asset_usage_tracks_archive_restore_and_removal(
     )
     assert edited.status_code == 200
     for human_path in (first_path, second_path):
-        assert (
-            api_client_focused.get(human_path, headers=headers).json()["assets"][0][
-                "filename"
-            ]
-            == new_name
-        )
+        embedded = api_client_focused.get(human_path, headers=headers).json()["assets"]
+        assert len(embedded) == 1
+        assert embedded[0]["filename"] == new_name
+        assert embedded[0]["usageCount"] == 2
 
     restored = api_client_focused.patch(
         second_path, headers=headers, json={"status": "active"}
@@ -809,16 +1292,21 @@ def test_shared_asset_usage_tracks_archive_restore_and_removal(
         ).status_code
         == 204
     )
-    assert api_client_focused.get(first_path, headers=headers).json()["asset_ids"] == []
-    usage = api_client_focused.get(asset_path, headers=headers).json()["used_by"]
+    first_detail = api_client_focused.get(first_path, headers=headers).json()
+    assert first_detail["asset_ids"] == []
+    assert first_detail["assets"] == []
+    asset_detail = api_client_focused.get(asset_path, headers=headers).json()
+    assert asset_detail["usageCount"] == 1
+    usage = asset_detail["used_by"]
     assert usage == [
         {"digital_human_id": second_id, "name": f"{prefix}_b", "status": "active"}
     ]
-    assert api_client_focused.get(second_path, headers=headers).json()["asset_ids"] == [
-        asset_id
-    ]
+    second_detail = api_client_focused.get(second_path, headers=headers).json()
+    assert second_detail["asset_ids"] == [asset_id]
+    assert second_detail["assets"][0]["usageCount"] == 1
 
     assert api_client_focused.delete(second_path, headers=headers).status_code == 204
     retained = api_client_focused.get(asset_path, headers=headers)
     assert retained.status_code == 200
     assert retained.json()["used_by"] == []
+    assert retained.json()["usageCount"] == 0
