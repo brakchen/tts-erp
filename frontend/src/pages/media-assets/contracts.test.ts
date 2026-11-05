@@ -5,6 +5,7 @@ import {
   decodeDigitalHuman,
   decodeDigitalHumanDetail,
   decodeUploadTicket,
+  decodeTags,
   displayBytes,
 } from './contracts';
 
@@ -36,6 +37,15 @@ describe('media asset wire contracts', () => {
     expect(row.sizeBytes).toBe(2048);
     expect(row.tags).toEqual([]);
     expect(row.url).toContain('sig=1');
+  });
+
+  it('keeps server usage counts and accepts older embedded responses with unknown counts', () => {
+    expect(decodeAsset(asset({ usageCount: 7 })).usageCount).toBe(7);
+    expect(decodeAsset(asset({ usageCount: null })).usageCount).toBeNull();
+    expect(decodeAsset(asset()).usageCount).toBeNull();
+    expect(() => decodeAsset(asset({ usageCount: -1 }))).toThrow();
+    expect(decodeTags(['TEST_有,标点', 'all'])).toEqual(['TEST_有,标点', 'all']);
+    expect(() => decodeTags({ items: [] })).toThrow();
   });
 
   it('rejects a non-object payload', () => {

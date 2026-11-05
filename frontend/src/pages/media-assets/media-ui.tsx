@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Alert, AlertDialog, Button, ListBox, Label, Modal, Select } from '@heroui/react';
+import { Alert, AlertDialog, Button, Chip, ListBox, Label, Select } from '@heroui/react';
 import { ApiError, requestJson } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
 import { pathFor } from '../../shared/api/paths';
@@ -32,6 +32,7 @@ export function mediaError(error: unknown, writing = false) {
   if (error.status === 503) return '服务暂不可用，请稍后重试。';
   if (error.status === 400 || error.status === 422) return '资料未通过校验，请检查文件类型、大小或填写内容。';
   if (error.status === 409) {
+    if (error.detail === 'ASSET_IN_USE' || error.code === 'ASSET_IN_USE') return '此素材仍被数字人引用。请先解除全部引用，再从素材库删除。';
     if (error.detail === 'ASSET_NOT_READY' || error.code === 'ASSET_NOT_READY') return '此资产还没有完成入库，暂时无法添加。';
     return '记录状态已变化，请重新查看后再操作。';
   }
@@ -130,18 +131,19 @@ export function ActionError({ message }: { message: string }) {
   </Alert.Content></Alert> : null;
 }
 
-export function RecordDialog({ title, pending = false, onClose, children, footer }: {
-  title: string; pending?: boolean; onClose: () => void; children: ReactNode; footer?: ReactNode;
+export function RecordPage({ title, pending = false, onClose, children, backLabel = '返回列表', target }: {
+  title: string; pending?: boolean; onClose: () => void; children: ReactNode; backLabel?: string; target?: string;
 }) {
-  return <Modal.Backdrop isOpen isDismissable={false} isKeyboardDismissDisabled={pending}
-    onOpenChange={(open) => { if (!open && !pending) onClose(); }}>
-    <Modal.Container size="lg" scroll="inside"><Modal.Dialog>
-      <Modal.CloseTrigger aria-label="关闭窗口" isDisabled={pending} />
-      <Modal.Header><Modal.Heading className="[overflow-wrap:anywhere]">{title}</Modal.Heading></Modal.Header>
-      <Modal.Body className="space-y-4">{children}</Modal.Body>
-      {footer && <Modal.Footer>{footer}</Modal.Footer>}
-    </Modal.Dialog></Modal.Container>
-  </Modal.Backdrop>;
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, [title]);
+  return <section className="erp-panel space-y-4" aria-label={title}>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 space-y-1"><h2 ref={heading} tabIndex={-1} className="text-xl font-semibold [overflow-wrap:anywhere]">{title}</h2>
+        {target && <p className="[overflow-wrap:anywhere]">目标数字人：<strong>{target}</strong></p>}</div>
+      <Button variant="secondary" isDisabled={pending} onPress={onClose}>{backLabel}</Button>
+    </div>
+    {children}
+  </section>;
 }
 
 export function DiscardDialog({ open, description, onKeep, onDiscard }: {
@@ -162,11 +164,13 @@ export function DiscardDialog({ open, description, onKeep, onDiscard }: {
 export function MediaSelect({ label, value, options, onChange, disabled = false }: {
   label: string; value: string; options: readonly { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean;
 }) {
-  return <Select isDisabled={disabled} selectedKey={value || 'all'} onSelectionChange={(key) => onChange(!key || key === 'all' ? '' : String(key))}>
+  // Index keys keep every literal tag (including "all") selectable.
+  const selectedKey = String(options.findIndex((option) => option.value === value));
+  return <Select isDisabled={disabled} selectedKey={selectedKey} onSelectionChange={(key) => onChange(options[Number(key)]?.value ?? '')}>
     <Label>{label}</Label>
     <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-    <Select.Popover><ListBox>{options.map((item) =>
-      <ListBox.Item key={item.value || 'all'} id={item.value || 'all'} textValue={item.label}>{item.label}</ListBox.Item>)}
+    <Select.Popover><ListBox>{options.map((item, index) =>
+      <ListBox.Item key={index} id={String(index)} textValue={item.label}>{item.label}</ListBox.Item>)}
     </ListBox></Select.Popover>
   </Select>;
 }
@@ -209,6 +213,8 @@ export function AssetFacts({ asset }: { asset: Asset }) {
   return <>
     <p>{assetType(asset)} · {displayBytes(asset.sizeBytes)} · {assetStatus(asset.status)}</p>
     {asset.description && <p className="whitespace-pre-wrap break-words">{asset.description}</p>}
-    {!!asset.tags.length && <p className="break-words">标签：{asset.tags.join('、')}</p>}
+    {!!asset.tags.length && <div className="flex flex-wrap gap-1" aria-label="素材标签">{asset.tags.map((tag) =>
+      <Chip key={tag} size="sm" className="max-w-full"><Chip.Label className="[overflow-wrap:anywhere] whitespace-normal">{tag}</Chip.Label></Chip>)}</div>}
+    <p className="text-sm text-muted">{asset.usageCount === null ? '引用数量未知' : `${asset.usageCount} 个数字人引用`}</p>
   </>;
 }
