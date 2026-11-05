@@ -638,8 +638,13 @@ it('holds the same profile write lock while removing an association and retains 
   expect(screen.getByText('归档数字人').closest('button')).toBeEnabled();
   await user.click(confirmation.getByRole('button', { name: '确认移除' }));
   await waitFor(() => expect(attempts).toBe(2));
-  expect(screen.getByText('归档数字人').closest('button')).toBeDisabled();
+  const archiveButton = screen.getByText('归档数字人').closest('button')!;
+  expect(archiveButton).toHaveAttribute('aria-disabled', 'true');
   expect(screen.getByText('编辑资料').closest('button')).toBeDisabled();
+  fireEvent.click(archiveButton);
+  fireEvent.click(confirmation.getByRole('button', { name: '处理中…' }));
+  expect(fetcher.mock.calls.some(([, init]) => init.method === 'PATCH')).toBe(false);
+  expect(attempts).toBe(2);
   attached = false;
   await act(async () => releaseRemoval(json({})));
   expect(await screen.findByText(/已从当前数字人移除/)).toBeVisible();
