@@ -58,7 +58,12 @@ export function useMediaRead<T>(root: string, path: string | null, decode: (data
   }, [root, path, decode, revision, attempt]);
   return {
     ...(state.path === path ? state : { path, loading: path !== null } as State),
-    retry: () => setAttempt((value) => value + 1),
+    retry: () => {
+      // Consumers must see the read gate in the same event as retry(), before
+      // the effect starts its request, so writes cannot race an older snapshot.
+      setState((previous) => ({ path, loading: path !== null, data: previous.path === path ? previous.data : undefined }));
+      setAttempt((value) => value + 1);
+    },
   };
 }
 

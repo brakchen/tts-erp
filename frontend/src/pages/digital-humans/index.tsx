@@ -156,7 +156,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   }
 
   function attach(assets: readonly Asset[]) {
-    if (!human || !canWrite || !assets.length) return;
+    if (!human || !canWrite || !assets.length || read.loading || read.error) return;
     void action.run(async () => {
       setPickerNotice('');
       let current = human;
@@ -212,6 +212,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   if (human && mode === 'pick') {
     return <AssetPicker root={root} human={human} pending={action.pending} error={action.error}
       notice={pickerNotice} onAdd={attach} onClose={backFromPicker} draft={pickerDraft} onDraft={setPickerDraft}
+      targetRead={read}
       onUpload={() => { action.clearError(); setUploadOrigin('pick'); setMode('upload'); }} />;
   }
 
