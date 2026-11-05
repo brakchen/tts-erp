@@ -54,7 +54,7 @@
 - `media_asset_status_check`：状态只有 `awaiting_upload` / `ready` / `failed`。
 - `media_asset_size_check`：`size_bytes > 0`。
 - 三张表都挂 `public.fn_touch_updated_at()` BEFORE UPDATE 触发器（仓库既有约定）。
-- 资产删除是**软删**（`deleted_at`）+ 对象存储 best-effort 删除。已删除资产从数字人的资产列表和计数中排除。
+- 资产仅在没有未删除数字人引用（含归档）时可删除；资产排他行锁下检查引用，仍被引用则返回 `409 ASSET_IN_USE`，不软删也不删除存储对象。允许删除时采用**软删**（`deleted_at`）+ 对象存储 best-effort 删除。历史已删除资产仍从数字人的资产列表和计数中排除。
 - 删除数字人只软删数字人并解绑链接，**资产本身保留在全局池**。
 
 ## 4. 对象键布局
