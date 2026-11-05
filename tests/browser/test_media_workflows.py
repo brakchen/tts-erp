@@ -273,6 +273,18 @@ def image_ready(page: Page, name: str) -> None:
     )
 
 
+def video_ready(page: Page, name: str, *, local: bool = False) -> dict[str, int | float]:
+    label = ("本地视频预览 " if local else "视频预览 ") + name
+    video = main(page).get_by_label(label, exact=True)
+    expect(video).to_be_visible()
+    if local:
+        expect(video).to_have_attribute("src", re.compile(r"^blob:"))
+    page.wait_for_function("""video => video.readyState >= HTMLMediaElement.HAVE_METADATA
+        && video.videoWidth > 0 && video.videoHeight > 0
+        && Number.isFinite(video.duration) && video.duration > 0""", arg=video.element_handle())
+    return video.evaluate("video => ({width: video.videoWidth, height: video.videoHeight, duration: video.duration})")
+
+
 def open_asset(page: Page, name: str) -> None:
     button(main(page), "查看 " + name).click()
     heading(page, "素材详情 · " + name)
@@ -778,6 +790,63 @@ def test_media_pages_share_shell_and_render_real_previews_at_supported_widths(me
     expect(main(page).get_by_role("checkbox", name=filename, exact=True)).to_be_disabled()
     image_ready(page, filename)
     assert_layout(page, tmp_path, "asset_picker")
+
+
+def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRun, tmp_path: Path) -> None:
+    """A legal VP8 fixture must decode natively before and after the real upload flow."""
+    run, page, gate = media_run, media_run.page, media_run.gate
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "media" / "TEST_preview.webm"
+    payload = fixture.read_bytes()
+    filename = run.name("metadata_clip.webm")
+    run.goto("media-assets")
+    button(main(page), "上传素材").click()
+    heading(page, "上传素材")
+    main(page).locator('input[type="file"]').set_input_files({
+        "name": filename, "mimeType": "video/webm", "buffer": payload,
+    })
+    local_metadata = video_ready(page, filename, local=True)
+    assert (local_metadata["width"], local_metadata["height"]) == (320, 180)
+    assert local_metadata["duration"] == pytest.approx(1.0, abs=0.05)
+    assert gate.calls["POST", ASSETS + "/upload-url"] == gate.store.puts == 0
+    assert gate.assets == set() and gate.store.objects == {}
+    assert_layout(page, tmp_path, "local_video_preview")
+
+    button(main(page), "开始上传").click()
+    heading(page, "素材详情 · " + filename)
+    assert video_ready(page, filename) == local_metadata
+    asset_id = run.asset_id(filename)
+    with db() as session:
+        asset = session.get(MediaAsset, asset_id)
+        assert (asset.kind, asset.content_type, asset.size_bytes, asset.status) == ("video", "video/webm", len(payload), "ready")
+        object_key = asset.object_key
+    assert gate.store.objects == {object_key: ("video/webm", payload)}
+    assert gate.calls["POST", ASSETS + "/upload-url"] == gate.store.puts == 1
+    assert gate.calls["POST", f"{ASSETS}/{asset_id}/confirm"] == 1
+    button(main(page), "返回素材库").click()
+    assert video_ready(page, filename) == local_metadata
+    assert gate.asset_pages[-1]["items"][0]["asset_id"] == asset_id
+    assert gate.asset_pages[-1]["items"][0]["usageCount"] == 0
+
+    person, human_id = run.seed_human("video_target")
+    run.goto("digital-humans")
+    picker(page, person, from_list=True)
+    kind(page, "视频")
+    assert video_ready(page, filename) == local_metadata
+    set_checkbox(page, filename, True)
+    attach_path = f"{HUMANS}/{human_id}/assets"
+    assert gate.calls["POST", attach_path] == 0 and run.links(human_id) == set()
+    submit_selection(page, 1)
+    heading(page, "数字人档案 · " + person)
+    assert video_ready(page, filename) == local_metadata
+    assert run.links(human_id) == {asset_id} and gate.calls["POST", attach_path] == 1
+    assert_layout(page, tmp_path, "shared_video_detail")
+
+    run.goto(f"media-assets?asset={asset_id}")
+    heading(page, "素材详情 · " + filename)
+    assert video_ready(page, filename) == local_metadata
+    text(main(page), "1 个数字人引用")
+    expect(main(page).get_by_role("link", name=person, exact=True)).to_be_visible()
+    assert gate.store.objects == {object_key: ("video/webm", payload)} and gate.store.removes == 0
 
 
 @pytest.mark.parametrize("media_run", [("viewer", 1440, "")], indirect=True)
