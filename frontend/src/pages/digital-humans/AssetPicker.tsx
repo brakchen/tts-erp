@@ -37,13 +37,14 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
   if (appliedKind) params.set('kind', appliedKind);
   if (offset) params.set('offset', String(offset));
   if (hideAssociated) params.set('excludeDigitalHumanId', human.digitalHumanId);
+  const associationRevision = human.assetIds.join(',');
   // The server excludes existing associations before pagination. New draft picks stay visible.
-  const read = useMediaRead(root, '/assets?' + params, decodeAssetList, human.assetIds.length);
+  const read = useMediaRead(root, '/assets?' + params, decodeAssetList, associationRevision);
   const associatedParams = new URLSearchParams({ status: 'ready', digitalHumanId: human.digitalHumanId, limit: '1' });
   if (query) associatedParams.set('keyword', query);
   if (appliedKind) associatedParams.set('kind', appliedKind);
-  // Only this server-filtered total proves how many matches the switch hides.
-  const associated = useMediaRead(root, hideAssociated ? '/assets?' + associatedParams : null, decodeAssetList, human.assetIds.length);
+  // Association identity, not its length, invalidates both server-filtered results.
+  const associated = useMediaRead(root, hideAssociated ? '/assets?' + associatedParams : null, decodeAssetList, associationRevision);
   const hiddenCount = associated.data?.total;
   const hasHidden = hiddenCount !== undefined && String(hiddenCount) !== '0';
   const rows = read.data?.items ?? [];
@@ -85,7 +86,8 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
       </div>}
       <ReadStatus title="可选素材" loading={read.loading} error={read.error} onRetry={read.retry} />
       {!read.loading && !read.error && !rows.length && <p className="media-box">{hideAssociated && hasHidden
-        ? '符合条件的素材均已添加。取消勾选“隐藏已选内容”可查看。' : '没有符合条件的素材。'}</p>}
+        ? '符合条件的素材均已添加。取消勾选“隐藏已选内容”可查看。'
+        : hideAssociated && hiddenCount === undefined ? '当前没有可新增的匹配素材。' : '没有符合条件的素材。'}</p>}
       <ul className="media-grid" data-media-grid aria-label="可选素材">
         {rows.map((asset) => {
           const alreadyAdded = human.assetIds.includes(asset.assetId);
