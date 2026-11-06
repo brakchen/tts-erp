@@ -15,6 +15,7 @@ def test_ad_filters_fit_and_align(frontend_browser_renderer, width):
     page = frontend_browser_renderer.open("/v2/pages/ad-daily", width=width)
     form = page.get_by_role("form", name="广告筛选")
     expect(form.get_by_role("button", name="应用筛选")).to_be_enabled()
+    page.evaluate("document.fonts.ready")
     controls = [form.get_by_role("button", name=re.compile(re.escape(label))) for label in [
         "店铺（外部 Seller ID）", "广告账户", "数据接口",
     ]] + [form.get_by_label(label, exact=True) for label in [

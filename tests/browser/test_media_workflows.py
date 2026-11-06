@@ -10,6 +10,8 @@ import json
 import re
 import struct
 import zlib
+from tests.support.browser_runtime import borrowed_browser
+
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -18,7 +20,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from playwright.sync_api import Locator, Page, Response, expect, sync_playwright
+from playwright.sync_api import Locator, Page, Response, expect
 from render_support import overflow_report
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -185,29 +187,25 @@ def media_run(request, frontend_build, monkeypatch) -> Iterator[MediaRun]:
     )
     gate = MediaBrowserBridge(client, store, marker, username, prefix=prefix)
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+        with borrowed_browser() as browser:
+            context = browser.new_context(viewport={"width": width, "height": 1000}, service_workers="block")
             try:
-                context = browser.new_context(viewport={"width": width, "height": 1000}, service_workers="block")
-                try:
-                    context.route("**/*", gate.handle)
-                    context.route_web_socket("**/*", lambda socket: socket.close())
-                    page = context.new_page()
-                    page.goto(f"{APP}{prefix}{LOGIN}?next={prefix}{ME}")
-                    page.get_by_label("用户名", exact=True).fill(username)
-                    fill_sensitive(page.get_by_label("密码", exact=True), password)
-                    page.get_by_role("button", name="登录", exact=True).click()
-                    page.wait_for_url(APP + prefix + ME)
-                    identity = json.loads(page.locator("body").inner_text())
-                    assert identity.get("authenticated") is True and identity.get("username") == username
-                    yield MediaRun(page, gate, marker)
-                    assert gate.refusals == []
-                    assert gate.fail_next is None and gate.held is None and gate.hold_next is None
-                finally:
-                    gate.closing = True
-                    context.close()
+                context.route("**/*", gate.handle)
+                context.route_web_socket("**/*", lambda socket: socket.close())
+                page = context.new_page()
+                page.goto(f"{APP}{prefix}{LOGIN}?next={prefix}{ME}")
+                page.get_by_label("用户名", exact=True).fill(username)
+                fill_sensitive(page.get_by_label("密码", exact=True), password)
+                page.get_by_role("button", name="登录", exact=True).click()
+                page.wait_for_url(APP + prefix + ME)
+                identity = json.loads(page.locator("body").inner_text())
+                assert identity.get("authenticated") is True and identity.get("username") == username
+                yield MediaRun(page, gate, marker)
+                assert gate.refusals == []
+                assert gate.fail_next is None and gate.held is None and gate.hold_next is None
             finally:
-                browser.close()
+                gate.closing = True
+                context.close()
     finally:
         client.close()
         clear_owned(gate, user_id, username)

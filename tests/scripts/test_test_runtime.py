@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts._test_frontend import input_key, prepare_frontend
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -25,6 +27,8 @@ def _project(tmp_path: Path) -> None:
         'exit_code="${TEST_BUILD_EXIT:-0}"\n'
         'if test "$exit_code" != 0; then exit "$exit_code"; fi\n'
         "mkdir -p tts_erp_v2/static/frontend\n"
+        "mkdir -p tts_erp_v2/static/frontend/TEST_current\n"
+        "echo TEST_asset > tts_erp_v2/static/frontend/TEST_current/main.js\n"
         "printf '%s' '{\"releaseId\":\"TEST_current\"}' > tts_erp_v2/static/frontend/release.json\n",
         encoding="utf-8",
     )
@@ -45,6 +49,7 @@ def _project(tmp_path: Path) -> None:
             "@pytest.mark.requires_frontend_build\n"
             "def test_release_is_locked():\n"
             "    with Path('.git/tts-test-frontend.lock').open('a') as lock:\n"
+            "        fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)\n"
             "        with pytest.raises(BlockingIOError):\n"
             "            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
         )
@@ -101,3 +106,57 @@ def test_failed_or_empty_collection_does_not_build(tmp_path: Path, source: str, 
     result = _run(tmp_path)
     assert result.returncode == code, result.stdout + result.stderr
     assert not (tmp_path / "TEST_builds").exists()
+
+
+def test_cache_revalidates_content_environment_installation_and_artifacts(tmp_path, monkeypatch):
+    _project(tmp_path)
+    source = tmp_path / "frontend/src/main.tsx"
+    source.parent.mkdir(parents=True)
+    source.write_text("TEST_first")
+    with prepare_frontend(tmp_path) as cold:
+        assert not cold.cached
+    with prepare_frontend(tmp_path) as warm:
+        assert warm.cached and warm.build_seconds == 0
+    changes = [
+        lambda: source.write_text("TEST_changed"),
+        lambda: (source.parent.parent / "package-lock.json").write_text("TEST_lock"),
+        lambda: monkeypatch.setenv("VITE_TEST_CACHE_INPUT", "TEST_environment"),
+        lambda: (tmp_path / "tts_erp_v2/static/frontend/TEST_current/main.js").write_text("TEST_corrupt"),
+        lambda: (tmp_path / ".git/tts-test-frontend.json").write_text("malformed"),
+    ]
+    for change in changes:
+        change()
+        with prepare_frontend(tmp_path) as rebuilt:
+            assert not rebuilt.cached
+        with prepare_frontend(tmp_path) as checked:
+            assert checked.cached
+    assert len((tmp_path / "TEST_builds").read_text().splitlines()) == 6
+    installed = tmp_path / "frontend/node_modules/.package-lock.json"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("TEST_installation")
+    before = input_key(tmp_path)
+    os.utime(installed, ns=(1, 1))
+    assert input_key(tmp_path) != before
+
+
+def test_failed_rebuild_does_not_accept_previous_release(tmp_path, monkeypatch):
+    _project(tmp_path)
+    with prepare_frontend(tmp_path):
+        pass
+    monkeypatch.setenv("VITE_TEST_CACHE_INPUT", "TEST_new")
+    monkeypatch.setenv("TEST_BUILD_EXIT", "7")
+    with pytest.raises(subprocess.CalledProcessError):
+        with prepare_frontend(tmp_path):
+            pytest.fail("Failed rebuild must not yield a stale release")
+    assert not (tmp_path / ".git/tts-test-frontend.json").exists()
+
+
+def test_source_change_during_build_cannot_publish_cache(tmp_path):
+    _project(tmp_path)
+    script = tmp_path / "scripts/build_frontend.sh"
+    with script.open("a") as output:
+        output.write("echo TEST_mutation >> scripts/build_frontend.sh\n")
+    with pytest.raises(ValueError, match="inputs changed"):
+        with prepare_frontend(tmp_path):
+            pytest.fail("A changing input is not valid cache evidence")
+    assert not (tmp_path / ".git/tts-test-frontend.json").exists()

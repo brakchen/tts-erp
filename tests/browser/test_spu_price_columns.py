@@ -110,7 +110,8 @@ def _open_with_supported_payload(
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open(path)
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     if "/focused-spus" not in path:
         page.locator("#price-summary").wait_for(state="visible")
@@ -254,7 +255,8 @@ def test_price_error_can_retry_to_supported_payload(frontend_browser_renderer, m
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     page.locator("#retry-link").wait_for(state="visible")
     assert page.locator("#price-summary").is_hidden()
@@ -292,7 +294,8 @@ def test_rapid_date_requests_keep_latest_price_payload(frontend_browser_renderer
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     page.locator("#price-summary").wait_for(state="visible")
     page.evaluate(
@@ -349,7 +352,8 @@ def test_rapid_shop_requests_keep_latest_price_payload(frontend_browser_renderer
 def test_legacy_payload_hides_price_capability_without_fake_zeroes(frontend_browser_renderer):
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     page.wait_for_timeout(500)
     assert page.locator("#price-summary").is_hidden()

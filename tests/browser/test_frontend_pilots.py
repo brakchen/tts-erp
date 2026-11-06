@@ -9,6 +9,7 @@ import pytest
 from render_support import overflow_report
 
 from tts_erp_v2.accounts.pages import PAGES
+from tests.support.page_readiness import wait_canned_page
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
@@ -64,6 +65,7 @@ def test_navigation_drawer_theme_and_focus(frontend_browser_renderer, prefix):
 def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, width, slug, title):
     page = frontend_browser_renderer.open(f"{prefix}/v2/pages/{slug}", width=width)
     page.get_by_role("heading", level=1, name=title, exact=True).wait_for(timeout=10_000)
+    wait_canned_page(page, slug)
     assert page.locator("#frontend-startup").count() == 0
     if slug == "spu-profit-deterioration":
         # Exercise populated comparison layout, not just its loading/error shell.

@@ -266,7 +266,9 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
         return _alert_payload()
     if path.endswith("/v2/commerce/channel-accounts"):
         return [{"id": 7, "platform": "tiktok", "shop_id": "749486486860415",
-                 "account_name": "QA 店 7", "region": "VN", "status": "active"}]
+                 "account_name": "QA 店 7", "region": "VN", "status": "active",
+                 "seller_type": None, "opened_date": None, "credential_id": None,
+                 "service_id": None, "app_credentials_configured": False}]
     if path.endswith("/v2/reporting/ad-daily/options"):
         return {
             "sellers": [{"seller_id": "749486486860415", "shop_name": "North Nook",
@@ -343,10 +345,12 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
             "whitelisted_requests": 12,
             "today_requests": 120,
             "error_requests": 3,
-            "by_host": [{"key": "api.tiktokshop.com", "count": 300},
-                        {"key": "seller.tiktokshop.com", "count": 132}],
-            "by_method": [{"key": "GET", "count": 380}, {"key": "POST", "count": 52}],
-            "by_status": [{"key": "200", "count": 400}, {"key": "500", "count": 31}],
+            "by_host": [{"label": "api.tiktokshop.com", "count": 300, "percentage": "69.44"},
+                        {"label": "seller.tiktokshop.com", "count": 132, "percentage": "30.56"}],
+            "by_method": [{"label": "GET", "count": 380, "percentage": "87.96"},
+                          {"label": "POST", "count": 52, "percentage": "12.04"}],
+            "by_status": [{"label": "200", "count": 400, "percentage": "92.81"},
+                          {"label": "500", "count": 31, "percentage": "7.19"}],
             "daily": [
                 {"date": "2026-10-01", "count": 120},
                 {"date": "2026-10-02", "count": 80},
@@ -379,6 +383,42 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     if path.endswith("/v2/reporting/coverage"):
         return {"costed_spus": 1145, "linked_spus": 1200, "total_spus": 1234,
                 "coverage_rate": "0.928", "as_of": "2026-10-01"}
+    if path.endswith(("/v2/config/enum-map/list", "/v2/commerce/channel-products")):
+        return []
+    if path.endswith("/v2/users"):
+        return {"users": []}
+    if path.endswith("/v2/roles"):
+        return {"roles": [], "allPermissions": []}
+    if path.endswith("/v2/sync/jobs"):
+        return {"server_time": _NOW, "jobs": [], "tiktok_shops": []}
+    if path.endswith("/v2/config/runtime/items"):
+        return {"items": [{"configKey": "TEST_RENDER_RUNTIME", "displayName": "TEST_RENDER_RUNTIME",
+                           "publishedVersion": None, "hasDraft": False, "updatedAt": _NOW,
+                           "publishedAt": None, "retiredAt": None}]}
+    if path.endswith("/v2/media/assets/tags"):
+        return []
+    if path.endswith("/v2/media/assets"):
+        return {"items": [], "total": 0, "limit": 24, "offset": 0}
+    if path.endswith("/v2/media/digital-humans"):
+        return []
+    if path.endswith("/v2/video-publish/config"):
+        return {
+            "acceptedContentTypes": ["video/mp4"], "acceptedExtensions": [".mp4"],
+            "maxVideoBytes": 1048576, "maxCaptionCharacters": 4000, "uploadUrlTtlSeconds": 900,
+            "target": {"appName": "TEST_TikTok", "appPackage": "com.test.app",
+                       "deviceSerialMasked": "TEST***", "album": "TEST_album"},
+            "worker": {"status": "ready", "lastHeartbeatAt": None},
+            "device": {"status": "ready", "message": "TEST_render_device"},
+            "artemis": {"profile": "TEST_layout", "verificationLevel": "TEST_readonly"},
+            "workerTiming": {"pollSeconds": 2, "leaseSeconds": 30, "heartbeatSeconds": 5},
+            "canWrite": False, "writeBlockReason": "TEST_render_read_only", "serverTime": _NOW,
+        }
+    if path.endswith("/v2/video-publish/tasks/current"):
+        return {"tasks": [], "pollState": {"running": False, "cleaning": False, "queued": False},
+                "suggestedPollSeconds": 60, "serverTime": _NOW}
+    if path.endswith("/v2/video-publish/tasks"):
+        return {"items": [], "pollState": {"running": False, "cleaning": False, "queued": False},
+                "nextCursor": None, "totalApprox": 0, "serverTime": _NOW}
     return {"items": [], "total": 0, "options": [], "configs": [], "jobs": []}
 
 
@@ -500,7 +540,7 @@ def frontend_build() -> None:
 def _serve_pages(rendered: Path) -> Iterator[str]:
     handler = type("BoundHandler", (_Handler,), {"rendered_dir": rendered})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True)
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"

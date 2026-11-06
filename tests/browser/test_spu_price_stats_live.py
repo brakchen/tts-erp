@@ -32,6 +32,8 @@ cookie 会话，以及原有的 readonly API key 会话。浏览器、playwright
 
 from __future__ import annotations
 
+from tests.support.browser_runtime import borrowed_browser
+
 from collections.abc import Iterator
 from typing import Any
 
@@ -95,42 +97,26 @@ _BROWSER_UNAVAILABLE = (
 )
 
 
-def _launch_chromium() -> tuple[Any, Any]:
-    """启动 headless chromium；playwright/chromium 不可用即硬失败（不是 skip）。"""
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:  # pragma: no cover - 环境相关
-        raise RuntimeError(f"{_BROWSER_UNAVAILABLE}（playwright 导入失败: {exc}）") from exc
-    playwright = sync_playwright().start()
-    try:
-        browser: Any = playwright.chromium.launch(headless=True)
-    except Exception as exc:  # pragma: no cover - 环境相关
-        playwright.stop()
-        raise RuntimeError(f"{_BROWSER_UNAVAILABLE}（chromium 启动失败: {exc}）") from exc
-    return playwright, browser
-
-
 @pytest.fixture()
 def live(
     live_api: LiveApi, price_scene: PriceScene, request: pytest.FixtureRequest
 ) -> Iterator[LiveBrowser]:
     """真实 Chromium 会话。
 
-    作用域是 function（与 `tests/browser/conftest.py` 同因）：Playwright 存活
-    期间会占着主线程事件循环，跨用例复用会污染后续 async 用例。
+    每例保持独立会话和 context；Chromium 借自模块 owner，在 async setup 前释放。
 
     用例失败时把 uvicorn 日志尾巴 + 每个页面截图写进临时证据目录并打印路径。
     """
-    playwright, browser = _launch_chromium()
-    session = LiveBrowser(browser, live_api.base, price_scene)
-    try:
-        yield session
-    finally:
-        if _call_failed(request):
-            _dump_failure_evidence(session, live_api)
-        session.close()
-        browser.close()
-        playwright.stop()
+    with borrowed_browser() as browser:
+        session = LiveBrowser(browser, live_api.base, price_scene)
+        try:
+            yield session
+        finally:
+            try:
+                if _call_failed(request):
+                    _dump_failure_evidence(session, live_api)
+            finally:
+                session.close()
 
 
 def _call_failed(request: pytest.FixtureRequest) -> bool:

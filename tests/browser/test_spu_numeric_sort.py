@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs
 
@@ -19,18 +18,8 @@ import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
-_TABLE = (
-    Path(__file__).resolve().parents[2]
-    / "frontend/src/pages/spu-profitability/ProfitabilityTable.tsx"
-)
-
 # 数字降序 63,50,9,8,6；字符串降序 9,8,63,6,50。两组必须能区分。
 _ORDER_COUNTS = (9, 8, 63, 50, 6)
-
-
-def test_profitability_kernel_uses_remote_sort_mode() -> None:
-    src = _TABLE.read_text(encoding="utf-8")
-    assert "sortMode: 'remote'" in src
 
 
 def _item(base: dict[str, Any], index: int, total_orders: int) -> dict[str, Any]:
@@ -71,7 +60,8 @@ def _open_page(frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open(path)
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     page.locator(".tabulator-row").first.wait_for(state="visible")
     return page

@@ -3,6 +3,11 @@
 # lock, execute against a unique test clone, then remove only that clone.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Dispatch only before any DB options/environment are consumed. Child runs own
+# the unchanged connection authority, per-run proof and ephemeral cleanup.
+if [[ "${1:-}" == --browser-workers ]]; then
+  exec .venv/bin/python -m scripts._test_browser_parallel --workers "${2:-}" "${@:3}"
+fi
 KEEP_DB=0
 REFRESH_TEMPLATE=0
 TEMPLATE_DB="${TTS_ERP_TEST_TEMPLATE_DB:-tts_erp_test_template}"
@@ -25,6 +30,7 @@ usage() {
     '  --template-db NAME   Explicit test-named template (default tts_erp_test_template)' \
     '  --db-name NAME       Explicit test-named ephemeral database' \
     '  --keep-db            Preserve this run clone for diagnosis' \
+    '  --browser-workers N browser FILE...  One/two isolated read-only workers (must be first option)' \
     '  -h, --help           Show help'
 }
 while [[ $# -gt 0 ]]; do
