@@ -13,6 +13,7 @@
 .media-workspace :where(button, input, textarea) { font: inherit; }
 .media-workspace :where(button, a.button) { min-height: 36px; height: auto; max-width: 100%; padding: 6px 11px; border-radius: 7px; white-space: normal; overflow-wrap: anywhere; font: inherit; }
 .media-workspace .button--secondary { --button-bg: var(--media-surface); --button-fg: var(--media-ink); --button-bg-hover: var(--media-soft); border: 1px solid var(--media-line); }
+.media-workspace .button--primary { font-weight: 600; }
 .media-workspace .media-danger { color: light-dark(#8f2424, #ffb4ad); background: light-dark(#fff0ed, #392421); border: 1px solid light-dark(#ca9e97, #8d5c52); }
 .media-record, .media-stack { display: grid; min-width: 0; gap: 17px; align-content: start; }
 .media-stack { gap: 10px; }
@@ -43,10 +44,10 @@
 .media-workspace .media-chip { height: auto; padding: 2px 8px; background: var(--media-soft); color: var(--media-ink); font-size: 12px; line-height: 1.55; }
 .media-workspace .media-checkbox-control { width: 17px; height: 17px; border-radius: 3px; }
 .media-workspace .media-checkbox-control::before { border-radius: inherit; }
-.media-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 9px; min-width: 0; }
+.media-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 9px; min-width: 0; margin-block-end: 14px; }
 .media-filters > :not(button) { flex: 1 1 145px; min-width: 0; }
 .media-form { display: grid; gap: 10px; }
-.media-workspace :where(input:not([type="checkbox"]):not([type="file"]), textarea) { min-height: 36px; padding: 7px 9px; border: 1px solid var(--media-line); border-radius: 7px; box-shadow: none; }
+.media-workspace :where(input:not([type="checkbox"]):not([type="file"]), textarea) { min-height: 36px; padding: 7px 9px; border: 1px solid var(--media-line); border-radius: 7px; background: var(--media-surface); color: var(--media-ink); box-shadow: none; }
 .media-workspace label { font-weight: 500; }
 .media-workspace .media-select-trigger { min-height: 36px; width: 100%; border: 1px solid var(--media-line); border-radius: 7px; background: var(--media-surface); }
 .media-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 0; border-top: 1px solid var(--media-line); min-width: 0; }
