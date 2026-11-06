@@ -59,6 +59,40 @@
 
 ## 执行记录
 
+### 2026-11-07：按确认原型纠正实现偏差
+
+用户新目标为“你先开发的和原型差距很大，帮我继续修改，直到和原型一致为止”。
+确认原型 `media-interaction-map.html` 是本轮页面结构、文案、信息密度和操作顺序的依据，
+旧实现与旧测试不是验收基线。先前功能验收不能证明原型一致。
+
+- TaskStartSnapshot：干净工作树 `media-asset-multiselect/tts-erp`，从当前
+  `origin/master=110a2814f57a7395874db22e44c648f77e4cdcae` 建立
+  `codex/media-prototype-fidelity`。Change Necessity=code-change；原型对照已证实结构与流程偏差，
+  重新构建相同代码不足以修复。ArchitectureReviewRequired=局部呈现与状态复核；TDD mode=off，
+  用真实行为和逐屏对照验证，不以既有断言保留错误终态。
+- 已批准设计继续有效，不再要求用户重复确认。全站导航和唯一 AppShell 保留；原型的示例三项导航、
+  占位媒体、示例文件选择器和故障演练工具不复制进产品。业务主内容逐屏对齐。
+  用户后续“引用中资产禁止删除（含归档）”覆盖原型旧的级联删除文案。真实上传协议、草稿保护、
+  迟到读取隔离、共用写锁和部分成功恢复继续保留。
+- 页面验收：素材库为单业务页头、两项筛选和紧凑卡片；每页4项，始终显示左侧总数/页码和右侧前后页；
+  素材详情分“素材资料”“哪些数字人在用”两块；编辑表单字段与底部动作照原型；
+  数字人启用/归档为直接按钮、单盒紧凑行，详情为名称/说明/状态操作行及“引用素材 · N 项”行列表；
+  唯一“添加素材”进入选择页，上传在选择页页头；选择标题、隐藏计数、勾选清单、确认工具栏及折叠预览照原型；
+  上传表单、100%确认入库进度、标签数量和新增反馈照原型；删除/移除/归档采用独立操作确认页，
+  归档确认成功回归档列表、恢复回启用列表。不是只换标题或颜色。
+- 隐藏数量复用现有 assets 查询：同条件 `digitalHumanId` 返回的 server total；不从当前页或全部引用数量推断，
+  不新增API或前端业务聚合。标签大小写不敏感复用已有候选，保存待提交输入仍走同一候选解析。
+- root 独占共享呈现 `media-ui.tsx`、AssetCard/AssetPreview/TagEditor/UploadAsset、操作确认组件和媒体局部样式，
+  以及本计划和产品文档。资产 writer 在 `media-fidelity-assets/tts-erp` 的
+  `codex/media-fidelity-assets` 仅写 `media-assets/index.tsx`；数字人 writer 在
+  `media-fidelity-humans/tts-erp` 的 `codex/media-fidelity-humans` 仅写 `digital-humans/index.tsx,AssetPicker.tsx`；
+  独立验收 writer 在 `media-fidelity-acceptance/tts-erp` 的 `codex/media-fidelity-acceptance` 仅写媒体
+  browser/support 和 `media-assets/workflows.test.tsx`。三个工作树均由管理工具从110a建立，单 writer。
+- 对照证据必须覆盖所有业务屏幕和关键状态，以同等内容区宽度和确定数据比较分区、字段、动作顺序、尺寸及位置；
+  保留长名称/窄屏压力案例。测试通过不自动等于视觉一致。只有最终构建逐屏实际查看并独立复核后才可结束本目标。
+- 本轮测试虚拟机已重新验证可SSH，Python3.14.4/Node22.23.2可用。真实 localhost 数据只读，
+  写入验证仍只通过标准 runner 的临时测试克隆。主目录备份脚本的外来 WIP 不动。
+
 - 2026-11-05：已读取最新主线，当前 API 与旧原型仍允许引用中软删。产品角色只读核对七项实现差异和八组验收脚本；已纳入本计划。测试虚拟机 SSH 身份验证成功，尚未运行本轮测试。
 - 集成候选 `eec9064322f76dc91c96ec12f152554ddf8e34b1` 已推送。前端 `a0d57e68`、后端 `329937ec`、验收 `806ccd0f` 的改动已集成；子分支保留以便复核和后续完整归并。
 - 测试 VM 使用独立验证克隆 `/home/schan/tts-erp-codex-media-ui-validation`；共享主目录的备份脚本 WIP 未改。测试配置为私有测试形基线，由项目连接 authority 校验；所有测试实际连接 wrapper 创建的临时 clone。Node 22.23.2 来自官方归档并校验 SHA256，验证目录拥有自己的 node_modules。
