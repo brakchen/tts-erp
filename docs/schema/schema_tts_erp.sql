@@ -100,6 +100,11 @@ CREATE SCHEMA publishing;
 CREATE SCHEMA reporting;
 
 
+-- Name: runninghub; Type: SCHEMA; Schema: -; Owner: -
+
+CREATE SCHEMA runninghub;
+
+
 -- Name: security; Type: SCHEMA; Schema: -; Owner: -
 
 CREATE SCHEMA security;
@@ -2072,6 +2077,138 @@ ALTER TABLE reporting.shop_fee_rate_estimates ALTER COLUMN id ADD GENERATED ALWA
 );
 
 
+-- Name: artifacts; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.artifacts (
+    id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    attempt_id text NOT NULL,
+    kind text NOT NULL,
+    bucket text NOT NULL,
+    object_key text NOT NULL,
+    sha256 text NOT NULL,
+    spec jsonb NOT NULL,
+    CONSTRAINT artifacts_kind_check CHECK ((kind = ANY (ARRAY['raw'::text, 'final'::text])))
+);
+
+
+-- Name: asset_uploads; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.asset_uploads (
+    id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    quota_id text NOT NULL,
+    sha256 text NOT NULL,
+    file_name text NOT NULL,
+    uploaded_at timestamp with time zone NOT NULL
+);
+
+
+-- Name: attempts; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.attempts (
+    id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    job_id text NOT NULL,
+    number integer NOT NULL,
+    quota_id text NOT NULL,
+    reserved boolean NOT NULL,
+    task_id text,
+    cloud_status text,
+    request_hash text,
+    receipt jsonb NOT NULL,
+    usage jsonb,
+    error text,
+    asset_hashes jsonb NOT NULL,
+    lease_token text,
+    lease_until timestamp with time zone,
+    next_poll_at timestamp with time zone,
+    last_polled_at timestamp with time zone,
+    poll_failures integer NOT NULL,
+    resolution jsonb
+);
+
+
+-- Name: batches; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.batches (
+    id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    request_hash text NOT NULL,
+    mode text NOT NULL,
+    status text NOT NULL,
+    error text,
+    config jsonb NOT NULL,
+    created_by text,
+    CONSTRAINT batches_mode_check CHECK ((mode = ANY (ARRAY['dry-run'::text, 'live'::text])))
+);
+
+
+-- Name: jobs; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.jobs (
+    id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    batch_id text NOT NULL,
+    identity text NOT NULL,
+    inputs jsonb NOT NULL,
+    seed bigint NOT NULL,
+    status text NOT NULL,
+    error text,
+    current_attempt_id text,
+    CONSTRAINT jobs_seed_check CHECK (((seed >= 0) AND (seed <= '9007199254640991'::bigint)))
+);
+
+
+-- Name: profiles; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.profiles (
+    id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    credential_ref text NOT NULL,
+    workflow_id text NOT NULL,
+    instance_type text NOT NULL,
+    concurrency integer NOT NULL,
+    workflow_version_id text,
+    CONSTRAINT profiles_concurrency_check CHECK (((concurrency >= 1) AND (concurrency <= 5))),
+    CONSTRAINT profiles_instance_type_check CHECK ((instance_type = ANY (ARRAY['default'::text, 'plus'::text, 'ultra'::text])))
+);
+
+
+-- Name: quotas; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.quotas (
+    id text NOT NULL,
+    limit_count integer NOT NULL,
+    paused_reason text,
+    CONSTRAINT quotas_limit_count_check CHECK (((limit_count >= 1) AND (limit_count <= 5)))
+);
+
+
+-- Name: templates; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.templates (
+    id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    human_id bigint NOT NULL,
+    name text NOT NULL,
+    clips jsonb NOT NULL,
+    CONSTRAINT templates_name_check CHECK ((name = ANY (ARRAY['A'::text, 'B'::text, 'C'::text])))
+);
+
+
+-- Name: workflow_versions; Type: TABLE; Schema: runninghub; Owner: -
+
+CREATE TABLE IF NOT EXISTS runninghub.workflow_versions (
+    id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    workflow_id text NOT NULL,
+    content_hash text NOT NULL,
+    graph jsonb NOT NULL,
+    validation jsonb NOT NULL
+);
+
+
 -- Name: api_keys; Type: TABLE; Schema: security; Owner: -
 
 CREATE TABLE IF NOT EXISTS security.api_keys (
@@ -2984,6 +3121,96 @@ ALTER TABLE ONLY reporting.shop_fee_rate_estimates
     ADD CONSTRAINT uq_shop_fee_rate_est_shop_day UNIQUE (shop_pk, calculated_on);
 
 
+-- Name: artifacts artifacts_attempt_id_kind_key; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.artifacts
+    ADD CONSTRAINT artifacts_attempt_id_kind_key UNIQUE (attempt_id, kind);
+
+
+-- Name: artifacts artifacts_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.artifacts
+    ADD CONSTRAINT artifacts_pkey PRIMARY KEY (id);
+
+
+-- Name: asset_uploads asset_uploads_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.asset_uploads
+    ADD CONSTRAINT asset_uploads_pkey PRIMARY KEY (id);
+
+
+-- Name: asset_uploads asset_uploads_quota_id_sha256_key; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.asset_uploads
+    ADD CONSTRAINT asset_uploads_quota_id_sha256_key UNIQUE (quota_id, sha256);
+
+
+-- Name: attempts attempts_job_id_number_key; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.attempts
+    ADD CONSTRAINT attempts_job_id_number_key UNIQUE (job_id, number);
+
+
+-- Name: attempts attempts_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.attempts
+    ADD CONSTRAINT attempts_pkey PRIMARY KEY (id);
+
+
+-- Name: attempts attempts_task_id_key; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.attempts
+    ADD CONSTRAINT attempts_task_id_key UNIQUE (task_id);
+
+
+-- Name: batches batches_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.batches
+    ADD CONSTRAINT batches_pkey PRIMARY KEY (id);
+
+
+-- Name: jobs jobs_batch_id_identity_key; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.jobs
+    ADD CONSTRAINT jobs_batch_id_identity_key UNIQUE (batch_id, identity);
+
+
+-- Name: jobs jobs_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.jobs
+    ADD CONSTRAINT jobs_pkey PRIMARY KEY (id);
+
+
+-- Name: profiles profiles_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.profiles
+    ADD CONSTRAINT profiles_pkey PRIMARY KEY (id);
+
+
+-- Name: quotas quotas_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.quotas
+    ADD CONSTRAINT quotas_pkey PRIMARY KEY (id);
+
+
+-- Name: templates templates_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.templates
+    ADD CONSTRAINT templates_pkey PRIMARY KEY (id);
+
+
+-- Name: workflow_versions workflow_versions_pkey; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.workflow_versions
+    ADD CONSTRAINT workflow_versions_pkey PRIMARY KEY (id);
+
+
+-- Name: workflow_versions workflow_versions_workflow_id_content_hash_key; Type: CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.workflow_versions
+    ADD CONSTRAINT workflow_versions_workflow_id_content_hash_key UNIQUE (workflow_id, content_hash);
+
+
 -- Name: api_keys api_keys_pkey; Type: CONSTRAINT; Schema: security; Owner: -
 
 ALTER TABLE ONLY security.api_keys
@@ -3587,6 +3814,16 @@ CREATE INDEX IF NOT EXISTS ix_profit_daily_profit_date ON reporting.product_prof
 -- Name: ix_shop_fee_rate_est_shop_calc_at; Type: INDEX; Schema: reporting; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_shop_fee_rate_est_shop_calc_at ON reporting.shop_fee_rate_estimates USING btree (shop_pk, calculated_at);
+
+
+-- Name: ix_rh_attempts_quota; Type: INDEX; Schema: runninghub; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_rh_attempts_quota ON runninghub.attempts USING btree (quota_id, reserved);
+
+
+-- Name: ix_rh_jobs_dispatch; Type: INDEX; Schema: runninghub; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_rh_jobs_dispatch ON runninghub.jobs USING btree (status, created_at);
 
 
 -- Name: ix_api_keys_role; Type: INDEX; Schema: security; Owner: -
@@ -4314,6 +4551,48 @@ ALTER TABLE ONLY reporting.product_profit_daily
 
 ALTER TABLE ONLY reporting.shop_fee_rate_estimates
     ADD CONSTRAINT shop_fee_rate_estimates_shop_pk_fkey FOREIGN KEY (shop_pk) REFERENCES commerce.shops(id) ON DELETE CASCADE;
+
+
+-- Name: artifacts artifacts_attempt_id_fkey; Type: FK CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.artifacts
+    ADD CONSTRAINT artifacts_attempt_id_fkey FOREIGN KEY (attempt_id) REFERENCES runninghub.attempts(id);
+
+
+-- Name: asset_uploads asset_uploads_quota_id_fkey; Type: FK CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.asset_uploads
+    ADD CONSTRAINT asset_uploads_quota_id_fkey FOREIGN KEY (quota_id) REFERENCES runninghub.quotas(id);
+
+
+-- Name: attempts attempts_job_id_fkey; Type: FK CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.attempts
+    ADD CONSTRAINT attempts_job_id_fkey FOREIGN KEY (job_id) REFERENCES runninghub.jobs(id);
+
+
+-- Name: attempts attempts_quota_id_fkey; Type: FK CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.attempts
+    ADD CONSTRAINT attempts_quota_id_fkey FOREIGN KEY (quota_id) REFERENCES runninghub.quotas(id);
+
+
+-- Name: jobs jobs_batch_id_fkey; Type: FK CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.jobs
+    ADD CONSTRAINT jobs_batch_id_fkey FOREIGN KEY (batch_id) REFERENCES runninghub.batches(id);
+
+
+-- Name: profiles profiles_workflow_version_id_fkey; Type: FK CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.profiles
+    ADD CONSTRAINT profiles_workflow_version_id_fkey FOREIGN KEY (workflow_version_id) REFERENCES runninghub.workflow_versions(id);
+
+
+-- Name: templates templates_human_id_fkey; Type: FK CONSTRAINT; Schema: runninghub; Owner: -
+
+ALTER TABLE ONLY runninghub.templates
+    ADD CONSTRAINT templates_human_id_fkey FOREIGN KEY (human_id) REFERENCES media.digital_humans(id);
 
 
 -- Name: role_permissions role_permissions_permission_code_fkey; Type: FK CONSTRAINT; Schema: security; Owner: -
