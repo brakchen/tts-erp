@@ -60,6 +60,26 @@ _fernet: Fernet | Any | None = _UNSET
 DEFAULT_REFRESH_SKEW = timedelta(seconds=60)
 
 
+def load_runninghub_api_key(session: Session, reference: str) -> str:
+    """Resolve a server-owned reference; never serialize this return value.
+
+    Only the RunningHub environment namespace is eligible for env references.
+    Integration references reuse the existing encrypted credential lifecycle.
+    """
+    import re
+
+    if reference.startswith("env:") and re.fullmatch(r"RUNNINGHUB_[A-Z0-9_]*API_KEY", reference[4:]):
+        value = os.environ.get(reference[4:], "").strip()
+    elif reference.startswith("integration:") and reference[12:]:
+        credential = load_credentials(session, provider="runninghub", external_account_id=reference[12:])
+        value = credential.access_token if credential else ""
+    else:
+        raise SigningError("Invalid RunningHub credential reference")
+    if not value:
+        raise SigningError("RunningHub credential is not configured")
+    return value
+
+
 def _resolve_key() -> str | None:
     """Read TTS_ERP_FERNET_KEY from env. Empty / unset → None."""
     raw = os.environ.get("TTS_ERP_FERNET_KEY", "").strip()

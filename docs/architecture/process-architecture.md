@@ -10,6 +10,7 @@
 - **`tts-erp.service`**：uvicorn API，cwd=仓库根，`EnvironmentFile=.env`
 - **`tts-erp-sync.service`**：APScheduler worker，安装脚本 `prod-switch/install-sync-worker.sh`
 - **`tts-erp-publish.service`**：单设备 TikTok 发布 Worker；主循环保持 recovery/device-cleanup/publish 顺序，独立有界后台 coroutine 用短 DB session/cleanup lease 推进 spool 与 MinIO cleanup，慢对象删除不阻塞发布；user unit 为 `scripts/systemd/tts-erp-publish.service`
+- **`tts-erp-runninghub.service`**：独立换装生成 Worker（`tts_erp_v2.runninghub.worker`），复用 PostgreSQL/MinIO；数据库凭据级配额控制云端最多5个在途，已受理任务恢复优先。部署需人工安装并按实际目录覆盖 unit；接口开发不自动启动进程，见 [RunningHub](../api/runninghub.md)。
 - **`tts-erp-watchdog.timer`**：每 10min 巡检 → `logs/watchdog.log`
 - **`tts-erp-logrotate.timer`**：每 6h 检查 `logs/{stdout,stderr,watchdog}.log`，
   > 20MB 则滚动（`scripts/logrotate/tts-erp.conf`，copytruncate 适配 systemd
@@ -32,7 +33,8 @@ tts_erp_v2/
 ├── sync_worker/         # APScheduler；JOBS 注册表 + 调度状态（顶部 NOTE，以它为准）；
 │                        #   operator controls use readwrite-gated /v2/pages/sync-jobs;
 │                        #   manual trigger is readwrite+, enable/disable is admin
-├── db/models/           # 15 schema SQLAlchemy 模型 — publishing.py 为视频发布任务/attempt/Worker 心跳；
+├── db/models/           # 16 schema SQLAlchemy 模型 — publishing.py 为视频发布任务/attempt/Worker 心跳；
+│                        #   runninghub.py 为换装批次/Attempt、工作流/素材快照、配额、上传缓存与成片；
 │                        #   media.py 为全局媒体资产库/数字人 3 张表；
 │                        #   miaoshou.py 为妙手 source-owned 包裹/采购价域 8 张表；
 │                        #   plugin.py 为插件 dump 的结构化表：订单/物流/结算 7 张
@@ -77,7 +79,7 @@ APScheduler 调度器，JOBS 注册表在文件顶部 `NOTE`，以它为准，�
 
 ### 3.3 db/models/
 
-15 schema SQLAlchemy 模型：
+16 schema SQLAlchemy 模型：
 
 - `publishing.py`：`publishing.video_publish_tasks / video_publish_attempts / worker_heartbeats`，分别保存任务与 publish/cleanup owner 状态（每轮 execution generation、下载前 generation-scoped `spool_path`、上传 generation/key/PUT expiry 独立）、含 profile/verification level 的完整不可变 attempt submission 身份和 Worker readiness；spool cleanup 精确处理退休 final/`.part`，对象 cleanup 固定退休 generation 并受 expiry+grace DB-time gate，设备 cleanup 只删除退休 generation 的精确 filesystem/MediaStore 路径；
 - `media.py`：全局媒体资产库与数字人（人设档案）3 张表：`media_assets` / `digital_humans` / `digital_human_assets`；对象字节流由浏览器凭预签名 URL 直传对象存储，数据库只存元数据；契约见 [`docs/design/media-asset-library.md`](../design/media-asset-library.md)；

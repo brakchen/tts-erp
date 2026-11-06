@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import MetaData
 
 from tts_erp_v2.db.base import Base
+from tts_erp_v2.db.models import runninghub as runninghub
 from tts_erp_v2.db.models.after_sales import (
     Case,
     CaseLine,
