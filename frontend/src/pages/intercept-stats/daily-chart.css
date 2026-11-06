@@ -1,0 +1,3 @@
+/* uPlot's public root rule sets its own font. Keep the React chart on the same
+ * canonical token as the legacy chart, without importing Bootstrap/common.css. */
+.erp-daily-chart .uplot { font-family: var(--sans); }

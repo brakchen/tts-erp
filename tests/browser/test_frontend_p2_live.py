@@ -403,56 +403,66 @@ def enum_task(page, gate, probe):
     assert command_count(gate, "DELETE", f"/v2/config/enum-map/{enum_pk}") == 1
 
 
-@pytest.mark.parametrize("prefix", ["", "/tts"])
-@pytest.mark.parametrize(("role", "width"), [("viewer", 375), ("operator", 768), ("admin", 1440)])
-def test_real_ui_persistence_permissions_and_lost_response(frontend_build, monkeypatch, prefix, role, width):
+@pytest.fixture(scope="module", params=["", "/tts"], ids=["root", "tts"])
+def live_module(request, frontend_build):
     value, _binding = current_binding()
-    monkeypatch.setenv("TTS_ERP_FERNET_KEY", api_env(value)["TTS_ERP_FERNET_KEY"])
-    token_service._reset_for_testing()
-    try:
-        with live_api_server(value) as child:
-            probe = seed_and_check_canary(child, prefix=prefix)
-            account = next(account for account in seed_accounts(probe) if account.role_code == role)
-            shop_id = "99" + str(secrets.randbelow(10**14)).zfill(14)
-            service_id = "TEST_sid_" + secrets.token_hex(8)
-            enum_value = "TEST_enum_" + secrets.token_hex(8)
-            with owned_command_facts(
-                probe, shop_id=shop_id, service_id=service_id,
-                enum_value=enum_value, profile="live",
-            ):
-                with independent(probe) as session:
-                    assert session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)) is None
-                with live_browser(probe, account, shop_id=shop_id, service_id=service_id,
-                                  enum_value=enum_value, width=width) as (page, gate):
-                    target = "/v2/pages/intercept-stats" if role == "viewer" else "/v2/pages/shops"
-                    page.goto(child.base + prefix + "/v2/auth/login?" + urlencode({"next": prefix + target}), wait_until="networkidle")
-                    page.get_by_label("用户名", exact=True).fill(account.username)
-                    fill_sensitive(page.get_by_label("密码", exact=True), account.password)
-                    page.get_by_role("button", name="登录", exact=True).click()
-                    page.wait_for_url(child.base + prefix + target)
-                    page.locator("#frontend-root").wait_for()
-                    if role == "viewer":
-                        expect(page.get_by_role("button", name="刷新统计", exact=True)).to_be_visible()
-                        statistics = public_get(probe, "/v2/intercept/requests/stats?days=7")
-                        assert isinstance(statistics, dict)
-                        for label, key in (("总请求数", "total_requests"), ("白名单命中", "whitelisted_requests"),
-                                           ("今日请求（UTC）", "today_requests"), ("错误请求", "error_requests")):
-                            expect(page.get_by_role("region", name=label, exact=True).get_by_text(f"{statistics[key]:,}", exact=True)).to_be_visible()
-                        expect(page.get_by_role("grid", name="每日请求（UTC）", exact=True)).to_be_visible()
-                        denied_register(page, probe, gate, csrf=True)
-                        response = page.goto(child.base + prefix + "/v2/pages/shops")
-                        assert response is not None and response.status == 403
-                    else:
-                        shop_task(page, gate, probe)
-                        if role == "admin":
-                            enum_task(page, gate, probe)
-                        else:
-                            page.goto(child.base + prefix + "/v2/pages/enum-map", wait_until="networkidle")
-                            expect(page.get_by_role("button", name="新增映射", exact=True)).to_be_disabled()
-                            assert page.get_by_role("button", name="编辑映射", exact=True).count() == 0
-                    assert all(csrf for method, _path, csrf in gate.calls if method in {"PUT", "PATCH", "DELETE"})
-                    dimensions = page.evaluate("({scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth})")
-                    assert dimensions["scroll"] <= dimensions["client"] + 1
-                    assert not gate.violations
-    finally:
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("TTS_ERP_FERNET_KEY", api_env(value)["TTS_ERP_FERNET_KEY"])
         token_service._reset_for_testing()
+        try:
+            with live_api_server(value) as child:
+                probe = seed_and_check_canary(child, prefix=request.param)
+                accounts = {account.role_code: account for account in seed_accounts(probe)}
+                require_data_probe(probe)
+                yield child, probe, accounts, request.param
+                child.require_live()
+        finally:
+            token_service._reset_for_testing()
+
+
+@pytest.mark.parametrize(("role", "width"), [("viewer", 375), ("operator", 768), ("admin", 1440)])
+def test_real_ui_persistence_permissions_and_lost_response(live_module, role, width):
+    child, probe, accounts, prefix = live_module
+    require_data_probe(probe)
+    account = accounts[role]
+    shop_id = "99" + str(secrets.randbelow(10**14)).zfill(14)
+    service_id = "TEST_sid_" + secrets.token_hex(8)
+    enum_value = "TEST_enum_" + secrets.token_hex(8)
+    with owned_command_facts(
+        probe, shop_id=shop_id, service_id=service_id,
+        enum_value=enum_value, profile="live",
+    ):
+        with independent(probe) as session:
+            assert session.scalar(select(ChannelAccount.id).where(ChannelAccount.shop_id == shop_id)) is None
+        with live_browser(probe, account, shop_id=shop_id, service_id=service_id,
+                          enum_value=enum_value, width=width) as (page, gate):
+            target = "/v2/pages/intercept-stats" if role == "viewer" else "/v2/pages/shops"
+            page.goto(child.base + prefix + "/v2/auth/login?" + urlencode({"next": prefix + target}), wait_until="networkidle")
+            page.get_by_label("用户名", exact=True).fill(account.username)
+            fill_sensitive(page.get_by_label("密码", exact=True), account.password)
+            page.get_by_role("button", name="登录", exact=True).click()
+            page.wait_for_url(child.base + prefix + target)
+            page.locator("#frontend-root").wait_for()
+            if role == "viewer":
+                expect(page.get_by_role("button", name="刷新统计", exact=True)).to_be_visible()
+                statistics = public_get(probe, "/v2/intercept/requests/stats?days=7")
+                assert isinstance(statistics, dict)
+                for label, key in (("总请求数", "total_requests"), ("白名单命中", "whitelisted_requests"),
+                                   ("今日请求（UTC）", "today_requests"), ("错误请求", "error_requests")):
+                    expect(page.get_by_role("region", name=label, exact=True).get_by_text(f"{statistics[key]:,}", exact=True)).to_be_visible()
+                expect(page.get_by_role("grid", name="每日请求（UTC）", exact=True)).to_be_visible()
+                denied_register(page, probe, gate, csrf=True)
+                response = page.goto(child.base + prefix + "/v2/pages/shops")
+                assert response is not None and response.status == 403
+            else:
+                shop_task(page, gate, probe)
+                if role == "admin":
+                    enum_task(page, gate, probe)
+                else:
+                    page.goto(child.base + prefix + "/v2/pages/enum-map", wait_until="networkidle")
+                    expect(page.get_by_role("button", name="新增映射", exact=True)).to_be_disabled()
+                    assert page.get_by_role("button", name="编辑映射", exact=True).count() == 0
+            assert all(csrf for method, _path, csrf in gate.calls if method in {"PUT", "PATCH", "DELETE"})
+            dimensions = page.evaluate("({scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth})")
+            assert dimensions["scroll"] <= dimensions["client"] + 1
+            assert not gate.violations

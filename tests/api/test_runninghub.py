@@ -109,7 +109,9 @@ def setup(db_engine):
         )
         session.add_all([template, image])
         session.flush()
+        asset_ids = [int(clip["assetId"]) for clip in clips] + [image.id]
         profile = session.get(GenerationProfile, "default")
+        previous_version_id = profile.workflow_version_id
         profile.workflow_version_id = version.id
         frozen = config_snapshot(profile, {})
         frozen["credentialRef"] = "env:RUNNINGHUB_TEST_API_KEY"
@@ -160,6 +162,19 @@ def setup(db_engine):
         session.execute(
             delete(GenerationBatch).where(GenerationBatch.id.in_(batch_ids))
         )
+        # These rows were committed independently of db_session's rollback.
+        # Release only this fixture's exact identities before the browser suite
+        # checks that it cannot expose another case's media through real APIs.
+        session.get(GenerationProfile, "default").workflow_version_id = previous_version_id
+        session.flush()
+        session.execute(delete(VideoTemplate).where(VideoTemplate.id == template.id))
+        session.execute(delete(DigitalHumanAsset).where(
+            DigitalHumanAsset.digital_human_id == human.id,
+            DigitalHumanAsset.asset_id.in_(asset_ids),
+        ))
+        session.execute(delete(DigitalHuman).where(DigitalHuman.id == human.id, DigitalHuman.name == marker))
+        session.execute(delete(MediaAsset).where(MediaAsset.id.in_(asset_ids)))
+        session.execute(delete(WorkflowVersion).where(WorkflowVersion.id == version.id))
 
 
 def test_offline_486_jobs_81_groups_and_variants(setup):
