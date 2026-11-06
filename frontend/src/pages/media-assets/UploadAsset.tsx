@@ -39,6 +39,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
   selectionCount?: number;
 }) {
   const [file, setFile] = useState<File>();
+  const fileInput = useRef<HTMLInputElement>(null);
   const [filename, setFilename] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -167,9 +168,9 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
         event.preventDefault();
         if (editable && file?.size && (!tagInput.trim() || tagCatalog)) void run(start);
       }}>
-      <label className="media-upload-file">
+      <div className="media-upload-file" title="图片最大 20 MiB，视频最大 200 MiB。">
         <span>选择文件</span>
-        <input type="file" accept={types} disabled={!editable} title="图片最大 20 MiB，视频最大 200 MiB。" onChange={(event) => {
+        <input ref={fileInput} type="file" hidden aria-label="选择文件" accept={types} disabled={!editable} onChange={(event) => {
           const next = event.currentTarget.files?.[0];
           if (!next) return;
           setTicket(undefined);
@@ -179,7 +180,14 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
           setFilename(next.name.slice(0, 255));
           setError(next.size === 0 ? '请选择非空的文件。' : '');
         }} />
-      </label>
+        <Button type="button" variant="secondary" className="media-file-trigger" isDisabled={!editable}
+          aria-label={file ? '重新选择文件：' + file.name : undefined} onPress={() => fileInput.current?.click()}>
+          <span>{file?.name ?? '选择文件'}</span>
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 20 20" fill="none">
+            <path d="m5 7.5 5 5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Button>
+      </div>
       {file && <LocalFilePreview file={file} />}
       <TextField value={filename} onChange={setFilename} isDisabled={!editable}>
         <Label>素材名称</Label><Input maxLength={255} />

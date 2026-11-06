@@ -81,6 +81,35 @@ async function finishTransfer() {
   await act(async () => Upload.last!.onload?.());
 }
 
+it('opens the native picker from a visible control and preserves the selected file on an empty selection event', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('XMLHttpRequest', Upload);
+  vi.stubGlobal('fetch', apiFetch(async (url) => url.endsWith('/upload-url') ? json(ticket, 201) : json(page())));
+  render(<MediaAssets bootstrap={bootstrap} />);
+  await user.click(button('上传素材'));
+  const input = screen.getByLabelText('选择文件') as HTMLInputElement;
+  expect(input).not.toBeVisible();
+  const open = vi.spyOn(input, 'click');
+  await user.click(button('选择文件'));
+  expect(open).toHaveBeenCalledTimes(1);
+  chooseFile();
+  const preview = await screen.findByRole('img', { name: '本地图片预览 ' + asset.filename });
+  const previewUrl = preview.getAttribute('src');
+  await user.clear(screen.getByLabelText('素材名称'));
+  await user.type(screen.getByLabelText('素材名称'), 'TEST_只改显示名称');
+  await user.type(screen.getByLabelText('新增标签'), 'TEST_保留标签{Enter}');
+  fireEvent.change(input, { target: { files: [] } });
+  expect(button('重新选择文件：' + asset.filename)).toHaveTextContent(asset.filename);
+  expect(screen.getByLabelText('素材名称')).toHaveValue('TEST_只改显示名称');
+  expect(screen.getByRole('row', { name: 'TEST_保留标签' })).toHaveAttribute('aria-selected', 'true');
+  expect(preview).toHaveAttribute('src', previewUrl);
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  await user.click(button('开始上传'));
+  await waitFor(() => expect(Upload.last).toBeDefined());
+  expect(button('重新选择文件：' + asset.filename)).toBeDisabled();
+  expect(input).toBeDisabled();
+});
+
 it('requires explicit upload, separates 100% transfer from confirmation, and retries the same asset', async () => {
   const user = userEvent.setup();
   vi.stubGlobal('XMLHttpRequest', Upload);
