@@ -164,10 +164,17 @@ class MediaBrowserBridge:
 
     def allows(self, method: str, path: str, query: dict, body: object) -> bool:
         if method == "GET" and path in PAGES:
-            id_name, ids = ("asset", self.assets) if path.endswith("media-assets") else ("human", self.humans)
-            return not query or (
-                set(query) == {id_name} and len(query[id_name]) == 1 and self._owned_id(query[id_name][0], ids)
-            )
+            if not query:
+                return True
+            if path.endswith("media-assets"):
+                return (
+                    set(query) <= {"asset", "fromHuman"} and "asset" in query
+                    and len(query["asset"]) == 1 and self._owned_id(query["asset"][0], self.assets)
+                    and ("fromHuman" not in query or (
+                        len(query["fromHuman"]) == 1 and self._owned_id(query["fromHuman"][0], self.humans)
+                    ))
+                )
+            return set(query) == {"human"} and len(query["human"]) == 1 and self._owned_id(query["human"][0], self.humans)
         if method == "GET" and path == LOGIN:
             return not query or (
                 set(query) == {"next"} and query["next"] in ([self.prefix + p] for p in PAGES | {ME})

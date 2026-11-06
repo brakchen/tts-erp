@@ -206,7 +206,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
     setUpload(false); setFilters(emptyFilters); setApplied(emptyFilters); setOffset(0);
     clearOrigin(); refresh(); setNotice('已入库：' + filename + '。' + resetMessage); select(id);
   }
-  if (upload) return <div className="erp-page media-workspace"><UploadAsset bootstrap={bootstrap} backLabel="返回素材库"
+  if (upload) return <div className="erp-page media-workspace"><UploadAsset bootstrap={bootstrap}
     onClose={() => setUpload(false)} onComplete={uploaded} /></div>;
   if (selected) return <div className="erp-page media-workspace"><AssetDetail key={selected} bootstrap={bootstrap} id={selected}
     returnHuman={returnHuman} initialNotice={notice} onClose={() => { clearOrigin(); select(null); setNotice(''); }}
