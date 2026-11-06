@@ -42,8 +42,8 @@ export function mediaError(error: unknown, writing = false) {
   return '操作失败（HTTP ' + error.status + '），请重试。';
 }
 
-export function useMediaRead<T>(root: string, path: string | null, decode: (data: unknown) => T, revision = 0) {
-  type State = { path: string | null; revision: number; attempt: number; data?: T; error?: string; loading: boolean };
+export function useMediaRead<T>(root: string, path: string | null, decode: (data: unknown) => T, revision: number | string = 0) {
+  type State = { path: string | null; revision: number | string; attempt: number; data?: T; error?: string; loading: boolean };
   const [state, setState] = useState<State>({ path, revision, attempt: 0, loading: path !== null });
   const [attempt, setAttempt] = useState(0);
   const latestAttempt = useRef(0);

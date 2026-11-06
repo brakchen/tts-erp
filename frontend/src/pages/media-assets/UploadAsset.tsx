@@ -36,7 +36,6 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
   target?: { id: string; name: string };
   onClose: (completedAssetId?: string) => void;
   onComplete: (assetId: string, filename: string) => void;
-  backLabel?: string;
   selectionCount?: number;
 }) {
   const [file, setFile] = useState<File>();
