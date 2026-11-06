@@ -77,6 +77,7 @@ def test_real_browser_contexts_and_mixed_async_modules(tmp_path: Path) -> None:
     (tmp_path / "pytest.ini").write_text("[pytest]\nasyncio_mode = auto\n", encoding="utf-8")
     (browser_dir / "test_a_sync.py").write_text(
         "import asyncio\n"
+        "from tests.browser import conftest as imported_conftest\n"
         "TEST_browsers = []\n"
         "def test_first(_module_browser_runtime):\n"
         "    browser = _module_browser_runtime.get()\n"
@@ -89,6 +90,12 @@ def test_real_browser_contexts_and_mixed_async_modules(tmp_path: Path) -> None:
         "    assert browser is TEST_browsers[0]\n"
         "    assert browser.contexts == []\n"
         "    with browser.new_context() as context: assert context.cookies() == []\n"
+        "def test_imported_helper_uses_the_same_runtime(_module_browser_runtime):\n"
+        "    renderer = imported_conftest._browser_renderer('http://127.0.0.1')\n"
+        "    try:\n"
+        "        assert next(renderer)._browser is _module_browser_runtime.get()\n"
+        "    finally:\n"
+        "        renderer.close()\n"
         "async def test_async_between():\n"
         "    await asyncio.sleep(0)\n"
         "def test_relaunch(_module_browser_runtime):\n"
@@ -104,4 +111,4 @@ def test_real_browser_contexts_and_mixed_async_modules(tmp_path: Path) -> None:
         text=True, capture_output=True, timeout=45, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "5 passed" in result.stdout and "skipped" not in result.stdout
+    assert "6 passed" in result.stdout and "skipped" not in result.stdout

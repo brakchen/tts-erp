@@ -31,35 +31,32 @@ from urllib.parse import parse_qs
 import pytest
 from render_support import Renderer
 
-from tests.support.browser_runtime import BrowserLaunchError, ModuleBrowser
+from tests.support.browser_runtime import (
+    BrowserLaunchError,
+    ModuleBrowser,
+    current_module_browser,
+    module_browser_scope,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _STATIC_ROOT = REPO_ROOT / "tts_erp_v2" / "static"
-_MODULE_BROWSER: ModuleBrowser | None = None
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _module_browser_runtime() -> Iterator[ModuleBrowser]:
-    global _MODULE_BROWSER
-    runtime = ModuleBrowser()
-    _MODULE_BROWSER = runtime
-    try:
+    with module_browser_scope() as runtime:
         yield runtime
-    finally:
-        try:
-            runtime.close()
-        finally:
-            _MODULE_BROWSER = None
 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_setup(item: pytest.Item) -> None:
     # Release the sync API's active event loop BEFORE pytest-asyncio sets up an
     # async item, including a future mixed module. The next sync item can relaunch.
-    if _MODULE_BROWSER is not None and (
+    runtime = current_module_browser()
+    if runtime is not None and (
         item.get_closest_marker("asyncio") or inspect.iscoroutinefunction(getattr(item, "obj", None))
     ):
-        _MODULE_BROWSER.close()
+        runtime.close()
 
 
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -571,9 +568,10 @@ def _browser_renderer(site_url: str) -> Any:
     module teardown 和 async item setup 前均关闭 sync Playwright，防止它占用
     pytest-asyncio 的事件循环。Renderer 及其只读请求记录仍逐用例创建、清理。
     """
-    assert _MODULE_BROWSER is not None, "browser rendering requires the module lifecycle fixture"
+    runtime = current_module_browser()
+    assert runtime is not None, "browser rendering requires the module lifecycle fixture"
     try:
-        browser = _MODULE_BROWSER.get()
+        browser = runtime.get()
     except ImportError as exc:  # pragma: no cover - 环境相关
         pytest.skip(f"playwright 不可用: {exc}")
     except BrowserLaunchError as exc:  # Chromium absence keeps its existing skip semantics.
@@ -587,7 +585,7 @@ def _browser_renderer(site_url: str) -> Any:
         finally:
             # A failed context close must not leave state in the reused browser.
             if browser.contexts:
-                _MODULE_BROWSER.close()
+                runtime.close()
 
 
 @pytest.fixture(scope="module")
