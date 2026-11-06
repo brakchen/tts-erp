@@ -129,7 +129,10 @@ class MediaBrowserBridge:
         self.calls: Counter[tuple[str, str]] = Counter()
         self.requests: list[MediaRequest] = []
         self.responses: list[tuple[str, str, int]] = []
+        # The picker performs a separate count read for existing associations.
+        # Keep its genuine response distinct from library/candidate page data.
         self.asset_pages: list[dict] = []
+        self.associated_pages: list[dict] = []
         self.refusals: list[str] = []
         self.fail_next: tuple[str, re.Pattern[str], int, int] | None = None
         self.hold_next: tuple[str, re.Pattern[str]] | None = None
@@ -238,7 +241,8 @@ class MediaBrowserBridge:
             self.client.cookies.clear()
         self.responses.append((request.method, path, response.status_code))
         if request.method == "GET" and path == ASSETS and response.status_code == 200:
-            self.asset_pages.append(response.json())
+            pages = self.associated_pages if "digitalHumanId" in parse_qs(urlsplit(target).query) else self.asset_pages
+            pages.append(response.json())
         if response.status_code == 201 and request.method == "POST":
             if path == ASSETS + "/upload-url":
                 self.assets.add(response.json()["asset_id"])
