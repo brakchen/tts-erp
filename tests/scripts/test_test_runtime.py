@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import subprocess
 import sys
@@ -28,7 +29,7 @@ def _project(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (tmp_path / "test_sample.py").write_text(
-        "import os\nimport pytest\n"
+        "import os\nimport fcntl\nfrom pathlib import Path\nimport pytest\n"
         "def test_plain(): pass\n"
         "@pytest.mark.requires_frontend_build\n"
         "def test_assets():\n"
@@ -39,6 +40,14 @@ def _project(tmp_path: Path) -> None:
         "def test_fixture(frontend_build): assert frontend_build == 'TEST_current'\n",
         encoding="utf-8",
     )
+    with (tmp_path / "test_sample.py").open("a", encoding="utf-8") as sample:
+        sample.write(
+            "@pytest.mark.requires_frontend_build\n"
+            "def test_release_is_locked():\n"
+            "    with Path('.git/tts-test-frontend.lock').open('a') as lock:\n"
+            "        with pytest.raises(BlockingIOError):\n"
+            "            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+        )
 
 
 def _run(tmp_path: Path, *args: str, build_exit: int = 0) -> subprocess.CompletedProcess[str]:
@@ -66,6 +75,15 @@ def test_marker_and_fixture_build_current_assets_once(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / "TEST_builds").read_text().splitlines() == ["build"]
     assert (tmp_path / "TEST_executed").exists()
+    with (tmp_path / ".git/tts-test-frontend.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_collection_only_does_not_build(tmp_path: Path) -> None:
+    _project(tmp_path)
+    result = _run(tmp_path, "--collect-only")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (tmp_path / "TEST_builds").exists()
 
 
 def test_build_failure_stops_before_test_execution(tmp_path: Path) -> None:

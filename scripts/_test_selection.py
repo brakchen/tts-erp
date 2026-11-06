@@ -158,7 +158,9 @@ def _classify(selection: Selection, path: str) -> str:
     if path == "tests/fixtures/ad_daily_summary.json":
         _contract(selection, "ad_daily")
         return "ad-daily shared contract sample"
-    if path == "tests/support/media_browser.py" or path.startswith("tests/fixtures/media/"):
+    if path == "tests/support/media_browser.py" or (
+        path.startswith("tests/fixtures/media/") and not path.endswith(".md")
+    ):
         selection.checks.extend(PAGE_BROWSER["media-assets"])
         selection.build = True
         return "media browser fixture and its consumers"

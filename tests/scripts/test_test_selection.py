@@ -46,7 +46,10 @@ def test_scenario_adds_a_build_without_changing_selected_sides():
 
 
 def test_empty_and_docs_only_select_no_application_test():
-    for changes in ([], ["docs/README.md"], ["docs/api/external-api.md"], ["docs/guides/agent-testing.md"]):
+    for changes in (
+        [], ["docs/README.md"], ["docs/api/external-api.md"],
+        ["docs/guides/agent-testing.md"], ["tests/fixtures/media/README.md"],
+    ):
         plan = select(changes)
         assert not (plan.frontend or plan.backend_all or plan.backend or plan.build)
 

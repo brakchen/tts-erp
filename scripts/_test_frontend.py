@@ -6,6 +6,8 @@ import fcntl
 import json
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,7 +19,8 @@ class FrontendBuild:
     build_seconds: float
 
 
-def prepare_frontend(root: Path) -> FrontendBuild:
+@contextmanager
+def prepare_frontend(root: Path) -> Iterator[FrontendBuild]:
     lock_path = Path(subprocess.check_output(
         ["git", "rev-parse", "--git-path", "tts-test-frontend.lock"], cwd=root, text=True,
     ).strip())
@@ -31,4 +34,5 @@ def prepare_frontend(root: Path) -> FrontendBuild:
         subprocess.run(["bash", "scripts/build_frontend.sh"], cwd=root, check=True, timeout=240)
         build_seconds = time.monotonic() - started
         release = json.loads((root / "tts_erp_v2/static/frontend/release.json").read_text(encoding="utf-8"))
-        return FrontendBuild(release["releaseId"], wait_seconds, build_seconds)
+        # Keep the release stable for the consumer's entire pytest session.
+        yield FrontendBuild(release["releaseId"], wait_seconds, build_seconds)

@@ -10,6 +10,7 @@ import os
 import subprocess
 import time
 from collections import defaultdict
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,7 @@ def pytest_collection(session: pytest.Session):
 def pytest_collection_finish(session: pytest.Session) -> None:
     _phases["collection"] += time.monotonic() - _collection_started
     # Failed/empty collection must never start npm or mask the collection error.
-    if session.testsfailed or not session.items:
+    if session.testsfailed or not session.items or session.config.option.collectonly:
         return
     needs_build = os.environ.get("TTS_ERP_TEST_SELECTED_NO_BUILD") == "0" or any(
         item.get_closest_marker("requires_frontend_build")
@@ -48,7 +49,9 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     prepared = os.environ.get("TTS_ERP_TEST_PREPARED_RELEASE")
     if needs_build and not prepared:
         try:
-            result = prepare_frontend(Path(session.config.rootpath))
+            resources = ExitStack()
+            session.config.add_cleanup(resources.close)
+            result = resources.enter_context(prepare_frontend(Path(session.config.rootpath)))
             _phases["frontend_lock"] += result.wait_seconds
             _phases["frontend_build"] += result.build_seconds
             os.environ["TTS_ERP_TEST_PREPARED_RELEASE"] = result.release_id
