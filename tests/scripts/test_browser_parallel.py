@@ -115,3 +115,31 @@ def test_prewarm_lease_is_released_before_children_revalidate_changed_inputs(tmp
         "set -eu\nflock -x -w 2 TEST_build.lock -c 'echo TEST_rebuilt'\n",
     )
     assert parallel.run(FILES, 2) == 0
+
+
+def test_second_worker_launch_failure_cleans_the_first_wrapper(tmp_path, monkeypatch):
+    project(tmp_path, monkeypatch)
+    (tmp_path / "scripts/test_isolated.sh").write_text(
+        "set -eu\ntrap 'touch TEST_launch_cleaned; exit 130' INT TERM\n"
+        "touch TEST_launch_ready\nsleep 60\n",
+    )
+    original = parallel.owned_process
+    calls = 0
+
+    @contextlib.contextmanager
+    def launch(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("TEST_second_launch_failed")
+        with original(*args, **kwargs) as process:
+            deadline = time.monotonic() + 5
+            while not (tmp_path / "TEST_launch_ready").exists():
+                assert time.monotonic() < deadline
+                time.sleep(0.02)
+            yield process
+
+    monkeypatch.setattr(parallel, "owned_process", launch)
+    with pytest.raises(OSError, match="TEST_second_launch_failed"):
+        parallel.run(FILES, 2)
+    assert (tmp_path / "TEST_launch_cleaned").exists()

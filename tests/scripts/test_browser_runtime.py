@@ -68,6 +68,32 @@ def test_failed_navigation_context_is_still_closed() -> None:
     context.close.assert_called_once()
 
 
+def test_canned_layout_waits_for_data_and_refuses_an_error_shell() -> None:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    from tests.support.page_readiness import wait_canned_page
+
+    runtime = ModuleBrowser()
+    try:
+        with runtime.get().new_context() as context:
+            page = context.new_page()
+            page.set_content('<div id="frontend-root"><main class="erp-page">TEST_loading</main></div>')
+            page.evaluate("""() => setTimeout(() => {
+                const grid = document.createElement('div');
+                grid.setAttribute('role', 'grid');
+                grid.setAttribute('aria-label', '店铺接入列表');
+                document.querySelector('main').append(grid);
+            }, 150)""")
+            wait_canned_page(page, "shops")
+            assert page.get_by_role("grid").count() == 1
+            page.set_content('<div id="frontend-root"><main class="erp-page">TEST_error</main></div>')
+            page.set_default_timeout(100)
+            with pytest.raises(PlaywrightTimeoutError):
+                wait_canned_page(page, "shops")
+    finally:
+        runtime.close()
+
+
 def test_real_browser_contexts_and_mixed_async_modules(tmp_path: Path) -> None:
     browser_dir = tmp_path / "tests/browser"
     browser_dir.mkdir(parents=True)

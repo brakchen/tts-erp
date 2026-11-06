@@ -72,16 +72,27 @@ The raw isolated `unit`, domain and file commands build frontend assets only
 after successful collection, when retained cases request `frontend_build`, carry
 `requires_frontend_build`, or are browser tests. The selected runner's explicit
 build requirement is honored by the same owner. Build-free API cases reuse the
-existing test-only asset-manifest fixture. Required builds always use current
-sources and the worktree-local asset lock; build failure stops test execution.
-No cached release from an earlier invocation is accepted as preparation evidence.
+existing test-only asset-manifest fixture. Required builds use the worktree-local
+owner in `scripts/_test_frontend.py`. It hashes actual frontend files (including
+uncommitted inputs), lock/config/build scripts, Node/npm versions, build environment
+and the private npm installation marker. A prior release is reusable only when
+this key and every packaged artifact's content still match. Missing/corrupt
+artifacts or changed inputs trigger a rebuild; failure or changes during a build
+cannot publish cache evidence. Do not hand-edit `node_modules`: use `npm ci`.
+The cache is worktree-private, under Git's `tts-test-frontend.json` path; removing
+that one file forces a cold build. Producers take EX; consuming pytest sessions
+hold SH leases. Builds reclaim their complete subprocess groups before releasing
+the lock, including timeout/termination paths.
 
 Every isolated run prints `[test-timing]` phases for connection preparation,
 template-lock waiting, template preparation, cloning, test execution, cleanup and
-total time. Pytest prints collection/build and setup/call/teardown totals plus
+total time. Pytest prints collection/cache/build and setup/call/teardown totals plus
 the 20 slowest phases. Phase totals distinguish accumulated test durations from
 wall time; they are diagnostics, not a second success/failure signal. Successful
 baseline runs also print these timings; `--keep-log` retains full details.
+Browser startup, navigation, readiness and cleanup are subparts of those
+setup/call/teardown totals, not additional wall time. `[test-build]` identifies
+cache hits and builds.
 
 The Monitor Zabbix export selects its YAML syntax and structure checks through
 the isolated runner. These checks do not validate a live Zabbix import. Other YAML
@@ -137,14 +148,49 @@ and a worktree-local `npm ci --prefix frontend` installation. Do not share writa
 to fit the validation VM's memory budget. The component adapter and local Vite
 fixtures own their npm process groups and reclaim descendants on success, failure,
 or timeout; increasing test deadlines is not a substitute for process cleanup.
+The shared `frontend/scripts/check-runtime.mjs` uses npm/node-semver 7.8.6 (ISC,
+https://github.com/npm/node-semver) against that one engine declaration. npm
+typecheck/build/component/dev commands run it first; cache reuse also checks the
+active runtime. Browser-free Python selections do not require Node.
 
 The common read-only browser renderer reuses Chromium within each test module.
 Each test owns its Renderer/request records and fresh BrowserContexts. Module
 teardown closes the browser and Playwright; an async item's setup also releases
 the sync API before pytest-asyncio starts its loop. It is not session-wide reuse.
 Lifecycle regression covers same-module reuse, cookie isolation, async cases
-between sync cases, and a following async module. Full-stack browser fixtures
-with their own launch owners retain their existing lifecycle.
+between sync cases, and a following async module. P2 auth/permissions, media,
+runtime-config and live price fixtures borrow the same module owner, retaining
+hard failures for missing Chromium and fresh contexts, fences, login, canaries
+and persistence checks per case. Six P2 role/prefix cases reuse their verified
+API child/accounts per module and prefix; command facts remain case-owned.
+
+The common canned Renderer waits for hydration/lazy-page completion instead of
+networkidle. Cases wait for actual data/command state; generic layout/font checks
+use `tests/support/page_readiness.py` to require positive tables/data and fonts.
+Canned payloads follow current decoder contracts. Deployed key-based E2E keeps
+its previous network-idle behavior until separately migrated; writable workflow
+negative/replay waits are not mechanically removed.
+
+### Optional two-way read-only browser execution
+
+```bash
+bash scripts/test_isolated.sh --browser-workers 2 browser \
+  tests/browser/test_frontend_ad_daily_filters.py \
+  tests/browser/test_frontend_dashboard_layout.py
+```
+
+This first-option form accepts one or two workers, explicit files/node targets
+from `scripts/_test_browser_parallel.py::SAFE_FILES`, and no pytest flags. Unknown
+files, duplicate/overlapping targets and `TTS_ERP_TEST_DB_NAME` overrides are
+rejected. Use serial commands for filters, writable workflows, Vite and heavy
+components. Whole modules stay together. Prewarming releases its lease before
+children revalidate inputs after loading `.env.test`. Each child enters the
+original isolated wrapper, gets its own generated database/proof, local server
+ports and private log. Every child must finish; any failure, empty collection or
+cleanup failure makes the overall command fail. Cancellation/launch failure
+allows pytest/shell cleanup before reclaiming groups. This opt-in adapter does
+not replace full fast baseline execution or its completeness report, and never
+shares test data.
 
 ## 4. Template and shared database usage
 

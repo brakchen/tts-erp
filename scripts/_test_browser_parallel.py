@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from pathlib import Path
 
 from scripts._test_frontend import prepare_frontend
@@ -57,16 +57,16 @@ def run(targets: list[str], workers: int) -> int:
     with ExitStack() as resources:
         directory = Path(resources.enter_context(tempfile.TemporaryDirectory(prefix="tts-browser-parallel-")))
         children = []
-        for index, group in enumerate(groups):
-            path = directory / f"worker-{index + 1}.log"
-            output = resources.enter_context(path.open("w", encoding="utf-8"))
-            process = resources.enter_context(owned_process(
-                ["bash", "scripts/test_isolated.sh", "browser", *group], cwd=ROOT,
-                env=os.environ.copy(), stdout=output, stderr=subprocess.STDOUT,
-            ))
-            children.append((process, path))
-            print(f"[browser-parallel] worker={index + 1} targets={group}", flush=True)
         try:
+            for index, group in enumerate(groups):
+                path = directory / f"worker-{index + 1}.log"
+                output = resources.enter_context(path.open("w", encoding="utf-8"))
+                process = resources.enter_context(owned_process(
+                    ["bash", "scripts/test_isolated.sh", "browser", *group], cwd=ROOT,
+                    env=os.environ.copy(), stdout=output, stderr=subprocess.STDOUT,
+                ))
+                children.append((process, path))
+                print(f"[browser-parallel] worker={index + 1} targets={group}", flush=True)
             deadline = time.monotonic() + 1200
             while any(process.poll() is None for process, _ in children):
                 if time.monotonic() > deadline:
@@ -77,7 +77,8 @@ def run(targets: list[str], workers: int) -> int:
             # before the existing owner applies its bounded TERM/KILL cleanup.
             for process, _ in children:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGINT)
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGINT)
             for process, path in children:
                 try:
                     process.wait(timeout=15)

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import fcntl
 import os
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from scripts._test_frontend import input_key, prepare_frontend
+from tests.support.owned_process import owned_process
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -158,3 +161,42 @@ def test_source_change_during_build_cannot_publish_cache(tmp_path):
     with pytest.raises(ValueError, match="inputs changed"), prepare_frontend(tmp_path):
         pytest.fail("A changing input is not valid cache evidence")
     assert not (tmp_path / ".git/tts-test-frontend.json").exists()
+
+
+@pytest.mark.parametrize("mode", ["timeout", "terminate"])
+def test_cancelled_build_cannot_leave_a_descendant_writer(tmp_path, monkeypatch, mode):
+    from scripts import _test_frontend
+
+    _project(tmp_path)
+    (tmp_path / "scripts/build_frontend.sh").write_text(
+        "set -eu\n"
+        "(trap '' TERM; touch TEST_writer_started; sleep 1; echo TEST_stale > TEST_late_write) &\n"
+        "wait\n",
+    )
+    if mode == "timeout":
+        monkeypatch.setattr(_test_frontend, "BUILD_TIMEOUT_SECONDS", 0.2)
+        with pytest.raises(subprocess.TimeoutExpired), prepare_frontend(tmp_path):
+            pytest.fail("A timed-out build must not produce a lease")
+        time.sleep(1)
+        assert not (tmp_path / "TEST_late_write").exists()
+    else:
+        code = (
+            "import sys; from pathlib import Path; from scripts._test_frontend import prepare_frontend;"
+            "\nwith prepare_frontend(Path(sys.argv[1])): raise AssertionError('unexpected build completion')"
+        )
+        with (tmp_path / "TEST_build.log").open("w") as log, owned_process(
+            [sys.executable, "-c", code, str(tmp_path)], cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": str(ROOT)}, stdout=log, stderr=subprocess.STDOUT,
+        ) as process:
+            deadline = time.monotonic() + 10
+            while not (tmp_path / "TEST_writer_started").exists():
+                assert process.poll() is None
+                assert time.monotonic() < deadline
+                time.sleep(0.02)
+            os.kill(process.pid, signal.SIGTERM)
+            assert process.wait(timeout=10) != 0
+            time.sleep(1)
+            assert not (tmp_path / "TEST_late_write").exists()
+    assert not (tmp_path / ".git/tts-test-frontend.json").exists()
+    with (tmp_path / ".git/tts-test-frontend.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

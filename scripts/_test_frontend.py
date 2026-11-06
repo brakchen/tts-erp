@@ -6,12 +6,34 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+
+from tests.support.owned_process import owned_process
+
+BUILD_TIMEOUT_SECONDS = 240
+
+
+def _build(root: Path) -> None:
+    def terminate(_signum, _frame):
+        raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, terminate)
+    try:
+        with owned_process(
+            ["bash", "scripts/build_frontend.sh"], cwd=root, env=os.environ.copy(),
+            stdout=None, stderr=None,
+        ) as process:
+            code = process.wait(timeout=BUILD_TIMEOUT_SECONDS)
+            if code:
+                raise subprocess.CalledProcessError(code, process.args)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 @dataclass(frozen=True)
@@ -123,7 +145,7 @@ def prepare_frontend(root: Path) -> Iterator[FrontendBuild]:
             if release is None:
                 cache.unlink(missing_ok=True)
                 started = time.monotonic()
-                subprocess.run(["bash", "scripts/build_frontend.sh"], cwd=root, check=True, timeout=240)
+                _build(root)
                 build_seconds = time.monotonic() - started
                 if input_key(root) != key:
                     raise ValueError("Frontend inputs changed during build; rerun tests")
