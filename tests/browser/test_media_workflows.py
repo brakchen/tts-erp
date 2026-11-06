@@ -210,6 +210,7 @@ def media_run(request, frontend_build, monkeypatch) -> Iterator[MediaRun]:
                     yield MediaRun(page, gate, marker)
                     assert gate.refusals == []
                     assert gate.fail_next is None and gate.held is None and gate.hold_next is None
+                    assert store.held_put is None and not store.hold_next_put
                 finally:
                     gate.closing = True
                     context.close()
@@ -297,7 +298,7 @@ def video_ready(page: Page, name: str, *, local: bool = False, scope: Locator | 
     expect(video).to_be_visible()
     if local:
         expect(video).to_have_attribute("src", re.compile(r"^blob:"))
-    page.wait_for_function("""video => video.readyState >= HTMLMediaElement.HAVE_METADATA
+    page.wait_for_function("""video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
         && video.videoWidth > 0 && video.videoHeight > 0
         && Number.isFinite(video.duration) && video.duration > 0""", arg=video.element_handle())
     return video.evaluate("video => ({width: video.videoWidth, height: video.videoHeight, duration: video.duration})")
@@ -401,12 +402,31 @@ def assert_preserved(run: MediaRun, asset_id: int, human_ids: set[int], objects:
 
 
 def assert_layout(page: Page, tmp_path: Path, label: str) -> None:
+    # Full-page capture must start at the same viewport origin as the reference;
+    # otherwise Chromium paints the sticky app header across a scrolled page.
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_function("window.scrollY === 0")
+    media_metadata = []
+    # Every visible video in these fixtures contains legal VP8 bytes. Waiting
+    # for its first decoded frame prevents a loading spinner becoming evidence.
+    for video in main(page).locator("video:visible").all():
+        page.wait_for_function("""video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+            && video.videoWidth > 0 && video.videoHeight > 0
+            && Number.isFinite(video.duration) && video.duration > 0""", arg=video.element_handle())
+        media_metadata.append(video.evaluate("""video => ({
+            label: video.getAttribute('aria-label'), readyState: video.readyState,
+            width: video.videoWidth, height: video.videoHeight, duration: video.duration,
+            controls: video.controls, preload: video.preload,
+        })"""))
     dimensions = overflow_report(page)
     assert dimensions["scrollWidth"] <= dimensions["clientWidth"], dimensions
     expect(page.get_by_role("banner")).to_have_count(1)
     expect(page.get_by_role("main")).to_have_count(1)
     viewport = page.viewport_size
     assert viewport is not None
+    (tmp_path / f"TEST_{label}_{viewport['width']}.media.json").write_text(
+        json.dumps(media_metadata, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
     page.screenshot(path=tmp_path / f"TEST_{label}_{viewport['width']}.png", animations="disabled", full_page=True)
 
 
@@ -586,9 +606,15 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     before_tickets = gate.calls["POST", ASSETS + "/upload-url"]
     before_puts = gate.store.puts
     attach_path = f"{HUMANS}/{human_id}/assets"
+    gate.store.hold_put()
     gate.hold("POST", re.compile(rf"{ASSETS}/[1-9][0-9]*/confirm"))
-    with page.expect_request(lambda req: req.method == "POST" and req.url.endswith("/confirm")):
+    with page.expect_request(lambda req: req.method == "PUT"):
         button(main(page), "开始上传").click()
+    expect(main(page).get_by_role("progressbar", name="传输进度", exact=True)).to_be_visible()
+    assert gate.store.held_put is not None and gate.store.puts == before_puts
+    assert_layout(page, tmp_path, "upload_sending")
+    with page.expect_request(lambda req: req.method == "POST" and req.url.endswith("/confirm")):
+        gate.store.release_put()
     expect(main(page).get_by_text(re.compile("正在确认入库")).first).to_be_visible()
     expect(main(page).get_by_role("progressbar", name="传输完成", exact=True)).to_have_attribute("aria-valuenow", "100")
     uploaded_id, = gate.assets - before_assets
@@ -598,12 +624,17 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
         assert session.get(MediaAsset, uploaded_id).status == "awaiting_upload"
     assert_layout(page, tmp_path, "upload_confirming")
     gate.release(status=503)
+    expect(button(main(page), "重试入库")).to_be_visible()
+    expect(main(page).get_by_role("alert")).to_be_visible()
+    assert_layout(page, tmp_path, "upload_confirm_error")
     gate.fail("POST", attach_path, 500)
     button(main(page), "重试入库").click()
     button(main(page), "重试添加").wait_for()
     with db() as session:
         assert session.get(MediaAsset, uploaded_id).status == "ready"
     assert run.links(human_id) == set()
+    expect(main(page).get_by_role("alert")).to_be_visible()
+    assert_layout(page, tmp_path, "upload_attach_error")
     button(main(page), "重试添加").click()
     heading(page, "为「" + person + "」添加素材")
     text(main(page), "本次新增 2 项")
@@ -1037,6 +1068,8 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     image_ready(page, assets[1][0], scope=preview)
     text(preview, specs[1]["description"])
     assert_layout(page, tmp_path, "fidelity_picker_preview")
+    preview.locator("summary").click()
+    expect(preview).to_have_js_property("open", False)
     set_checkbox(page, assets[4][0], True)
     expect(button(main(page), "取消勾选 " + assets[4][0])).to_be_visible()
     assert_reference_picker(page, person, 1)
