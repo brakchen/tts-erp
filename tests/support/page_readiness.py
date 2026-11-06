@@ -1,8 +1,8 @@
 """Positive canned-data readiness for layout/font checks, never error scenarios."""
 from __future__ import annotations
 
-import time
 import re
+import time
 from typing import Any
 
 from playwright.sync_api import expect

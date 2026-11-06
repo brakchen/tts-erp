@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-from tests.support.browser_runtime import borrowed_browser
-
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -20,6 +18,7 @@ from uuid import UUID
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Locator, Page, Route
 
+from tests.support.browser_runtime import borrowed_browser
 from tests.support.frontend_p2_accounts import SeedAccount
 from tests.support.frontend_p2_binding import NONCE_HEADER, verify_attestation
 from tests.support.frontend_p2_canary import (

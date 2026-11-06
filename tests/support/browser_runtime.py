@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-import time
 from typing import Any
 
 from tests.support.test_runtime import record_phase

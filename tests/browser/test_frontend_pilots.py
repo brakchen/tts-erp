@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from render_support import overflow_report
 
-from tts_erp_v2.accounts.pages import PAGES
 from tests.support.page_readiness import wait_canned_page
+from tts_erp_v2.accounts.pages import PAGES
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 

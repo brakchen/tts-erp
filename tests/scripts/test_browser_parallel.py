@@ -2,11 +2,18 @@
 from __future__ import annotations
 
 import contextlib
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from scripts import _test_browser_parallel as parallel
+from tests.support.owned_process import owned_process
 
 FILES = ["tests/browser/test_frontend_ad_daily_filters.py", "tests/browser/test_frontend_dashboard_layout.py"]
 
@@ -47,3 +54,35 @@ def test_each_target_runs_once_and_any_child_failure_propagates(tmp_path, monkey
     assert len(outputs) == 2
     observed = [path.read_text().splitlines() for path in outputs]
     assert sorted(observed) == sorted([["browser", name] for name in FILES])
+
+
+def test_termination_allows_children_to_run_cleanup_traps(tmp_path, monkeypatch):
+    project(tmp_path, monkeypatch)
+    (tmp_path / "scripts/test_isolated.sh").write_text(
+        "set -eu\ntrap 'touch TEST_cleaned_$$; exit 130' INT TERM\n"
+        "touch TEST_ready_$$\nsleep 60\n",
+    )
+    code = (
+        "import contextlib, sys; from pathlib import Path; from types import SimpleNamespace;"
+        "from scripts import _test_browser_parallel as p;"
+        "p.ROOT=Path(sys.argv[1]);"
+        "p.prepare_frontend=lambda root: contextlib.nullcontext(SimpleNamespace(cached=True));"
+        "sys.argv=['parallel','--workers','2','browser',*sys.argv[2:]];"
+        "sys.exit(p.main())"
+    )
+    output = tmp_path / "TEST_coordinator.log"
+    with output.open("w") as log, owned_process(
+        [sys.executable, "-c", code, str(tmp_path), *FILES], cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2])},
+        stdout=log, stderr=subprocess.STDOUT,
+    ) as process:
+        deadline = time.monotonic() + 10
+        while len(list(tmp_path.glob("TEST_ready_*"))) < 2:
+            assert process.poll() is None, output.read_text()
+            assert time.monotonic() < deadline, output.read_text()
+            time.sleep(0.02)
+        os.kill(process.pid, signal.SIGTERM)
+        assert process.wait(timeout=20) == 130, output.read_text()
+    ready = {path.name.removeprefix("TEST_ready_") for path in tmp_path.glob("TEST_ready_*")}
+    cleaned = {path.name.removeprefix("TEST_cleaned_") for path in tmp_path.glob("TEST_cleaned_*")}
+    assert ready == cleaned and len(cleaned) == 2

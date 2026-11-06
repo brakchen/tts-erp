@@ -145,9 +145,8 @@ def test_failed_rebuild_does_not_accept_previous_release(tmp_path, monkeypatch):
         pass
     monkeypatch.setenv("VITE_TEST_CACHE_INPUT", "TEST_new")
     monkeypatch.setenv("TEST_BUILD_EXIT", "7")
-    with pytest.raises(subprocess.CalledProcessError):
-        with prepare_frontend(tmp_path):
-            pytest.fail("Failed rebuild must not yield a stale release")
+    with pytest.raises(subprocess.CalledProcessError), prepare_frontend(tmp_path):
+        pytest.fail("Failed rebuild must not yield a stale release")
     assert not (tmp_path / ".git/tts-test-frontend.json").exists()
 
 
@@ -155,8 +154,7 @@ def test_source_change_during_build_cannot_publish_cache(tmp_path):
     _project(tmp_path)
     script = tmp_path / "scripts/build_frontend.sh"
     with script.open("a") as output:
-        output.write("echo TEST_mutation >> scripts/build_frontend.sh\n")
-    with pytest.raises(ValueError, match="inputs changed"):
-        with prepare_frontend(tmp_path):
-            pytest.fail("A changing input is not valid cache evidence")
+        output.write("echo '# TEST_mutation' >> scripts/build_frontend.sh\n")
+    with pytest.raises(ValueError, match="inputs changed"), prepare_frontend(tmp_path):
+        pytest.fail("A changing input is not valid cache evidence")
     assert not (tmp_path / ".git/tts-test-frontend.json").exists()

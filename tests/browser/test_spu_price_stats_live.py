@@ -32,10 +32,7 @@ cookie 会话，以及原有的 readonly API key 会话。浏览器、playwright
 
 from __future__ import annotations
 
-from tests.support.browser_runtime import borrowed_browser
-
 from collections.abc import Iterator
-from typing import Any
 
 import pytest
 from support.spu_price_stats_live import (
@@ -59,6 +56,8 @@ from support.spu_price_stats_live import (
     priced_test_database,
     spu_roi_path,
 )
+
+from tests.support.browser_runtime import borrowed_browser
 
 pytestmark = [
     pytest.mark.domain_browser,

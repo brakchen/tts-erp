@@ -9,8 +9,6 @@ the benign TEST config. The isolated wrapper owns all database teardown.
 from __future__ import annotations
 
 import json
-from tests.support.browser_runtime import borrowed_browser
-
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -32,6 +30,7 @@ from tests.scripts.test_frontend_remaining_live_api import (
     owned,
 )
 from tests.scripts.test_frontend_remaining_live_api import clone as owned_clone
+from tests.support.browser_runtime import borrowed_browser
 from tests.support.frontend_p2_binding import (
     NONCE_HEADER,
     checked_session,

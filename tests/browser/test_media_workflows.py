@@ -10,8 +10,6 @@ import json
 import re
 import struct
 import zlib
-from tests.support.browser_runtime import borrowed_browser
-
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -26,9 +24,22 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from tests.support.frontend_p2_binding import checked_session, current_binding, validate_application
+from tests.support.browser_runtime import borrowed_browser
+from tests.support.frontend_p2_binding import (
+    checked_session,
+    current_binding,
+    validate_application,
+)
 from tests.support.frontend_p2_browser import fill_sensitive
-from tests.support.media_browser import APP, ASSETS, HUMANS, LOGIN, ME, MediaBrowserBridge, MediaBytes
+from tests.support.media_browser import (
+    APP,
+    ASSETS,
+    HUMANS,
+    LOGIN,
+    ME,
+    MediaBrowserBridge,
+    MediaBytes,
+)
 from tts_erp_v2.accounts import service
 from tts_erp_v2.accounts.models import Role, User
 from tts_erp_v2.api.v2 import media
@@ -679,7 +690,7 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
 def test_new_reference_after_delete_preflight_is_rejected_without_byte_removal(media_run: MediaRun) -> None:
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
-    filename, asset_id = run.seed_asset("delete_race.png")
+    _filename, asset_id = run.seed_asset("delete_race.png")
     person, human_id = run.seed_human("late_reference")
     objects = dict(gate.store.objects)
     run.goto(f"media-assets?asset={asset_id}")
