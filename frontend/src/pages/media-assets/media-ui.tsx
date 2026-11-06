@@ -137,8 +137,8 @@ export function recordLink(bootstrap: FrontendBootstrap, page: string, parameter
 export function ReadStatus({ title, loading, error, onRetry }: {
   title: string; loading: boolean; error?: string; onRetry: () => void;
 }) {
-  if (error) return <Alert role="alert" status="danger"><Alert.Content>
-    <Alert.Title>{title}不可用</Alert.Title><Alert.Description className="[overflow-wrap:anywhere]">{error}</Alert.Description>
+  if (error) return <Alert role="alert" status="danger" className="media-error shadow-none"><Alert.Content>
+    <Alert.Title>{title}不可用</Alert.Title><Alert.Description className="text-inherit [overflow-wrap:anywhere]">{error}</Alert.Description>
     <Button variant="secondary" onPress={onRetry}>重试{title}</Button>
   </Alert.Content></Alert>;
   if (loading) return <p role="status">正在加载{title}…</p>;
@@ -146,8 +146,8 @@ export function ReadStatus({ title, loading, error, onRetry }: {
 }
 
 export function ActionError({ message }: { message: string }) {
-  return message ? <Alert role="alert" status="danger"><Alert.Content>
-    <Alert.Title>需要处理</Alert.Title><Alert.Description className="[overflow-wrap:anywhere]">{message}</Alert.Description>
+  return message ? <Alert role="alert" status="danger" className="media-error shadow-none"><Alert.Content>
+    <Alert.Description className="text-inherit [overflow-wrap:anywhere]">{message}</Alert.Description>
   </Alert.Content></Alert> : null;
 }
 
