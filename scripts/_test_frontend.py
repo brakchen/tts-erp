@@ -69,6 +69,15 @@ def _digest(paths: list[Path], root: Path) -> str:
 def input_key(root: Path) -> str:
     frontend = root / "frontend"
     paths = _files(frontend, {"node_modules", "dist", ".cache"}) if frontend.exists() else []
+    # Vite imports shared tokens/navigation CSS and Tabulator's vendor CSS from
+    # outside frontend/. Hash the static source tree, excluding packaged output.
+    shared = root / "tts_erp_v2/static"
+    if shared.exists():
+        paths.extend(_files(shared, {"frontend"}))
+    # Included by the frontend TypeScript project via an imported test contract.
+    contract = root / "tests/fixtures/ad_daily_summary.json"
+    if contract.exists():
+        paths.append(contract)
     paths.append(root / "scripts/build_frontend.sh")
     # npm ci replaces this installation marker. Hand-editing node_modules is
     # unsupported: reinstall rather than sharing writable dependency installs.

@@ -74,7 +74,8 @@ after successful collection, when retained cases request `frontend_build`, carry
 build requirement is honored by the same owner. Build-free API cases reuse the
 existing test-only asset-manifest fixture. Required builds use the worktree-local
 owner in `scripts/_test_frontend.py`. It hashes actual frontend files (including
-uncommitted inputs), lock/config/build scripts, Node/npm versions, build environment
+uncommitted inputs), shared static sources (excluding packaged output),
+lock/config/build scripts, Node/npm versions, build environment
 and the private npm installation marker. A prior release is reusable only when
 this key and every packaged artifact's content still match. Missing/corrupt
 artifacts or changed inputs trigger a rebuild; failure or changes during a build
