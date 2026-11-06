@@ -500,8 +500,11 @@ def test_picker_preserves_selection_and_uses_server_exclusion(media_run: MediaRu
     expect(main(page).get_by_role("checkbox")).to_have_count(5)  # Four cards + hide-existing switch.
     initial = gate.asset_pages[-1]
     assert initial["total"] == 5 and initial["limit"] == 4 and len(initial["items"]) == 4
+    text(main(page), "已隐藏 2 项已添加素材")
+    assert gate.associated_pages[-1]["total"] == 2 and gate.associated_pages[-1]["limit"] == 1
     assert not {row["asset_id"] for row in initial["items"]} & {aid for _, aid in existing}
-    first_read = next(item for item in gate.requests[start:] if item.method == "GET" and item.path == ASSETS)
+    first_read = next(item for item in gate.requests[start:] if item.method == "GET" and item.path == ASSETS
+                      and "digitalHumanId" not in item.query)
     assert first_read.query["excludeDigitalHumanId"] == [str(human_id)]
     text(main(page), "共 5 项 · 第 1 页")
 
@@ -587,6 +590,7 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     with page.expect_request(lambda req: req.method == "POST" and req.url.endswith("/confirm")):
         button(main(page), "开始上传").click()
     expect(main(page).get_by_text(re.compile("正在确认入库")).first).to_be_visible()
+    expect(main(page).get_by_role("progressbar", name="传输完成", exact=True)).to_have_attribute("aria-valuenow", "100")
     uploaded_id, = gate.assets - before_assets
     confirm_path = f"{ASSETS}/{uploaded_id}/confirm"
     assert gate.store.puts == before_puts + 1 and gate.calls["POST", attach_path] == 0
@@ -853,7 +857,7 @@ def test_read_preview_and_draft_recovery_keeps_objects_isolated(media_run: Media
     gate.fail("GET", re.compile(rf"{HUMANS}/[1-9][0-9]*"), 503)
     button(main(page), "创建档案").click()
     button(main(page), "重试数字人档案").wait_for()
-    expect(main(page).get_by_text(re.compile("已创建数字人")).first).to_be_visible()
+    expect(main(page).get_by_text(re.compile("档案已创建")).first).to_be_visible()
     button(main(page), "重试数字人档案").click()
     heading(page, person)
     human_id = run.human_id(person)
@@ -1001,11 +1005,19 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     assert_layout(page, tmp_path, "fidelity_asset_edit")
     button(main(page), "取消").click()
 
-    main(page).get_by_role("link", name=person, exact=True).click()
+    run.goto(f"media-assets?asset={assets[2][1]}")
+    heading(page, assets[2][0])
+    shared_by = main(page).get_by_role("region", name="哪些数字人在用", exact=True)
+    expect(shared_by.get_by_role("link")).to_have_text([humans[0][0], humans[1][0]])
+    video_ready(page, assets[2][0])
+    assert_layout(page, tmp_path, "fidelity_shared_asset_detail")
+    shared_by.get_by_role("link", name=person, exact=True).click()
     assert_reference_header(page, person, "返回数字人列表")
     refs = main(page).get_by_role("region", name="引用素材", exact=True)
     text(refs, "引用素材 · 2 项")
-    expect(refs.locator('ul[aria-label="已引用素材"] > li')).to_have_count(2)
+    reference_rows = refs.locator('ul[aria-label="已引用素材"] > li')
+    expect(reference_rows).to_have_count(2)
+    expect(reference_rows.locator(":scope > strong")).to_have_text([assets[0][0], assets[2][0]])
     expect(refs.locator("img, video")).to_have_count(0)
     assert_layout(page, tmp_path, "fidelity_human_detail")
     button(main(page), "编辑档案").click()
@@ -1032,6 +1044,23 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     button(main(page), "取消").click()
     button(dialog(page), "确认放弃").click()
     assert run.links(human_id) == {assets[0][1], assets[2][1]}
+
+    picker(page, person)
+    set_checkbox(page, assets[4][0], True)
+    submit_selection(page, 1)
+    heading(page, person)
+    ordered_rows = main(page).locator('ul[aria-label="已引用素材"] > li > strong')
+    expect(ordered_rows).to_have_text([assets[0][0], assets[2][0], assets[4][0]])
+    assert_layout(page, tmp_path, "fidelity_human_after_add")
+    run.link(human_id, assets[2][1])  # Replaying an existing link must not move its row.
+    run.goto(f"digital-humans?human={human_id}")
+    heading(page, person)
+    expect(main(page).locator('ul[aria-label="已引用素材"] > li > strong')).to_have_text(
+        [assets[0][0], assets[2][0], assets[4][0]],
+    )
+    assert run.links(human_id) == {assets[0][1], assets[2][1], assets[4][1]}
+    remove_reference(page, assets[4][0])
+    expect(main(page).locator('ul[aria-label="已引用素材"] > li > strong')).to_have_text([assets[0][0], assets[2][0]])
 
     button(main(page), "归档档案").click()
     assert_reference_header(page, "归档「" + person + "」")
@@ -1146,7 +1175,8 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
 
     open_reference(page, filename)
     assert video_ready(page, filename) == local_metadata
-    text(main(page), "1 个数字人引用")
+    status, metadata = run.api("GET", f"{ASSETS}/{asset_id}")
+    assert status == 200 and isinstance(metadata, dict) and metadata["usageCount"] == 1
     expect(main(page).get_by_role("link", name=person, exact=True)).to_be_visible()
     assert gate.store.objects == {object_key: ("video/webm", payload)} and gate.store.removes == 0
 
