@@ -4,8 +4,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
 
-def test_engine_guard_uses_the_declared_range_including_prereleases():
+pytestmark = [pytest.mark.domain_frontend, pytest.mark.layer_unit]
+
+
+def test_engine_guard_uses_the_declared_range_including_prereleases() -> None:
     frontend = Path(__file__).resolve().parents[2] / "frontend"
     result = subprocess.run([
         "node", "--input-type=module", "-e",
