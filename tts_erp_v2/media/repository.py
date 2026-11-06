@@ -316,7 +316,7 @@ def usage_counts_for_assets(session: Session, asset_ids: list[int]) -> dict[int,
 
 
 def asset_ids_for_digital_human(session: Session, digital_human_id: int) -> list[int]:
-    """Return live asset ids linked to one persona, newest link first."""
+    """Return live asset ids in addition order; new references append at the end."""
     rows = session.scalars(
         select(DigitalHumanAsset.asset_id)
         .join(MediaAsset, MediaAsset.id == DigitalHumanAsset.asset_id)
@@ -324,7 +324,7 @@ def asset_ids_for_digital_human(session: Session, digital_human_id: int) -> list
             DigitalHumanAsset.digital_human_id == digital_human_id,
             MediaAsset.deleted_at.is_(None),
         )
-        .order_by(DigitalHumanAsset.created_at.desc(), DigitalHumanAsset.id.desc())
+        .order_by(DigitalHumanAsset.created_at, DigitalHumanAsset.id)
     ).all()
     return list(rows)
 
@@ -335,7 +335,7 @@ def digital_humans_for_asset(session: Session, asset_id: int) -> list[DigitalHum
         _human_base_query()
         .join(DigitalHumanAsset, DigitalHumanAsset.digital_human_id == DigitalHuman.id)
         .where(DigitalHumanAsset.asset_id == asset_id)
-        .order_by(DigitalHuman.name, DigitalHuman.id)
+        .order_by(DigitalHuman.created_at.desc(), DigitalHuman.id.desc())
     ).all()
     return list(rows)
 

@@ -25,7 +25,7 @@ function Usage({ asset, bootstrap }: { asset: Asset; bootstrap: PageProps['boots
       return <li className="media-row" key={human.id}>
         {href ? <a className="underline [overflow-wrap:anywhere]" href={href}>{human.name}</a>
           : <span className="[overflow-wrap:anywhere]">{human.name}</span>}
-        <Chip size="sm"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
+        <Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
       </li>;
     })}
   </ul>;
@@ -232,10 +232,10 @@ export default function MediaAssets({ bootstrap }: PageProps) {
         {assets.map((asset) => <li key={asset.assetId} className="min-w-0"><AssetCard asset={asset} root={root}>
           <h3 className="font-semibold [overflow-wrap:anywhere]">{asset.filename}</h3>
           <div className="flex flex-wrap items-center gap-2">
-            <Chip size="sm"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
+            <Chip size="sm" className="media-chip"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
             <span className="text-muted">{asset.usageCount === null ? '引用数量未知'
               : asset.usageCount === 0 || asset.usageCount === '0' ? '未被引用' : String(asset.usageCount) + ' 个数字人引用'}</span>
-            {asset.status !== 'ready' && <Chip size="sm"><Chip.Label>{assetStatus(asset.status)}</Chip.Label></Chip>}
+            {asset.status !== 'ready' && <Chip size="sm" className="media-chip"><Chip.Label>{assetStatus(asset.status)}</Chip.Label></Chip>}
           </div>
           <AssetTags tags={asset.tags} />
           <Button variant="secondary" className="max-w-full whitespace-normal [overflow-wrap:anywhere]"

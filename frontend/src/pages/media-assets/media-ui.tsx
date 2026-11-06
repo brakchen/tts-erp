@@ -156,7 +156,7 @@ export function RecordPage({ eyebrow, title, description, actions, pending = fal
   pending?: boolean; onClose?: () => void; children: ReactNode; backLabel?: string;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus(); }, [title]);
+  useEffect(() => { heading.current?.focus({ preventScroll: true }); }, [title]);
   return <section className="media-record">
     <header className="media-header" data-media-header>
       <div className="media-title"><p className="media-caption">{eyebrow}</p>

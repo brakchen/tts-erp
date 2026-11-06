@@ -18,12 +18,13 @@ export default function TagEditor({ root, selected, input, onChange, onInput, di
   onInput: (value: string) => void; disabled?: boolean;
 }) {
   const read = useMediaRead(root, '/assets/tags', decodeTags);
-  const choices = withPendingTag([...selected, ...(read.data ?? [])], '');
+  const choices = withPendingTag([...(read.data ?? []), ...selected], '');
   const selection = withPendingTag(selected, '');
+  const selectedKeys = new Set(selection.map((tag) => tag.toLowerCase()));
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const normalized = input.trim().replace(/\s+/gu, ' ');
-  const existing = choices.find((tag) => tag.toLowerCase() === normalized.toLowerCase());
+  const existing = [...selection, ...choices].find((tag) => tag.toLowerCase() === normalized.toLowerCase());
   // Canonical saved spelling also reaches the parent's pending-input submit
   // path, including when candidates finish loading after the user has typed.
   useEffect(() => {
@@ -40,14 +41,20 @@ export default function TagEditor({ root, selected, input, onChange, onInput, di
     setNotice(existing ? '已选中现有标签「' + tag + '」。' : '已添加标签「' + tag + '」，保存资料后生效。');
   }
   return <div className="media-tag-editor">
-    <TagGroup aria-label="可选素材标签" selectionMode="multiple" selectedKeys={new Set(selection)}
-      disabledKeys={disabled ? choices : []}
-      onSelectionChange={(keys) => onChange(keys === 'all' ? choices : Array.from(keys, String))}>
+    <TagGroup aria-label="可选素材标签" selectionMode="multiple" selectedKeys={selectedKeys}
+      disabledKeys={disabled ? choices.map((tag) => tag.toLowerCase()) : []}
+      onSelectionChange={(keys) => {
+        const nextKeys = keys === 'all' ? choices.map((tag) => tag.toLowerCase()) : Array.from(keys, String);
+        onChange(nextKeys.flatMap((key) => {
+          const tag = [...selection, ...choices].find((value) => value.toLowerCase() === key);
+          return tag ? [tag] : [];
+        }));
+      }}>
       <Label>素材标签</Label>
       <TagGroup.List renderEmptyState={() => <p className="text-sm text-muted">暂无标签，可在下方新增。</p>}>
-        {choices.map((tag) => <Tag key={tag} id={tag} textValue={tag}
-          className={'media-tag-option ' + (selection.includes(tag) ? 'media-tag-selected' : '')}>
-          <span className="media-tag-tick" aria-hidden="true">{selection.includes(tag) ? '✓' : '＋'}</span>{tag}
+        {choices.map((tag) => <Tag key={tag.toLowerCase()} id={tag.toLowerCase()} textValue={tag}
+          className={'media-tag-option ' + (selectedKeys.has(tag.toLowerCase()) ? 'media-tag-selected' : '')}>
+          <span className="media-tag-tick" aria-hidden="true">{selectedKeys.has(tag.toLowerCase()) ? '✓' : '＋'}</span>{tag}
         </Tag>)}
       </TagGroup.List>
     </TagGroup>

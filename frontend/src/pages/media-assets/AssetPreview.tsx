@@ -23,9 +23,10 @@ export default function AssetPreview({ asset, root, compact = false }: { asset: 
   </div>;
   return <div className={'media-preview ' + (compact ? 'media-preview-compact' : 'media-preview-large')}>
     {source.kind === 'video'
-      ? <video key={url} src={url} aria-label={'视频预览 ' + source.filename} controls preload="metadata" playsInline
+      ? <video key={url} src={url} aria-label={'视频预览 ' + source.filename} controls={!compact} preload="metadata" playsInline
           onError={() => setFailedUrl(url)} />
       : <img key={url} src={url} alt={'图片预览 ' + source.filename}
           onError={() => setFailedUrl(url)} />}
+    {compact && source.kind === 'video' && <span className="media-video-mark" aria-hidden="true">▶</span>}
   </div>;
 }

@@ -7,7 +7,7 @@
   --media-line: light-dark(#dbe3db, #39483e);
   --media-soft: light-dark(#eaf1e8, #24362a);
   --media-accent: light-dark(#214c3d, #ace2c6);
-  gap: 17px; color: var(--media-ink); font-size: 14px; line-height: 1.55;
+  gap: 17px; color: var(--media-ink); font: 14px/1.55 system-ui, 'Microsoft YaHei', sans-serif;
 }
 .media-workspace :where(h1, h2, h3, p) { margin: 0; }
 .media-workspace :where(button, input, textarea) { font: inherit; }
@@ -19,6 +19,7 @@
 .media-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
 .media-title { display: grid; flex: 1 1 225px; gap: 5px; min-width: 0; }
 .media-title h1 { font-size: clamp(22px, 4vw, 30px); line-height: 1.25; letter-spacing: -.025em; font-weight: 700; overflow-wrap: anywhere; }
+.media-title h1[tabindex="-1"]:focus { outline: none; }
 .media-caption { font-size: 12px; letter-spacing: .06em; color: var(--media-muted); }
 .media-description, .media-muted { color: var(--media-muted); overflow-wrap: anywhere; }
 .media-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
@@ -30,7 +31,8 @@
 .media-workspace .media-card-content { display: grid; align-content: start; gap: 7px; min-width: 0; padding: 0; }
 .media-card-content h3 { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
 .media-card-content > button { justify-self: start; }
-.media-preview { display: flex; align-items: center; justify-content: center; min-width: 0; border-radius: 5px; background: var(--media-soft); overflow: hidden; }
+.media-preview { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; border-radius: 5px; background: var(--media-soft); overflow: hidden; }
+.media-video-mark { position: absolute; right: 7px; bottom: 5px; color: #fff; font-size: 14px; text-shadow: 0 1px 3px #172822; pointer-events: none; }
 .media-preview-compact { height: 66px; min-height: 66px; }
 .media-preview-large { height: 128px; min-height: 128px; }
 .media-preview :where(img, video) { display: block; width: auto; max-width: 100%; height: 100%; object-fit: contain; }
@@ -38,6 +40,8 @@
 .media-preview-unavailable p { overflow-wrap: anywhere; }
 .media-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
 .media-workspace .media-tag { max-width: 100%; padding: 3px 10px; border: 1px solid var(--media-line); background: var(--media-soft); color: var(--media-ink); font-size: 12px; }
+.media-workspace .media-chip { height: auto; padding: 2px 8px; background: var(--media-soft); color: var(--media-ink); font-size: 12px; line-height: 1.55; }
+.media-workspace .media-checkbox-control { width: 17px; height: 17px; border-radius: 3px; }
 .media-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 9px; min-width: 0; }
 .media-filters > :not(button) { flex: 1 1 145px; min-width: 0; }
 .media-form { display: grid; gap: 10px; }

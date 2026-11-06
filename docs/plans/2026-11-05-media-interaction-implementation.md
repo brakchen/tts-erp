@@ -82,6 +82,9 @@
   归档确认成功回归档列表、恢复成功打开/保留档案（原型 restore 分支第387行）。不是只换标题或颜色。
 - 隐藏数量复用现有 assets 查询：同条件 `digitalHumanId` 返回的 server total；不从当前页或全部引用数量推断，
   不新增API或前端业务聚合。标签大小写不敏感复用已有候选，保存待提交输入仍走同一候选解析。
+- 实际截图另证实原有“最新引用在前”与原型的追加顺序相反，引用者按名字排序也与档案列表顺序不同。
+  在既有仓库只读查询出口统一为：引用按关联添加顺序，幂等重放不改变位置、移除再添加排末尾；
+  引用者按档案列表的创建倒序。无数据改写和迁移。对应 API 契约与顺序回归同步更新，禁止通过调整seed掩盖。
 - root 独占共享呈现 `media-ui.tsx`、AssetCard/AssetPreview/TagEditor/UploadAsset、操作确认组件和媒体局部样式，
   以及本计划和产品文档。资产 writer 在 `media-fidelity-assets/tts-erp` 的
   `codex/media-fidelity-assets` 仅写 `media-assets/index.tsx`；数字人 writer 在
