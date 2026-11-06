@@ -38,6 +38,18 @@ class MediaBytes:
         self.puts = 0
         self.removes = 0
         self.break_next_preview = False
+        self.hold_next_put = False
+        self.held_put: tuple[Route, str] | None = None
+
+    def hold_put(self) -> None:
+        assert not self.hold_next_put and self.held_put is None
+        self.hold_next_put = True
+
+    def release_put(self) -> None:
+        assert self.held_put is not None
+        route, path = self.held_put
+        self.held_put = None
+        assert self.handle(route, path)
 
     def bucket(self) -> str:
         return "TEST_media"
@@ -85,6 +97,10 @@ class MediaBytes:
                 payload = request.post_data_buffer
                 if headers.get("content-type") != content_type or not payload or len(payload) > 2**20:
                     return False
+                if self.hold_next_put:
+                    self.hold_next_put = False
+                    self.held_put = route, path
+                    return True
                 self.objects[key] = (content_type, payload)
                 self.puts += 1
             route.fulfill(status=204, headers=cors)
