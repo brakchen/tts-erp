@@ -30,7 +30,8 @@ def _open_spu_roi(frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     page.locator("#filter-w-start").wait_for(state="visible")
     page.locator("#filter-w-end").wait_for(state="visible")

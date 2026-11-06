@@ -16,8 +16,9 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Locator, Page, Route, sync_playwright
+from playwright.sync_api import Locator, Page, Route
 
+from tests.support.browser_runtime import borrowed_browser
 from tests.support.frontend_p2_accounts import SeedAccount
 from tests.support.frontend_p2_binding import NONCE_HEADER, verify_attestation
 from tests.support.frontend_p2_canary import (
@@ -391,25 +392,21 @@ def live_browser(
     gate = BrowserFence(probe, username=account.username, shop_id=shop_id,
                         service_id=service_id, enum_value=enum_value, remaining=remaining)
     # No skip/fallback for missing Chromium, persistent context or service worker.
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+    with borrowed_browser() as browser:
+        context = browser.new_context(viewport={"width": width, "height": 1000}, service_workers="block")
         try:
-            context = browser.new_context(viewport={"width": width, "height": 1000}, service_workers="block")
-            try:
-                context.route("**/*", gate.handle)
+            context.route("**/*", gate.handle)
 
-                def reject_socket(socket) -> None:
-                    gate.violations.append(REFUSAL)
-                    socket.close()
+            def reject_socket(socket) -> None:
+                gate.violations.append(REFUSAL)
+                socket.close()
 
-                context.route_web_socket("**/*", reject_socket)
-                page = context.new_page()
-                yield page, gate
-                page.wait_for_load_state("networkidle")
-                if gate.violations:
-                    raise ValueError(REFUSAL)
-            finally:
-                gate.closing = True
-                context.close()
+            context.route_web_socket("**/*", reject_socket)
+            page = context.new_page()
+            yield page, gate
+            page.wait_for_load_state("networkidle")
+            if gate.violations:
+                raise ValueError(REFUSAL)
         finally:
-            browser.close()
+            gate.closing = True
+            context.close()

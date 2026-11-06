@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import fcntl
 import os
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
+
+from scripts._test_frontend import input_key, prepare_frontend
+from tests.support.owned_process import owned_process
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -25,6 +30,8 @@ def _project(tmp_path: Path) -> None:
         'exit_code="${TEST_BUILD_EXIT:-0}"\n'
         'if test "$exit_code" != 0; then exit "$exit_code"; fi\n'
         "mkdir -p tts_erp_v2/static/frontend\n"
+        "mkdir -p tts_erp_v2/static/frontend/TEST_current\n"
+        "echo TEST_asset > tts_erp_v2/static/frontend/TEST_current/main.js\n"
         "printf '%s' '{\"releaseId\":\"TEST_current\"}' > tts_erp_v2/static/frontend/release.json\n",
         encoding="utf-8",
     )
@@ -45,6 +52,7 @@ def _project(tmp_path: Path) -> None:
             "@pytest.mark.requires_frontend_build\n"
             "def test_release_is_locked():\n"
             "    with Path('.git/tts-test-frontend.lock').open('a') as lock:\n"
+            "        fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)\n"
             "        with pytest.raises(BlockingIOError):\n"
             "            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
         )
@@ -101,3 +109,102 @@ def test_failed_or_empty_collection_does_not_build(tmp_path: Path, source: str, 
     result = _run(tmp_path)
     assert result.returncode == code, result.stdout + result.stderr
     assert not (tmp_path / "TEST_builds").exists()
+
+
+def test_cache_revalidates_content_environment_installation_and_artifacts(tmp_path, monkeypatch):
+    _project(tmp_path)
+    source = tmp_path / "frontend/src/main.tsx"
+    source.parent.mkdir(parents=True)
+    source.write_text("TEST_first")
+    with prepare_frontend(tmp_path) as cold:
+        assert not cold.cached
+    with prepare_frontend(tmp_path) as warm:
+        assert warm.cached and warm.build_seconds == 0
+    shared = tmp_path / "tts_erp_v2/static/css/tokens.css"
+    shared.parent.mkdir(parents=True)
+    contract = tmp_path / "tests/fixtures/ad_daily_summary.json"
+    contract.parent.mkdir(parents=True)
+    changes = [
+        lambda: source.write_text("TEST_changed"),
+        lambda: (source.parent.parent / "package-lock.json").write_text("TEST_lock"),
+        lambda: shared.write_text("TEST_shared_theme"),
+        lambda: contract.write_text('{"TEST_contract": true}'),
+        lambda: (tmp_path / ".gitignore").write_text("TEST_scan_exclusion\n"),
+        lambda: (tmp_path / ".gitignore").unlink(),
+        lambda: monkeypatch.setenv("VITE_TEST_CACHE_INPUT", "TEST_environment"),
+        lambda: (tmp_path / "tts_erp_v2/static/frontend/TEST_current/main.js").write_text("TEST_corrupt"),
+        lambda: (tmp_path / ".git/tts-test-frontend.json").write_text("malformed"),
+    ]
+    for change in changes:
+        change()
+        with prepare_frontend(tmp_path) as rebuilt:
+            assert not rebuilt.cached
+        with prepare_frontend(tmp_path) as checked:
+            assert checked.cached
+    assert len((tmp_path / "TEST_builds").read_text().splitlines()) == 10
+    installed = tmp_path / "frontend/node_modules/.package-lock.json"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("TEST_installation")
+    before = input_key(tmp_path)
+    os.utime(installed, ns=(1, 1))
+    assert input_key(tmp_path) != before
+
+
+def test_failed_rebuild_does_not_accept_previous_release(tmp_path, monkeypatch):
+    _project(tmp_path)
+    with prepare_frontend(tmp_path):
+        pass
+    monkeypatch.setenv("VITE_TEST_CACHE_INPUT", "TEST_new")
+    monkeypatch.setenv("TEST_BUILD_EXIT", "7")
+    with pytest.raises(subprocess.CalledProcessError), prepare_frontend(tmp_path):
+        pytest.fail("Failed rebuild must not yield a stale release")
+    assert not (tmp_path / ".git/tts-test-frontend.json").exists()
+
+
+def test_source_change_during_build_cannot_publish_cache(tmp_path):
+    _project(tmp_path)
+    script = tmp_path / "scripts/build_frontend.sh"
+    with script.open("a") as output:
+        output.write("echo '# TEST_mutation' >> scripts/build_frontend.sh\n")
+    with pytest.raises(ValueError, match="inputs changed"), prepare_frontend(tmp_path):
+        pytest.fail("A changing input is not valid cache evidence")
+    assert not (tmp_path / ".git/tts-test-frontend.json").exists()
+
+
+@pytest.mark.parametrize("mode", ["timeout", "terminate"])
+def test_cancelled_build_cannot_leave_a_descendant_writer(tmp_path, monkeypatch, mode):
+    from scripts import _test_frontend
+
+    _project(tmp_path)
+    (tmp_path / "scripts/build_frontend.sh").write_text(
+        "set -eu\n"
+        "(trap '' TERM; touch TEST_writer_started; sleep 1; echo TEST_stale > TEST_late_write) &\n"
+        "wait\n",
+    )
+    if mode == "timeout":
+        monkeypatch.setattr(_test_frontend, "BUILD_TIMEOUT_SECONDS", 0.2)
+        with pytest.raises(subprocess.TimeoutExpired), prepare_frontend(tmp_path):
+            pytest.fail("A timed-out build must not produce a lease")
+        time.sleep(1)
+        assert not (tmp_path / "TEST_late_write").exists()
+    else:
+        code = (
+            "import sys; from pathlib import Path; from scripts._test_frontend import prepare_frontend;"
+            "\nwith prepare_frontend(Path(sys.argv[1])): raise AssertionError('unexpected build completion')"
+        )
+        with (tmp_path / "TEST_build.log").open("w") as log, owned_process(
+            [sys.executable, "-c", code, str(tmp_path)], cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": str(ROOT)}, stdout=log, stderr=subprocess.STDOUT,
+        ) as process:
+            deadline = time.monotonic() + 10
+            while not (tmp_path / "TEST_writer_started").exists():
+                assert process.poll() is None
+                assert time.monotonic() < deadline
+                time.sleep(0.02)
+            os.kill(process.pid, signal.SIGTERM)
+            assert process.wait(timeout=10) != 0
+            time.sleep(1)
+            assert not (tmp_path / "TEST_late_write").exists()
+    assert not (tmp_path / ".git/tts-test-frontend.json").exists()
+    with (tmp_path / ".git/tts-test-frontend.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

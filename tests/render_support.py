@@ -19,8 +19,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any
 from urllib.parse import urlsplit
+
+from tests.support.test_runtime import record_phase
 
 logger = logging.getLogger(__name__)
 
@@ -153,16 +156,29 @@ class Renderer:
             context.set_extra_http_headers(headers)
         page = context.new_page()
         page.on("request", self._record)
+        started = time.monotonic()
         response = page.goto(
             self._base + path, wait_until="domcontentloaded", timeout=30_000
         )
-        try:
-            # 有轮询的页面（sync-jobs）不会 idle，等不到就算了，不因此失败
-            page.wait_for_load_state("networkidle", timeout=8_000)
-        except Exception:  # noqa: BLE001 - 等待超时不是用例失败
-            logger.debug("Network-idle readiness check did not finish")
+        record_phase("browser_navigation", time.monotonic() - started)
         status = response.status if response is not None else 0
         assert status == 200, f"{path} 未渲染成功：HTTP {status}"
+        started = time.monotonic()
+        if page.locator("#frontend-root").count():
+            # AppShell precedes the lazy page. Wait for hydration, then for its
+            # Suspense boundary; data/command success remains the case's oracle.
+            page.locator("#frontend-root main").wait_for()
+            page.get_by_text("加载页面…", exact=True).wait_for(state="hidden")
+        if self._key:
+            # Deployed read-only E2E callers still inspect arbitrary live data.
+            # Preserve their existing readiness until that separate suite has
+            # explicit data or empty-state contracts; never use TEST fixtures.
+            try:
+                page.wait_for_load_state("networkidle", timeout=8_000)
+            except Exception:  # noqa: BLE001 - preserve the live polling-page contract
+                logger.debug("Live network-idle readiness check did not finish")
+        page.evaluate("document.fonts.ready")
+        record_phase("browser_ready", time.monotonic() - started)
         return page
 
     def _record(self, request: Any) -> None:
@@ -200,10 +216,12 @@ class Renderer:
         )
 
     def close(self) -> None:
+        started = time.monotonic()
         for context in self._contexts:
             try:
                 context.close()
             except Exception:  # noqa: BLE001 - 收尾尽力而为
                 logger.debug("Browser context cleanup failed")
         self._contexts.clear()
+        record_phase("browser_cleanup", time.monotonic() - started)
         self.assert_read_only()

@@ -64,7 +64,8 @@ def test_projection_control_is_visible_and_switches_only_projection(frontend_bro
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
         page.wait_for_timeout(300)
     control = page.locator("#filter-projection-lookback-days")

@@ -20,6 +20,8 @@ from render_support import (
     page_path,
 )
 
+from tests.support.page_readiness import wait_canned_page
+
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
 # ``token_font_stacks`` 是 tests/browser/conftest.py 里的 fixture，由测试函数
@@ -47,7 +49,8 @@ def _assert_no_overflow(page, label: str) -> None:
 @pytest.mark.parametrize("slug", GATE_SLUGS)
 def test_page_has_no_horizontal_overflow(browser_renderer, slug):
     """共享门槛清单里的页面在常见笔记本宽度（1440）不横向溢出。"""
-    page = browser_renderer.open(page_path(slug))
+    page = browser_renderer.open(page_path(slug, 7))
+    wait_canned_page(page, slug)
     _assert_no_overflow(page, f"{slug}@1440")
 
 
@@ -55,6 +58,7 @@ def test_page_has_no_horizontal_overflow(browser_renderer, slug):
 def test_ad_daily_has_no_horizontal_overflow_at_any_viewport(browser_renderer, width):
     """广告日明细逐宽度断言：筛选条 8 列曾在 1280~1536 把查询按钮顶出视口。"""
     page = browser_renderer.open("/v2/pages/ad-daily", width=width)
+    wait_canned_page(page, "ad-daily")
     _assert_no_overflow(page, f"ad-daily@{width}")
 
 
@@ -75,7 +79,8 @@ def test_spu_deterioration_alert_has_no_horizontal_overflow_at_any_viewport(
 @pytest.mark.parametrize("slug", GATE_SLUGS)
 def test_page_font_stacks_come_only_from_tokens(browser_renderer, token_font_stacks, slug):
     """页面上每一段文字的 computed font-family 必须是 tokens 的三套栈之一。"""
-    page = browser_renderer.open(page_path(slug))
+    page = browser_renderer.open(page_path(slug, 7))
+    wait_canned_page(page, slug)
     allowed = token_font_stacks
     stray = sorted({s for s in font_stacks(page) if normalize_stack(s) not in allowed})
     assert not stray, (

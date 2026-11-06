@@ -73,6 +73,7 @@ PAGE_BROWSER = {
     "manual-costs": ("tests/browser/test_frontend_remaining_manual_native.py",),
     "message": ("tests/browser/test_frontend_auxiliary_views.py",),
     "runtime-configs": ("tests/browser/test_runtime_config_workflow.py",),
+    "runninghub": ("tests/browser/test_runninghub_page.py",),
     "users": ("tests/browser/test_frontend_p2_live.py", "tests/browser/test_frontend_p2_errors.py"),
     "spu-profitability": (
         *MOCK_BROWSER["spu-profitability"],

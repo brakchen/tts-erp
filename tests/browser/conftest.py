@@ -19,7 +19,6 @@ from __future__ import annotations
 import inspect
 import json
 import os
-import subprocess
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -266,7 +265,9 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
         return _alert_payload()
     if path.endswith("/v2/commerce/channel-accounts"):
         return [{"id": 7, "platform": "tiktok", "shop_id": "749486486860415",
-                 "account_name": "QA 店 7", "region": "VN", "status": "active"}]
+                 "account_name": "QA 店 7", "region": "VN", "status": "active",
+                 "seller_type": None, "opened_date": None, "credential_id": None,
+                 "service_id": None, "app_credentials_configured": False}]
     if path.endswith("/v2/reporting/ad-daily/options"):
         return {
             "sellers": [{"seller_id": "749486486860415", "shop_name": "North Nook",
@@ -343,10 +344,12 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
             "whitelisted_requests": 12,
             "today_requests": 120,
             "error_requests": 3,
-            "by_host": [{"key": "api.tiktokshop.com", "count": 300},
-                        {"key": "seller.tiktokshop.com", "count": 132}],
-            "by_method": [{"key": "GET", "count": 380}, {"key": "POST", "count": 52}],
-            "by_status": [{"key": "200", "count": 400}, {"key": "500", "count": 31}],
+            "by_host": [{"label": "api.tiktokshop.com", "count": 300, "percentage": "69.44"},
+                        {"label": "seller.tiktokshop.com", "count": 132, "percentage": "30.56"}],
+            "by_method": [{"label": "GET", "count": 380, "percentage": "87.96"},
+                          {"label": "POST", "count": 52, "percentage": "12.04"}],
+            "by_status": [{"label": "200", "count": 400, "percentage": "92.81"},
+                          {"label": "500", "count": 31, "percentage": "7.19"}],
             "daily": [
                 {"date": "2026-10-01", "count": 120},
                 {"date": "2026-10-02", "count": 80},
@@ -379,6 +382,51 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     if path.endswith("/v2/reporting/coverage"):
         return {"costed_spus": 1145, "linked_spus": 1200, "total_spus": 1234,
                 "coverage_rate": "0.928", "as_of": "2026-10-01"}
+    if path.endswith(("/v2/config/enum-map/list", "/v2/commerce/channel-products")):
+        return []
+    if path.endswith("/v2/users"):
+        return {"users": []}
+    if path.endswith("/v2/roles"):
+        return {"roles": [], "allPermissions": []}
+    if path.endswith("/v2/sync/jobs"):
+        return {"server_time": _NOW, "jobs": [], "tiktok_shops": []}
+    if path.endswith("/v2/config/runtime/items"):
+        return {"items": [{"configKey": "TEST_RENDER_RUNTIME", "displayName": "TEST_RENDER_RUNTIME",
+                           "publishedVersion": None, "hasDraft": False, "updatedAt": _NOW,
+                           "publishedAt": None, "retiredAt": None}]}
+    if path.endswith("/v2/media/assets/tags"):
+        return []
+    if path.endswith("/v2/media/assets"):
+        return {"items": [], "total": 0, "limit": 24, "offset": 0}
+    if path.endswith("/v2/media/digital-humans"):
+        return []
+    if path.endswith("/v2/video-publish/config"):
+        return {
+            "acceptedContentTypes": ["video/mp4"], "acceptedExtensions": [".mp4"],
+            "maxVideoBytes": 1048576, "maxCaptionCharacters": 4000, "uploadUrlTtlSeconds": 900,
+            "target": {"appName": "TEST_TikTok", "appPackage": "com.test.app",
+                       "deviceSerialMasked": "TEST***", "album": "TEST_album"},
+            "worker": {"status": "ready", "lastHeartbeatAt": None},
+            "device": {"status": "ready", "message": "TEST_render_device"},
+            "artemis": {"profile": "TEST_layout", "verificationLevel": "TEST_readonly"},
+            "workerTiming": {"pollSeconds": 2, "leaseSeconds": 30, "heartbeatSeconds": 5},
+            "canWrite": False, "writeBlockReason": "TEST_render_read_only", "serverTime": _NOW,
+        }
+    if path.endswith("/v2/video-publish/tasks/current"):
+        return {"tasks": [], "pollState": {"running": False, "cleaning": False, "queued": False},
+                "suggestedPollSeconds": 60, "serverTime": _NOW}
+    if path.endswith("/v2/video-publish/tasks"):
+        return {"items": [], "pollState": {"running": False, "cleaning": False, "queued": False},
+                "nextCursor": None, "totalApprox": 0, "serverTime": _NOW}
+    if path.endswith("/v2/runninghub/config"):
+        return {"credentialRef": "env:RUNNINGHUB_API_KEY", "credentialConfigured": False,
+                "workflowId": "2111762608670990337", "instanceType": "plus", "concurrency": 5,
+                "workflowVersionId": "TEST_render_version"}
+    if path.endswith("/v2/runninghub/templates"):
+        return {"items": [{"id": "TEST_render_template", "humanId": "1", "humanName": "TEST_RENDER_HUMAN",
+                           "name": "A", "clips": []}]}
+    if path.endswith("/v2/runninghub/batches"):
+        return {"items": []}
     return {"items": [], "total": 0, "options": [], "configs": [], "jobs": []}
 
 
@@ -397,6 +445,7 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
     """Render current owners; explicit pilot override is test-only, not a runtime flag."""
     from starlette.requests import Request
 
+    from tts_erp_v2.access import AccessGrant, AuthMode, Role
     from tts_erp_v2.api.v2 import frontend_pages
     from tts_erp_v2.api.v2.ad_daily import ad_daily_page
     from tts_erp_v2.api.v2.pages import (
@@ -408,7 +457,8 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
         if slug in effective:
             for prefix in ("", "/tts"):
                 request = Request(
-                    {"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}"}
+                    {"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}",
+                     "access_grant": AccessGrant(mode=AuthMode.ENFORCE, role=Role.ADMIN)}
                 )
                 resp = frontend_pages.render_frontend_page(request, slug)
                 name = ("tts-" if prefix else "") + slug
@@ -488,19 +538,16 @@ class _Handler(BaseHTTPRequestHandler):
 def frontend_build() -> None:
     """Current source must build; never skip React coverage for missing artifacts."""
     prepared = os.environ.get("TTS_ERP_TEST_PREPARED_RELEASE")
-    if prepared is not None:
-        release = REPO_ROOT / "tts_erp_v2/static/frontend/release.json"
-        assert json.loads(release.read_text(encoding="utf-8"))["releaseId"] == prepared
-        return
-    result = subprocess.run(["bash", "scripts/build_frontend.sh"], cwd=REPO_ROOT, capture_output=True, text=True, timeout=180, check=False)
-    assert result.returncode == 0, (result.stdout + result.stderr)[-18000:]
+    assert prepared is not None, "Use the isolated runner with the test_runtime asset owner"
+    release = REPO_ROOT / "tts_erp_v2/static/frontend/release.json"
+    assert json.loads(release.read_text(encoding="utf-8"))["releaseId"] == prepared
 
 
 @contextmanager
 def _serve_pages(rendered: Path) -> Iterator[str]:
     handler = type("BoundHandler", (_Handler,), {"rendered_dir": rendered})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True)
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -522,6 +569,7 @@ def site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> 
 def frontend_site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> Iterator[str]:
     from starlette.requests import Request
 
+    from tts_erp_v2.access import AccessGrant, AuthMode, Role
     from tts_erp_v2.accounts.pages import PAGES
     from tts_erp_v2.api.v2 import frontend_pages
 
@@ -531,8 +579,12 @@ def frontend_site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: 
     for page in PAGES:
         if page.page_id not in frontend_pages.MIGRATED_PAGE_IDS:
             continue
+        # Profitability's default preview is readonly. Mutation cases explicitly
+        # install their own writable bootstrap and inert route acknowledgments.
+        role = Role.READONLY if page.page_id in _SPU_PAGES else Role.ADMIN
         for prefix in ("", "/tts"):
-            request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{page.page_id}"})
+            request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{page.page_id}",
+                               "access_grant": AccessGrant(mode=AuthMode.ENFORCE, role=role)})
             response = frontend_pages.render_frontend_page(request, page.page_id)
             name = ("tts-" if prefix else "") + page.page_id
             (rendered / f"{name}.html").write_bytes(response.body)

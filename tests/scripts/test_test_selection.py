@@ -18,6 +18,13 @@ def test_dashboard_layout_adds_only_its_mock_browser_file():
     assert plan.build and not plan.scenarios
 
 
+def test_runninghub_page_keeps_its_real_browser_boundaries():
+    plan = select(["frontend/src/pages/runninghub/index.tsx"])
+    assert plan.browser_mock == ["tests/browser/test_runninghub_page.py"]
+    assert plan.vitest == ["src/pages/runninghub/"]
+    assert plan.build and not plan.scenarios
+
+
 def test_formula_uses_its_backend_tests_without_node():
     plan = select(["tts_erp_v2/analytics/spu_profitability/_formula_v10.py"])
     assert plan.backend == ["tests/analytics/test_spu_profitability_formula.py"]

@@ -55,7 +55,8 @@ async function prepareUpload(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText('TEST_device_locked');
   const file = new File(['TEST_VIDEO'], 'TEST_upload.mp4', { type: 'video/mp4' });
   await user.upload(screen.getByLabelText('选择 MP4 视频'), file);
-  await user.type(screen.getByRole('textbox', { name: '发布文案' }), 'TEST_new_caption');
+  await user.click(screen.getByLabelText('发布文案'));
+  await user.paste('TEST_new_caption');
   await user.click(screen.getByRole('button', { name: '上传并加入发布队列' }));
   await user.click(screen.getByRole('button', { name: '确认并上传' })); return file;
 }

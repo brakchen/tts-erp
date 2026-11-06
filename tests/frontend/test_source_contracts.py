@@ -134,3 +134,8 @@ def test_sync_jobs_css_has_mobile_card_layout_and_disabled_cursor() -> None:
     assert ".jobs-table thead { display: none; }" in src
     assert "content: attr(data-label)" in src
     assert ".scope-select { width: 100%;" in src
+
+
+def test_profitability_kernel_uses_remote_sort_mode() -> None:
+    source = Path(__file__).resolve().parents[2] / "frontend/src/pages/spu-profitability/ProfitabilityTable.tsx"
+    assert "sortMode: 'remote'" in source.read_text(encoding="utf-8")

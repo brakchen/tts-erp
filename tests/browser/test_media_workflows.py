@@ -13,20 +13,34 @@ import zlib
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from playwright.sync_api import Locator, Page, Response, expect, sync_playwright
+from playwright.sync_api import Locator, Page, Response, expect
 from render_support import overflow_report
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from tests.support.frontend_p2_binding import checked_session, current_binding, validate_application
+from tests.support.browser_runtime import borrowed_browser
+from tests.support.frontend_p2_binding import (
+    checked_session,
+    current_binding,
+    validate_application,
+)
 from tests.support.frontend_p2_browser import fill_sensitive
-from tests.support.media_browser import APP, ASSETS, HUMANS, LOGIN, ME, MediaBrowserBridge, MediaBytes
+from tests.support.media_browser import (
+    APP,
+    ASSETS,
+    HUMANS,
+    LOGIN,
+    ME,
+    MediaBrowserBridge,
+    MediaBytes,
+)
 from tts_erp_v2.accounts import service
 from tts_erp_v2.accounts.models import Role, User
 from tts_erp_v2.api.v2 import media
@@ -192,30 +206,26 @@ def media_run(request, frontend_build, monkeypatch) -> Iterator[MediaRun]:
     )
     gate = MediaBrowserBridge(client, store, marker, username, prefix=prefix)
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+        with borrowed_browser() as browser:
+            context = browser.new_context(viewport={"width": width, "height": 1000}, service_workers="block")
             try:
-                context = browser.new_context(viewport={"width": width, "height": 1000}, service_workers="block")
-                try:
-                    context.route("**/*", gate.handle)
-                    context.route_web_socket("**/*", lambda socket: socket.close())
-                    page = context.new_page()
-                    page.goto(f"{APP}{prefix}{LOGIN}?next={prefix}{ME}")
-                    page.get_by_label("用户名", exact=True).fill(username)
-                    fill_sensitive(page.get_by_label("密码", exact=True), password)
-                    page.get_by_role("button", name="登录", exact=True).click()
-                    page.wait_for_url(APP + prefix + ME)
-                    identity = json.loads(page.locator("body").inner_text())
-                    assert identity.get("authenticated") is True and identity.get("username") == username
-                    yield MediaRun(page, gate, marker)
-                    assert gate.refusals == []
-                    assert gate.fail_next is None and gate.held is None and gate.hold_next is None
-                    assert store.held_put is None and not store.hold_next_put
-                finally:
-                    gate.closing = True
-                    context.close()
+                context.route("**/*", gate.handle)
+                context.route_web_socket("**/*", lambda socket: socket.close())
+                page = context.new_page()
+                page.goto(f"{APP}{prefix}{LOGIN}?next={prefix}{ME}")
+                page.get_by_label("用户名", exact=True).fill(username)
+                fill_sensitive(page.get_by_label("密码", exact=True), password)
+                page.get_by_role("button", name="登录", exact=True).click()
+                page.wait_for_url(APP + prefix + ME)
+                identity = json.loads(page.locator("body").inner_text())
+                assert identity.get("authenticated") is True and identity.get("username") == username
+                yield MediaRun(page, gate, marker)
+                assert gate.refusals == []
+                assert gate.fail_next is None and gate.held is None and gate.hold_next is None
+                assert store.held_put is None and not store.hold_next_put
             finally:
-                browser.close()
+                gate.closing = True
+                context.close()
     finally:
         client.close()
         clear_owned(gate, user_id, username)
@@ -475,7 +485,7 @@ def assert_reference_grid(page: Page, count: int) -> None:
     first_row = [box for box in rectangles if abs(box["y"] - rectangles[0]["y"]) <= 2]
     assert len(first_row) == columns, {"area": area, "cards": rectangles, "expectedColumns": columns}
     if columns > 1:
-        for left, right in zip(first_row, first_row[1:]):
+        for left, right in pairwise(first_row):
             assert abs(left["width"] - right["width"]) <= 2
             assert 8 <= right["x"] - left["x"] - left["width"] <= 12
     for index in range(count):
@@ -850,7 +860,7 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
 def test_new_reference_after_delete_preflight_is_rejected_without_byte_removal(media_run: MediaRun) -> None:
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
-    filename, asset_id = run.seed_asset("delete_race.png")
+    _filename, asset_id = run.seed_asset("delete_race.png")
     person, human_id = run.seed_human("late_reference")
     objects = dict(gate.store.objects)
     run.goto(f"media-assets?asset={asset_id}")
