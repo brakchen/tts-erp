@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import subprocess
@@ -30,8 +31,35 @@ from urllib.parse import parse_qs
 import pytest
 from render_support import Renderer
 
+from tests.support.browser_runtime import BrowserLaunchError, ModuleBrowser
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _STATIC_ROOT = REPO_ROOT / "tts_erp_v2" / "static"
+_MODULE_BROWSER: ModuleBrowser | None = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _module_browser_runtime() -> Iterator[ModuleBrowser]:
+    global _MODULE_BROWSER
+    runtime = ModuleBrowser()
+    _MODULE_BROWSER = runtime
+    try:
+        yield runtime
+    finally:
+        try:
+            runtime.close()
+        finally:
+            _MODULE_BROWSER = None
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    # Release the sync API's active event loop BEFORE pytest-asyncio sets up an
+    # async item, including a future mixed module. The next sync item can relaunch.
+    if _MODULE_BROWSER is not None and (
+        item.get_closest_marker("asyncio") or inspect.iscoroutinefunction(getattr(item, "obj", None))
+    ):
+        _MODULE_BROWSER.close()
 
 
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -539,30 +567,27 @@ def frontend_browser_renderer(frontend_site_url: str) -> Any:
 def _browser_renderer(site_url: str) -> Any:
     """本层的 headless chromium 渲染器；缺 playwright/chromium 时 skip。
 
-    作用域是 **function**（不是 session）：Playwright 存活期间会在主线程里占着
-    事件循环，pytest-asyncio 的后续 async 用例会以「coroutine never awaited /
-    Cannot run the event loop while another loop is running」失败——实测
-    tests/browser 先于 tests/middleware 跑时必现。每条用例用完即关，退出测试
-    进程前不留 Playwright 的循环。
+    Chromium 在当前 module 内复用；每次 Renderer.open 创建独立 context。
+    module teardown 和 async item setup 前均关闭 sync Playwright，防止它占用
+    pytest-asyncio 的事件循环。Renderer 及其只读请求记录仍逐用例创建、清理。
     """
-    pw: Any = None
-    browser: Any = None
-    sync_playwright: Any = None
+    assert _MODULE_BROWSER is not None, "browser rendering requires the module lifecycle fixture"
     try:
-        from playwright.sync_api import sync_playwright
+        browser = _MODULE_BROWSER.get()
     except ImportError as exc:  # pragma: no cover - 环境相关
         pytest.skip(f"playwright 不可用: {exc}")
-    pw = sync_playwright().start()
-    try:
-        browser = pw.chromium.launch(headless=True)
-    except Exception as exc:  # noqa: BLE001 — chromium 启动失败一律 skip
-        pw.stop()
+    except BrowserLaunchError as exc:  # Chromium absence keeps its existing skip semantics.
         pytest.skip(f"chromium 启动失败: {exc}")
     instance = Renderer(browser, site_url)
-    yield instance
-    instance.close()
-    browser.close()
-    pw.stop()
+    try:
+        yield instance
+    finally:
+        try:
+            instance.close()
+        finally:
+            # A failed context close must not leave state in the reused browser.
+            if browser.contexts:
+                _MODULE_BROWSER.close()
 
 
 @pytest.fixture(scope="module")

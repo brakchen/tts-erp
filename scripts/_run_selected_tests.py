@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import subprocess
 import sys
 from dataclasses import asdict
-from pathlib import Path
 
 from _test_selection import (
     COMPONENTS,
@@ -65,6 +63,7 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
         raise ValueError("schema changes require --refresh-template")
 
     env = os.environ.copy()
+    env.pop("TTS_ERP_TEST_PREPARED_RELEASE", None)
     env.update(
         PYTEST_ADDOPTS="",
         TTS_ERP_TEST_SELECTION_REPORT=report,
@@ -76,21 +75,13 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
     )
     args = [
         sys.executable, "-m", "pytest", "-q", "-p", "tests.support.selected_test_report",
-        "-p", "no:cacheprovider", "-m", SAFE_MARKS,
+        "-p", "tests.support.test_runtime", "--durations=20", "-p", "no:cacheprovider", "-m", SAFE_MARKS,
     ]
     if scope != "fast":
         args.append("-rP")
     if plan.backend_all and scope != "fast":
         args.extend(f"--ignore={path}" for path in LEGACY_FRONTEND if path not in required)
-    if plan.build:
-        lock_path = ROOT / Path(os.fsdecode(git("rev-parse", "--git-path", "tts-test-frontend.lock")).strip())
-        with lock_path.open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            subprocess.run(["bash", "scripts/build_frontend.sh"], cwd=ROOT, env=env, check=True, timeout=240)
-            release = ROOT / "tts_erp_v2/static/frontend/release.json"
-            env["TTS_ERP_TEST_PREPARED_RELEASE"] = json.loads(release.read_text(encoding="utf-8"))["releaseId"]
-            return subprocess.run([*args, *targets], cwd=ROOT, env=env, check=False).returncode
-    if plan.frontend:
+    if plan.frontend and not plan.build:
         subprocess.run(["npm", "--prefix", "frontend", "run", "typecheck"], cwd=ROOT, env=env, check=True, timeout=120)
     return subprocess.run([*args, *targets], cwd=ROOT, env=env, check=False).returncode
 

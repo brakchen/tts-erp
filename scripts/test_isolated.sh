@@ -11,6 +11,12 @@ PG_DOCKER_VALUE="${PG_DOCKER-postgres}"
 TEMPLATE_LOCK_PATH="${TTS_ERP_TEST_TEMPLATE_LOCK:-/tmp/tts-erp-test-template.lock}"
 TEMPLATE_LOCK_TIMEOUT_S="${TTS_ERP_TEST_TEMPLATE_LOCK_TIMEOUT_S:-600}"
 PYTHON="$(pwd)/.venv/bin/python"
+RUN_STARTED_US="${EPOCHREALTIME/./}"
+EXECUTION_STARTED_US=''
+phase_timing() {
+  local elapsed_us=$(( ${EPOCHREALTIME/./} - $2 ))
+  printf '[test-timing] %s=%d.%03ds\n' "$1" "$((elapsed_us / 1000000))" "$((elapsed_us / 1000 % 1000))"
+}
 
 usage() {
   printf '%s\n' \
@@ -57,6 +63,7 @@ connections="$(TTS_ERP_DB_URL_TEST="$BASE_TEST_URL" PG_DOCKER="$PG_DOCKER_VALUE"
   fail 'test connection identity/routing validation failed'
 mapfile -t connection_fields <<< "$connections"
 [[ "${#connection_fields[@]}" -eq 6 ]] || fail 'invalid connection authority output'
+phase_timing connection_prepare "$RUN_STARTED_US"
 TEMPLATE_URL="${connection_fields[1]}"
 RUN_URL="${connection_fields[2]}"
 MAINTENANCE_URL="${connection_fields[3]}"
@@ -140,14 +147,20 @@ RUN_PROOF_DIR=''
 RUN_PROOF_PATH=''
 RUN_ID=''
 prepare_template_and_clone() {
+  local phase_started_us="${EPOCHREALTIME/./}"
   exec 9>"$TEMPLATE_LOCK_PATH"
   flock -w "$TEMPLATE_LOCK_TIMEOUT_S" 9 || fail 'could not acquire template lock'
+  phase_timing template_lock "$phase_started_us"
+  phase_started_us="${EPOCHREALTIME/./}"
   if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then refresh_template
   elif ! db_exists; then refresh_template; fi
+  phase_timing template_prepare "$phase_started_us"
+  phase_started_us="${EPOCHREALTIME/./}"
   echo "[isolated-test] cloning $TEMPLATE_DB -> $RUN_DB"
   drop_run_db
   pg_exec createdb --maintenance-db "$MAINTENANCE_URL" -T "$TEMPLATE_DB" "$RUN_DB"
   RUN_CREATED=1
+  phase_timing database_clone "$phase_started_us"
   flock -u 9
   exec 9>&-
 }
@@ -164,6 +177,8 @@ cleanup_status=1
 if [[ "${1:-}" == selected ]]; then cleanup_status=70; fi
 cleanup() {
   local rc=$?
+  local cleanup_started_us="${EPOCHREALTIME/./}"
+  if [[ -n "$EXECUTION_STARTED_US" ]]; then phase_timing test_execution "$EXECUTION_STARTED_US"; fi
   # keep-db preserves data for diagnosis, never current-run write provenance.
   if [[ -n "$RUN_PROOF_DIR" ]]; then
     if ! rm -f -- "$RUN_PROOF_PATH" || ! rmdir -- "$RUN_PROOF_DIR"; then
@@ -181,6 +196,8 @@ cleanup() {
       fi
     fi
   fi
+  phase_timing database_cleanup "$cleanup_started_us"
+  phase_timing isolated_total "$RUN_STARTED_US"
   exit "$rc"
 }
 trap cleanup EXIT
@@ -190,6 +207,7 @@ prepare_template_and_clone
 issue_run_binding
 if [[ "$TEMPLATE_CREATED_OR_REFRESHED" -eq 0 ]]; then echo "[isolated-test] using existing template DB: $TEMPLATE_DB"; fi
 echo "[isolated-test] running: bash scripts/test.sh ${*:-}"
+EXECUTION_STARTED_US="${EPOCHREALTIME/./}"
 TTS_ERP_DB_URL_TEST="$RUN_URL" TTS_ERP_TEST_RUN_PROOF="$RUN_PROOF_PATH" \
   TTS_ERP_TEST_RUN_ID="$RUN_ID" TTS_ERP_TEST_REFRESHED_FOR_SELECTION="$REFRESH_TEMPLATE" \
   bash scripts/test.sh "$@"

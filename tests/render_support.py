@@ -143,6 +143,9 @@ class Renderer:
         self.assert_read_only()
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else None
         context = self._browser.new_context(viewport={"width": width, "height": height})
+        # Track before navigation/setup can fail so the caller's finalizer also
+        # closes contexts from failed opens when the browser is reused.
+        self._contexts.append(context)
         if headers:
             context.set_extra_http_headers(headers)
         page = context.new_page()
@@ -157,7 +160,6 @@ class Renderer:
             pass
         status = response.status if response is not None else 0
         assert status == 200, f"{path} 未渲染成功：HTTP {status}"
-        self._contexts.append(context)
         return page
 
     def _record(self, request: Any) -> None:

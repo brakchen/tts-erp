@@ -12,13 +12,8 @@
 # Domain names may be given with or without the "domain_" prefix
 # (e.g. `scripts/test.sh miaoshou` == `pytest -m "domain_miaoshou and not slow"`).
 #
-# Test-DB isolation (2026-09-07): by default this script sources
-# ``.env.test`` (gitignored, must exist locally) which sets
-# ``TTS_ERP_DB_URL_TEST`` → ``tts_erp_v3_test`` so tests run against
-# the dedicated test database instead of the production ``tts_erp``.
-# Set ``TTS_ERP_TEST_OFF=1`` to bypass (e.g. when intentionally running
-# the migration suite against prod). Set ``TTS_ERP_DB_URL_TEST``
-# directly to override the value from ``.env.test``.
+# Internal delegate only. Agents enter through test_isolated.sh, which binds
+# a fresh ephemeral database and current-run proof before reaching this script.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -50,32 +45,18 @@ fi
 # suite re-applies one-shot scripts against the PROD DB and hangs full runs
 # on lock waits. CLI -m overrides addopts, so the run_all/run_coverage
 # tautology below is what makes `all` / `coverage` truly include them.
-prepare_frontend() {
-  # Tests must exercise the current branch's complete build, not stale assets.
-  if [[ -f frontend/package.json ]]; then
-    [[ -x frontend/node_modules/.bin/vite ]] || {
-      echo "[tests] missing frontend toolchain: npm ci --include=dev --prefix frontend" >&2
-      return 1
-    }
-    local lock_path
-    lock_path="$(git rev-parse --git-path tts-test-frontend.lock)"
-    exec {frontend_lock_fd}>"$lock_path"
-    flock -x "$frontend_lock_fd"
-    bash scripts/build_frontend.sh
-    TTS_ERP_TEST_PREPARED_RELEASE="$(
-      .venv/bin/python -c 'import json; print(json.load(open("tts_erp_v2/static/frontend/release.json"))["releaseId"])'
-    )"
-    export TTS_ERP_TEST_PREPARED_RELEASE
-  fi
+run_pytest() {
+  # A release prepared by another invocation is never evidence for this run.
+  unset TTS_ERP_TEST_PREPARED_RELEASE TTS_ERP_TEST_SELECTED_NO_BUILD
+  "$PYTEST" -q -p tests.support.test_runtime --durations=20 "$@"
 }
-run_unit() { prepare_frontend; "$PYTEST" -q -m "layer_unit and not slow" "$@"; }
-run_fast() { prepare_frontend; "$PYTEST" -q -m "not slow and not requires_service" "$@"; }
+run_unit() { run_pytest -m "layer_unit and not slow and not domain_migration" "$@"; }
+run_fast() { run_pytest -m "not slow and not requires_service and not domain_migration" "$@"; }
 run_all() { "$PYTEST" -q -m "domain_migration or not domain_migration" "$@"; }
 run_coverage() { "$PYTEST" -q -m "domain_migration or not domain_migration" --cov=tts_erp_v2 --cov=miaoshou --cov-report=term-missing "$@"; }
 run_domain() {
   local name="${1#domain_}"
-  prepare_frontend
-  "$PYTEST" -q -m "domain_${name} and not slow" "${@:2}"
+  run_pytest -m "domain_${name} and not slow and not domain_migration" "${@:2}"
 }
 
 case "${1:-default}" in
