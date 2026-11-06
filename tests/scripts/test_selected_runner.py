@@ -48,6 +48,15 @@ def test_mixed_collection_preserves_requested_groups_once(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
     report, junit = tmp_path / "report.json", tmp_path / "junit.xml"
+    # The retained marker requests actual build evidence even in this synthetic
+    # collector project. Its tiny builder must succeed before tests can execute.
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/build_frontend.sh").write_text(
+        "set -eu\nmkdir -p tts_erp_v2/static/frontend\n"
+        "printf '%s' '{\"releaseId\":\"TEST_collector\"}' > tts_erp_v2/static/frontend/release.json\n",
+        encoding="utf-8",
+    )
     real_run = subprocess.run
 
     def execute(args, **kwargs):

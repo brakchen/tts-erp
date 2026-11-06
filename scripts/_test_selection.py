@@ -62,6 +62,28 @@ MOCK_BROWSER = {
     "spu-profitability": ("tests/browser/test_spu_react_workspace.py",),
     "spu-profit-deterioration": ("tests/browser/test_spu_deterioration_alert_page.py",),
 }
+PAGE_BROWSER = {
+    **MOCK_BROWSER,
+    "digital-humans": ("tests/browser/test_media_workflows.py",),
+    "media-assets": ("tests/browser/test_media_workflows.py",),
+    "enum-map": ("tests/browser/test_frontend_enum.py",),
+    "intercept-requests": ("tests/browser/test_frontend_pilots.py::test_request_query_detail_and_pagination",),
+    "intercept-stats": ("tests/browser/test_frontend_stats.py",),
+    "login": ("tests/browser/test_frontend_remaining_auth_native.py",),
+    "manual-costs": ("tests/browser/test_frontend_remaining_manual_native.py",),
+    "message": ("tests/browser/test_frontend_auxiliary_views.py",),
+    "runtime-configs": ("tests/browser/test_runtime_config_workflow.py",),
+    "users": ("tests/browser/test_frontend_p2_live.py", "tests/browser/test_frontend_p2_errors.py"),
+    "spu-profitability": (
+        *MOCK_BROWSER["spu-profitability"],
+        "tests/browser/test_spu_comparison_drilldown_dates.py",
+        "tests/browser/test_spu_date_range.py",
+        "tests/browser/test_spu_numeric_sort.py",
+        "tests/browser/test_spu_price_columns.py",
+        "tests/browser/test_spu_projection.py",
+    ),
+}
+SHARED_SHELL_BROWSER = "tests/browser/test_frontend_pilots.py"
 
 SCENARIOS = {
     "page-assets": "tests/api/test_spu_roi_api.py::test_spu_roi_page_cache_busts_css_and_js_from_their_own_content",
@@ -136,6 +158,15 @@ def _classify(selection: Selection, path: str) -> str:
     if path == "tests/fixtures/ad_daily_summary.json":
         _contract(selection, "ad_daily")
         return "ad-daily shared contract sample"
+    if path == "tests/support/media_browser.py" or (
+        path.startswith("tests/fixtures/media/") and not path.endswith(".md")
+    ):
+        selection.checks.extend(PAGE_BROWSER["media-assets"])
+        selection.build = True
+        return "media browser fixture and its consumers"
+    if path.startswith("tts_erp_v2/media/"):
+        _contract(selection, "media")
+        return "media implementation and its API/UI consumers"
     if path.startswith("tts_erp_v2/api/v2/") and Path(path).stem in API_CONTRACTS:
         _contract(selection, Path(path).stem)
         return "registered API provider and consumer"
@@ -160,10 +191,12 @@ def _classify(selection: Selection, path: str) -> str:
         _page(selection, page)
         if page in {"dashboard", "shops", "spu-profitability", "spu-profit-deterioration", "sync-jobs"}:
             selection.checks.append(SOURCE_CONTRACTS)
+        is_test = path.endswith((".test.ts", ".test.tsx"))
+        if not is_test:
+            selection.browser_mock.extend(PAGE_BROWSER.get(page, ()))
         if path.endswith(".css"):
             selection.checks.append(STYLE_TOKENS)
-            selection.browser_mock.extend(MOCK_BROWSER.get(page, ()))
-            if page not in MOCK_BROWSER:
+            if page not in PAGE_BROWSER:
                 return f"frontend page {page}; review the unregistered layout check"
         return f"frontend page {page}"
     if path in LEGACY_FRONTEND or (
@@ -182,9 +215,12 @@ def _classify(selection: Selection, path: str) -> str:
         return "legacy video-publish stylesheet and accessibility contract"
     if path.startswith(("frontend/", "tests/frontend/", "tts_erp_v2/static/css/", "tts_erp_v2/static/js/")):
         _frontend_all(selection)
+        if path.startswith("frontend/src/app/") and not path.endswith((".test.ts", ".test.tsx")):
+            selection.browser_mock.append(SHARED_SHELL_BROWSER)
         if path.endswith(".css"):
             selection.checks.extend((SOURCE_CONTRACTS, STYLE_TOKENS))
             selection.browser_mock.extend(MOCK_BROWSER["dashboard"] + MOCK_BROWSER["spu-profitability"])
+            selection.browser_mock.append(SHARED_SHELL_BROWSER)
         if path in {"frontend/vite.config.ts", "frontend/package.json", "frontend/package-lock.json"}:
             selection.build = True
             selection.checks.append(PACKAGER)
@@ -228,15 +264,15 @@ def _classify(selection: Selection, path: str) -> str:
             selection.backend_all = True
             _frontend_all(selection)
             return "shared test or explicit smoke surface"
-        selection.backend_all = True
-        return "backend test"
-    if path.startswith("scripts/test") or path in {"scripts/_test_selection.py", "AGENTS.md"}:
+        selection.backend.append(path)
+        return "changed backend test file"
+    if path.startswith("scripts/test") or path in {"scripts/_test_selection.py", "scripts/_test_frontend.py", "AGENTS.md"}:
         selection.backend.extend((
             SELECTOR_TESTS, "tests/test_test_template_refresh.py", "tests/test_test_run_binding.py",
         ))
         _frontend_all(selection)
         return "test infrastructure"
-    if path.endswith(".md") and not path.startswith(("docs/api/", "docs/testing/", "docs/guides/agent-")):
+    if path.endswith(".md"):
         selection.docs = True
         return "documentation"
     selection.backend_all = True

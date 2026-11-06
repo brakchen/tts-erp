@@ -5,10 +5,11 @@ from __future__ import annotations
 from scripts._test_selection import DRAWER_BROWSER, ZABBIX_CHECK, select
 
 
-def test_page_without_layout_change_runs_only_frontend():
+def test_page_ui_change_runs_its_browser_and_components():
     plan = select(["frontend/src/pages/dashboard/index.tsx", "README.md"])
     assert plan.frontend and plan.vitest == ["src/pages/dashboard/"]
-    assert not (plan.backend or plan.backend_all or plan.build or plan.scenarios)
+    assert plan.browser_mock == ["tests/browser/test_frontend_dashboard_layout.py"]
+    assert plan.build and not (plan.backend or plan.backend_all or plan.scenarios)
 
 
 def test_dashboard_layout_adds_only_its_mock_browser_file():
@@ -34,7 +35,8 @@ def test_api_contract_pairs_both_sides_without_browser():
 def test_unknown_uses_both_without_browser_and_cannot_lose_broad_frontend():
     plan = select(["!new-surface", "frontend/src/pages/dashboard/index.tsx"])
     assert plan.backend_all and plan.frontend and not plan.vitest
-    assert not (plan.build or plan.browser_mock or plan.scenarios)
+    assert plan.browser_mock == ["tests/browser/test_frontend_dashboard_layout.py"]
+    assert plan.build and not plan.scenarios
 
 
 def test_scenario_adds_a_build_without_changing_selected_sides():
@@ -44,7 +46,10 @@ def test_scenario_adds_a_build_without_changing_selected_sides():
 
 
 def test_empty_and_docs_only_select_no_application_test():
-    for changes in ([], ["docs/README.md"]):
+    for changes in (
+        [], ["docs/README.md"], ["docs/api/external-api.md"],
+        ["docs/guides/agent-testing.md"], ["tests/fixtures/media/README.md"],
+    ):
         plan = select(changes)
         assert not (plan.frontend or plan.backend_all or plan.backend or plan.build)
 
@@ -134,3 +139,42 @@ def test_drawer_has_a_relevant_browser_check_and_keeps_named_scenarios():
     shared = select(["frontend/src/app/workspace.css", path])
     assert not shared.vitest
     assert "tests/browser/test_frontend_dashboard_layout.py" in shared.browser_mock
+
+
+def test_component_test_only_does_not_trigger_browser_or_build():
+    plan = select(["frontend/src/pages/dashboard/index.test.tsx"])
+    assert plan.vitest == ["src/pages/dashboard/"]
+    assert not (plan.build or plan.browser_mock or plan.backend_all)
+
+
+def test_page_browser_keeps_all_viewports_and_shared_shell_is_broader():
+    page = select(["frontend/src/pages/ad-daily/index.tsx"])
+    assert page.browser_mock == ["tests/browser/test_frontend_ad_daily_filters.py"]
+    shared = select(["frontend/src/app/AppShell.tsx"])
+    assert "tests/browser/test_frontend_pilots.py" in shared.browser_mock
+    assert shared.frontend and shared.build and not shared.vitest
+
+
+def test_media_fixture_helper_and_ui_keep_only_known_consumers():
+    plan = select([
+        "frontend/src/pages/media-assets/AssetPreview.tsx",
+        "tests/fixtures/media/TEST_preview.webm",
+        "tests/support/media_browser.py",
+        "tts_erp_v2/media/repository.py",
+        "tests/api/test_media_api.py",
+        "docs/api/external-api.md",
+    ])
+    assert not plan.backend_all
+    assert plan.backend == ["tests/api/test_media_api.py"]
+    assert plan.vitest == ["src/pages/media-assets/", "src/pages/media-assets/workflows.test.tsx"]
+    assert plan.checks == plan.browser_mock == ["tests/browser/test_media_workflows.py"]
+    assert plan.build and plan.docs
+
+
+def test_changed_backend_test_is_narrow_but_deleted_and_shared_tests_stay_broad():
+    path = "tests/api/test_media_api.py"
+    assert select([path]).backend == [path]
+    assert not select([path]).backend_all
+    assert select([path], deleted=frozenset({path})).backend_all
+    assert select(["tests/api/conftest.py"]).backend_all
+    assert select(["tts_erp_v2/db/session.py"]).backend_all

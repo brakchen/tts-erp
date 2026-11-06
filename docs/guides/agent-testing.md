@@ -59,6 +59,30 @@ browser behavior. Append `--scenario login-cookie` for browser login and cookies
 `--scenario account-page` for the isolated account page contract. A schema change
 requires `--refresh-template`. Browser scopes build current assets when needed.
 
+Page source changes select the registered page browser files without cutting
+their desktop/mobile parameters; component-test-only edits stay component-only.
+Shared application-shell changes select the shared shell browser coverage. Media
+fixtures/helpers select the media browser consumers rather than both complete
+suites. Ordinary backend test edits select the changed file; deleted tests and
+shared fixtures keep broader coverage. Documentation (including API guides)
+selects documentation checks; behavior changes still require code and its tests.
+Unclassified code keeps the conservative fallback. Use `--plan` to review it.
+
+The raw isolated `unit`, domain and file commands build frontend assets only
+after successful collection, when retained cases request `frontend_build`, carry
+`requires_frontend_build`, or are browser tests. The selected runner's explicit
+build requirement is honored by the same owner. Build-free API cases reuse the
+existing test-only asset-manifest fixture. Required builds always use current
+sources and the worktree-local asset lock; build failure stops test execution.
+No cached release from an earlier invocation is accepted as preparation evidence.
+
+Every isolated run prints `[test-timing]` phases for connection preparation,
+template-lock waiting, template preparation, cloning, test execution, cleanup and
+total time. Pytest prints collection/build and setup/call/teardown totals plus
+the 20 slowest phases. Phase totals distinguish accumulated test durations from
+wall time; they are diagnostics, not a second success/failure signal. Successful
+baseline runs also print these timings; `--keep-log` retains full details.
+
 The Monitor Zabbix export selects its YAML syntax and structure checks through
 the isolated runner. These checks do not validate a live Zabbix import. Other YAML
 paths keep their existing fallback. Mobile navigation rules live in
@@ -113,6 +137,14 @@ and a worktree-local `npm ci --prefix frontend` installation. Do not share writa
 to fit the validation VM's memory budget. The component adapter and local Vite
 fixtures own their npm process groups and reclaim descendants on success, failure,
 or timeout; increasing test deadlines is not a substitute for process cleanup.
+
+The common read-only browser renderer reuses Chromium within each test module.
+Each test owns its Renderer/request records and fresh BrowserContexts. Module
+teardown closes the browser and Playwright; an async item's setup also releases
+the sync API before pytest-asyncio starts its loop. It is not session-wide reuse.
+Lifecycle regression covers same-module reuse, cookie isolation, async cases
+between sync cases, and a following async module. Full-stack browser fixtures
+with their own launch owners retain their existing lifecycle.
 
 ## 4. Template and shared database usage
 

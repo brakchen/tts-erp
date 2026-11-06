@@ -184,7 +184,8 @@ if [[ "$SCOPED" -eq 1 ]]; then
   rc=0
   bash scripts/test_isolated.sh "${options[@]}" selected --scope "$SCOPE" --base "$BASE" --head "$HEAD_SHA" --report "$RUN_TMP/report.json" \
     "${SCENARIOS[@]}" >"$RUN_LOG" 2>&1 || rc=$?
-  if [[ "$SCOPE" != fast || "$rc" -ne 0 ]]; then cat "$RUN_LOG"; fi
+  if [[ "$SCOPE" != fast || "$rc" -ne 0 ]]; then cat "$RUN_LOG"
+  else sed -n '/^\[test-timing\]/p' "$RUN_LOG"; fi
   "$SELECT_PYTHON" - "$RUN_TMP/report.json" "$RUN_TMP/target-baseline.txt" "$rc" <<'PYTHON'
 import json
 import sys
@@ -236,6 +237,7 @@ echo "[test-baseline] this single run replaces the old capture-baseline + rerun-
 rc=0
 # shellcheck disable=SC2086
 bash scripts/test_isolated.sh "${options[@]}" "$SCOPE" -p no:cacheprovider >"$RUN_LOG" 2>&1 || rc=$?
+sed -n '/^\[test-timing\]/p' "$RUN_LOG"
 
 pytest_failure_ids "$RUN_LOG" >"$RUN_TMP/current.txt"
 
