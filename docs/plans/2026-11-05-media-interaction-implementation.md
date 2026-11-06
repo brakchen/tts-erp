@@ -66,7 +66,7 @@
 旧实现与旧测试不是验收基线。先前功能验收不能证明原型一致。
 
 - TaskStartSnapshot：干净工作树 `media-asset-multiselect/tts-erp`，从当前
-  `origin/master=110a2814f57a7395874db22e44c648f77e4cdcae` 建立
+  `origin/master=5884b9863a2e4cde68c24f61f85b6f1c8744eaea` 建立
   `codex/media-prototype-fidelity`。Change Necessity=code-change；原型对照已证实结构与流程偏差，
   重新构建相同代码不足以修复。ArchitectureReviewRequired=局部呈现与状态复核；TDD mode=off，
   用真实行为和逐屏对照验证，不以既有断言保留错误终态。
@@ -79,7 +79,7 @@
   数字人启用/归档为直接按钮、单盒紧凑行，详情为名称/说明/状态操作行及“引用素材 · N 项”行列表；
   唯一“添加素材”进入选择页，上传在选择页页头；选择标题、隐藏计数、勾选清单、确认工具栏及折叠预览照原型；
   上传表单、100%确认入库进度、标签数量和新增反馈照原型；删除/移除/归档采用独立操作确认页，
-  归档确认成功回归档列表、恢复回启用列表。不是只换标题或颜色。
+  归档确认成功回归档列表、恢复成功打开/保留档案（原型 restore 分支第387行）。不是只换标题或颜色。
 - 隐藏数量复用现有 assets 查询：同条件 `digitalHumanId` 返回的 server total；不从当前页或全部引用数量推断，
   不新增API或前端业务聚合。标签大小写不敏感复用已有候选，保存待提交输入仍走同一候选解析。
 - root 独占共享呈现 `media-ui.tsx`、AssetCard/AssetPreview/TagEditor/UploadAsset、操作确认组件和媒体局部样式，
@@ -87,7 +87,7 @@
   `codex/media-fidelity-assets` 仅写 `media-assets/index.tsx`；数字人 writer 在
   `media-fidelity-humans/tts-erp` 的 `codex/media-fidelity-humans` 仅写 `digital-humans/index.tsx,AssetPicker.tsx`；
   独立验收 writer 在 `media-fidelity-acceptance/tts-erp` 的 `codex/media-fidelity-acceptance` 仅写媒体
-  browser/support 和 `media-assets/workflows.test.tsx`。三个工作树均由管理工具从110a建立，单 writer。
+  browser/support 和 `media-assets/workflows.test.tsx`。三个工作树均由管理工具从5884建立（已核对实际父提交），单 writer。
 - 对照证据必须覆盖所有业务屏幕和关键状态，以同等内容区宽度和确定数据比较分区、字段、动作顺序、尺寸及位置；
   保留长名称/窄屏压力案例。测试通过不自动等于视觉一致。只有最终构建逐屏实际查看并独立复核后才可结束本目标。
 - 本轮测试虚拟机已重新验证可SSH，Python3.14.4/Node22.23.2可用。真实 localhost 数据只读，
