@@ -22,6 +22,10 @@ _collection_started = 0.0
 _phases: dict[str, float] = defaultdict(float)
 
 
+def record_phase(name: str, seconds: float) -> None:
+    _phases[name] += seconds
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
     global _started
     _started = time.monotonic()
@@ -54,6 +58,8 @@ def pytest_collection_finish(session: pytest.Session) -> None:
             result = resources.enter_context(prepare_frontend(Path(session.config.rootpath)))
             _phases["frontend_lock"] += result.wait_seconds
             _phases["frontend_build"] += result.build_seconds
+            _phases["frontend_cache_check"] += result.cache_seconds
+            print(f"[test-build] cache={'hit' if result.cached else 'miss'} release={result.release_id}", flush=True)
             os.environ["TTS_ERP_TEST_PREPARED_RELEASE"] = result.release_id
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             raise pytest.UsageError("Current frontend build failed; inspect build output") from exc
@@ -67,6 +73,7 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
 
 def pytest_terminal_summary(terminalreporter) -> None:
     terminalreporter.section("test phase timings (seconds)")
-    for name in ("collection", "frontend_lock", "frontend_build", "setup", "call", "teardown"):
+    for name in ("collection", "frontend_lock", "frontend_cache_check", "frontend_build", "setup", "call", "teardown",
+                 "browser_start", "browser_navigation", "browser_ready", "browser_cleanup"):
         terminalreporter.write_line(f"[test-timing] {name}={_phases[name]:.3f}s")
     terminalreporter.write_line(f"[test-timing] pytest_total={time.monotonic() - _started:.3f}s")

@@ -53,7 +53,8 @@ def test_mixed_collection_preserves_requested_groups_once(
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/build_frontend.sh").write_text(
-        "set -eu\nmkdir -p tts_erp_v2/static/frontend\n"
+        "set -eu\nmkdir -p tts_erp_v2/static/frontend/TEST_collector\n"
+        "echo TEST_asset > tts_erp_v2/static/frontend/TEST_collector/main.js\n"
         "printf '%s' '{\"releaseId\":\"TEST_collector\"}' > tts_erp_v2/static/frontend/release.json\n",
         encoding="utf-8",
     )
