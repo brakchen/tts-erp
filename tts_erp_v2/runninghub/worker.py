@@ -467,23 +467,8 @@ class Worker:
                 return
             attempt, job, batch = state
             attempt.cloud_status = result["status"]
-            attempt.receipt = {
-                **attempt.receipt,
-                "query": sanitize(result, (client.key,) if client else ()),
-            }
+            self._record_query(attempt, result, (client.key,) if client else ())
             attempt.last_polled_at = session.scalar(select(func.now()))
-            attempt.usage = (
-                sanitize(result.get("usage"), (client.key,) if client else ())
-                if isinstance(result.get("usage"), dict)
-                else attempt.usage
-            )
-            if isinstance(result.get("taskUsageList"), list):
-                attempt.receipt = {
-                    **attempt.receipt,
-                    "taskUsageList": sanitize(
-                        result["taskUsageList"], (client.key,) if client else ()
-                    ),
-                }
             attempt.poll_failures, attempt.error, attempt.lease_until = 0, None, None
             attempt.next_poll_at = attempt.last_polled_at + timedelta(
                 seconds=10 if client else 0
@@ -511,6 +496,22 @@ class Worker:
             else:
                 attempt.error = "UNKNOWN_CLOUD_STATUS"
                 pause_failure(batch, attempt.error)
+
+    def _record_query(
+        self, attempt: GenerationAttempt, result: dict, secrets: tuple[str, ...]
+    ) -> None:
+        """Every observed query can supply additional usage, including link refreshes."""
+        attempt.receipt = {**attempt.receipt, "query": sanitize(result, secrets)}
+        if isinstance(result.get("usage"), dict):
+            attempt.usage = {
+                **(attempt.usage or {}),
+                **sanitize(result["usage"], secrets),
+            }
+        if isinstance(result.get("taskUsageList"), list):
+            attempt.receipt = {
+                **attempt.receipt,
+                "taskUsageList": sanitize(result["taskUsageList"], secrets),
+            }
 
     def _artifact(
         self, session: Session, attempt_id: str, kind: str, stored: dict, spec: dict
@@ -558,6 +559,12 @@ class Worker:
                     result = client.query(
                         task_id
                     )  # Refresh expired result links using the original ID.
+                    with self.sessions() as session, session.begin():
+                        state = owned(session, attempt_id, token)
+                        if state is None:
+                            return
+                        self._record_query(state[0], result, (client.key,))
+                        state[0].last_polled_at = session.scalar(select(func.now()))
                     if result["status"] != "SUCCESS" or not isinstance(
                         result.get("results"), list
                     ):

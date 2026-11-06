@@ -11,6 +11,7 @@
 - `scripts/regen_schema.py --db-url postgresql://postgres@localhost/tts_erp_test_template`：只读schema生成，源已确认 `0074_runninghub`；新增9表，当前16个业务schema/87表。SQL未手改。
 - `bash scripts/test_isolated.sh fast tests/api/test_frontend_pages.py::test_activation_matches_implemented_candidate_pages tests/publishing/test_final_v16_findings.py::test_architecture_inventory_is_derived_from_live_schema tests/publishing/test_final_v18_findings.py::test_generated_schema_and_architecture_cover_publishing_head --tb=short`：修复后3项全部通过，日志 `/tmp/rh-schema-fixed.log`。保留严格集合相等与结构相等断言。
 - 实际编译页面在390/1440/2560宽度、两种URL前缀均通过键盘选择与溢出断言；三个宽度截图已人工查看。截图在任务校验checkout的 `frontend/.cache/screenshots/TEST_runninghub_*`。
+- `bash scripts/test_isolated.sh api tests/api/test_runninghub.py tests/api/test_runninghub_protocol.py --tb=short`：最后29个后端用例通过。查询回执改为单一出口，轮询和下载刷新合并实际usage字段，专项反例证明后到的钱包费用保留且不叠加重复taskUsageList；日志 `/tmp/rh-final-api.log`、`/tmp/rh-usage-fixed.log`。
 
 ## 覆盖与边界
 
@@ -20,4 +21,4 @@ mock HTTP覆盖官方两种响应包装、multipart、完整图JSON字符串、�
 
 未执行真实RunningHub账户/生成/上传联调、真实对象存储端到端、生产迁移/部署/重启；不存在画质、实际费用单价或生产可用性验收声明。上线依照 `docs/api/runninghub.md` 由人工配置和迁移，真实批次需主动确认付费。最终合并前还须在锁内校验精确的 prospective master commit。
 
-复杂度控制：协议/映射/计划/数据库领取/媒体/Worker/API各有一个所有者，复用既有凭据、MinIO和应用壳；保留历史Attempt和工作流快照是审计要求。未新增队列框架、并行状态通道或全局测试设施。较长的专属测试文件共享一套端到端夹具，覆盖28个有差异的后端验收；不以复制实现的断言替代真实数据库与媒体处理。仓库没有额外的Aegis复杂度硬限文件；以AGENTS.md和已执行验收为基准。
+复杂度控制：协议/映射/计划/数据库领取/媒体/Worker/API各有一个所有者，复用既有凭据、MinIO和应用壳；保留历史Attempt和工作流快照是审计要求。未新增队列框架、并行状态通道或全局测试设施。协议/映射/权限测试已从端到端用例分离，共用一份合成工作流图，覆盖29个有差异的后端验收；不以复制实现的断言替代真实数据库与媒体处理。仓库没有额外的Aegis复杂度硬限文件；以AGENTS.md和已执行验收为基准。
