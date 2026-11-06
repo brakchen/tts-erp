@@ -608,6 +608,66 @@ it.each(['save', 'upload'] as const)('reuses a pending existing tag at the %s bo
   expect(writes).toBe(1);
 });
 
+it.each(['save', 'upload'] as const)('waits for delayed tag candidates before a pending tag can %s', async (operation) => {
+  const user = userEvent.setup();
+  vi.stubGlobal('XMLHttpRequest', Upload);
+  const canonical = 'TEST_Existing Tag';
+  const raw = '  test_existing   TAG  ';
+  let releaseCatalog!: (response: Response) => void;
+  const delayedCatalog = new Promise<Response>((resolve) => { releaseCatalog = resolve; });
+  let writes = 0;
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/assets/tags')) return delayedCatalog;
+    if (url.endsWith('/upload-url')) {
+      writes += 1;
+      expect(JSON.parse(String(init.body)).tags).toEqual([canonical]);
+      return json(ticket, 201);
+    }
+    if (url.endsWith('/confirm')) return json(confirmed);
+    if (init.method === 'PATCH') {
+      writes += 1;
+      expect(JSON.parse(String(init.body))).toEqual({ tags: [canonical] });
+      return json({ ...asset, tags: [canonical] });
+    }
+    if (url.endsWith(assetPath)) return json({ ...asset, tags: writes ? [canonical] : [], used_by: [] });
+    return json(page());
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<MediaAssets bootstrap={bootstrap} />);
+  const submit = operation === 'save' ? '保存资料' : '开始上传';
+  if (operation === 'save') {
+    await user.click(await findButton('查看 ' + asset.filename));
+    await user.click(button('编辑资料'));
+  } else {
+    await user.click(button('上传素材'));
+    chooseFile();
+    expect(button(submit)).toBeEnabled(); // A file without a new tag does not need the catalog.
+  }
+  expect(await screen.findByText('正在加载已有标签…')).toBeVisible();
+  const input = screen.getByLabelText('新增标签');
+  await user.type(input, raw);
+  expect(input).toHaveValue(raw);
+  expect(button('添加标签')).toBeDisabled();
+  expect(button(submit)).toBeDisabled();
+  await user.keyboard('{Enter}');
+  expect(input).toHaveValue(raw);
+  expect(screen.queryByRole('row', { name: canonical })).not.toBeInTheDocument();
+  await user.click(button('添加标签'));
+  await user.click(button(submit));
+  expect(writes).toBe(0);
+  expect(Upload.last).toBeUndefined();
+
+  await act(async () => releaseCatalog(json([canonical])));
+  expect(await screen.findByRole('row', { name: canonical })).toBeVisible();
+  expect(input).toHaveValue(raw);
+  expect(button('添加标签')).toBeEnabled();
+  await waitFor(() => expect(button(submit)).toBeEnabled());
+  await user.click(button(submit));
+  if (operation === 'upload') await finishTransfer();
+  expect(await screen.findByText(operation === 'save' ? /素材资料已保存/ : /已入库：/)).toBeVisible();
+  expect(writes).toBe(1);
+});
+
 it.each([false, true])('waits for the post-upload profile read before a partial add (refresh failure: %s)', async (failRefresh) => {
   const user = userEvent.setup();
   vi.stubGlobal('XMLHttpRequest', Upload);
