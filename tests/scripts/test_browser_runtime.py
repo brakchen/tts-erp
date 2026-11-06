@@ -82,6 +82,7 @@ def test_canned_layout_waits_for_data_and_refuses_an_error_shell() -> None:
                 const grid = document.createElement('div');
                 grid.setAttribute('role', 'grid');
                 grid.setAttribute('aria-label', '店铺接入列表');
+                grid.textContent = 'TEST_ready';
                 document.querySelector('main').append(grid);
             }, 150)""")
             wait_canned_page(page, "shops")
