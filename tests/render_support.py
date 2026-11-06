@@ -17,9 +17,12 @@ live e2e 层（`tests/e2e/`，需 :9877）共用这里的 JS 片段与 Renderer�
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 from urllib.parse import urlsplit
+
+logger = logging.getLogger(__name__)
 
 # 全站 13 个页面 slug（与 tts_erp_v2.accounts.pages.PAGES 一一对应）
 PAGE_SLUGS = [
@@ -157,7 +160,7 @@ class Renderer:
             # 有轮询的页面（sync-jobs）不会 idle，等不到就算了，不因此失败
             page.wait_for_load_state("networkidle", timeout=8_000)
         except Exception:  # noqa: BLE001 - 等待超时不是用例失败
-            pass
+            logger.debug("Network-idle readiness check did not finish")
         status = response.status if response is not None else 0
         assert status == 200, f"{path} 未渲染成功：HTTP {status}"
         return page
@@ -201,6 +204,6 @@ class Renderer:
             try:
                 context.close()
             except Exception:  # noqa: BLE001 - 收尾尽力而为
-                pass
+                logger.debug("Browser context cleanup failed")
         self._contexts.clear()
         self.assert_read_only()
