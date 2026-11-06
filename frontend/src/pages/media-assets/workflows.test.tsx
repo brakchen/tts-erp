@@ -528,6 +528,86 @@ it('includes an uncommitted upload tag in its ticket and cancelling never writes
   expect(await screen.findByText(/已入库：/)).toBeVisible();
 });
 
+it('preserves a typed space after an existing tag prefix until the complete tag is explicitly added', async () => {
+  const user = userEvent.setup();
+  const prefix = 'TEST_厨房';
+  const complete = prefix + ' 场景';
+  let writes = 0;
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/assets/tags')) return json([prefix]);
+    if (init.method === 'PATCH') {
+      writes += 1;
+      expect(JSON.parse(String(init.body))).toEqual({ tags: [complete] });
+      return json({ ...asset, tags: [complete] });
+    }
+    if (url.endsWith(assetPath)) return json({ ...asset, used_by: [] });
+    return json(page());
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<MediaAssets bootstrap={bootstrap} />);
+  await user.click(await findButton('查看 ' + asset.filename));
+  await user.click(button('编辑资料'));
+  expect(await screen.findByRole('row', { name: prefix })).toBeVisible();
+  const input = screen.getByLabelText('新增标签');
+  await user.type(input, prefix + ' ');
+  expect(input).toHaveValue(prefix + ' ');
+  await user.type(input, '场景');
+  expect(input).toHaveValue(complete);
+  expect(screen.queryByRole('row', { name: complete })).not.toBeInTheDocument();
+  expect(writes).toBe(0);
+  await user.click(button('添加标签'));
+  expect(screen.getByRole('row', { name: complete })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('row', { name: prefix })).not.toHaveAttribute('aria-selected', 'true');
+  expect(input).toHaveValue('');
+  expect(writes).toBe(0);
+  await user.click(button('保存资料'));
+  expect(await screen.findByText(/素材资料已保存/)).toBeVisible();
+  expect(writes).toBe(1);
+});
+
+it.each(['save', 'upload'] as const)('reuses a pending existing tag at the %s boundary without rewriting its raw input', async (operation) => {
+  const user = userEvent.setup();
+  vi.stubGlobal('XMLHttpRequest', Upload);
+  const canonical = 'TEST_Existing Tag';
+  const raw = '  test_existing   TAG  ';
+  let writes = 0;
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/assets/tags')) return json([canonical]);
+    if (url.endsWith('/upload-url')) {
+      writes += 1;
+      expect(JSON.parse(String(init.body)).tags).toEqual([canonical]);
+      return json(ticket, 201);
+    }
+    if (url.endsWith('/confirm')) return json(confirmed);
+    if (init.method === 'PATCH') {
+      writes += 1;
+      expect(JSON.parse(String(init.body))).toEqual({ tags: [canonical] });
+      return json({ ...asset, tags: [canonical] });
+    }
+    if (url.endsWith(assetPath)) return json({ ...asset, tags: writes ? [canonical] : [], used_by: [] });
+    return json(page());
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<MediaAssets bootstrap={bootstrap} />);
+  if (operation === 'save') {
+    await user.click(await findButton('查看 ' + asset.filename));
+    await user.click(button('编辑资料'));
+  } else {
+    await user.click(button('上传素材'));
+    chooseFile();
+  }
+  const option = await screen.findByRole('row', { name: canonical });
+  const input = screen.getByLabelText('新增标签');
+  await user.type(input, raw);
+  expect(input).toHaveValue(raw);
+  expect(option).not.toHaveAttribute('aria-selected', 'true');
+  expect(writes).toBe(0);
+  await user.click(button(operation === 'save' ? '保存资料' : '开始上传'));
+  if (operation === 'upload') await finishTransfer();
+  expect(await screen.findByText(operation === 'save' ? /素材资料已保存/ : /已入库：/)).toBeVisible();
+  expect(writes).toBe(1);
+});
+
 it.each([false, true])('waits for the post-upload profile read before a partial add (refresh failure: %s)', async (failRefresh) => {
   const user = userEvent.setup();
   vi.stubGlobal('XMLHttpRequest', Upload);
