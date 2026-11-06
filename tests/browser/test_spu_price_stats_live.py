@@ -91,11 +91,6 @@ def live_api(price_scene: PriceScene, db_url: str) -> Iterator[LiveApi]:
 
 
 # 浏览器/playwright 不可用 = 本层证据缺失，必须失败（design §8.1 gate 5 第 4 条）。
-_BROWSER_UNAVAILABLE = (
-    "playwright/chromium 不可用：本层是真实浏览器全栈 E2E 证据，不允许跳过"
-)
-
-
 @pytest.fixture()
 def live(
     live_api: LiveApi, price_scene: PriceScene, request: pytest.FixtureRequest
