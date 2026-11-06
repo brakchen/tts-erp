@@ -1260,8 +1260,8 @@ def test_shared_asset_usage_tracks_archive_restore_and_removal(
     assert asset_detail["usageCount"] == 2
     usage = asset_detail["used_by"]
     assert usage == [
-        {"digital_human_id": first_id, "name": f"{prefix}_a", "status": "active"},
         {"digital_human_id": second_id, "name": f"{prefix}_b", "status": "archived"},
+        {"digital_human_id": first_id, "name": f"{prefix}_a", "status": "active"},
     ]
     listing = api_client_focused.get(
         "/v2/media/assets", headers=headers, params={"keyword": prefix}
@@ -1310,3 +1310,47 @@ def test_shared_asset_usage_tracks_archive_restore_and_removal(
     assert retained.status_code == 200
     assert retained.json()["used_by"] == []
     assert retained.json()["usageCount"] == 0
+
+
+def test_reference_order_appends_new_links_and_preserves_replayed_positions(
+    api_client_focused, readwrite_key
+):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    assets = [
+        _upload_one(
+            api_client_focused, readwrite_key, filename=f"TEST_reference_order_{name}.jpg"
+        )
+        for name in ("first", "second")
+    ]
+    for asset_id in assets:
+        confirmed = api_client_focused.post(
+            f"/v2/media/assets/{asset_id}/confirm", headers=headers
+        )
+        assert confirmed.status_code == 200
+    created = api_client_focused.post(
+        "/v2/media/digital-humans",
+        headers=headers,
+        json={"name": "TEST_reference_order_persona"},
+    )
+    assert created.status_code == 201
+    path = f"/v2/media/digital-humans/{created.json()['digital_human_id']}"
+    for index, asset_id in enumerate(assets):
+        linked = api_client_focused.post(
+            f"{path}/assets", headers=headers, json={"assetId": asset_id}
+        )
+        assert linked.status_code == 200
+        assert linked.json()["asset_ids"] == assets[: index + 1]
+    replayed = api_client_focused.post(
+        f"{path}/assets", headers=headers, json={"assetId": assets[0]}
+    )
+    assert replayed.status_code == 200
+    assert replayed.json()["asset_ids"] == assets
+    detail = api_client_focused.get(path, headers=headers).json()
+    assert [asset["asset_id"] for asset in detail["assets"]] == assets
+    detached = api_client_focused.delete(f"{path}/assets/{assets[0]}", headers=headers)
+    assert detached.status_code == 204
+    reattached = api_client_focused.post(
+        f"{path}/assets", headers=headers, json={"assetId": assets[0]}
+    )
+    assert reattached.status_code == 200
+    assert reattached.json()["asset_ids"] == [assets[1], assets[0]]

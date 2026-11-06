@@ -1,41 +1,78 @@
+import { useEffect, useState } from 'react';
 import { Button, Input, Label, Tag, TagGroup, TextField } from '@heroui/react';
 import { decodeTags } from './contracts';
 import { ReadStatus, useMediaRead } from './media-ui';
 
 /** Each input is one tag, including punctuation. Candidates stay server-owned. */
-export function withPendingTag(selected: readonly string[], input: string): string[] {
-  return [...new Set([...selected, input].map((tag) => tag.trim().replace(/\s+/gu, ' ')).filter(Boolean))];
+export function withPendingTag(selected: readonly string[], input: string, catalog: readonly string[] = []): string[] {
+  const tags = new Map<string, string>();
+  const pending = input.trim().replace(/\s+/gu, ' ');
+  const saved = [...selected, ...catalog].find((tag) => tag.toLowerCase() === pending.toLowerCase());
+  for (const value of [...selected, saved ?? pending]) {
+    const tag = value.trim().replace(/\s+/gu, ' ');
+    if (tag && !tags.has(tag.toLowerCase())) tags.set(tag.toLowerCase(), tag);
+  }
+  return Array.from(tags.values());
 }
 
-export default function TagEditor({ root, selected, input, onChange, onInput, disabled = false }: {
+export default function TagEditor({ root, selected, input, onChange, onInput, onCatalog, disabled = false }: {
   root: string; selected: string[]; input: string; onChange: (tags: string[]) => void;
-  onInput: (value: string) => void; disabled?: boolean;
+  onInput: (value: string) => void; onCatalog: (tags: string[]) => void; disabled?: boolean;
 }) {
   const read = useMediaRead(root, '/assets/tags', decodeTags);
   const choices = withPendingTag([...(read.data ?? []), ...selected], '');
+  const selection = withPendingTag(selected, '');
+  const selectedKeys = new Set(selection.map((tag) => tag.toLowerCase()));
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const normalized = input.trim().replace(/\s+/gu, ' ');
+  const existing = [...selection, ...choices].find((tag) => tag.toLowerCase() === normalized.toLowerCase());
+  // Share the server catalog with the submit owner; preserve the raw draft
+  // while typing, including spaces after a prefix that is an existing tag.
+  useEffect(() => {
+    if (read.data) onCatalog(read.data);
+  }, [read.data, onCatalog]);
   function add() {
-    if (!input.trim() || disabled) return;
-    onChange(withPendingTag(selected, input));
+    if (disabled || read.loading || !read.data) return;
+    setNotice('');
+    if (!normalized) { setError('请输入标签名称。'); return; }
+    const tag = existing ?? normalized;
+    setError('');
+    onChange(withPendingTag(selected, tag));
     onInput('');
+    setNotice(existing ? '已选中现有标签「' + tag + '」。' : '已添加标签「' + tag + '」，保存资料后生效。');
   }
-  return <div className="space-y-3">
-    <TagGroup aria-label="选择素材标签" selectionMode="multiple" selectedKeys={new Set(withPendingTag(selected, ''))}
-      disabledKeys={disabled ? choices : []}
-      onSelectionChange={(keys) => onChange(keys === 'all' ? choices : Array.from(keys, String))}>
-      <Label>标签（可多选）</Label>
+  return <div className="media-tag-editor">
+    <TagGroup aria-label="可选素材标签" selectionMode="multiple" selectedKeys={selectedKeys}
+      disabledKeys={disabled ? choices.map((tag) => tag.toLowerCase()) : []}
+      onSelectionChange={(keys) => {
+        const nextKeys = keys === 'all' ? choices.map((tag) => tag.toLowerCase()) : Array.from(keys, String);
+        onChange(nextKeys.flatMap((key) => {
+          const tag = [...selection, ...choices].find((value) => value.toLowerCase() === key);
+          return tag ? [tag] : [];
+        }));
+      }}>
+      <Label>素材标签</Label>
       <TagGroup.List renderEmptyState={() => <p className="text-sm text-muted">暂无标签，可在下方新增。</p>}>
-        {choices.map((tag) => <Tag key={tag} id={tag} textValue={tag} className="max-w-full [overflow-wrap:anywhere]">{tag}</Tag>)}
+        {choices.map((tag) => <Tag key={tag.toLowerCase()} id={tag.toLowerCase()} textValue={tag}
+          className={'media-tag-option ' + (selectedKeys.has(tag.toLowerCase()) ? 'media-tag-selected' : '')}>
+          <span className="media-tag-tick" aria-hidden="true">{selectedKeys.has(tag.toLowerCase()) ? '✓' : '＋'}</span>{tag}
+        </Tag>)}
       </TagGroup.List>
     </TagGroup>
+    <p className="media-tag-count" aria-live="polite">已选 {selection.length} 个 · 可多选，再次点击取消</p>
     <ReadStatus title="已有标签" loading={read.loading} error={read.error} onRetry={read.retry} />
-    <div className="flex flex-wrap items-end gap-2">
-      <TextField value={input} onChange={onInput} isDisabled={disabled} className="min-w-0 flex-1">
-        <Label>新增标签</Label><Input placeholder="输入一个标签，按 Enter 添加" onKeyDown={(event) => {
+    <div className="media-tag-add">
+      <TextField value={input} onChange={(value) => { setError(''); setNotice(''); onInput(value); }}
+        isDisabled={disabled} isInvalid={Boolean(error)} className="min-w-0 flex-1">
+        <Label>新增标签</Label><Input placeholder="输入新标签名称，按回车添加" onKeyDown={(event) => {
           if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!event.nativeEvent.isComposing) add(); }
         }} />
       </TextField>
-      <Button variant="secondary" isDisabled={disabled || !input.trim()} onPress={add}>添加标签</Button>
+      <Button variant="secondary" isDisabled={disabled || read.loading || !read.data} onPress={add}>添加标签</Button>
     </div>
-    <p className="text-sm text-muted">新增标签会自动选中，保存或上传后才进入素材库的标签候选。标签可包含逗号。</p>
+    <p className="media-tag-note">支持自定义标签，保存资料后生效。</p>
+    {error && <p className="media-error" role="alert">{error}</p>}
+    {notice && <p className="media-muted" role="status">{notice}</p>}
   </div>;
 }

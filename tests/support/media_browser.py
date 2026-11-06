@@ -38,6 +38,18 @@ class MediaBytes:
         self.puts = 0
         self.removes = 0
         self.break_next_preview = False
+        self.hold_next_put = False
+        self.held_put: tuple[Route, str] | None = None
+
+    def hold_put(self) -> None:
+        assert not self.hold_next_put and self.held_put is None
+        self.hold_next_put = True
+
+    def release_put(self) -> None:
+        assert self.held_put is not None
+        route, path = self.held_put
+        self.held_put = None
+        assert self.handle(route, path)
 
     def bucket(self) -> str:
         return "TEST_media"
@@ -85,6 +97,10 @@ class MediaBytes:
                 payload = request.post_data_buffer
                 if headers.get("content-type") != content_type or not payload or len(payload) > 2**20:
                     return False
+                if self.hold_next_put:
+                    self.hold_next_put = False
+                    self.held_put = route, path
+                    return True
                 self.objects[key] = (content_type, payload)
                 self.puts += 1
             route.fulfill(status=204, headers=cors)
@@ -129,7 +145,10 @@ class MediaBrowserBridge:
         self.calls: Counter[tuple[str, str]] = Counter()
         self.requests: list[MediaRequest] = []
         self.responses: list[tuple[str, str, int]] = []
+        # The picker performs a separate count read for existing associations.
+        # Keep its genuine response distinct from library/candidate page data.
         self.asset_pages: list[dict] = []
+        self.associated_pages: list[dict] = []
         self.refusals: list[str] = []
         self.fail_next: tuple[str, re.Pattern[str], int, int] | None = None
         self.hold_next: tuple[str, re.Pattern[str]] | None = None
@@ -164,10 +183,17 @@ class MediaBrowserBridge:
 
     def allows(self, method: str, path: str, query: dict, body: object) -> bool:
         if method == "GET" and path in PAGES:
-            id_name, ids = ("asset", self.assets) if path.endswith("media-assets") else ("human", self.humans)
-            return not query or (
-                set(query) == {id_name} and len(query[id_name]) == 1 and self._owned_id(query[id_name][0], ids)
-            )
+            if not query:
+                return True
+            if path.endswith("media-assets"):
+                return (
+                    set(query) <= {"asset", "fromHuman"} and "asset" in query
+                    and len(query["asset"]) == 1 and self._owned_id(query["asset"][0], self.assets)
+                    and ("fromHuman" not in query or (
+                        len(query["fromHuman"]) == 1 and self._owned_id(query["fromHuman"][0], self.humans)
+                    ))
+                )
+            return set(query) == {"human"} and len(query["human"]) == 1 and self._owned_id(query["human"][0], self.humans)
         if method == "GET" and path == LOGIN:
             return not query or (
                 set(query) == {"next"} and query["next"] in ([self.prefix + p] for p in PAGES | {ME})
@@ -231,7 +257,8 @@ class MediaBrowserBridge:
             self.client.cookies.clear()
         self.responses.append((request.method, path, response.status_code))
         if request.method == "GET" and path == ASSETS and response.status_code == 200:
-            self.asset_pages.append(response.json())
+            pages = self.associated_pages if "digitalHumanId" in parse_qs(urlsplit(target).query) else self.asset_pages
+            pages.append(response.json())
         if response.status_code == 201 and request.method == "POST":
             if path == ASSETS + "/upload-url":
                 self.assets.add(response.json()["asset_id"])

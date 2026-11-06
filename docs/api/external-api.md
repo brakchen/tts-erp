@@ -513,6 +513,7 @@ with a presigned URL. Design:
    deletion hold the asset's exclusive row lock, serializing concurrent links.
    Detail includes `used_by: [{digital_human_id, name, status}]` for current
    persona references, including archived personas, and matching `usageCount`.
+   References follow persona-list order (newest persona first).
    Existing snake_case response fields remain unchanged; only `usageCount`
    uses camelCase. In PATCH responses where usage has not been calculated,
    `usageCount` is null.
@@ -521,7 +522,9 @@ with a presigned URL. Design:
    `asset_ids` exclude soft-deleted assets.
 7. `GET/PATCH/DELETE /v2/media/digital-humans/{digital_human_id}` — detail
    (including the referenced assets, each with its server-calculated
-   `usageCount` including archived references) / edit / soft-delete. Archiving via
+   `usageCount` including archived references) / edit / soft-delete. Embedded
+   assets and `asset_ids` follow association-addition order; replaying an existing
+   link keeps its position, and unlinking then reattaching appends it. Archiving via
    `status=archived` preserves the references and allows maintenance and
    restoration via `status=active`. Deleting a persona preserves its assets.
 8. `POST /v2/media/digital-humans/{id}/assets` — attach a ready asset

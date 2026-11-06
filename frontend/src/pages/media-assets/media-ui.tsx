@@ -5,7 +5,10 @@ import { parseIdentityJson } from '../../shared/api/identity-json';
 import { pathFor } from '../../shared/api/paths';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import type { FrontendBootstrap } from '../../shared/contracts';
-import { displayBytes, type Asset } from './contracts';
+import type { Asset, Count } from './contracts';
+import './media-workspace.css';
+
+export const mediaPageSize = 4;
 
 export function mediaRequest<T>(root: string, path: string, decode: (data: unknown) => T, init?: RequestInit) {
   return requestJson<unknown>(root, '/v2/media' + path, init, parseIdentityJson)
@@ -39,8 +42,8 @@ export function mediaError(error: unknown, writing = false) {
   return '操作失败（HTTP ' + error.status + '），请重试。';
 }
 
-export function useMediaRead<T>(root: string, path: string | null, decode: (data: unknown) => T, revision = 0) {
-  type State = { path: string | null; revision: number; attempt: number; data?: T; error?: string; loading: boolean };
+export function useMediaRead<T>(root: string, path: string | null, decode: (data: unknown) => T, revision: number | string = 0) {
+  type State = { path: string | null; revision: number | string; attempt: number; data?: T; error?: string; loading: boolean };
   const [state, setState] = useState<State>({ path, revision, attempt: 0, loading: path !== null });
   const [attempt, setAttempt] = useState(0);
   const latestAttempt = useRef(0);
@@ -134,8 +137,8 @@ export function recordLink(bootstrap: FrontendBootstrap, page: string, parameter
 export function ReadStatus({ title, loading, error, onRetry }: {
   title: string; loading: boolean; error?: string; onRetry: () => void;
 }) {
-  if (error) return <Alert role="alert" status="danger"><Alert.Content>
-    <Alert.Title>{title}不可用</Alert.Title><Alert.Description className="[overflow-wrap:anywhere]">{error}</Alert.Description>
+  if (error) return <Alert role="alert" status="danger" className="media-error shadow-none"><Alert.Content>
+    <Alert.Title>{title}不可用</Alert.Title><Alert.Description className="text-inherit [overflow-wrap:anywhere]">{error}</Alert.Description>
     <Button variant="secondary" onPress={onRetry}>重试{title}</Button>
   </Alert.Content></Alert>;
   if (loading) return <p role="status">正在加载{title}…</p>;
@@ -143,22 +146,27 @@ export function ReadStatus({ title, loading, error, onRetry }: {
 }
 
 export function ActionError({ message }: { message: string }) {
-  return message ? <Alert role="alert" status="danger"><Alert.Content>
-    <Alert.Title>需要处理</Alert.Title><Alert.Description className="[overflow-wrap:anywhere]">{message}</Alert.Description>
+  return message ? <Alert role="alert" status="danger" className="media-error shadow-none"><Alert.Content>
+    <Alert.Description className="text-inherit [overflow-wrap:anywhere]">{message}</Alert.Description>
   </Alert.Content></Alert> : null;
 }
 
-export function RecordPage({ title, pending = false, onClose, children, backLabel = '返回列表', target }: {
-  title: string; pending?: boolean; onClose: () => void; children: ReactNode; backLabel?: string; target?: string;
+export function RecordPage({ eyebrow, title, description, actions, pending = false, onClose, children, backLabel = '返回列表' }: {
+  eyebrow: string; title: string; description?: ReactNode; actions?: ReactNode;
+  pending?: boolean; onClose?: () => void; children: ReactNode; backLabel?: string;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus(); }, [title]);
-  return <section className="erp-panel space-y-4" aria-label={title}>
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0 space-y-1"><h2 ref={heading} tabIndex={-1} className="text-xl font-semibold [overflow-wrap:anywhere]">{title}</h2>
-        {target && <p className="[overflow-wrap:anywhere]">目标数字人：<strong>{target}</strong></p>}</div>
-      <Button variant="secondary" isDisabled={pending} onPress={onClose}>{backLabel}</Button>
-    </div>
+  useEffect(() => { heading.current?.focus({ preventScroll: true }); }, [title]);
+  return <section className="media-record">
+    <header className="media-header" data-media-header>
+      <div className="media-title"><p className="media-caption">{eyebrow}</p>
+        <h1 ref={heading} tabIndex={-1}>{title}</h1>
+        {description && <div className="media-description">{description}</div>}
+      </div>
+      {(actions || onClose) && <div className="media-actions">{actions}
+        {onClose && <Button variant="ghost" className="media-back" isDisabled={pending} onPress={onClose}>{backLabel}</Button>}
+      </div>}
+    </header>
     {children}
   </section>;
 }
@@ -185,28 +193,26 @@ export function MediaSelect({ label, value, options, onChange, disabled = false 
   const selectedKey = String(options.findIndex((option) => option.value === value));
   return <Select isDisabled={disabled} selectedKey={selectedKey} onSelectionChange={(key) => onChange(options[Number(key)]?.value ?? '')}>
     <Label>{label}</Label>
-    <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+    <Select.Trigger className="media-select-trigger"><Select.Value /><Select.Indicator /></Select.Trigger>
     <Select.Popover><ListBox>{options.map((item, index) =>
       <ListBox.Item key={index} id={String(index)} textValue={item.label}>{item.label}</ListBox.Item>)}
     </ListBox></Select.Popover>
   </Select>;
 }
 
-export function MediaPagination({ name, offset, limit, hasNext, loading, onChange }: {
-  name: string; offset: number; limit: number; hasNext: boolean; loading: boolean; onChange: (offset: number) => void;
+export function MediaPagination({ name, offset, limit, total, hasNext, loading, onChange }: {
+  name: string; offset: number; limit: number; total?: Count; hasNext: boolean; loading: boolean; onChange: (offset: number) => void;
 }) {
-  if (!offset && !hasNext) return null;
-  return <nav aria-label={name} className="flex flex-wrap items-center gap-2">
-    <Button variant="secondary" isDisabled={!offset || loading} onPress={() => onChange(Math.max(0, offset - limit))}>上一页</Button>
-    <span>第 {Math.floor(offset / limit) + 1} 页</span>
-    <Button variant="secondary" isDisabled={!hasNext || loading} onPress={() => onChange(offset + limit)}>下一页</Button>
+  // Persona lists return an array without a total; retain access to their next
+  // server page without inventing a count. Asset consumers always supply total.
+  if (total === undefined && !offset && !hasNext) return null;
+  return <nav aria-label={name} className="media-pagination">
+    <span>{total === undefined ? '' : `共 ${total} 项 · `}第 {Math.floor(offset / limit) + 1} 页</span>
+    <div className="media-actions">
+      <Button variant="secondary" isDisabled={!offset || loading} onPress={() => onChange(Math.max(0, offset - limit))}>上一页</Button>
+      <Button variant="secondary" isDisabled={!hasNext || loading} onPress={() => onChange(offset + limit)}>下一页</Button>
+    </div>
   </nav>;
-}
-
-export function createdAtLabel(value: string) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '创建时间未知';
-  return '创建于 ' + new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
 export function humanStatus(status: string) {
@@ -226,12 +232,8 @@ export function assetStatus(status: string) {
   return '状态未知';
 }
 
-export function AssetFacts({ asset }: { asset: Asset }) {
-  return <>
-    <p>{assetType(asset)} · {displayBytes(asset.sizeBytes)} · {assetStatus(asset.status)}</p>
-    {asset.description && <p className="whitespace-pre-wrap break-words">{asset.description}</p>}
-    {!!asset.tags.length && <div className="flex flex-wrap gap-1" aria-label="素材标签">{asset.tags.map((tag) =>
-      <Chip key={tag} size="sm" className="max-w-full"><Chip.Label className="[overflow-wrap:anywhere] whitespace-normal">{tag}</Chip.Label></Chip>)}</div>}
-    <p className="text-sm text-muted">{asset.usageCount === null ? '引用数量未知' : `${asset.usageCount} 个数字人引用`}</p>
-  </>;
+export function AssetTags({ tags }: { tags: readonly string[] }) {
+  return tags.length ? <div className="media-tags" role="list" aria-label="素材标签">{tags.map((tag) =>
+    <Chip key={tag} size="sm" className="media-tag" role="listitem"><Chip.Label className="[overflow-wrap:anywhere] whitespace-normal">{tag}</Chip.Label></Chip>)}</div>
+    : <span className="media-muted">未设置标签</span>;
 }
