@@ -1245,6 +1245,7 @@ def test_upload_file_control_is_visible_and_opens_native_picker(media_run: Media
     assert abs(bounds(control)["width"] - bounds(main(page).get_by_role("textbox", name="素材名称", exact=True))["width"]) <= 2
     text(main(page), "暂无标签，可在下方新增。")
     assert_layout(page, tmp_path, "file_control_empty")
+    main(page).locator("form").screenshot(path=tmp_path / f"TEST_file_control_form_empty_{page.viewport_size['width']}.png")
     # Real visible-trigger activation, rather than setting a hidden input directly.
     pick_file(run, run.name("本地素材.png"))
     name = run.name("原始文件名_" + "长名称保持可读_" * 12 + ".png")
