@@ -1,30 +1,31 @@
 import { useState, type FormEvent } from 'react';
-import { Button, Input, Label, TextArea, TextField } from '@heroui/react';
+import { Button, Chip, Input, Label, TextArea, TextField } from '@heroui/react';
 import { ApiError } from '../../shared/api/client';
 import type { PageProps } from '../../shared/contracts';
-import PageIntro from '../../shared/PageIntro';
 import AssetCard from './AssetCard';
 import AssetPreview from './AssetPreview';
-import DeleteConfirmation from './DeleteConfirmation';
+import OperationConfirmation from './OperationConfirmation';
 import TagEditor, { withPendingTag } from './TagEditor';
 import UploadAsset from './UploadAsset';
-import { assetKinds, decodeAsset, decodeAssetList, decodeTags, type Asset } from './contracts';
+import { assetKinds, decodeAsset, decodeAssetList, type Asset } from './contracts';
 import {
-  ActionError, AssetFacts, DiscardDialog, MediaPagination, MediaSelect, ReadStatus, RecordPage,
-  humanStatus, mediaWrite, recordLink, useLeaveGuard, useMediaAction, useMediaRead, useRecordSelection,
+  ActionError, AssetTags, DiscardDialog, MediaPagination, MediaSelect, ReadStatus, RecordPage,
+  assetStatus, assetType, humanStatus, mediaPageSize, mediaWrite, recordLink, useLeaveGuard,
+  useMediaAction, useMediaRead, useRecordSelection,
 } from './media-ui';
 
-const pageSize = 24;
-const emptyFilters = { keyword: '', kind: '', tag: '' };
+const emptyFilters = { keyword: '', kind: '' };
 
 function Usage({ asset, bootstrap }: { asset: Asset; bootstrap: PageProps['bootstrap'] }) {
   if (!asset.usedBy) return <p>当前无法确认引用情况。</p>;
-  if (asset.usedBy.length === 0) return <p>当前没有数字人引用此素材。</p>;
-  return <ul className="list-inside list-disc space-y-1">
+  if (asset.usedBy.length === 0) return <p className="text-muted">还没有数字人引用这份素材。</p>;
+  return <ul>
     {asset.usedBy.map((human) => {
       const href = recordLink(bootstrap, 'digital-humans', 'human', human.id);
-      return <li className="break-words" key={human.id}>
-        {href ? <a className="underline" href={href}>{human.name}</a> : human.name} · {humanStatus(human.status)}
+      return <li className="media-row" key={human.id}>
+        {href ? <a className="underline [overflow-wrap:anywhere]" href={href}>{human.name}</a>
+          : <span className="[overflow-wrap:anywhere]">{human.name}</span>}
+        <Chip size="sm"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
       </li>;
     })}
   </ul>;
@@ -34,31 +35,37 @@ function draftFor(asset: Asset) {
   return { filename: asset.filename, description: asset.description ?? '', tags: [...asset.tags], tagInput: '' };
 }
 
-function DeleteAsset({ bootstrap, asset, onConfirm }: PageProps & { asset: Asset; onConfirm: () => Promise<void> }) {
-  const [open, setOpen] = useState(false);
-  const read = useMediaRead(bootstrap.rootPath, open ? '/assets/' + asset.assetId : null, decodeAsset);
+function DeleteAsset({ bootstrap, asset, pending, error, onConfirm, onCancel }: PageProps & {
+  asset: Asset; pending: boolean; error: string; onConfirm: () => Promise<void>; onCancel: () => void;
+}) {
+  // Entering this page always checks current references, including archived personas.
+  const read = useMediaRead(bootstrap.rootPath, '/assets/' + asset.assetId, decodeAsset);
   const current = read.data?.assetId === asset.assetId && read.data.usedBy ? read.data : undefined;
   const inUse = Boolean(current?.usedBy?.length);
   async function confirm() {
+    if (!current || read.loading || inUse || pending) return;
     try { await onConfirm(); }
     catch (failure) {
+      // The parent's action owns the error and write lock. A concurrent link
+      // must refresh the explanation without dismissing this confirmation page.
       if (failure instanceof ApiError && failure.status === 409) read.retry();
-      throw failure;
     }
   }
-  return <DeleteConfirmation label="从素材库删除" name={asset.filename} onVisibilityChange={setOpen}
-    confirmDisabled={!current || read.loading || inUse} onConfirm={confirm} description={<>
-      <p>删除后，此文件将从全局素材库移除。只有没有任何数字人引用的素材才能删除。</p>
-      {current && !read.loading ? <>
-        {inUse && <p role="status">此素材仍被数字人引用。请先解除全部引用，再从素材库删除。已归档的档案也需解除引用。</p>}
-        <Usage asset={current} bootstrap={bootstrap} />
-      </> : <ReadStatus title="当前引用" loading={read.loading}
-        error={read.error ?? (!read.loading ? '无法确认哪些数字人引用此素材。请重试后再删除。' : undefined)} onRetry={read.retry} />}
-    </>} />;
+  return <OperationConfirmation title={'从素材库删除「' + asset.filename + '」'}
+    description="只有没有任何数字人引用的素材才能删除。确认后，文件将从全局素材库移除。"
+    pending={pending} error={error} confirmLabel="确认删除" danger
+    confirmDisabled={!current || read.loading || inUse} onConfirm={confirm} onCancel={onCancel}>
+    {current && !read.loading ? <>
+      {inUse && <p role="status">此素材仍被数字人引用。请先解除全部引用，再从素材库删除。已归档的档案也需解除引用。</p>}
+      <Usage asset={current} bootstrap={bootstrap} />
+    </> : <ReadStatus title="当前引用" loading={read.loading}
+      error={read.error ?? (!read.loading ? '无法确认哪些数字人引用此素材。请重试后再删除。' : undefined)} onRetry={read.retry} />}
+  </OperationConfirmation>;
 }
 
-function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDeleted }: PageProps & {
-  id: string; initialNotice: string; onClose: () => void; onChanged: () => void; onDeleted: (name: string) => void;
+function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDeleted, returnHuman }: PageProps & {
+  id: string; initialNotice: string; onClose: () => void; onChanged: () => void;
+  onDeleted: (name: string) => void; returnHuman?: string;
 }) {
   const root = bootstrap.rootPath;
   const canWrite = bootstrap.roleCapabilities?.readwrite === true;
@@ -67,6 +74,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   const [updated, setUpdated] = useState<Asset>();
   const [draft, setDraft] = useState<ReturnType<typeof draftFor> | null>(null);
   const [discard, setDiscard] = useState<'view' | 'close'>();
+  const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState(initialNotice);
   const asset = updated ?? read.data;
   const original = asset && draftFor(asset);
@@ -75,8 +83,10 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   useLeaveGuard(dirty || action.pending);
 
   function finishExit(target: 'view' | 'close') {
-    if (target === 'close') onClose();
-    else { setDraft(null); setDiscard(undefined); action.clearError(); }
+    if (target === 'close') {
+      if (returnHuman) window.location.assign(returnHuman);
+      else onClose();
+    } else { setDraft(null); setDiscard(undefined); action.clearError(); }
   }
   function exit(target: 'view' | 'close') {
     if (action.pending) return;
@@ -94,48 +104,64 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
       if (response.assetId !== id) throw new Error('保存结果不符');
       setUpdated({ ...response, usedBy: response.usedBy ?? asset.usedBy, usageCount: response.usageCount ?? asset.usageCount });
       setDraft(null);
-      setNotice('素材资料已保存。引用它的数字人会显示更新后的资料。');
+      setNotice('素材资料已保存。');
       onChanged();
     });
   }
   async function remove() {
     if (!asset || !canWrite) return;
-    await mediaWrite(root, '/assets/' + id, 'DELETE', () => undefined);
-    onDeleted(asset.filename);
+    await action.run(async () => {
+      await mediaWrite(root, '/assets/' + id, 'DELETE', () => undefined);
+      onDeleted(asset.filename);
+    }, true);
   }
+  if (deleting && asset) return <DeleteAsset bootstrap={bootstrap} asset={asset} pending={action.pending}
+    error={action.error} onConfirm={remove} onCancel={() => {
+      if (!action.pending) { setDeleting(false); action.clearError(); }
+    }} />;
+
   return <>
-    <RecordPage title={asset ? (draft ? '编辑素材 · ' : '素材详情 · ') + asset.filename : '素材详情'}
-      pending={action.pending} backLabel={draft ? '返回素材详情' : '返回素材库'} onClose={() => exit(draft ? 'view' : 'close')}>
-      {notice && !draft && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
+    <RecordPage eyebrow={draft ? '资产管理 / 素材资料' : '资产管理 / 素材详情'}
+      title={draft ? '编辑素材资料' : asset?.filename ?? '素材详情'} description={!draft && asset ? assetType(asset) : undefined}
+      pending={action.pending} backLabel={returnHuman ? '返回档案' : '返回素材库'}
+      onClose={draft ? undefined : () => exit('close')}>
+      {notice && !draft && <p role="status" className="media-status">{notice}</p>}
       {!asset && <ReadStatus title="素材详情" loading={read.loading} error={read.error} onRetry={read.retry} />}
-      {asset && (draft ? <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-        <p>这里修改显示名称、说明和标签。此处暂不支持替换文件。</p>
-        <p>这是素材库的共享资料，保存后所有引用位置都会显示新资料。</p>
-        <Usage asset={asset} bootstrap={bootstrap} />
+      {asset && (draft ? <form className="media-box media-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <TextField value={draft.filename} isDisabled={action.pending} onChange={(filename) => setDraft({ ...draft, filename })}>
-          <Label>显示名称</Label><Input maxLength={255} />
+          <Label>素材名称</Label><Input maxLength={255} />
         </TextField>
         <TextField value={draft.description} isDisabled={action.pending} onChange={(description) => setDraft({ ...draft, description })}>
-          <Label>说明</Label><TextArea rows={3} maxLength={2000} />
+          <Label>素材说明</Label><TextArea rows={3} maxLength={2000} />
         </TextField>
         <TagEditor root={root} selected={draft.tags} input={draft.tagInput} disabled={action.pending}
           onChange={(tags) => setDraft((previous) => previous && { ...previous, tags })}
           onInput={(tagInput) => setDraft((previous) => previous && { ...previous, tagInput })} />
+        <p className="text-sm text-muted">保存后，所有引用此素材的位置都会显示更新后的资料。</p>
         <ActionError message={action.error && (action.uncertain ? action.error : '保存未完成。' + action.error)} />
         <div className="flex flex-wrap gap-2">
           <Button type="submit" isDisabled={!dirty || !draft.filename.trim()} isPending={action.pending}>保存资料</Button>
-          <Button variant="secondary" isDisabled={action.pending} onPress={() => exit('view')}>取消编辑</Button>
+          <Button variant="secondary" isDisabled={action.pending} onPress={() => exit('view')}>取消</Button>
         </div>
       </form> : <>
-        <AssetPreview asset={asset} root={root} />
-        <AssetFacts asset={asset} />
-        <section aria-label="引用此素材的数字人" className="space-y-2">
-          <h3 className="font-semibold">引用此素材的数字人</h3><Usage asset={asset} bootstrap={bootstrap} />
+        <section className="media-box media-form" aria-label="素材资料">
+          <AssetPreview asset={asset} root={root} />
+          <h2>素材资料</h2>
+          {asset.status !== 'ready' && <p role="status">{assetStatus(asset.status)}</p>}
+          <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{asset.description || '暂无说明'}</p>
+          <AssetTags tags={asset.tags} />
+          {canWrite && <div className="flex flex-wrap gap-2">
+            <Button isDisabled={action.pending || read.loading} onPress={() => {
+              setNotice(''); action.clearError(); setDraft(draftFor(asset));
+            }}>编辑资料</Button>
+            <Button variant="danger" className="media-danger" isDisabled={action.pending || read.loading} onPress={() => {
+              setNotice(''); action.clearError(); setDeleting(true);
+            }}>从素材库删除</Button>
+          </div>}
         </section>
-        {canWrite && <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onPress={() => { setNotice(''); setDraft(draftFor(asset)); }}>编辑资料</Button>
-          <DeleteAsset asset={asset} bootstrap={bootstrap} onConfirm={remove} />
-        </div>}
+        <section className="media-box media-form" aria-label="哪些数字人在用">
+          <h2>哪些数字人在用</h2><Usage asset={asset} bootstrap={bootstrap} />
+        </section>
       </>)}
     </RecordPage>
     <DiscardDialog open={Boolean(discard)} description="本次修改尚未保存，放弃后将清除这些输入。"
@@ -153,66 +179,71 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   const [selected, select] = useRecordSelection('asset');
   const [upload, setUpload] = useState(false);
   const [notice, setNotice] = useState('');
-  const humanPage = recordLink(bootstrap, 'digital-humans');
-  const params = new URLSearchParams({ limit: String(pageSize) });
+  const fromHuman = new URLSearchParams(window.location.search).get('fromHuman');
+  const returnHuman = fromHuman && /^[1-9]\d*$/.test(fromHuman)
+    ? recordLink(bootstrap, 'digital-humans', 'human', fromHuman) : undefined;
+  const params = new URLSearchParams({ limit: String(mediaPageSize) });
   if (offset) params.set('offset', String(offset));
   if (applied.keyword) params.set('keyword', applied.keyword);
   if (applied.kind) params.set('kind', applied.kind);
-  if (applied.tag) params.set('tag', applied.tag);
   const read = useMediaRead(root, '/assets?' + params, decodeAssetList, revision);
-  const tags = useMediaRead(root, '/assets/tags', decodeTags, revision);
-  const tagOptions = [...new Set([...(tags.data ?? []), ...(filters.tag ? [filters.tag] : [])])];
   const assets = read.data?.items ?? [];
-  const filtered = Boolean(applied.keyword || applied.kind || applied.tag);
+  const filtered = Boolean(applied.keyword || applied.kind);
   const refresh = () => setRevision((value) => value + 1);
+
+  function clearOrigin() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('fromHuman');
+    window.history.replaceState(window.history.state, '', url);
+  }
   function search(event: FormEvent) {
     event.preventDefault();
-    setApplied({ keyword: filters.keyword.trim(), kind: filters.kind, tag: filters.tag });
+    setApplied({ keyword: filters.keyword.trim(), kind: filters.kind });
     setOffset(0); setNotice('');
   }
-  function reset() { setFilters(emptyFilters); setApplied(emptyFilters); setOffset(0); }
   function uploaded(id: string, filename: string) {
     const resetMessage = filtered || offset ? '已清除筛选并返回第一页。' : '';
-    setUpload(false); reset(); refresh(); setNotice('已入库：' + filename + '。' + resetMessage); select(id);
+    setUpload(false); setFilters(emptyFilters); setApplied(emptyFilters); setOffset(0);
+    clearOrigin(); refresh(); setNotice('已入库：' + filename + '。' + resetMessage); select(id);
   }
-  if (upload) return <div className="erp-page"><UploadAsset bootstrap={bootstrap} backLabel="返回素材库" onClose={() => setUpload(false)} onComplete={uploaded} /></div>;
-  if (selected) return <div className="erp-page"><AssetDetail key={selected} bootstrap={bootstrap} id={selected} initialNotice={notice} onClose={() => { select(null); setNotice(''); }}
-    onChanged={refresh} onDeleted={(name) => {
-      select(null);
-      if (assets.length === 1 && assets[0].assetId === selected) setOffset(Math.max(0, offset - pageSize));
-      refresh(); setNotice('素材「' + name + '」已从素材库删除。');
+  if (upload) return <div className="erp-page media-workspace"><UploadAsset bootstrap={bootstrap} backLabel="返回素材库"
+    onClose={() => setUpload(false)} onComplete={uploaded} /></div>;
+  if (selected) return <div className="erp-page media-workspace"><AssetDetail key={selected} bootstrap={bootstrap} id={selected}
+    returnHuman={returnHuman} initialNotice={notice} onClose={() => { clearOrigin(); select(null); setNotice(''); }}
+    onChanged={refresh} onDeleted={() => {
+      clearOrigin(); select(null); setOffset(0); refresh(); setNotice('素材已从全局库删除。');
     }} /></div>;
-  return <div className="erp-page">
-    <PageIntro eyebrow="内容资产" title="全局素材库" description="上传、查找和整理图片与视频。一个素材可独立保存，也可被多个数字人共享。">
-      {humanPage && <a className="underline" href={humanPage}>前往数字人</a>}
-      {canWrite && <Button onPress={() => { setNotice(''); setUpload(true); }}>上传素材</Button>}
-    </PageIntro>
-    {!canWrite && <p>你可以查看素材资料和预览。上传或修改需要编辑权限。</p>}
-    {notice && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
-    <section className="erp-panel space-y-4" aria-label="素材列表">
-      <h2 className="text-xl font-semibold">素材列表</h2>
-      <form className="erp-filter-row" onSubmit={search}>
-        <TextField value={filters.keyword} onChange={(keyword) => setFilters({ ...filters, keyword })}>
-          <Label>搜索素材</Label><Input placeholder="输入名称、说明或标签" maxLength={120} />
+  return <div className="erp-page media-workspace">
+    <RecordPage eyebrow="资产管理" title="全局素材库" description="查看图片和视频，也可以查到每份素材被谁引用。"
+      actions={canWrite ? <Button onPress={() => { setNotice(''); setUpload(true); }}>上传素材</Button> : undefined}>
+      {!canWrite && <p>你可以查看素材资料和预览。上传或修改需要编辑权限。</p>}
+      {notice && <p role="status" className="media-status">{notice}</p>}
+      <form className="media-filters" onSubmit={search}>
+        <TextField value={filters.keyword} className="media-field" onChange={(keyword) => setFilters({ ...filters, keyword })}>
+          <Label>搜索素材</Label><Input placeholder="名称、说明或标签" maxLength={120} />
         </TextField>
         <MediaSelect label="素材类型" value={filters.kind} options={assetKinds}
-          onChange={(kind) => { setFilters({ ...filters, kind }); setApplied({ ...applied, kind }); setOffset(0); }} />
-        <MediaSelect label="筛选标签" value={filters.tag} options={[{ value: '', label: '全部标签' }, ...tagOptions.map((tag) => ({ value: tag, label: tag }))]}
-          onChange={(tag) => { setFilters({ ...filters, tag }); setApplied({ ...applied, tag }); setOffset(0); }} />
-        <Button type="submit">搜索</Button><Button variant="secondary" onPress={reset}>清除筛选</Button>
+          onChange={(kind) => setFilters({ ...filters, kind })} />
+        <Button type="submit">搜索</Button>
       </form>
-      <ReadStatus title="标签筛选" loading={tags.loading} error={tags.error} onRetry={tags.retry} />
       <ReadStatus title="素材列表" loading={read.loading} error={read.error} onRetry={read.retry} />
-      {!read.loading && !read.error && (assets.length > 0 ? <p>共 {read.data?.total} 项素材</p>
-        : <p>{filtered ? '没有符合当前筛选条件的素材。' : '素材库还没有文件。'}</p>)}
-      <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-        {assets.map((asset) => <li key={asset.assetId} className="min-w-0"><AssetCard asset={asset} root={root}
-          title={<h3 className="font-semibold [overflow-wrap:anywhere]">{asset.filename}</h3>}>
-          <Button variant="secondary" onPress={() => { setNotice(''); select(asset.assetId); }} aria-label={'查看 ' + asset.filename}>查看详情</Button>
+      {!read.loading && !read.error && !assets.length && <p className="media-box">没有符合条件的素材。</p>}
+      <ul className="media-grid" data-media-grid aria-label="素材列表">
+        {assets.map((asset) => <li key={asset.assetId} className="min-w-0"><AssetCard asset={asset} root={root}>
+          <h3 className="font-semibold [overflow-wrap:anywhere]">{asset.filename}</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip size="sm"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
+            <span className="text-muted">{asset.usageCount === null ? '引用数量未知'
+              : asset.usageCount === 0 || asset.usageCount === '0' ? '未被引用' : String(asset.usageCount) + ' 个数字人引用'}</span>
+            {asset.status !== 'ready' && <Chip size="sm"><Chip.Label>{assetStatus(asset.status)}</Chip.Label></Chip>}
+          </div>
+          <AssetTags tags={asset.tags} />
+          <Button variant="secondary" className="max-w-full whitespace-normal [overflow-wrap:anywhere]"
+            onPress={() => { clearOrigin(); setNotice(''); select(asset.assetId); }}>查看 {asset.filename}</Button>
         </AssetCard></li>)}
       </ul>
-      <MediaPagination name="素材分页" offset={offset} limit={pageSize}
-        hasNext={offset + pageSize < Number(read.data?.total ?? 0)} loading={read.loading} onChange={setOffset} />
-    </section>
+      <MediaPagination name="素材分页" offset={offset} limit={mediaPageSize} total={read.data?.total ?? 0}
+        hasNext={offset + mediaPageSize < Number(read.data?.total ?? 0)} loading={read.loading} onChange={setOffset} />
+    </RecordPage>
   </div>;
 }
