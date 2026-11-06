@@ -19,6 +19,7 @@ const loaders: Record<string, () => Promise<{ default: ComponentType<PageProps> 
   'video-publish': () => import('../pages/video-publish'),
   'media-assets': () => import('../pages/media-assets'),
   'digital-humans': () => import('../pages/digital-humans'),
+  runninghub: () => import('../pages/runninghub'),
   login: () => import('../pages/login'),
   'oauth-onboard': () => import('../pages/oauth-onboard'),
 };

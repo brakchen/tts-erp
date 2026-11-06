@@ -41,6 +41,7 @@ PAGES: tuple[PageDef, ...] = (
     PageDef("video-publish", "发", "视频发布", "数据工具"),
     PageDef("media-assets", "资", "资产管理", "内容资产"),
     PageDef("digital-humans", "人", "数字人", "内容资产"),
+    PageDef("runninghub", "换", "换装视频", "内容资产"),
 )
 
 PAGE_BY_ID: dict[str, PageDef] = {p.page_id: p for p in PAGES}
@@ -87,6 +88,7 @@ PAGE_MIN_WRITE_TIER: dict[str, str] = {
     "video-publish": "readwrite",
     "media-assets": "readwrite",
     "digital-humans": "readwrite",
+    "runninghub": "readwrite",
 }
 
 
@@ -108,4 +110,6 @@ def required_page_permission(route_path: str) -> str | None:
         return "page:users"
     if path.startswith("/v2/video-publish"):
         return "page:video-publish"
+    if path.startswith("/v2/runninghub/"):
+        return "page:runninghub"
     return None

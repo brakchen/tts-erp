@@ -10,6 +10,7 @@
 - **`tts-erp.service`**：uvicorn API，cwd=仓库根，`EnvironmentFile=.env`
 - **`tts-erp-sync.service`**：APScheduler worker，安装脚本 `prod-switch/install-sync-worker.sh`
 - **`tts-erp-publish.service`**：单设备 TikTok 发布 Worker；主循环保持 recovery/device-cleanup/publish 顺序，独立有界后台 coroutine 用短 DB session/cleanup lease 推进 spool 与 MinIO cleanup，慢对象删除不阻塞发布；user unit 为 `scripts/systemd/tts-erp-publish.service`
+- **`tts-erp-runninghub.service`**：独立换装生成 Worker（`tts_erp_v2.runninghub.worker`），复用 PostgreSQL/MinIO；数据库凭据级配额控制云端最多5个在途，已受理任务恢复优先。部署需人工安装并按实际目录覆盖 unit；接口开发不自动启动进程，见 [RunningHub](../api/runninghub.md)。
 - **`tts-erp-watchdog.timer`**：每 10min 巡检 → `logs/watchdog.log`
 - **`tts-erp-logrotate.timer`**：每 6h 检查 `logs/{stdout,stderr,watchdog}.log`，
   > 20MB 则滚动（`scripts/logrotate/tts-erp.conf`，copytruncate 适配 systemd

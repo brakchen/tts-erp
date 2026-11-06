@@ -106,6 +106,10 @@ def required_role(method: str, route_path: str) -> Role | None:
         if normalized_method in {"GET", "HEAD", "OPTIONS"}:
             return Role.READONLY
         return Role.READWRITE
+    if path.startswith("/v2/runninghub/"):
+        if normalized_method != "GET" and (path.endswith(("/config", "/account", "/workflow/check", "/resolve", "/dispatch/resume"))):
+            return Role.ADMIN
+        return Role.READONLY if normalized_method in {"GET", "HEAD", "OPTIONS"} else Role.READWRITE
     if path in _READONLY_EXACT or path.startswith(_READONLY_PREFIXES):
         return Role.READONLY
     return Role.ADMIN

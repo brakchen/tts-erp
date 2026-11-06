@@ -501,6 +501,12 @@ def media_assets_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse
   return _render_page("media-assets.html", current_page="media-assets")
 
 
+@router.get("/runninghub", response_class=HTMLResponse)
+def runninghub_page(request: Request) -> HTMLResponse:
+  """Outfit generation uses the shared authorized application shell."""
+  return frontend_pages.render_frontend_page(request, "runninghub")
+
+
 @router.get("/digital-humans", response_class=HTMLResponse)
 def digital_humans_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Digital human (persona) console: manage personas and their assets."""
