@@ -268,7 +268,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         error={action.error && (action.uncertain ? action.error : '保存未完成。' + action.error)} submitLabel="保存资料"
         onSubmit={save} onCancel={() => leave('view')} /> : <>
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="档案操作">
-          <Chip size="sm"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
+          <Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
           {canWrite && <>
             <Button variant="secondary" isDisabled={action.pending || read.loading} onPress={edit}>编辑档案</Button>
             {human.status === 'archived'
@@ -290,7 +290,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
               const href = assetPage && assetPage + '&fromHuman=' + encodeURIComponent(id);
               return <li key={asset.assetId} className="media-row">
                 <strong className="min-w-0 [overflow-wrap:anywhere]">{asset.filename}</strong>
-                <Chip size="sm"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
+                <Chip size="sm" className="media-chip"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
                 <AssetTags tags={asset.tags} />
                 <div className="flex flex-wrap gap-2">
                   {href && <a className={buttonVariants({ variant: 'secondary' })} href={href} aria-label={'查看素材 ' + asset.filename}>查看素材</a>}
@@ -368,7 +368,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         <ul aria-label="数字人档案">
           {humans.map((human) => <li key={human.digitalHumanId} className="media-row">
             <strong className="min-w-0 [overflow-wrap:anywhere]">{human.name}</strong>
-            <span className="flex flex-wrap items-center gap-2"><Chip size="sm"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>{human.assetIds.length} 项素材</span>
+            <span className="flex flex-wrap items-center gap-2"><Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>{human.assetIds.length} 项素材</span>
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" isDisabled={listAction.pending} aria-label={'查看档案 ' + human.name}
                 onPress={() => { setNotice(''); setOpenMode('view'); select(human.digitalHumanId); }}>查看档案</Button>

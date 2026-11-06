@@ -67,7 +67,7 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
         <div className="flex flex-wrap items-center gap-2">
           <Checkbox isSelected={hideAssociated} isDisabled={disabled}
             onChange={(checked) => change({ hideAssociated: checked, offset: 0 })}>
-            <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><Label>隐藏已选内容</Label></Checkbox.Content>
+            <Checkbox.Content><Checkbox.Control className="media-checkbox-control"><Checkbox.Indicator /></Checkbox.Control><Label>隐藏已选内容</Label></Checkbox.Content>
           </Checkbox>
           {hideAssociated && hasHidden && <span className="text-muted">已隐藏 {hiddenCount} 项已添加素材</span>}
         </div>
@@ -96,10 +96,10 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
             <Checkbox isSelected={alreadyAdded || toAdd.some((item) => item.assetId === asset.assetId)}
               isDisabled={alreadyAdded || disabled || read.loading || asset.status !== 'ready'}
               aria-describedby={alreadyAdded ? statusId : undefined} onChange={(checked) => toggle(asset, checked)}>
-              <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+              <Checkbox.Content><Checkbox.Control className="media-checkbox-control"><Checkbox.Indicator /></Checkbox.Control>
                 <Label className="min-w-0 [overflow-wrap:anywhere]">{asset.filename}</Label></Checkbox.Content>
             </Checkbox>
-            {alreadyAdded && <Chip id={statusId} size="sm" className="max-w-full"><Chip.Label className="whitespace-normal [overflow-wrap:anywhere]">已添加至「{human.name}」</Chip.Label></Chip>}
+            {alreadyAdded && <Chip id={statusId} size="sm" className="media-chip max-w-full"><Chip.Label className="whitespace-normal [overflow-wrap:anywhere]">已添加至「{human.name}」</Chip.Label></Chip>}
             <AssetTags tags={asset.tags} />
             <details className="media-card-preview">
               <summary>查看预览</summary>
