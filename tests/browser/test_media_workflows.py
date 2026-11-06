@@ -994,6 +994,7 @@ def seed_reference_content(run: MediaRun, tmp_path: Path) -> tuple[list[tuple[st
     (tmp_path / "reference-dataset.json").write_text(json.dumps({
         "marker": run.marker, "width": viewport["width"], "height": viewport["height"],
         "contentWidth": bounds(main(run.page).locator("[data-media-header]"))["width"],
+        "tagCatalog": tags(run),
         "assets": [{**spec, "name": assets[spec["id"]][0]} for spec in asset_specs],
         "people": [{**spec, "name": humans[spec["id"]][0]} for spec in people_specs],
     }, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -200,7 +200,18 @@ it('keeps selections across searches and retries only the remaining asset after 
   await user.click(await findButton('查看档案 ' + human.name));
   await user.click(await findButton('添加素材'));
   expect(button('确认添加（0）')).toBeDisabled();
-  expect(await screen.findByRole('img', { name: '图片预览 ' + asset.filename })).toBeVisible();
+  const card = (await screen.findByRole('checkbox', { name: asset.filename })).closest('li');
+  expect(card).not.toBeNull();
+  const thumbnails = within(card!).getAllByRole('img', { name: '图片预览 ' + asset.filename })
+    .filter((image) => image.closest('details') === null);
+  expect(thumbnails).toHaveLength(1);
+  for (const thumbnail of thumbnails) expect(thumbnail).toBeVisible();
+  const details = card!.querySelector('details');
+  expect(details).not.toBeNull();
+  expect(details).not.toHaveAttribute('open');
+  await user.click(within(details!).getByText('查看预览', { selector: 'summary' }));
+  expect(details).toHaveAttribute('open');
+  expect(within(details!).getByRole('img', { name: '图片预览 ' + asset.filename })).toBeVisible();
   await user.click(screen.getByRole('checkbox', { name: asset.filename }));
   await user.type(screen.getByLabelText('搜索素材'), second.filename);
   await user.click(button('搜索'));
