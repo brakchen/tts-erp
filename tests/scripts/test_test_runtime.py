@@ -129,6 +129,8 @@ def test_cache_revalidates_content_environment_installation_and_artifacts(tmp_pa
         lambda: (source.parent.parent / "package-lock.json").write_text("TEST_lock"),
         lambda: shared.write_text("TEST_shared_theme"),
         lambda: contract.write_text('{"TEST_contract": true}'),
+        lambda: (tmp_path / ".gitignore").write_text("TEST_scan_exclusion\n"),
+        lambda: (tmp_path / ".gitignore").unlink(),
         lambda: monkeypatch.setenv("VITE_TEST_CACHE_INPUT", "TEST_environment"),
         lambda: (tmp_path / "tts_erp_v2/static/frontend/TEST_current/main.js").write_text("TEST_corrupt"),
         lambda: (tmp_path / ".git/tts-test-frontend.json").write_text("malformed"),
@@ -139,7 +141,7 @@ def test_cache_revalidates_content_environment_installation_and_artifacts(tmp_pa
             assert not rebuilt.cached
         with prepare_frontend(tmp_path) as checked:
             assert checked.cached
-    assert len((tmp_path / "TEST_builds").read_text().splitlines()) == 8
+    assert len((tmp_path / "TEST_builds").read_text().splitlines()) == 10
     installed = tmp_path / "frontend/node_modules/.package-lock.json"
     installed.parent.mkdir(parents=True)
     installed.write_text("TEST_installation")

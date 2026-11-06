@@ -78,6 +78,10 @@ def input_key(root: Path) -> str:
     contract = root / "tests/fixtures/ad_daily_summary.json"
     if contract.exists():
         paths.append(contract)
+    # Tailwind's automatic source scanner respects the repository exclusions.
+    ignore = root / ".gitignore"
+    if ignore.exists():
+        paths.append(ignore)
     paths.append(root / "scripts/build_frontend.sh")
     # npm ci replaces this installation marker. Hand-editing node_modules is
     # unsupported: reinstall rather than sharing writable dependency installs.
