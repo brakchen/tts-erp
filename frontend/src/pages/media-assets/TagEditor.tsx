@@ -4,18 +4,20 @@ import { decodeTags } from './contracts';
 import { ReadStatus, useMediaRead } from './media-ui';
 
 /** Each input is one tag, including punctuation. Candidates stay server-owned. */
-export function withPendingTag(selected: readonly string[], input: string): string[] {
+export function withPendingTag(selected: readonly string[], input: string, catalog: readonly string[] = []): string[] {
   const tags = new Map<string, string>();
-  for (const value of [...selected, input]) {
+  const pending = input.trim().replace(/\s+/gu, ' ');
+  const saved = [...selected, ...catalog].find((tag) => tag.toLowerCase() === pending.toLowerCase());
+  for (const value of [...selected, saved ?? pending]) {
     const tag = value.trim().replace(/\s+/gu, ' ');
     if (tag && !tags.has(tag.toLowerCase())) tags.set(tag.toLowerCase(), tag);
   }
   return Array.from(tags.values());
 }
 
-export default function TagEditor({ root, selected, input, onChange, onInput, disabled = false }: {
+export default function TagEditor({ root, selected, input, onChange, onInput, onCatalog, disabled = false }: {
   root: string; selected: string[]; input: string; onChange: (tags: string[]) => void;
-  onInput: (value: string) => void; disabled?: boolean;
+  onInput: (value: string) => void; onCatalog: (tags: string[]) => void; disabled?: boolean;
 }) {
   const read = useMediaRead(root, '/assets/tags', decodeTags);
   const choices = withPendingTag([...(read.data ?? []), ...selected], '');
@@ -25,11 +27,11 @@ export default function TagEditor({ root, selected, input, onChange, onInput, di
   const [notice, setNotice] = useState('');
   const normalized = input.trim().replace(/\s+/gu, ' ');
   const existing = [...selection, ...choices].find((tag) => tag.toLowerCase() === normalized.toLowerCase());
-  // Canonical saved spelling also reaches the parent's pending-input submit
-  // path, including when candidates finish loading after the user has typed.
+  // Share the server catalog with the submit owner; preserve the raw draft
+  // while typing, including spaces after a prefix that is an existing tag.
   useEffect(() => {
-    if (existing && input !== existing) onInput(existing);
-  }, [existing, input, onInput]);
+    if (read.data) onCatalog(read.data);
+  }, [read.data, onCatalog]);
   function add() {
     if (disabled) return;
     setNotice('');

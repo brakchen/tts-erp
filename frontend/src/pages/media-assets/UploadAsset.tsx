@@ -42,6 +42,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
   const [filename, setFilename] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
+  const [tagCatalog, setTagCatalog] = useState<string[]>([]);
   const [ticket, setTicket] = useState<UploadTicket>();
   const [phase, setPhase] = useState<Phase>('draft');
   const [progress, setProgress] = useState(0);
@@ -137,7 +138,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
     let next: UploadTicket;
     try {
       next = await mediaWrite(root, '/assets/upload-url', 'POST', decodeUploadTicket, {
-        filename: filename.trim(), contentType: file.type, sizeBytes: file.size, tags: withPendingTag(tags, tagInput),
+        filename: filename.trim(), contentType: file.type, sizeBytes: file.size, tags: withPendingTag(tags, tagInput, tagCatalog),
       });
     } catch (failure) {
       setPrepareUncertain(uncertainResult(failure));
@@ -180,7 +181,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
       <TextField value={filename} onChange={setFilename} isDisabled={!editable}>
         <Label>素材名称</Label><Input maxLength={255} />
       </TextField>
-      <TagEditor root={root} selected={tags} input={tagInput} onChange={setTags} onInput={setTagInput} disabled={!editable} />
+      <TagEditor root={root} selected={tags} input={tagInput} onChange={setTags} onInput={setTagInput} onCatalog={setTagCatalog} disabled={!editable} />
       {phase === 'preparing' && <p role="status">正在准备上传…</p>}
       {phase === 'sending' && <>
         <p role="status">{progress === 100 ? '文件已发送，等待存储响应…' : '正在传输文件'}</p>

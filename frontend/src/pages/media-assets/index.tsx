@@ -76,6 +76,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   const [discard, setDiscard] = useState<'view' | 'close'>();
   const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState(initialNotice);
+  const [tagCatalog, setTagCatalog] = useState<string[]>([]);
   const asset = updated ?? read.data;
   const original = asset && draftFor(asset);
   const dirty = Boolean(draft && original && (draft.filename !== original.filename || draft.description !== original.description
@@ -94,7 +95,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   }
   async function save() {
     if (!asset || !draft || !original || !dirty || !draft.filename.trim() || !canWrite) return;
-    const tags = withPendingTag(draft.tags, draft.tagInput);
+    const tags = withPendingTag(draft.tags, draft.tagInput, tagCatalog);
     await action.run(async () => {
       const response = await mediaWrite(root, '/assets/' + id, 'PATCH', decodeAsset, {
         ...(draft.filename !== original.filename && { filename: draft.filename.trim() }),
@@ -134,7 +135,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         <TextField value={draft.description} isDisabled={action.pending} onChange={(description) => setDraft({ ...draft, description })}>
           <Label>素材说明</Label><TextArea rows={3} maxLength={2000} />
         </TextField>
-        <TagEditor root={root} selected={draft.tags} input={draft.tagInput} disabled={action.pending}
+        <TagEditor root={root} selected={draft.tags} input={draft.tagInput} onCatalog={setTagCatalog} disabled={action.pending}
           onChange={(tags) => setDraft((previous) => previous && { ...previous, tags })}
           onInput={(tagInput) => setDraft((previous) => previous && { ...previous, tagInput })} />
         <p className="text-sm text-muted">保存后，所有引用此素材的位置都会显示更新后的资料。</p>
