@@ -86,3 +86,32 @@ def test_termination_allows_children_to_run_cleanup_traps(tmp_path, monkeypatch)
     ready = {path.name.removeprefix("TEST_ready_") for path in tmp_path.glob("TEST_ready_*")}
     cleaned = {path.name.removeprefix("TEST_cleaned_") for path in tmp_path.glob("TEST_cleaned_*")}
     assert ready == cleaned and len(cleaned) == 2
+
+
+def test_explicit_database_override_is_rejected_before_starting_workers(tmp_path, monkeypatch):
+    project(tmp_path, monkeypatch)
+    monkeypatch.setenv("TTS_ERP_TEST_DB_NAME", "tts_erp_test_TEST_fixed")
+    with pytest.raises(ValueError, match="generated per-worker"):
+        parallel.run(FILES, 2)
+    assert not list(tmp_path.glob("TEST_executed_*"))
+
+
+def test_prewarm_lease_is_released_before_children_revalidate_changed_inputs(tmp_path, monkeypatch):
+    project(tmp_path, monkeypatch)
+    import fcntl
+
+    lock_path = tmp_path / "TEST_build.lock"
+
+    @contextlib.contextmanager
+    def warmup(root):
+        with lock_path.open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH)
+            yield SimpleNamespace(cached=True)
+
+    monkeypatch.setattr(parallel, "prepare_frontend", warmup)
+    # Represents the EX rebuild needed after a child loads differing .env.test
+    # or a source save. An inherited parent SH lease would make flock fail.
+    (tmp_path / "scripts/test_isolated.sh").write_text(
+        "set -eu\nflock -x -w 2 TEST_build.lock -c 'echo TEST_rebuilt'\n",
+    )
+    assert parallel.run(FILES, 2) == 0

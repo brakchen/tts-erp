@@ -169,6 +169,14 @@ class Renderer:
             # Suspense boundary; data/command success remains the case's oracle.
             page.locator("#frontend-root main").wait_for()
             page.get_by_text("加载页面…", exact=True).wait_for(state="hidden")
+        if self._key:
+            # Deployed read-only E2E callers still inspect arbitrary live data.
+            # Preserve their existing readiness until that separate suite has
+            # explicit data or empty-state contracts; never use TEST fixtures.
+            try:
+                page.wait_for_load_state("networkidle", timeout=8_000)
+            except Exception:  # noqa: BLE001 - preserve the live polling-page contract
+                logger.debug("Live network-idle readiness check did not finish")
         page.evaluate("document.fonts.ready")
         record_phase("browser_ready", time.monotonic() - started)
         return page

@@ -33,7 +33,8 @@ def partition(targets: list[str], workers: int) -> list[list[str]]:
         if module not in SAFE_FILES or not (ROOT / module).is_file():
             raise ValueError("Parallel browser target is outside the reviewed safe file list")
         peers = modules.setdefault(module, [])
-        if peers and (module in peers or target == module):
+        if any(target == peer or target.startswith((peer + "::", peer + "["))
+               or peer.startswith((target + "::", target + "[")) for peer in peers):
             raise ValueError("Overlapping file/node selections are not supported")
         peers.append(target)
     groups: list[list[str]] = [[] for _ in range(min(workers, len(modules)))]
@@ -44,12 +45,16 @@ def partition(targets: list[str], workers: int) -> list[list[str]]:
 
 def run(targets: list[str], workers: int) -> int:
     groups = partition(targets, workers)
+    if os.environ.get("TTS_ERP_TEST_DB_NAME"):
+        raise ValueError("Parallel browser runs require generated per-worker database names; unset TTS_ERP_TEST_DB_NAME")
     started = time.monotonic()
     # Prewarm under EX before starting consumers; readers then share one lease.
     # There is no parent database. Each child invokes the full isolated wrapper.
-    with ExitStack() as resources:
-        result = resources.enter_context(prepare_frontend(ROOT))
+    with prepare_frontend(ROOT) as result:
         print(f"[browser-parallel] workers={len(groups)} cache={'hit' if result.cached else 'miss'}", flush=True)
+    # Children revalidate after loading .env.test. Release the warmup lease so
+    # an input/environment change cannot deadlock a child needing an EX build.
+    with ExitStack() as resources:
         directory = Path(resources.enter_context(tempfile.TemporaryDirectory(prefix="tts-browser-parallel-")))
         children = []
         for index, group in enumerate(groups):

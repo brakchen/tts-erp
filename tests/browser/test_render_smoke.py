@@ -12,7 +12,6 @@ runtime-configs 的裸 ``<code>`` 命中 Bootstrap SFMono 栈 —— 两个问�
 from __future__ import annotations
 
 import pytest
-from tests.support.page_readiness import wait_canned_page
 from render_support import (
     PAGE_SLUGS,
     font_stacks,
@@ -20,6 +19,8 @@ from render_support import (
     overflow_report,
     page_path,
 )
+
+from tests.support.page_readiness import wait_canned_page
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
