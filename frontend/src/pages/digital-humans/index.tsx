@@ -1,36 +1,32 @@
 import { useState } from 'react';
-import { Button, Card, Input, Label, TextArea, TextField } from '@heroui/react';
+import { Button, Chip, Input, Label, TextArea, TextField, buttonVariants } from '@heroui/react';
 import { pathFor } from '../../shared/api/paths';
 import type { PageProps } from '../../shared/contracts';
-import PageIntro from '../../shared/PageIntro';
-import AssetCard from '../media-assets/AssetCard';
-import DeleteConfirmation from '../media-assets/DeleteConfirmation';
+import OperationConfirmation from '../media-assets/OperationConfirmation';
 import UploadAsset from '../media-assets/UploadAsset';
 import {
   decodeDigitalHuman, decodeDigitalHumanDetail, decodeDigitalHumanList, type Asset, type DigitalHuman, type DigitalHumanDetail,
 } from '../media-assets/contracts';
 import {
-  ActionError, DiscardDialog, MediaPagination, MediaSelect, ReadStatus, RecordPage,
-  createdAtLabel, humanStatus, mediaWrite, recordLink, useLeaveGuard, useMediaAction, useMediaRead, useRecordSelection,
+  ActionError, AssetTags, DiscardDialog, MediaPagination, ReadStatus, RecordPage,
+  assetType, humanStatus, mediaWrite, recordLink, useLeaveGuard, useMediaAction, useMediaRead, useRecordSelection,
 } from '../media-assets/media-ui';
 import AssetPicker, { emptyPickerDraft } from './AssetPicker';
 
-const pageSize = 24;
-const statusOptions = [
-  { value: 'active', label: '启用中' },
-  { value: 'archived', label: '已归档' },
-  { value: '', label: '全部状态' },
-];
+// The persona endpoint is a bounded array contract, unlike the asset total/offset envelope.
+const humanPageSize = 24;
 const emptyDraft = { name: '', description: '' };
 type Draft = typeof emptyDraft;
+type HumanStatus = 'active' | 'archived';
+type Operation = 'archive' | 'delete' | Asset;
 
-function HumanForm({ draft, setDraft, pending, error, submitLabel, cancelLabel, onSubmit, onCancel, unchanged = false }: {
+function HumanForm({ draft, setDraft, pending, error, submitLabel, onSubmit, onCancel, unchanged = false }: {
   draft: Draft; setDraft: (draft: Draft) => void; pending: boolean; error: string;
-  submitLabel: string; cancelLabel: string; onSubmit: () => void; onCancel: () => void; unchanged?: boolean;
+  submitLabel: string; onSubmit: () => void; onCancel: () => void; unchanged?: boolean;
 }) {
-  return <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+  return <form className="media-box media-form" aria-label="档案资料" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
     <TextField value={draft.name} isDisabled={pending} onChange={(name) => setDraft({ ...draft, name })}>
-      <Label>名称</Label><Input maxLength={120} />
+      <Label>数字人名称</Label><Input maxLength={120} />
     </TextField>
     <TextField value={draft.description} isDisabled={pending} onChange={(description) => setDraft({ ...draft, description })}>
       <Label>人设说明</Label><TextArea rows={3} maxLength={2000} />
@@ -38,7 +34,7 @@ function HumanForm({ draft, setDraft, pending, error, submitLabel, cancelLabel, 
     <ActionError message={error} />
     <div className="flex flex-wrap gap-2">
       <Button type="submit" isDisabled={unchanged || !draft.name.trim()} isPending={pending}>{submitLabel}</Button>
-      <Button variant="secondary" isDisabled={pending} onPress={onCancel}>{cancelLabel}</Button>
+      <Button variant="secondary" isDisabled={pending} onPress={onCancel}>取消</Button>
     </div>
   </form>;
 }
@@ -66,20 +62,20 @@ function CreateHuman({ root, onClose, onCreated }: {
     });
   }
   return <>
-    <RecordPage title="新建数字人" pending={action.pending} onClose={close} backLabel="返回数字人列表">
-      <p>先建立人设档案。创建后会打开档案，你可以选择已有素材或上传新素材。</p>
+    <RecordPage eyebrow="数字人 / 档案资料" title="新建数字人">
       {action.uncertain && <p>再次提交前，请核对是否已经创建同名档案。 <a className="underline"
         href={pathFor(root, '/v2/pages/digital-humans')} target="_blank" rel="noreferrer">在新标签页核对档案</a></p>}
       <HumanForm draft={draft} setDraft={setDraft} pending={action.pending}
-        error={action.error && (action.uncertain ? action.error : '创建未完成。' + action.error)} submitLabel="创建数字人" cancelLabel="取消创建"
+        error={action.error && (action.uncertain ? action.error : '创建未完成。' + action.error)} submitLabel="创建档案"
         onSubmit={create} onCancel={close} />
     </RecordPage>
     <DiscardDialog open={discard} description="尚未保存的档案资料将清除。" onKeep={() => setDiscard(false)} onDiscard={onClose} />
   </>;
 }
 
-function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDeleted, initialMode = 'view' }: PageProps & {
-  id: string; initialNotice: string; onClose: () => void; onChanged: () => void; onDeleted: (name: string) => void; initialMode?: 'view' | 'pick';
+function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDeleted, onStatusChanged, initialMode = 'view' }: PageProps & {
+  id: string; initialNotice: string; onClose: () => void; onChanged: () => void; onDeleted: (name: string) => void;
+  onStatusChanged: (status: HumanStatus, name: string) => void; initialMode?: 'view' | 'pick';
 }) {
   const root = bootstrap.rootPath;
   const canWrite = bootstrap.roleCapabilities?.readwrite === true;
@@ -88,13 +84,12 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   const action = useMediaAction();
   const [mode, setMode] = useState<'view' | 'pick' | 'upload'>(initialMode);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [operation, setOperation] = useState<Operation>();
   const [discard, setDiscard] = useState<'view' | 'close'>();
   const [pickerDraft, setPickerDraft] = useState(emptyPickerDraft);
-  const [uploadOrigin, setUploadOrigin] = useState<'view' | 'pick'>('view');
   const [notice, setNotice] = useState(initialNotice);
   const [pickerNotice, setPickerNotice] = useState('');
-  // A read can replace an acknowledged write only in that write's generation.
-  // Advancing the generation hides older reads synchronously, before effects.
+  // Only a read from the acknowledged write's generation can replace its result.
   const human = read.data ?? snapshot.acknowledged;
   function acknowledge(value: DigitalHumanDetail) {
     setSnapshot((previous) => ({ revision: previous.revision + 1, acknowledged: value }));
@@ -134,22 +129,19 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
       if (updated.digitalHumanId !== id) throw new Error('保存结果不符');
       acknowledge({ ...human, ...updated });
       setDraft(null);
-      setNotice('数字人资料已保存。');
+      setNotice('档案资料已保存。');
       onChanged();
     });
   }
 
-  function archive() {
+  async function changeStatus(status: HumanStatus) {
     if (!human || !canWrite) return;
-    const archived = human.status !== 'archived';
-    void action.run(async () => {
-      const updated = await mediaWrite(root, '/digital-humans/' + id, 'PATCH', decodeDigitalHuman, {
-        status: archived ? 'archived' : 'active',
-      });
+    await action.run(async () => {
+      const updated = await mediaWrite(root, '/digital-humans/' + id, 'PATCH', decodeDigitalHuman, { status });
       if (updated.digitalHumanId !== id) throw new Error('归档状态结果不符');
       acknowledge({ ...human, ...updated });
-      setNotice(archived ? '已归档。资产引用已保留，可在「已归档」列表找到此档案。' : '已恢复为启用，可在「启用中」列表找到此档案。');
-      onChanged();
+      if (status === 'active') setNotice('档案已恢复，原有引用已保留。');
+      onStatusChanged(status, human.name);
     });
   }
 
@@ -158,7 +150,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
     await action.run(async () => {
       await mediaWrite(root, '/digital-humans/' + id, 'DELETE', () => undefined);
       onDeleted(human.name);
-    }, true);
+    });
   }
 
   function attach(assets: readonly Asset[]) {
@@ -178,7 +170,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         }
       } finally {
         if (added) {
-          const message = '已添加 ' + added + ' 项资产。';
+          const message = '已添加 ' + added + ' 项素材。';
           setPickerNotice(message);
           setNotice(message);
           onChanged();
@@ -197,18 +189,25 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         ...human, assets: human.assets.filter((item) => item.assetId !== asset.assetId),
         assetIds: human.assetIds.filter((item) => item !== asset.assetId),
       });
-      setNotice('已从当前数字人移除「' + asset.filename + '」。资产库中的文件和其他引用仍可使用。');
+      setOperation(undefined);
+      setNotice('已从当前档案移除。');
       onChanged();
-    }, true);
+    });
   }
 
-  function begin(next: 'pick' | 'upload') {
+  function ask(next: Operation) {
+    if (action.pending || read.loading || !canWrite) return;
+    action.clearError();
+    setNotice('');
+    setOperation(next);
+  }
+
+  function beginPicker() {
     setPickerNotice('');
     setNotice('');
     action.clearError();
-    if (next === 'pick') setPickerDraft(emptyPickerDraft);
-    if (next === 'upload') setUploadOrigin('view');
-    setMode(next);
+    setPickerDraft(emptyPickerDraft);
+    setMode('pick');
   }
 
   function backFromPicker() {
@@ -221,76 +220,84 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
     return <AssetPicker root={root} human={human} pending={action.pending} error={action.error}
       notice={pickerNotice} onAdd={attach} onClose={backFromPicker} draft={pickerDraft} onDraft={setPickerDraft}
       targetRead={read}
-      onUpload={() => { action.clearError(); setUploadOrigin('pick'); setMode('upload'); }} />;
+      onUpload={() => { action.clearError(); setMode('upload'); }} />;
   }
 
   if (human && mode === 'upload') {
     const selectedCount = pickerDraft.selected.filter((asset) => !human.assetIds.includes(asset.assetId)).length;
-    return <UploadAsset bootstrap={bootstrap} target={{ id, name: human.name }}
-      backLabel={uploadOrigin === 'pick' ? '返回选择素材' : '返回档案'} selectionCount={selectedCount}
+    return <UploadAsset bootstrap={bootstrap} target={{ id, name: human.name }} selectionCount={selectedCount}
       onClose={(assetId) => {
-        setMode(uploadOrigin);
-        const message = assetId ? '新素材已保留在全局素材库，尚未确认添加至此档案，可在选择页继续添加。' : '';
-        if (uploadOrigin === 'pick') setPickerNotice(message); else setNotice(message);
+        setMode('pick');
+        setPickerNotice(assetId ? '新素材已保留在全局素材库，尚未添加至此档案，可继续选择添加。' : '');
       }}
       onComplete={(assetId, filename) => {
-        // Preserve A/B and the picker query while recording C's successful association.
+        // Keep A/B pending while acknowledging C. Do not synthesize C's file metadata.
         acknowledge({ ...human, assetIds: [...new Set([...human.assetIds, assetId])] });
-        setMode(uploadOrigin);
-        onChanged();
-        const message = '「' + filename + '」已入库并添加到此档案。' + (selectedCount ? '原有 ' + selectedCount + ' 项待添加选择已保留，请继续确认。' : '');
+        const message = '「' + filename + '」已入库并添加到此档案。'
+          + (selectedCount ? '原有 ' + selectedCount + ' 项待添加选择已保留，请继续确认。' : '');
         setNotice(message); setPickerNotice(message);
+        if (!selectedCount) setPickerDraft(emptyPickerDraft);
+        setMode(selectedCount ? 'pick' : 'view');
+        onChanged();
       }} />;
   }
 
+  if (human && operation) {
+    const unlinkAsset = typeof operation === 'string' ? undefined : operation;
+    const archiving = operation === 'archive';
+    return <OperationConfirmation
+      title={archiving ? '归档「' + human.name + '」'
+        : unlinkAsset ? '从「' + human.name + '」移除「' + unlinkAsset.filename + '」' : '删除档案「' + human.name + '」'}
+      description={archiving ? '档案移到已归档列表，素材引用保留，可随时恢复。'
+        : unlinkAsset ? '仅解除当前档案的引用。素材及其他数字人的引用会保留。'
+          : '删除该档案及其引用关系。全局素材库中的文件会保留。'}
+      pending={action.pending} error={action.error} confirmDisabled={read.loading}
+      confirmLabel={archiving ? '确认归档' : unlinkAsset ? '确认移除' : '确认删除'} danger={!archiving}
+      onCancel={() => { if (!action.pending) { action.clearError(); setOperation(undefined); } }}
+      onConfirm={() => archiving ? changeStatus('archived') : unlinkAsset ? detach(unlinkAsset) : remove()} />;
+  }
+
   return <>
-    <RecordPage title={human ? (draft ? '编辑数字人 · ' : '数字人档案 · ') + human.name : '数字人档案'}
-      target={human?.name} backLabel={draft ? '返回档案' : '返回数字人列表'} pending={action.pending} onClose={() => leave(draft ? 'view' : 'close')}>
-      {notice && !draft && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
+    <RecordPage eyebrow={draft ? '数字人 / 档案资料' : '数字人 / 档案详情'}
+      title={draft ? '编辑档案' : human?.name ?? '数字人档案'}
+      description={!draft && human ? human.description || '暂无人设说明' : undefined}
+      {...(!draft && { onClose: () => leave('close'), backLabel: '返回数字人列表', pending: action.pending })}>
+      {notice && !draft && <p role="status" className="media-status">{notice}</p>}
       <ReadStatus title="数字人档案" loading={read.loading} error={read.error} onRetry={read.retry} />
-      {human && (draft ? <>
-        <p>在此修改档案名称与人设说明。素材在详情的「引用素材」中管理。</p>
-        <HumanForm draft={draft} setDraft={setDraft} pending={action.pending} unchanged={!dirty}
-          error={action.error && (action.uncertain ? action.error : '保存未完成。' + action.error)} submitLabel="保存资料" cancelLabel="取消编辑"
-          onSubmit={save} onCancel={() => leave('view')} />
-      </> : <>
-        <div className="space-y-2">
-          <p className="font-semibold">{humanStatus(human.status)}</p>
-          <p className="text-sm text-muted">{createdAtLabel(human.createdAt)}</p>
-          <p className="whitespace-pre-wrap break-words">{human.description || '暂未填写人设说明。'}</p>
-          <p className="text-sm text-muted">{human.status === 'archived'
-            ? '已归档的档案可查看和维护，保留原来的资产引用。可以随时恢复为启用。'
-            : '启用中的档案显示在默认列表。暂时不用时可以归档，引用的资产会保留。'}</p>
+      {human && (draft ? <HumanForm draft={draft} setDraft={setDraft} pending={action.pending} unchanged={!dirty}
+        error={action.error && (action.uncertain ? action.error : '保存未完成。' + action.error)} submitLabel="保存资料"
+        onSubmit={save} onCancel={() => leave('view')} /> : <>
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="档案操作">
+          <Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
+          {canWrite && <>
+            <Button variant="secondary" isDisabled={action.pending || read.loading} onPress={edit}>编辑档案</Button>
+            {human.status === 'archived'
+              ? <Button variant="secondary" isPending={action.pending} isDisabled={read.loading} onPress={() => void changeStatus('active')}>恢复档案</Button>
+              : <Button variant="secondary" isDisabled={action.pending || read.loading} onPress={() => ask('archive')}>归档档案</Button>}
+            <Button variant="danger" className="media-danger" isDisabled={action.pending || read.loading} onPress={() => ask('delete')}>删除档案</Button>
+          </>}
         </div>
         <ActionError message={action.error} />
-        {canWrite && <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" isDisabled={action.pending || read.loading} onPress={edit}>编辑资料</Button>
-          <Button variant={human.status === 'archived' ? 'primary' : 'secondary'} isPending={action.pending} isDisabled={read.loading} onPress={archive}>
-            {human.status === 'archived' ? '恢复为启用' : '归档数字人'}
-          </Button>
-          <DeleteConfirmation label="删除数字人" name={human.name} isDisabled={action.pending || read.loading}
-            description="档案和它的引用关系将被移除。资产库中的文件以及其他数字人的引用会保留。" onConfirm={remove} />
-        </div>}
-        <section aria-label="引用素材" className="space-y-3 border-t border-default pt-3">
-          <h3 className="text-lg font-semibold">引用素材</h3>
-          <p>素材来自全局资产库，可以在多个数字人之间共享。</p>
-          {canWrite && <div className="flex flex-wrap gap-2">
-            <Button isDisabled={action.pending || read.loading} onPress={() => begin('pick')}>选择已有素材</Button>
-            <Button variant="secondary" isDisabled={action.pending || read.loading} onPress={() => begin('upload')}>上传新素材</Button>
-          </div>}
-          {human.assets.length === 0 && !read.loading && <p>此档案还没有引用素材。</p>}
-          <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <section aria-label="引用素材" className="media-box media-form">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2>引用素材 · {human.assetIds.length} 项</h2>
+            {canWrite && <Button isDisabled={action.pending || read.loading} onPress={beginPicker}>添加素材</Button>}
+          </div>
+          {human.assets.length === 0 && !read.loading && <p className="text-muted">还没有引用素材。点击「添加素材」从素材库选择。</p>}
+          <ul aria-label="已引用素材" className="media-stack">
             {human.assets.map((asset) => {
-              const href = recordLink(bootstrap, 'media-assets', 'asset', asset.assetId);
-              return <li key={asset.assetId} className="min-w-0"><AssetCard asset={asset} root={root}>
-                <div className="flex flex-wrap items-center gap-2">
-                  {href && <a className="underline" href={href} aria-label={'在素材库查看 ' + asset.filename}>在素材库查看</a>}
-                  {canWrite && <DeleteConfirmation remove label={'从当前数字人移除 ' + asset.filename} name={asset.filename}
-                    isDisabled={action.pending || read.loading}
-                    description={'将解除「' + human.name + '」对这个素材的引用。文件和其他数字人的引用会保留。'}
-                    onConfirm={() => detach(asset)} />}
+              const assetPage = recordLink(bootstrap, 'media-assets', 'asset', asset.assetId);
+              const href = assetPage && assetPage + '&fromHuman=' + encodeURIComponent(id);
+              return <li key={asset.assetId} className="media-row">
+                <strong className="min-w-0 [overflow-wrap:anywhere]">{asset.filename}</strong>
+                <Chip size="sm" className="media-chip"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
+                <AssetTags tags={asset.tags} />
+                <div className="flex flex-wrap gap-2">
+                  {href && <a className={buttonVariants({ variant: 'secondary' })} href={href} aria-label={'查看素材 ' + asset.filename}>查看素材</a>}
+                  {canWrite && <Button variant="secondary" isDisabled={action.pending || read.loading}
+                    aria-label={'移除引用 ' + asset.filename} onPress={() => ask(asset)}>移除引用</Button>}
                 </div>
-              </AssetCard></li>;
+              </li>;
             })}
           </ul>
         </section>
@@ -304,10 +311,7 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
 export default function DigitalHumans({ bootstrap }: PageProps) {
   const root = bootstrap.rootPath;
   const canWrite = bootstrap.roleCapabilities?.readwrite === true;
-  const assetsPage = recordLink(bootstrap, 'media-assets');
-  const [keyword, setKeyword] = useState('');
-  const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('active');
+  const [status, setStatus] = useState<HumanStatus>('active');
   const [offset, setOffset] = useState(0);
   const [revision, setRevision] = useState(0);
   const [selected, select] = useRecordSelection('human');
@@ -315,87 +319,76 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   const [openMode, setOpenMode] = useState<'view' | 'pick'>('view');
   const listAction = useMediaAction();
   const [notice, setNotice] = useState('');
-  const params = new URLSearchParams({ limit: String(pageSize + 1) });
-  if (query) params.set('keyword', query);
-  if (status) params.set('status', status);
+  const params = new URLSearchParams({ limit: String(humanPageSize + 1), status });
   if (offset) params.set('offset', String(offset));
   const read = useMediaRead(root, '/digital-humans?' + params, decodeDigitalHumanList, revision);
-  const humans = read.data?.slice(0, pageSize) ?? [];
+  const humans = read.data?.slice(0, humanPageSize) ?? [];
   const refresh = () => setRevision((value) => value + 1);
 
   function created(human: DigitalHuman) {
-    const reset = Boolean(query || offset || status !== 'active');
+    const reset = Boolean(offset || status !== 'active');
     setCreating(false);
-    setKeyword('');
-    setQuery('');
     setStatus('active');
     setOffset(0);
     refresh();
-    setNotice('已创建数字人：' + human.name + '。接下来可以添加素材。' + (reset ? '列表已返回「启用中」首页。' : ''));
+    setNotice('档案已创建。现在可以添加素材。' + (reset ? '列表已返回「启用中」首页。' : ''));
     setOpenMode('view');
     select(human.digitalHumanId);
   }
 
-  if (creating) return <div className="erp-page"><CreateHuman root={root} onClose={() => setCreating(false)} onCreated={created} /></div>;
-  if (selected) return <div className="erp-page"><HumanDetail key={selected} bootstrap={bootstrap} id={selected} initialNotice={notice} initialMode={openMode}
-    onClose={() => { select(null); setNotice(''); }} onChanged={refresh} onDeleted={(name) => {
+  function statusChanged(next: HumanStatus) {
+    if (next === 'archived') select(null);
+    setStatus(next);
+    setOffset(0);
+    refresh();
+    setNotice(next === 'archived' ? '档案已移到「已归档」。' : '档案已恢复，原有引用已保留。');
+  }
+
+  if (creating) return <div className="erp-page media-workspace"><CreateHuman root={root} onClose={() => setCreating(false)} onCreated={created} /></div>;
+  if (selected) return <div className="erp-page media-workspace"><HumanDetail key={selected} bootstrap={bootstrap} id={selected} initialNotice={notice} initialMode={openMode}
+    onClose={() => { select(null); setNotice(''); }} onChanged={refresh} onStatusChanged={statusChanged} onDeleted={() => {
       select(null);
-      if (humans.length === 1 && humans[0].digitalHumanId === selected) setOffset(Math.max(0, offset - pageSize));
-      refresh(); setNotice('数字人「' + name + '」已删除。引用过的素材仍在素材库中。');
+      if (humans.length === 1 && humans[0].digitalHumanId === selected) setOffset(Math.max(0, offset - humanPageSize));
+      refresh(); setNotice('档案已删除。素材仍在全局库。');
     }} /></div>;
 
-  return <div className="erp-page">
-    <PageIntro eyebrow="内容资产" title="数字人档案" description="在这里建立和维护人设档案，再把适用的图片和视频添加到档案。素材集中保存在全局资产库。">
-      {assetsPage && <a className="underline" href={assetsPage}>前往资产库</a>}
-      {canWrite && <Button onPress={() => { setNotice(''); setCreating(true); }}>新建数字人</Button>}
-    </PageIntro>
-    {!canWrite && <p>你可以查看档案和引用素材。创建或修改档案需要编辑权限。</p>}
-    {notice && !selected && <p role="status" className="[overflow-wrap:anywhere]">{notice}</p>}
-    <section className="erp-panel space-y-4" aria-label="数字人列表">
-      <h2 className="text-xl font-semibold">数字人列表</h2>
-      <form className="erp-filter-row" onSubmit={(event) => { event.preventDefault(); setQuery(keyword.trim()); setOffset(0); setNotice(''); }}>
-        <TextField value={keyword} onChange={setKeyword}>
-          <Label>搜索数字人</Label><Input placeholder="输入名称或人设说明" maxLength={120} />
-        </TextField>
-        <MediaSelect label="档案状态" value={status} options={statusOptions}
-          onChange={(next) => { setStatus(next); setOffset(0); setNotice(''); }} />
-        <Button type="submit">搜索</Button>
-        <Button variant="secondary" onPress={() => {
-          setKeyword(''); setQuery(''); setStatus('active'); setOffset(0); setNotice('');
-        }}>清除筛选</Button>
-      </form>
+  return <div className="erp-page media-workspace">
+    <RecordPage eyebrow="数字人" title="数字人列表" description="从列表直接打开档案或给指定数字人添加素材。"
+      actions={canWrite && <Button isDisabled={listAction.pending} onPress={() => { setNotice(''); setCreating(true); }}>新建数字人</Button>}>
+      {notice && <p role="status" className="media-status">{notice}</p>}
+      <div className="flex flex-wrap gap-2" role="group" aria-label="档案状态">
+        {(['active', 'archived'] as const).map((value) => <Button key={value}
+          variant={status === value ? 'primary' : 'secondary'} aria-pressed={status === value} isDisabled={listAction.pending}
+          onPress={() => { setStatus(value); setOffset(0); setNotice(''); }}>{humanStatus(value)}</Button>)}
+      </div>
       <ReadStatus title="数字人列表" loading={read.loading} error={read.error} onRetry={read.retry} />
-      {!read.loading && !read.error && humans.length === 0 && (
-        <p>{query ? '没有符合搜索条件的档案。' : status === 'archived' ? '当前没有已归档的数字人。'
-          : '当前列表还没有数字人。' + (canWrite ? '点击「新建数字人」建立档案。' : '')}</p>
-      )}
       <ActionError message={listAction.error} />
-      <ul className="space-y-3">
-        {humans.map((human) => <li key={human.digitalHumanId} className="min-w-0"><Card><Card.Content>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <h3 className="font-semibold [overflow-wrap:anywhere]">{human.name}</h3>
-              <p>{humanStatus(human.status)} · {human.assetIds.length} 个引用素材</p>
-              <p className="text-sm text-muted">{createdAtLabel(human.createdAt)}</p>
-              {human.description && <p className="line-clamp-2 break-words">{human.description}</p>}
-            </div>
+      <div className="media-box">
+        {!read.loading && !read.error && humans.length === 0 && <p>当前没有档案。</p>}
+        <ul aria-label="数字人档案">
+          {humans.map((human) => <li key={human.digitalHumanId} className="media-row">
+            <strong className="min-w-0 [overflow-wrap:anywhere]">{human.name}</strong>
+            <span className="flex flex-wrap items-center gap-2"><Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>{human.assetIds.length} 项素材</span>
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" aria-label={'查看档案 ' + human.name}
+              <Button variant="secondary" isDisabled={listAction.pending} aria-label={'查看档案 ' + human.name}
                 onPress={() => { setNotice(''); setOpenMode('view'); select(human.digitalHumanId); }}>查看档案</Button>
-              {canWrite && <Button aria-label={'添加素材 ' + human.name}
-                onPress={() => { setNotice(''); setOpenMode('pick'); select(human.digitalHumanId); }}>添加素材</Button>}
-              {canWrite && human.status === 'archived' && <Button variant="secondary" aria-label={'恢复为启用 ' + human.name}
-                isPending={listAction.pending} onPress={() => void listAction.run(async () => {
-                  const updated = await mediaWrite(root, '/digital-humans/' + human.digitalHumanId, 'PATCH', decodeDigitalHuman, { status: 'active' });
-                  if (updated.digitalHumanId !== human.digitalHumanId) throw new Error('恢复结果不符');
-                  setNotice('「' + human.name + '」已恢复为启用。'); refresh();
-                })}>恢复为启用</Button>}
+              {canWrite && (human.status === 'archived'
+                ? <Button variant="secondary" aria-label={'恢复档案 ' + human.name} isPending={listAction.pending}
+                    onPress={() => void listAction.run(async () => {
+                      const updated = await mediaWrite(root, '/digital-humans/' + human.digitalHumanId, 'PATCH', decodeDigitalHuman, { status: 'active' });
+                      if (updated.digitalHumanId !== human.digitalHumanId) throw new Error('恢复结果不符');
+                      statusChanged('active');
+                      setOpenMode('view');
+                      select(human.digitalHumanId);
+                    })}>恢复档案</Button>
+                : <Button isDisabled={listAction.pending} aria-label={'添加素材 ' + human.name}
+                    onPress={() => { setNotice(''); setOpenMode('pick'); select(human.digitalHumanId); }}>添加素材</Button>)}
             </div>
-          </div>
-        </Card.Content></Card></li>)}
-      </ul>
-      <MediaPagination name="数字人分页" offset={offset} limit={pageSize}
-        hasNext={Boolean(read.data && read.data.length > pageSize)} loading={read.loading} onChange={setOffset} />
-    </section>
+          </li>)}
+        </ul>
+      </div>
+      <MediaPagination name="数字人分页" offset={offset} limit={humanPageSize}
+        hasNext={Boolean(read.data && read.data.length > humanPageSize)} loading={read.loading || listAction.pending} onChange={setOffset} />
+    </RecordPage>
   </div>;
 }
