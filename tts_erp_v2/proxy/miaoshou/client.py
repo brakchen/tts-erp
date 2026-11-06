@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import os
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass
@@ -49,6 +48,7 @@ from tts_erp_v2.proxy.errors import ProxyError, SigningError
 from tts_erp_v2.proxy.miaoshou.rate_limit import (
     TokenBucket,
 )
+from tts_erp_v2.runtime_settings import get_setting
 
 # ---- Shared constants -----------------------------------------------
 
@@ -204,18 +204,18 @@ class MiaoshouClient:
 
     @classmethod
     def from_env(cls) -> MiaoshouClient:
-        license_id = os.environ.get("MIAOSHOU_LICENSE_ID", "")
-        secret = os.environ.get("MIAOSHOU_COMPANY_SECRET", "")
+        license_id = get_setting("MIAOSHOU_LICENSE_ID", "")
+        secret = get_setting("MIAOSHOU_COMPANY_SECRET", "")
         if not license_id or not secret:
             raise RuntimeError("missing MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET")
         try:
-            timeout = float(os.environ.get("MIAOSHOU_HTTP_TIMEOUT", "30"))
+            timeout = float(get_setting("MIAOSHOU_HTTP_TIMEOUT", "30"))
         except (TypeError, ValueError) as e:
             raise RuntimeError(f"MIAOSHOU_HTTP_TIMEOUT invalid: {e}") from e
         return cls(
             license_id=license_id,
             company_secret=secret,
-            env=os.environ.get("MIAOSHOU_ENV", "test"),
+            env=get_setting("MIAOSHOU_ENV", "test"),
             timeout=timeout,
         )
 
@@ -247,7 +247,7 @@ class MiaoshouClient:
         )
         url = path if absolute else f"{self.cfg.base_url}{self.cfg.path_prefix}{path}"
 
-        if os.environ.get("MIAOSHOU_DEBUG_SIGN") == "1":
+        if get_setting("MIAOSHOU_DEBUG_SIGN") == "1":
             import sys
 
             print(
@@ -312,7 +312,7 @@ class MiaoshouErpClient:
         self.app_id = app_id
         self.app_secret = app_secret
         self.base_url = (
-            base_url or os.environ.get("MIAOSHOU_ERP_BASE_URL", ERP_DEFAULT_BASE_URL)
+            base_url or get_setting("MIAOSHOU_ERP_BASE_URL", ERP_DEFAULT_BASE_URL)
         ).rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
@@ -321,14 +321,14 @@ class MiaoshouErpClient:
 
     @classmethod
     def from_env(cls) -> MiaoshouErpClient:
-        app_id_raw = os.environ.get("MIAOSHOU_LICENSE_ID", "")
-        app_secret_raw = os.environ.get("MIAOSHOU_COMPANY_SECRET", "")
+        app_id_raw = get_setting("MIAOSHOU_LICENSE_ID", "")
+        app_secret_raw = get_setting("MIAOSHOU_COMPANY_SECRET", "")
         app_id = app_id_raw.strip()
         app_secret = app_secret_raw.strip()
         if not app_id or not app_secret:
             raise RuntimeError("missing MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET")
         try:
-            timeout = float(os.environ.get("MIAOSHOU_HTTP_TIMEOUT", "30"))
+            timeout = float(get_setting("MIAOSHOU_HTTP_TIMEOUT", "30"))
         except (TypeError, ValueError) as e:
             raise RuntimeError(f"MIAOSHOU_HTTP_TIMEOUT invalid: {e}") from e
         return cls(app_id=app_id, app_secret=app_secret, timeout=timeout)

@@ -9,7 +9,6 @@ ordering live in :mod:`tts_erp_v2.access`.
 from __future__ import annotations
 
 import json
-import os
 import sys
 
 from tts_erp_v2.access import (
@@ -26,6 +25,7 @@ from tts_erp_v2.access import (
 )
 from tts_erp_v2.access import required_role as _required_role
 from tts_erp_v2.access._context import user_label_var, user_pages_var
+from tts_erp_v2.runtime_settings import get_setting
 
 # Compatibility exports for existing handler helpers and test fixtures.
 ROLE_LEVEL = {role.value: role.level for role in Role}
@@ -103,8 +103,14 @@ def _deny_response(
         # The renderer preserves 403 and readable facts even without a JS release.
         from tts_erp_v2.api.v2.frontend_pages import render_message_page
 
-        response = render_message_page(root_path, title="无权访问该页面",
-            message=message, tone="danger", status_code=403, action="login")
+        response = render_message_page(
+            root_path,
+            title="无权访问该页面",
+            message=message,
+            tone="danger",
+            status_code=403,
+            action="login",
+        )
         return status, list(response.raw_headers), bytes(response.body)
     body = json.dumps({"detail": message}).encode()
     headers = [(b"content-type", b"application/json")]
@@ -114,7 +120,7 @@ def _deny_response(
 
 
 def _auth_mode() -> AuthMode:
-    raw = os.environ.get("TTS_ERP_AUTH_MODE", "off")
+    raw = get_setting("TTS_ERP_AUTH_MODE", "off")
     try:
         return AuthMode(raw)
     except ValueError:
@@ -156,9 +162,7 @@ class AuthMiddleware:
                 route_path=canonical.route_path,
                 accepts_html=_accept_text_html(scope),
                 client_ip=client,
-                session_cookie=_extract_cookie(
-                    scope, session_auth.SESSION_COOKIE_NAME
-                ),
+                session_cookie=_extract_cookie(scope, session_auth.SESSION_COOKIE_NAME),
                 bearer_key=bearer_key,
                 api_key=api_key,
             ),
@@ -178,9 +182,7 @@ class AuthMiddleware:
             scope["username"] = grant.user.username
             scope["user_pages"] = grant.user.pages
             user_pages_var.set(grant.user.pages)
-            user_label_var.set(
-                grant.user.display_name or grant.user.username
-            )
+            user_label_var.set(grant.user.display_name or grant.user.username)
         else:
             scope["user_id"] = None
             scope["username"] = None
@@ -206,9 +208,7 @@ class AuthMiddleware:
                 f"[rate-limit] 429 (auth-denied) path={scope['path']} "
                 f"retry_after={retry_after}s\n"
             )
-            status, headers, body = rate_limit.too_many_response(
-                limit, retry_after
-            )
+            status, headers, body = rate_limit.too_many_response(limit, retry_after)
             await send(
                 {"type": "http.response.start", "status": status, "headers": headers}
             )
@@ -239,7 +239,10 @@ class AuthMiddleware:
             f"from {client} key_prefix={_prefix_of(attempted_key)}\n"
         )
         response_status, headers, body = _deny_response(
-            status, detail, accepts_html=_accept_text_html(scope), root_path=canonical.root_path
+            status,
+            detail,
+            accepts_html=_accept_text_html(scope),
+            root_path=canonical.root_path,
         )
         await send(
             {

@@ -6,7 +6,6 @@ import base64
 import binascii
 import hashlib
 import json
-import os
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -62,6 +61,7 @@ from tts_erp_v2.publishing.submission import (
     retry_task,
     update_settings,
 )
+from tts_erp_v2.runtime_settings import get_setting
 
 router = APIRouter(prefix="/v2/video-publish", tags=["video-publish"])
 _store: VideoObjectStore | None = None
@@ -227,7 +227,8 @@ def _attempt(a: VideoPublishAttempt, *, diagnostics: bool = False) -> dict:
         result.update(
             promptSnapshot=(
                 sanitize_text(a.prompt_snapshot)
-                if a.prompt_snapshot is not None else None
+                if a.prompt_snapshot is not None
+                else None
             ),
             artemisOutput=output,
         )
@@ -386,7 +387,7 @@ def _snapshot(
                     "appName": "TikTok",
                     "appPackage": task.target_app_package,
                     "deviceSerialMasked": _mask(task.target_device_serial),
-                    "album": os.environ.get("TIKTOK_PUBLISH_ALBUM", "TTSERP"),
+                    "album": get_setting("TIKTOK_PUBLISH_ALBUM", "TTSERP"),
                 },
                 "object": {
                     "bucket": task.object_bucket,
@@ -704,7 +705,7 @@ def _fresh_ready_worker(session: Session) -> PublishWorkerHeartbeat | None:
 def config(request: Request, session: Annotated[Session, Depends(get_session)]) -> dict:
     heartbeat_row = _fresh_ready_worker(session)
     heartbeat = heartbeat_row.heartbeat_at if heartbeat_row else None
-    configured_serial = bool(os.environ.get("ARTEMIS_DEVICE_SERIAL"))
+    configured_serial = bool(get_setting("ARTEMIS_DEVICE_SERIAL"))
     device_status = (
         heartbeat_row.device_status
         if heartbeat_row is not None and configured_serial
@@ -731,15 +732,15 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
         "maxCaptionCharacters": max_caption_chars(),
         # No maxPublishAttempts: there is no publish budget any more (02 §14.1).
         "uploadUrlTtlSeconds": int(
-            os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900")
+            get_setting("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900")
         ),
         "target": {
             "appName": "TikTok",
-            "appPackage": os.environ.get(
+            "appPackage": get_setting(
                 "ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically"
             ),
-            "deviceSerialMasked": _mask(os.environ.get("ARTEMIS_DEVICE_SERIAL", "")),
-            "album": os.environ.get("TIKTOK_PUBLISH_ALBUM", "TTSERP"),
+            "deviceSerialMasked": _mask(get_setting("ARTEMIS_DEVICE_SERIAL", "")),
+            "album": get_setting("TIKTOK_PUBLISH_ALBUM", "TTSERP"),
         },
         "worker": {
             "status": "ready" if heartbeat else "unavailable",
@@ -750,14 +751,14 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
             "message": device_message,
         },
         "artemis": {
-            "profile": os.environ.get("ARTEMIS_PROFILE", "pro"),
-            "verificationLevel": os.environ.get("ARTEMIS_VERIFICATION_LEVEL", "strict"),
+            "profile": get_setting("ARTEMIS_PROFILE", "pro"),
+            "verificationLevel": get_setting("ARTEMIS_VERIFICATION_LEVEL", "strict"),
         },
         "workerTiming": {
-            "pollSeconds": float(os.environ.get("PUBLISH_POLL_INTERVAL_SECONDS", "2")),
-            "leaseSeconds": int(os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")),
+            "pollSeconds": float(get_setting("PUBLISH_POLL_INTERVAL_SECONDS", "2")),
+            "leaseSeconds": int(get_setting("PUBLISH_TASK_LEASE_SECONDS", "30")),
             "heartbeatSeconds": float(
-                os.environ.get("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")
+                get_setting("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")
             ),
         },
         "canWrite": can_write,
@@ -775,7 +776,7 @@ def config(request: Request, session: Annotated[Session, Depends(get_session)]) 
 @router.get("/devices")
 async def devices(request: Request) -> dict:
     """Live Artemis device list for the page picker (design §21.15)."""
-    base_url = os.environ.get("ARTEMIS_BASE_URL", "").strip()
+    base_url = get_setting("ARTEMIS_BASE_URL", "").strip()
     if not base_url:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -783,7 +784,7 @@ async def devices(request: Request) -> dict:
                 request, "ARTEMIS_UNREACHABLE", "ARTEMIS_UNREACHABLE", retryable=True
             ),
         )
-    client = ArtemisClient(base_url, token=os.environ.get("ARTEMIS_TOKEN") or None)
+    client = ArtemisClient(base_url, token=get_setting("ARTEMIS_TOKEN") or None)
     try:
         raw = await client.list_devices()
     except ArtemisTransportError as exc:

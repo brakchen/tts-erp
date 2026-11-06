@@ -230,8 +230,17 @@ python3.14 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
-环境变量保存在本地 `.env`，权限必须为 `0600`。仓库不提供含凭证的模板；从运维人员处取得
-所需配置，不要提交数据库 URL、Fernet key、API key、cookie、token 或 MinIO 凭证。
+配置优先级是：当前工作目录 `.env`（开发覆盖）→ `TTS_ERP_RUNTIME_ENV_FILE`
+指向的安全文件 → 进程环境。运行环境推荐把密钥保存在仓库外的
+`~/.config/tts-erp/runtime.env`，权限必须为 `0600`，并在 shell 初始化文件中只
+export 该路径并 source 安全文件。仓库不提供含凭证的模板；不要提交数据库 URL、
+Fernet key、API key、cookie、token 或 MinIO 凭证。
+
+运行中的 API、sync worker 和 publish worker 会按文件 inode/size/mtime 重新读取配置：
+下游密钥在下一次请求或任务中生效，publish worker 最迟约 5 秒重建客户端；数据库 URL
+变更会在下一次创建会话时切换连接池。`TTS_ERP_HOST`/`TTS_ERP_PORT` 控制监听 socket，
+变更后仍需重启服务。数据库 URL 与 Fernet key 缺失时服务拒绝启动；可选下游配置缺失
+只记录 ERROR 并保持服务运行。
 
 推荐通过 systemd 启动：
 

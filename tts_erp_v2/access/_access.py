@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Literal
 
 from anyio.to_thread import run_sync
@@ -23,6 +22,7 @@ from tts_erp_v2.access._types import (
 )
 from tts_erp_v2.accounts.pages import required_page_permission
 from tts_erp_v2.accounts.service import authenticate_session_cookie
+from tts_erp_v2.runtime_settings import get_setting
 
 _MISSING_CREDENTIAL = (
     "missing bearer token (Authorization: Bearer <key> or X-API-Key: <key>)"
@@ -102,7 +102,7 @@ async def evaluate_access(
     if (
         isinstance(credential, Credential)
         and request.route_path.startswith("/v2/video-publish")
-        and os.environ.get("TTS_ERP_VIDEO_PUBLISH_ALLOW_READWRITE_API_KEYS") != "1"
+        and get_setting("TTS_ERP_VIDEO_PUBLISH_ALLOW_READWRITE_API_KEYS") != "1"
     ):
         needed = AccessRole.ADMIN
     grant = _grant(

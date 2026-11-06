@@ -1,11 +1,16 @@
 #!/bin/bash
 # Restart tts-erp service (managed by systemd --user since 2026-08-18).
-# The unit loads .env via EnvironmentFile and runs uvicorn from tdd/;
-# logs still go to logs/{stdout,stderr}.log.
+# The app reads a local .env first, then the secure reloadable runtime file.
 set -e
 cd /home/schan/tts-erp
 
-PORT="$(grep -E '^TTS_ERP_PORT=' .env | cut -d= -f2)"
+RUNTIME_ENV_FILE="${TTS_ERP_RUNTIME_ENV_FILE:-$HOME/.config/tts-erp/runtime.env}"
+CONFIG_FILE=/home/schan/tts-erp/.env
+if [[ ! -r "$CONFIG_FILE" ]]; then
+  CONFIG_FILE="$RUNTIME_ENV_FILE"
+fi
+
+PORT="$(grep -E '^TTS_ERP_PORT=' "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
 PORT="${PORT:-9877}"
 
 echo "restarting via systemd --user..."

@@ -16,14 +16,13 @@ from __future__ import annotations
 
 import http.client
 import json
-import os
 import sys
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
-from typing_extensions import Self
+from tts_erp_v2.runtime_settings import get_setting
 
 from .miaoshou_signing import build_envelope, now_ms
 
@@ -147,9 +146,7 @@ def safe_http_post_json(url: str, body_bytes: bytes, timeout: int) -> str:
         status = getattr(resp, "status", 200)
         if isinstance(status, int) and status >= 400:
             body_preview = resp.read().decode("utf-8", errors="replace")[:300]
-            raise MiaoshouApiError(
-                status, f"HTTP {status}: {body_preview}", None
-            )
+            raise MiaoshouApiError(status, f"HTTP {status}: {body_preview}", None)
         return resp.read().decode("utf-8")
     finally:
         conn.close()
@@ -171,21 +168,21 @@ class MiaoshouClient:
     @classmethod
     def from_env(cls) -> MiaoshouClient:
         """从环境变量构造（依赖 MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET / MIAOSHOU_ENV）。"""
-        license_id = os.environ.get("MIAOSHOU_LICENSE_ID", "")
-        secret = os.environ.get("MIAOSHOU_COMPANY_SECRET", "")
+        license_id = get_setting("MIAOSHOU_LICENSE_ID", "")
+        secret = get_setting("MIAOSHOU_COMPANY_SECRET", "")
         if not license_id or not secret:
             raise RuntimeError(
                 "缺少 MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET。"
                 "请在 .env 里配置，或手动 export。"
             )
         try:
-            timeout = int(os.environ.get("MIAOSHOU_HTTP_TIMEOUT", "30"))
+            timeout = int(get_setting("MIAOSHOU_HTTP_TIMEOUT", "30"))
         except (TypeError, ValueError) as e:  # pragma: no cover — defensive
             raise RuntimeError(f"MIAOSHOU_HTTP_TIMEOUT 无效: {e}") from e
         return cls(
             license_id=license_id,
             company_secret=secret,
-            env=os.environ.get("MIAOSHOU_ENV", "test"),
+            env=get_setting("MIAOSHOU_ENV", "test"),
             timeout=timeout,
         )
 
@@ -267,7 +264,7 @@ class MiaoshouClient:
         )
         url = path if absolute else f"{self.cfg.base_url}{self.cfg.path_prefix}{path}"
 
-        if os.environ.get("MIAOSHOU_DEBUG_SIGN") == "1":
+        if get_setting("MIAOSHOU_DEBUG_SIGN") == "1":
             print(
                 f"[miaoshou-debug] url={url}\n  envelope.sign={envelope['sign']}\n"
                 f"  busData={envelope['busData']}",

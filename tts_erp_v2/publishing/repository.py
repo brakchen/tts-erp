@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import struct
 import zlib
 from collections.abc import Callable
@@ -45,6 +44,7 @@ from tts_erp_v2.publishing.prompt import (
     build_publish_prompt,
     build_verify_prompt,
 )
+from tts_erp_v2.runtime_settings import get_setting
 
 
 class LeaseLost(RuntimeError):
@@ -303,7 +303,7 @@ def _new_publish_attempt(
         )
         or 0
     )
-    album = os.environ.get("TIKTOK_PUBLISH_ALBUM", "TTSERP")
+    album = get_setting("TIKTOK_PUBLISH_ALBUM", "TTSERP")
     attempt = VideoPublishAttempt(
         task_id=task.id,
         sequence_no=latest + 1,
@@ -1614,7 +1614,7 @@ def schedule_retention_cleanup(
     retention_days = (
         failed_retention_days
         if failed_retention_days is not None
-        else int(os.environ.get("TIKTOK_PUBLISH_FAILED_RETENTION_DAYS", "30"))
+        else int(get_setting("TIKTOK_PUBLISH_FAILED_RETENTION_DAYS", "30"))
     )
     abandoned_before = now - timedelta(hours=24)
     failed_before = now - timedelta(days=max(0, retention_days))

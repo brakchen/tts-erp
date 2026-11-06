@@ -12,7 +12,6 @@ import hashlib
 import json
 import logging
 import math
-import os
 import time
 import urllib.error
 import urllib.parse
@@ -38,6 +37,7 @@ from tts_erp_v2.db.models.miaoshou import (
 from tts_erp_v2.db.models.procurement import ProcurementAccount
 from tts_erp_v2.jobs.runner import finish_job, run_job
 from tts_erp_v2.proxy.token_service import CredentialsView, load_credentials
+from tts_erp_v2.runtime_settings import get_setting
 
 log = logging.getLogger("tts_erp_v2.jobs.miaoshou.purchase_price_clean")
 
@@ -168,7 +168,7 @@ def _resolve_credentials(
     session: Session, *, external_account_id: str | None = None
 ) -> CredentialsView | None:
     account_id = (
-        external_account_id or os.environ.get("MIAOSHOU_WEB_ACCOUNT_ID", "").strip()
+        external_account_id or get_setting("MIAOSHOU_WEB_ACCOUNT_ID", "").strip()
     )
     if account_id:
         return load_credentials(session, WEB_PROVIDER, account_id)

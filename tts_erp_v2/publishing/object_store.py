@@ -10,6 +10,7 @@ from typing import Protocol
 
 from minio.error import S3Error
 
+from tts_erp_v2.runtime_settings import get_setting
 from tts_erp_v2.storage.minio_client import MinioClient, ObjectNotFound
 
 
@@ -38,7 +39,7 @@ class MinioVideoStore:
     ) -> None:
         expected = (
             expected_bucket
-            or os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
+            or get_setting("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
         )
         if not expected or client.bucket != expected:
             raise ValueError("PUBLISH_BUCKET_MISMATCH")
@@ -116,5 +117,5 @@ def video_store_from_env() -> MinioVideoStore:
     (default ``tiktok-video``) so video objects never land in the SPU image
     bucket and vice versa. Shared by the API presign path and the worker.
     """
-    bucket = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
+    bucket = get_setting("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
     return MinioVideoStore(MinioClient.from_env().with_bucket(bucket))

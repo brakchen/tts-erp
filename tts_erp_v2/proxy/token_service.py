@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -47,6 +46,7 @@ from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models.integration import Credentials, TikTokAppCredential
 from tts_erp_v2.proxy.errors import DecryptionError, SigningError
+from tts_erp_v2.runtime_settings import get_setting
 
 log = logging.getLogger("tts_erp_v2.proxy.token_service")
 
@@ -55,34 +55,43 @@ log = logging.getLogger("tts_erp_v2.proxy.token_service")
 
 _UNSET: Any = object()
 _fernet: Fernet | Any | None = _UNSET
+_fernet_key: str | None = None
+_fernet_forced = False
 
 # Default refresh skew: refresh if expires_at is within this window.
 DEFAULT_REFRESH_SKEW = timedelta(seconds=60)
 
 
 def _resolve_key() -> str | None:
-    """Read TTS_ERP_FERNET_KEY from env. Empty / unset → None."""
-    raw = os.environ.get("TTS_ERP_FERNET_KEY", "").strip()
+    """Read TTS_ERP_FERNET_KEY from reloadable configuration."""
+    raw = (get_setting("TTS_ERP_FERNET_KEY") or "").strip()
     return raw or None
 
 
 def _configure_fernet(key: str) -> None:
     """Force-set the Fernet singleton (test helper)."""
-    global _fernet
+    global _fernet, _fernet_forced, _fernet_key
     _fernet = Fernet(key.encode("utf-8"))
+    _fernet_key = key
+    _fernet_forced = True
 
 
 def _reset_for_testing() -> None:
     """Drop the Fernet singleton (test helper, mirrored from legacy)."""
-    global _fernet
+    global _fernet, _fernet_forced, _fernet_key
     _fernet = _UNSET
+    _fernet_key = None
+    _fernet_forced = False
 
 
 def _get_fernet() -> Fernet | None:
-    global _fernet
-    if _fernet is not _UNSET:
+    global _fernet, _fernet_key
+    if _fernet_forced:
         return _fernet  # type: ignore[return-value]
     key = _resolve_key()
+    if _fernet is not _UNSET and key == _fernet_key:
+        return _fernet  # type: ignore[return-value]
+    _fernet_key = key
     if not key:
         _fernet = None
         return None

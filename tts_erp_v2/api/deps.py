@@ -22,6 +22,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.access import AccessGrant, Role
+from tts_erp_v2.runtime_settings import get_setting
 
 
 def get_session() -> Session:
@@ -45,9 +46,6 @@ SessionDep = Annotated[Session, Depends(get_session)]
 def caller_key_hash(request: Request) -> str | None:
     """Return the authenticated key hash (or None if exempt)."""
     return request.scope.get("api_key_hash")
-
-
-
 
 
 def caller_role(request: Request) -> str | None:
@@ -134,10 +132,9 @@ def is_prod_shaped_db() -> bool:
         >>> is_prod_shaped_db()
         False
     """
-    import os as _os
     from urllib.parse import urlparse as _urlparse
 
-    db_url = _os.environ.get("TTS_ERP_DB_URL", "").strip()
+    db_url = (get_setting("TTS_ERP_DB_URL") or "").strip()
     if not db_url:
         # Unset env var → refuse. Fail-closed is intentional: a missing
         # var usually means the operator forgot to source .env.
@@ -145,18 +142,13 @@ def is_prod_shaped_db() -> bool:
     try:
         # postgresql+psycopg://u:p@h:port/dbname → urlparse needs plain
         # postgresql:// scheme. Strip the driver suffix.
-        path = _urlparse(
-            db_url.replace("postgresql+psycopg://", "postgresql://")
-        ).path
+        path = _urlparse(db_url.replace("postgresql+psycopg://", "postgresql://")).path
         dbname = path.lstrip("/").split("?")[0]
     except Exception:  # noqa: BLE001 — defensive: bad URL = refuse.
         return True
     if not dbname:
         return True
-    return (
-        dbname in _PROD_SHAPED_DBNAMES
-        or dbname.startswith("tts_erp_prod_")
-    )
+    return dbname in _PROD_SHAPED_DBNAMES or dbname.startswith("tts_erp_prod_")
 
 
 def require_destructive_guard(
@@ -202,7 +194,8 @@ def require_destructive_guard(
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail=reason or (
+        detail=reason
+        or (
             f"Refused: {op_name} is destructive and runs against a "
             "prod-shape dbname. Set {env}=1 in the environment to "
             "override (NOT recommended; you are about to mutate live "

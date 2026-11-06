@@ -72,18 +72,15 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
-import os
 import sys
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Same env-var loading pattern as scripts/oneoff_finance_reset.py —
-# the watchdog must work when invoked directly, without going through
-# tests/conftest.py or any other entry point that loads .env.
+# Add the project root before importing the shared reloadable settings layer.
+# This keeps direct CLI and systemd invocations consistent with the services.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ENV_PATH = PROJECT_ROOT / ".env"
 
 # Make the project root importable so ``from tts_erp_v2.…`` resolves
 # even when the watchdog is invoked from a different CWD (e.g. cron
@@ -94,30 +91,7 @@ ENV_PATH = PROJECT_ROOT / ".env"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-
-def _load_env() -> None:
-    """Best-effort load of .env so TTS_ERP_DB_URL etc. are populated.
-
-    Mirrors the parsing in tests/conftest.py so behaviour is
-    consistent whether the watchdog runs from a cron tick (no shell
-    env) or a developer invocation (env already exported). Ignores
-    comments and blank lines; trims surrounding quotes on values.
-    """
-    if not ENV_PATH.exists():
-        return
-    try:
-        text = ENV_PATH.read_text(encoding="utf-8")
-    except OSError:
-        return
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
-
-_load_env()
+from tts_erp_v2.runtime_settings import get_setting
 
 log = logging.getLogger("scripts.watchdog_sync")
 
@@ -504,10 +478,10 @@ def main(argv: list[str] | None = None) -> int:
     from "the watchdog itself broke" — the latter should page the
     on-call directly.
     """
-    if not os.environ.get("TTS_ERP_DB_URL", "").strip():
+    if not (get_setting("TTS_ERP_DB_URL", "") or "").strip():
         sys.stderr.write(
             "watchdog_sync: TTS_ERP_DB_URL is not set; refusing to run.\n"
-            "Set it in /home/schan/tts-erp/.env or export it in the shell.\n"
+            "Configure local .env or TTS_ERP_RUNTIME_ENV_FILE.\n"
         )
         return 2
 
@@ -540,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     emit(findings)
-    webhook_url = os.environ.get("TTS_ERP_ALERT_WEBHOOK_URL", "").strip()
+    webhook_url = (get_setting("TTS_ERP_ALERT_WEBHOOK_URL", "") or "").strip()
     if webhook_url:
         post_webhook(webhook_url, findings)
     return 1 if findings else 0

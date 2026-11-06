@@ -172,8 +172,6 @@ def test_null_and_empty_price_values_never_render_as_zero(frontend_browser_rende
 
 def test_each_price_header_sends_its_server_sort_id(frontend_browser_renderer, monkeypatch):
     page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
-    requests: list[str] = []
-    page.on("request", lambda request: requests.append(request.url))
     for field, sort_id in zip(
         (
             "priceStats.purchase.mean",
@@ -185,9 +183,11 @@ def test_each_price_header_sends_its_server_sort_id(frontend_browser_renderer, m
         ),
         _SORTS,
     ):
-        page.locator(f'.tabulator-header [tabulator-field="{field}"]').click()
-        page.wait_for_timeout(80)
-        assert any(f"sort={sort_id}" in url for url in requests), (field, sort_id, requests)
+        with page.expect_request(
+            lambda request, expected=sort_id: f"sort={expected}" in request.url,
+            timeout=3_000,
+        ):
+            page.locator(f'.tabulator-header [tabulator-field="{field}"]').click()
 
 
 def test_price_tooltip_is_keyboard_openable_and_restores_focus(frontend_browser_renderer, monkeypatch):

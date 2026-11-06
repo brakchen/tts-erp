@@ -6,6 +6,8 @@ set -euo pipefail
 
 REPO=/home/schan/tts-erp
 UNIT_DIR="$HOME/.config/systemd/user"
+RUNTIME_ENV_FILE="${TTS_ERP_RUNTIME_ENV_FILE:-$HOME/.config/tts-erp/runtime.env}"
+[[ -r "$REPO/.env" || -r "$RUNTIME_ENV_FILE" ]] || { echo "missing runtime configuration" >&2; exit 1; }
 mkdir -p "$UNIT_DIR"
 
 cat > "$UNIT_DIR/tts-erp-sync.service" <<EOF
@@ -16,7 +18,7 @@ After=network.target docker.service
 [Service]
 Type=simple
 WorkingDirectory=$REPO
-EnvironmentFile=$REPO/.env
+Environment=TTS_ERP_RUNTIME_ENV_FILE=$RUNTIME_ENV_FILE
 ExecStart=$REPO/.venv/bin/python -m tts_erp_v2.sync_worker.main
 Restart=on-failure
 RestartSec=10

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
-import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -58,6 +57,7 @@ from tts_erp_v2.publishing.repository import (
     renew_cleanup_work,
     schedule_retention_cleanup,
 )
+from tts_erp_v2.runtime_settings import get_setting
 from tts_erp_v2.storage.minio_client import ObjectNotFound
 
 
@@ -72,7 +72,7 @@ class PublishDependencies:
     # This worker claims tasks for one device only; another device runs its
     # own worker instance (02 §16.1).
     device_serial: str = field(
-        default_factory=lambda: os.environ.get("ARTEMIS_DEVICE_SERIAL", "")
+        default_factory=lambda: get_setting("ARTEMIS_DEVICE_SERIAL", "")
     )
     lease_seconds: int = 30
     poll_seconds: float = 2.0

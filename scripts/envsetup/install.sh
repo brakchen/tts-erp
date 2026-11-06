@@ -14,7 +14,7 @@
 #   bash scripts/envscripts/envsetup/install.sh -h           # 全部选项
 #
 # 步骤：
-#   1 preflight  .env 存在 / 0600 / 必需变量 / Python>=3.13 / systemd --user
+#   1 preflight  安全配置存在 / 0600 / 必需变量 / Python>=3.13 / systemd --user
 #   2 目录       logs/ tests/
 #   3 依赖       .venv + pip install -e .
 #   4 权限       restart.sh 可执行
@@ -30,13 +30,18 @@
 #     `alembic upgrade head` 属人工操作：非交互模式下必须显式传
 #     --migrate 才会执行；执行时仅对本次 alembic 子进程设置
 #     ALLOW_PROD_DESTRUCTIVE=1（绕过 env.py 的 prod-shape guard）。
-#   * 脚本不创建、不修改任何密钥；.env 由运维提供，只校验存在性与权限。
+#   * 脚本不创建、不修改任何密钥；配置由运维提供，只校验存在性与权限。
 #   * 不触碰测试库，不执行 DELETE/TRUNCATE/DROP。
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+RUNTIME_ENV_FILE="${TTS_ERP_RUNTIME_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/tts-erp/runtime.env}"
+CONFIG_FILE="$REPO/.env"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  CONFIG_FILE="$RUNTIME_ENV_FILE"
+fi
 PG_DOCKER="${PG_DOCKER:-postgres}"
 HEALTH_URL_BASE_DEFAULT=9877
 
@@ -106,11 +111,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# 读取 .env 中的变量（去引号），第二个参数为默认值。
+# 读取优先级最高的配置文件变量（去引号），第二个参数为默认值。
 env_get() {
   local key=$1 def="${2-}" v=""
-  if [[ -f "$REPO/.env" ]]; then
-    v="$(grep -E "^${key}=" "$REPO/.env" | head -1 | cut -d= -f2- || true)"
+  if [[ -f "$CONFIG_FILE" ]]; then
+    v="$(grep -E "^${key}=" "$CONFIG_FILE" | head -1 | cut -d= -f2- || true)"
     v="${v%%\"}"; v="${v#\"}"
   fi
   printf '%s' "${v:-$def}"
@@ -163,23 +168,23 @@ case "$sys_state" in
 esac
 ok "systemd --user: ${sys_state}"
 
-[[ -f "$REPO/.env" ]] || die ".env 不存在。仓库不提供含凭证的模板，请从运维处取得配置放到 $REPO/.env 并 chmod 600"
+[[ -f "$CONFIG_FILE" ]] || die "安全配置不存在：可使用仓库 .env，或设置 TTS_ERP_RUNTIME_ENV_FILE（默认 $RUNTIME_ENV_FILE）"
 
-if [[ "$(stat -c '%a' "$REPO/.env")" != "600" ]]; then
-  (( DRY_RUN )) && warn "[dry-run] .env 权限非 600，将执行 chmod 600" || chmod 600 "$REPO/.env"
-  ok ".env 权限已修正为 600"
+if [[ "$(stat -c '%a' "$CONFIG_FILE")" != "600" ]]; then
+  (( DRY_RUN )) && warn "[dry-run] 配置权限非 600，将执行 chmod 600" || chmod 600 "$CONFIG_FILE"
+  ok "配置权限已修正为 600"
 else
-  ok ".env 权限 600"
+  ok "配置权限 600"
 fi
 
 DB_URL="$(env_get TTS_ERP_DB_URL)"
-[[ -n "$DB_URL" ]] || die ".env 缺少 TTS_ERP_DB_URL（服务与迁移都依赖它）"
+[[ -n "$DB_URL" ]] || die "配置缺少 TTS_ERP_DB_URL（服务与迁移都依赖它）"
 DB_NAME="$(db_name_of "$DB_URL")"
 PROD_DB=0; is_prod_shaped "$DB_URL" && PROD_DB=1
 ok "数据库: ${DB_NAME}$([[ $PROD_DB == 1 ]] && echo '（生产形态库）')"
 
 for key in TTS_ERP_HOST TTS_ERP_PORT TTS_ERP_FERNET_KEY TTS_ERP_SESSION_SECRET; do
-  if [[ -z "$(env_get "$key")" ]]; then warn ".env 缺少（或为空）$key"; fi
+  if [[ -z "$(env_get "$key")" ]]; then warn "配置缺少（或为空）$key"; fi
 done
 
 if pick_python; then
@@ -262,8 +267,8 @@ Wants=network-online.target oauth-receiver.service
 [Service]
 Type=simple
 WorkingDirectory=$REPO
-EnvironmentFile=$REPO/.env
-ExecStart=$REPO/.venv/bin/python -m uvicorn tts_erp_v2.app:app --host \${TTS_ERP_HOST} --port \${TTS_ERP_PORT} --proxy-headers --no-access-log
+Environment=TTS_ERP_RUNTIME_ENV_FILE=$RUNTIME_ENV_FILE
+ExecStart=$REPO/.venv/bin/python -m tts_erp_v2.server
 Restart=always
 RestartSec=3
 StandardOutput=append:$REPO/logs/stdout.log
@@ -279,7 +284,7 @@ After=network.target docker.service
 [Service]
 Type=simple
 WorkingDirectory=$REPO
-EnvironmentFile=$REPO/.env
+Environment=TTS_ERP_RUNTIME_ENV_FILE=$RUNTIME_ENV_FILE
 ExecStart=$REPO/.venv/bin/python -m tts_erp_v2.sync_worker.main
 Restart=on-failure
 RestartSec=10
@@ -293,7 +298,7 @@ Description=tts-erp sync watchdog (one-shot scan of integration.sync_jobs)
 [Service]
 Type=oneshot
 WorkingDirectory=$REPO
-EnvironmentFile=$REPO/.env
+Environment=TTS_ERP_RUNTIME_ENV_FILE=$RUNTIME_ENV_FILE
 ExecStart=$REPO/.venv/bin/python scripts/watchdog_sync.py
 StandardOutput=append:$REPO/logs/watchdog.log
 StandardError=append:$REPO/logs/watchdog.log"

@@ -20,14 +20,17 @@ Hot reload (2026-08-31):
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 from collections import deque
 from typing import Any
 
+from tts_erp_v2.runtime_settings import get_setting
+
 DEFAULT_LIMIT = 100
-ENV_VAR_NAME = "TTS_ERP_RATE_LIMIT_PER_MIN"  # exported for the admin reset endpoint + diagnostics
+ENV_VAR_NAME = (
+    "TTS_ERP_RATE_LIMIT_PER_MIN"  # exported for the admin reset endpoint + diagnostics
+)
 WINDOW_S = 60
 EVICT_AFTER_S = 5 * WINDOW_S
 EVICT_EVERY_N_CALLS = 256
@@ -72,7 +75,7 @@ class SlidingWindow:
 
 
 def _env_limit() -> int:
-    raw = os.environ.get("TTS_ERP_RATE_LIMIT_PER_MIN")
+    raw = get_setting("TTS_ERP_RATE_LIMIT_PER_MIN")
     if not raw:
         return DEFAULT_LIMIT
     try:

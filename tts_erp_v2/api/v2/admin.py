@@ -36,6 +36,11 @@ from tts_erp_v2.api.deps import (
     require_cookie_csrf,
     require_role_at_least,
 )
+from tts_erp_v2.api.schemas import ChannelAccountOut
+from tts_erp_v2.commerce.shop_access import authorized_shop_clause
+from tts_erp_v2.commerce.shop_metadata import plugin_sources, upsert_shop_metadata
+from tts_erp_v2.db.models.commerce import ChannelAccount
+from tts_erp_v2.db.models.integration import Credentials
 from tts_erp_v2.middleware.rate_limit import (
     ENV_VAR_NAME,
     reset_shared,
@@ -46,17 +51,12 @@ from tts_erp_v2.proxy.token_service import (
     resolve_tiktok_app_credentials,
     upsert_tiktok_app_credentials,
 )
+from tts_erp_v2.runtime_settings import get_setting
 from tts_erp_v2.sync_worker.scheduler import (
     JOBS,
     run_scheduled_job_once,
     set_job_enabled,
 )
-
-from tts_erp_v2.api.schemas import ChannelAccountOut
-from tts_erp_v2.commerce.shop_access import authorized_shop_clause
-from tts_erp_v2.commerce.shop_metadata import plugin_sources, upsert_shop_metadata
-from tts_erp_v2.db.models.commerce import ChannelAccount
-from tts_erp_v2.db.models.integration import Credentials
 
 router = APIRouter()
 
@@ -146,7 +146,7 @@ def get_rate_limit(request: Request) -> RateLimitConfigResponse:
     """
     require_role_at_least(request, "admin")
     config = shared_config()
-    env_raw = os.environ.get(ENV_VAR_NAME)
+    env_raw = get_setting(ENV_VAR_NAME)
     env_effective: int | None = None
     if env_raw is not None:
         try:
@@ -212,7 +212,9 @@ def reset_rate_limit(
 
 
 class SyncJobEnabledBody(BaseModel):
-    enabled: bool = Field(description="True = allow scheduled ticks; false = skip ticks.")
+    enabled: bool = Field(
+        description="True = allow scheduled ticks; false = skip ticks."
+    )
 
 
 class SyncJobEnabledResponse(BaseModel):
@@ -416,7 +418,7 @@ def purge_plugin_data(
     dry_run = not confirm
     executed = confirm and (not is_prod or allow_prod_env or (allow_prod and dev_env))
 
-    from sqlalchemy import select, text
+    from sqlalchemy import text
 
     from tts_erp_v2.db.base import get_engine
 
@@ -531,7 +533,10 @@ class ShopRegisterResponse(BaseModel):
 
 
 def _validated_plaintext_app_secret(
-    *, service_id: str | None, app_key: str | None, app_secret: SecretStr | None,
+    *,
+    service_id: str | None,
+    app_key: str | None,
+    app_secret: SecretStr | None,
 ) -> str | None:
     plaintext = app_secret.get_secret_value() if app_secret is not None else None
     if (app_key is None) != (plaintext is None):
@@ -544,7 +549,9 @@ def _validated_plaintext_app_secret(
     return plaintext
 
 
-def _app_credentials_configured(session: Session, *, shop_pk: int, service_id: str | None) -> bool:
+def _app_credentials_configured(
+    session: Session, *, shop_pk: int, service_id: str | None
+) -> bool:
     if not service_id:
         return False
     try:
@@ -555,14 +562,23 @@ def _app_credentials_configured(session: Session, *, shop_pk: int, service_id: s
 
 
 def _configure_or_validate_app_credentials(
-    session: Session, *, shop_pk: int, service_id: str | None,
-    app_key: str | None, app_secret: str | None,
+    session: Session,
+    *,
+    shop_pk: int,
+    service_id: str | None,
+    app_key: str | None,
+    app_secret: str | None,
 ) -> bool:
     if not service_id:
         return False
     if app_key is not None and app_secret is not None:
-        upsert_tiktok_app_credentials(session, shop_pk=shop_pk, service_id=service_id,
-                                     app_key=app_key, plaintext_app_secret=app_secret)
+        upsert_tiktok_app_credentials(
+            session,
+            shop_pk=shop_pk,
+            service_id=service_id,
+            app_key=app_key,
+            plaintext_app_secret=app_secret,
+        )
         return True
     if not _app_credentials_configured(session, shop_pk=shop_pk, service_id=service_id):
         raise HTTPException(409, "configure this shop's App Key and App Secret first")
@@ -570,28 +586,49 @@ def _configure_or_validate_app_credentials(
 
 
 def _shop_out(session: Session, shop: ChannelAccount) -> ShopOut:
-    configured = _app_credentials_configured(session, shop_pk=shop.id, service_id=shop.service_id)
-    credential = session.get(Credentials, shop.credential_id) if shop.credential_id else None
+    configured = _app_credentials_configured(
+        session, shop_pk=shop.id, service_id=shop.service_id
+    )
+    credential = (
+        session.get(Credentials, shop.credential_id) if shop.credential_id else None
+    )
     auth_state = "unauthorized"
     if credential:
         authorized = session.execute(
-            text("SELECT " + authorized_shop_clause() + " FROM commerce.shops WHERE id = :id"),
+            text(
+                "SELECT "
+                + authorized_shop_clause()
+                + " FROM commerce.shops WHERE id = :id"
+            ),
             {"id": shop.id},
         ).scalar()
         if authorized:
             auth_state = "authorized"
-        elif credential.provider == "tiktok" and credential.external_account_id == shop.shop_id:
+        elif (
+            credential.provider == "tiktok"
+            and credential.external_account_id == shop.shop_id
+        ):
             auth_state = "reauthorize"
         else:
             auth_state = "unknown"
     return ShopOut(
-        id=shop.id, platform=shop.platform, shop_id=shop.shop_id,
-        account_name=shop.account_name, region=shop.region, shop_code=shop.shop_code,
-        discovered_at=shop.discovered_at, plugin_sources=plugin_sources(shop.plugin_metadata),
-        seller_type=shop.seller_type, status=shop.status,
-        credential_id=shop.credential_id, service_id=shop.service_id,
-        app_credentials_configured=configured, opened_date=shop.opened_date,
-        synced_at=shop.synced_at, updated_at=shop.updated_at, auth_state=auth_state,
+        id=shop.id,
+        platform=shop.platform,
+        shop_id=shop.shop_id,
+        account_name=shop.account_name,
+        region=shop.region,
+        shop_code=shop.shop_code,
+        discovered_at=shop.discovered_at,
+        plugin_sources=plugin_sources(shop.plugin_metadata),
+        seller_type=shop.seller_type,
+        status=shop.status,
+        credential_id=shop.credential_id,
+        service_id=shop.service_id,
+        app_credentials_configured=configured,
+        opened_date=shop.opened_date,
+        synced_at=shop.synced_at,
+        updated_at=shop.updated_at,
+        auth_state=auth_state,
     )
 
 
@@ -599,19 +636,34 @@ def _shop_out(session: Session, shop: ChannelAccount) -> ShopOut:
 def register_shop(request: Request, body: ShopRegisterBody) -> ShopRegisterResponse:
     require_role_at_least(request, "readwrite")
     require_cookie_csrf(request)
-    plaintext = _validated_plaintext_app_secret(service_id=body.service_id,
-        app_key=body.app_key, app_secret=body.app_secret)
+    plaintext = _validated_plaintext_app_secret(
+        service_id=body.service_id, app_key=body.app_key, app_secret=body.app_secret
+    )
     from tts_erp_v2.db.base import get_engine
+
     with Session(get_engine()) as session, session.begin():
-        shop, created = upsert_shop_metadata(session, shop_id=body.shop_id,
-            account_name=body.account_name, region=body.region,
-            seller_type=body.seller_type, opened_date=body.opened_date,
-            service_id=body.service_id)
+        shop, created = upsert_shop_metadata(
+            session,
+            shop_id=body.shop_id,
+            account_name=body.account_name,
+            region=body.region,
+            seller_type=body.seller_type,
+            opened_date=body.opened_date,
+            service_id=body.service_id,
+        )
         if body.app_key is not None and shop.service_id != body.service_id:
-            raise HTTPException(409, "shop already uses another service_id; update its App configuration explicitly")
+            raise HTTPException(
+                409,
+                "shop already uses another service_id; update its App configuration explicitly",
+            )
         if body.service_id is not None or body.app_key is not None:
-            _configure_or_validate_app_credentials(session, shop_pk=shop.id,
-                service_id=shop.service_id, app_key=body.app_key, app_secret=plaintext)
+            _configure_or_validate_app_credentials(
+                session,
+                shop_pk=shop.id,
+                service_id=shop.service_id,
+                app_key=body.app_key,
+                app_secret=plaintext,
+            )
         result = ShopRegisterResponse(created=created, shop=_shop_out(session, shop))
     return result
 
@@ -634,23 +686,34 @@ class ShopUpdateResponse(BaseModel):
 
 
 @router.patch("/shops/{shop_pk}", response_model=ShopUpdateResponse)
-def update_shop(request: Request, shop_pk: int, body: ShopUpdateBody) -> ShopUpdateResponse:
+def update_shop(
+    request: Request, shop_pk: int, body: ShopUpdateBody
+) -> ShopUpdateResponse:
     """Edit opening date or this shop's App; shop name and region are immutable."""
     require_role_at_least(request, "readwrite")
     require_cookie_csrf(request)
     from tts_erp_v2.db.base import get_engine
+
     with Session(get_engine()) as session, session.begin():
-        shop = session.scalar(select(ChannelAccount).where(ChannelAccount.id == shop_pk).with_for_update())
+        shop = session.scalar(
+            select(ChannelAccount).where(ChannelAccount.id == shop_pk).with_for_update()
+        )
         if shop is None:
             raise HTTPException(404, "shop not found")
         service_id = body.service_id if body.service_id is not None else shop.service_id
-        plaintext = _validated_plaintext_app_secret(service_id=service_id,
-            app_key=body.app_key, app_secret=body.app_secret)
+        plaintext = _validated_plaintext_app_secret(
+            service_id=service_id, app_key=body.app_key, app_secret=body.app_secret
+        )
         if "opened_date" in body.model_fields_set:
             shop.opened_date = body.opened_date
         if body.service_id is not None or body.app_key is not None:
-            _configure_or_validate_app_credentials(session, shop_pk=shop.id,
-                service_id=service_id, app_key=body.app_key, app_secret=plaintext)
+            _configure_or_validate_app_credentials(
+                session,
+                shop_pk=shop.id,
+                service_id=service_id,
+                app_key=body.app_key,
+                app_secret=plaintext,
+            )
             shop.service_id = service_id
         shop.updated_at = datetime.now(UTC)
         session.flush()

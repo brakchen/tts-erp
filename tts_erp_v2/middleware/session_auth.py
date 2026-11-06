@@ -16,9 +16,8 @@ Design: docs/design/user-account-authz-design.md
 
 from __future__ import annotations
 
-import os
-
 from tts_erp_v2.middleware.rate_limit import SlidingWindow
+from tts_erp_v2.runtime_settings import get_setting
 
 # 专属命名（防同域其他服务的 cookie 撞名）；旧名 tts_session 的
 # api-key-hmac 会话一律视为未登录（不做过渡兼容）。
@@ -30,7 +29,7 @@ _login_limiter: SlidingWindow | None = None
 
 
 def session_ttl_seconds() -> int:
-    raw = os.environ.get("TTS_ERP_SESSION_TTL")
+    raw = get_setting("TTS_ERP_SESSION_TTL")
     try:
         return max(300, int(raw)) if raw else SESSION_TTL_DEFAULT_S
     except ValueError:
@@ -39,7 +38,7 @@ def session_ttl_seconds() -> int:
 
 def session_secure_flag() -> bool:
     """Secure cookie flag — on by default; off only for local http dev."""
-    raw = os.environ.get("TTS_ERP_SESSION_SECURE", "1")
+    raw = get_setting("TTS_ERP_SESSION_SECURE", "1")
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
@@ -55,7 +54,7 @@ def cookie_path(root_path: str | None) -> str:
 
 
 def _env_login_limit() -> int:
-    raw = os.environ.get("TTS_ERP_LOGIN_RATE_LIMIT")
+    raw = get_setting("TTS_ERP_LOGIN_RATE_LIMIT")
     try:
         return max(1, int(raw)) if raw else LOGIN_RATE_LIMIT_DEFAULT
     except ValueError:
@@ -71,8 +70,9 @@ def login_throttle_hit(client_key: str) -> int | None:
     brute-force target.
     """
     global _login_limiter
-    if _login_limiter is None:
-        _login_limiter = SlidingWindow(_env_login_limit())
+    desired = _env_login_limit()
+    if _login_limiter is None or _login_limiter.limit != desired:
+        _login_limiter = SlidingWindow(desired)
     return _login_limiter.hit(client_key)
 
 

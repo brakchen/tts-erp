@@ -34,7 +34,6 @@ from __future__ import annotations
 import http.client
 import json
 import logging
-import os
 import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -53,6 +52,7 @@ from tts_erp_v2.proxy.token_service import (
     resolve_tiktok_app_credentials,
 )
 from tts_erp_v2.proxy.tts_shop.signing import sign_request
+from tts_erp_v2.runtime_settings import get_setting
 
 log = logging.getLogger("tts_erp_v2.proxy.tiktok_auth")
 
@@ -73,6 +73,7 @@ AUTHORIZE_PATH = "/open/authorize"
 # Cap on the upstream response body we keep for diagnostics.
 _BODY_PREVIEW_CHARS = 300
 
+
 def _resolve_app_credentials() -> tuple[str, str, str]:
     """Read the legacy environment App pair and token host.
 
@@ -85,11 +86,9 @@ def _resolve_app_credentials() -> tuple[str, str, str]:
     missing — we never fall back to empty strings (which would produce
     bogus ``98001004 invalid params`` upstream).
     """
-    app_key = os.environ.get("TIKTOK_APP_KEY", "").strip()
-    app_secret = os.environ.get("TIKTOK_APP_SECRET", "").strip()
-    auth_host = (
-        os.environ.get("TIKTOK_AUTH_HOST", "").strip() or DEFAULT_TIKTOK_AUTH_HOST
-    )
+    app_key = get_setting("TIKTOK_APP_KEY", "").strip()
+    app_secret = get_setting("TIKTOK_APP_SECRET", "").strip()
+    auth_host = get_setting("TIKTOK_AUTH_HOST", "").strip() or DEFAULT_TIKTOK_AUTH_HOST
     if not app_key or not app_secret:
         raise SigningError(
             "TIKTOK_APP_KEY and TIKTOK_APP_SECRET are not configured in the "
@@ -101,7 +100,7 @@ def _resolve_app_credentials() -> tuple[str, str, str]:
 
 def resolve_service_id(service_id: str | None = None) -> str:
     """Return an explicit service_id or the legacy environment default."""
-    resolved = (service_id or os.environ.get("TIKTOK_SERVICE_ID", "")).strip()
+    resolved = (service_id or get_setting("TIKTOK_SERVICE_ID", "")).strip()
     if not resolved:
         raise SigningError(
             "service_id not provided and TIKTOK_SERVICE_ID is not configured"
@@ -119,7 +118,7 @@ def _resolve_service_credentials() -> tuple[str, str]:
     """
     service_id = resolve_service_id()
     authorize_host = (
-        os.environ.get("TIKTOK_AUTHORIZE_HOST", "").strip()
+        get_setting("TIKTOK_AUTHORIZE_HOST", "").strip()
         or DEFAULT_TIKTOK_AUTHORIZE_HOST
     )
     if not service_id:
@@ -155,9 +154,7 @@ def _http_app_pair(
     """Return ``(app_key, app_secret, auth_host)`` for one HTTP operation."""
     if app_credentials is None:
         return _resolve_app_credentials()
-    auth_host = (
-        os.environ.get("TIKTOK_AUTH_HOST", "").strip() or DEFAULT_TIKTOK_AUTH_HOST
-    )
+    auth_host = get_setting("TIKTOK_AUTH_HOST", "").strip() or DEFAULT_TIKTOK_AUTH_HOST
     return app_credentials.app_key, app_credentials.app_secret, auth_host
 
 
@@ -485,7 +482,7 @@ def build_authorize_url(
             authorize host 非 http(s)。
     """
     authorize_host = (
-        os.environ.get("TIKTOK_AUTHORIZE_HOST", "").strip()
+        get_setting("TIKTOK_AUTHORIZE_HOST", "").strip()
         or DEFAULT_TIKTOK_AUTHORIZE_HOST
     )
     resolved_service_id = resolve_service_id(service_id)
@@ -515,7 +512,7 @@ AUTHORIZED_SHOPS_PATH = "/authorization/202309/shops"
 
 
 def _resolve_api_host() -> str:
-    return os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_TIKTOK_API_HOST
+    return get_setting("TIKTOK_API_HOST", "").strip() or DEFAULT_TIKTOK_API_HOST
 
 
 def fetch_authorized_shops(

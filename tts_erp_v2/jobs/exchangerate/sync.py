@@ -36,7 +36,6 @@ Environment (sync-worker only; never used by the API process):
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -52,6 +51,7 @@ from tts_erp_v2.proxy.exchangerate import (
     StandardRates,
     fetch_standard_rates,
 )
+from tts_erp_v2.runtime_settings import get_setting
 
 log = logging.getLogger("tts_erp_v2.jobs.exchangerate.sync")
 
@@ -215,14 +215,14 @@ def run_scheduled(session: Session) -> dict[str, Any]:
     pass in the shared ``sync_jobs`` lifecycle and returns counters.
     """
     with run_job(session, job_name=JOB_NAME) as job:
-        api_key = (os.environ.get(ENV_API_KEY) or "").strip()
+        api_key = (get_setting(ENV_API_KEY) or "").strip()
         if not api_key:
             raise RuntimeError(
                 f"{ENV_API_KEY} is not set — add it to .env (the "
                 "tts-erp-sync.service EnvironmentFile) before enabling fx.sync"
             )
-        base_code = (os.environ.get(ENV_BASE_CODE) or "USD").strip().upper() or "USD"
-        force = (os.environ.get(ENV_FORCE) or "").strip() == "1"
+        base_code = (get_setting(ENV_BASE_CODE) or "USD").strip().upper() or "USD"
+        force = (get_setting(ENV_FORCE) or "").strip() == "1"
 
         try:
             result = sync_fx_rates(

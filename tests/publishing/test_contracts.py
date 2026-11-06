@@ -248,12 +248,12 @@ def test_tracked_spool_deletion_has_one_cleanup_executor_owner() -> None:
 
 def test_worker_wires_documented_artemis_and_timing_knobs() -> None:
     source = (ROOT / "tts_erp_v2/publishing/worker.py").read_text()
-    assert 'os.environ.get("ARTEMIS_PROFILE", "pro")' in source
+    assert 'get_setting("ARTEMIS_PROFILE", "pro")' in source
     assert '"ARTEMIS_VERIFICATION_LEVEL", "strict"' in source
-    assert 'os.environ.get("PUBLISH_POLL_INTERVAL_SECONDS", "2")' in source
+    assert 'get_setting("PUBLISH_POLL_INTERVAL_SECONDS", "2")' in source
     assert "PUBLISH_WORKER_POLL_SECONDS" not in source
-    assert 'os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")' in source
-    assert 'os.environ.get("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")' in source
+    assert 'get_setting("PUBLISH_TASK_LEASE_SECONDS", "30")' in source
+    assert 'get_setting("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")' in source
     assert "await asyncio.to_thread(" in source
     assert "_cleanup_orphan_spool" in source
 

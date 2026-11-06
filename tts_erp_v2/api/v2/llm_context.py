@@ -41,8 +41,7 @@ What this endpoint does NOT include (secrets, noise)
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -51,6 +50,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
+from tts_erp_v2.runtime_settings import get_setting
 
 router = APIRouter(prefix="/v2/llm-context", tags=["llm-context"])
 
@@ -544,8 +544,8 @@ def get_llm_context(
     return JSONResponse(
         {
             "schema_version": "v2-1",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "host": os.environ.get(
+            "generated_at": datetime.now(UTC).isoformat(),
+            "host": get_setting(
                 "TTS_ERP_HOST", "0.0.0.0"
             ),  # pi-lens-ignore: no-server-bind-wildcard — JSON debug field reporting the bind host, NOT a socket bind (uvicorn binds via systemd --host ${TTS_ERP_HOST})
             "sections": [

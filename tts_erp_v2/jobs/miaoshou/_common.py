@@ -23,7 +23,6 @@ Design notes
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -35,6 +34,7 @@ from sqlalchemy.orm import Session
 from tts_erp_v2.db.models.integration import Credentials
 from tts_erp_v2.db.models.procurement import ProcurementAccount
 from tts_erp_v2.proxy.token_service import CredentialsView, load_credentials
+from tts_erp_v2.runtime_settings import get_setting
 
 log = logging.getLogger("tts_erp_v2.jobs.miaoshou")
 
@@ -76,7 +76,7 @@ def resolve_miaoshou_context(
         :class:`MiaoshouContext` with the decrypted view + account id,
         or ``None`` if not found.
     """
-    ext_id = (license_id or os.environ.get("MIAOSHOU_LICENSE_ID") or "").strip()
+    ext_id = (license_id or get_setting("MIAOSHOU_LICENSE_ID") or "").strip()
     if not ext_id:
         return None
     with session.begin():

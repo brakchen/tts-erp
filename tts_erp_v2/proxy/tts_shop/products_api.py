@@ -29,7 +29,6 @@ Conventions
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
 
@@ -44,6 +43,7 @@ from tts_erp_v2.proxy.tts_shop.client import (
     TiktokCallResult,
     TiktokShopClient,
 )
+from tts_erp_v2.runtime_settings import get_setting
 
 
 class ProductClient(Protocol):
@@ -104,15 +104,13 @@ def _resolve_shop_id(session: Session, shop_pk: int) -> str:
     """
     row = session.execute(
         text(
-            "SELECT shop_id FROM commerce.shops "
-            "WHERE id = :id AND platform = 'tiktok'"
+            "SELECT shop_id FROM commerce.shops WHERE id = :id AND platform = 'tiktok'"
         ),
         {"id": shop_pk},
     ).first()
     if row is None:
         raise ChannelAccountNotFound(
-            f"commerce.shops id={shop_pk} "
-            f"platform='tiktok' not found"
+            f"commerce.shops id={shop_pk} platform='tiktok' not found"
         )
     return row[0]
 
@@ -137,7 +135,7 @@ def _build_default_client(session: Session, shop_id: str) -> TiktokShopClient:
         session,
         shop_id=shop_id,
     )
-    api_host = os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
+    api_host = get_setting("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
     return TiktokShopClient(
         app_key=app_credentials.app_key,
         app_secret=app_credentials.app_secret,
@@ -175,9 +173,7 @@ def _check_envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
     data = payload.get("data")
     if not isinstance(data, Mapping):
-        raise ProxyError(
-            f"upstream 'data' is not an object: {type(data).__name__}"
-        )
+        raise ProxyError(f"upstream 'data' is not an object: {type(data).__name__}")
     return dict(data)
 
 
@@ -244,9 +240,7 @@ def get_product(
         client = _build_default_client(session, shop_id)
 
     path = GET_PRODUCT_PATH_TEMPLATE.format(product_id=product_id)
-    extra_params: dict[str, str] = {
-        "shop_cipher": cast(str, cred.shop_cipher)
-    }
+    extra_params: dict[str, str] = {"shop_cipher": cast(str, cred.shop_cipher)}
     if return_under_review_version:
         extra_params["return_under_review_version"] = "true"
     if return_draft_version:

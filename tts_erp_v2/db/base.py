@@ -1,12 +1,12 @@
 """Declarative base + engine/session factory for tts_erp_v2.
 
-Reads TTS_ERP_DB_URL from os.environ (populated from .env at app startup).
+Reads TTS_ERP_DB_URL through the reloadable runtime configuration provider.
 Does NOT mutate the existing public.* schema or the legacy tables.
 """
 
 from __future__ import annotations
 
-import os
+import threading
 from collections.abc import Iterator
 from datetime import datetime
 from typing import Any, ClassVar
@@ -15,6 +15,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+from tts_erp_v2.runtime_settings import require_setting
 
 # Schemas we manage. Alembic uses these to create schemas before table create.
 SCHEMAS: tuple[str, ...] = (
@@ -51,6 +53,7 @@ class Base(DeclarativeBase):
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
+_config_lock = threading.RLock()
 
 # ─── QueuePool 配置（2026-09-06，见 commit 信息 + 压测基线）────────────
 # 背景：默认 QueuePool 5+10=15 + pool_pre_ping 每 checkout 一次 SELECT 往返 +
@@ -77,51 +80,55 @@ POOL_RECYCLE_S = 300
 
 
 def _resolve_db_url() -> str:
-    url = os.environ.get("TTS_ERP_DB_URL")
-    if not url:
-        raise RuntimeError(
-            "TTS_ERP_DB_URL not configured. Set it in .env or os.environ "
-            "before importing tts_erp_v2.db.base."
-        )
-    return url
+    return require_setting("TTS_ERP_DB_URL")
 
 
 def get_engine(url: str | None = None, *, echo: bool = False) -> Engine:
-    """Return a process-wide Engine. Idempotent; recreate only if url changes."""
-    global _engine
+    """Return the engine, rotating its pool when the configured URL changes."""
+    global _engine, _SessionLocal
     target = url or _resolve_db_url()
-    if _engine is None or _engine.url.render_as_string(hide_password=False) != target:
-        _engine = create_engine(
-            target,
-            echo=echo,
-            future=True,
-            # 池参数见模块顶部注释（pre_ping off + recycle 300 + size 10/
-            # overflow 20 + checkout 超时 10s）。
-            pool_pre_ping=False,
-            pool_recycle=POOL_RECYCLE_S,
-            pool_size=POOL_SIZE,
-            max_overflow=POOL_MAX_OVERFLOW,
-            pool_timeout=POOL_TIMEOUT_S,
-        )
-    return _engine
+    with _config_lock:
+        if (
+            _engine is None
+            or _engine.url.render_as_string(hide_password=False) != target
+        ):
+            previous = _engine
+            _engine = create_engine(
+                target,
+                echo=echo,
+                future=True,
+                # 池参数见模块顶部注释（pre_ping off + recycle 300 + size 10/
+                # overflow 20 + checkout 超时 10s）。
+                pool_pre_ping=False,
+                pool_recycle=POOL_RECYCLE_S,
+                pool_size=POOL_SIZE,
+                max_overflow=POOL_MAX_OVERFLOW,
+                pool_timeout=POOL_TIMEOUT_S,
+            )
+            _SessionLocal = None
+            if previous is not None:
+                previous.dispose()
+        return _engine
 
 
 def get_session_factory(engine: Engine | None = None) -> sessionmaker[Session]:
-    """Return a process-wide SessionLocal. Idempotent."""
+    """Return a session factory bound to the current reloadable DB URL."""
     global _SessionLocal
-    if _SessionLocal is None:
-        eng = engine or get_engine()
-        _SessionLocal = sessionmaker(bind=eng, expire_on_commit=False, future=True)
-    return _SessionLocal
+    eng = engine or get_engine()
+    with _config_lock:
+        if _SessionLocal is None or _SessionLocal.kw.get("bind") is not eng:
+            _SessionLocal = sessionmaker(bind=eng, expire_on_commit=False, future=True)
+        return _SessionLocal
 
 
 def reset_for_testing() -> None:
     """Drop the cached engine/sessionmaker. Used by conftest fixtures."""
     global _engine, _SessionLocal
-    if _engine is not None:
-        _engine.dispose()
-    _engine = None
-    _SessionLocal = None
+    with _config_lock:
+        if _engine is not None:
+            _engine.dispose()
+        _engine = None
+        _SessionLocal = None
 
 
 def reset_session_factory() -> None:
@@ -133,7 +140,8 @@ def reset_session_factory() -> None:
     connection pool while preserving per-test session isolation.
     """
     global _SessionLocal
-    _SessionLocal = None
+    with _config_lock:
+        _SessionLocal = None
 
 
 def session_scope() -> Iterator[Session]:

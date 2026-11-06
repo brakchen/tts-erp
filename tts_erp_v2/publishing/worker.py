@@ -28,48 +28,64 @@ from tts_erp_v2.publishing.dispatcher import (
 )
 from tts_erp_v2.publishing.object_store import video_store_from_env
 from tts_erp_v2.publishing.repository import schedule_spool_reconciliation
+from tts_erp_v2.runtime_settings import (
+    MissingRequiredSettings,
+    config_revision,
+    get_setting,
+    log_optional_settings_status,
+    require_setting,
+    validate_required_settings,
+)
+from tts_erp_v2.storage.minio_client import MinioConfigError
 
 logger = logging.getLogger(__name__)
+_CONFIG_RETRY_SECONDS = 5.0
 
 
-async def run() -> None:
-    instance_id = str(uuid4())
-    session_factory = get_session_factory()
-    await asyncio.to_thread(_write_heartbeat, session_factory, instance_id, "starting")
+def _build_dependencies(session_factory, instance_id: str) -> PublishDependencies:
     store = video_store_from_env()
-    device_serial = os.environ.get("ARTEMIS_DEVICE_SERIAL", "").strip()
+    device_serial = get_setting("ARTEMIS_DEVICE_SERIAL", "").strip()
     if not device_serial:
         logger.error(
             "ARTEMIS_DEVICE_SERIAL is not configured; this worker would claim "
-            "nothing. Configure one serial per worker process (02 §6.1)."
+            "nothing. The worker remains alive and will retry configuration."
         )
-    deps = PublishDependencies(
+    return PublishDependencies(
         session_factory=session_factory,
         store=store,
         adb=AdbDevice(
-            os.environ.get("ADB_BINARY", "adb"),
-            album=os.environ.get("TIKTOK_PUBLISH_ALBUM", "TTSERP"),
+            get_setting("ADB_BINARY", "adb"),
+            album=get_setting("TIKTOK_PUBLISH_ALBUM", "TTSERP"),
         ),
         artemis=ArtemisClient(
-            os.environ["ARTEMIS_BASE_URL"], token=os.environ.get("ARTEMIS_TOKEN")
+            require_setting("ARTEMIS_BASE_URL"), token=get_setting("ARTEMIS_TOKEN")
         ),
-        spool_dir=Path(os.environ["TTS_ERP_PUBLISH_SPOOL_DIR"]).expanduser(),
+        spool_dir=Path(require_setting("TTS_ERP_PUBLISH_SPOOL_DIR")).expanduser(),
         instance_id=instance_id,
         device_serial=device_serial,
-        lease_seconds=int(os.environ.get("PUBLISH_TASK_LEASE_SECONDS", "30")),
-        poll_seconds=float(os.environ.get("PUBLISH_POLL_INTERVAL_SECONDS", "2")),
-        artemis_profile=os.environ.get("ARTEMIS_PROFILE", "pro"),
-        artemis_verification_level=os.environ.get(
-            "ARTEMIS_VERIFICATION_LEVEL", "strict"
-        ),
+        lease_seconds=int(get_setting("PUBLISH_TASK_LEASE_SECONDS", "30")),
+        poll_seconds=float(get_setting("PUBLISH_POLL_INTERVAL_SECONDS", "2")),
+        artemis_profile=get_setting("ARTEMIS_PROFILE", "pro"),
+        artemis_verification_level=get_setting("ARTEMIS_VERIFICATION_LEVEL", "strict"),
     )
+
+
+async def _serve_config_generation(
+    deps: PublishDependencies,
+    *,
+    revision: int,
+) -> None:
     deps.spool_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    await asyncio.to_thread(_cleanup_orphan_spool, session_factory, deps.spool_dir)
+    await asyncio.to_thread(
+        _cleanup_orphan_spool,
+        deps.session_factory,
+        deps.spool_dir,
+    )
     heartbeat_task = asyncio.create_task(
         _heartbeat_loop(
-            session_factory,
-            instance_id,
-            float(os.environ.get("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")),
+            deps.session_factory,
+            deps.instance_id,
+            float(get_setting("PUBLISH_WORKER_HEARTBEAT_SECONDS", "5")),
             deps,
         ),
         name="publish-heartbeat",
@@ -77,18 +93,16 @@ async def run() -> None:
     background_cleanup_task = asyncio.create_task(
         _background_cleanup_loop(
             deps,
-            batch_size=int(
-                os.environ.get("PUBLISH_BACKGROUND_CLEANUP_BATCH_SIZE", "1")
-            ),
+            batch_size=int(get_setting("PUBLISH_BACKGROUND_CLEANUP_BATCH_SIZE", "1")),
             interval_seconds=float(
-                os.environ.get("PUBLISH_BACKGROUND_CLEANUP_INTERVAL_SECONDS", "1")
+                get_setting("PUBLISH_BACKGROUND_CLEANUP_INTERVAL_SECONDS", "1")
             ),
         ),
         name="publish-background-cleanup",
     )
     try:
         await recover_active(deps)
-        while True:
+        while config_revision() == revision:
             await dispatch_one(deps)
             await asyncio.sleep(deps.poll_seconds)
     finally:
@@ -97,8 +111,36 @@ async def run() -> None:
         await asyncio.gather(
             heartbeat_task, background_cleanup_task, return_exceptions=True
         )
+
+
+async def run() -> None:
+    validate_required_settings("tts-erp publish-worker")
+    instance_id = str(uuid4())
+    session_factory = get_session_factory()
+    await asyncio.to_thread(_write_heartbeat, session_factory, instance_id, "starting")
+    try:
+        while True:
+            log_optional_settings_status()
+            try:
+                deps = _build_dependencies(session_factory, instance_id)
+            except (MissingRequiredSettings, MinioConfigError, ValueError) as exc:
+                logger.error(
+                    "publish worker downstream configuration unavailable (%s); "
+                    "retrying in %.1fs without exiting",
+                    type(exc).__name__,
+                    _CONFIG_RETRY_SECONDS,
+                )
+                await asyncio.sleep(_CONFIG_RETRY_SECONDS)
+                continue
+            revision = config_revision()
+            await _serve_config_generation(deps, revision=revision)
+            logger.info("publish worker configuration changed; rebuilding clients")
+    finally:
         await asyncio.to_thread(
-            _write_heartbeat, session_factory, instance_id, "stopping"
+            _write_heartbeat,
+            session_factory,
+            instance_id,
+            "stopping",
         )
 
 
@@ -179,7 +221,7 @@ async def _probe_device_readiness(
         return "unknown", "设备探测返回未知错误"
     try:
         await deps.adb.check_package(
-            serial, os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
+            serial, get_setting("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
         )
     except Exception:  # noqa: BLE001 - never persist package probe diagnostics
         return "unknown", "TikTok 应用不可用或包探测失败"

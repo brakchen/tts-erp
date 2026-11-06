@@ -25,13 +25,14 @@ are authoritative (no network call needed).
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from typing import Any
+
+from tts_erp_v2.runtime_settings import get_setting
 
 DEFAULT_BASE_URL = "https://v6.exchangerate-api.com/v6"
 DEFAULT_HTTP_TIMEOUT = 15.0
@@ -155,7 +156,7 @@ def fetch_standard_rates(
     if not api_key or not api_key.strip():
         raise ExchangeRateAPIError("exchangerate api key is empty", error_type="no-key")
     resolved_base = (
-        (base_url or os.environ.get("EXCHANGERATE_BASE_URL") or DEFAULT_BASE_URL)
+        (base_url or get_setting("EXCHANGERATE_BASE_URL") or DEFAULT_BASE_URL)
         .strip()
         .rstrip("/")
     )

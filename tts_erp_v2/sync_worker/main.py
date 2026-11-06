@@ -40,11 +40,16 @@ from __future__ import annotations
 import argparse
 import logging
 import logging.handlers
-import os
 import pathlib
 import signal
 import sys
 
+from tts_erp_v2.runtime_settings import (
+    MissingRequiredSettings,
+    get_setting,
+    log_optional_settings_status,
+    validate_required_settings,
+)
 from tts_erp_v2.sync_worker.scheduler import JOBS, build_scheduler
 
 log = logging.getLogger("tts_erp_v2.sync_worker.main")
@@ -60,20 +65,12 @@ def _require_env() -> None:
     systemd reports a clear failure (rather than crashing inside
     APScheduler with an obscure traceback).
     """
-    missing: list[str] = []
-    if not os.environ.get("TTS_ERP_DB_URL", "").strip():
-        missing.append("TTS_ERP_DB_URL")
-    if not os.environ.get("TTS_ERP_FERNET_KEY", "").strip():
-        missing.append("TTS_ERP_FERNET_KEY")
-    if missing:
-        sys.stderr.write(
-            "tts-erp sync-worker cannot start; missing env var(s):\n"
-            + "\n".join(f"  - {name}" for name in missing)
-            + "\n"
-            "Set them in /home/schan/tts-erp/.env; the systemd unit's "
-            "EnvironmentFile= forwards them at start.\n"
-        )
+    try:
+        validate_required_settings("tts-erp sync-worker")
+    except MissingRequiredSettings as exc:
+        sys.stderr.write(f"{exc}\n")
         sys.exit(2)
+    log_optional_settings_status()
 
 
 def _sync_log_filename() -> str:
@@ -103,7 +100,7 @@ def _configure_logging() -> None:
     and checkouts without a ``logs/`` dir fall back to stderr-only via
     the guard below.
     """
-    level = os.environ.get("TTS_ERP_SYNC_LOG_LEVEL", "INFO").upper()
+    level = (get_setting("TTS_ERP_SYNC_LOG_LEVEL", "INFO") or "INFO").upper()
     logging.basicConfig(
         level=level,
         format=("%(asctime)s %(levelname)-7s %(name)s | %(message)s"),
@@ -229,11 +226,11 @@ def _run_daemon() -> int:
     session_factory = get_session_factory()
     sched = build_scheduler(session_factory)
 
-    def _shutdown(signum, _frame):  # noqa: ANN001 — signal handler shape
+    def _shutdown(signum, _frame):
         log.info("received signal %d, shutting down", signum)
         try:
             sched.shutdown(wait=False)
-        except Exception:  # noqa: BLE001 — boundary
+        except Exception:
             log.exception("error shutting down scheduler")
         sys.exit(0)
 

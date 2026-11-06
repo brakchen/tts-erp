@@ -30,7 +30,6 @@ All other routes go through v2 routers and require auth.
 from __future__ import annotations
 
 import base64
-import os
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -56,8 +55,8 @@ from tts_erp_v2.api.v2 import (
     media,
     oauth,
     order_sync,
-    plugin_shops,
     pages,
+    plugin_shops,
     reporting,
     spu_deterioration_alert,
     spu_images,
@@ -70,6 +69,11 @@ from tts_erp_v2.api.v2 import config as config_router
 from tts_erp_v2.middleware.access_log import AccessLogMiddleware
 from tts_erp_v2.middleware.auth import AuthMiddleware
 from tts_erp_v2.middleware.rate_limit import RateLimitMiddleware
+from tts_erp_v2.runtime_settings import (
+    get_setting,
+    log_optional_settings_status,
+    validate_required_settings,
+)
 
 # The production ads-data-sync extension has a stable signed ID. Keep this
 # narrow instead of enabling every chrome-extension origin; operators can
@@ -201,11 +205,11 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app):  # type: ignore[no-untyped-def]
         super().__init__(app)
-        self._user = os.environ.get("TTS_ERP_DOCS_USER", "")
-        self._password = os.environ.get("TTS_ERP_DOCS_PASSWORD", "")
-        self._enabled = bool(self._user and self._password)
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        user = get_setting("TTS_ERP_DOCS_USER") or ""
+        password = get_setting("TTS_ERP_DOCS_PASSWORD") or ""
+        enabled = bool(user and password)
         canonical = canonicalize_path(
             DeploymentPathInput(
                 path=request.scope.get("path", ""),
@@ -213,15 +217,15 @@ class DocsAuthMiddleware(BaseHTTPMiddleware):
                 root_path=request.scope.get("root_path", ""),
             )
         )
-        if not self._enabled or canonical.route_path not in self._PROTECTED:
+        if not enabled or canonical.route_path not in self._PROTECTED:
             return await call_next(request)
 
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Basic "):
             try:
                 decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
-                user, password = decoded.split(":", 1)
-                if user == self._user and password == self._password:
+                supplied_user, supplied_password = decoded.split(":", 1)
+                if supplied_user == user and supplied_password == password:
                     return await call_next(request)
             except (ValueError, UnicodeDecodeError):
                 pass  # malformed Basic header — fall through to 401
@@ -240,12 +244,14 @@ def build_app() -> FastAPI:
     with ``tts_erp_v2.app:build_app()`` (the factory; uvicorn picks the
     returned instance).
     """
+    validate_required_settings("tts-erp API")
+    log_optional_settings_status()
     # root_path 是外部挂载前缀的唯一真相源（2026-09-28 收敛）：仅在此处
     # 读一次 TTS_ERP_EXTERNAL_PREFIX，下游（auth middleware 分类 / 302
     # Location / cookie path / oauth redirect hint / StaticFiles）一律从
     # scope["root_path"] 派生，不再各自读 env。nginx 侧契约：/tts/ 必须
     # 透传完整前缀（proxy_pass 不带尾斜杠），见 ~/setup/nginx/conf.d/services.conf。
-    root_path = os.environ.get("TTS_ERP_EXTERNAL_PREFIX", "")
+    root_path = get_setting("TTS_ERP_EXTERNAL_PREFIX", "") or ""
     app = FastAPI(
         title="tts-erp v2",
         version="2.0.0",
@@ -327,9 +333,7 @@ def _parse_cors_origins() -> list[str]:
 
 
 def _env_cors() -> str:
-    import os
-
-    return os.environ.get("TTS_ERP_CORS_ALLOW_ORIGINS", "")
+    return get_setting("TTS_ERP_CORS_ALLOW_ORIGINS", "") or ""
 
 
 def _register_public_routes(app: FastAPI) -> None:
@@ -365,9 +369,7 @@ def _register_public_routes(app: FastAPI) -> None:
 
 
 def _env_auth_mode() -> str:
-    import os
-
-    return os.environ.get("TTS_ERP_AUTH_MODE", "off")
+    return get_setting("TTS_ERP_AUTH_MODE", "off") or "off"
 
 
 def _walk_v2_routes(routes, prefix=""):

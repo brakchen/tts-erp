@@ -16,17 +16,17 @@ Base URL 默认 ``https://openapi-erp.91miaoshou.com``，可通过环境变量 `
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, TypeVar
+from typing import Any, Self, TypeVar
 
 from pydantic import BaseModel as _BaseModel
 from pydantic import ValidationError as _ValidationError
-from typing_extensions import Self
+
+from tts_erp_v2.runtime_settings import get_setting
 
 from .miaoshou_client import MiaoshouApiError
 from .miaoshou_signing import hmac_sha256_sign
@@ -43,8 +43,8 @@ class MiaoshouErpClient:
     @classmethod
     def from_env(cls) -> MiaoshouErpClient:
         """从环境变量构造（依赖 MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET / MIAOSHOU_HTTP_TIMEOUT）。"""
-        app_id_raw = os.environ.get("MIAOSHOU_LICENSE_ID", "")
-        app_secret_raw = os.environ.get("MIAOSHOU_COMPANY_SECRET", "")
+        app_id_raw = get_setting("MIAOSHOU_LICENSE_ID", "")
+        app_secret_raw = get_setting("MIAOSHOU_COMPANY_SECRET", "")
         # 同时过滤空白字符（空格 / tab / 换行）
         app_id = app_id_raw.strip()
         app_secret = app_secret_raw.strip()
@@ -53,7 +53,7 @@ class MiaoshouErpClient:
                 "缺少 MIAOSHOU_LICENSE_ID / MIAOSHOU_COMPANY_SECRET（不能是空字符串或纯空白）。请在 .env 里配置，或手动 export。"
             )
         try:
-            timeout = int(os.environ.get("MIAOSHOU_HTTP_TIMEOUT", "30"))
+            timeout = int(get_setting("MIAOSHOU_HTTP_TIMEOUT", "30"))
         except (TypeError, ValueError) as e:  # pragma: no cover — defensive
             raise RuntimeError(f"MIAOSHOU_HTTP_TIMEOUT 无效: {e}") from e
         return cls(app_id=app_id, app_secret=app_secret, timeout=timeout)
@@ -73,7 +73,7 @@ class MiaoshouErpClient:
         self.app_id = app_id
         self.app_secret = app_secret
         self.base_url = (
-            base_url or os.environ.get("MIAOSHOU_ERP_BASE_URL", ERP_DEFAULT_BASE_URL)
+            base_url or get_setting("MIAOSHOU_ERP_BASE_URL", ERP_DEFAULT_BASE_URL)
         ).rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
@@ -165,9 +165,11 @@ class MiaoshouErpClient:
                 "x-sign": signature,
                 **extra_headers,
             }
-            req = urllib.request.Request(url, data=body_bytes, method="POST", headers=headers)  # noqa: S310 -- url from operator-configured base, not user input
+            req = urllib.request.Request(
+                url, data=body_bytes, method="POST", headers=headers
+            )
 
-            if os.environ.get("MIAOSHOU_DEBUG_SIGN") == "1":
+            if get_setting("MIAOSHOU_DEBUG_SIGN") == "1":
                 print(
                     f"[miaoshou-erp-debug] url={url}",
                     f"  attempt={attempt}",
@@ -179,7 +181,7 @@ class MiaoshouErpClient:
                 )
 
             try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as http_resp:  # noqa: S310 -- operator-configured URL
+                with urllib.request.urlopen(req, timeout=self.timeout) as http_resp:
                     raw = http_resp.read().decode("utf-8")
                 last_network_err = None
                 http_err = None

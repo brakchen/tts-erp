@@ -15,12 +15,14 @@ Exports
 * :func:`build_signed_url` — URL with timestamp + signature.
 * :func:`build_canonical` — exposed for tests / debugging.
 """
+
 from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import sys
+
+from tts_erp_v2.runtime_settings import get_setting
 
 
 def build_canonical(
@@ -60,7 +62,7 @@ def sign_request(
         canonical.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    if os.environ.get("TTS_DEBUG_SIGN") == "1":
+    if get_setting("TTS_DEBUG_SIGN") == "1":
         body_repr = repr(body) if body else "None"
         sys.stderr.write(
             f"[tts-erp-debug] path={path}\n"
@@ -72,4 +74,4 @@ def sign_request(
     return sig
 
 
-__all__ = ["sign_request", "build_canonical"]
+__all__ = ["build_canonical", "sign_request"]

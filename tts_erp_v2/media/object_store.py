@@ -9,10 +9,10 @@ bucket to the same client, exactly like the publish workflow does.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta
 from typing import Protocol
 
+from tts_erp_v2.runtime_settings import get_setting
 from tts_erp_v2.storage.minio_client import (
     MinioClient,
     MinioConfigError,
@@ -86,7 +86,7 @@ def media_store_from_env() -> MinioMediaStore:
     ``MEDIA_MINIO_BUCKET`` selects the bucket; every other MinIO setting is
     shared with the rest of the project (``MINIO_ENDPOINT`` and friends).
     """
-    bucket = os.environ.get("MEDIA_MINIO_BUCKET", DEFAULT_MEDIA_BUCKET).strip()
+    bucket = get_setting("MEDIA_MINIO_BUCKET", DEFAULT_MEDIA_BUCKET).strip()
     if not bucket:
         raise MinioConfigError("MEDIA_MINIO_BUCKET must not be empty")
     return MinioMediaStore(MinioClient.from_env().with_bucket(bucket))

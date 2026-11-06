@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from collections.abc import Callable
 
 from sqlalchemy.orm import Session
@@ -51,6 +50,7 @@ from tts_erp_v2.proxy.tts_shop.client import (
     DEFAULT_API_HOST,
     TiktokShopClient,
 )
+from tts_erp_v2.runtime_settings import get_setting
 
 log = logging.getLogger("tts_erp_v2.sync_worker.proxy_call")
 
@@ -175,7 +175,7 @@ def build_proxy_call(
     Each call snapshots the OAuth token and its matching shop-owned App in
     one short read transaction. HTTP/retries run after that transaction ends.
     """
-    api_host = os.environ.get("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
+    api_host = get_setting("TIKTOK_API_HOST", "").strip() or DEFAULT_API_HOST
 
     def proxy_call(method: str, path: str, *, body: dict | None = None) -> dict:
         with session.begin():

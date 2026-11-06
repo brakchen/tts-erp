@@ -52,9 +52,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import sys
 import time
+
+from tts_erp_v2.runtime_settings import get_setting
 
 logger = logging.getLogger("tts_erp_v2.access")
 
@@ -89,7 +90,7 @@ _DISABLED_ENV = "TTS_ERP_ACCESS_LOG"
 
 
 def _is_enabled() -> bool:
-    raw = os.environ.get(_DISABLED_ENV, "1").strip().lower()
+    raw = get_setting(_DISABLED_ENV, "1").strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 

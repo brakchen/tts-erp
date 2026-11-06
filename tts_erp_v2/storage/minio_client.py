@@ -18,7 +18,6 @@ hostname. Without this rewrite MinIO returns 403. See
 from __future__ import annotations
 
 import logging
-import os
 import re
 import sys
 from dataclasses import dataclass, replace
@@ -27,6 +26,8 @@ from urllib.parse import urlparse, urlunparse
 
 from minio import Minio
 from minio.error import S3Error
+
+from tts_erp_v2.runtime_settings import get_setting
 
 # 2026-09-01: warn at startup when MINIO_ENDPOINT looks LAN-only but
 # MINIO_PUBLIC_HOST is unset — otherwise the browser receives a
@@ -137,13 +138,13 @@ def _rewrite_presigned_host(sdk_url: str, public_host: str) -> str:
 
 def _read_config() -> _Config:
     required = {
-        "MINIO_ENDPOINT": os.environ.get("MINIO_ENDPOINT", "").strip(),
-        "MINIO_ACCESS_KEY": os.environ.get("MINIO_ACCESS_KEY", "").strip(),
-        "MINIO_SECRET_KEY": os.environ.get("MINIO_SECRET_KEY", "").strip(),
-        "MINIO_BUCKET": os.environ.get("MINIO_BUCKET", "").strip(),
-        "MINIO_SECURE": os.environ.get("MINIO_SECURE", "").strip().lower(),
-        "MINIO_REGION": os.environ.get("MINIO_REGION", "").strip(),
-        "MINIO_PRESIGN_EXPIRY_SECONDS": os.environ.get(
+        "MINIO_ENDPOINT": get_setting("MINIO_ENDPOINT", "").strip(),
+        "MINIO_ACCESS_KEY": get_setting("MINIO_ACCESS_KEY", "").strip(),
+        "MINIO_SECRET_KEY": get_setting("MINIO_SECRET_KEY", "").strip(),
+        "MINIO_BUCKET": get_setting("MINIO_BUCKET", "").strip(),
+        "MINIO_SECURE": get_setting("MINIO_SECURE", "").strip().lower(),
+        "MINIO_REGION": get_setting("MINIO_REGION", "").strip(),
+        "MINIO_PRESIGN_EXPIRY_SECONDS": get_setting(
             "MINIO_PRESIGN_EXPIRY_SECONDS", ""
         ).strip(),
     }
@@ -173,8 +174,8 @@ def _read_config() -> _Config:
         raise MinioConfigError(
             "MINIO_PRESIGN_EXPIRY_SECONDS must be between 1 and 604800."
         )
-    base = os.environ.get("MINIO_PUBLIC_BASE_URL", "").strip()
-    public_host = os.environ.get("MINIO_PUBLIC_HOST", "").strip() or None
+    base = get_setting("MINIO_PUBLIC_BASE_URL", "").strip()
+    public_host = get_setting("MINIO_PUBLIC_HOST", "").strip() or None
     # 2026-09-01: warn at startup when the SDK endpoint looks LAN-only
     # (127.0.0.1, localhost, or a private RFC1918 IP) but no public
     # host is configured. The browser receives a presigned URL

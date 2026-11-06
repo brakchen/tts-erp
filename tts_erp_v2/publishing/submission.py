@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -35,33 +34,32 @@ from tts_erp_v2.publishing.repository import (
     queue_task,
     release_lease,
 )
+from tts_erp_v2.runtime_settings import get_setting
 from tts_erp_v2.storage.minio_client import ObjectNotFound
 
-_BUCKET = os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video")
-_PACKAGE = os.environ.get("ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically")
 MAX_UPLOAD_TICKET_TTL = timedelta(days=7)
 _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _APP_PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
 
 
 def max_video_bytes() -> int:
-    return int(os.environ.get("TIKTOK_PUBLISH_MAX_VIDEO_BYTES", str(500 * 1024 * 1024)))
+    return int(get_setting("TIKTOK_PUBLISH_MAX_VIDEO_BYTES", str(500 * 1024 * 1024)))
 
 
 def max_caption_chars() -> int:
-    return int(os.environ.get("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "4000"))
+    return int(get_setting("TIKTOK_PUBLISH_MAX_CAPTION_CHARS", "4000"))
 
 
 def max_prompt_chars() -> int:
-    return int(os.environ.get("TIKTOK_PUBLISH_MAX_PROMPT_CHARS", "4000"))
+    return int(get_setting("TIKTOK_PUBLISH_MAX_PROMPT_CHARS", "4000"))
 
 
 def configured_device_serial() -> str:
-    return os.environ.get("ARTEMIS_DEVICE_SERIAL", "").strip()
+    return get_setting("ARTEMIS_DEVICE_SERIAL", "").strip()
 
 
 def configured_bucket() -> str:
-    return os.environ.get("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
+    return get_setting("TIKTOK_PUBLISH_MINIO_BUCKET", "tiktok-video").strip()
 
 
 def upload_expires_at(
@@ -71,7 +69,7 @@ def upload_expires_at(
     expiry = getattr(store, "default_expiry", None)
     if not isinstance(expiry, timedelta):
         expiry = timedelta(
-            seconds=int(os.environ.get("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900"))
+            seconds=int(get_setting("TIKTOK_PUBLISH_UPLOAD_TTL_SECONDS", "900"))
         )
     if expiry <= timedelta(0) or expiry > MAX_UPLOAD_TICKET_TTL:
         raise ValueError("UPLOAD_TTL_EXCEEDS_SAFE_MAX")
@@ -232,14 +230,16 @@ def create_upload_ticket(
         object_filename=object_filename,
         content_type=command.content_type,
         size_bytes=command.size_bytes,
-        object_bucket=getattr(store, "bucket", _BUCKET),
+        object_bucket=getattr(store, "bucket", configured_bucket()),
         object_key=key,
         object_generation=generation,
         status=TaskStatus.PENDING.value,
         stage=TaskStage.AWAITING_UPLOAD.value,
         stage_started_at=now,
         target_device_serial=device_serial,
-        target_app_package=_PACKAGE,
+        target_app_package=get_setting(
+            "ARTEMIS_APP_PACKAGE", "com.zhiliaoapp.musically"
+        ),
     )
     session.add(task)
     try:
