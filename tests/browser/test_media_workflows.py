@@ -13,6 +13,7 @@ import zlib
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from uuid import uuid4
 
@@ -484,7 +485,7 @@ def assert_reference_grid(page: Page, count: int) -> None:
     first_row = [box for box in rectangles if abs(box["y"] - rectangles[0]["y"]) <= 2]
     assert len(first_row) == columns, {"area": area, "cards": rectangles, "expectedColumns": columns}
     if columns > 1:
-        for left, right in zip(first_row, first_row[1:]):
+        for left, right in pairwise(first_row):
             assert abs(left["width"] - right["width"]) <= 2
             assert 8 <= right["x"] - left["x"] - left["width"] <= 12
     for index in range(count):

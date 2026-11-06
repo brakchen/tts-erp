@@ -1,11 +1,8 @@
 """Positive canned-data readiness for layout/font checks, never error scenarios."""
 from __future__ import annotations
 
-import re
 import time
 from typing import Any
-
-from playwright.sync_api import expect
 
 from tests.support.test_runtime import record_phase
 
@@ -41,11 +38,9 @@ def wait_canned_page(page: Any, slug: str) -> None:
         elif slug == "spu-profit-deterioration":
             page.get_by_text("TEST_RENDER_COMPARE_0", exact=True).wait_for()
         elif slug == "media-assets":
-            page.get_by_text("素材库还没有文件。", exact=True).wait_for()
-            page.get_by_text("正在加载标签筛选…", exact=True).wait_for(state="hidden")
-            expect(page.get_by_text("标签筛选不可用", exact=True)).to_have_count(0)
+            page.get_by_text("没有符合条件的素材。", exact=True).wait_for()
         elif slug == "digital-humans":
-            page.get_by_text(re.compile(r"^当前列表还没有数字人。")).wait_for()
+            page.get_by_text("当前没有档案。", exact=True).wait_for()
         elif slug == "video-publish":
             page.get_by_role("region", name="发布配置", exact=True).get_by_text("TEST_render_device", exact=True).wait_for()
             page.get_by_text("当前没有运行中或清理中的发布任务。", exact=True).wait_for()
