@@ -570,9 +570,12 @@ def frontend_site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: 
     for page in PAGES:
         if page.page_id not in frontend_pages.MIGRATED_PAGE_IDS:
             continue
+        # Profitability's default preview is readonly. Mutation cases explicitly
+        # install their own writable bootstrap and inert route acknowledgments.
+        role = Role.READONLY if page.page_id in _SPU_PAGES else Role.ADMIN
         for prefix in ("", "/tts"):
             request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{page.page_id}",
-                               "access_grant": AccessGrant(mode=AuthMode.ENFORCE, role=Role.ADMIN)})
+                               "access_grant": AccessGrant(mode=AuthMode.ENFORCE, role=role)})
             response = frontend_pages.render_frontend_page(request, page.page_id)
             name = ("tts-" if prefix else "") + page.page_id
             (rendered / f"{name}.html").write_bytes(response.body)
