@@ -76,7 +76,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   const [discard, setDiscard] = useState<'view' | 'close'>();
   const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState(initialNotice);
-  const [tagCatalog, setTagCatalog] = useState<string[]>([]);
+  const [tagCatalog, setTagCatalog] = useState<string[]>();
   const asset = updated ?? read.data;
   const original = asset && draftFor(asset);
   const dirty = Boolean(draft && original && (draft.filename !== original.filename || draft.description !== original.description
@@ -94,8 +94,9 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
     if (dirty) setDiscard(target); else finishExit(target);
   }
   async function save() {
-    if (!asset || !draft || !original || !dirty || !draft.filename.trim() || !canWrite) return;
-    const tags = withPendingTag(draft.tags, draft.tagInput, tagCatalog);
+    if (!asset || !draft || !original || !dirty || !draft.filename.trim() || !canWrite
+      || (draft.tagInput.trim() && !tagCatalog)) return;
+    const tags = withPendingTag(draft.tags, draft.tagInput, tagCatalog ?? []);
     await action.run(async () => {
       const response = await mediaWrite(root, '/assets/' + id, 'PATCH', decodeAsset, {
         ...(draft.filename !== original.filename && { filename: draft.filename.trim() }),
@@ -141,7 +142,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
         <p className="text-sm text-muted">保存后，所有引用此素材的位置都会显示更新后的资料。</p>
         <ActionError message={action.error && (action.uncertain ? action.error : '保存未完成。' + action.error)} />
         <div className="flex flex-wrap gap-2">
-          <Button type="submit" isDisabled={!dirty || !draft.filename.trim()} isPending={action.pending}>保存资料</Button>
+          <Button type="submit" isDisabled={!dirty || !draft.filename.trim() || Boolean(draft.tagInput.trim() && !tagCatalog)} isPending={action.pending}>保存资料</Button>
           <Button variant="secondary" isDisabled={action.pending} onPress={() => exit('view')}>取消</Button>
         </div>
       </form> : <>

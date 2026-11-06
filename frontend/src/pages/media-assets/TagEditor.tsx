@@ -33,7 +33,7 @@ export default function TagEditor({ root, selected, input, onChange, onInput, on
     if (read.data) onCatalog(read.data);
   }, [read.data, onCatalog]);
   function add() {
-    if (disabled) return;
+    if (disabled || read.loading || !read.data) return;
     setNotice('');
     if (!normalized) { setError('请输入标签名称。'); return; }
     const tag = existing ?? normalized;
@@ -69,7 +69,7 @@ export default function TagEditor({ root, selected, input, onChange, onInput, on
           if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!event.nativeEvent.isComposing) add(); }
         }} />
       </TextField>
-      <Button variant="secondary" isDisabled={disabled} onPress={add}>添加标签</Button>
+      <Button variant="secondary" isDisabled={disabled || read.loading || !read.data} onPress={add}>添加标签</Button>
     </div>
     <p className="media-tag-note">支持自定义标签，保存资料后生效。</p>
     {error && <p className="media-error" role="alert">{error}</p>}

@@ -42,7 +42,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
   const [filename, setFilename] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
-  const [tagCatalog, setTagCatalog] = useState<string[]>([]);
+  const [tagCatalog, setTagCatalog] = useState<string[]>();
   const [ticket, setTicket] = useState<UploadTicket>();
   const [phase, setPhase] = useState<Phase>('draft');
   const [progress, setProgress] = useState(0);
@@ -138,7 +138,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
     let next: UploadTicket;
     try {
       next = await mediaWrite(root, '/assets/upload-url', 'POST', decodeUploadTicket, {
-        filename: filename.trim(), contentType: file.type, sizeBytes: file.size, tags: withPendingTag(tags, tagInput, tagCatalog),
+        filename: filename.trim(), contentType: file.type, sizeBytes: file.size, tags: withPendingTag(tags, tagInput, tagCatalog ?? []),
       });
     } catch (failure) {
       setPrepareUncertain(uncertainResult(failure));
@@ -163,7 +163,10 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
   return <>
     <RecordPage eyebrow={target ? '数字人 / 上传新素材' : '资产管理 / 上传素材'} title={title}>
       {selectionCount > 0 && <p role="status">选择页待添加的 {selectionCount} 项素材已保留。上传完成后返回继续确认添加。</p>}
-      <form className="media-box media-form" onSubmit={(event) => { event.preventDefault(); if (editable && file?.size) void run(start); }}>
+      <form className="media-box media-form" onSubmit={(event) => {
+        event.preventDefault();
+        if (editable && file?.size && (!tagInput.trim() || tagCatalog)) void run(start);
+      }}>
       <label className="media-upload-file">
         <span>选择文件</span>
         <input type="file" accept={types} disabled={!editable} title="图片最大 20 MiB，视频最大 200 MiB。" onChange={(event) => {
@@ -203,7 +206,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete, se
       <ActionError message={error} />
       {phase === 'prepare-error' && prepareUncertain && <p>上传准备结果未确认。再次开始前请在资产库核对同名记录。{href && <> <a className="underline" href={href} target="_blank" rel="noreferrer">在新标签页核对资产库</a></>}</p>}
       <div className="media-actions">
-        {editable && <Button type="submit" isDisabled={!file?.size || !filename.trim()}>
+        {editable && <Button type="submit" isDisabled={!file?.size || !filename.trim() || Boolean(tagInput.trim() && !tagCatalog)}>
           {phase === 'restart' ? '重新上传文件' : '开始上传'}
         </Button>}
         {(phase === 'send-error' || phase === 'confirm-error') && ticket && <Button onPress={() => void run(() => confirm(ticket))}>
