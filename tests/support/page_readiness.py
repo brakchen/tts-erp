@@ -35,9 +35,9 @@ def wait_canned_page(page: Any, slug: str) -> None:
             page.get_by_text("API 正常", exact=True).wait_for()
         elif slug == "intercept-stats":
             page.get_by_role("grid", name="每日请求（UTC）", exact=True).wait_for()
-            page.locator(".uplot canvas").wait_for()
+            page.locator(".uplot canvas").first.wait_for()
         elif slug == "runtime-configs":
-            page.get_by_role("grid", name="运行配置", exact=True).get_by_text("TEST_RENDER_RUNTIME", exact=True).wait_for()
+            page.get_by_role("grid", name="运行配置", exact=True).get_by_text("TEST_RENDER_RUNTIME", exact=True).first.wait_for()
         elif slug == "spu-profit-deterioration":
             page.get_by_text("TEST_RENDER_COMPARE_0", exact=True).wait_for()
         elif slug == "media-assets":

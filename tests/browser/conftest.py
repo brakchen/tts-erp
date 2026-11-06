@@ -437,6 +437,7 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
     """Render current owners; explicit pilot override is test-only, not a runtime flag."""
     from starlette.requests import Request
 
+    from tts_erp_v2.access import AccessGrant, AuthMode, Role
     from tts_erp_v2.api.v2 import frontend_pages
     from tts_erp_v2.api.v2.ad_daily import ad_daily_page
     from tts_erp_v2.api.v2.pages import (
@@ -448,7 +449,8 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
         if slug in effective:
             for prefix in ("", "/tts"):
                 request = Request(
-                    {"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}"}
+                    {"type": "http", "root_path": prefix, "path": f"/v2/pages/{slug}",
+                     "access_grant": AccessGrant(mode=AuthMode.ENFORCE, role=Role.ADMIN)}
                 )
                 resp = frontend_pages.render_frontend_page(request, slug)
                 name = ("tts-" if prefix else "") + slug
@@ -562,6 +564,7 @@ def site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> 
 def frontend_site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: None) -> Iterator[str]:
     from starlette.requests import Request
 
+    from tts_erp_v2.access import AccessGrant, AuthMode, Role
     from tts_erp_v2.accounts.pages import PAGES
     from tts_erp_v2.api.v2 import frontend_pages
 
@@ -572,7 +575,8 @@ def frontend_site_url(tmp_path_factory: pytest.TempPathFactory, frontend_build: 
         if page.page_id not in frontend_pages.MIGRATED_PAGE_IDS:
             continue
         for prefix in ("", "/tts"):
-            request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{page.page_id}"})
+            request = Request({"type": "http", "root_path": prefix, "path": f"/v2/pages/{page.page_id}",
+                               "access_grant": AccessGrant(mode=AuthMode.ENFORCE, role=Role.ADMIN)})
             response = frontend_pages.render_frontend_page(request, page.page_id)
             name = ("tts-" if prefix else "") + page.page_id
             (rendered / f"{name}.html").write_bytes(response.body)
