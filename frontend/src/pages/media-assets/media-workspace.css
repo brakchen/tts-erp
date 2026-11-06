@@ -24,7 +24,7 @@
 .media-caption { font-size: 12px; letter-spacing: .06em; color: var(--media-muted); }
 .media-description, .media-muted { color: var(--media-muted); overflow-wrap: anywhere; }
 .media-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-.media-workspace .media-back { min-height: auto; border-color: transparent; color: var(--media-accent); text-decoration: underline; text-underline-offset: 3px; }
+.media-workspace .media-back { border-color: transparent; color: var(--media-accent); text-decoration: underline; text-underline-offset: 3px; }
 .media-box { min-width: 0; padding: 14px; border: 1px solid var(--media-line); border-radius: 10px; background: var(--media-surface); }
 .media-box h2 { font-size: 18px; line-height: 1.35; font-weight: 700; }
 .media-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(178px, 100%), 1fr)); gap: 10px; min-width: 0; list-style: none; margin: 0; padding: 0; }

@@ -81,7 +81,7 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
       {hideAssociated && <ReadStatus title="已添加素材数量" loading={associated.loading} error={associated.error} onRetry={associated.retry} />}
       <ActionError message={error ? '提交未完成，待添加的勾选已保留。' + error : ''} />
       {toAdd.length > 0 && <div className="flex flex-wrap gap-2" role="group" aria-label="本次勾选素材">
-        {toAdd.map((asset) => <Button key={asset.assetId} size="sm" variant="ghost" isDisabled={disabled}
+        {toAdd.map((asset) => <Button key={asset.assetId} size="sm" variant="ghost" className="media-back" isDisabled={disabled}
           onPress={() => toggle(asset, false)}>取消勾选 {asset.filename}</Button>)}
       </div>}
       <ReadStatus title="可选素材" loading={read.loading} error={read.error} onRetry={read.retry} />

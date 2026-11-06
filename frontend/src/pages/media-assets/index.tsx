@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Button, Chip, Input, Label, TextArea, TextField } from '@heroui/react';
+import { Button, Chip, Input, Label, TextArea, TextField, buttonVariants } from '@heroui/react';
 import { ApiError } from '../../shared/api/client';
 import type { PageProps } from '../../shared/contracts';
 import AssetCard from './AssetCard';
@@ -23,7 +23,7 @@ function Usage({ asset, bootstrap }: { asset: Asset; bootstrap: PageProps['boots
     {asset.usedBy.map((human) => {
       const href = recordLink(bootstrap, 'digital-humans', 'human', human.id);
       return <li className="media-row" key={human.id}>
-        {href ? <a className="underline [overflow-wrap:anywhere]" href={href}>{human.name}</a>
+        {href ? <a className={buttonVariants({ variant: 'ghost' }) + ' media-back [overflow-wrap:anywhere]'} href={href}>{human.name}</a>
           : <span className="[overflow-wrap:anywhere]">{human.name}</span>}
         <Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
       </li>;
