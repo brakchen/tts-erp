@@ -278,13 +278,13 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
           </>}
         </div>
         <ActionError message={action.error} />
-        <section aria-label="引用素材" className="media-box">
+        <section aria-label="引用素材" className="media-box media-form">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2>引用素材 · {human.assetIds.length} 项</h2>
             {canWrite && <Button isDisabled={action.pending || read.loading} onPress={beginPicker}>添加素材</Button>}
           </div>
           {human.assets.length === 0 && !read.loading && <p className="text-muted">还没有引用素材。点击「添加素材」从素材库选择。</p>}
-          <ul aria-label="已引用素材">
+          <ul aria-label="已引用素材" className="media-stack">
             {human.assets.map((asset) => {
               const assetPage = recordLink(bootstrap, 'media-assets', 'asset', asset.assetId);
               const href = assetPage && assetPage + '&fromHuman=' + encodeURIComponent(id);

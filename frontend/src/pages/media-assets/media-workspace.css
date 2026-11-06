@@ -30,7 +30,7 @@
 .media-card { height: 100%; }
 .media-workspace .media-card-content { display: grid; align-content: start; gap: 7px; min-width: 0; padding: 0; }
 .media-card-content h3 { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
-.media-card-content > button { justify-self: start; }
+.media-card-content > button { justify-self: stretch; width: 100%; }
 .media-preview { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; border-radius: 5px; background: var(--media-soft); overflow: hidden; }
 .media-video-mark { position: absolute; right: 7px; bottom: 5px; color: #fff; font-size: 14px; text-shadow: 0 1px 3px #172822; pointer-events: none; }
 .media-preview-compact { height: 66px; min-height: 66px; }

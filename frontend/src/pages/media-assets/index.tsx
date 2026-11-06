@@ -19,7 +19,7 @@ const emptyFilters = { keyword: '', kind: '' };
 function Usage({ asset, bootstrap }: { asset: Asset; bootstrap: PageProps['bootstrap'] }) {
   if (!asset.usedBy) return <p>当前无法确认引用情况。</p>;
   if (asset.usedBy.length === 0) return <p className="text-muted">还没有数字人引用这份素材。</p>;
-  return <ul>
+  return <ul className="media-stack">
     {asset.usedBy.map((human) => {
       const href = recordLink(bootstrap, 'digital-humans', 'human', human.id);
       return <li className="media-row" key={human.id}>
