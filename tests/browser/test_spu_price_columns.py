@@ -11,7 +11,7 @@ import copy
 import time
 from collections.abc import Callable
 from typing import Any, cast
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from playwright.sync_api import expect
@@ -173,8 +173,6 @@ def test_null_and_empty_price_values_never_render_as_zero(frontend_browser_rende
 
 def test_each_price_header_sends_its_server_sort_id(frontend_browser_renderer, monkeypatch):
     page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
-    requests: list[str] = []
-    page.on("request", lambda request: requests.append(request.url))
     for field, sort_id in zip(
         (
             "priceStats.purchase.mean",
@@ -186,9 +184,14 @@ def test_each_price_header_sends_its_server_sort_id(frontend_browser_renderer, m
         ),
         _SORTS,
     ):
-        page.locator(f'.tabulator-header [tabulator-field="{field}"]').click()
-        page.wait_for_timeout(80)
-        assert any(f"sort={sort_id}" in url for url in requests), (field, sort_id, requests)
+        with page.expect_response(lambda response, sort_id=sort_id: (
+            response.request.method == "GET"
+            and urlsplit(response.url).path.endswith("/v2/analytics/spu-roi")
+            and parse_qs(urlsplit(response.url).query).get("sort") == [sort_id]
+        )) as response:
+            page.locator(f'.tabulator-header [tabulator-field="{field}"]').click()
+        assert response.value.status == 200
+        expect(page.locator("#rows").locator("..").get_by_role("status")).to_have_count(0)
 
 
 def test_price_tooltip_is_keyboard_openable_and_restores_focus(frontend_browser_renderer, monkeypatch):
