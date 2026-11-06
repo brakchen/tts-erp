@@ -418,6 +418,15 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     if path.endswith("/v2/video-publish/tasks"):
         return {"items": [], "pollState": {"running": False, "cleaning": False, "queued": False},
                 "nextCursor": None, "totalApprox": 0, "serverTime": _NOW}
+    if path.endswith("/v2/runninghub/config"):
+        return {"credentialRef": "env:RUNNINGHUB_API_KEY", "credentialConfigured": False,
+                "workflowId": "2111762608670990337", "instanceType": "plus", "concurrency": 5,
+                "workflowVersionId": "TEST_render_version"}
+    if path.endswith("/v2/runninghub/templates"):
+        return {"items": [{"id": "TEST_render_template", "humanId": "1", "humanName": "TEST_RENDER_HUMAN",
+                           "name": "A", "clips": []}]}
+    if path.endswith("/v2/runninghub/batches"):
+        return {"items": []}
     return {"items": [], "total": 0, "options": [], "configs": [], "jobs": []}
 
 

@@ -18,6 +18,12 @@ def wait_canned_page(page: Any, slug: str) -> None:
     if slug == "spu-profit-deterioration" and page.locator("#alert-page").count():
         page.locator('#alert-status[data-kind="ready"]').wait_for()
         page.locator('#alert-rows [data-spu-pk]').first.wait_for(state="attached")
+    elif slug == "runninghub":
+        # This page has its own root layout; require its displayed GET facts.
+        page.get_by_text("2111762608670990337 · plus · 并发 5 · 已校验版本", exact=True).wait_for()
+        page.get_by_role("checkbox", name="TEST_RENDER_HUMAN / A · TEST_ren", exact=True).wait_for()
+        page.get_by_text("没有就绪图片。请先到资产管理上传服装图。", exact=True).wait_for()
+        assert page.get_by_role("alert").count() == 0
     else:
         page.locator("#frontend-root .erp-page").wait_for()
         if slug in TABLES:
