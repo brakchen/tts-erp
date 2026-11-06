@@ -407,16 +407,24 @@ def assert_layout(page: Page, tmp_path: Path, label: str) -> None:
     page.evaluate("window.scrollTo(0, 0)")
     page.wait_for_function("window.scrollY === 0")
     media_metadata = []
-    # Every visible video in these fixtures contains legal VP8 bytes. Waiting
-    # for its first decoded frame prevents a loading spinner becoming evidence.
+    # Every visible video contains legal VP8 bytes. Full previews must actually
+    # play and pause before capture: a decoded first frame alone can still
+    # leave Chromium's native initial loading overlay in the screenshot.
     for video in main(page).locator("video:visible").all():
         page.wait_for_function("""video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
             && video.videoWidth > 0 && video.videoHeight > 0
             && Number.isFinite(video.duration) && video.duration > 0""", arg=video.element_handle())
+        if video.evaluate("video => video.controls"):
+            video.evaluate("video => video.play()")
+            page.wait_for_function("video => video.currentTime > 0 && !video.seeking", arg=video.element_handle())
+            video.evaluate("video => video.pause()")
+            page.wait_for_function("video => video.paused && !video.seeking", arg=video.element_handle())
+            page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
         media_metadata.append(video.evaluate("""video => ({
             label: video.getAttribute('aria-label'), readyState: video.readyState,
             width: video.videoWidth, height: video.videoHeight, duration: video.duration,
             controls: video.controls, preload: video.preload,
+            currentTime: video.currentTime, paused: video.paused, networkState: video.networkState,
         })"""))
     dimensions = overflow_report(page)
     assert dimensions["scrollWidth"] <= dimensions["clientWidth"], dimensions
