@@ -68,3 +68,13 @@ hooks 和 `--durations`，以及 Playwright 的 BrowserContext 隔离：
 或整套 fast 提速承诺；构建和系统缓存可能影响绝对值。当前窄回归还验证了
 构建失败/空收集/收集错误不执行测试、真实 collector 组完整性与混合异步生命周期。
 完整候选与合并验证待后续证据补齐。
+
+## 生命周期验证中发现的边界
+
+- 构建锁必须覆盖 pytest 的整个消费会话，通过 `Config.add_cleanup` 释放；
+  仅收集、空收集、收集失败不构建。测试验证会话内锁不可再次获取、退出后可获取。
+- pytest 的 conftest 导入和 `tests.browser.conftest` 显式导入可能是不同模块对象。
+  浏览器状态集中在 `tests/support/browser_runtime.py`，两类调用共享同一生命周期。
+  除真实混合异步测试外，回归覆盖显式导入 helper 与 fixture 取得同一个 browser。
+- 已中断的早期候选只用于诊断，不是全套通过证据；全套完成证据以最终提交的
+  baseline driver 结果为准。失败集仍按已提交的零失败基线比较，未修改基线。
