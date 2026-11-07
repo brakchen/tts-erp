@@ -170,10 +170,10 @@ export default function MediaAssets({ bootstrap }: PageProps) {
     <CursorTail {...feed} paused={Boolean(upload || selected || editing || deleting)} />
     {selected && <ViewAsset key={selected} root={root} id={selected} onClose={closeView} />}
     {canWrite && editing && <EditAsset root={root} asset={editing} onClose={() => setEditing(undefined)}
-      onDone={() => { setEditing(undefined); changed('素材资料已保存。'); }} />}
+      onDone={() => { setEditing(undefined); changed('素材资料已保存。'); document.scrollingElement?.scrollTo(0, 0); }} />}
     {canWrite && deleting && <DeleteAsset root={root} asset={deleting} onClose={() => setDeleting(undefined)}
       onDone={() => { setDeleting(undefined); changed('素材已从全局库删除。'); }} />}
     {canWrite && upload && <UploadAsset bootstrap={bootstrap} onClose={() => setUpload(false)}
-      onComplete={(id, filename) => { setUpload(false); changed('已入库「' + filename + '」。', id); }} />}
+      onComplete={(id, filename) => { setUpload(false); changed('已入库「' + filename + '」。', id); document.scrollingElement?.scrollTo(0, 0); }} />}
   </div>;
 }

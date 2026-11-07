@@ -743,7 +743,9 @@ it.each([false, true])('waits for the post-upload profile read before a partial 
     await user.click(button('重试目标档案'));
   }
   await waitFor(() => expect(button('确认添加（2）')).toBeEnabled());
+  await waitFor(() => expect(button('确认添加（2）')).not.toHaveAttribute('aria-disabled', 'true'));
   await user.click(button('确认添加（2）'));
+  await waitFor(() => expect(writes).toEqual(['4', '2', '3']));
   expect(await screen.findByText(/待添加的勾选已保留/)).toBeVisible();
   expect(writes).toEqual(['4', '2', '3']);
   await waitFor(() => expect(button('确认添加（1）')).toBeEnabled());
@@ -777,6 +779,27 @@ it('keeps newly filtered cards when an older cursor request finishes late', asyn
   expect(await screen.findByRole('heading', { name: second.filename })).toBeVisible();
   await act(async () => release(json(page([asset]))));
   expect(screen.queryByRole('heading', { name: asset.filename })).not.toBeInTheDocument();
+});
+
+it('starts at the first cursor when returning to a previously extended status filter', async () => {
+  const user = userEvent.setup();
+  const older = { ...human, digital_human_id: 2, name: 'TEST_更早的档案' };
+  const fetcher = vi.fn(async (url: string) => {
+    const params = new URL(url, location.origin).searchParams;
+    if (params.get('status') === 'archived') return json({ items: [], total: 0, nextCursor: null });
+    if (params.get('cursor')) return json({ items: [older], total: 2, nextCursor: null });
+    return json({ items: [human], total: 2, nextCursor: 'TEST_next' });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<DigitalHumans bootstrap={bootstrap} />);
+  await user.click(await findButton('加载更多'));
+  expect(await screen.findByRole('heading', { name: older.name })).toBeVisible();
+  await chooseStatus(user, '已归档');
+  await screen.findByText('暂无已归档的档案。');
+  await chooseStatus(user, '启用中');
+  expect(await screen.findByRole('heading', { name: human.name })).toBeVisible();
+  expect(screen.queryByRole('heading', { name: older.name })).not.toBeInTheDocument();
+  expect(new URL(fetcher.mock.calls.at(-1)![0], location.origin).searchParams.get('cursor')).toBe('');
 });
 
 it('confirms archiving before a write and keeps its pending confirmation exclusive', async () => {

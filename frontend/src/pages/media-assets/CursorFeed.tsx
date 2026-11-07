@@ -8,6 +8,7 @@ export function useCursorFeed<T extends Asset | DigitalHuman>(
 ) {
   const key = JSON.stringify([root, path, revision]);
   const [requested, setRequested] = useState({ key, cursor: '' });
+  if (requested.key !== key) setRequested({ key, cursor: '' });
   const cursor = requested.key === key ? requested.cursor : '';
   const [page, setPage] = useState<{ key: string; cursor: string; data: FeedPage<T> }>();
   const request = path && path + (path.includes('?') ? '&' : '?') + new URLSearchParams({ cursor, limit: String(mediaPageSize) });

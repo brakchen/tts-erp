@@ -92,10 +92,10 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
                 <Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
               </div>
               <div className="media-actions">
-                {canWrite && human.status === 'active' && <Button variant="secondary" aria-haspopup="dialog"
+                {canWrite && human.status === 'active' && <Button variant="secondary" className="media-person-add" aria-haspopup="dialog"
                   onPress={() => setPicker(human)}>＋ 添加素材</Button>}
                 <Button variant="secondary" isDisabled={!human.assetIds.length}
-                  onPress={() => select(human.digitalHumanId)}>管理素材 · {human.assetIds.length}</Button>
+                  onPress={() => { select(human.digitalHumanId); document.scrollingElement?.scrollTo(0, 0); }}>管理素材 · {human.assetIds.length}</Button>
               </div>
               {canWrite && <div className="media-card-actions">
                 <Button variant="ghost" aria-label={'编辑 ' + human.name} onPress={() => setEditor({ mode: 'edit', human })}>编辑</Button>
@@ -116,6 +116,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         : editor.mode === 'portrait' ? '形象照片已更新。' : '档案资料已保存。');
       setEditor(undefined);
       refresh();
+      document.scrollingElement?.scrollTo(0, 0);
     }} />}
     {canWrite && operation && <OperationConfirmation
       title={(operation.mode === 'archive' ? '归档「' : '删除档案「') + operation.human.name + '」'}

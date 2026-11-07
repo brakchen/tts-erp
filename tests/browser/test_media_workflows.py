@@ -253,12 +253,11 @@ def text(scope: Page | Locator, value: str) -> None:
 
 
 def main(page: Page) -> Locator:
-    active = dialog(page)
-    return active if active.count() else page.locator("main")
+    return page.locator('main:visible, [role="dialog"]:visible, [role="alertdialog"]:visible').last
 
 
 def heading(page: Page, title: str) -> None:
-    expect(page.get_by_role("heading", name=title, exact=True)).to_be_visible()
+    expect(main(page).get_by_role("heading", name=title, exact=True)).to_be_visible()
     expect(page.get_by_role("banner", include_hidden=True)).to_have_count(1)
     expect(page.get_by_role("main", include_hidden=True)).to_have_count(1)
 
@@ -926,7 +925,7 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     root = page.locator("main")
     expect(root.get_by_role("heading", name="全局素材库", exact=True)).to_have_count(0)
     expect(button(root, "上传素材")).to_be_visible()
-    cards = root.get_by_role("list", name="素材列表").get_by_role("listitem")
+    cards = root.get_by_role("list", name="素材列表").locator(":scope > li")
     expect(cards.first).to_be_visible()
     while cards.count() < len(assets):
         tail = root.get_by_role("button", name="加载更多", exact=True)
@@ -994,7 +993,7 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     expect(dialog(page)).to_have_count(0)
     open_human(page, person)
     linked = root.get_by_role("list", name="关联素材", exact=True)
-    expect(linked.get_by_role("listitem")).to_have_count(2)
+    expect(linked.locator(":scope > li")).to_have_count(2)
     image_ready(page, oldest, scope=linked)
     assert_layout(page, tmp_path, "linked_asset_cards")
     set_checkbox(page, "全选", True)
