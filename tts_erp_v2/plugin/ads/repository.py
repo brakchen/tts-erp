@@ -538,6 +538,7 @@ def upsert_campaign_opt_logs(
     seller_id: str,
     advertiser_id: str,
     logs: list[dict[str, Any]],
+    commit: bool = True,
 ) -> int:
     """写入广告操作日志，返回 inserted 数。
 
@@ -585,7 +586,8 @@ def upsert_campaign_opt_logs(
             },
         )
         inserted += 1
-    sess.commit()
+    if commit:
+        sess.commit()
     if skipped:
         log.warning(
             "campaign_opt_logs: %d inserted, %d skipped (bad opt_time)",

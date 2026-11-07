@@ -34,6 +34,7 @@ def _cleanup(db_engine):
         "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
         "DELETE FROM plugin.ad_today WHERE seller_id = :s",
         "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
+        "DELETE FROM plugin.campaign_opt_logs WHERE seller_id = :s",
     )
     with db_engine.begin() as conn:
         for stmt in statements:
@@ -355,6 +356,44 @@ def test_dumps_v4_campaign_change_log_only_archives(
     assert archived["body"]["data"]["table"][0]["change_id"] == "evt-001"
     assert archived["body"]["data"]["table"][1]["change_type"] == "ROI"
     assert archived["status"] == 200
+
+
+@pytest.mark.parametrize("failed_write", ["upsert_campaign_opt_logs", "upsert_daily_rows"])
+def test_campaign_change_log_failure_rolls_back_both_writes(
+    api_client, readwrite_key, db_engine, monkeypatch, failed_write
+):
+    from tts_erp_v2.plugin.ads import repository
+
+    body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
+    body["dump"]["response"]["body"]["data"]["logs"] = [
+        {
+            "id": "TEST_atomic_campaign_log",
+            "object_id": CAMPAIGN,
+            "opt_time": "2026-09-08 15:40:46",
+        }
+    ]
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("simulated persistence failure")
+
+    def log_count():
+        with db_engine.connect() as conn:
+            return conn.execute(
+                text("SELECT count(*) FROM plugin.campaign_opt_logs WHERE seller_id = :s"),
+                {"s": SELLER},
+            ).scalar_one()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(repository, failed_write, fail)
+        r = _post(api_client, readwrite_key, body)
+        assert r.status_code == 500, r.text
+        assert _ad_raw_log_count(db_engine) == 0
+        assert log_count() == 0
+
+    r = _post(api_client, readwrite_key, body)
+    assert r.status_code == 200, r.text
+    assert _ad_raw_log_count(db_engine) == 1
+    assert log_count() == 1
 
 
 def test_dumps_v4_today_campaign_change_log_only_archives(
