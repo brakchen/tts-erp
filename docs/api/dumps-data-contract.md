@@ -501,6 +501,8 @@ POST /oec_ads/shopping/v1/oec/ads/stat/post_session_list   ← 会话分析
 POST /oec_ads/shopping/v1/oec/ads/stat/campaign_opt_log_list ← 变更日志
 ```
 
+变更日志转储同时持久化 `plugin.campaign_opt_logs` 和 `plugin.ad_raw_log`。两处写入在同一事务内提交后才返回 2xx。任一写入失败时返回可重试的 500，并回滚本次转储，因此失败的新转储不会进入覆盖查询。
+
 ### 6.2 v4 协议关键设计决策（D1-D5，详见 `docs/archive/dump-architecture.md` §2）
 
 | 决策 | 含义 |
