@@ -19,7 +19,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Locator, Page, Route, expect, sync_playwright
+from playwright.sync_api import Locator, Page, Route, expect
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -30,6 +30,7 @@ from tests.scripts.test_frontend_remaining_live_api import (
     owned,
 )
 from tests.scripts.test_frontend_remaining_live_api import clone as owned_clone
+from tests.support.browser_runtime import borrowed_browser
 from tests.support.frontend_p2_binding import (
     NONCE_HEADER,
     checked_session,
@@ -221,27 +222,23 @@ def runtime_browser(clone: OwnedClone, target: ConfigTarget, width: int) -> Iter
     config_state(clone, target)
     gate = RuntimeFence(clone, target)
     # No reused context, service worker, external network, websocket or fallback.
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+    with borrowed_browser() as browser:
+        context = browser.new_context(viewport={"width": width, "height": 1000}, service_workers="block")
         try:
-            context = browser.new_context(viewport={"width": width, "height": 1000}, service_workers="block")
-            try:
-                context.route("**/*", gate.handle)
+            context.route("**/*", gate.handle)
 
-                def reject_socket(socket) -> None:
-                    gate.violations.append(REFUSAL)
-                    socket.close()
+            def reject_socket(socket) -> None:
+                gate.violations.append(REFUSAL)
+                socket.close()
 
-                context.route_web_socket("**/*", reject_socket)
-                page = context.new_page()
-                yield page, gate
-                page.wait_for_load_state("networkidle")
-                assert not gate.violations, REFUSAL
-            finally:
-                gate.closing = True
-                context.close()
+            context.route_web_socket("**/*", reject_socket)
+            page = context.new_page()
+            yield page, gate
+            page.wait_for_load_state("networkidle")
+            assert not gate.violations, REFUSAL
         finally:
-            browser.close()
+            gate.closing = True
+            context.close()
 
 
 def focused_view(page: Page, target: ConfigTarget, title: str) -> None:

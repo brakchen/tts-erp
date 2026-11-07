@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import uPlot from 'uplot';
 import UplotReact from 'uplot-react';
 import 'uplot/dist/uPlot.min.css';
+import './daily-chart.css';
 
 export interface DailyCount { date: string; count: number }
 
@@ -34,7 +35,7 @@ export default function DailyChart({ rows }: { rows: DailyCount[] }) {
     };
   }, []);
   const options = useMemo<uPlot.Options>(() => ({ ...base, width }), [base, width]);
-  return <div ref={container} className="min-w-0 w-full" aria-hidden="true">
+  return <div ref={container} className="erp-daily-chart min-w-0 w-full" aria-hidden="true">
     {width > 0 && <UplotReact options={options} data={data} />}
   </div>;
 }

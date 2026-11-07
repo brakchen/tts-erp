@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
+
+from tests.support.test_runtime import record_phase
 
 
 class BrowserLaunchError(RuntimeError):
@@ -20,6 +23,7 @@ class ModuleBrowser:
         if self.browser is None:
             from playwright.sync_api import sync_playwright
 
+            started = time.monotonic()
             self.playwright = sync_playwright().start()
             try:
                 self.browser = self.playwright.chromium.launch(headless=True)
@@ -29,9 +33,12 @@ class ModuleBrowser:
             except BaseException:
                 self.close()
                 raise
+            finally:
+                record_phase("browser_start", time.monotonic() - started)
         return self.browser
 
     def close(self) -> None:
+        started = time.monotonic()
         browser, playwright = self.browser, self.playwright
         self.browser = self.playwright = None
         try:
@@ -40,6 +47,7 @@ class ModuleBrowser:
         finally:
             if playwright is not None:
                 playwright.stop()
+            record_phase("browser_cleanup", time.monotonic() - started)
 
 
 _current: ModuleBrowser | None = None
@@ -47,6 +55,18 @@ _current: ModuleBrowser | None = None
 
 def current_module_browser() -> ModuleBrowser | None:
     return _current
+
+
+@contextmanager
+def borrowed_browser() -> Iterator[Any]:
+    """Full-stack consumers keep hard failures and fresh per-case contexts."""
+    runtime = current_module_browser() or ModuleBrowser()
+    browser = runtime.get()
+    try:
+        yield browser
+    finally:
+        if current_module_browser() is not runtime or browser.contexts:
+            runtime.close()
 
 
 @contextmanager

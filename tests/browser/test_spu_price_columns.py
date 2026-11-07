@@ -11,7 +11,7 @@ import copy
 import time
 from collections.abc import Callable
 from typing import Any, cast
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from playwright.sync_api import expect
@@ -110,7 +110,8 @@ def _open_with_supported_payload(
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open(path)
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     if "/focused-spus" not in path:
         page.locator("#price-summary").wait_for(state="visible")
@@ -172,8 +173,6 @@ def test_null_and_empty_price_values_never_render_as_zero(frontend_browser_rende
 
 def test_each_price_header_sends_its_server_sort_id(frontend_browser_renderer, monkeypatch):
     page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
-    requests: list[str] = []
-    page.on("request", lambda request: requests.append(request.url))
     for field, sort_id in zip(
         (
             "priceStats.purchase.mean",
@@ -185,9 +184,14 @@ def test_each_price_header_sends_its_server_sort_id(frontend_browser_renderer, m
         ),
         _SORTS,
     ):
-        page.locator(f'.tabulator-header [tabulator-field="{field}"]').click()
-        page.wait_for_timeout(80)
-        assert any(f"sort={sort_id}" in url for url in requests), (field, sort_id, requests)
+        with page.expect_response(lambda response, sort_id=sort_id: (
+            response.request.method == "GET"
+            and urlsplit(response.url).path.endswith("/v2/analytics/spu-roi")
+            and parse_qs(urlsplit(response.url).query).get("sort") == [sort_id]
+        )) as response:
+            page.locator(f'.tabulator-header [tabulator-field="{field}"]').click()
+        assert response.value.status == 200
+        expect(page.locator("#rows").locator("..").get_by_role("status")).to_have_count(0)
 
 
 def test_price_tooltip_is_keyboard_openable_and_restores_focus(frontend_browser_renderer, monkeypatch):
@@ -254,7 +258,8 @@ def test_price_error_can_retry_to_supported_payload(frontend_browser_renderer, m
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     page.locator("#retry-link").wait_for(state="visible")
     assert page.locator("#price-summary").is_hidden()
@@ -292,7 +297,8 @@ def test_rapid_date_requests_keep_latest_price_payload(frontend_browser_renderer
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     page.locator("#price-summary").wait_for(state="visible")
     page.evaluate(
@@ -349,7 +355,8 @@ def test_rapid_shop_requests_keep_latest_price_payload(frontend_browser_renderer
 def test_legacy_payload_hides_price_capability_without_fake_zeroes(frontend_browser_renderer):
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
     shop_button = page.locator("#shop-modal-list button").first
-    if shop_button.is_visible():
+    if "shop_pk=" not in page.url:
+        shop_button.wait_for()
         shop_button.click()
     page.wait_for_timeout(500)
     assert page.locator("#price-summary").is_hidden()
