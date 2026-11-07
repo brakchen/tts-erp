@@ -22,6 +22,8 @@ function api(command: (path: string, init: RequestInit) => Promise<Response> = a
     });
     if (path.endsWith('/templates')) return json({ items: [template] });
     if (path.includes('/batches?')) return json({ items: readBatches() });
+    if (path.endsWith('/batches/' + planned.id)) return json(readBatches()[0]);
+    if (path.includes('/jobs?')) return json({ items: [] });
     return json({});
   });
 }
@@ -37,6 +39,11 @@ describe('RunningHub workbench and write boundaries', () => {
     expect(await screen.findByRole('button', { name: '批次详情 ' + planned.id })).toBeVisible();
     expect(screen.getByText('当前为只读权限。')).toBeVisible();
     expect(screen.queryByRole('button', { name: '预览计划' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '批次详情 ' + planned.id }));
+    const detail = await screen.findByRole('dialog', { name: '批次详情' });
+    expect(await within(detail).findByText('待启动 · 共 1 个任务')).toBeVisible();
+    expect(within(detail).queryByRole('button', { name: '终止批次' })).toBeNull();
+    await user.click(within(detail).getByRole('button', { name: '关闭批次详情' }));
     await user.click(screen.getByRole('button', { name: '工作流配置' }));
     const dialog = await screen.findByRole('dialog', { name: '工作流配置' });
     expect(within(dialog).getByText('2111762608670990337')).toBeVisible();
@@ -110,5 +117,29 @@ describe('RunningHub workbench and write boundaries', () => {
     await user.click(within(pay).getByRole('checkbox', { name: /RunningHub 费用/ }));
     await user.click(confirm);
     await waitFor(() => expect(starts).toEqual([{ confirmPaid: true }]));
+  });
+
+  it('requires confirmation in batch details before stopping dispatch', async () => {
+    const user = userEvent.setup();
+    let batch = { ...planned, status: 'ACTIVE' };
+    const terminate = vi.fn(async () => {
+      batch = { ...batch, status: 'TERMINATING' };
+      return json(batch);
+    });
+    vi.stubGlobal('fetch', api(terminate, () => [batch]));
+    render(<RunningHub {...props} />);
+    await user.click(await screen.findByRole('button', { name: '批次详情 ' + batch.id }));
+    const detail = await screen.findByRole('dialog', { name: '批次详情' });
+    await user.click(await within(detail).findByRole('button', { name: '终止批次' }));
+    await user.click(within(detail).getByRole('button', { name: '返回' }));
+    expect(terminate).not.toHaveBeenCalled();
+    await user.click(within(detail).getByRole('button', { name: '终止批次' }));
+    await user.click(within(detail).getByRole('button', { name: '确认终止' }));
+    expect(await within(detail).findByText(/终止中 · 共 1 个任务/)).toBeVisible();
+    expect(terminate).toHaveBeenCalledOnce();
+    expect(terminate).toHaveBeenCalledWith('/tts/v2/runninghub/batches/' + batch.id + '/terminate', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ confirmTerminate: true }),
+    }));
+    expect(within(detail).queryByRole('button', { name: '终止批次' })).toBeNull();
   });
 });

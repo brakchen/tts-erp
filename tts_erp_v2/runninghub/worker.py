@@ -48,6 +48,7 @@ from tts_erp_v2.runninghub.media import (
     validate_image,
 )
 from tts_erp_v2.runninghub.repository import (
+    STOPPING_BATCH_STATES,
     complete_batch,
     lock_state,
     owned,
@@ -117,6 +118,7 @@ class Worker:
                             else "dry-run"
                         )
                     except (SigningError, DecryptionError):
+                        session.refresh(batch, with_for_update=True)
                         pause_failure(batch, "CREDENTIAL_UNAVAILABLE")
                         session.commit()
                         continue
@@ -150,8 +152,15 @@ class Worker:
             )
             graph = session.get(WorkflowVersion, config["workflowVersionId"]).graph
             quota_id = attempt.quota_id
+            stopping = batch.status in STOPPING_BATCH_STATES
         client = None
         try:
+            if stage == "PREPARING" and stopping:
+                with self.sessions() as session, session.begin():
+                    state = owned(session, attempt_id, token)
+                    if state:
+                        self._finish_termination(session, *state)
+                return
             if mode == "live" and stage != "FINALIZING":
                 with self.sessions() as session:
                     key = load_runninghub_api_key(session, config["credentialRef"])
@@ -177,6 +186,12 @@ class Worker:
                             "SUBMISSION_UNKNOWN",
                             "CREATE_OUTCOME_REQUIRES_RECONCILIATION",
                         )
+                    elif (
+                        job.status == "PREPARING"
+                        and batch.status in STOPPING_BATCH_STATES
+                    ):
+                        self._finish_termination(session, attempt, job, batch)
+                        return
                     elif stage in {"QUEUED", "RUNNING"}:
                         if (
                             isinstance(error, (SigningError, DecryptionError))
@@ -230,6 +245,8 @@ class Worker:
                         None,
                     )
                     pause_failure(batch, job.error or job.status)
+                    if batch.status == "TERMINATING":
+                        complete_batch(session, batch)
             log.warning(
                 "RunningHub stage interrupted: attempt=%s stage=%s", attempt_id, stage
             )
@@ -332,8 +349,10 @@ class Worker:
             if not state:
                 return
             attempt, job, batch = state
-            # Pause racing with preparation wins before the persisted create intent.
-            session.refresh(batch, with_for_update=True)
+            # Stop requests win until the create intent is durable.
+            if batch.status in STOPPING_BATCH_STATES:
+                self._finish_termination(session, attempt, job, batch)
+                return
             if (
                 batch.status != "ACTIVE"
                 or session.get(CloudQuota, attempt.quota_id).paused_reason
@@ -351,12 +370,16 @@ class Worker:
             except RemoteError:
                 with self.sessions() as session, session.begin():
                     attempt, job, batch = lock_state(session, attempt_id)
-                    job.status, job.error, attempt.lease_until = (
-                        "SUBMISSION_UNKNOWN",
-                        "CREATE_OUTCOME_REQUIRES_RECONCILIATION",
-                        None,
-                    )
-                    pause_failure(batch, job.error)
+                    if (
+                        job.current_attempt_id == attempt_id
+                        and job.status == "SUBMITTING"
+                    ):
+                        job.status, job.error, attempt.lease_until = (
+                            "SUBMISSION_UNKNOWN",
+                            "CREATE_OUTCOME_REQUIRES_RECONCILIATION",
+                            None,
+                        )
+                        pause_failure(batch, job.error)
                 return
         else:
             receipt = {
@@ -382,12 +405,16 @@ class Worker:
                 attempt.task_id = str(task_id)
                 attempt.reserved = True
                 attempt.cloud_status = "ACCEPTED"
+                if batch.status == "TERMINATED":
+                    batch.status = "TERMINATING"
                 if job.current_attempt_id == attempt_id:
                     job.status = "QUEUED"
                     attempt.lease_until = None
                     attempt.next_poll_at = session.scalar(
                         select(func.now())
-                    ) + timedelta(seconds=10 if client else 0)
+                    ) + timedelta(
+                        seconds=10 if client and batch.status != "TERMINATING" else 0
+                    )
                 else:
                     attempt.error = "LATE_ACCEPTANCE_REQUIRES_RECONCILIATION"
                     pause_failure(batch, attempt.error)
@@ -401,7 +428,7 @@ class Worker:
             }
             code = receipt.get("code") if type(receipt.get("code")) is int else None
             if attempt.task_id:
-                if attempt.last_polled_at is None:
+                if attempt.last_polled_at is None and "cancel" not in attempt.receipt:
                     attempt.cloud_status = str(data.get("taskStatus") or "QUEUED")
                 tips = data.get("promptTips")
                 try:
@@ -418,6 +445,8 @@ class Worker:
                 if code not in {0, 804, 813}:
                     attempt.error = "UPSTREAM_REPORTED_ERROR_WITH_TASK_ID"
                     pause_failure(batch, attempt.error)
+            elif job.current_attempt_id != attempt_id or attempt.resolution is not None:
+                return
             elif code in DEFINITE_REJECTION_CODES:
                 attempt.lease_until = None
                 job.status, job.error, attempt.reserved = (
@@ -427,6 +456,8 @@ class Worker:
                 )
                 attempt.cloud_status = "REJECTED"
                 pause_failure(session.get(GenerationBatch, job.batch_id), job.error)
+                if batch.status == "TERMINATING":
+                    complete_batch(session, batch)
             else:
                 attempt.lease_until = None
                 job.status, job.error = (
@@ -441,16 +472,61 @@ class Worker:
                 ).paused_reason = "UPSTREAM_CONFIGURATION_REJECTED"
 
     def _query_failure(
-        self, session: Session, attempt: GenerationAttempt, job: GenerationJob
+        self,
+        session: Session,
+        attempt: GenerationAttempt,
+        job: GenerationJob,
+        reason: str = "QUERY_INTERRUPTED",
     ) -> None:
         attempt.poll_failures += 1
         attempt.next_poll_at = session.scalar(select(func.now())) + timedelta(
             seconds=min(300, 10 * 2 ** min(attempt.poll_failures, 5))
         )
         attempt.lease_until = None
-        attempt.error = "QUERY_INTERRUPTED"
+        attempt.error = reason
         if attempt.poll_failures >= 12:
             job.status, job.error = "TRACKING_INTERRUPTED", "RESUME_KNOWN_TASK_ID"
+
+    @staticmethod
+    def _finish_termination(
+        session: Session,
+        attempt: GenerationAttempt,
+        job: GenerationJob,
+        batch: GenerationBatch,
+    ) -> None:
+        job.status, job.error = "TERMINATED", None
+        attempt.reserved = False
+        attempt.error = attempt.lease_until = attempt.next_poll_at = None
+        complete_batch(session, batch)
+
+    def _cancel(
+        self,
+        attempt_id: str,
+        token: str,
+        client: RunningHubClient | None,
+        task_id: str,
+        result: dict | None,
+    ) -> None:
+        failure = None
+        try:
+            receipt = client.cancel(task_id) if client else {"simulated": True}
+        except RemoteError as error:
+            failure = str(error)
+            receipt = {**error.receipt, "error": failure}
+        with self.sessions() as session, session.begin():
+            state = owned(session, attempt_id, token)
+            if not state:
+                return
+            attempt, job, batch = state
+            if result is not None and client is not None:
+                attempt.cloud_status = result["status"]
+                self._record_query(attempt, result, (client.key,))
+                attempt.last_polled_at = session.scalar(select(func.now()))
+            attempt.receipt = {**attempt.receipt, "cancel": receipt}
+            if failure:
+                self._query_failure(session, attempt, job, "CANCELLATION_UNCONFIRMED")
+                return
+            self._finish_termination(session, attempt, job, batch)
 
     def _poll(
         self, attempt_id: str, token: str, client: RunningHubClient | None
@@ -458,9 +534,28 @@ class Worker:
         with self.sessions() as session:
             attempt = session.get(GenerationAttempt, attempt_id)
             task_id = attempt.task_id
-        result = (
-            client.query(task_id) if client else {"status": "SUCCESS", "results": []}
-        )
+            job = session.get(GenerationJob, attempt.job_id)
+            stopping = (
+                session.get(GenerationBatch, job.batch_id).status == "TERMINATING"
+            )
+        if stopping and client is None:
+            self._cancel(attempt_id, token, None, task_id, None)
+            return
+        try:
+            result = (
+                client.query(task_id)
+                if client
+                else {"status": "SUCCESS", "results": []}
+            )
+        except RemoteError:
+            if not stopping:
+                raise
+            result = None
+        if stopping and (
+            result is None or result["status"] not in {"SUCCESS", "FAILED"}
+        ):
+            self._cancel(attempt_id, token, client, task_id, result)
+            return
         with self.sessions() as session, session.begin():
             state = owned(session, attempt_id, token)
             if not state:
@@ -486,6 +581,8 @@ class Worker:
                     False,
                 )
                 pause_failure(batch, job.error)
+                if batch.status == "TERMINATING":
+                    complete_batch(session, batch)
             elif result["status"] in {"QUEUED", "RUNNING"}:
                 job.status = result["status"]
                 if (attempt.last_polled_at - attempt.created_at).total_seconds() > 3600:

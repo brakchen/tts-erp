@@ -23,4 +23,6 @@ export const statuses: Record<string, string> = {
   QUEUED: '云端排队', RUNNING: '云端生成', DOWNLOADING: '下载中', FINALIZING: '成片处理中',
   SUCCEEDED: '已完成', FAILED: '生成失败', SUBMISSION_UNKNOWN: '待管理员核对', TRACKING_INTERRUPTED: '跟踪中断',
   DOWNLOAD_FAILED: '下载失败', FINALIZE_FAILED: '成片处理失败', PREPARATION_FAILED: '素材准备失败',
+  TERMINATING: '终止中', TERMINATED: '已终止',
 };
+export const canTerminateBatch = (batch: Batch) => ['PLANNED', 'ACTIVE', 'PAUSED'].includes(batch.status);

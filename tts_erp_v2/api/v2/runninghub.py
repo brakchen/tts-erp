@@ -46,6 +46,11 @@ from tts_erp_v2.runninghub.planner import (
     config_snapshot,
     create_batch,
 )
+from tts_erp_v2.runninghub.repository import (
+    STOPPING_BATCH_STATES,
+    complete_batch,
+    request_termination,
+)
 from tts_erp_v2.runninghub.workflow import SPEC, WorkflowError, digest, validate_graph
 from tts_erp_v2.storage.minio_client import MinioConfigError
 
@@ -158,6 +163,10 @@ class BatchIn(PlanIn):
 
 class StartIn(Input):
     confirmPaid: bool = False
+
+
+class TerminateIn(Input):
+    confirmTerminate: Literal[True]
 
 
 class ResolutionIn(Input):
@@ -472,6 +481,17 @@ def batch_detail(batch_id: str, session: SessionDep) -> dict:
     return batch_summary(session, _batch(session, batch_id))
 
 
+@router.post("/batches/{batch_id}/terminate")
+def terminate_batch(batch_id: str, body: TerminateIn, session: SessionDep) -> dict:
+    batch = _batch(session, batch_id, lock=True)
+    if batch.status == "SUCCEEDED":
+        raise HTTPException(409, "BATCH_ALREADY_COMPLETE")
+    if batch.status not in STOPPING_BATCH_STATES:
+        request_termination(session, batch)
+        session.commit()
+    return batch_summary(session, batch)
+
+
 @router.post("/batches/{batch_id}/{action}")
 def batch_action(
     batch_id: str,
@@ -482,6 +502,8 @@ def batch_action(
     batch = _batch(session, batch_id, lock=True)
     if batch.status == "SUCCEEDED":
         raise HTTPException(409, "BATCH_ALREADY_COMPLETE")
+    if batch.status in STOPPING_BATCH_STATES:
+        raise HTTPException(409, "BATCH_TERMINATION_REQUESTED")
     if action != "pause" and batch.mode == "live" and not body.confirmPaid:
         raise HTTPException(409, "EXPLICIT_PAID_CONFIRMATION_REQUIRED")
     batch.status, batch.error = ("PAUSED" if action == "pause" else "ACTIVE"), None
@@ -521,12 +543,24 @@ def _job_out(job: GenerationJob) -> dict:
     }
 
 
-def _job(session: Session, job_id: str, *, lock: bool = False) -> GenerationJob:
-    query = select(GenerationJob).where(GenerationJob.id == job_id)
-    row = session.scalar(query.with_for_update() if lock else query)
+def _job(session: Session, job_id: str) -> GenerationJob:
+    row = session.get(GenerationJob, job_id)
     if not row:
         raise HTTPException(404, "JOB_NOT_FOUND")
     return row
+
+
+def _lock_batch_job(
+    session: Session, job_id: str
+) -> tuple[GenerationBatch, GenerationJob]:
+    batch = _batch(session, _job(session, job_id).batch_id, lock=True)
+    job = session.scalar(
+        select(GenerationJob)
+        .where(GenerationJob.id == job_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return batch, job
 
 
 @router.get("/jobs/{job_id}")
@@ -564,7 +598,7 @@ def resolve(
     job_id: str, body: ResolutionIn, request: Request, session: SessionDep
 ) -> dict:
     require_role_at_least(request, "admin")
-    job = _job(session, job_id, lock=True)
+    batch, job = _lock_batch_job(session, job_id)
     if (
         job.status != "SUBMISSION_UNKNOWN"
         or bool(body.taskId) == body.confirmedNotCreated
@@ -593,7 +627,7 @@ def resolve(
     else:
         attempt.reserved, job.status, attempt.cloud_status = (
             False,
-            "FAILED",
+            "TERMINATED" if batch.status in STOPPING_BATCH_STATES else "FAILED",
             "CONFIRMED_NOT_CREATED",
         )
     attempt.lease_token, attempt.lease_until, attempt.next_poll_at = (
@@ -602,13 +636,15 @@ def resolve(
         None,
     )
     job.error = None
+    if batch.status == "TERMINATING":
+        complete_batch(session, batch)
     session.commit()
     return job_detail(job.id, session)
 
 
 @router.post("/jobs/{job_id}/recover")
 def recover(job_id: str, session: SessionDep) -> dict:
-    job = _job(session, job_id, lock=True)
+    _, job = _lock_batch_job(session, job_id)
     attempt = (
         session.get(GenerationAttempt, job.current_attempt_id)
         if job.current_attempt_id
@@ -634,7 +670,9 @@ def recover(job_id: str, session: SessionDep) -> dict:
 
 @router.post("/jobs/{job_id}/retry")
 def retry(job_id: str, session: SessionDep) -> dict:
-    job = _job(session, job_id, lock=True)
+    batch, job = _lock_batch_job(session, job_id)
+    if batch.status in STOPPING_BATCH_STATES:
+        raise HTTPException(409, "BATCH_TERMINATION_REQUESTED")
     attempt = (
         session.get(GenerationAttempt, job.current_attempt_id)
         if job.current_attempt_id

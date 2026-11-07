@@ -159,6 +159,10 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
     page.get_by_role("button", name="批次详情 TEST_024").click()
     detail = page.get_by_role("dialog", name="批次详情")
     detail.get_by_text("派发中 · 共 12 个任务").wait_for()
+    detail.get_by_role("button", name="终止批次", exact=True).click()
+    detail.get_by_role("heading", name="确认终止批次？").wait_for()
+    detail.get_by_role("button", name="返回", exact=True).click()
+    detail.get_by_role("button", name="终止批次", exact=True).wait_for()
     detail.get_by_role("button", name="关闭批次详情").click()
     assert not errors, errors
     report = overflow_report(page)

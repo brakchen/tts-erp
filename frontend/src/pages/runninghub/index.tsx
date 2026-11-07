@@ -8,7 +8,7 @@ import type { PageProps } from '../../shared/contracts';
 import { decodeAssetList, decodeDigitalHumanDetail, decodeDigitalHumanList, type Asset } from '../media-assets/contracts';
 import BatchRecords from './BatchRecords';
 import type { Artifact, Batch, Config, Job, Template } from './contracts';
-import { statuses } from './contracts';
+import { canTerminateBatch, statuses } from './contracts';
 import { Check, Choice, Field, SelectTile, WorkModal } from './controls';
 import './runninghub.css';
 
@@ -47,8 +47,9 @@ function useRead<T>(root: string, path: string | null, revision: number, polling
   return { data, error, loading };
 }
 
-function JobDetail({ jobId, root, revision, canWrite, admin, run }: {
+function JobDetail({ jobId, root, revision, canWrite, admin, stopping, run }: {
   jobId: string; root: string; revision: number; canWrite: boolean; admin: boolean;
+  stopping: boolean;
   run: (path: string, body?: object) => Promise<void>;
 }) {
   const detail = useRead<Job>(root, '/v2/runninghub/jobs/' + jobId, revision, true);
@@ -62,8 +63,8 @@ function JobDetail({ jobId, root, revision, canWrite, admin, run }: {
     {detail.loading && !job && <p role="status">正在读取任务…</p>}{detail.error && <p role="alert">{detail.error}</p>}
     {job && <><p className="break-all">{job.identity.originalFilename} · {job.identity.humanName} · {job.identity.templateName}{job.identity.clip}</p>
       <p>{statuses[job.status] ?? job.status} · seed {job.seed}</p>{job.error && <p role="status">{job.error}</p>}
-      {canWrite && ['DOWNLOAD_FAILED', 'FINALIZE_FAILED', 'TRACKING_INTERRUPTED'].includes(job.status) && <Button onPress={() => { void run('/jobs/' + job.id + '/recover'); }}>恢复原任务</Button>}
-      {canWrite && ['FAILED', 'PREPARATION_FAILED'].includes(job.status) && <Button onPress={() => { if (window.confirm('此操作将为明确失败的任务安排新的 Attempt。真实模式可能再次计费，是否继续？')) void run('/jobs/' + job.id + '/retry'); }}>明确失败后重新生成</Button>}
+      {canWrite && ['DOWNLOAD_FAILED', 'FINALIZE_FAILED', 'TRACKING_INTERRUPTED'].includes(job.status) && <Button onPress={() => { void run('/jobs/' + job.id + '/recover'); }}>{stopping && job.status === 'TRACKING_INTERRUPTED' ? '继续核对终止' : '恢复原任务'}</Button>}
+      {canWrite && !stopping && ['FAILED', 'PREPARATION_FAILED'].includes(job.status) && <Button onPress={() => { if (window.confirm('此操作将为明确失败的任务安排新的 Attempt。真实模式可能再次计费，是否继续？')) void run('/jobs/' + job.id + '/retry'); }}>明确失败后重新生成</Button>}
       {job.status === 'SUBMISSION_UNKNOWN' && <div className="space-y-2"><p>请管理员到 RunningHub 任务列表核对。此任务继续占用配额，不会自动重提。</p>
         {admin && <><Field label="核实的云端 taskId" value={taskId} onChange={setTaskId} />
           <Field label="核对说明" value={note} onChange={setNote} />
@@ -77,7 +78,7 @@ function JobDetail({ jobId, root, revision, canWrite, admin, run }: {
         <a className="underline" href={item.url} target="_blank" rel="noreferrer">下载{item.kind === 'final' ? '成片' : '原始视频'}</a>
       </div>)}
       {job.attempts?.map((attempt) => <details key={attempt.id}><summary>Attempt {attempt.number} · {attempt.cloudStatus ?? '尚未受理'} · {attempt.taskId ?? '无云端 ID'}</summary>
-        <p>配额：{attempt.reserved ? '保留' : '已释放'}</p><p>{attempt.error}</p>
+        <p>配额：{attempt.reserved ? '保留' : '已释放'}</p><p>{attempt.error === 'CANCELLATION_UNCONFIRMED' ? '云端终止结果待确认。' : attempt.error}</p>
         <p>费用：{attempt.usage ? JSON.stringify(attempt.usage) : '未知'}</p>
         <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(attempt.receipt, null, 2)}</pre></details>)}
     </>}
@@ -126,6 +127,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
   const [startTarget, setStartTarget] = useState<Batch>();
   const [paid, setPaid] = useState(false);
   const [batchId, setBatchId] = useState('');
+  const [confirmTermination, setConfirmTermination] = useState(false);
   const batch = useRead<Batch>(root, batchId ? '/v2/runninghub/batches/' + batchId : null, revision, true);
   const [jobOffset, setJobOffset] = useState(0);
   const jobs = useRead<{ items: Job[] }>(root, batchId ? '/v2/runninghub/batches/' + batchId + '/jobs?limit=100&offset=' + jobOffset : null, revision, true);
@@ -248,6 +250,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
   const close = () => setDialog(undefined);
   const notice = feedback && <p role="status" className="break-words">{feedback}</p>;
   const selectedBatch = batch.data;
+  const stopping = selectedBatch?.status === 'TERMINATING' || selectedBatch?.status === 'TERMINATED';
   const startingLive = startTarget?.mode === 'live';
   const resuming = startTarget?.status === 'PAUSED';
 
@@ -433,7 +436,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
     </WorkModal>}
 
     <Drawer.Backdrop isOpen={Boolean(batchId)} isDismissable={!busy} isKeyboardDismissDisabled={busy}
-      onOpenChange={(open) => { if (!open && !busy) { setBatchId(''); setJobId(''); } }}>
+      onOpenChange={(open) => { if (!open && !busy) { setBatchId(''); setJobId(''); setConfirmTermination(false); } }}>
       <Drawer.Content placement="right" className="w-full max-w-[44rem]">
         <Drawer.Dialog>
           <Drawer.Header><Drawer.Heading>批次详情</Drawer.Heading>{!busy && <Drawer.CloseTrigger aria-label="关闭批次详情" />}</Drawer.Header>
@@ -443,8 +446,27 @@ export default function RunningHub({ bootstrap }: PageProps) {
             {notice}
             {selectedBatch && <>
               <p className="break-all font-mono text-xs">{selectedBatch.id}</p>
-              <p>{statuses[selectedBatch.status] ?? selectedBatch.status} · 共 {selectedBatch.total} 个任务
-                {selectedBatch.mode === 'dry-run' ? ' · 历史演练批次' : ''}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p>{statuses[selectedBatch.status] ?? selectedBatch.status} · 共 {selectedBatch.total} 个任务
+                  {selectedBatch.mode === 'dry-run' ? ' · 历史演练批次' : ''}</p>
+                {canWrite && canTerminateBatch(selectedBatch) && !confirmTermination &&
+                  <Button size="sm" variant="danger" isDisabled={busy} onPress={() => { setFeedback(''); setConfirmTermination(true); }}>终止批次</Button>}
+              </div>
+              {canWrite && canTerminateBatch(selectedBatch) && confirmTermination &&
+                <section aria-labelledby="rh-terminate-title" className="space-y-2 rounded-lg border p-3">
+                  <h3 id="rh-terminate-title" className="erp-section-heading">确认终止批次？</h3>
+                  <p>未提交的任务将停止，云端排队和运行中的任务将请求取消。已完成的成片和已记录的费用将保留，终止后无法恢复派发。</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" autoFocus isDisabled={busy} onPress={() => setConfirmTermination(false)}>返回</Button>
+                    <Button size="sm" variant="danger" isDisabled={busy} onPress={() => {
+                      void command<Batch>('/batches/' + selectedBatch.id + '/terminate', { confirmTerminate: true })
+                        .then((saved) => { if (saved) setConfirmTermination(false); });
+                    }}>确认终止</Button>
+                  </div>
+                </section>}
+              {selectedBatch.status === 'TERMINATING' && <p role="status">
+                已停止新提交，正在处理已提交的任务。跟踪中断时可在单任务详情继续核对，提交结果不明时由管理员核对。
+              </p>}
               <p>{Object.entries(selectedBatch.counts).map(([key, count]) => (statuses[key] ?? key) + ' ' + count).join(' / ')}</p>
               {selectedBatch.error && <p role="status">{selectedBatch.error}。暂停只停止新提交，已受理任务继续处理。</p>}
               <p>已知费用：{Object.keys(selectedBatch.costs).length
@@ -462,7 +484,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
               <Button variant="secondary" isDisabled={!jobOffset || jobs.loading} onPress={() => setJobOffset((n) => Math.max(0, n - 100))}>上一页任务</Button>
               <Button variant="secondary" isDisabled={(jobs.data?.items.length ?? 0) < 100 || jobs.loading} onPress={() => setJobOffset((n) => n + 100)}>下一页任务</Button>
             </div>}
-            {jobId && <JobDetail key={jobId} jobId={jobId} root={root} revision={revision} canWrite={canWrite && !busy} admin={admin && !busy} run={run} />}
+            {jobId && <JobDetail key={jobId} jobId={jobId} root={root} revision={revision} canWrite={canWrite && !busy} admin={admin && !busy} stopping={stopping} run={run} />}
           </Drawer.Body>
         </Drawer.Dialog>
       </Drawer.Content>

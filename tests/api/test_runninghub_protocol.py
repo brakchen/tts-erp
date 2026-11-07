@@ -98,6 +98,35 @@ def test_official_wrappers_ids_multipart_and_no_create_retry(tmp_path):
     client.close()
 
 
+@pytest.mark.parametrize("code", [0, 807, False, "0"])
+def test_cancel_uses_official_contract_and_requires_integer_zero(code):
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/task/openapi/cancel"
+        assert request.headers["Authorization"] == "Bearer TEST_SECRET"
+        assert json.loads(request.content) == {
+            "apiKey": "TEST_SECRET",
+            "taskId": "90071992547409931234567",
+        }
+        return httpx.Response(
+            200, json={"code": code, "data": None, "msg": "TEST_SECRET"}
+        )
+
+    client = RunningHubClient("TEST_SECRET", transport=httpx.MockTransport(handler))
+    try:
+        if type(code) is int and code == 0:
+            assert client.cancel("90071992547409931234567") == {
+                "code": 0,
+                "data": None,
+                "msg": "[redacted]",
+            }
+        else:
+            with pytest.raises(RemoteError, match="UPSTREAM_CANCEL_REJECTED"):
+                client.cancel("90071992547409931234567")
+    finally:
+        client.close()
+
+
 def test_redaction_nested_diagnostics():
     raw = {
         "apiKey": "TEST_SECRET",

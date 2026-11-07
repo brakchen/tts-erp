@@ -817,6 +817,129 @@ def test_readonly_and_readwrite_http_gates(
         ).status_code
         == 403
     )
+    assert (
+        client.post(
+            f"/v2/runninghub/batches/{setup['batch']}/terminate",
+            headers={"Authorization": "Bearer " + readonly_key},
+            json={"confirmTerminate": True},
+        ).status_code
+        == 403
+    )
+
+
+@pytest.fixture()
+def termination_api(monkeypatch):
+    from tts_erp_v2.middleware.auth import AuthMiddleware
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.add_middleware(AuthMiddleware)
+    monkeypatch.setenv("TTS_ERP_AUTH_MODE", "off")
+    return TestClient(app)
+
+
+def test_termination_fences_preparation_and_waits_for_unknown_submission(
+    setup,
+    termination_api,
+):
+    sessions = setup["sessions"]
+    batch_path = f"/v2/runninghub/batches/{setup['batch']}"
+    preparing_id, unknown_id, succeeded_id, *_ = setup["jobs"]
+    with sessions() as session, session.begin():
+        preparing = reserve(session, preparing_id, "TEST_stop_" + setup["batch"], 5)
+        reserve(session, unknown_id, "TEST_stop_" + setup["batch"], 5)
+        session.get(GenerationJob, unknown_id).status = "SUBMISSION_UNKNOWN"
+        session.get(GenerationJob, succeeded_id).status = "SUCCEEDED"
+
+    assert termination_api.post(batch_path + "/terminate", json={}).status_code == 422
+    body = {"confirmTerminate": True}
+    response = termination_api.post(batch_path + "/terminate", json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "TERMINATING"
+    assert response.json()["counts"] == {
+        "PREPARING": 1,
+        "SUCCEEDED": 1,
+        "SUBMISSION_UNKNOWN": 1,
+        "TERMINATED": 3,
+    }
+    assert termination_api.post(batch_path + "/resume", json={}).status_code == 409
+    assert (
+        termination_api.post(f"/v2/runninghub/jobs/{unknown_id}/retry").status_code
+        == 409
+    )
+    worker = Worker(sessions, Mock())
+    worker.process(preparing)
+    with sessions() as session:
+        assert not session.get(GenerationAttempt, preparing).reserved
+        assert session.get(GenerationBatch, setup["batch"]).status == "TERMINATING"
+    resolution = termination_api.post(
+        f"/v2/runninghub/jobs/{unknown_id}/resolve",
+        json={"confirmedNotCreated": True, "note": "TEST_checked_platform"},
+    )
+    assert resolution.status_code == 200, resolution.text
+    assert resolution.json()["status"] == "TERMINATED"
+    assert not resolution.json()["attempts"][0]["reserved"]
+    assert termination_api.post(batch_path + "/terminate", json=body).json()[
+        "counts"
+    ] == {"SUCCEEDED": 1, "TERMINATED": 5}
+    assert termination_api.get(batch_path).json()["status"] == "TERMINATED"
+
+
+@pytest.mark.parametrize("cloud_finishes", [False, True])
+def test_termination_during_create_tracks_original_id_and_preserves_usage(
+    setup,
+    termination_api,
+    monkeypatch,
+    cloud_finishes,
+):
+    key = "TEST_key_" + new_id()
+    monkeypatch.setenv("RUNNINGHUB_TEST_API_KEY", key)
+    monkeypatch.setattr(Worker, "_uploaded", lambda *_args: "openapi/TEST_uploaded")
+    batch_path = f"/v2/runninghub/batches/{setup['batch']}"
+    task_id = "9007199254740993" + str(int(cloud_finishes))
+    with setup["sessions"]() as session, session.begin():
+        session.get(GenerationBatch, setup["batch"]).mode = "live"
+
+    def create(_body):
+        response = termination_api.post(
+            batch_path + "/terminate", json={"confirmTerminate": True}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["counts"] == {"SUBMITTING": 1, "TERMINATED": 5}
+        return {"code": 0, "data": {"taskId": task_id, "taskStatus": "QUEUED"}}
+
+    fake = Mock(key=key)
+    fake.create.side_effect = create
+    fake.query.return_value = {"status": "RUNNING", "usage": {"consumeCoins": "1.23"}}
+    fake.cancel.side_effect = RemoteError(
+        "UPSTREAM_CANCEL_REJECTED", receipt={"code": 807}
+    )
+    worker = Worker(setup["sessions"], Mock(), lambda _key: fake)
+    tick(worker, setup, 2)
+    assert termination_api.get(batch_path).json()["status"] == "TERMINATING"
+    with setup["sessions"]() as session:
+        attempt = session.scalar(
+            select(GenerationAttempt).where(GenerationAttempt.task_id == task_id)
+        )
+        assert attempt.reserved and attempt.receipt["cancel"]["code"] == 807
+        assert attempt.next_poll_at is not None
+
+    fake.cancel.side_effect = None
+    fake.cancel.return_value = {"code": 0, "data": None}
+    fake.query.return_value = {"status": "SUCCESS" if cloud_finishes else "RUNNING"}
+    tick(worker, setup)
+    fake.create.assert_called_once()
+    assert fake.cancel.call_count == (1 if cloud_finishes else 2)
+    assert all(call.args == (task_id,) for call in fake.cancel.call_args_list)
+    result = termination_api.get(batch_path).json()
+    assert result["costs"] == {"consumeCoins": "1.23"}
+    assert result["status"] == ("TERMINATING" if cloud_finishes else "TERMINATED")
+    with setup["sessions"]() as session:
+        attempt = session.get(GenerationAttempt, attempt.id)
+        assert not attempt.reserved
+        assert session.get(GenerationJob, attempt.job_id).status == (
+            "DOWNLOADING" if cloud_finishes else "TERMINATED"
+        )
 
 
 def test_costs_are_decimal_unknown_separate_from_currency(setup):
