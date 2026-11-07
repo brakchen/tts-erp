@@ -206,7 +206,10 @@ def request_termination(session: Session, batch: GenerationBatch) -> None:
     batch.status, batch.error = "TERMINATING", None
     session.execute(
         update(GenerationJob)
-        .where(GenerationJob.batch_id == batch.id, GenerationJob.status == "PLANNED")
+        .where(
+            GenerationJob.batch_id == batch.id,
+            GenerationJob.status.in_(["PLANNED", "DEFERRED"]),
+        )
         .values(status="TERMINATED")
     )
     tracking = session.execute(
@@ -254,10 +257,16 @@ def complete_batch(session: Session, batch: GenerationBatch) -> None:
         if not session.scalar(select(or_(reserved, local_processing))):
             batch.status = "TERMINATED"
         return
-    remaining = session.scalar(
-        select(func.count())
-        .select_from(GenerationJob)
-        .where(GenerationJob.batch_id == batch.id, GenerationJob.status != "SUCCEEDED")
+    remaining = set(
+        session.scalars(
+            select(GenerationJob.status)
+            .where(
+                GenerationJob.batch_id == batch.id, GenerationJob.status != "SUCCEEDED"
+            )
+            .distinct()
+        )
     )
-    if remaining == 0:
+    if remaining == {"DEFERRED"}:
+        batch.status, batch.error = "FIRST_CLIP_READY", None
+    elif not remaining:
         batch.status, batch.error = "SUCCEEDED", None

@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { Button, Chip, ProgressBar, Table, buttonVariants } from '@heroui/react';
-import { pathFor } from '../../shared/api/paths';
-import { canTerminateBatch, statuses, type Batch } from './contracts';
+import { Button, Chip, ProgressBar, Table } from '@heroui/react';
+import { canDispatchBatch, statuses, type Batch } from './contracts';
 
 const filters = [
   { id: 'all', label: '全部' },
@@ -9,16 +8,15 @@ const filters = [
   { id: 'done', label: '已完成' },
 ] as const;
 
-export default function BatchRecords({ batches, loading, error, root, canWrite, busy, offset, onPage, onDetail, onStart, onPause }: {
+export default function BatchRecords({ batches, loading, error, canWrite, busy, offset, onPage, onDetail, onStart, onPause }: {
   batches: Batch[];
   loading: boolean;
   error: string;
-  root: string;
   canWrite: boolean;
   busy: boolean;
   offset: number;
   onPage: (offset: number) => void;
-  onDetail: (id: string) => void;
+  onDetail: (id: string, archive?: boolean) => void;
   onStart: (batch: Batch) => void;
   onPause: (batch: Batch) => void;
 }) {
@@ -50,6 +48,7 @@ export default function BatchRecords({ batches, loading, error, root, canWrite, 
             {visible.map((batch) => {
               const done = batch.counts.SUCCEEDED ?? 0;
               const completed = batch.status === 'SUCCEEDED';
+              const trial = batch.status === 'FIRST_CLIP_READY';
               const firstGroup = batch.groups[0]?.path;
               return <Table.Row className="erp-table-row" key={batch.id} id={batch.id}>
                 <Table.Cell className="erp-table-cell">
@@ -57,7 +56,7 @@ export default function BatchRecords({ batches, loading, error, root, canWrite, 
                   <span className="erp-table-meta break-all">{batch.id}</span>
                 </Table.Cell>
                 <Table.Cell className="erp-table-cell">
-                  <Chip size="sm" color={completed ? 'success' : ['PAUSED', 'TERMINATING'].includes(batch.status) ? 'warning' : 'default'}>
+                  <Chip size="sm" color={completed || trial ? 'success' : ['PAUSED', 'TERMINATING'].includes(batch.status) ? 'warning' : 'default'}>
                     {statuses[batch.status] ?? batch.status}
                   </Chip>
                 </Table.Cell>
@@ -71,10 +70,10 @@ export default function BatchRecords({ batches, loading, error, root, canWrite, 
                 </Table.Cell>
                 <Table.Cell className="erp-table-cell" focusMode="child">
                   <div className="flex flex-wrap gap-1">
-                    <Button size="sm" variant="ghost" aria-label={'批次详情 ' + batch.id} onPress={() => onDetail(batch.id)}>详情</Button>
-                    {completed && <a className={buttonVariants({ size: 'sm', variant: 'ghost' })}
-                      href={pathFor(root, '/v2/runninghub/batches/' + batch.id + '/export')}>归档 ZIP</a>}
-                    {canWrite && canTerminateBatch(batch) && (batch.status === 'ACTIVE'
+                    <Button size="sm" variant="ghost" aria-label={(trial ? '查看首段 ' : '批次详情 ') + batch.id}
+                      onPress={() => onDetail(batch.id)}>{trial ? '查看首段' : '详情'}</Button>
+                    {completed && <Button size="sm" variant="ghost" onPress={() => onDetail(batch.id, true)}>归档</Button>}
+                    {canWrite && canDispatchBatch(batch) && (batch.status === 'ACTIVE'
                       ? <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => onPause(batch)}>暂停</Button>
                       : <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => onStart(batch)}>
                         {batch.status === 'PAUSED' ? '恢复' : '启动'}

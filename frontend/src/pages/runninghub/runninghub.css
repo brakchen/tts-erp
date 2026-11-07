@@ -68,6 +68,9 @@
 }
 .rh-template-name { padding-right: 2rem; }
 .rh-template-mark { background: #e3ebdd; color: #325742; border-radius: 6px; padding: 5px 8px; }
+.rh-editor-panel { min-width: 0; padding: 12px; border: 1px solid var(--rule); border-radius: 10px; }
+.rh-editor-list { display: grid; gap: 6px; max-height: 22rem; overflow: auto; margin-top: 8px; }
+.rh-editor-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px; border-radius: 6px; background: var(--paper); }
 .rh-step { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .rh-empty {
   padding: 12px;

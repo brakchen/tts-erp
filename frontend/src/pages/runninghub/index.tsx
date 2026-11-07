@@ -1,50 +1,53 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Chip, Drawer, Label, TextArea, TextField } from '@heroui/react';
+import { Button, Chip, Drawer, Label, TextArea, TextField, buttonVariants } from '@heroui/react';
 import PageIntro from '../../shared/PageIntro';
-import { ApiError, requestJson } from '../../shared/api/client';
-import { parseIdentityJson } from '../../shared/api/identity-json';
+import { requestJson } from '../../shared/api/client';
 import { pathFor } from '../../shared/api/paths';
 import type { PageProps } from '../../shared/contracts';
-import { decodeAssetList, decodeDigitalHumanDetail, decodeDigitalHumanList, type Asset } from '../media-assets/contracts';
+import { decodeAssetList, type Asset } from '../media-assets/contracts';
 import BatchRecords from './BatchRecords';
 import type { Artifact, Batch, Config, Job, Template } from './contracts';
-import { canTerminateBatch, statuses } from './contracts';
+import { canTerminateBatch, statuses, templateLabel } from './contracts';
 import { Check, Choice, Field, SelectTile, WorkModal } from './controls';
+import { errorText, useRead } from './requests';
+import TemplateEditor from './TemplateEditor';
 import './runninghub.css';
 
-function errorText(error: unknown) {
-  if (error instanceof ApiError) {
-    if (error.status === 403) return '无权执行此操作。';
-    if (error.status === 401) return '会话已过期，请重新登录。';
-    if (error.status === 429) return '请求过于频繁，请稍后刷新。';
-    if (typeof error.detail === 'string' && /^[A-Z0-9_: .-]+$/.test(error.detail)) return `操作未完成：${error.detail}`;
-  }
-  return '请求未完成。请刷新查看实际状态，写操作不会自动重放。';
+function ClipPreview({ jobId, root, first }: { jobId: string; root: string; first: boolean }) {
+  const [revision, setRevision] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const artifacts = useRead<{ items: Artifact[] }>(root, '/v2/runninghub/jobs/' + jobId + '/artifacts', revision);
+  const final = artifacts.data?.items.find((item) => item.kind === 'final');
+  const title = first ? '首段成片' : '成片预览';
+  return <section aria-label={title} className="space-y-2">
+    <h3 className="erp-section-heading">{title}</h3>
+    {artifacts.loading && <p role="status">正在读取成片…</p>}
+    {(artifacts.error || failed || (artifacts.data && !final)) && <div className="rh-empty space-y-2">
+      <p role="status">{artifacts.error || '成片暂时无法预览。'}</p>
+      <Button size="sm" variant="secondary" onPress={() => { setFailed(false); setRevision((n) => n + 1); }}>重新读取成片</Button>
+    </div>}
+    {final && !failed && <video aria-label={title} className="mx-auto max-h-72 max-w-full" controls playsInline
+      preload="metadata" src={final.url} onError={() => setFailed(true)} />}
+    {final && <a className="underline" href={final.url} target="_blank" rel="noreferrer">下载{title === '首段成片' ? title : '成片'}</a>}
+  </section>;
 }
 
-function useRead<T>(root: string, path: string | null, revision: number, polling = false) {
-  const [data, setData] = useState<T>();
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    if (!path) { setData(undefined); return; }
-    const controller = new AbortController();
-    let current = true;
-    let timer: ReturnType<typeof setTimeout>;
-    setData(undefined);
-    async function read() {
-      setLoading(true);
-      try {
-        const response = await requestJson<T>(root, path!, { signal: controller.signal }, parseIdentityJson);
-        if (current) { setData(response.data); setError(''); }
-      } catch (failure) { if (current) setError(errorText(failure)); }
-      finally { if (current) setLoading(false); }
-      if (current && polling) timer = setTimeout(() => { void read(); }, 10000);
-    }
-    void read();
-    return () => { current = false; controller.abort(); clearTimeout(timer); };
-  }, [root, path, revision, polling]);
-  return { data, error, loading };
+function BatchArchive({ batch, root }: { batch: Batch; root: string }) {
+  const [requested, setRequested] = useState(false);
+  const finished = batch.status === 'SUCCEEDED';
+  const stopped = batch.status === 'TERMINATED' || batch.status === 'TERMINATING';
+  return <section aria-labelledby="rh-archive-title" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+    <div className="min-w-0 flex-1 space-y-1">
+      <h3 id="rh-archive-title" className="erp-section-heading">批次成片 ZIP</h3>
+      <p role="status">{finished
+        ? requested ? '已请求服务器打包，可在浏览器下载列表查看进度。' : batch.total + ' 段成片 · 服务器从 MinIO 取文件并打包。'
+        : stopped ? '可在任务详情下载已完成的单段成片。整批完成后才能下载 ZIP。'
+          : '全部 ' + batch.total + ' 段完成后可下载 ZIP。'}</p>
+    </div>
+    {finished ? <a className={buttonVariants({ variant: 'primary' })} target="_blank" rel="noopener"
+      href={pathFor(root, '/v2/runninghub/batches/' + batch.id + '/export')} onClick={() => setRequested(true)}>打包下载 ZIP</a>
+      : <Button variant="secondary" isDisabled>打包下载 ZIP</Button>}
+  </section>;
 }
 
 function JobDetail({ jobId, root, revision, canWrite, admin, stopping, run }: {
@@ -93,7 +96,7 @@ const instanceOptions = [
   { id: 'ultra', name: 'ultra / 84 GB' },
 ];
 type Selection = { asset: Asset; skuId: string; style: string };
-type Plan = { total: number; groups: number; paths: string[] };
+type Plan = { total: number; fullTotal: number; groups: number; paths: string[] };
 
 export default function RunningHub({ bootstrap }: PageProps) {
   const root = bootstrap.rootPath;
@@ -109,15 +112,10 @@ export default function RunningHub({ bootstrap }: PageProps) {
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
   const assets = useRead<unknown>(root, '/v2/media/assets?kind=image&status=ready&limit=' + imagePageSize + '&offset=' + offset + '&keyword=' + encodeURIComponent(search), revision);
-  const humans = useRead<unknown>(root, dialog === 'template' ? '/v2/media/digital-humans?limit=200' : null, revision);
   const templates = useRead<{ items: Template[] }>(root, '/v2/runninghub/templates', revision);
   const config = useRead<Config>(root, '/v2/runninghub/config', revision);
   const [batchOffset, setBatchOffset] = useState(0);
   const batches = useRead<{ items: Batch[] }>(root, '/v2/runninghub/batches?limit=30&offset=' + batchOffset, revision, true);
-  const [humanId, setHumanId] = useState('');
-  const human = useRead<unknown>(root, dialog === 'template' && humanId ? '/v2/media/digital-humans/' + humanId : null, revision);
-  const [templateName, setTemplateName] = useState('A');
-  const [clipIds, setClipIds] = useState<string[]>(Array(6).fill(''));
   const [selected, setSelected] = useState<Selection[]>([]);
   const [style, setStyle] = useState('');
   const [selectedTemplates, setSelectedTemplates] = useState<string[]>([]);
@@ -127,7 +125,10 @@ export default function RunningHub({ bootstrap }: PageProps) {
   const [startTarget, setStartTarget] = useState<Batch>();
   const [paid, setPaid] = useState(false);
   const [batchId, setBatchId] = useState('');
-  const [confirmTermination, setConfirmTermination] = useState(false);
+  const [archiveView, setArchiveView] = useState(false);
+  const [detailAction, setDetailAction] = useState<'terminate' | 'continue'>();
+  const terminateTrigger = useRef<HTMLButtonElement>(null);
+  const continueTrigger = useRef<HTMLButtonElement>(null);
   const batch = useRead<Batch>(root, batchId ? '/v2/runninghub/batches/' + batchId : null, revision, true);
   const [jobOffset, setJobOffset] = useState(0);
   const jobs = useRead<{ items: Job[] }>(root, batchId ? '/v2/runninghub/batches/' + batchId + '/jobs?limit=100&offset=' + jobOffset : null, revision, true);
@@ -178,11 +179,19 @@ export default function RunningHub({ bootstrap }: PageProps) {
     setDialog('config');
   }
 
-  function openBatch(id: string) {
+  function openBatch(id: string, archive = false) {
     setFeedback('');
     setBatchId(id);
+    setArchiveView(archive);
+    setDetailAction(undefined);
     setJobId('');
     setJobOffset(0);
+  }
+
+  function backToDetails() {
+    const trigger = detailAction === 'terminate' ? terminateTrigger : continueTrigger;
+    setDetailAction(undefined);
+    requestAnimationFrame(() => trigger.current?.focus());
   }
 
   function prepareStart(current: Batch) {
@@ -226,18 +235,15 @@ export default function RunningHub({ bootstrap }: PageProps) {
   }
 
   let imageRows: Asset[] = [];
-  let humanRows: ReturnType<typeof decodeDigitalHumanList> = [];
-  let videoRows: Asset[] = [];
   let decodeError = '';
   try {
     if (assets.data) imageRows = decodeAssetList(assets.data).items;
-    if (humans.data) humanRows = decodeDigitalHumanList(humans.data).filter((item) => item.status === 'active');
-    if (human.data) videoRows = decodeDigitalHumanDetail(human.data).assets.filter((item) => item.kind === 'video' && item.status === 'ready');
   } catch { decodeError = '素材列表格式错误，请刷新重试。'; }
 
   const disabled = busy || !canWrite;
   const profile = config.data;
   const templateRows = templates.data?.items ?? [];
+  const selectedTemplateRows = templateRows.filter((template) => selectedTemplates.includes(template.id));
   const batchRows = batches.data?.items ?? [];
   const selectionHint = single && (selected.length !== 1 || selectedTemplates.length !== 1)
     ? '仅跑首段时，请选择一张图和一个人物模板。'
@@ -246,10 +252,24 @@ export default function RunningHub({ bootstrap }: PageProps) {
       : body.images.some((item) => !item.style || !item.skuId)
         ? '请填写款式编号和 SKU。'
         : '';
+  const displayFullCount = selected.length * selectedTemplateRows.reduce((total, template) => total + template.clips.length, 0);
+  const displayPlanCount = single
+    ? Number(selected.length === 1 && selectedTemplateRows.length === 1)
+    : displayFullCount;
+  const stripCount = selectedTemplateRows.length === 1 ? (single ? 1 : selectedTemplateRows[0].clips.length) : 0;
+  const trialHint = single && displayPlanCount > 0
+    ? displayFullCount > 1
+      ? '本次只跑首段。看完效果后，可在原批次继续生成剩余 ' + (displayFullCount - 1) + ' 段。'
+      : '此模板只有 1 段，首段完成即整批完成。'
+    : '';
   const run = async (path: string, value?: object) => { await command(path, value); };
   const close = () => setDialog(undefined);
   const notice = feedback && <p role="status" className="break-words">{feedback}</p>;
   const selectedBatch = batch.data;
+  const firstClipReady = selectedBatch?.status === 'FIRST_CLIP_READY';
+  const remaining = selectedBatch?.counts.DEFERRED ?? 0;
+  const completed = selectedBatch?.counts.SUCCEEDED ?? 0;
+  const impact = selectedBatch?.terminationImpact;
   const stopping = selectedBatch?.status === 'TERMINATING' || selectedBatch?.status === 'TERMINATED';
   const startingLive = startTarget?.mode === 'live';
   const resuming = startTarget?.status === 'PAUSED';
@@ -307,21 +327,26 @@ export default function RunningHub({ bootstrap }: PageProps) {
             </div>)}</div>
           </details>}
         </fieldset>
-        <fieldset className="min-w-0">
-          <legend className="mb-2 font-semibold"><span className="rh-step mr-2">02</span>人物模板</legend>
-          {canWrite && <Button size="sm" variant="ghost" className="mb-2" isDisabled={disabled} onPress={() => { setFeedback(''); setDialog('template'); }}>配置六段模板</Button>}
+        <section className="min-w-0" aria-labelledby="rh-templates-title">
+          <div className="rh-panel-heading">
+            <h3 id="rh-templates-title"><span className="rh-step mr-2">02</span>人物模板</h3>
+            {canWrite && <Button size="sm" isDisabled={disabled}
+              onPress={() => { setFeedback(''); setDialog('template'); }}>
+              <span aria-hidden="true">＋</span> 新建模板
+            </Button>}
+          </div>
           {templateRows.length ? <div className="rh-template-grid">{templateRows.map((template) => (
-            <SelectTile key={template.id} label={template.humanName + ' · 模板 ' + template.name} disabled={disabled}
+            <SelectTile key={template.id} label={templateLabel(template) + ' · ' + template.clips.length + ' 段'} disabled={disabled}
               selected={selectedTemplates.includes(template.id)}
               onChange={(checked) => setSelectedTemplates((ids) => checked ? [...ids, template.id] : ids.filter((id) => id !== template.id))}>
               <span className="rh-tile-name rh-template-name" title={template.humanName + ' · 模板 ' + template.name}>
                 <span className="rh-template-mark mr-2" aria-hidden="true">{template.name}</span>
                 {template.humanName} · 模板 {template.name}
               </span>
-              <span className="block px-1 text-xs text-muted">{template.clips.length} 段 · {template.id.slice(0, 8)}</span>
+              <span className="block px-1 text-xs text-muted">{template.clips.length} 段 · {template.version ? 'v' + template.version : template.id.slice(0, 8)}</span>
             </SelectTile>
-          ))}</div> : <p className="rh-empty">{templates.loading ? '正在读取模板…' : templates.error ? '模板读取失败。' : '暂无人物模板。先在数字人素材库挂载参考视频，再配置六段模板。'}</p>}
-        </fieldset>
+          ))}</div> : <p className="rh-empty">{templates.loading ? '正在读取模板…' : templates.error ? '模板读取失败。' : '暂无人物模板。可使用数字人素材库中已挂载的参考视频新建模板。'}</p>}
+        </section>
         <div className="border-t pt-3"><Check label="仅跑首段" selected={single} onChange={setSingle} disabled={disabled} /></div>
       </section>
 
@@ -329,24 +354,26 @@ export default function RunningHub({ bootstrap }: PageProps) {
         <p className="rh-step mb-2 font-mono tracking-widest">BATCH PREVIEW</p>
         <h3 id="rh-plan-title">生成计划</h3>
         <div className="rh-plan-total" role="status" aria-label="计划成片数">
-          <strong>{preview?.total ?? '—'}</strong><span>段成片</span>
+          <strong>{preview?.total ?? displayPlanCount}</strong><span>段成片</span>
         </div>
-        <p className="text-sm">{selected.length} 张图 × {selectedTemplates.length} 个人物模板 × {single ? 1 : 6} 段</p>
-        <div className="rh-strip font-mono" aria-hidden="true">
-          {(single ? ['01'] : ['01', '02', '03', '04', '05', '06']).map((clip) => <span key={clip}>{clip}</span>)}
-        </div>
+        <p className="text-sm">{selected.length} 张图 · {selectedTemplates.length} 个人物模板</p>
+        {stripCount > 0 && <div className="rh-strip font-mono" aria-hidden="true">
+          {Array.from({ length: Math.min(stripCount, 12) }, (_, index) =>
+            <span key={index}>{String(index + 1).padStart(2, '0')}</span>)}
+          {stripCount > 12 && <span>+{stripCount - 12}</span>}
+        </div>}
         <div className="rh-specs">{specs.map((spec) => <span key={spec}>{spec}</span>)}</div>
         <p className="mt-3 break-all text-xs">{profile
           ? profile.instanceType + ' · 并发 ' + profile.concurrency + ' · ' + (profile.workflowVersionId ? '已校验版本' : '待检查工作流')
           : config.loading ? '正在读取工作流…' : '工作流配置暂不可用'}</p>
         <div className="rh-plan-action">
           {canWrite && <Button className="rh-plan-button" isDisabled={disabled || Boolean(selectionHint)} onPress={() => { void previewPlan(); }}>预览计划 <span aria-hidden="true">→</span></Button>}
-          <p className="mt-2 text-xs">{canWrite ? selectionHint || '预览后保存批次，启动时确认付费。' : '由有操作权限的人员创建并启动批次。'}</p>
+          <p className="mt-2 text-xs">{canWrite ? selectionHint || trialHint || '预览后保存批次，启动时确认付费。' : '由有操作权限的人员创建并启动批次。'}</p>
         </div>
       </section>
     </div>
 
-    <BatchRecords batches={batchRows} loading={batches.loading} error={batches.error} root={root}
+    <BatchRecords batches={batchRows} loading={batches.loading} error={batches.error}
       canWrite={canWrite} busy={busy} offset={batchOffset} onPage={setBatchOffset} onDetail={openBatch}
       onStart={prepareStart} onPause={(current) => { void run('/batches/' + current.id + '/pause'); }} />
 
@@ -389,34 +416,31 @@ export default function RunningHub({ bootstrap }: PageProps) {
       {notice}
     </WorkModal>}
 
-    {dialog === 'template' && <WorkModal title="配置人物模板" busy={busy} close={close} footer={
-      <Button isDisabled={busy || !humanId || clipIds.some((id) => !id) || new Set(clipIds).size !== 6}
-        onPress={() => { void command('/templates', { humanId, name: templateName, assetIds: clipIds }).then((saved) => { if (saved) close(); }); }}>
-        保存六段模板
-      </Button>
-    }>
-      <p>先在 <a className="underline" href={pathFor(root, '/v2/pages/digital-humans')}>数字人素材库</a> 挂载六段不同视频，再按实际顺序选择。</p>
-      {[humans.error, human.error].filter(Boolean).map((error, index) => <p role="alert" key={index}>{error}</p>)}
-      {humans.loading && <p role="status">正在读取人物…</p>}
-      <div className="grid gap-2 sm:grid-cols-2">
-        <Choice label="人物" value={humanId} onChange={(id) => { setHumanId(id); setClipIds(Array(6).fill('')); }}
-          options={humanRows.map((item) => ({ id: item.digitalHumanId, name: item.name }))} disabled={busy} />
-        <Choice label="模板" value={templateName} onChange={setTemplateName}
-          options={['A', 'B', 'C'].map((id) => ({ id, name: id }))} disabled={busy} />
-        {clipIds.map((id, index) => <Choice key={index} label={'第 ' + (index + 1) + ' 段'} value={id} disabled={busy || !humanId}
-          options={videoRows.map((video) => ({ id: video.assetId, name: video.filename }))}
-          onChange={(value) => setClipIds((old) => old.map((entry, i) => i === index ? value : entry))} />)}
-      </div>
-      {humanId && !human.loading && videoRows.length < 6 && <p className="rh-empty">该人物的就绪参考视频不足六段。</p>}
-      {notice}
-    </WorkModal>}
+    {dialog === 'template' && <TemplateEditor root={root} busy={busy} feedback={feedback} close={close}
+      save={async (draft) => {
+        const saved = await command<Template>('/templates', draft);
+        if (saved) {
+          setSelectedTemplates([saved.id]);
+          setFeedback('已保存 ' + templateLabel(saved) + ' · ' + saved.clips.length + ' 段');
+          close();
+        }
+      }} />}
 
     {dialog === 'plan' && preview && <WorkModal title="确认生成计划" busy={busy} close={close} footer={<>
       <Button variant="secondary" isDisabled={busy} onPress={close}>返回修改</Button>
       <Button isDisabled={disabled || !profile?.workflowVersionId} onPress={() => { void saveBatch(); }}>保存批次</Button>
     </>}>
       <p className="font-semibold">服务端计划：{preview.total} 段成片 / {preview.groups} 组</p>
-      <p>保存后可在批次记录中主动启动。{single ? '本次使用模板的第 1 段参考视频。' : '每个服装图和人物模板组合包含六段。'}</p>
+      <dl className="grid gap-2 rounded-lg border p-3 sm:grid-cols-2">
+        <div><dt>本次生成</dt><dd className="font-semibold">{preview.total} 段</dd></div>
+        <div><dt>完整批次</dt><dd className="font-semibold">{preview.fullTotal} 段</dd></div>
+        <div><dt>服装图片</dt><dd className="break-all">{selected.map(({ asset }) => asset.filename).join('、')}</dd></div>
+        <div><dt>人物模板</dt><dd className="break-all">{selectedTemplateRows.map(templateLabel).join('、')}</dd></div>
+      </dl>
+      <p>保存后可在批次记录中主动启动。</p>
+      <p className="rh-empty">{single && preview.fullTotal > 1
+        ? '首段完成后，可在原批次继续生成剩余 ' + (preview.fullTotal - preview.total) + ' 段。'
+        : '成片段数以模板实际选入的参考视频为准。'}</p>
       {!profile?.workflowVersionId && <p className="rh-empty">请先在工作流配置中检查并保存版本。</p>}
       <details><summary>查看成片归档路径</summary><ul className="max-h-52 overflow-auto">{preview.paths.map((path) => <li className="break-all" key={path}>{path}</li>)}</ul></details>
       {notice}
@@ -429,6 +453,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
       </Button>
     </>}>
       <p className="break-all">批次 {startTarget.id} · {startTarget.total} 段成片</p>
+      {(startTarget.counts.DEFERRED ?? 0) > 0 && <p>本次只生成首段，剩余片段等待确认后续跑。</p>}
       {startingLive && <div className="rounded-lg bg-warning-soft p-3">
         <Check label="我了解实际生成会产生 RunningHub 费用。" selected={paid} onChange={setPaid} disabled={busy} />
       </div>}
@@ -436,10 +461,10 @@ export default function RunningHub({ bootstrap }: PageProps) {
     </WorkModal>}
 
     <Drawer.Backdrop isOpen={Boolean(batchId)} isDismissable={!busy} isKeyboardDismissDisabled={busy}
-      onOpenChange={(open) => { if (!open && !busy) { setBatchId(''); setJobId(''); setConfirmTermination(false); } }}>
+      onOpenChange={(open) => { if (!open && !busy) { setBatchId(''); setJobId(''); setDetailAction(undefined); } }}>
       <Drawer.Content placement="right" className="w-full max-w-[44rem]">
         <Drawer.Dialog>
-          <Drawer.Header><Drawer.Heading>批次详情</Drawer.Heading>{!busy && <Drawer.CloseTrigger aria-label="关闭批次详情" />}</Drawer.Header>
+          <Drawer.Header><Drawer.Heading>{archiveView ? '归档预览' : firstClipReady ? '查看首段' : '批次详情'}</Drawer.Heading>{!busy && <Drawer.CloseTrigger aria-label="关闭批次详情" />}</Drawer.Header>
           <Drawer.Body className="space-y-3">
             {(batch.error || jobs.error) && <p role="alert">{batch.error || jobs.error}</p>}
             {batch.loading && !selectedBatch && <p role="status">正在读取批次…</p>}
@@ -449,24 +474,42 @@ export default function RunningHub({ bootstrap }: PageProps) {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p>{statuses[selectedBatch.status] ?? selectedBatch.status} · 共 {selectedBatch.total} 个任务
                   {selectedBatch.mode === 'dry-run' ? ' · 历史演练批次' : ''}</p>
-                {canWrite && canTerminateBatch(selectedBatch) && !confirmTermination &&
-                  <Button size="sm" variant="danger" isDisabled={busy} onPress={() => { setFeedback(''); setConfirmTermination(true); }}>终止批次</Button>}
+                {canWrite && canTerminateBatch(selectedBatch) && !detailAction &&
+                  <Button ref={terminateTrigger} size="sm" variant="danger" isDisabled={busy}
+                    onPress={() => { setFeedback(''); setDetailAction('terminate'); }}>终止批次</Button>}
               </div>
-              {canWrite && canTerminateBatch(selectedBatch) && confirmTermination &&
+              {canWrite && canTerminateBatch(selectedBatch) && detailAction === 'terminate' &&
                 <section aria-labelledby="rh-terminate-title" className="space-y-2 rounded-lg border p-3">
                   <h3 id="rh-terminate-title" className="erp-section-heading">确认终止批次？</h3>
+                  {impact && <dl className="grid gap-2 sm:grid-cols-3">
+                    <div><dt>已完成并保留</dt><dd>{impact.completed} 段</dd></div>
+                    <div><dt>未提交，将停止派发</dt><dd>{impact.unsubmitted} 段</dd></div>
+                    <div><dt>云端在途，将请求取消</dt><dd>{impact.cloudInFlight} 段</dd></div>
+                  </dl>}
+                  {!!impact?.unconfirmed && <p>{impact.unconfirmed} 段提交结果待确认，将继续核对。</p>}
                   <p>未提交的任务将停止，云端排队和运行中的任务将请求取消。已完成的成片和已记录的费用将保留，终止后无法恢复派发。</p>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="secondary" autoFocus isDisabled={busy} onPress={() => setConfirmTermination(false)}>返回</Button>
+                    <Button size="sm" variant="secondary" autoFocus isDisabled={busy} onPress={backToDetails}>返回</Button>
                     <Button size="sm" variant="danger" isDisabled={busy} onPress={() => {
                       void command<Batch>('/batches/' + selectedBatch.id + '/terminate', { confirmTerminate: true })
-                        .then((saved) => { if (saved) setConfirmTermination(false); });
+                        .then((saved) => { if (saved) setDetailAction(undefined); });
                     }}>确认终止</Button>
                   </div>
                 </section>}
               {selectedBatch.status === 'TERMINATING' && <p role="status">
                 已停止新提交，正在处理已提交的任务。跟踪中断时可在单任务详情继续核对，提交结果不明时由管理员核对。
               </p>}
+              {selectedBatch.status === 'TERMINATED' && <p className="rh-empty">批次已终止。已完成的片段和费用记录保留。</p>}
+              <dl className="grid gap-2 rounded-lg border p-3 sm:grid-cols-2">
+                <div><dt>成片进度</dt><dd>{completed} / {selectedBatch.total}</dd></div>
+                <div><dt>创建时配置</dt><dd>{selectedBatch.config
+                  ? selectedBatch.config.instanceType + ' · 并发 ' + selectedBatch.config.concurrency + ' · 工作流 ' + (selectedBatch.config.workflowVersionId?.slice(0, 8) ?? '—')
+                  : '—'}</dd></div>
+                {!!selectedBatch.templates?.length && <div className="sm:col-span-2"><dt>模板版本</dt>
+                  <dd className="break-all">{selectedBatch.templates.map(templateLabel).join('、')}</dd></div>}
+              </dl>
+              {!archiveView && selectedBatch.previewJobId && <ClipPreview key={selectedBatch.previewJobId}
+                jobId={selectedBatch.previewJobId} root={root} first={firstClipReady} />}
               <p>{Object.entries(selectedBatch.counts).map(([key, count]) => (statuses[key] ?? key) + ' ' + count).join(' / ')}</p>
               {selectedBatch.error && <p role="status">{selectedBatch.error}。暂停只停止新提交，已受理任务继续处理。</p>}
               <p>已知费用：{Object.keys(selectedBatch.costs).length
@@ -476,8 +519,9 @@ export default function RunningHub({ bootstrap }: PageProps) {
             </>}
             <ul className="space-y-2">{jobs.data?.items.map((job) => <li className="rounded-lg border p-3" key={job.id}>
               <div className="flex flex-wrap items-center gap-2">
-                <p className="min-w-0 flex-1 break-all">{job.identity.originalFilename} · {job.identity.humanName} · {job.identity.templateName}{job.identity.clip} · {statuses[job.status] ?? job.status}</p>
-                <Button size="sm" variant="secondary" onPress={() => setJobId(job.id)}>查看任务 {job.identity.templateName}{job.identity.clip}</Button>
+                <p className="min-w-0 flex-1 break-all">第 {String(job.identity.clip).padStart(2, '0')} 段 · {job.referenceFilename ?? job.identity.originalFilename} · {job.identity.humanName} · {job.identity.templateName} · {statuses[job.status] ?? job.status}</p>
+                {job.status !== 'DEFERRED' && <Button size="sm" variant="secondary"
+                  onPress={() => setJobId(job.id)}>查看任务 {job.identity.templateName}{job.identity.clip}</Button>}
               </div>
             </li>)}</ul>
             {(jobOffset > 0 || (jobs.data?.items.length ?? 0) >= 100) && <div className="rh-pager">
@@ -485,6 +529,28 @@ export default function RunningHub({ bootstrap }: PageProps) {
               <Button variant="secondary" isDisabled={(jobs.data?.items.length ?? 0) < 100 || jobs.loading} onPress={() => setJobOffset((n) => n + 100)}>下一页任务</Button>
             </div>}
             {jobId && <JobDetail key={jobId} jobId={jobId} root={root} revision={revision} canWrite={canWrite && !busy} admin={admin && !busy} stopping={stopping} run={run} />}
+            {selectedBatch && <BatchArchive key={selectedBatch.id} batch={selectedBatch} root={root} />}
+            {selectedBatch && firstClipReady && <section aria-label="首段续跑" className="space-y-3 rounded-lg bg-success-soft p-3">
+              {detailAction === 'continue' ? <>
+                <h3 className="erp-section-heading">继续生成剩余 {remaining} 段</h3>
+                <p>沿用首段的服装、模板顺序和工作流。首段成片保留在原批次。</p>
+                <p>已完成 {completed} / {selectedBatch.total} 段 · 本次安排 {remaining} 段</p>
+                {selectedBatch.mode === 'live' && <Check label="我了解继续生成会产生 RunningHub 费用。"
+                  selected={paid} onChange={setPaid} disabled={busy} />}
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" autoFocus isDisabled={busy} onPress={backToDetails}>返回详情</Button>
+                  <Button isDisabled={disabled || (selectedBatch.mode === 'live' && !paid)} onPress={() => {
+                    void command<Batch>('/batches/' + selectedBatch.id + '/continue', { confirmPaid: paid })
+                      .then((saved) => { if (saved) { setDetailAction(undefined); setFeedback('已安排剩余片段继续生成。'); } });
+                  }}>确认继续生成</Button>
+                </div>
+              </> : <>
+                <p>首段满意后，可在同一个批次里完成后续片段。</p>
+                {canWrite && !detailAction && <Button ref={continueTrigger} isDisabled={busy} onPress={() => {
+                  setFeedback(''); setPaid(false); setDetailAction('continue');
+                }}>继续生成剩余 {remaining} 段</Button>}
+              </>}
+            </section>}
           </Drawer.Body>
         </Drawer.Dialog>
       </Drawer.Content>

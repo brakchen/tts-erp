@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 import secrets
+from collections import Counter
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePath
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.commerce.shop_access import authorized_shop_clause
@@ -26,6 +27,22 @@ from tts_erp_v2.runninghub.workflow import MAX_SEED, SPEC, digest
 
 class PlanError(ValueError):
     pass
+
+
+def max_batch_jobs() -> int:
+    return int(os.environ.get("RUNNINGHUB_MAX_BATCH_JOBS", "2000"))
+
+
+def template_versions():
+    return select(
+        VideoTemplate.id,
+        func.row_number()
+        .over(
+            partition_by=(VideoTemplate.human_id, VideoTemplate.name),
+            order_by=(VideoTemplate.created_at, VideoTemplate.id),
+        )
+        .label("version"),
+    ).subquery()
 
 
 def asset_snapshot(session: Session, asset_id: str, kind: str) -> dict:
@@ -80,6 +97,34 @@ def build_plan(
 ) -> list[dict]:
     if not images or not template_ids or len(set(template_ids)) != len(template_ids):
         raise PlanError("IMAGES_AND_UNIQUE_TEMPLATES_REQUIRED")
+    if single and (len(images) != 1 or len(template_ids) != 1):
+        raise PlanError("FIRST_CLIP_REQUIRES_ONE_IMAGE_AND_TEMPLATE")
+    versions = template_versions()
+    templates = {
+        template.id: (template, human, version)
+        for template, human, version in session.execute(
+            select(VideoTemplate, DigitalHuman, versions.c.version)
+            .join(DigitalHuman, DigitalHuman.id == VideoTemplate.human_id)
+            .join(versions, versions.c.id == VideoTemplate.id)
+            .where(
+                VideoTemplate.id.in_(template_ids),
+                DigitalHuman.deleted_at.is_(None),
+                DigitalHuman.status == "active",
+            )
+        )
+    }
+    if len(templates) != len(template_ids):
+        raise PlanError("ACTIVE_HUMAN_TEMPLATE_REQUIRED")
+    if any(not template.clips for template, _, _ in templates.values()):
+        raise PlanError("REFERENCE_CLIP_REQUIRED")
+    if (
+        len(images) * sum(len(template.clips) for template, _, _ in templates.values())
+        > max_batch_jobs()
+    ):
+        raise PlanError("BATCH_SIZE_EXCEEDED")
+    names = Counter(
+        (template.human_id, template.name) for template, _, _ in templates.values()
+    )
     rows: list[dict] = []
     paths: set[str] = set()
     identities: set[str] = set()
@@ -88,20 +133,8 @@ def build_plan(
         if not image["style"].strip() or not image["skuId"].strip():
             raise PlanError("STYLE_AND_SKU_REQUIRED")
         for template_id in template_ids:
-            template = session.get(VideoTemplate, template_id)
-            human = session.get(DigitalHuman, template.human_id) if template else None
-            if (
-                not template
-                or not human
-                or human.deleted_at
-                or human.status != "active"
-            ):
-                raise PlanError("ACTIVE_HUMAN_TEMPLATE_REQUIRED")
-            if len(template.clips) != 6:
-                raise PlanError("SIX_CLIPS_REQUIRED")
-            for index, clip in enumerate(
-                template.clips[:1] if single else template.clips, 1
-            ):
+            template, human, version = templates[template_id]
+            for index, clip in enumerate(template.clips, 1):
                 inputs = {
                     "image": source,
                     "video": clip,
@@ -115,8 +148,11 @@ def build_plan(
                     "humanName": human.name,
                     "templateId": template.id,
                     "templateName": template.name,
+                    "templateVersion": version,
                     "clip": index,
                 }
+                if names[template.human_id, template.name] > 1:
+                    inputs["archiveTemplateName"] = f"{template.name}-v{version}"
                 identity = digest(
                     {
                         k: inputs[k]
@@ -134,9 +170,6 @@ def build_plan(
                 rows.append(
                     {"identity": identity, "inputs": {**inputs, "archivePath": path}}
                 )
-    maximum = int(os.environ.get("RUNNINGHUB_MAX_BATCH_JOBS", "2000"))
-    if len(rows) > maximum or (single and len(rows) != 1):
-        raise PlanError("BATCH_SIZE_EXCEEDED")
     return rows
 
 
@@ -162,6 +195,8 @@ def create_batch(
     plan: list[dict],
     request_hash: str,
     actor: str,
+    *,
+    single: bool = False,
 ) -> GenerationBatch:
     # Serialize duplicate request IDs across processes without catching transaction failure.
     session.execute(
@@ -196,6 +231,9 @@ def create_batch(
                 identity=item["identity"],
                 inputs=item["inputs"],
                 seed=seed,
+                status="DEFERRED"
+                if single and item["inputs"]["clip"] > 1
+                else "PLANNED",
             )
         )
     session.flush()
@@ -208,12 +246,29 @@ def batch_summary(session: Session, batch: GenerationBatch) -> dict:
     )
     counts: dict[str, int] = {}
     groups: dict[str, dict] = {}
+    templates: dict[str, dict] = {}
+    preview_job = None
     for job in jobs:
         counts[job.status] = counts.get(job.status, 0) + 1
-        path = job.inputs["archivePath"].rsplit("/", 1)[0]
+        inputs = job.inputs
+        path = inputs["archivePath"].rsplit("/", 1)[0]
         group = groups.setdefault(path, {"path": path, "total": 0, "succeeded": 0})
         group["total"] += 1
         group["succeeded"] += int(job.status == "SUCCEEDED")
+        templates.setdefault(
+            inputs["templateId"],
+            {
+                "id": inputs["templateId"],
+                "name": inputs["templateName"],
+                "humanName": inputs["humanName"],
+                "version": inputs.get("templateVersion"),
+            },
+        )
+        if job.status == "SUCCEEDED" and (
+            preview_job is None
+            or inputs["archivePath"] < preview_job.inputs["archivePath"]
+        ):
+            preview_job = job
     attempts = list(
         session.scalars(
             select(GenerationAttempt)
@@ -224,7 +279,9 @@ def batch_summary(session: Session, batch: GenerationBatch) -> dict:
     # One row per unique cloud taskId; top-level usage is authoritative if present.
     totals: dict[str, Decimal] = {}
     unknown = 0
+    cloud_in_flight = 0
     for attempt in attempts:
+        cloud_in_flight += int(attempt.reserved and attempt.task_id is not None)
         if not attempt.task_id:
             continue
         usage = attempt.usage or {}
@@ -254,6 +311,17 @@ def batch_summary(session: Session, batch: GenerationBatch) -> dict:
         "counts": counts,
         "total": len(jobs),
         "groups": list(groups.values()),
+        "templates": list(templates.values()),
+        "previewJobId": preview_job.id if preview_job else None,
+        "terminationImpact": {
+            "completed": counts.get("SUCCEEDED", 0),
+            "unsubmitted": sum(
+                counts.get(status, 0) for status in ("PLANNED", "DEFERRED", "PREPARING")
+            ),
+            "cloudInFlight": cloud_in_flight,
+            "unconfirmed": counts.get("SUBMISSION_UNKNOWN", 0)
+            + counts.get("SUBMITTING", 0),
+        },
         "costs": {k: str(v) for k, v in totals.items()},
         "unknownCostTasks": unknown,
         "config": {k: v for k, v in batch.config.items() if k != "credentialRef"},

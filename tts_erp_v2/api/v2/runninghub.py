@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRoute
 from minio.error import S3Error
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -45,6 +45,8 @@ from tts_erp_v2.runninghub.planner import (
     build_plan,
     config_snapshot,
     create_batch,
+    max_batch_jobs,
+    template_versions,
 )
 from tts_erp_v2.runninghub.repository import (
     STOPPING_BATCH_STATES,
@@ -136,9 +138,11 @@ class CheckIn(Input):
 
 
 class TemplateIn(Input):
-    humanId: str = Field(pattern=r"^[1-9][0-9]*$")
+    humanId: str = Field(pattern=r"^[1-9][0-9]{0,18}$")
     name: Literal["A", "B", "C"]
-    assetIds: list[str] = Field(min_length=6, max_length=6)
+    assetIds: list[Annotated[str, Field(pattern=r"^[1-9][0-9]{0,18}$")]] = Field(
+        min_length=1
+    )
 
 
 class ImageIn(Input):
@@ -323,41 +327,42 @@ def templates(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> dict:
+    versions = template_versions()
     rows = session.execute(
-        select(VideoTemplate, DigitalHuman.name)
+        select(VideoTemplate, DigitalHuman.name, versions.c.version)
         .join(DigitalHuman, DigitalHuman.id == VideoTemplate.human_id)
+        .join(versions, versions.c.id == VideoTemplate.id)
         .where(DigitalHuman.deleted_at.is_(None))
-        .order_by(VideoTemplate.created_at)
+        .order_by(VideoTemplate.created_at.desc(), VideoTemplate.id.desc())
         .limit(limit)
         .offset(offset)
     ).all()
+    return {"items": [_template_out(t, name, version) for t, name, version in rows]}
+
+
+def _template_out(template: VideoTemplate, human_name: str, version: int) -> dict:
     return {
-        "items": [
-            {
-                "id": t.id,
-                "humanId": str(t.human_id),
-                "humanName": name,
-                "name": t.name,
-                "clips": [
-                    {"assetId": c["assetId"], "filename": c["filename"]}
-                    for c in t.clips
-                ],
-            }
-            for t, name in rows
-        ]
+        "id": template.id,
+        "humanId": str(template.human_id),
+        "humanName": human_name,
+        "name": template.name,
+        "version": version,
+        "clips": [
+            {"assetId": clip["assetId"], "filename": clip["filename"]}
+            for clip in template.clips
+        ],
     }
 
 
 @router.post("/templates", status_code=201)
 def add_template(body: TemplateIn, session: SessionDep) -> dict:
     human = session.get(DigitalHuman, int(body.humanId))
-    if (
-        not human
-        or human.deleted_at
-        or human.status != "active"
-        or len(set(body.assetIds)) != 6
-    ):
-        raise HTTPException(422, "ACTIVE_HUMAN_AND_SIX_DISTINCT_CLIPS_REQUIRED")
+    if not human or human.deleted_at or human.status != "active":
+        raise HTTPException(422, "ACTIVE_HUMAN_REQUIRED")
+    if len(body.assetIds) > max_batch_jobs():
+        raise HTTPException(422, "BATCH_SIZE_EXCEEDED")
+    if len(set(body.assetIds)) != len(body.assetIds):
+        raise HTTPException(422, "DISTINCT_REFERENCE_CLIPS_REQUIRED")
     linked = set(
         session.scalars(
             select(DigitalHumanAsset.asset_id).where(
@@ -375,16 +380,31 @@ def add_template(body: TemplateIn, session: SessionDep) -> dict:
             store.freeze(s, f"sources/templates/{template_id}/{index}")
             for index, s in enumerate(sources, 1)
         ]
-        if len({clip["etag"] for clip in clips}) != 6:
-            raise PlanError("SIX_DISTINCT_VIDEO_CONTENTS_REQUIRED")
+        if len({clip["etag"] for clip in clips}) != len(clips):
+            raise PlanError("DISTINCT_VIDEO_CONTENTS_REQUIRED")
     except PlanError as error:
         raise HTTPException(422, str(error)) from None
     except (S3Error, MinioConfigError, MediaError, OSError):
         raise HTTPException(503, "SOURCE_SNAPSHOT_FAILED") from None
-    row = VideoTemplate(id=template_id, human_id=human.id, name=body.name, clips=clips)
+    # Publish a version in order even when multiple operators finish copying at once.
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"rh-template:{human.id}:{body.name}"},
+    )
+    row = VideoTemplate(
+        id=template_id,
+        human_id=human.id,
+        name=body.name,
+        clips=clips,
+        created_at=func.clock_timestamp(),
+    )
     session.add(row)
+    session.flush()
+    versions = template_versions()
+    version = session.scalar(select(versions.c.version).where(versions.c.id == row.id))
+    result = _template_out(row, human.name, version)
     session.commit()
-    return {"id": row.id, "name": row.name, "humanId": str(row.human_id)}
+    return result
 
 
 def _plan(body: PlanIn, session: Session) -> list[dict]:
@@ -402,11 +422,13 @@ def _plan(body: PlanIn, session: Session) -> list[dict]:
 @router.post("/plan")
 def preview_plan(body: PlanIn, session: SessionDep) -> dict:
     plan = _plan(body, session)
+    paths = [row["inputs"]["archivePath"] for row in plan]
     return {
-        "total": len(plan),
-        "groups": len(plan) if body.single else len(plan) // 6,
+        "total": 1 if body.single else len(plan),
+        "fullTotal": len(plan),
+        "groups": len({path.rsplit("/", 1)[0] for path in paths}),
         "spec": SPEC,
-        "paths": [row["inputs"]["archivePath"] for row in plan],
+        "paths": paths[:1] if body.single else paths,
         "single": body.single,
     }
 
@@ -444,6 +466,7 @@ def add_batch(body: BatchIn, request: Request, session: SessionDep) -> dict:
             plan,
             request_hash,
             _actor(request),
+            single=body.single,
         )
     except PlanError as error:
         raise HTTPException(422, str(error)) from None
@@ -492,6 +515,23 @@ def terminate_batch(batch_id: str, body: TerminateIn, session: SessionDep) -> di
     return batch_summary(session, batch)
 
 
+@router.post("/batches/{batch_id}/continue")
+def continue_batch(batch_id: str, body: StartIn, session: SessionDep) -> dict:
+    batch = _batch(session, batch_id, lock=True)
+    if batch.status != "FIRST_CLIP_READY":
+        raise HTTPException(409, "FIRST_CLIP_READY_REQUIRED")
+    if batch.mode == "live" and not body.confirmPaid:
+        raise HTTPException(409, "EXPLICIT_PAID_CONFIRMATION_REQUIRED")
+    session.execute(
+        update(GenerationJob)
+        .where(GenerationJob.batch_id == batch.id, GenerationJob.status == "DEFERRED")
+        .values(status="PLANNED")
+    )
+    batch.status, batch.error = "ACTIVE", None
+    session.commit()
+    return batch_summary(session, batch)
+
+
 @router.post("/batches/{batch_id}/{action}")
 def batch_action(
     batch_id: str,
@@ -504,6 +544,8 @@ def batch_action(
         raise HTTPException(409, "BATCH_ALREADY_COMPLETE")
     if batch.status in STOPPING_BATCH_STATES:
         raise HTTPException(409, "BATCH_TERMINATION_REQUESTED")
+    if batch.status == "FIRST_CLIP_READY":
+        raise HTTPException(409, "EXPLICIT_CONTINUATION_REQUIRED")
     if action != "pause" and batch.mode == "live" and not body.confirmPaid:
         raise HTTPException(409, "EXPLICIT_PAID_CONFIRMATION_REQUIRED")
     batch.status, batch.error = ("PAUSED" if action == "pause" else "ACTIVE"), None
@@ -522,7 +564,12 @@ def jobs(
     rows = session.scalars(
         select(GenerationJob)
         .where(GenerationJob.batch_id == batch_id)
-        .order_by(GenerationJob.created_at, GenerationJob.id)
+        .order_by(
+            GenerationJob.inputs["imageId"].astext,
+            GenerationJob.inputs["templateId"].astext,
+            GenerationJob.inputs["clip"].as_integer(),
+            GenerationJob.id,
+        )
         .limit(limit)
         .offset(offset)
     )
@@ -539,6 +586,7 @@ def _job_out(job: GenerationJob) -> dict:
         "identity": {
             k: v for k, v in job.inputs.items() if k not in {"image", "video"}
         },
+        "referenceFilename": job.inputs["video"]["filename"],
         "attemptId": job.current_attempt_id,
     }
 
@@ -716,9 +764,21 @@ def export(batch_id: str, session: SessionDep) -> FileResponse:
     batch = _batch(session, batch_id)
     if batch.status != "SUCCEEDED":
         raise HTTPException(409, "EXPORT_REQUIRES_ALL_FINAL_VIDEOS")
-    jobs = list(
-        session.scalars(select(GenerationJob).where(GenerationJob.batch_id == batch_id))
-    )
+    finals = session.execute(
+        select(GenerationJob, GenerationArtifact)
+        .outerjoin(
+            GenerationArtifact,
+            and_(
+                GenerationArtifact.attempt_id == GenerationJob.current_attempt_id,
+                GenerationArtifact.kind == "final",
+            ),
+        )
+        .where(GenerationJob.batch_id == batch_id)
+    ).all()
+    if not finals or any(
+        job.status != "SUCCEEDED" or not artifact for job, artifact in finals
+    ):
+        raise HTTPException(409, "FINAL_ARTIFACT_MISSING")
     # A disk-backed ZIP avoids keeping a large batch in API process memory.
     temporary = tempfile.TemporaryDirectory(
         prefix="rh-export-", dir=os.environ.get("RUNNINGHUB_SPOOL_DIR")
@@ -729,15 +789,13 @@ def export(batch_id: str, session: SessionDep) -> FileResponse:
         store = get_store()
         names: set[str] = set()
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as target:
-            for job in jobs:
-                artifact = session.scalar(
-                    select(GenerationArtifact).where(
-                        GenerationArtifact.attempt_id == job.current_attempt_id,
-                        GenerationArtifact.kind == "final",
-                    )
-                )
-                if not artifact or job.status != "SUCCEEDED":
-                    raise HTTPException(409, "FINAL_ARTIFACT_MISSING")
+            for job, artifact in sorted(
+                finals,
+                key=lambda row: (
+                    row[0].inputs["archivePath"].rsplit("/", 1)[0],
+                    row[0].inputs["clip"],
+                ),
+            ):
                 path = job.inputs["archivePath"]
                 if path.casefold() in names:
                     raise HTTPException(409, "EXPORT_PATH_COLLISION")
@@ -752,6 +810,9 @@ def export(batch_id: str, session: SessionDep) -> FileResponse:
             filename=batch_id + ".zip",
             background=BackgroundTask(temporary.cleanup),
         )
+    except (S3Error, MinioConfigError, MediaError, OSError):
+        temporary.cleanup()
+        raise HTTPException(503, "FINAL_ARCHIVE_PREPARATION_FAILED") from None
     except Exception:
         temporary.cleanup()
         raise

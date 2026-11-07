@@ -87,7 +87,11 @@ class Worker:
                         func.row_number()
                         .over(
                             partition_by=GenerationJob.batch_id,
-                            order_by=(GenerationJob.created_at, GenerationJob.id),
+                            order_by=(
+                                GenerationJob.created_at,
+                                GenerationJob.inputs["clip"].as_integer(),
+                                GenerationJob.id,
+                            ),
                         )
                         .label("position"),
                     )
