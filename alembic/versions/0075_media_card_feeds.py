@@ -55,12 +55,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if op.get_bind().scalar(
-        sa.text("SELECT EXISTS (SELECT 1 FROM media.media_assets WHERE is_portrait)")
-    ):
-        raise RuntimeError(
-            "Portrait assets must be handled before removing their visibility flag"
-        )
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM media.media_assets WHERE is_portrait) THEN
+                RAISE EXCEPTION 'Portrait assets must be handled before removing their visibility flag';
+            END IF;
+        END;
+        $$
+        """
+    )
     op.drop_index(
         "ix_media_assets_live_recent", table_name="media_assets", schema="media"
     )

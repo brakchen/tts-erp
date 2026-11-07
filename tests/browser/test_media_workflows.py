@@ -825,6 +825,7 @@ def test_new_reference_after_delete_preflight_is_rejected_without_byte_removal(m
 def test_read_preview_and_draft_recovery_keeps_objects_isolated(media_run: MediaRun) -> None:
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
+    text(main(page), "没有符合条件的素材。")
     filename, asset_id = run.seed_asset("recover_preview.png")
     gate.fail("GET", ASSETS, 503)
     run.goto("media-assets")
@@ -844,6 +845,7 @@ def test_read_preview_and_draft_recovery_keeps_objects_isolated(media_run: Media
     run.goto("digital-humans")
     other_name, other_id = run.seed_human("other_persona")
     run.goto("digital-humans")
+    expect(human_card(page, other_name)).to_be_visible()
     before_creates = gate.calls["POST", HUMANS]
     person = run.name("created_in_ui")
     button(main(page), "新建数字人").click()
