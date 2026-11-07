@@ -4,7 +4,7 @@
 
 ## 配置与上线
 
-1. 人工按现行迁移流程应用 `0074_runninghub`，新增 `runninghub` schema 的 9 张表及 `page:runninghub` 权限（admin、operator）。迁移只新增对象；审计事实不提供破坏性 downgrade。开发验证仅由隔离 runner 升级测试模板。
+1. 人工按现行迁移流程应用 `0074_runninghub`，新增 `runninghub` schema 的 9 张表及 `page:runninghub` 权限（admin、operator）。迁移只新增对象；审计事实不提供破坏性 downgrade。开发验证仅由隔离 runner 升级测试模板。 在 HP desk 上运行 [`bash scripts/oneoff_migrate_0074_runninghub.sh`](../../scripts/oneoff_migrate_0074_runninghub.sh)，核对版本后输入 `tts_erp` 确认。
 2. 在服务端私有环境中配置 [.env.example](../../.env.example) 的 RunningHub 项、已有 PostgreSQL 和 MinIO 配置。Key 不经过前端。`credentialRef` 默认 `env:RUNNINGHUB_API_KEY`，也支持 `env:RUNNINGHUB_<NAME>_API_KEY` 或 `integration:<external_account_id>`；后者通过既有 token_service 加载 provider=runninghub 的 access_token。不要修改或查询旧 oauth_tokens。
 3. 安装 FFmpeg/FFprobe（须支持 libx264、AAC），确认 Worker 可执行二者；必要时填写绝对路径。准备私有临时目录和磁盘空间。原素材快照、raw、final 存入独立 MinIO bucket `tts-erp-runninghub`。
 4. admin 检查账户、读取并校验官方完整工作流，或离线导入完整 API 图。启用的是不可变版本，旧批次保持原版本。当前只接受已映射的 `2111762608670990337`，plus=48GB 显存；不推断 GPU 型号，不开放任意帧率。
