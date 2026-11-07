@@ -90,7 +90,7 @@ MinIO 未配置时，资产和数字人详情仍可读取元数据，预览 URL 
 - 路由角色矩阵在 `tts_erp_v2/access/_policy.py`（`/v2/media/` 前缀：GET/HEAD/OPTIONS → readonly，其余 → readwrite）。
 - 页面权限点 `page:media-assets` / `page:digital-humans` 由 `accounts/pages.py` 注册，alembic 0073 为 admin + operator 种子授权。
 - Cookie 会话的所有写操作要求 `X-Requested-With: tts-erp`（CSRF 守卫）。
-- 资产删除与数字人删除都走 `require_destructive_guard`（生产形状库名需 `ALLOW_PROD_DESTRUCTIVE=1`）。
+- 资产与档案按 ID 单条删除属于 `readwrite` 业务操作，适用于生产库。页面要求确认，接口对会话写入校验 CSRF。素材仍被引用时返回 `409 ASSET_IN_USE`。
 
 ## 7. 前端
 

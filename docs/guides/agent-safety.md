@@ -31,6 +31,13 @@ require_destructive_guard(request, op_name="descriptive-operation-name")
 
 The guard rejects production-shaped databases unless `ALLOW_PROD_DESTRUCTIVE=1` is explicitly present in the human-operated environment.
 
+The authorized business exception covers two single-record endpoints:
+
+- `DELETE /v2/media/assets/{asset_id}` soft-deletes one unreferenced asset and attempts to remove its object. References from archived personas also block deletion.
+- `DELETE /v2/media/digital-humans/{digital_human_id}` soft-deletes one persona and removes that persona's links. Its assets stay in the library.
+
+Both endpoints require `readwrite` and the CSRF header for cookie-authenticated writes. Agents verify this behavior through the isolated runner.
+
 ### CLI scripts, migrations, and jobs
 
 Import and call:

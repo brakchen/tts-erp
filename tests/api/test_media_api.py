@@ -623,10 +623,27 @@ def test_update_unknown_asset_is_404(api_client_focused, readwrite_key):
     assert r.status_code == 404, r.text
 
 
+@pytest.fixture()
+def production_delete_policy(monkeypatch):
+    """Exercise the production policy while keeping the isolated DB binding."""
+    from tts_erp_v2.api import deps
+
+    monkeypatch.setattr(deps, "is_prod_shaped_db", lambda: True)
+    monkeypatch.delenv("ALLOW_PROD_DESTRUCTIVE", raising=False)
+
+
+@pytest.mark.usefixtures("production_delete_policy")
 def test_delete_asset_is_soft_and_removes_object(
-    api_client_focused, readwrite_key, fake_store
+    api_client_focused, readwrite_key, readonly_key, fake_store
 ):
     asset_id = _upload_one(api_client_focused, readwrite_key)
+    denied = api_client_focused.delete(
+        f"/v2/media/assets/{asset_id}",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert denied.status_code == 403, denied.text
+    fake_store.remove.assert_not_called()
+
     r = api_client_focused.delete(
         f"/v2/media/assets/{asset_id}",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -649,6 +666,7 @@ def test_delete_asset_is_soft_and_removes_object(
     assert fake_store.remove.call_count == 1
 
 
+@pytest.mark.usefixtures("production_delete_policy")
 def test_referenced_asset_cannot_be_deleted_until_the_last_reference_is_removed(
     api_client_focused, readwrite_key, fake_store, db_engine
 ):
@@ -861,7 +879,8 @@ def test_create_and_read_digital_human(api_client_focused, readwrite_key):
     assert detail.json()["assets"] == []
 
 
-def test_update_and_delete_digital_human(api_client_focused, readwrite_key):
+@pytest.mark.usefixtures("production_delete_policy")
+def test_update_and_delete_digital_human(api_client_focused, readwrite_key, readonly_key):
     created = api_client_focused.post(
         "/v2/media/digital-humans",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -877,6 +896,12 @@ def test_update_and_delete_digital_human(api_client_focused, readwrite_key):
     assert patched.status_code == 200, patched.text
     assert patched.json()["name"] == "TEST_digital_human_b2"
     assert patched.json()["status"] == "archived"
+
+    denied = api_client_focused.delete(
+        f"/v2/media/digital-humans/{human_id}",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert denied.status_code == 403, denied.text
 
     deleted = api_client_focused.delete(
         f"/v2/media/digital-humans/{human_id}",

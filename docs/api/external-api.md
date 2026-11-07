@@ -508,6 +508,7 @@ with a presigned URL. Design:
    Upload URL generation and confirmation of a pending ticket return HTTP 503 when MinIO is unconfigured.
 5. `GET/PATCH/DELETE /v2/media/assets/{asset_id}` — detail / metadata edit /
    soft-delete (204, idempotent; the stored object is removed best-effort).
+   Single-asset DELETE is available to `readwrite` on production databases.
    DELETE returns 409 `ASSET_IN_USE` while any undeleted persona references the
    asset, including archived personas; metadata, references, and object bytes
    are preserved. There is no force-delete option. Reference checking and
@@ -527,7 +528,8 @@ with a presigned URL. Design:
    assets and `asset_ids` follow association-addition order; replaying an existing
    link keeps its position, and unlinking then reattaching appends it. Archiving via
    `status=archived` preserves the references and allows maintenance and
-   restoration via `status=active`. Deleting a persona preserves its assets.
+   restoration via `status=active`. Single-persona DELETE is available to
+   `readwrite` on production databases and preserves the persona's assets.
 8. `POST /v2/media/digital-humans/{id}/assets` — attach a ready asset
    (idempotent). New links to unconfirmed assets return 409 `ASSET_NOT_READY`.
    Existing links can be read, replayed, or detached.
