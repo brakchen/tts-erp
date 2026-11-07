@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from time import time_ns
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
@@ -97,14 +98,15 @@ class MonitorTelemetry(BaseModel):
         return items
 
 
-async def _telemetry_body(request: Request) -> MonitorTelemetry:
+async def _telemetry_body(request: Request) -> tuple[MonitorTelemetry, int]:
+    received_at_ns = time_ns()
     raw = bytearray()
     async for chunk in request.stream():
         raw.extend(chunk)
         if len(raw) > 16384:
             raise HTTPException(413, "Monitor telemetry body exceeds 16KiB")
     try:
-        return MonitorTelemetry.model_validate_json(raw)
+        return MonitorTelemetry.model_validate_json(raw), received_at_ns
     except ValidationError:
         raise HTTPException(422, "invalid Monitor telemetry") from None
 
@@ -176,7 +178,7 @@ def get_plugin_shop(
 def monitor_telemetry(
     request: Request,
     shop_id: Annotated[str, Path(pattern=r"^[0-9]{1,64}$")],
-    body: Annotated[MonitorTelemetry, Depends(_telemetry_body)],
+    telemetry: Annotated[tuple[MonitorTelemetry, int], Depends(_telemetry_body)],
     session: Annotated[Session, Depends(get_session)],
 ) -> Response:
     _require_shop_scope(request, shop_id)
@@ -186,8 +188,12 @@ def monitor_telemetry(
     ))
     if shop is None or "monitor" not in (shop.plugin_metadata or {}).get("plugins", {}):
         raise HTTPException(409, "register the Monitor shop before sending telemetry")
+    body, received_at_ns = telemetry
     try:
-        forward_observations(session, shop, [item.model_dump() for item in body.items])
+        forward_observations(
+            session, shop, [item.model_dump() for item in body.items],
+            received_at_ns=received_at_ns,
+        )
     except MonitorRelayError as error:
         raise HTTPException(503, str(error)) from None
     return Response(status_code=204, headers={"Cache-Control": "no-store"})
