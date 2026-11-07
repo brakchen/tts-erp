@@ -71,7 +71,7 @@ async function uploadFromProfile(user: ReturnType<typeof userEvent.setup>) {
 }
 
 function chooseFile() {
-  fireEvent.change(screen.getByLabelText('选择文件'), {
+  fireEvent.change(screen.getByLabelText('素材文件'), {
     target: { files: [new File(['abc'], asset.filename, { type: 'image/png' })] },
   });
 }
@@ -87,26 +87,29 @@ it('opens the native picker from a visible control and preserves the selected fi
   vi.stubGlobal('fetch', apiFetch(async (url) => url.endsWith('/upload-url') ? json(ticket, 201) : json(page())));
   render(<MediaAssets bootstrap={bootstrap} />);
   await user.click(button('上传素材'));
-  const input = screen.getByLabelText('选择文件') as HTMLInputElement;
+  const input = screen.getByLabelText('素材文件') as HTMLInputElement;
   expect(input).not.toBeVisible();
   const open = vi.spyOn(input, 'click');
-  await user.click(button('选择文件'));
+  await user.click(button('上传文件'));
   expect(open).toHaveBeenCalledTimes(1);
   chooseFile();
   const preview = await screen.findByRole('img', { name: '本地图片预览 ' + asset.filename });
   const previewUrl = preview.getAttribute('src');
   await user.clear(screen.getByLabelText('素材名称'));
   await user.type(screen.getByLabelText('素材名称'), 'TEST_只改显示名称');
-  await user.type(screen.getByLabelText('新增标签'), 'TEST_保留标签{Enter}');
+  await user.click(button('选择标签'));
+  await screen.findByText('暂无已有标签。');
+  await user.type(screen.getByRole('searchbox', { name: '搜索标签' }), 'TEST_保留标签{Enter}');
   fireEvent.change(input, { target: { files: [] } });
-  expect(button('重新选择文件：' + asset.filename)).toHaveTextContent(asset.filename);
+  expect(button('更换文件')).toBeVisible();
+  expect(within(screen.getByRole('dialog', { name: '上传素材' })).getByText(asset.filename, { exact: true })).toBeVisible();
   expect(screen.getByLabelText('素材名称')).toHaveValue('TEST_只改显示名称');
-  expect(screen.getByRole('row', { name: 'TEST_保留标签' })).toHaveAttribute('aria-selected', 'true');
+  expect(button('移除标签 TEST_保留标签')).toBeVisible();
   expect(preview).toHaveAttribute('src', previewUrl);
   expect(URL.revokeObjectURL).not.toHaveBeenCalled();
   await user.click(button('开始上传'));
   await waitFor(() => expect(Upload.last).toBeDefined());
-  expect(button('重新选择文件：' + asset.filename)).toBeDisabled();
+  expect(button('更换文件')).toBeDisabled();
   expect(input).toBeDisabled();
 });
 
@@ -136,28 +139,31 @@ it('requires explicit upload, separates 100% transfer from confirmation, and ret
   await waitFor(() => expect(Upload.last).toBeDefined());
   await act(async () => Upload.last!.upload.onprogress?.(new ProgressEvent('progress', { lengthComputable: true, loaded: 3, total: 3 })));
   expect(screen.getByText(/等待存储响应/)).toBeVisible();
-  expect(screen.queryByText(/已入库：/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/已入库「/)).not.toBeInTheDocument();
   expect(Upload.last!.setRequestHeader).toHaveBeenCalledWith('X-Test', 'TEST_signed');
 
   await finishTransfer();
   expect(await screen.findByText('传输完成，正在确认入库')).toBeVisible();
   expect(screen.getByRole('progressbar', { name: '传输完成' })).toHaveAttribute('aria-valuenow', '100');
-  expect(screen.queryByText(/已入库：/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/已入库「/)).not.toBeInTheDocument();
   finishConfirm(json({}, 503));
   await user.click(await findButton('重试入库'));
-  expect(await screen.findByText(/已入库：TEST_图片.png/)).toBeVisible();
-  expect(screen.getByText(/已清除筛选并返回第一页/)).toBeVisible();
+  expect(await screen.findByText('已入库「' + asset.filename + '」。')).toBeVisible();
+  expect(screen.getByRole('heading', { name: '全局素材库' })).toBeVisible();
+  expect(screen.getByLabelText('搜索素材')).toHaveValue('TEST_filter');
+  expect(screen.getByText(/共 5 项 · 第 2 页/)).toBeVisible();
+  await user.click(button('查看刚上传的素材'));
   expect(await screen.findByRole('img', { name: '图片预览 ' + asset.filename })).toBeVisible();
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/upload-url'))).toHaveLength(1);
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/assets/2/confirm'))).toHaveLength(2);
   await user.click(button('返回素材库'));
-  expect(screen.getByLabelText('搜索素材')).toHaveValue('');
-  expect(screen.getByText(/共 5 项 · 第 1 页/)).toBeVisible();
+  expect(screen.getByLabelText('搜索素材')).toHaveValue('TEST_filter');
+  expect(screen.getByText(/共 5 项 · 第 2 页/)).toBeVisible();
   await waitFor(() => {
     const listReads = fetcher.mock.calls.filter(([url]) => url.includes('/assets?'));
     const latest = new URL(listReads.at(-1)![0], location.origin).searchParams;
-    expect(latest.has('keyword')).toBe(false);
-    expect(latest.has('offset')).toBe(false);
+    expect(latest.get('keyword')).toBe('TEST_filter');
+    expect(latest.get('offset')).toBe('4');
   });
 });
 
@@ -194,6 +200,9 @@ it('retries a failed association without creating or uploading another asset', a
   expect(screen.getByRole('link', { name: '在新标签页查看已入库资产' })).toHaveAttribute('href', '/tts/v2/pages/media-assets?asset=2');
   await user.click(button('重试添加'));
   expect(await screen.findByText(/已入库并添加到此档案/)).toBeVisible();
+  expect(screen.getByRole('heading', { name: '为「' + human.name + '」添加素材' })).toBeVisible();
+  await waitFor(() => expect(button('取消')).toBeEnabled());
+  await user.click(button('取消'));
   expect(await references().findByText(asset.filename)).toBeVisible();
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/upload-url'))).toHaveLength(1);
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/confirm'))).toHaveLength(1);
@@ -456,8 +465,9 @@ it('preserves A/B, query and type while C is uploaded and associated from the pi
   await user.type(screen.getByLabelText('搜索素材'), 'TEST_');
   await user.click(button('搜索'));
   await user.click(button('上传新素材'));
-  expect(screen.queryByLabelText('搜索素材')).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['abc'], third.filename, { type: 'image/png' })] } });
+  expect(screen.getByLabelText('搜索素材')).toHaveValue('TEST_');
+  expect(screen.getByRole('dialog', { name: '上传新素材' })).toBeVisible();
+  fireEvent.change(screen.getByLabelText('素材文件'), { target: { files: [new File(['abc'], third.filename, { type: 'image/png' })] } });
   await user.click(button('开始上传'));
   await finishTransfer();
   expect(await screen.findByText(/原有 2 项待添加选择已保留/)).toBeVisible();
@@ -528,33 +538,53 @@ it('uses tag arrays, prevents Enter submitting, and retains the pending tag afte
   expect(patchCount).toBe(2);
 });
 
-it('includes an uncommitted upload tag in its ticket and cancelling never writes candidates', async () => {
+it('filters and explicitly adds upload tags without writing discarded or unselected queries', async () => {
   const user = userEvent.setup();
   vi.stubGlobal('XMLHttpRequest', Upload);
-  const fetcher = apiFetch(async (url: string, init: RequestInit) => {
+  const canonical = 'TEST_Existing Tag';
+  const custom = 'TEST_上传,标签';
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/assets/tags')) return json([canonical, 'TEST_无关']);
     if (url.endsWith('/upload-url')) {
-      expect(JSON.parse(String(init.body)).tags).toEqual(['TEST_上传,标签']);
+      expect(JSON.parse(String(init.body)).tags).toEqual([canonical, custom]);
       return json(ticket, 201);
     }
     if (url.endsWith('/confirm')) return json(confirmed);
-    if (url.endsWith(assetPath)) return json(asset);
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
   render(<MediaAssets bootstrap={bootstrap} />);
   await user.click(button('上传素材'));
-  await user.type(screen.getByLabelText('新增标签'), 'TEST_取消候选{Enter}');
+  expect(screen.queryByRole('searchbox', { name: '搜索标签' })).not.toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.endsWith('/assets/tags'))).toBe(false);
+  await user.click(button('选择标签'));
+  await screen.findByRole('checkbox', { name: canonical });
+  const search = () => screen.getByRole('searchbox', { name: '搜索标签' });
+  await user.type(search(), 'TEST_取消候选{Enter}');
   await user.click(button('取消'));
   await user.click(await findButton('确认放弃'));
   expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
+
   await user.click(button('上传素材'));
-  expect(screen.queryByRole('row', { name: 'TEST_取消候选' })).not.toBeInTheDocument();
   chooseFile();
-  await user.type(screen.getByLabelText('新增标签'), ' TEST_上传,标签 ');
+  await user.click(button('选择标签'));
+  await screen.findByRole('checkbox', { name: canonical });
+  expect(screen.queryByRole('checkbox', { name: 'TEST_取消候选' })).not.toBeInTheDocument();
+  await user.type(search(), '  test_existing   TAG  ');
+  expect(screen.queryByRole('checkbox', { name: 'TEST_无关' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^新建/ })).not.toBeInTheDocument();
+  await user.keyboard('{Enter}');
+  expect(screen.getByRole('checkbox', { name: canonical })).toBeChecked();
+  await user.type(search(), custom);
+  await user.click(button('新建「' + custom + '」'));
+  expect(button('移除标签 ' + custom)).toBeVisible();
+  await user.click(screen.getByRole('checkbox', { name: 'TEST_无关' }));
+  await user.click(button('移除标签 TEST_无关'));
+  expect(screen.getByRole('checkbox', { name: 'TEST_无关' })).not.toBeChecked();
+  await user.type(search(), 'TEST_只是搜索');
   await user.click(button('开始上传'));
-  await waitFor(() => expect(Upload.last).toBeDefined());
   await finishTransfer();
-  expect(await screen.findByText(/已入库：/)).toBeVisible();
+  expect(await screen.findByText(/已入库「/)).toBeVisible();
 });
 
 it('preserves a typed space after an existing tag prefix until the complete tag is explicitly added', async () => {
@@ -594,20 +624,13 @@ it('preserves a typed space after an existing tag prefix until the complete tag 
   expect(writes).toBe(1);
 });
 
-it.each(['save', 'upload'] as const)('reuses a pending existing tag at the %s boundary without rewriting its raw input', async (operation) => {
+it('reuses a pending existing tag at save without rewriting its raw input', async () => {
   const user = userEvent.setup();
-  vi.stubGlobal('XMLHttpRequest', Upload);
   const canonical = 'TEST_Existing Tag';
   const raw = '  test_existing   TAG  ';
   let writes = 0;
   const fetcher = vi.fn(async (url: string, init: RequestInit) => {
     if (url.endsWith('/assets/tags')) return json([canonical]);
-    if (url.endsWith('/upload-url')) {
-      writes += 1;
-      expect(JSON.parse(String(init.body)).tags).toEqual([canonical]);
-      return json(ticket, 201);
-    }
-    if (url.endsWith('/confirm')) return json(confirmed);
     if (init.method === 'PATCH') {
       writes += 1;
       expect(JSON.parse(String(init.body))).toEqual({ tags: [canonical] });
@@ -618,28 +641,21 @@ it.each(['save', 'upload'] as const)('reuses a pending existing tag at the %s bo
   });
   vi.stubGlobal('fetch', fetcher);
   render(<MediaAssets bootstrap={bootstrap} />);
-  if (operation === 'save') {
-    await user.click(await findButton('查看 ' + asset.filename));
-    await user.click(button('编辑资料'));
-  } else {
-    await user.click(button('上传素材'));
-    chooseFile();
-  }
+  await user.click(await findButton('查看 ' + asset.filename));
+  await user.click(button('编辑资料'));
   const option = await screen.findByRole('row', { name: canonical });
   const input = screen.getByLabelText('新增标签');
   await user.type(input, raw);
   expect(input).toHaveValue(raw);
   expect(option).not.toHaveAttribute('aria-selected', 'true');
   expect(writes).toBe(0);
-  await user.click(button(operation === 'save' ? '保存资料' : '开始上传'));
-  if (operation === 'upload') await finishTransfer();
-  expect(await screen.findByText(operation === 'save' ? /素材资料已保存/ : /已入库：/)).toBeVisible();
+  await user.click(button('保存资料'));
+  expect(await screen.findByText(/素材资料已保存/)).toBeVisible();
   expect(writes).toBe(1);
 });
 
-it.each(['save', 'upload'] as const)('waits for delayed tag candidates before a pending tag can %s', async (operation) => {
+it('waits for delayed tag candidates before saving a pending tag', async () => {
   const user = userEvent.setup();
-  vi.stubGlobal('XMLHttpRequest', Upload);
   const canonical = 'TEST_Existing Tag';
   const raw = '  test_existing   TAG  ';
   let releaseCatalog!: (response: Response) => void;
@@ -647,12 +663,6 @@ it.each(['save', 'upload'] as const)('waits for delayed tag candidates before a 
   let writes = 0;
   const fetcher = vi.fn(async (url: string, init: RequestInit) => {
     if (url.endsWith('/assets/tags')) return delayedCatalog;
-    if (url.endsWith('/upload-url')) {
-      writes += 1;
-      expect(JSON.parse(String(init.body)).tags).toEqual([canonical]);
-      return json(ticket, 201);
-    }
-    if (url.endsWith('/confirm')) return json(confirmed);
     if (init.method === 'PATCH') {
       writes += 1;
       expect(JSON.parse(String(init.body))).toEqual({ tags: [canonical] });
@@ -663,15 +673,9 @@ it.each(['save', 'upload'] as const)('waits for delayed tag candidates before a 
   });
   vi.stubGlobal('fetch', fetcher);
   render(<MediaAssets bootstrap={bootstrap} />);
-  const submit = operation === 'save' ? '保存资料' : '开始上传';
-  if (operation === 'save') {
-    await user.click(await findButton('查看 ' + asset.filename));
-    await user.click(button('编辑资料'));
-  } else {
-    await user.click(button('上传素材'));
-    chooseFile();
-    expect(button(submit)).toBeEnabled(); // A file without a new tag does not need the catalog.
-  }
+  const submit = '保存资料';
+  await user.click(await findButton('查看 ' + asset.filename));
+  await user.click(button('编辑资料'));
   expect(await screen.findByText('正在加载已有标签…')).toBeVisible();
   const input = screen.getByLabelText('新增标签');
   await user.type(input, raw);
@@ -684,7 +688,6 @@ it.each(['save', 'upload'] as const)('waits for delayed tag candidates before a 
   await user.click(button('添加标签'));
   await user.click(button(submit));
   expect(writes).toBe(0);
-  expect(Upload.last).toBeUndefined();
 
   await act(async () => releaseCatalog(json([canonical])));
   expect(await screen.findByRole('row', { name: canonical })).toBeVisible();
@@ -692,8 +695,7 @@ it.each(['save', 'upload'] as const)('waits for delayed tag candidates before a 
   expect(button('添加标签')).toBeEnabled();
   await waitFor(() => expect(button(submit)).toBeEnabled());
   await user.click(button(submit));
-  if (operation === 'upload') await finishTransfer();
-  expect(await screen.findByText(operation === 'save' ? /素材资料已保存/ : /已入库：/)).toBeVisible();
+  expect(await screen.findByText(/素材资料已保存/)).toBeVisible();
   expect(writes).toBe(1);
 });
 
@@ -736,7 +738,7 @@ it.each([false, true])('waits for the post-upload profile read before a partial 
   await user.click(await screen.findByRole('checkbox', { name: asset.filename }));
   await user.click(screen.getByRole('checkbox', { name: second.filename }));
   await user.click(button('上传新素材'));
-  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['abc'], third.filename, { type: 'image/png' })] } });
+  fireEvent.change(screen.getByLabelText('素材文件'), { target: { files: [new File(['abc'], third.filename, { type: 'image/png' })] } });
   await user.click(button('开始上传'));
   await finishTransfer();
   await waitFor(() => expect(capturedRefresh).toBeDefined());
@@ -801,9 +803,11 @@ it('keeps the acknowledged save when an older retry finishes after the write', a
   render(<DigitalHumans bootstrap={bootstrap} />);
   await user.click(await findButton('查看档案 ' + human.name));
   await uploadFromProfile(user);
-  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [new File(['abc'], third.filename, { type: 'image/png' })] } });
+  fireEvent.change(screen.getByLabelText('素材文件'), { target: { files: [new File(['abc'], third.filename, { type: 'image/png' })] } });
   await user.click(button('开始上传'));
   await finishTransfer();
+  expect(await screen.findByText('目标档案不可用')).toBeVisible();
+  await user.click(button('取消'));
   expect(await screen.findByText('数字人档案不可用')).toBeVisible();
   await user.click(button('编辑档案'));
   await user.clear(screen.getByLabelText('数字人名称'));
@@ -912,14 +916,14 @@ it('previews the selected local file before upload and releases URLs on replacem
   const view = render(<MediaAssets bootstrap={bootstrap} />);
   await user.click(button('上传素材'));
   const image = new File(['abc'], 'TEST_local.png', { type: 'image/png' });
-  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [image] } });
+  fireEvent.change(screen.getByLabelText('素材文件'), { target: { files: [image] } });
   expect(await screen.findByRole('img', { name: '本地图片预览 ' + image.name })).toHaveAttribute('src', 'blob:TEST_local_1');
   expect(URL.createObjectURL).toHaveBeenCalledWith(image);
   expect(Upload.last).toBeUndefined();
   expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
 
   const video = new File(['video'], 'TEST_local.mp4', { type: 'video/mp4' });
-  fireEvent.change(screen.getByLabelText('选择文件'), { target: { files: [video] } });
+  fireEvent.change(screen.getByLabelText('素材文件'), { target: { files: [video] } });
   const preview = await screen.findByLabelText('本地视频预览 ' + video.name);
   expect(preview).toHaveAttribute('src', 'blob:TEST_local_2');
   expect(preview).toHaveAttribute('controls');
@@ -952,7 +956,7 @@ it('refreshes available rows and hidden matches when references change identity 
   });
   const draft = { ...emptyPickerDraft, keyword: asset.filename, query: asset.filename };
   const props = {
-    root: '/tts', pending: false, error: '', notice: '', draft, onDraft: vi.fn(),
+    root: '/tts', pending: false, error: '', notice: '', draft, revision: 0, onDraft: vi.fn(),
     onAdd: vi.fn(), onClose: vi.fn(), onUpload: vi.fn(), targetRead: { loading: false, retry: vi.fn() },
   };
   const view = render(<AssetPicker {...props} human={profile()} />);

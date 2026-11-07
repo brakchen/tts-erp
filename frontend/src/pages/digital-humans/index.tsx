@@ -82,7 +82,9 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   const [snapshot, setSnapshot] = useState<{ revision: number; acknowledged?: DigitalHumanDetail }>({ revision: 0 });
   const read = useMediaRead(root, '/digital-humans/' + id, decodeDigitalHumanDetail, snapshot.revision);
   const action = useMediaAction();
-  const [mode, setMode] = useState<'view' | 'pick' | 'upload'>(initialMode);
+  const [mode, setMode] = useState(initialMode);
+  const [upload, setUpload] = useState(false);
+  const [pickerRevision, setPickerRevision] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [operation, setOperation] = useState<Operation>();
   const [discard, setDiscard] = useState<'view' | 'close'>();
@@ -217,29 +219,28 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   }
 
   if (human && mode === 'pick') {
-    return <AssetPicker root={root} human={human} pending={action.pending} error={action.error}
-      notice={pickerNotice} onAdd={attach} onClose={backFromPicker} draft={pickerDraft} onDraft={setPickerDraft}
-      targetRead={read}
-      onUpload={() => { action.clearError(); setMode('upload'); }} />;
-  }
-
-  if (human && mode === 'upload') {
     const selectedCount = pickerDraft.selected.filter((asset) => !human.assetIds.includes(asset.assetId)).length;
-    return <UploadAsset bootstrap={bootstrap} target={{ id, name: human.name }} selectionCount={selectedCount}
-      onClose={(assetId) => {
-        setMode('pick');
-        setPickerNotice(assetId ? '新素材已保留在全局素材库，尚未添加至此档案，可继续选择添加。' : '');
-      }}
-      onComplete={(assetId, filename) => {
-        // Keep A/B pending while acknowledging C. Do not synthesize C's file metadata.
-        acknowledge({ ...human, assetIds: [...new Set([...human.assetIds, assetId])] });
-        const message = '「' + filename + '」已入库并添加到此档案。'
-          + (selectedCount ? '原有 ' + selectedCount + ' 项待添加选择已保留，请继续确认。' : '');
-        setNotice(message); setPickerNotice(message);
-        if (!selectedCount) setPickerDraft(emptyPickerDraft);
-        setMode(selectedCount ? 'pick' : 'view');
-        onChanged();
-      }} />;
+    return <>
+      <AssetPicker root={root} human={human} pending={action.pending} error={action.error} revision={pickerRevision}
+        notice={pickerNotice} onAdd={attach} onClose={backFromPicker} draft={pickerDraft} onDraft={setPickerDraft}
+        targetRead={read} onUpload={() => { action.clearError(); setUpload(true); }} />
+      {upload && <UploadAsset bootstrap={bootstrap} target={{ id, name: human.name }}
+        onClose={(assetId) => {
+          setUpload(false);
+          if (assetId) {
+            setPickerRevision((value) => value + 1);
+            setPickerNotice('新素材已保留在全局素材库，尚未添加至此档案，可继续选择添加。');
+          }
+        }}
+        onComplete={(assetId, filename) => {
+          // Acknowledge the association while retaining the other draft picks.
+          acknowledge({ ...human, assetIds: [...new Set([...human.assetIds, assetId])] });
+          const message = '「' + filename + '」已入库并添加到此档案。'
+            + (selectedCount ? '原有 ' + selectedCount + ' 项待添加选择已保留，请继续确认。' : '');
+          setNotice(message); setPickerNotice(message); setUpload(false);
+          onChanged();
+        }} />}
+    </>;
   }
 
   if (human && operation) {
