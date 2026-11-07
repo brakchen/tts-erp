@@ -22,6 +22,7 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
   targetRead: { loading: boolean; error?: string; retry: () => void };
 }) {
   const [discard, setDiscard] = useState(false);
+  const [searchRevision, setSearchRevision] = useState(0);
   const { keyword, query, kind, appliedKind, hideAssociated, selected } = draft;
   const toAdd = selected.filter((asset) => !human.assetIds.includes(asset.assetId));
   const disabled = pending || targetRead.loading || Boolean(targetRead.error);
@@ -40,7 +41,7 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
   if (hideAssociated) params.set('excludeDigitalHumanId', human.digitalHumanId);
   const associationRevision = human.assetIds.join(',');
   // The server excludes existing associations before pagination. New draft picks stay visible.
-  const read = useCursorFeed(root, '/assets?' + params, decodeAssetList, associationRevision + ':' + revision);
+  const read = useCursorFeed(root, '/assets?' + params, decodeAssetList, associationRevision + ':' + revision + ':' + searchRevision);
   const associatedParams = new URLSearchParams({ status: 'ready', digitalHumanId: human.digitalHumanId, limit: '1' });
   if (query) associatedParams.set('keyword', query);
   if (appliedKind) associatedParams.set('kind', appliedKind);
@@ -61,6 +62,7 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
       {notice && <p role="status" className="media-status">{notice}</p>}
       <form className="media-filters" onSubmit={(event) => {
         event.preventDefault(); change({ query: keyword.trim(), appliedKind: kind });
+        setSearchRevision((value) => value + 1);
       }}>
         <TextField value={keyword} onChange={(value) => change({ keyword: value })} isDisabled={disabled}>
           <Label>搜索素材</Label><Input placeholder="名称、说明或标签" maxLength={120} />

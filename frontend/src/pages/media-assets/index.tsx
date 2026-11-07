@@ -132,6 +132,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
       <form className="media-filters" onSubmit={(event) => {
         event.preventDefault();
         setApplied({ keyword: filters.keyword.trim(), kind: filters.kind });
+        setRevision((value) => value + 1);
         setNotice(undefined);
       }}>
         <TextField value={filters.keyword} onChange={(keyword) => setFilters({ ...filters, keyword })}>
