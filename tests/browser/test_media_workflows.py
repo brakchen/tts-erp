@@ -1078,6 +1078,12 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     button(main(page), "编辑档案").click()
     assert_reference_form(page, "编辑档案", ("数字人名称", "人设说明"), "保存资料")
     assert_layout(page, tmp_path, "fidelity_human_edit")
+    name_input = main(page).get_by_role("textbox", name="数字人名称", exact=True)
+    name_input.fill("TEST_尚未保存的名称")
+    main(page).get_by_role("navigation", name="面包屑").get_by_role("link", name="数字人", exact=True).click()
+    button(page.get_by_role("alertdialog"), "继续处理").click()
+    expect(name_input).to_have_value("TEST_尚未保存的名称")
+    name_input.fill(person)
     button(main(page), "取消").click()
 
     picker(page, person)
@@ -1132,8 +1138,13 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     button(main(page), "恢复档案 " + person).click()
     heading(page, person)
     assert run.links(human_id) == {assets[0][1], assets[2][1]}
-    button(main(page), "返回数字人列表").click()
+    breadcrumb = main(page).get_by_role("navigation", name="面包屑")
+    parent = breadcrumb.get_by_role("link", name="数字人", exact=True)
+    expect(parent).to_have_attribute("href", "/tts/v2/pages/digital-humans")
+    expect(breadcrumb.get_by_text("档案详情", exact=True)).to_have_attribute("aria-current", "page")
+    parent.press("Enter")
     assert_reference_header(page, "数字人列表", "新建数字人")
+    assert "human=" not in page.url
     expect(button(main(page), "启用中")).to_have_attribute("aria-pressed", "true")
     expect(main(page).get_by_role("textbox", name="搜索数字人", exact=True)).to_have_count(0)
     assert_layout(page, tmp_path, "fidelity_active_list")

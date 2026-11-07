@@ -151,15 +151,27 @@ export function ActionError({ message }: { message: string }) {
   </Alert.Content></Alert> : null;
 }
 
-export function RecordPage({ eyebrow, title, description, actions, pending = false, onClose, children, backLabel = '返回列表' }: {
+export function RecordPage({ eyebrow, breadcrumb, title, description, actions, pending = false, onClose, children, backLabel = '返回列表' }: {
   eyebrow: string; title: string; description?: ReactNode; actions?: ReactNode;
+  breadcrumb?: { label: string; href: string; onNavigate: () => void };
   pending?: boolean; onClose?: () => void; children: ReactNode; backLabel?: string;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus({ preventScroll: true }); }, [title]);
   return <section className="media-record">
     <header className="media-header" data-media-header>
-      <div className="media-title"><p className="media-caption">{eyebrow}</p>
+      <div className="media-title">
+        {breadcrumb ? <nav className="media-caption" aria-label="面包屑">
+          <ol className="flex items-center gap-1">
+            <li><a className="media-back inline-flex min-h-6 items-center" href={pending ? undefined : breadcrumb.href}
+              aria-disabled={pending || undefined} onClick={(event) => {
+                if (pending || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+                event.preventDefault();
+                breadcrumb.onNavigate();
+              }}>{breadcrumb.label}</a><span aria-hidden="true" className="ml-1">/</span></li>
+            <li aria-current="page">{eyebrow}</li>
+          </ol>
+        </nav> : <p className="media-caption">{eyebrow}</p>}
         <h1 ref={heading} tabIndex={-1}>{title}</h1>
         {description && <div className="media-description">{description}</div>}
       </div>

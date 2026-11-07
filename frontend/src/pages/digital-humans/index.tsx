@@ -259,10 +259,12 @@ function HumanDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   }
 
   return <>
-    <RecordPage eyebrow={draft ? '数字人 / 档案资料' : '数字人 / 档案详情'}
+    <RecordPage eyebrow={draft ? '档案资料' : '档案详情'}
+      breadcrumb={{ label: '数字人', href: pathFor(root, '/v2/pages/digital-humans'), onNavigate: () => leave('close') }}
       title={draft ? '编辑档案' : human?.name ?? '数字人档案'}
       description={!draft && human ? human.description || '暂无人设说明' : undefined}
-      {...(!draft && { onClose: () => leave('close'), backLabel: '返回数字人列表', pending: action.pending })}>
+      pending={action.pending}
+      {...(!draft && { onClose: () => leave('close'), backLabel: '返回数字人列表' })}>
       {notice && !draft && <p role="status" className="media-status">{notice}</p>}
       <ReadStatus title="数字人档案" loading={read.loading} error={read.error} onRetry={read.retry} />
       {human && (draft ? <HumanForm draft={draft} setDraft={setDraft} pending={action.pending} unchanged={!dirty}
