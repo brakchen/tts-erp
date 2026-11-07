@@ -14,10 +14,12 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -34,6 +36,7 @@ def _cleanup(db_engine):
         "DELETE FROM plugin.ad_daily WHERE seller_id = :s",
         "DELETE FROM plugin.ad_today WHERE seller_id = :s",
         "DELETE FROM plugin.ad_raw_log WHERE seller_id = :s",
+        "DELETE FROM plugin.campaign_opt_logs WHERE seller_id = :s",
     )
     with db_engine.begin() as conn:
         for stmt in statements:
@@ -355,6 +358,184 @@ def test_dumps_v4_campaign_change_log_only_archives(
     assert archived["body"]["data"]["table"][0]["change_id"] == "evt-001"
     assert archived["body"]["data"]["table"][1]["change_type"] == "ROI"
     assert archived["status"] == 200
+
+
+@pytest.mark.parametrize(
+    "failed_write", ["upsert_campaign_opt_logs", "upsert_daily_rows"]
+)
+def test_campaign_change_log_failure_rolls_back_both_writes(
+    api_client, readwrite_key, db_engine, monkeypatch, failed_write
+):
+    from tts_erp_v2.plugin.ads import repository
+
+    body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
+    body["dump"]["response"]["body"]["data"]["logs"] = [
+        {
+            "id": "TEST_atomic_campaign_log",
+            "object_id": CAMPAIGN,
+            "opt_time": "2026-09-08 15:40:46",
+        }
+    ]
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("simulated persistence failure")
+
+    def log_count():
+        with db_engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT count(*) FROM plugin.campaign_opt_logs WHERE seller_id = :s"
+                ),
+                {"s": SELLER},
+            ).scalar_one()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(repository, failed_write, fail)
+        r = _post(api_client, readwrite_key, body)
+        assert r.status_code == 500, r.text
+        assert _ad_raw_log_count(db_engine) == 0
+        assert log_count() == 0
+
+    r = _post(api_client, readwrite_key, body)
+    assert r.status_code == 200, r.text
+    assert _ad_raw_log_count(db_engine) == 1
+    assert log_count() == 1
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        None,
+        {},
+        [{}],
+        [
+            {"id": "TEST_valid_before_invalid", "opt_time": "2026-09-08 15:40:46"},
+            {"id": "TEST_invalid", "opt_time": "invalid"},
+        ],
+    ],
+)
+def test_campaign_change_log_rejects_invalid_rows_without_coverage(
+    api_client, readwrite_key, db_engine, invalid
+):
+    body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
+    body["dump"]["response"]["body"]["data"]["logs"] = invalid
+    r = _post(api_client, readwrite_key, body)
+
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "INVALID_CAMPAIGN_CHANGE_LOG"
+    assert _ad_raw_log_count(db_engine) == 0
+    with db_engine.connect() as conn:
+        assert (
+            conn.execute(
+                text(
+                    "SELECT count(*) FROM plugin.campaign_opt_logs WHERE seller_id = :s"
+                ),
+                {"s": SELLER},
+            ).scalar_one()
+            == 0
+        )
+
+
+def test_campaign_change_log_requires_native_logs_or_a_legacy_table(
+    api_client, readwrite_key, db_engine
+):
+    body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
+    body["dump"]["response"]["body"]["data"] = {}
+    r = _post(api_client, readwrite_key, body)
+
+    assert r.status_code == 422, r.text
+    assert _ad_raw_log_count(db_engine) == 0
+
+
+def test_campaign_change_log_cannot_overwrite_another_scope(
+    api_client, readwrite_key, db_engine
+):
+    from tts_erp_v2.plugin.ads import repository
+
+    log = {
+        "id": "TEST_scope_campaign_log",
+        "object_id": CAMPAIGN,
+        "opt_time": "2026-09-08 15:40:46",
+    }
+    # The API request uses its own session, so commit the fixture to this clone.
+    with Session(db_engine) as session:
+        repository.upsert_campaign_opt_logs(
+            session,
+            seller_id=SELLER,
+            advertiser_id="TEST_original_advertiser",
+            logs=[{**log, "user": "original"}],
+        )
+    body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
+    body["dump"]["response"]["body"]["data"]["logs"] = [{**log, "user": "replacement"}]
+    r = _post(api_client, readwrite_key, body)
+
+    assert r.status_code == 422, r.text
+    assert _ad_raw_log_count(db_engine) == 0
+    with db_engine.connect() as conn:
+        assert (
+            conn.execute(
+                text('SELECT "user" FROM plugin.campaign_opt_logs WHERE log_id = :id'),
+                {"id": log["id"]},
+            ).scalar_one()
+            == "original"
+        )
+
+
+@pytest.mark.parametrize("requested", [False, True])
+def test_campaign_change_log_coverage_recovers_an_old_partial_archive(
+    api_client, readwrite_key, db_engine, requested
+):
+    from tts_erp_v2.plugin.ads import repository
+
+    body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
+    dump = body["dump"]
+    dump["response"]["body"]["data"]["logs"] = [
+        {
+            "id": "TEST_old_partial",
+            "object_id": CAMPAIGN,
+            "opt_time": "2026-09-08 15:40:46",
+        }
+    ]
+    with Session(db_engine) as session:
+        repository.upsert_daily_rows(
+            session,
+            seller_id=SELLER,
+            advertiser_id=ADVERTISER,
+            endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT,
+            campaign_id=CAMPAIGN,
+            day=date.fromisoformat(dump["day"]),
+            rows=[],
+            request_url=dump["request"]["url"],
+            request_body=dump["request"],
+            response_status=200,
+            response_body=dump["response"],
+            created_at=datetime(2026, 9, 9, 2, tzinfo=UTC),
+            request_id="TEST_old_partial_archive",
+            source="tiktok-shop-data-sync",
+        )
+    assert _ad_raw_log_count(db_engine) == 1
+
+    def coverage():
+        r = api_client.get(
+            "/v2/analytics/sync/coverage",
+            headers={"Authorization": f"Bearer {readwrite_key}"},
+            params={
+                "sellerId": SELLER,
+                "advertiserId": ADVERTISER,
+                "endpoint": CAMPAIGN_CHANGE_LOG_ENDPOINT,
+                "kind": "daily",
+                "startDay": dump["day"],
+                "endDay": dump["day"],
+                **({"campaignId": CAMPAIGN} if requested else {}),
+            },
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["data"]
+
+    assert coverage()["campaigns"].get(CAMPAIGN, {}).get("coveredPeriods", []) == []
+    r = _post(api_client, readwrite_key, body)
+    assert r.status_code == 200, r.text
+    assert coverage()["campaigns"][CAMPAIGN]["coveredPeriods"] == [dump["day"]]
 
 
 def test_dumps_v4_today_campaign_change_log_only_archives(

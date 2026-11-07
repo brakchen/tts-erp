@@ -605,6 +605,7 @@ def post_dumps(
         )
 
     from tts_erp_v2.plugin.ads.repository import (
+        InvalidCampaignOptLog,
         is_product_level_endpoint,
         upsert_campaign_opt_logs,
         upsert_daily_rows,
@@ -640,7 +641,35 @@ def post_dumps(
         else None
     )
 
+    opt_logs_inserted = 0
     try:
+        if (
+            payload.dump.endpoint
+            == "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list"
+        ):
+            response = payload.dump.response or {}
+            inner_body = response.get("body", response)
+            data = inner_body.get("data") if isinstance(inner_body, dict) else None
+            if not isinstance(data, dict) or (
+                "logs" not in data and not isinstance(data.get("table"), list)
+            ):
+                raise InvalidCampaignOptLog(
+                    "response.data must contain logs or a legacy table"
+                )
+            if "logs" in data:
+                opt_logs = data["logs"]
+                if not isinstance(opt_logs, list):
+                    raise InvalidCampaignOptLog("response.data.logs must be an array")
+                # The raw archive write below commits both records together.
+                opt_logs_inserted = upsert_campaign_opt_logs(
+                    sess,
+                    seller_id=payload.scope.sellerId,
+                    advertiser_id=payload.scope.advertiserId,
+                    logs=opt_logs,
+                    commit=False,
+                    strict=True,
+                )
+
         common_kwargs: dict = {
             "sess": sess,
             "seller_id": payload.scope.sellerId,
@@ -658,8 +687,22 @@ def post_dumps(
         }
         common_kwargs["day"] = payload.dump.day
         inserted = repo_fn(**common_kwargs)
+    except InvalidCampaignOptLog as exc:
+        sess.rollback()
+        return _audit_and_error(
+            request_id=request_id,
+            status=422,
+            code="INVALID_CAMPAIGN_CHANGE_LOG",
+            message=str(exc),
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="INVALID_CAMPAIGN_CHANGE_LOG",
+            method=method,
+            path=path,
+        )
     # pi-lens-ignore: no-boolean-in-except
     except Exception as exc:  # noqa: BLE001 — 落库失败统一转 500，细节进 stderr/ingest log
+        sess.rollback()
         exc_class = type(exc).__name__
         sys.stderr.write(
             f"[analytics-sync] v4 persistence failure: {exc_class}: {exc}\n"
@@ -695,27 +738,6 @@ def post_dumps(
         records_ok=inserted,
         records_rej=0,
     )
-
-    # campaign_opt_log_list: 从 response_body 提取操作日志写入 campaign_opt_logs
-    opt_logs_inserted = 0
-    if payload.dump.endpoint == "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list":
-        try:
-            resp_body = payload.dump.response or {}
-            # 响应结构: {"body": {"data": {"logs": [...]}, ...}, "status": 200}
-            inner_body = resp_body.get("body", resp_body)
-            if isinstance(inner_body, dict):
-                data = inner_body.get("data", {})
-                if isinstance(data, dict):
-                    opt_logs = data.get("logs", [])
-                    if opt_logs:
-                        opt_logs_inserted = upsert_campaign_opt_logs(
-                            sess,
-                            seller_id=payload.scope.sellerId,
-                            advertiser_id=payload.scope.advertiserId,
-                            logs=opt_logs,
-                        )
-        except Exception:
-            log.exception("campaign_opt_log upsert failed")
 
     resp_data: dict[str, object] = {
         "kind": dump_kind,
