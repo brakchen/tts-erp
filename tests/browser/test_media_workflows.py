@@ -894,6 +894,10 @@ def test_media_long_content_remains_readable_at_supported_widths(media_run: Medi
     image_ready(page, filename)
     text(main(page), chip)
     expect(main(page).get_by_text("1 个数字人引用", exact=True)).to_have_count(0)
+    card = main(page).get_by_role("list", name="素材列表").locator(":scope > li").first
+    name_box = bounds(card.get_by_role("heading", name=filename, exact=True))
+    kind_box = bounds(card.get_by_text("图片", exact=True))
+    assert abs((name_box["y"] + name_box["height"] / 2) - (kind_box["y"] + kind_box["height"] / 2)) < 2
     assert_layout(page, tmp_path, "media_library")
     open_asset(page, filename)
     image_ready(page, filename)

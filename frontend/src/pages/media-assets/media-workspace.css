@@ -31,8 +31,10 @@
 .media-card .media-card-content { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 0; }
 .media-card-content h3 { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
 .media-card-title, .media-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
+.media-card-title { flex-wrap: nowrap; }
+.media-card-title > h3 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-card-actions { gap: 3px; border-top: 1px solid var(--media-line); padding-top: 5px; }
-.media-kind { background: light-dark(#e8f0fa, #23364e); color: light-dark(#244971, #c8defc); white-space: nowrap; }
+.media-kind { flex: none; background: light-dark(#e8f0fa, #23364e); color: light-dark(#244971, #c8defc); white-space: nowrap; }
 .media-person-identity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; }
 .media-workspace .media-portrait, .media-portrait {
   position: relative; display: grid; place-items: center; flex: none; width: 64px; height: 64px; min-width: 64px;
@@ -48,7 +50,7 @@
 .media-list-toolbar h1, .media-list-toolbar h2 { font-size: 20px; font-weight: 700; }
 .media-count { font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 999px; background: var(--media-soft); color: var(--media-muted); }
 .media-status-filter > div { display: flex; flex-direction: row; align-items: center; gap: 6px; padding-inline: 10px; border: 1px solid var(--media-line); border-radius: 7px; background: var(--media-surface); white-space: nowrap; }
-.media-workspace .media-status-filter .media-select-trigger { width: auto; min-height: 34px; padding-inline: 0; border: 0; background: transparent; box-shadow: none; }
+.media-workspace .media-status-filter .media-select-trigger { width: auto; min-height: 34px; padding-inline: 0 24px; border: 0; background: transparent; box-shadow: none; }
 .media-workspace .media-person-add { --button-bg: var(--media-soft); color: var(--media-accent); font-weight: 600; }
 .media-library-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .media-library-toolbar .media-filters { flex: 1 1 420px; margin: 0; }

@@ -85,7 +85,7 @@ export default function HumanMaterials({ root, id, revision, canWrite, onBack, o
               <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control></Checkbox.Content>
             </Checkbox>}
             <div className="media-card-title">
-              <h3 className="font-semibold [overflow-wrap:anywhere]">{asset.filename}</h3>
+              <h3 title={asset.filename}>{asset.filename}</h3>
               <Chip size="sm" className="media-kind"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
             </div>
             <AssetTags tags={asset.tags} />

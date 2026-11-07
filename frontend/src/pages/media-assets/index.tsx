@@ -153,7 +153,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
     <ul className="media-grid" data-media-grid aria-label="素材列表">
       {assets.map((asset) => <li key={asset.assetId} className="min-w-0"><AssetCard asset={asset} root={root}>
         <div className="media-card-title">
-          <h3 className="font-semibold [overflow-wrap:anywhere]">{asset.filename}</h3>
+          <h3 title={asset.filename}>{asset.filename}</h3>
           <Chip size="sm" className="media-kind"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
         </div>
         {asset.status !== 'ready' && <span className="text-muted">{assetStatus(asset.status)}</span>}
