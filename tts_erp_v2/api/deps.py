@@ -165,6 +165,7 @@ def require_destructive_guard(
     op_name: str,
     allow_env: str = "ALLOW_PROD_DESTRUCTIVE",
     reason: str | None = None,
+    error_code: str | None = None,
 ) -> None:
     """FastAPI endpoint guard: refuse destructive ops on prod-shape dbnames.
 
@@ -181,6 +182,8 @@ def require_destructive_guard(
             destructive mode. Defaults to ``ALLOW_PROD_DESTRUCTIVE``.
         reason: custom refusal text. Defaults to a generic message
             that includes the dbname and opt-in env name.
+        error_code: optional public refusal code sent in X-Error-Code. It
+            also becomes the detail when no custom reason is supplied.
 
     Raises:
         HTTPException(403) when running on a prod-shape dbname without
@@ -202,12 +205,13 @@ def require_destructive_guard(
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail=reason or (
+        detail=reason or error_code or (
             f"Refused: {op_name} is destructive and runs against a "
             "prod-shape dbname. Set {env}=1 in the environment to "
             "override (NOT recommended; you are about to mutate live "
             "data).".format(env=allow_env)
         ),
+        headers={"X-Error-Code": error_code} if error_code else None,
     )
 
 

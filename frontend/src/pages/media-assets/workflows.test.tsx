@@ -1,13 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ApiError } from '../../shared/api/client';
 import type { PageProps } from '../../shared/contracts';
 import DigitalHumans from '../digital-humans';
 import AssetPicker, { emptyPickerDraft } from '../digital-humans/AssetPicker';
 import { decodeDigitalHumanDetail } from './contracts';
 import MediaAssets from './index';
-import { mediaError } from './media-ui';
+import { mediaError, mediaWrite } from './media-ui';
 
 const bootstrap: PageProps['bootstrap'] = {
   rootPath: '/tts', pageId: 'media-assets', releaseId: 'TEST',
@@ -67,11 +66,18 @@ const findButton = (name: string) => screen.findByRole('button', { name });
 const references = () => within(screen.getByRole('region', { name: '引用素材' }));
 const findConfirmation = async () => within(await screen.findByRole('region', { name: '操作确认' }));
 
-it('distinguishes a protected database deletion from a role denial', () => {
-  expect(mediaError(new ApiError('Forbidden', 403, undefined, undefined, 'MEDIA_DELETE_PROTECTED'), true))
-    .toBe('当前数据库受删除保护。请联系运维核对服务配置。');
-  expect(mediaError(new ApiError('Forbidden', 403, undefined, undefined, 'requires readwrite'), true))
-    .toBe('你没有权限执行此操作。');
+it.each([
+  ['MEDIA_DELETE_PROTECTED', '当前数据库受删除保护。请联系运维核对服务配置。'],
+  [undefined, '你没有权限执行此操作。'],
+])('explains a deletion rejected with %s at the request boundary', async (code, message) => {
+  const response = new Response('{"detail":"untrusted"}', {
+    status: 403, headers: code ? { 'X-Error-Code': code } : undefined,
+  });
+  const readBody = vi.spyOn(response, 'text');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  await expect(mediaWrite('/tts', '/digital-humans/1', 'DELETE', () => undefined)
+    .catch((error: unknown) => mediaError(error, true))).resolves.toBe(message);
+  expect(readBody).not.toHaveBeenCalled();
 });
 
 async function uploadFromProfile(user: ReturnType<typeof userEvent.setup>) {

@@ -645,6 +645,7 @@ def test_media_delete_reports_database_protection_to_readwrite(
         )
     assert response.status_code == 403, response.text
     assert response.json()["detail"] == "MEDIA_DELETE_PROTECTED"
+    assert response.headers["X-Error-Code"] == "MEDIA_DELETE_PROTECTED"
     delete_record.assert_not_called()
     fake_store.remove.assert_not_called()
 

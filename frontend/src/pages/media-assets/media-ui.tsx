@@ -30,7 +30,7 @@ export function mediaError(error: unknown, writing = false) {
   }
   if (error.status === 401) return '会话已失效，请重新登录。';
   if (error.status === 403) {
-    if (error.detail === 'MEDIA_DELETE_PROTECTED' || error.code === 'MEDIA_DELETE_PROTECTED') {
+    if (error.code === 'MEDIA_DELETE_PROTECTED') {
       return '当前数据库受删除保护。请联系运维核对服务配置。';
     }
     return writing ? '你没有权限执行此操作。' : '你没有权限查看此内容。';

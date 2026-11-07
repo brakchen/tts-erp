@@ -539,7 +539,8 @@ with a presigned URL. Design:
 
 Media writes require `readwrite`. Deleting an asset or a persona may return
 `403 MEDIA_DELETE_PROTECTED` when the target database is protected by the
-destructive-operation guard. This response is distinct from a role denial.
+destructive-operation guard. The code is available in both `X-Error-Code` and
+`detail`, so clients can distinguish it from a role denial using the headers.
 
 Upload and metadata PATCH trim leading/trailing whitespace, collapse repeated
 whitespace, remove empty labels, and deduplicate tags while preserving input

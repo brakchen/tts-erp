@@ -32,6 +32,10 @@ function retryDelay(value: string | null): number | undefined {
 // Native binary uploads reuse the same header policy, without JSON/auth replay.
 export { retryDelay as retryAfterSeconds };
 
+function publicErrorCode(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(value) ? value : undefined;
+}
+
 /** One lifecycle-owned delay, split to avoid browser signed-32-bit timer overflow.
  * Uses elapsed monotonic time; it never retries requests or owns global scheduling.
  */
@@ -70,7 +74,7 @@ export async function requestJson<T>(rootPath: string, path: string, init: Reque
     || (!response.ok && headerRetryAfter !== undefined && headerRetryAfter > 0)) {
     void response.body?.cancel().catch(() => {});
     throw new ApiError(`HTTP ${response.status}`, response.status,
-      retryDelay(response.headers.get('Retry-After')), requestId);
+      headerRetryAfter, requestId, undefined, publicErrorCode(response.headers.get('x-error-code')));
   }
   if (response.status === 204) return { data: undefined as T, status: 204, headers: response.headers };
   const raw = await response.text();
@@ -83,8 +87,7 @@ export async function requestJson<T>(rootPath: string, path: string, init: Reque
   }
   if (!response.ok) {
     const detail = data && typeof data === 'object' && 'detail' in data ? data.detail : undefined;
-    const code = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string'
-      && /^[A-Z][A-Z0-9_]{0,79}$/.test(data.code) ? data.code : undefined;
+    const code = publicErrorCode(data && typeof data === 'object' && 'code' in data ? data.code : undefined);
     // Error.message is rendered by legacy read consumers; raw detail is not a
     // public message. Keep it separate for explicit allowlisted field mapping.
     throw new ApiError(`HTTP ${response.status}`, response.status,
