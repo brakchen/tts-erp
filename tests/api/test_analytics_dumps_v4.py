@@ -359,7 +359,9 @@ def test_dumps_v4_campaign_change_log_only_archives(
     assert archived["status"] == 200
 
 
-@pytest.mark.parametrize("failed_write", ["upsert_campaign_opt_logs", "upsert_daily_rows"])
+@pytest.mark.parametrize(
+    "failed_write", ["upsert_campaign_opt_logs", "upsert_daily_rows"]
+)
 def test_campaign_change_log_failure_rolls_back_both_writes(
     api_client, readwrite_key, db_engine, monkeypatch, failed_write
 ):
@@ -380,7 +382,9 @@ def test_campaign_change_log_failure_rolls_back_both_writes(
     def log_count():
         with db_engine.connect() as conn:
             return conn.execute(
-                text("SELECT count(*) FROM plugin.campaign_opt_logs WHERE seller_id = :s"),
+                text(
+                    "SELECT count(*) FROM plugin.campaign_opt_logs WHERE seller_id = :s"
+                ),
                 {"s": SELLER},
             ).scalar_one()
 
@@ -420,10 +424,26 @@ def test_campaign_change_log_rejects_invalid_rows_without_coverage(
     assert r.json()["code"] == "INVALID_CAMPAIGN_CHANGE_LOG"
     assert _ad_raw_log_count(db_engine) == 0
     with db_engine.connect() as conn:
-        assert conn.execute(
-            text("SELECT count(*) FROM plugin.campaign_opt_logs WHERE seller_id = :s"),
-            {"s": SELLER},
-        ).scalar_one() == 0
+        assert (
+            conn.execute(
+                text(
+                    "SELECT count(*) FROM plugin.campaign_opt_logs WHERE seller_id = :s"
+                ),
+                {"s": SELLER},
+            ).scalar_one()
+            == 0
+        )
+
+
+def test_campaign_change_log_requires_native_logs_or_a_legacy_table(
+    api_client, readwrite_key, db_engine
+):
+    body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
+    body["dump"]["response"]["body"]["data"] = {}
+    r = _post(api_client, readwrite_key, body)
+
+    assert r.status_code == 422, r.text
+    assert _ad_raw_log_count(db_engine) == 0
 
 
 def test_campaign_change_log_cannot_overwrite_another_scope(
@@ -437,7 +457,9 @@ def test_campaign_change_log_cannot_overwrite_another_scope(
         "opt_time": "2026-09-08 15:40:46",
     }
     repository.upsert_campaign_opt_logs(
-        db_session, seller_id=SELLER, advertiser_id="TEST_original_advertiser",
+        db_session,
+        seller_id=SELLER,
+        advertiser_id="TEST_original_advertiser",
         logs=[{**log, "user": "original"}],
     )
     body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
@@ -447,10 +469,13 @@ def test_campaign_change_log_cannot_overwrite_another_scope(
     assert r.status_code == 422, r.text
     assert _ad_raw_log_count(db_engine) == 0
     with db_engine.connect() as conn:
-        assert conn.execute(
-            text('SELECT "user" FROM plugin.campaign_opt_logs WHERE log_id = :id'),
-            {"id": log["id"]},
-        ).scalar_one() == "original"
+        assert (
+            conn.execute(
+                text('SELECT "user" FROM plugin.campaign_opt_logs WHERE log_id = :id'),
+                {"id": log["id"]},
+            ).scalar_one()
+            == "original"
+        )
 
 
 @pytest.mark.parametrize("requested", [False, True])
@@ -461,11 +486,13 @@ def test_campaign_change_log_coverage_recovers_an_old_partial_archive(
 
     body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
     dump = body["dump"]
-    dump["response"]["body"]["data"]["logs"] = [{
-        "id": "TEST_old_partial",
-        "object_id": CAMPAIGN,
-        "opt_time": "2026-09-08 15:40:46",
-    }]
+    dump["response"]["body"]["data"]["logs"] = [
+        {
+            "id": "TEST_old_partial",
+            "object_id": CAMPAIGN,
+            "opt_time": "2026-09-08 15:40:46",
+        }
+    ]
     repository.upsert_daily_rows(
         db_session,
         seller_id=SELLER,
@@ -488,9 +515,12 @@ def test_campaign_change_log_coverage_recovers_an_old_partial_archive(
             "/v2/analytics/sync/coverage",
             headers={"Authorization": f"Bearer {readwrite_key}"},
             params={
-                "sellerId": SELLER, "advertiserId": ADVERTISER,
-                "endpoint": CAMPAIGN_CHANGE_LOG_ENDPOINT, "kind": "daily",
-                "startDay": dump["day"], "endDay": dump["day"],
+                "sellerId": SELLER,
+                "advertiserId": ADVERTISER,
+                "endpoint": CAMPAIGN_CHANGE_LOG_ENDPOINT,
+                "kind": "daily",
+                "startDay": dump["day"],
+                "endDay": dump["day"],
                 **({"campaignId": CAMPAIGN} if requested else {}),
             },
         )

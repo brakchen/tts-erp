@@ -43,21 +43,22 @@ _SQL_COVERAGE_DAILY_RAW_FROM = """
 FROM plugin.ad_raw_log AS raw
 CROSS JOIN LATERAL (
     SELECT CASE WHEN raw.response_body ? 'body'
-                THEN raw.response_body #> '{body,data,logs}'
-                ELSE raw.response_body #> '{data,logs}' END AS logs
+                THEN raw.response_body #> '{body,data}'
+                ELSE raw.response_body->'data' END AS data
 ) AS archived
 WHERE raw.seller_id = :seller_id AND raw.advertiser_id = :advertiser_id
   AND raw.endpoint = :endpoint AND raw.kind = 'daily'
   AND raw.day BETWEEN :start_day AND :end_day
   AND (
     raw.endpoint <> '/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list'
-    OR archived.logs IS NULL
+    OR (NOT (archived.data ? 'logs') AND jsonb_typeof(archived.data->'table') = 'array')
     OR (
-      jsonb_typeof(archived.logs) = 'array'
+      jsonb_typeof(archived.data->'logs') = 'array'
       AND NOT EXISTS (
         SELECT 1
         FROM jsonb_array_elements(
-          CASE WHEN jsonb_typeof(archived.logs) = 'array' THEN archived.logs ELSE '[]'::jsonb END
+          CASE WHEN jsonb_typeof(archived.data->'logs') = 'array'
+               THEN archived.data->'logs' ELSE '[]'::jsonb END
         ) AS expected(entry)
         WHERE NOT EXISTS (
           SELECT 1 FROM plugin.campaign_opt_logs AS stored
@@ -601,7 +602,9 @@ def upsert_campaign_opt_logs(
             )
         except (ValueError, TypeError) as exc:
             if strict:
-                raise InvalidCampaignOptLog(f"logs[{index}].opt_time is invalid") from exc
+                raise InvalidCampaignOptLog(
+                    f"logs[{index}].opt_time is invalid"
+                ) from exc
             # 2026-09-14 review：解析失败用 now() 顶替 = 静默写错数据（比 NULL 更糟），
             # 改为跳过该行 + warning。这是操作日志表，丢一行比错一行好。
             log.warning(
@@ -629,7 +632,9 @@ def upsert_campaign_opt_logs(
             },
         ).scalar_one_or_none()
         if written is None:
-            raise InvalidCampaignOptLog(f"logs[{index}].id conflicts with a different scope")
+            raise InvalidCampaignOptLog(
+                f"logs[{index}].id cannot be used in the submitted scope"
+            )
         inserted += 1
     if commit:
         sess.commit()

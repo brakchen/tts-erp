@@ -643,11 +643,20 @@ def post_dumps(
 
     opt_logs_inserted = 0
     try:
-        if payload.dump.endpoint == "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list":
+        if (
+            payload.dump.endpoint
+            == "/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list"
+        ):
             response = payload.dump.response or {}
             inner_body = response.get("body", response)
             data = inner_body.get("data") if isinstance(inner_body, dict) else None
-            if isinstance(data, dict) and "logs" in data:
+            if not isinstance(data, dict) or (
+                "logs" not in data and not isinstance(data.get("table"), list)
+            ):
+                raise InvalidCampaignOptLog(
+                    "response.data must contain logs or a legacy table"
+                )
+            if "logs" in data:
                 opt_logs = data["logs"]
                 if not isinstance(opt_logs, list):
                     raise InvalidCampaignOptLog("response.data.logs must be an array")
