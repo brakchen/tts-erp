@@ -37,24 +37,48 @@ WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
   AND day BETWEEN :start_day AND :end_day
 """
 
-SQL_COVERAGE_DAILY_RAW = """
-SELECT campaign_id, array_agg(DISTINCT day ORDER BY day) AS days
-FROM plugin.ad_raw_log
-WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
-  AND endpoint = :endpoint AND kind = 'daily'
-  AND day BETWEEN :start_day AND :end_day
-GROUP BY campaign_id
-ORDER BY campaign_id
-LIMIT :page_size OFFSET :offset
+# Legacy archives may have committed before their business logs. Count an
+# archived day with a logs array only once every log exists in the same scope.
+_SQL_COVERAGE_DAILY_RAW_FROM = """
+FROM plugin.ad_raw_log AS raw
+CROSS JOIN LATERAL (
+    SELECT CASE WHEN raw.response_body ? 'body'
+                THEN raw.response_body #> '{body,data,logs}'
+                ELSE raw.response_body #> '{data,logs}' END AS logs
+) AS archived
+WHERE raw.seller_id = :seller_id AND raw.advertiser_id = :advertiser_id
+  AND raw.endpoint = :endpoint AND raw.kind = 'daily'
+  AND raw.day BETWEEN :start_day AND :end_day
+  AND (
+    raw.endpoint <> '/oec_ads/shopping/v1/oec/stat/campaign_opt_log_list'
+    OR archived.logs IS NULL
+    OR (
+      jsonb_typeof(archived.logs) = 'array'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(
+          CASE WHEN jsonb_typeof(archived.logs) = 'array' THEN archived.logs ELSE '[]'::jsonb END
+        ) AS expected(entry)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM plugin.campaign_opt_logs AS stored
+          WHERE stored.log_id = expected.entry->>'id'
+            AND stored.seller_id = raw.seller_id
+            AND stored.advertiser_id = raw.advertiser_id
+        )
+      )
+    )
+  )
 """
 
-SQL_COVERAGE_DAILY_RAW_COUNT = """
-SELECT count(DISTINCT campaign_id) AS total
-FROM plugin.ad_raw_log
-WHERE seller_id = :seller_id AND advertiser_id = :advertiser_id
-  AND endpoint = :endpoint AND kind = 'daily'
-  AND day BETWEEN :start_day AND :end_day
-"""
+SQL_COVERAGE_DAILY_RAW = (
+    "SELECT campaign_id, array_agg(DISTINCT day ORDER BY day) AS days\n"
+    + _SQL_COVERAGE_DAILY_RAW_FROM
+    + "GROUP BY campaign_id ORDER BY campaign_id LIMIT :page_size OFFSET :offset"
+)
+
+SQL_COVERAGE_DAILY_RAW_COUNT = (
+    "SELECT count(DISTINCT campaign_id) AS total\n" + _SQL_COVERAGE_DAILY_RAW_FROM
+)
 
 SQL_UPSERT_DAILY_ROW = """
 INSERT INTO plugin.ad_daily (
@@ -529,7 +553,14 @@ ON CONFLICT (log_id) DO UPDATE SET
     object_raw_type = EXCLUDED.object_raw_type,
     activity_details = EXCLUDED.activity_details,
     updated_at = now()
+WHERE campaign_opt_logs.seller_id = EXCLUDED.seller_id
+  AND campaign_opt_logs.advertiser_id = EXCLUDED.advertiser_id
+RETURNING log_id
 """
+
+
+class InvalidCampaignOptLog(ValueError):
+    """The submitted change log cannot be stored as part of its declared scope."""
 
 
 def upsert_campaign_opt_logs(
@@ -539,6 +570,7 @@ def upsert_campaign_opt_logs(
     advertiser_id: str,
     logs: list[dict[str, Any]],
     commit: bool = True,
+    strict: bool = False,
 ) -> int:
     """写入广告操作日志，返回 inserted 数。
 
@@ -548,8 +580,17 @@ def upsert_campaign_opt_logs(
     """
     inserted = 0
     skipped = 0
-    for item in logs:
+    for index, item in enumerate(logs):
+        if not isinstance(item, dict):
+            raise InvalidCampaignOptLog(f"logs[{index}] must be an object")
         log_id = item.get("id")
+        if strict and (
+            not isinstance(log_id, (str, int))
+            or isinstance(log_id, bool)
+            or not str(log_id).strip()
+            or not log_id
+        ):
+            raise InvalidCampaignOptLog(f"logs[{index}].id is invalid")
         if not log_id:
             continue
         opt_time_str = item.get("opt_time", "")
@@ -558,7 +599,9 @@ def upsert_campaign_opt_logs(
             opt_time = datetime.strptime(opt_time_str, "%Y-%m-%d %H:%M:%S").replace(
                 tzinfo=UTC
             )
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
+            if strict:
+                raise InvalidCampaignOptLog(f"logs[{index}].opt_time is invalid") from exc
             # 2026-09-14 review：解析失败用 now() 顶替 = 静默写错数据（比 NULL 更糟），
             # 改为跳过该行 + warning。这是操作日志表，丢一行比错一行好。
             log.warning(
@@ -569,7 +612,7 @@ def upsert_campaign_opt_logs(
             skipped += 1
             continue
 
-        sess.execute(
+        written = sess.execute(
             text(SQL_UPSERT_CAMPAIGN_OPT_LOG),
             {
                 "seller_id": seller_id,
@@ -584,7 +627,9 @@ def upsert_campaign_opt_logs(
                     item.get("activity_details", []), ensure_ascii=False
                 ),
             },
-        )
+        ).scalar_one_or_none()
+        if written is None:
+            raise InvalidCampaignOptLog(f"logs[{index}].id conflicts with a different scope")
         inserted += 1
     if commit:
         sess.commit()

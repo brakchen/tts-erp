@@ -605,6 +605,7 @@ def post_dumps(
         )
 
     from tts_erp_v2.plugin.ads.repository import (
+        InvalidCampaignOptLog,
         is_product_level_endpoint,
         upsert_campaign_opt_logs,
         upsert_daily_rows,
@@ -646,8 +647,10 @@ def post_dumps(
             response = payload.dump.response or {}
             inner_body = response.get("body", response)
             data = inner_body.get("data") if isinstance(inner_body, dict) else None
-            opt_logs = data.get("logs") if isinstance(data, dict) else None
-            if opt_logs:
+            if isinstance(data, dict) and "logs" in data:
+                opt_logs = data["logs"]
+                if not isinstance(opt_logs, list):
+                    raise InvalidCampaignOptLog("response.data.logs must be an array")
                 # The raw archive write below commits both records together.
                 opt_logs_inserted = upsert_campaign_opt_logs(
                     sess,
@@ -655,6 +658,7 @@ def post_dumps(
                     advertiser_id=payload.scope.advertiserId,
                     logs=opt_logs,
                     commit=False,
+                    strict=True,
                 )
 
         common_kwargs: dict = {
@@ -674,6 +678,19 @@ def post_dumps(
         }
         common_kwargs["day"] = payload.dump.day
         inserted = repo_fn(**common_kwargs)
+    except InvalidCampaignOptLog as exc:
+        sess.rollback()
+        return _audit_and_error(
+            request_id=request_id,
+            status=422,
+            code="INVALID_CAMPAIGN_CHANGE_LOG",
+            message=str(exc),
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="INVALID_CAMPAIGN_CHANGE_LOG",
+            method=method,
+            path=path,
+        )
     # pi-lens-ignore: no-boolean-in-except
     except Exception as exc:  # noqa: BLE001 — 落库失败统一转 500，细节进 stderr/ingest log
         sess.rollback()
