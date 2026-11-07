@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertDialog, Button, Chip, ListBox, Label, Select } from '@heroui/react';
 import { ApiError, requestJson } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
 import { pathFor } from '../../shared/api/paths';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import type { FrontendBootstrap } from '../../shared/contracts';
-import type { Asset, Count } from './contracts';
+import type { Asset } from './contracts';
 import './media-workspace.css';
 
-export const mediaPageSize = 4;
+export const mediaPageSize = 12;
 
 export function mediaRequest<T>(root: string, path: string, decode: (data: unknown) => T, init?: RequestInit) {
   return requestJson<unknown>(root, '/v2/media' + path, init, parseIdentityJson)
@@ -37,6 +37,7 @@ export function mediaError(error: unknown, writing = false) {
   if (error.status === 409) {
     if (error.detail === 'ASSET_IN_USE' || error.code === 'ASSET_IN_USE') return '此素材仍被数字人引用。请先解除全部引用，再从素材库删除。';
     if (error.detail === 'ASSET_NOT_READY' || error.code === 'ASSET_NOT_READY') return '此资产还没有完成入库，暂时无法添加。';
+    if (error.detail === 'PORTRAIT_NOT_READY' || error.code === 'PORTRAIT_NOT_READY') return '形象照片尚未就绪，请重新选择照片。';
     return '记录状态已变化，请重新查看后再操作。';
   }
   return '操作失败（HTTP ' + error.status + '），请重试。';
@@ -151,38 +152,6 @@ export function ActionError({ message }: { message: string }) {
   </Alert.Content></Alert> : null;
 }
 
-export function RecordPage({ eyebrow, breadcrumb, title, description, actions, pending = false, onClose, children, backLabel = '返回列表' }: {
-  eyebrow: string; title: string; description?: ReactNode; actions?: ReactNode;
-  breadcrumb?: { label: string; href: string; onNavigate: () => void };
-  pending?: boolean; onClose?: () => void; children: ReactNode; backLabel?: string;
-}) {
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus({ preventScroll: true }); }, [title]);
-  return <section className="media-record">
-    <header className="media-header" data-media-header>
-      <div className="media-title">
-        {breadcrumb ? <nav className="media-caption" aria-label="面包屑">
-          <ol className="flex items-center gap-1">
-            <li><a className="media-back inline-flex min-h-6 items-center" href={pending ? undefined : breadcrumb.href}
-              aria-disabled={pending || undefined} onClick={(event) => {
-                if (pending || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-                event.preventDefault();
-                breadcrumb.onNavigate();
-              }}>{breadcrumb.label}</a><span aria-hidden="true" className="ml-1">/</span></li>
-            <li aria-current="page">{eyebrow}</li>
-          </ol>
-        </nav> : <p className="media-caption">{eyebrow}</p>}
-        <h1 ref={heading} tabIndex={-1}>{title}</h1>
-        {description && <div className="media-description">{description}</div>}
-      </div>
-      {(actions || onClose) && <div className="media-actions">{actions}
-        {onClose && <Button variant="ghost" className="media-back" isDisabled={pending} onPress={onClose}>{backLabel}</Button>}
-      </div>}
-    </header>
-    {children}
-  </section>;
-}
-
 export function DiscardDialog({ open, description, onKeep, onDiscard }: {
   open: boolean; description: string; onKeep: () => void; onDiscard: () => void;
 }) {
@@ -210,21 +179,6 @@ export function MediaSelect({ label, value, options, onChange, disabled = false 
       <ListBox.Item key={index} id={String(index)} textValue={item.label}>{item.label}</ListBox.Item>)}
     </ListBox></Select.Popover>
   </Select>;
-}
-
-export function MediaPagination({ name, offset, limit, total, hasNext, loading, onChange }: {
-  name: string; offset: number; limit: number; total?: Count; hasNext: boolean; loading: boolean; onChange: (offset: number) => void;
-}) {
-  // Persona lists return an array without a total; retain access to their next
-  // server page without inventing a count. Asset consumers always supply total.
-  if (total === undefined && !offset && !hasNext) return null;
-  return <nav aria-label={name} className="media-pagination">
-    <span>{total === undefined ? '' : `共 ${total} 项 · `}第 {Math.floor(offset / limit) + 1} 页</span>
-    <div className="media-actions">
-      <Button variant="secondary" isDisabled={!offset || loading} onPress={() => onChange(Math.max(0, offset - limit))}>上一页</Button>
-      <Button variant="secondary" isDisabled={!hasNext || loading} onPress={() => onChange(offset + limit)}>下一页</Button>
-    </div>
-  </nav>;
 }
 
 export function humanStatus(status: string) {

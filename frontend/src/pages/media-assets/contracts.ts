@@ -27,9 +27,13 @@ export interface AssetReference {
   status: string;
 }
 
-export interface AssetList {
-  items: Asset[];
+export interface FeedPage<T> {
+  items: T[];
   total: Count;
+  nextCursor: string | null;
+}
+
+export interface AssetList extends FeedPage<Asset> {
   limit: Count;
   offset: Count;
 }
@@ -49,6 +53,7 @@ export interface DigitalHuman {
   status: string;
   createdAt: string;
   assetIds: string[];
+  portraitUrl?: string | null;
 }
 
 export interface DigitalHumanDetail extends DigitalHuman {
@@ -127,6 +132,7 @@ export function decodeAssetList(value: unknown): AssetList {
     total: count(row.total),
     limit: count(row.limit),
     offset: count(row.offset),
+    nextCursor: nullableText(row.nextCursor),
   };
 }
 
@@ -164,6 +170,7 @@ export function decodeDigitalHuman(value: unknown): DigitalHuman {
     status: text(row.status),
     createdAt: text(row.created_at),
     assetIds: row.asset_ids.map(identity),
+    portraitUrl: nullableText(row.portraitUrl),
   };
 }
 
@@ -176,6 +183,12 @@ export function decodeDigitalHumanDetail(value: unknown): DigitalHumanDetail {
 export function decodeDigitalHumanList(value: unknown): DigitalHuman[] {
   if (!Array.isArray(value)) return invalid();
   return value.map(decodeDigitalHuman);
+}
+
+export function decodeDigitalHumanFeed(value: unknown): FeedPage<DigitalHuman> {
+  const row = object(value);
+  if (!Array.isArray(row.items)) return invalid();
+  return { items: row.items.map(decodeDigitalHuman), total: count(row.total), nextCursor: nullableText(row.nextCursor) };
 }
 
 /** Display-only byte formatting. It never feeds a business decision. */

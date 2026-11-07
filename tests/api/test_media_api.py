@@ -68,10 +68,10 @@ def _wipe_media_test_rows(db_engine):
                 )
             )
             conn.execute(
-                text("DELETE FROM media.media_assets WHERE filename LIKE 'TEST_%'")
+                text("DELETE FROM media.digital_humans WHERE name LIKE 'TEST_%'")
             )
             conn.execute(
-                text("DELETE FROM media.digital_humans WHERE name LIKE 'TEST_%'")
+                text("DELETE FROM media.media_assets WHERE filename LIKE 'TEST_%'")
             )
 
     wipe()
@@ -880,7 +880,9 @@ def test_create_and_read_digital_human(api_client_focused, readwrite_key):
 
 
 @pytest.mark.usefixtures("production_delete_policy")
-def test_update_and_delete_digital_human(api_client_focused, readwrite_key, readonly_key):
+def test_update_and_delete_digital_human(
+    api_client_focused, readwrite_key, readonly_key
+):
     created = api_client_focused.post(
         "/v2/media/digital-humans",
         headers={"Authorization": f"Bearer {readwrite_key}"},
@@ -1343,7 +1345,9 @@ def test_reference_order_appends_new_links_and_preserves_replayed_positions(
     headers = {"Authorization": f"Bearer {readwrite_key}"}
     assets = [
         _upload_one(
-            api_client_focused, readwrite_key, filename=f"TEST_reference_order_{name}.jpg"
+            api_client_focused,
+            readwrite_key,
+            filename=f"TEST_reference_order_{name}.jpg",
         )
         for name in ("first", "second")
     ]
@@ -1379,3 +1383,155 @@ def test_reference_order_appends_new_links_and_preserves_replayed_positions(
     )
     assert reattached.status_code == 200
     assert reattached.json()["asset_ids"] == [assets[1], assets[0]]
+
+
+def test_card_cursors_follow_edit_order_and_preserve_legacy_list(
+    api_client_focused, readwrite_key
+):
+    client = api_client_focused
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    assets = [
+        _upload_one(client, readwrite_key, filename=f"TEST_cursor_{index}.jpg")
+        for index in range(3)
+    ]
+    humans = [
+        client.post(
+            "/v2/media/digital-humans",
+            headers=headers,
+            json={"name": f"TEST_cursor_{index}"},
+        ).json()["digital_human_id"]
+        for index in range(3)
+    ]
+    for path, ids, field, edit in (
+        ("assets", assets, "asset_id", {"description": "recent"}),
+        ("digital-humans", humans, "digital_human_id", {"description": "recent"}),
+    ):
+        url = "/v2/media/" + path
+        assert (
+            client.patch(f"{url}/{ids[0]}", headers=headers, json=edit).status_code
+            == 200
+        )
+        params = {"keyword": "TEST_cursor_", "limit": 1, "cursor": ""}
+        result = []
+        for _ in ids:
+            response = client.get(url, headers=headers, params=params)
+            assert response.status_code == 200, response.text
+            page = response.json()
+            result.extend(row[field] for row in page["items"])
+            params["cursor"] = page["nextCursor"]
+        assert result == [ids[0], ids[2], ids[1]]
+        assert params["cursor"] is None
+        assert (
+            client.get(url, headers=headers, params={"cursor": "invalid"}).status_code
+            == 400
+        )
+    assert isinstance(
+        client.get("/v2/media/digital-humans", headers=headers).json(), list
+    )
+
+
+def test_portrait_lifecycle_is_separate_from_library_and_links(
+    api_client_focused, readwrite_key
+):
+    client = api_client_focused
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    path = "/v2/media/digital-humans"
+    first, replacement = [
+        _upload_one(
+            client,
+            readwrite_key,
+            filename=f"TEST_portrait_{index}.jpg",
+            isPortrait=True,
+        )
+        for index in range(2)
+    ]
+    body = {"name": "TEST_portrait", "portraitAssetId": first}
+    assert (
+        client.post(path, headers=headers, json=body).json()["detail"]
+        == "PORTRAIT_NOT_READY"
+    )
+    for asset_id in (first, replacement):
+        assert (
+            client.post(
+                f"/v2/media/assets/{asset_id}/confirm", headers=headers
+            ).status_code
+            == 200
+        )
+    created = client.post(path, headers=headers, json=body)
+    assert created.status_code == 201, created.text
+    assert created.json()["portraitUrl"]
+    assert created.json()["asset_ids"] == []
+    human_path = f"{path}/{created.json()['digital_human_id']}"
+    assert (
+        client.get(
+            "/v2/media/assets", headers=headers, params={"keyword": "TEST_portrait_"}
+        ).json()["items"]
+        == []
+    )
+    assert (
+        client.post(
+            f"{human_path}/assets", headers=headers, json={"assetId": first}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.delete(f"/v2/media/assets/{first}", headers=headers).status_code == 409
+    )
+    changed = client.patch(
+        human_path, headers=headers, json={"portraitAssetId": replacement}
+    )
+    assert changed.status_code == 200, changed.text
+    assert (
+        client.get(human_path, headers=headers).json()["portraitUrl"]
+        == changed.json()["portraitUrl"]
+    )
+    assert (
+        client.delete(f"/v2/media/assets/{first}", headers=headers).status_code == 204
+    )
+
+
+def test_batch_unlink_preserves_shared_assets_and_is_idempotent(
+    api_client_focused, readwrite_key, readonly_key
+):
+    client = api_client_focused
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    assets = [
+        _upload_one(client, readwrite_key, filename=f"TEST_unlink_{index}.jpg")
+        for index in range(2)
+    ]
+    for asset_id in assets:
+        assert (
+            client.post(
+                f"/v2/media/assets/{asset_id}/confirm", headers=headers
+            ).status_code
+            == 200
+        )
+    paths = []
+    for name in ("TEST_unlink_a", "TEST_unlink_b"):
+        created = client.post(
+            "/v2/media/digital-humans", headers=headers, json={"name": name}
+        ).json()
+        path = f"/v2/media/digital-humans/{created['digital_human_id']}"
+        paths.append(path)
+        for asset_id in assets:
+            assert (
+                client.post(
+                    f"{path}/assets", headers=headers, json={"assetId": asset_id}
+                ).status_code
+                == 200
+            )
+    endpoint = paths[0] + "/assets/batch-remove"
+    body = {"assetIds": assets}
+    denied = client.post(
+        endpoint, headers={"Authorization": f"Bearer {readonly_key}"}, json=body
+    )
+    assert denied.status_code == 403
+    for _ in range(2):
+        assert client.post(endpoint, headers=headers, json=body).status_code == 204
+    assert client.get(paths[0], headers=headers).json()["asset_ids"] == []
+    assert client.get(paths[1], headers=headers).json()["asset_ids"] == assets
+    for asset_id in assets:
+        assert (
+            client.get(f"/v2/media/assets/{asset_id}", headers=headers).status_code
+            == 200
+        )

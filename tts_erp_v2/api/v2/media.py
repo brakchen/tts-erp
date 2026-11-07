@@ -25,7 +25,11 @@ Auth:
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -34,7 +38,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session, require_role_at_least
-from tts_erp_v2.db.models.media import MediaAsset
+from tts_erp_v2.db.models.media import DigitalHuman, MediaAsset
 from tts_erp_v2.media import repository
 from tts_erp_v2.media.domain import (
     AssetKind,
@@ -74,6 +78,7 @@ class UploadUrlIn(BaseModel):
     content_type: str = Field(min_length=1, max_length=127, alias="contentType")
     size_bytes: int = Field(ge=1, alias="sizeBytes")
     tags: list[str] = Field(default_factory=list)
+    is_portrait: bool = Field(default=False, alias="isPortrait")
 
 
 class UploadUrlOut(BaseModel):
@@ -129,6 +134,7 @@ class AssetListOut(BaseModel):
     total: int
     limit: int
     offset: int
+    next_cursor: str | None = Field(default=None, serialization_alias="nextCursor")
 
 
 class AssetUpdateIn(BaseModel):
@@ -140,12 +146,14 @@ class AssetUpdateIn(BaseModel):
 class DigitalHumanIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
+    portrait_asset_id: int | None = Field(default=None, ge=1, alias="portraitAssetId")
 
 
 class DigitalHumanUpdateIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     status: DigitalHumanStatus | None = None
+    portrait_asset_id: int | None = Field(default=None, ge=1, alias="portraitAssetId")
 
 
 class DigitalHumanOut(BaseModel):
@@ -155,6 +163,13 @@ class DigitalHumanOut(BaseModel):
     status: str
     created_at: datetime
     asset_ids: list[int] = Field(default_factory=list)
+    portrait_url: str | None = Field(default=None, serialization_alias="portraitUrl")
+
+
+class DigitalHumanPageOut(BaseModel):
+    items: list[DigitalHumanOut]
+    total: int
+    next_cursor: str | None = Field(serialization_alias="nextCursor")
 
 
 class DigitalHumanDetailOut(DigitalHumanOut):
@@ -165,6 +180,10 @@ class LinkAssetIn(BaseModel):
     asset_id: int = Field(ge=1, alias="assetId")
 
     model_config = {"populate_by_name": True}
+
+
+class UnlinkAssetsIn(BaseModel):
+    asset_ids: list[Annotated[int, Field(ge=1)]] = Field(min_length=1, alias="assetIds")
 
 
 # --- helpers -----------------------------------------------------------------
@@ -265,6 +284,58 @@ def _asset_with_preview(
     return _asset_out(asset, *_asset_preview(asset), usage_count=usage_count)
 
 
+def _human_out(
+    session: Session, human: DigitalHuman, asset_ids: list[int] | None = None
+) -> DigitalHumanOut:
+    portrait_url = None
+    if human.portrait_asset_id is not None:
+        photo = repository.get_asset(
+            session, human.portrait_asset_id, include_portrait=True
+        )
+        if photo is not None:
+            portrait_url, _ = _asset_preview(photo)
+    return DigitalHumanOut(
+        digital_human_id=human.id,
+        name=human.name,
+        description=human.description,
+        status=human.status,
+        created_at=human.created_at,
+        asset_ids=asset_ids
+        if asset_ids is not None
+        else repository.asset_ids_for_digital_human(session, human.id),
+        portrait_url=portrait_url,
+    )
+
+
+def _after(cursor: str | None, offset: int) -> tuple[datetime, int] | None:
+    if cursor is not None and offset:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "OFFSET_WITH_CURSOR")
+    if not cursor:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True))
+        updated_at = datetime.fromisoformat(payload["updatedAt"])
+        row_id = payload["id"]
+        if (
+            updated_at.tzinfo is None
+            or type(row_id) is not int
+            or not 0 < row_id < 2**63
+        ):
+            raise ValueError
+        return updated_at, row_id
+    except (TypeError, KeyError, ValueError, binascii.Error) as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "INVALID_CURSOR") from error
+
+
+def _next_cursor(rows: Sequence[MediaAsset | DigitalHuman], limit: int) -> str | None:
+    if len(rows) <= limit:
+        return None
+    row = rows[limit - 1]
+    payload = json.dumps({"updatedAt": row.updated_at.isoformat(), "id": row.id})
+    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+
 # --- POST /assets/upload-url ------------------------------------------------
 
 
@@ -289,6 +360,8 @@ def create_upload_url(
             f"content_type {body.content_type!r} not allowed; expected one of "
             f"{list(allowed_content_types())}",
         )
+    if body.is_portrait and kind != AssetKind.IMAGE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "PORTRAIT_MUST_BE_IMAGE")
     cap = max_bytes_for(kind)
     if body.size_bytes > cap:
         raise HTTPException(
@@ -309,7 +382,8 @@ def create_upload_url(
         bucket=store.bucket(),
         uploaded_by_key_id=key_id,
         uploaded_by_prefix=key_prefix,
-        tags=body.tags,
+        tags=[] if body.is_portrait else body.tags,
+        is_portrait=body.is_portrait,
     )
     upload_url = store.presign_put(asset.object_key, body.content_type)
     expires_at = datetime.now(UTC) + store.default_expiry
@@ -337,7 +411,7 @@ def confirm_upload(
     require_role_at_least(request, "readwrite")
     _csrf(request)
 
-    asset = repository.get_asset(sess, asset_id)
+    asset = repository.get_asset(sess, asset_id, include_portrait=True)
     if asset is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -394,6 +468,7 @@ def list_assets(
     ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    cursor: str | None = Query(default=None, max_length=256),
 ) -> AssetListOut:
     """List live assets with optional filters and a total count."""
     require_role_at_least(request, "readonly")
@@ -417,18 +492,26 @@ def list_assets(
             digital_human_id=digital_human_id,
             exclude_digital_human_id=exclude_digital_human_id,
             status=asset_status,
-            limit=limit,
+            limit=limit + (cursor is not None),
             offset=offset,
+            recent=cursor is not None,
+            after=_after(cursor, offset),
         ),
     )
+    rows = page.items[:limit]
     usage_counts = repository.usage_counts_for_assets(
-        sess, [asset.id for asset in page.items]
+        sess, [asset.id for asset in rows]
     )
     items = [
-        _asset_with_preview(asset, usage_count=usage_counts[asset.id])
-        for asset in page.items
+        _asset_with_preview(asset, usage_count=usage_counts[asset.id]) for asset in rows
     ]
-    return AssetListOut(items=items, total=page.total, limit=limit, offset=offset)
+    return AssetListOut(
+        items=items,
+        total=page.total,
+        limit=limit,
+        offset=offset,
+        next_cursor=_next_cursor(page.items, limit),
+    )
 
 
 @router.get("/assets/tags", response_model=list[str])
@@ -534,7 +617,9 @@ def delete_asset(
 # --- GET /digital-humans -----------------------------------------------------
 
 
-@router.get("/digital-humans", response_model=list[DigitalHumanOut])
+@router.get(
+    "/digital-humans", response_model=list[DigitalHumanOut] | DigitalHumanPageOut
+)
 def list_digital_humans(
     request: Request,
     sess: Annotated[Session, Depends(get_session)],
@@ -542,23 +627,27 @@ def list_digital_humans(
     human_status: Annotated[DigitalHumanStatus | None, Query(alias="status")] = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-) -> list[DigitalHumanOut]:
+    cursor: str | None = Query(default=None, max_length=256),
+) -> list[DigitalHumanOut] | DigitalHumanPageOut:
     """List live personas with their linked asset ids."""
     require_role_at_least(request, "readonly")
     humans = repository.list_digital_humans(
-        sess, keyword=keyword, status=human_status, limit=limit, offset=offset
+        sess,
+        keyword=keyword,
+        status=human_status,
+        limit=limit + (cursor is not None),
+        offset=offset,
+        recent=cursor is not None,
+        after=_after(cursor, offset),
     )
-    return [
-        DigitalHumanOut(
-            digital_human_id=human.id,
-            name=human.name,
-            description=human.description,
-            status=human.status,
-            created_at=human.created_at,
-            asset_ids=repository.asset_ids_for_digital_human(sess, human.id),
-        )
-        for human in humans
-    ]
+    items = [_human_out(sess, human) for human in humans[:limit]]
+    if cursor is None:
+        return items
+    return DigitalHumanPageOut(
+        items=items,
+        total=repository.count_digital_humans(sess, keyword, human_status),
+        next_cursor=_next_cursor(humans, limit),
+    )
 
 
 # --- POST /digital-humans ----------------------------------------------------
@@ -577,20 +666,17 @@ def create_digital_human(
     """Create one persona record."""
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    human = repository.create_digital_human(
-        sess,
-        name=body.name,
-        description=body.description,
-        created_by=_actor(request),
-    )
-    return DigitalHumanOut(
-        digital_human_id=human.id,
-        name=human.name,
-        description=human.description,
-        status=human.status,
-        created_at=human.created_at,
-        asset_ids=[],
-    )
+    try:
+        human = repository.create_digital_human(
+            sess,
+            name=body.name,
+            description=body.description,
+            created_by=_actor(request),
+            portrait_asset_id=body.portrait_asset_id,
+        )
+    except repository.PortraitNotReady as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, "PORTRAIT_NOT_READY") from error
+    return _human_out(sess, human, [])
 
 
 # --- GET /digital-humans/{id} ------------------------------------------------
@@ -601,6 +687,7 @@ def get_digital_human(
     digital_human_id: int,
     request: Request,
     sess: Annotated[Session, Depends(get_session)],
+    include_assets: bool = Query(default=True, alias="includeAssets"),
 ) -> DigitalHumanDetailOut:
     """Return one persona with the full asset records it references."""
     require_role_at_least(request, "readonly")
@@ -611,6 +698,8 @@ def get_digital_human(
             f"digital human not found: {digital_human_id}",
         )
     asset_ids = repository.asset_ids_for_digital_human(sess, human.id)
+    if not include_assets:
+        return DigitalHumanDetailOut(**_human_out(sess, human, asset_ids).model_dump())
     usage_counts = repository.usage_counts_for_assets(sess, asset_ids)
     assets: list[AssetOut] = []
     for asset_id in asset_ids:
@@ -619,12 +708,7 @@ def get_digital_human(
             continue
         assets.append(_asset_with_preview(asset, usage_count=usage_counts[asset.id]))
     return DigitalHumanDetailOut(
-        digital_human_id=human.id,
-        name=human.name,
-        description=human.description,
-        status=human.status,
-        created_at=human.created_at,
-        asset_ids=[asset.asset_id for asset in assets],
+        **_human_out(sess, human, [asset.asset_id for asset in assets]).model_dump(),
         assets=assets,
     )
 
@@ -642,26 +726,23 @@ def update_digital_human(
     """Edit one persona."""
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    human = repository.update_digital_human(
-        sess,
-        digital_human_id,
-        name=body.name,
-        description=body.description,
-        status=body.status,
-    )
+    try:
+        human = repository.update_digital_human(
+            sess,
+            digital_human_id,
+            name=body.name,
+            description=body.description,
+            status=body.status,
+            portrait_asset_id=body.portrait_asset_id,
+        )
+    except repository.PortraitNotReady as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, "PORTRAIT_NOT_READY") from error
     if human is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"digital human not found: {digital_human_id}",
         )
-    return DigitalHumanOut(
-        digital_human_id=human.id,
-        name=human.name,
-        description=human.description,
-        status=human.status,
-        created_at=human.created_at,
-        asset_ids=repository.asset_ids_for_digital_human(sess, human.id),
-    )
+    return _human_out(sess, human)
 
 
 # --- DELETE /digital-humans/{id} ---------------------------------------------
@@ -717,14 +798,30 @@ def link_asset(
         )
     if human is repository.LinkAssetError.ASSET_NOT_READY:
         raise HTTPException(status.HTTP_409_CONFLICT, "ASSET_NOT_READY")
-    return DigitalHumanOut(
-        digital_human_id=human.id,
-        name=human.name,
-        description=human.description,
-        status=human.status,
-        created_at=human.created_at,
-        asset_ids=repository.asset_ids_for_digital_human(sess, human.id),
-    )
+    return _human_out(sess, human)
+
+
+@router.post(
+    "/digital-humans/{digital_human_id}/assets/batch-remove",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def unlink_assets(
+    digital_human_id: int,
+    body: UnlinkAssetsIn,
+    request: Request,
+    sess: Annotated[Session, Depends(get_session)],
+) -> Response:
+    """Remove multiple links in one transaction. Repeating the request is safe."""
+    require_role_at_least(request, "readwrite")
+    _csrf(request)
+    if (
+        repository.unlink_assets_from_digital_human(
+            sess, digital_human_id, body.asset_ids
+        )
+        is None
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "DIGITAL_HUMAN_NOT_FOUND")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --- DELETE /digital-humans/{id}/assets/{asset_id} ---------------------------

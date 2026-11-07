@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
-import { Button } from '@heroui/react';
-import { ActionError, RecordPage } from './media-ui';
+import { AlertDialog, Button } from '@heroui/react';
+import { ActionError } from './media-ui';
 
-/** The object page owns the write lock and result; this is its confirmation view. */
+/** The caller owns the write lock and result. */
 export default function OperationConfirmation({ title, description, children, pending = false, error = '',
   confirmLabel = '确认删除', danger = true, confirmDisabled = false, onConfirm, onCancel,
 }: {
@@ -10,17 +10,20 @@ export default function OperationConfirmation({ title, description, children, pe
   confirmLabel?: string; danger?: boolean; confirmDisabled?: boolean;
   onConfirm: () => void | Promise<void>; onCancel: () => void;
 }) {
-  return <section aria-label="操作确认">
-    <RecordPage eyebrow="操作确认" title={title} description={description}>
-      <div className="media-box media-stack">
+  return <AlertDialog.Backdrop isOpen isDismissable={false} isKeyboardDismissDisabled={pending}
+    onOpenChange={(open) => { if (!open && !pending) onCancel(); }}>
+    <AlertDialog.Container><AlertDialog.Dialog>
+      <AlertDialog.Header><AlertDialog.Heading>{title}</AlertDialog.Heading></AlertDialog.Header>
+      <AlertDialog.Body className="media-stack">
+        <p>{description}</p>
         {children}
         <ActionError message={error} />
-        <div className="media-actions">
-          <Button variant="secondary" isDisabled={pending} onPress={onCancel}>取消</Button>
-          <Button variant={danger ? 'danger' : 'primary'} className={danger ? 'media-danger' : undefined}
-            isDisabled={confirmDisabled} isPending={pending} onPress={() => void onConfirm()}>{confirmLabel}</Button>
-        </div>
-      </div>
-    </RecordPage>
-  </section>;
+      </AlertDialog.Body>
+      <AlertDialog.Footer>
+        <Button variant="secondary" autoFocus isDisabled={pending} onPress={onCancel}>取消</Button>
+        <Button variant={danger ? 'danger' : 'primary'} isDisabled={confirmDisabled} isPending={pending}
+          onPress={() => void onConfirm()}>{confirmLabel}</Button>
+      </AlertDialog.Footer>
+    </AlertDialog.Dialog></AlertDialog.Container>
+  </AlertDialog.Backdrop>;
 }

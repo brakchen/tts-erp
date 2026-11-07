@@ -208,7 +208,7 @@ class MediaBrowserBridge:
         if method == "GET" and not query and path == ASSETS + "/tags":
             return True
         if method == "GET" and path in {ASSETS, HUMANS}:
-            if set(query) - {"keyword", "kind", "limit", "offset", "status", "tag", "digitalHumanId", "excludeDigitalHumanId"}:
+            if set(query) - {"keyword", "kind", "limit", "offset", "cursor", "status", "tag", "digitalHumanId", "excludeDigitalHumanId"}:
                 return False
             return all(
                 len(values) == 1 and (key not in {"digitalHumanId", "excludeDigitalHumanId"}
@@ -216,12 +216,18 @@ class MediaBrowserBridge:
                 for key, values in query.items()
             )
         if query:
-            return False
+            return (
+                method == "GET" and query == {"includeAssets": ["false"]}
+                and path.startswith(HUMANS + "/")
+                and self._owned_id(path.removeprefix(HUMANS + "/"), self.humans)
+            )
         if method == "POST" and isinstance(body, dict):
             if path == ASSETS + "/upload-url":
                 return self._owned_name(body.get("filename"))
             if path == HUMANS:
-                return self._owned_name(body.get("name"))
+                return self._owned_name(body.get("name")) and (
+                    "portraitAssetId" not in body or self._owned_id(body["portraitAssetId"], self.assets)
+                )
         asset = re.fullmatch(rf"{ASSETS}/([1-9][0-9]{{0,18}})(/confirm)?", path)
         if asset and self._owned_id(asset[1], self.assets):
             if asset[2]:
@@ -230,16 +236,22 @@ class MediaBrowserBridge:
                 method == "PATCH" and isinstance(body, dict)
                 and ("filename" not in body or self._owned_name(body["filename"]))
             )
-        human = re.fullmatch(rf"{HUMANS}/([1-9][0-9]{{0,18}})(/assets(?:/([1-9][0-9]{{0,18}}))?)?", path)
+        human = re.fullmatch(rf"{HUMANS}/([1-9][0-9]{{0,18}})(/assets(?:/([1-9][0-9]{{0,18}}|batch-remove))?)?", path)
         if not human or not self._owned_id(human[1], self.humans):
             return False
         if human[3]:
+            if human[3] == "batch-remove":
+                return (
+                    method == "POST" and isinstance(body, dict) and isinstance(body.get("assetIds"), list)
+                    and bool(body["assetIds"]) and all(self._owned_id(value, self.assets) for value in body["assetIds"])
+                )
             return method == "DELETE" and self._owned_id(human[3], self.assets)
         if human[2]:
             return method == "POST" and isinstance(body, dict) and self._owned_id(body.get("assetId"), self.assets)
         return method in {"GET", "DELETE"} or (
             method == "PATCH" and isinstance(body, dict)
             and ("name" not in body or self._owned_name(body["name"]))
+            and ("portraitAssetId" not in body or self._owned_id(body["portraitAssetId"], self.assets))
         )
 
     def forward(self, route: Route, path: str, target: str) -> None:
