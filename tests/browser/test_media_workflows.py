@@ -235,6 +235,10 @@ def dialog(page: Page) -> Locator:
     return page.locator('[role="dialog"]:visible, [role="alertdialog"]:visible').last
 
 
+def upload_dialog(page: Page) -> Locator:
+    return page.get_by_role("dialog", name=re.compile(r"^上传(?:新)?素材$"))
+
+
 def confirmation(page: Page) -> Locator:
     """Destructive operations use the prototype's content page, not a modal."""
     region = main(page).get_by_role("region", name="操作确认", exact=True)
@@ -280,11 +284,11 @@ def pick_file(run: MediaRun, name: str) -> None:
     tickets_before = gate.calls["POST", ASSETS + "/upload-url"]
     puts_before = gate.store.puts
     with page.expect_file_chooser() as chooser:
-        main(page).locator('.media-file-trigger').click()
+        button(upload_dialog(page), "上传文件").click()
     chooser.value.set_files({
         "name": name, "mimeType": "image/png", "buffer": png(),
     })
-    preview = main(page).get_by_role("img", name="本地图片预览 " + name, exact=True)
+    preview = upload_dialog(page).get_by_role("img", name="本地图片预览 " + name, exact=True)
     expect(preview).to_be_visible()
     expect(preview).to_have_attribute("src", re.compile(r"^blob:"))
     page.wait_for_function(
@@ -422,7 +426,8 @@ def assert_layout(page: Page, tmp_path: Path, label: str) -> None:
     # Every visible video contains legal VP8 bytes. Full previews must actually
     # play and pause before capture: a decoded first frame alone can still
     # leave Chromium's native initial loading overlay in the screenshot.
-    for video in main(page).locator("video:visible").all():
+    scope = upload_dialog(page) if upload_dialog(page).count() else main(page)
+    for video in scope.locator("video:visible").all():
         page.wait_for_function("""video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
             && video.videoWidth > 0 && video.videoHeight > 0
             && Number.isFinite(video.duration) && video.duration > 0""", arg=video.element_handle())
@@ -440,8 +445,8 @@ def assert_layout(page: Page, tmp_path: Path, label: str) -> None:
         })"""))
     dimensions = overflow_report(page)
     assert dimensions["scrollWidth"] <= dimensions["clientWidth"], dimensions
-    expect(page.get_by_role("banner")).to_have_count(1)
-    expect(page.get_by_role("main")).to_have_count(1)
+    expect(page.get_by_role("banner", include_hidden=True)).to_have_count(1)
+    expect(page.get_by_role("main", include_hidden=True)).to_have_count(1)
     viewport = page.viewport_size
     assert viewport is not None
     (tmp_path / f"TEST_{label}_{viewport['width']}.media.json").write_text(
@@ -613,9 +618,10 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     kind(page, "图片")
     text(main(page), "本次新增 2 项")
     button(main(page), "上传新素材").click()
-    heading(page, "上传并添加到「" + person + "」")
-    expect(main(page).get_by_text("目标数字人：" + person, exact=True)).to_have_count(0)
-    button(main(page), "取消").click()
+    upload = upload_dialog(page)
+    text(upload, "上传后添加到「" + person + "」。")
+    expect(page.locator("main h1")).to_have_text("为「" + person + "」添加素材")
+    button(upload, "取消").click()
     heading(page, "为「" + person + "」添加素材")
     expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value(second)
     text(main(page), "本次新增 2 项")
@@ -629,14 +635,14 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     gate.store.hold_put()
     gate.hold("POST", re.compile(rf"{ASSETS}/[1-9][0-9]*/confirm"))
     with page.expect_request(lambda req: req.method == "PUT"):
-        button(main(page), "开始上传").click()
-    expect(main(page).get_by_role("progressbar", name="传输进度", exact=True)).to_be_visible()
+        button(upload, "开始上传").click()
+    expect(upload.get_by_role("progressbar", name="传输进度", exact=True)).to_be_visible()
     assert gate.store.held_put is not None and gate.store.puts == before_puts
     assert_layout(page, tmp_path, "upload_sending")
     with page.expect_request(lambda req: req.method == "POST" and req.url.endswith("/confirm")):
         gate.store.release_put()
-    expect(main(page).get_by_text(re.compile("正在确认入库")).first).to_be_visible()
-    expect(main(page).get_by_role("progressbar", name="传输完成", exact=True)).to_have_attribute("aria-valuenow", "100")
+    expect(upload.get_by_text(re.compile("正在确认入库")).first).to_be_visible()
+    expect(upload.get_by_role("progressbar", name="传输完成", exact=True)).to_have_attribute("aria-valuenow", "100")
     uploaded_id, = gate.assets - before_assets
     confirm_path = f"{ASSETS}/{uploaded_id}/confirm"
     assert gate.store.puts == before_puts + 1 and gate.calls["POST", attach_path] == 0
@@ -644,18 +650,18 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
         assert session.get(MediaAsset, uploaded_id).status == "awaiting_upload"
     assert_layout(page, tmp_path, "upload_confirming")
     gate.release(status=503)
-    expect(button(main(page), "重试入库")).to_be_visible()
-    expect(main(page).get_by_role("alert")).to_be_visible()
+    expect(button(upload, "重试入库")).to_be_visible()
+    expect(upload.get_by_role("alert")).to_be_visible()
     assert_layout(page, tmp_path, "upload_confirm_error")
     gate.fail("POST", attach_path, 500)
-    button(main(page), "重试入库").click()
-    button(main(page), "重试添加").wait_for()
+    button(upload, "重试入库").click()
+    button(upload, "重试添加").wait_for()
     with db() as session:
         assert session.get(MediaAsset, uploaded_id).status == "ready"
     assert run.links(human_id) == set()
-    expect(main(page).get_by_role("alert")).to_be_visible()
+    expect(upload.get_by_role("alert")).to_be_visible()
     assert_layout(page, tmp_path, "upload_attach_error")
-    button(main(page), "重试添加").click()
+    button(upload, "重试添加").click()
     heading(page, "为「" + person + "」添加素材")
     text(main(page), "本次新增 2 项")
     expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value(second)
@@ -670,81 +676,78 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     assert run.links(human_id) == {aid, bid, uploaded_id} and run.links(other_id) == set()
 
 
-def test_tag_editor_upload_pending_input_failed_save_and_shared_chips(media_run: MediaRun) -> None:
+def test_tag_editor_upload_selection_failed_save_and_shared_chips(media_run: MediaRun) -> None:
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
     existing_tag = run.name("existing tag")
     run.seed_asset("tag_candidate.png", tags=[existing_tag])
-    search(page, run.name("unmatched_filter"))
+    keyword = run.name("unmatched_filter")
+    search(page, keyword)
     filename = run.name("tagged_upload.png")
     comma_tag = run.name("comma,stays_one_" + "长标签" * 25)
     assert len(comma_tag) > 64
     pending_tag = run.name("upload_pending")
     button(main(page), "上传素材").click()
-    heading(page, "上传素材")
+    upload = upload_dialog(page)
+    expect(upload.get_by_role("checkbox")).to_have_count(0)
+    button(upload, "选择标签").click()
+    tag_search = upload.get_by_role("searchbox", name="搜索标签", exact=True)
     cancelled_upload = run.name("cancel_upload")
-    main(page).get_by_role("textbox", name="新增标签", exact=True).fill(cancelled_upload)
-    button(main(page), "添加标签").click()
-    button(main(page), "取消").click()
+    tag_search.fill(cancelled_upload)
+    button(upload, "新建「" + cancelled_upload + "」").click()
+    button(upload, "取消").click()
     button(dialog(page), "确认放弃").click()
     assert cancelled_upload not in tags(run)
+
     button(main(page), "上传素材").click()
-    expect(main(page).get_by_role("row", name=cancelled_upload, exact=True)).to_have_count(0)
     pick_file(run, filename)
-    existing = main(page).get_by_role("row", name=existing_tag, exact=True)
-    existing.click()
-    expect(existing).to_have_attribute("aria-selected", "true")
-    entry = main(page).get_by_role("textbox", name="新增标签", exact=True)
-    button(main(page), "添加标签").click()
-    text(main(page), "请输入标签名称。")
-    entry.fill(existing_tag.upper())
-    button(main(page), "添加标签").click()
-    expect(main(page).get_by_role("row", name=existing_tag.upper(), exact=True)).to_have_count(0)
-    expect(existing).to_have_attribute("aria-selected", "true")
-    text(main(page), "已选 1 个 · 可多选，再次点击取消")
-    text(main(page), "已选中现有标签「" + existing_tag + "」。")
+    button(upload, "选择标签").click()
+    existing = upload.get_by_role("checkbox", name=existing_tag, exact=True)
+    expect(existing).to_be_visible()
+    expect(upload.get_by_role("checkbox", name=cancelled_upload, exact=True)).to_have_count(0)
+    tag_search.fill("  " + existing_tag.upper().replace("EXISTING TAG", "EXISTING\u00a0 \u3000TAG") + "  ")
+    expect(existing).to_be_visible()
+    expect(upload.get_by_role("button", name=re.compile("^新建"))).to_have_count(0)
+    tag_search.press("Enter")
+    expect(existing).to_be_checked()
     before = gate.calls["POST", ASSETS + "/upload-url"]
-    entry.fill("  " + comma_tag + "  ")
-    entry.press("Enter")
-    expect(entry).to_have_value("")
-    expect(main(page).get_by_role("row", name=comma_tag, exact=True)).to_have_attribute("aria-selected", "true")
+    tag_search.fill("  " + comma_tag + "  ")
+    tag_search.press("Enter")
+    expect(tag_search).to_have_value("")
+    expect(upload.get_by_role("checkbox", name=comma_tag, exact=True)).to_be_checked()
     assert gate.calls["POST", ASSETS + "/upload-url"] == before
     assert comma_tag not in tags(run)
-    entry.fill(" " + comma_tag + " ")
-    button(main(page), "添加标签").click()
-    expect(main(page).get_by_role("row", name=comma_tag, exact=True)).to_have_count(1)
-    entry.fill("  " + existing_tag.replace("existing tag", "existing\u00a0 \u3000tag") + "  ")
-    button(main(page), "添加标签").click()
-    expect(main(page).get_by_role("row", name=existing_tag, exact=True)).to_have_count(1)
-    expect(existing).to_have_attribute("aria-selected", "true")
-    entry.fill("  " + pending_tag + "  ")  # Save/upload must consume an input not explicitly added.
+    button(upload, "移除标签 " + existing_tag).click()
+    expect(existing).not_to_be_checked()
+    existing.press("Space")
+    expect(existing).to_be_checked()
+    tag_search.fill("  " + pending_tag + "  ")
     gate.fail("POST", ASSETS + "/upload-url", 400)
-    button(main(page), "开始上传").click()
-    expect(main(page).get_by_role("alert")).to_be_visible()
-    expect(entry).to_have_value("  " + pending_tag + "  ")
-    expect(existing).to_have_attribute("aria-selected", "true")
+    button(upload, "开始上传").click()
+    expect(upload.get_by_role("alert")).to_be_visible()
+    expect(tag_search).to_have_value("  " + pending_tag + "  ")
+    expect(button(upload, "移除标签 " + existing_tag)).to_be_visible()
     assert pending_tag not in tags(run)
-    button(main(page), "开始上传").click()
+    button(upload, "开始上传").click()
+    heading(page, "全局素材库")
+    expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value(keyword)
+    button(main(page), "查看刚上传的素材").click()
     heading(page, filename)
-    expect(main(page).get_by_text("已清除筛选并返回第一页。", exact=False)).to_be_visible()
     asset_id = run.asset_id(filename)
-    expected = {existing_tag, comma_tag, pending_tag}
+    expected = {existing_tag, comma_tag}
     with db() as session:
         stored = session.get(MediaAsset, asset_id)
-        assert set(stored.tags) == expected and len(stored.tags) == 3
+        assert set(stored.tags) == expected and len(stored.tags) == 2
     for tag in expected:
         text(main(page), tag)
     assert expected <= set(tags(run))
     ticket_request = [item for item in gate.requests if item.path == ASSETS + "/upload-url"][-1]
     assert set(ticket_request.body["tags"]) == expected
-    button(main(page), "返回素材库").click()
-    expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value("")
-    button(main(page), "查看 " + filename).wait_for()
-    open_asset(page, filename)
 
     button(main(page), "编辑资料").click()
     heading(page, "编辑素材资料")
     cancelled = run.name("cancelled_candidate")
+    entry = main(page).get_by_role("textbox", name="新增标签", exact=True)
     entry.fill(cancelled)
     entry.press("Enter")
     button(main(page), "取消").click()
@@ -771,7 +774,7 @@ def test_tag_editor_upload_pending_input_failed_save_and_shared_chips(media_run:
     with db() as session:
         stored = session.get(MediaAsset, asset_id)
         assert (stored.filename, stored.description) == (renamed, note)
-        assert set(stored.tags) == expected and len(stored.tags) == 4
+        assert set(stored.tags) == expected and len(stored.tags) == 3
     person, human_id = run.seed_human("tag_reference")
     run.link(human_id, asset_id)
     run.goto(f"digital-humans?human={human_id}")
@@ -1150,11 +1153,12 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
 
     picker(page, person)
     button(main(page), "上传新素材").click()
-    assert_reference_form(page, "上传并添加到「" + person + "」", ("素材名称", "新增标签"), "开始上传")
+    text(upload_dialog(page), "上传后添加到「" + person + "」。")
+    expect(upload_dialog(page).get_by_role("textbox", name="素材名称", exact=True)).to_be_focused()
     assert_layout(page, tmp_path, "fidelity_target_upload_empty")
     pick_file(run, run.name("本地预览.png"))
     assert_layout(page, tmp_path, "fidelity_target_upload_preview")
-    button(main(page), "取消").click()
+    button(upload_dialog(page), "取消").click()
     button(dialog(page), "确认放弃").click()
     button(main(page), "取消").click()
     heading(page, person)
@@ -1166,13 +1170,14 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     button(confirmation(page), "取消").click()
     run.goto("media-assets")
     button(main(page), "上传素材").click()
-    assert_reference_form(page, "上传素材", ("素材名称", "新增标签"), "开始上传")
+    text(upload_dialog(page), "上传后添加到全局素材库。")
+    expect(upload_dialog(page).get_by_role("textbox", name="素材名称", exact=True)).to_be_focused()
     assert_layout(page, tmp_path, "fidelity_library_upload_empty")
     before = gate.calls["POST", ASSETS + "/upload-url"]
     pick_file(run, run.name("独立本地预览.png"))
     assert_layout(page, tmp_path, "fidelity_library_upload_preview")
     assert gate.calls["POST", ASSETS + "/upload-url"] == before
-    button(main(page), "取消").click()
+    button(upload_dialog(page), "取消").click()
     button(dialog(page), "确认放弃").click()
 
 
@@ -1184,20 +1189,22 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     filename = run.name("metadata_clip.webm")
     run.goto("media-assets")
     button(main(page), "上传素材").click()
-    heading(page, "上传素材")
+    upload = upload_dialog(page)
     with page.expect_file_chooser() as chooser:
-        button(main(page), "选择文件").click()
+        button(upload, "上传文件").click()
     chooser.value.set_files({
         "name": filename, "mimeType": "video/webm", "buffer": payload,
     })
-    local_metadata = video_ready(page, filename, local=True)
+    local_metadata = video_ready(page, filename, local=True, scope=upload)
     assert (local_metadata["width"], local_metadata["height"]) == (320, 180)
     assert local_metadata["duration"] == pytest.approx(1.0, abs=0.05)
     assert gate.calls["POST", ASSETS + "/upload-url"] == gate.store.puts == 0
     assert gate.assets == set() and gate.store.objects == {}
     assert_layout(page, tmp_path, "local_video_preview")
 
-    button(main(page), "开始上传").click()
+    button(upload, "开始上传").click()
+    heading(page, "全局素材库")
+    button(main(page), "查看刚上传的素材").click()
     heading(page, filename)
     assert video_ready(page, filename) == local_metadata
     asset_id = run.asset_id(filename)
@@ -1244,22 +1251,22 @@ def test_upload_file_control_is_visible_and_opens_native_picker(media_run: Media
         page.set_viewport_size({"width": 2560, "height": 1215})
     run.goto("media-assets")
     button(main(page), "上传素材").click()
-    heading(page, "上传素材")
-    control = button(main(page), "选择文件")
+    upload = upload_dialog(page)
+    expect(page.locator("main h1")).to_have_text("全局素材库")
+    control = button(upload, "上传文件")
+    name_field = upload.get_by_role("textbox", name="素材名称", exact=True)
+    expect(name_field).to_be_focused()
     expect(control).to_be_visible()
-    expect(main(page).locator('input[type="file"]')).not_to_be_visible()
-    style = control.evaluate("""el => { const style = getComputedStyle(el); return {
-        height: el.getBoundingClientRect().height, border: style.borderTopWidth, borderStyle: style.borderTopStyle,
-    }; }""")
-    assert style["height"] >= 36 and style["border"] == "1px" and style["borderStyle"] == "solid", style
-    assert abs(bounds(control)["width"] - bounds(main(page).get_by_role("textbox", name="素材名称", exact=True))["width"]) <= 2
-    text(main(page), "暂无标签，可在下方新增。")
+    expect(upload.locator('input[type="file"]')).not_to_be_visible()
+    assert bounds(name_field)["y"] + bounds(name_field)["height"] < bounds(control)["y"]
+    expect(upload.get_by_role("searchbox", name="搜索标签")).to_have_count(0)
     assert_layout(page, tmp_path, "file_control_empty")
-    main(page).locator("form").screenshot(path=tmp_path / f"TEST_file_control_form_empty_{page.viewport_size['width']}.png")
-    # Real visible-trigger activation, rather than setting a hidden input directly.
+    display_name = run.name("只修改素材显示名称")
+    name_field.fill(display_name)
     pick_file(run, run.name("本地素材.png"))
+    expect(name_field).to_have_value(display_name)
     name = run.name("原始文件名_" + "长名称保持可读_" * 12 + ".png")
-    current = main(page).locator('.media-file-trigger')
+    current = button(upload, "更换文件")
     current.focus()
     current.press("Tab")
     page.keyboard.press("Shift+Tab")
@@ -1268,21 +1275,20 @@ def test_upload_file_control_is_visible_and_opens_native_picker(media_run: Media
     with page.expect_file_chooser() as chooser:
         current.press("Enter")
     chooser.value.set_files({"name": name, "mimeType": "image/png", "buffer": png()})
-    expect(button(main(page), "重新选择文件：" + name)).to_be_visible()
-    expect(current).to_have_text(name)
-    display_name = run.name("只修改素材显示名称")
-    main(page).get_by_role("textbox", name="素材名称", exact=True).fill(display_name)
-    expect(current).to_have_text(name)
+    expect(current).to_be_visible()
+    text(upload, name)
+    expect(name_field).to_have_value(display_name)
     assert gate.assets == set() and gate.store.puts == 0
     assert_layout(page, tmp_path, "file_control_selected_long_name")
     gate.store.hold_put()
     with page.expect_request(lambda request: request.method == "PUT"):
-        button(main(page), "开始上传").click()
+        button(upload, "开始上传").click()
     expect(current).to_be_disabled()
-    expect(main(page).locator('input[type="file"]')).to_be_disabled()
+    expect(upload.locator('input[type="file"]')).to_be_disabled()
     assert_layout(page, tmp_path, "file_control_disabled")
     gate.store.release_put()
-    heading(page, display_name)
+    heading(page, "全局素材库")
+    text(main(page), "已入库「" + display_name + "」。")
     assert gate.store.puts == 1 and gate.calls["POST", ASSETS + "/upload-url"] == 1
 
 

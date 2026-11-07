@@ -13,10 +13,11 @@ export interface PickerDraft {
 }
 export const emptyPickerDraft: PickerDraft = { keyword: '', query: '', kind: '', appliedKind: '', offset: 0, hideAssociated: true, selected: [] };
 
-export default function AssetPicker({ root, human, pending, error, notice, onAdd, onClose, onUpload, draft, onDraft, targetRead }: {
+export default function AssetPicker({ root, human, pending, error, notice, onAdd, onClose, onUpload, draft, onDraft, targetRead, revision }: {
   root: string; human: DigitalHumanDetail; pending: boolean; error: string; notice: string;
   onAdd: (assets: readonly Asset[]) => void; onClose: () => void; onUpload: () => void;
   draft: PickerDraft; onDraft: (draft: PickerDraft) => void;
+  revision: number;
   targetRead: { loading: boolean; error?: string; retry: () => void };
 }) {
   const [discard, setDiscard] = useState(false);
@@ -39,7 +40,7 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
   if (hideAssociated) params.set('excludeDigitalHumanId', human.digitalHumanId);
   const associationRevision = human.assetIds.join(',');
   // The server excludes existing associations before pagination. New draft picks stay visible.
-  const read = useMediaRead(root, '/assets?' + params, decodeAssetList, associationRevision);
+  const read = useMediaRead(root, '/assets?' + params, decodeAssetList, associationRevision + ':' + revision);
   const associatedParams = new URLSearchParams({ status: 'ready', digitalHumanId: human.digitalHumanId, limit: '1' });
   if (query) associatedParams.set('keyword', query);
   if (appliedKind) associatedParams.set('kind', appliedKind);
@@ -51,7 +52,7 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
   return <>
     <RecordPage eyebrow="数字人 / 添加素材" title={'为「' + human.name + '」添加素材'}
       description="勾选要新增的素材。搜索和翻页保留本次勾选。"
-      actions={<Button variant="secondary" isDisabled={disabled} onPress={onUpload}>上传新素材</Button>}>
+      actions={<Button variant="secondary" isDisabled={disabled} aria-haspopup="dialog" onPress={onUpload}>上传新素材</Button>}>
       {notice && <p role="status" className="media-status">{notice}</p>}
       <form className="media-filters" onSubmit={(event) => {
         event.preventDefault(); change({ query: keyword.trim(), appliedKind: kind, offset: 0 });

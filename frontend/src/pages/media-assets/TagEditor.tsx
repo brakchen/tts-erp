@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Button, Input, Label, Tag, TagGroup, TextField } from '@heroui/react';
+import { useEffect, useRef, useState } from 'react';
+import { Button, Checkbox, Disclosure, Input, Label, Tag, TagGroup, TextField, buttonVariants } from '@heroui/react';
 import { decodeTags } from './contracts';
 import { ReadStatus, useMediaRead } from './media-ui';
 
@@ -40,7 +40,7 @@ export default function TagEditor({ root, selected, input, onChange, onInput, on
     setError('');
     onChange(withPendingTag(selected, tag));
     onInput('');
-    setNotice(existing ? '已选中现有标签「' + tag + '」。' : '已添加标签「' + tag + '」，保存资料后生效。');
+    setNotice(existing ? '已选中现有标签「' + tag + '」。' : '已添加标签「' + tag + '」。');
   }
   return <div className="media-tag-editor">
     <TagGroup aria-label="可选素材标签" selectionMode="multiple" selectedKeys={selectedKeys}
@@ -71,8 +71,72 @@ export default function TagEditor({ root, selected, input, onChange, onInput, on
       </TextField>
       <Button variant="secondary" isDisabled={disabled || read.loading || !read.data} onPress={add}>添加标签</Button>
     </div>
-    <p className="media-tag-note">支持自定义标签，保存资料后生效。</p>
     {error && <p className="media-error" role="alert">{error}</p>}
     {notice && <p className="media-muted" role="status">{notice}</p>}
   </div>;
+}
+
+export function UploadTags({ root, selected, onChange, disabled }: {
+  root: string; selected: string[]; onChange: (tags: string[]) => void; disabled: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState('');
+  const searchInput = useRef<HTMLInputElement>(null);
+  const open = expanded && !disabled;
+  const read = useMediaRead(root, open ? '/assets/tags' : null, decodeTags);
+  const choices = withPendingTag([...(read.data ?? []), ...selected], '');
+  const normalized = query.trim().replace(/\s+/gu, ' ');
+  const key = normalized.toLowerCase();
+  const existing = choices.find((tag) => tag.toLowerCase() === key);
+  const matches = choices.filter((tag) => tag.toLowerCase().includes(key));
+  const selectedKeys = new Set(selected.map((tag) => tag.toLowerCase()));
+
+  function add() {
+    if (!normalized || !read.data || read.loading || disabled) return;
+    onChange(withPendingTag(selected, existing ?? normalized));
+    setQuery('');
+    searchInput.current?.focus();
+  }
+
+  return <fieldset className="grid min-w-0 gap-2" disabled={disabled}>
+    <legend className="pb-2">素材标签 <span className="text-muted">· 可选</span></legend>
+    {selected.length > 0 && <TagGroup aria-label="已选标签" disabledKeys={disabled ? selectedKeys : []}
+      onRemove={disabled ? undefined : (keys) => onChange(selected.filter((tag) => !keys.has(tag.toLowerCase())))}>
+      <TagGroup.List className="flex-wrap">
+        {selected.map((tag) => <Tag key={tag.toLowerCase()} id={tag.toLowerCase()} textValue={tag} className="max-w-full [overflow-wrap:anywhere]">
+          {tag}<Tag.RemoveButton aria-label="移除标签" />
+        </Tag>)}
+      </TagGroup.List>
+    </TagGroup>}
+    <Disclosure isExpanded={open} onExpandedChange={setExpanded} isDisabled={disabled}>
+      <Disclosure.Heading>
+        <Disclosure.Trigger className={buttonVariants({ variant: 'secondary', size: 'sm' })}>
+          {open ? '收起标签' : '选择标签'}<Disclosure.Indicator />
+        </Disclosure.Trigger>
+      </Disclosure.Heading>
+      <Disclosure.Content>
+        {open && <div className="media-upload-tag-panel">
+          <TextField aria-label="搜索标签" type="search" value={query} onChange={setQuery}>
+            <Input ref={searchInput} autoFocus placeholder="搜索或新建标签" onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              add();
+            }} />
+          </TextField>
+          <ReadStatus title="已有标签" loading={read.loading} error={read.error} onRetry={read.retry} />
+          {!key && read.data && !choices.length && <p className="text-muted">暂无已有标签。</p>}
+          {matches.length > 0 && <div className="media-upload-tag-options" role="group" aria-label="可选标签">
+            {matches.map((tag) => <Checkbox key={tag.toLowerCase()} isSelected={selectedKeys.has(tag.toLowerCase())}
+              onChange={(checked) => onChange(checked ? withPendingTag(selected, tag) : selected.filter((value) => value !== tag))}>
+              <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                <Label className="min-w-0 [overflow-wrap:anywhere]">{tag}</Label>
+              </Checkbox.Content>
+            </Checkbox>)}
+          </div>}
+          {key && !existing && read.data && !read.loading && <Button type="button" variant="secondary" className="justify-self-start whitespace-normal [overflow-wrap:anywhere]"
+            onPress={add}>新建「{normalized}」</Button>}
+        </div>}
+      </Disclosure.Content>
+    </Disclosure>
+  </fieldset>;
 }

@@ -63,8 +63,8 @@ function DeleteAsset({ bootstrap, asset, pending, error, onConfirm, onCancel }: 
   </OperationConfirmation>;
 }
 
-function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDeleted, returnHuman }: PageProps & {
-  id: string; initialNotice: string; onClose: () => void; onChanged: () => void;
+function AssetDetail({ bootstrap, id, onClose, onChanged, onDeleted, returnHuman }: PageProps & {
+  id: string; onClose: () => void; onChanged: () => void;
   onDeleted: (name: string) => void; returnHuman?: string;
 }) {
   const root = bootstrap.rootPath;
@@ -75,7 +75,7 @@ function AssetDetail({ bootstrap, id, initialNotice, onClose, onChanged, onDelet
   const [draft, setDraft] = useState<ReturnType<typeof draftFor> | null>(null);
   const [discard, setDiscard] = useState<'view' | 'close'>();
   const [deleting, setDeleting] = useState(false);
-  const [notice, setNotice] = useState(initialNotice);
+  const [notice, setNotice] = useState('');
   const [tagCatalog, setTagCatalog] = useState<string[]>();
   const asset = updated ?? read.data;
   const original = asset && draftFor(asset);
@@ -180,7 +180,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   const [revision, setRevision] = useState(0);
   const [selected, select] = useRecordSelection('asset');
   const [upload, setUpload] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<{ message: string; assetId?: string }>();
   const fromHuman = new URLSearchParams(window.location.search).get('fromHuman');
   const returnHuman = fromHuman && /^[1-9]\d*$/.test(fromHuman)
     ? recordLink(bootstrap, 'digital-humans', 'human', fromHuman) : undefined;
@@ -190,7 +190,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   if (applied.kind) params.set('kind', applied.kind);
   const read = useMediaRead(root, '/assets?' + params, decodeAssetList, revision);
   const assets = read.data?.items ?? [];
-  const filtered = Boolean(applied.keyword || applied.kind);
+  const uploadedAssetId = notice?.assetId;
   const refresh = () => setRevision((value) => value + 1);
 
   function clearOrigin() {
@@ -201,25 +201,29 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   function search(event: FormEvent) {
     event.preventDefault();
     setApplied({ keyword: filters.keyword.trim(), kind: filters.kind });
-    setOffset(0); setNotice('');
+    setOffset(0); setNotice(undefined);
   }
   function uploaded(id: string, filename: string) {
-    const resetMessage = filtered || offset ? '已清除筛选并返回第一页。' : '';
-    setUpload(false); setFilters(emptyFilters); setApplied(emptyFilters); setOffset(0);
-    clearOrigin(); refresh(); setNotice('已入库：' + filename + '。' + resetMessage); select(id);
+    setUpload(false);
+    refresh();
+    setNotice({ message: '已入库「' + filename + '」。', assetId: id });
   }
-  if (upload) return <div className="erp-page media-workspace"><UploadAsset bootstrap={bootstrap}
-    onClose={() => setUpload(false)} onComplete={uploaded} /></div>;
+  function viewAsset(id: string) {
+    clearOrigin(); setNotice(undefined); select(id);
+  }
   if (selected) return <div className="erp-page media-workspace"><AssetDetail key={selected} bootstrap={bootstrap} id={selected}
-    returnHuman={returnHuman} initialNotice={notice} onClose={() => { clearOrigin(); select(null); setNotice(''); }}
+    returnHuman={returnHuman} onClose={() => { clearOrigin(); select(null); setNotice(undefined); }}
     onChanged={refresh} onDeleted={() => {
-      clearOrigin(); select(null); setOffset(0); refresh(); setNotice('素材已从全局库删除。');
+      clearOrigin(); select(null); setOffset(0); refresh(); setNotice({ message: '素材已从全局库删除。' });
     }} /></div>;
   return <div className="erp-page media-workspace">
     <RecordPage eyebrow="资产管理" title="全局素材库" description="查看图片和视频，也可以查到每份素材被谁引用。"
-      actions={canWrite ? <Button onPress={() => { setNotice(''); setUpload(true); }}>上传素材</Button> : undefined}>
+      actions={canWrite ? <Button aria-haspopup="dialog" onPress={() => setUpload(true)}>上传素材</Button> : undefined}>
       {!canWrite && <p>你可以查看素材资料和预览。上传或修改需要编辑权限。</p>}
-      {notice && <p role="status" className="media-status">{notice}</p>}
+      {notice && <div className="media-status media-actions">
+        <p role="status">{notice.message}</p>
+        {uploadedAssetId && <Button variant="secondary" size="sm" onPress={() => viewAsset(uploadedAssetId)}>查看刚上传的素材</Button>}
+      </div>}
       <form className="media-filters" onSubmit={search}>
         <TextField value={filters.keyword} className="media-field" onChange={(keyword) => setFilters({ ...filters, keyword })}>
           <Label>搜索素材</Label><Input placeholder="名称、说明或标签" maxLength={120} />
@@ -241,11 +245,12 @@ export default function MediaAssets({ bootstrap }: PageProps) {
           </div>
           <AssetTags tags={asset.tags} />
           <Button variant="secondary" className="max-w-full whitespace-normal [overflow-wrap:anywhere]"
-            onPress={() => { clearOrigin(); setNotice(''); select(asset.assetId); }}>查看 {asset.filename}</Button>
+            onPress={() => viewAsset(asset.assetId)}>查看 {asset.filename}</Button>
         </AssetCard></li>)}
       </ul>
       <MediaPagination name="素材分页" offset={offset} limit={mediaPageSize} total={read.data?.total ?? 0}
         hasNext={offset + mediaPageSize < Number(read.data?.total ?? 0)} loading={read.loading} onChange={setOffset} />
     </RecordPage>
+    {upload && <UploadAsset bootstrap={bootstrap} onClose={() => setUpload(false)} onComplete={uploaded} />}
   </div>;
 }

@@ -35,8 +35,10 @@
 .media-preview { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; border-radius: 5px; background: var(--media-soft); overflow: hidden; }
 .media-video-mark { position: absolute; right: 7px; bottom: 5px; color: #fff; font-size: 14px; text-shadow: 0 1px 3px #172822; pointer-events: none; }
 .media-preview-compact { height: 66px; min-height: 66px; }
-.media-preview-large { height: 128px; min-height: 128px; }
+.media-preview-large { inline-size: min(100%, 640px); height: clamp(128px, 38dvh, 280px); }
+.media-preview-upload { height: clamp(112px, 27dvh, 160px); background: var(--surface-secondary); }
 .media-preview :where(img, video) { display: block; width: auto; max-width: 100%; height: 100%; object-fit: contain; }
+.media-preview video { width: 100%; }
 .media-preview-unavailable { display: grid; gap: 7px; padding: 8px; border-radius: 5px; background: var(--media-soft); height: auto; min-width: 0; }
 .media-preview-unavailable p { overflow-wrap: anywhere; }
 .media-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
@@ -62,9 +64,10 @@
 .media-workspace .media-tag-option { min-height: 36px; max-width: 100%; padding: 6px 12px; border: 1px solid var(--media-line); border-radius: 999px; background: var(--media-surface); overflow-wrap: anywhere; }
 .media-workspace .media-tag-selected { background: var(--media-accent); color: light-dark(#fff, #172d22); border-color: var(--media-accent); }
 .media-tag-tick { display: inline-block; width: 13px; margin-inline-end: 6px; text-align: center; }
-.media-tag-count, .media-tag-note { color: var(--media-muted); }
+.media-tag-count { color: var(--media-muted); }
 .media-error { border-radius: 7px; padding: 8px 11px; background: light-dark(#fff0ed, #392421); color: light-dark(#8f2424, #ffb4ad); }
 .media-status { border-radius: 7px; padding: 8px 11px; background: var(--media-soft); overflow-wrap: anywhere; }
-.media-upload-file { display: grid; gap: 4px; font-weight: 500; }
-.media-workspace .media-file-trigger { width: 100%; justify-content: space-between; text-align: start; }
-.media-file-trigger > span { min-width: 0; overflow-wrap: anywhere; }
+.media-upload-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; background: var(--surface-secondary); }
+.media-upload-file > span { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
+.media-upload-tag-panel { display: grid; gap: 8px; margin-block-start: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
+.media-upload-tag-options { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr)); }
