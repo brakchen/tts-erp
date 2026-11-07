@@ -1,7 +1,7 @@
 """Provision Monitor hosts and forward current observations to Zabbix.
 
-Zabbix owns clocks, problem state, recovery and notifications. ERP authenticates
-the shop and stores only its central service credential through token_service.
+Zabbix owns problem state, recovery and notifications. ERP authenticates the
+shop, timestamps the batch at receipt and loads the central service credential.
 """
 
 from __future__ import annotations
@@ -80,12 +80,15 @@ def _ensure_host(api: ZabbixAPI, shop: ChannelAccount) -> str:
     return host
 
 
-def forward_observations(session: Session, shop: ChannelAccount, items: list[dict]) -> None:
+def forward_observations(
+    session: Session, shop: ChannelAccount, items: list[dict], *, received_at_ns: int,
+) -> None:
     """Return only after Zabbix has accepted every item in the current batch."""
     try:
         api = _client(session)
         host = _ensure_host(api, shop)
-        result = api.history.push([{**item, "host": host} for item in items])
+        clock, ns = divmod(received_at_ns, 1_000_000_000)
+        result = api.history.push([{**item, "host": host, "clock": clock, "ns": ns} for item in items])
         rows = result.get("data", []) if isinstance(result, dict) else []
         if (not isinstance(result, dict) or result.get("response") != "success"
                 or not isinstance(rows, list) or len(rows) != len(items)
