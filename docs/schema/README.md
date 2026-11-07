@@ -19,7 +19,7 @@
    ```
    `scripts/regen_schema.py` 只读不写库；它剥掉序列/`\restrict` 等噪音、给
    `CREATE TABLE`/`CREATE FUNCTION` 加 `IF NOT EXISTS`，使快照可重复执行。
-2. **生成源必须在当前 alembic head**（当前 head：`0074_runninghub`）：
+2. **生成源必须在当前 alembic head**（当前 head：`0075_media_card_feeds`）：
    ```bash
    docker exec postgres psql -U postgres -tAc "SELECT version_num FROM alembic_version" -d tts_erp_test_template
    ```
@@ -30,7 +30,7 @@
 4. 历史漂移教训（2026-08-25）：手维护的 schema.sql 曾漏 7 张表、列名写错，
    healthz/sync/db 三处互相矛盾——**只有"生成 + 同步"这条路是可靠的**。
 
-## 3. 数据结构索引（截至 migration 0074）
+## 3. 数据结构索引（截至 migration 0075）
 
 领域模型与表间关系见 [`docs/architecture/data-model-target-v3.md`](../architecture/data-model-target-v3.md)；
 「业务概念 ↔ 物理表字段」映射见 [`docs/business/spu-profitability.md`](../business/spu-profitability.md) 附录 A；
@@ -117,8 +117,8 @@
 契约见 [`docs/design/spu-profit-deterioration-alert.md`](../design/spu-profit-deterioration-alert.md)。
 
 ### media —— 媒体资产库与数字人（3 表）
-`media_assets` 保存全局图片/视频资产的元数据与对象存储绑定（`kind`、`filename`、`content_type`、`size_bytes`、`bucket`、`object_key`、`status`、`tags[]`，软删 `deleted_at`）；
-`digital_humans` 保存数字人（人设档案）记录（`name`、`description`、`status`、软删 `deleted_at`）；
+`media_assets` 保存图片和视频元数据与对象存储绑定。`is_portrait` 标记形象照，普通素材查询排除这些记录；
+`digital_humans` 保存数字人（人设档案）记录，`portrait_asset_id` 指向可选的形象照。素材和档案的卡片列表按 `updated_at` 与 `id` 降序续载；
 `digital_human_assets` 是数字人 ↔ 资产多对多链接（资产可无归属，也可同时挂多个数字人）。
 对象字节流不进数据库，浏览器凭预签名 URL 直传对象存储。契约见
 [`docs/design/media-asset-library.md`](../design/media-asset-library.md)。

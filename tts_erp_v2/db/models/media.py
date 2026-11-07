@@ -16,6 +16,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -63,6 +64,9 @@ class MediaAsset(Base):
         Text, nullable=False, server_default=text("'awaiting_upload'")
     )
     failure_reason: Mapped[str | None] = mapped_column(Text)
+    is_portrait: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     description: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
@@ -106,6 +110,10 @@ class DigitalHuman(Base):
         Text, nullable=False, server_default=text("'active'")
     )
     created_by: Mapped[str | None] = mapped_column(Text)
+    portrait_asset_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("media.media_assets.id", name="fk_digital_humans_portrait_asset"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         nullable=False, server_default=text("now()")
     )

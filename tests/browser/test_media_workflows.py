@@ -13,7 +13,6 @@ import zlib
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from itertools import pairwise
 from pathlib import Path
 from uuid import uuid4
 
@@ -240,10 +239,8 @@ def upload_dialog(page: Page) -> Locator:
 
 
 def confirmation(page: Page) -> Locator:
-    """Destructive operations use the prototype's content page, not a modal."""
-    region = main(page).get_by_role("region", name="操作确认", exact=True)
+    region = page.get_by_role("alertdialog")
     expect(region).to_be_visible()
-    expect(dialog(page)).to_have_count(0)
     return region
 
 
@@ -256,14 +253,13 @@ def text(scope: Page | Locator, value: str) -> None:
 
 
 def main(page: Page) -> Locator:
-    return page.get_by_role("main")
+    return page.locator('main:visible, [role="dialog"]:visible, [role="alertdialog"]:visible').last
 
 
 def heading(page: Page, title: str) -> None:
     expect(main(page).get_by_role("heading", name=title, exact=True)).to_be_visible()
-    expect(page.get_by_role("banner")).to_have_count(1)
-    expect(page.get_by_role("main")).to_have_count(1)
-    expect(dialog(page)).to_have_count(0)
+    expect(page.get_by_role("banner", include_hidden=True)).to_have_count(1)
+    expect(page.get_by_role("main", include_hidden=True)).to_have_count(1)
 
 
 def search(page: Page, query: str) -> None:
@@ -322,22 +318,32 @@ def video_ready(page: Page, name: str, *, local: bool = False, scope: Locator | 
 
 def open_asset(page: Page, name: str) -> None:
     button(main(page), "查看 " + name).click()
+    expect(dialog(page)).to_be_visible()
     heading(page, name)
+
+
+def asset_action(page: Page, action: str, name: str) -> None:
+    if dialog(page).count():
+        button(dialog(page), "关闭").click()
+        expect(dialog(page)).to_have_count(0)
+    button(main(page), action + " " + name).click()
+
+
+def human_card(page: Page, name: str) -> Locator:
+    return page.locator("main").get_by_role("list", name="数字人档案").get_by_role("listitem").filter(
+        has=page.get_by_role("heading", name=name, exact=True),
+    )
 
 
 def open_human(page: Page, name: str) -> None:
-    button(main(page), "查看档案 " + name).click()
-    heading(page, name)
+    human_card(page, name).get_by_role("button", name=re.compile(r"^管理素材 ·")).click()
+    heading(page, name + "的素材")
 
 
 def open_reference(page: Page, name: str) -> None:
-    refs = main(page).get_by_role("region", name="引用素材", exact=True)
-    expect(refs.locator("img, video")).to_have_count(0)
-    control = refs.get_by_role("link", name="查看素材 " + name, exact=True).or_(
-        refs.get_by_role("button", name="查看素材 " + name, exact=True),
-    )
-    expect(control).to_have_count(1)
-    control.click()
+    refs = main(page).get_by_role("list", name="关联素材", exact=True)
+    button(refs, "查看素材 " + name).click()
+    expect(dialog(page)).to_be_visible()
     heading(page, name)
 
 
@@ -356,7 +362,8 @@ def open_picker_preview(page: Page, name: str) -> Locator:
 
 
 def picker(page: Page, name: str, *, from_list: bool = False) -> None:
-    button(main(page), "添加素材 " + name if from_list else "添加素材").click()
+    button(human_card(page, name) if from_list else main(page), "＋ 添加素材").click()
+    expect(dialog(page)).to_be_visible()
     heading(page, "为「" + name + "」添加素材")
     expect(main(page).get_by_text("目标数字人：" + name, exact=True)).to_have_count(0)
     expect(main(page).get_by_role("checkbox", name="隐藏已选内容", exact=True)).to_be_checked()
@@ -393,7 +400,7 @@ def submit_selection(page: Page, count: int) -> None:
 
 
 def remove_reference(page: Page, name: str) -> None:
-    button(main(page), "移除引用 " + name).click()
+    button(main(page), "移除关联 " + name).click()
     button(confirmation(page), "确认移除").click()
     expect(dialog(page)).to_have_count(0)
     expect(main(page).get_by_text(name, exact=True)).to_have_count(0)
@@ -462,78 +469,17 @@ def bounds(locator: Locator) -> dict[str, float]:
     return value
 
 
-def assert_reference_header(page: Page, title: str, action: str | None = None) -> None:
-    """The accepted reference has one object title, not a panel title plus target."""
-    header = main(page).locator("[data-media-header]")
-    expect(header).to_have_count(1)
-    title_element = header.get_by_role("heading", name=title, exact=True, level=1)
-    title_box, header_box = bounds(title_element), bounds(header)
-    assert title_box["x"] >= header_box["x"] - 1
-    size = float(title_element.evaluate("el => parseFloat(getComputedStyle(el).fontSize)"))
-    assert 22 <= size <= 30, size
-    if action:
-        action_element = header.get_by_role("button", name=action, exact=True).or_(
-            header.get_by_role("link", name=action, exact=True),
-        )
-        action_box = bounds(action_element)
-        if header_box["width"] >= 560:
-            assert action_box["x"] >= title_box["x"] + title_box["width"] - 1
-            assert abs(action_box["x"] + action_box["width"] - header_box["x"] - header_box["width"]) <= 4
-
-
-def assert_reference_grid(page: Page, count: int) -> None:
-    """Reference CSS: four records/page, 178px minimum cards, 10px gap, compact previews."""
-    grid = main(page).locator("[data-media-grid]")
-    cards = grid.locator(":scope > *")
-    expect(cards).to_have_count(count)
-    area = bounds(grid)
-    columns = min(count, max(1, int((area["width"] + 10) // 188)))
-    rectangles = [bounds(cards.nth(index)) for index in range(count)]
-    first_row = [box for box in rectangles if abs(box["y"] - rectangles[0]["y"]) <= 2]
-    assert len(first_row) == columns, {"area": area, "cards": rectangles, "expectedColumns": columns}
-    if columns > 1:
-        for left, right in pairwise(first_row):
-            assert abs(left["width"] - right["width"]) <= 2
-            assert 8 <= right["x"] - left["x"] - left["width"] <= 12
-    for index in range(count):
-        visible_preview = cards.nth(index).locator("img:visible, video:visible").first
-        assert bounds(visible_preview)["height"] <= 82, "Card previews must retain the reference's compact frame"
-
-
-def assert_reference_picker(page: Page, name: str, count: int) -> None:
-    assert_reference_header(page, "为「" + name + "」添加素材", "上传新素材")
-    filters = main(page).locator("form").filter(has=page.get_by_role("textbox", name="搜索素材", exact=True))
-    toolbar = main(page).locator("[data-picker-toolbar]")
-    grid = main(page).locator("[data-media-grid]")
-    filter_box, toolbar_box, grid_box = bounds(filters), bounds(toolbar), bounds(grid)
-    assert filter_box["y"] + filter_box["height"] <= toolbar_box["y"] + 2
-    assert toolbar_box["y"] + toolbar_box["height"] <= grid_box["y"] + 2
-    hide_box = bounds(toolbar.get_by_role("checkbox", name="隐藏已选内容", exact=True))
-    confirm_box = bounds(button(toolbar, f"确认添加（{count}）"))
-    assert confirm_box["x"] >= hide_box["x"]
-    assert abs(confirm_box["x"] + confirm_box["width"] - toolbar_box["x"] - toolbar_box["width"]) <= 4
-    expect(main(page).get_by_role("button", name=re.compile(r"^确认添加[（(]"))).to_have_count(1)
-    expect(main(page).get_by_text(re.compile("^目标数字人："))).to_have_count(0)
-    expect(main(page).get_by_text(re.compile("^隐藏的是此数字人已关联"))).to_have_count(0)
-
-
-def assert_reference_form(page: Page, title: str, labels: tuple[str, ...], submit: str) -> None:
-    assert_reference_header(page, title)
-    for label in labels:
-        expect(main(page).get_by_role("textbox", name=label, exact=True)).to_be_visible()
-    submit_box = bounds(button(main(page), submit))
-    cancel_box = bounds(button(main(page), "取消"))
-    assert abs(submit_box["y"] - cancel_box["y"]) <= 2
-    assert submit_box["x"] + submit_box["width"] <= cancel_box["x"] + 2
-    expect(button(main(page), "取消")).to_have_count(1)
+def choose_status(page: Page, label: str) -> None:
+    page.locator("main").get_by_role("button", name=re.compile("状态")).click()
+    page.get_by_role("option", name=label, exact=True).click()
 
 
 def test_picker_preserves_selection_and_uses_server_exclusion(media_run: MediaRun) -> None:
-    """Existing references are excluded before count/paging; new checks stay visible."""
+    """Existing links are excluded from the cursor and draft picks survive continuation."""
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
     existing = [run.seed_asset(f"already_{index}.png") for index in range(2)]
-    candidates = [run.seed_asset(f"candidate_{index:02}.png") for index in range(5)]
+    candidates = [run.seed_asset(f"candidate_{index:02}.png") for index in range(13)]
     first_name, first_id = candidates[-1]
     assert run.api("PATCH", f"{ASSETS}/{first_id}", {"description": run.name("description_only")})[0] == 200
     human, human_id = run.seed_human("picker_target")
@@ -541,17 +487,17 @@ def test_picker_preserves_selection_and_uses_server_exclusion(media_run: MediaRu
         run.link(human_id, asset_id)
     run.goto("digital-humans")
     start = len(gate.requests)
+    first_page = len(gate.asset_pages)
     picker(page, human, from_list=True)
-    expect(main(page).get_by_role("checkbox")).to_have_count(5)  # Four cards + hide-existing switch.
-    initial = gate.asset_pages[-1]
-    assert initial["total"] == 5 and initial["limit"] == 4 and len(initial["items"]) == 4
+    text(main(page), "已隐藏 2 项已添加素材")
+    initial = gate.asset_pages[first_page]
+    assert initial["total"] == 13 and initial["limit"] == 12 and len(initial["items"]) == 12
     text(main(page), "已隐藏 2 项已添加素材")
     assert gate.associated_pages[-1]["total"] == 2 and gate.associated_pages[-1]["limit"] == 1
     assert not {row["asset_id"] for row in initial["items"]} & {aid for _, aid in existing}
     first_read = next(item for item in gate.requests[start:] if item.method == "GET" and item.path == ASSETS
                       and "digitalHumanId" not in item.query)
     assert first_read.query["excludeDigitalHumanId"] == [str(human_id)]
-    text(main(page), "共 5 项 · 第 1 页")
 
     search(page, run.name("description_only"))
     expect(main(page).get_by_role("checkbox", name=first_name, exact=True)).to_be_visible()
@@ -559,15 +505,12 @@ def test_picker_preserves_selection_and_uses_server_exclusion(media_run: MediaRu
     # The switch hides server-side references, never this unsaved local selection.
     expect(main(page).get_by_role("checkbox", name=first_name, exact=True)).to_be_checked()
     search(page, "")
-    pagination = main(page).get_by_role("navigation", name="可选素材分页", exact=True)
-    with page.expect_response(lambda response: response.request.method == "GET" and response.url.split("?")[0].endswith(ASSETS)
-                              and "offset=4" in response.url):
-        button(pagination, "下一页").click()
-    expect(button(pagination, "下一页")).to_be_disabled()
-    last_page = gate.asset_pages[-1]
-    assert last_page["total"] == 5 and last_page["offset"] == 4 and len(last_page["items"]) == 1
-    second = last_page["items"][0]
-    second_name, second_id = second["filename"], second["asset_id"]
+    second_name, second_id = candidates[0]
+    results = main(page).get_by_role("region", name="可选素材结果")
+    expect(results.get_by_role("checkbox", name=first_name, exact=True)).to_be_visible()
+    results.evaluate("element => element.scrollTop = element.scrollHeight")
+    expect(results.get_by_role("checkbox", name=second_name, exact=True)).to_be_visible()
+    assert any(item.query.get("cursor", [""])[0] for item in gate.requests[start:] if item.path == ASSETS)
     assert second_id != first_id
     set_checkbox(page, second_name, True)
     kind(page, "视频")
@@ -620,7 +563,7 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     button(main(page), "上传新素材").click()
     upload = upload_dialog(page)
     text(upload, "上传后添加到「" + person + "」。")
-    expect(page.locator("main h1")).to_have_text("为「" + person + "」添加素材")
+    expect(page.locator("main h1")).to_contain_text("档案")
     button(upload, "取消").click()
     heading(page, "为「" + person + "」添加素材")
     expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value(second)
@@ -729,7 +672,7 @@ def test_tag_editor_upload_selection_failed_save_and_shared_chips(media_run: Med
     expect(button(upload, "移除标签 " + existing_tag)).to_be_visible()
     assert pending_tag not in tags(run)
     button(upload, "开始上传").click()
-    heading(page, "全局素材库")
+    expect(button(page.locator("main"), "上传素材")).to_be_visible()
     expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value(keyword)
     button(main(page), "查看刚上传的素材").click()
     heading(page, filename)
@@ -744,32 +687,34 @@ def test_tag_editor_upload_selection_failed_save_and_shared_chips(media_run: Med
     ticket_request = [item for item in gate.requests if item.path == ASSETS + "/upload-url"][-1]
     assert set(ticket_request.body["tags"]) == expected
 
-    button(main(page), "编辑资料").click()
-    heading(page, "编辑素材资料")
+    button(dialog(page), "关闭").click()
+    search(page, filename)
+    asset_action(page, "编辑", filename)
+    heading(page, "编辑素材")
     cancelled = run.name("cancelled_candidate")
     entry = main(page).get_by_role("textbox", name="新增标签", exact=True)
-    entry.fill(cancelled)
+    main(page).get_by_role("textbox", name="新增标签", exact=True).fill(cancelled)
     entry.press("Enter")
     button(main(page), "取消").click()
     button(dialog(page), "确认放弃").click()
-    heading(page, filename)
+    expect(dialog(page)).to_have_count(0)
     assert cancelled not in tags(run)
-    button(main(page), "编辑资料").click()
+    asset_action(page, "编辑", filename)
     expect(main(page).get_by_role("row", name=cancelled, exact=True)).to_have_count(0)
     renamed = run.name("tagged_renamed.png")
     note = run.name("shared_description")
     final_tag = run.name("edit_pending")
     main(page).get_by_label("素材名称", exact=True).fill(renamed)
     main(page).get_by_label("素材说明", exact=True).fill(note)
-    entry.fill(" " + final_tag + " ")
+    main(page).get_by_role("textbox", name="新增标签", exact=True).fill(" " + final_tag + " ")
     gate.fail("PATCH", f"{ASSETS}/{asset_id}", 500)
     button(main(page), "保存资料").click()
     expect(main(page).get_by_role("alert")).to_be_visible()
-    expect(entry).to_have_value(" " + final_tag + " ")
+    expect(main(page).get_by_role("textbox", name="新增标签", exact=True)).to_have_value(" " + final_tag + " ")
     expect(main(page).get_by_label("素材名称", exact=True)).to_have_value(renamed)
     assert final_tag not in tags(run) and run.asset_id(filename) == asset_id
     button(main(page), "保存资料").click()
-    heading(page, renamed)
+    text(page.locator("main"), "素材资料已保存。")
     expected.add(final_tag)
     with db() as session:
         stored = session.get(MediaAsset, asset_id)
@@ -778,7 +723,7 @@ def test_tag_editor_upload_selection_failed_save_and_shared_chips(media_run: Med
     person, human_id = run.seed_human("tag_reference")
     run.link(human_id, asset_id)
     run.goto(f"digital-humans?human={human_id}")
-    heading(page, person)
+    heading(page, person + "的素材")
     for tag in expected:
         text(main(page), tag)
     run.goto("media-assets")
@@ -799,13 +744,10 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
     run.link(second_id, asset_id)
     assert run.api("PATCH", f"{HUMANS}/{second_id}", {"status": "archived"})[0] == 200
     objects = dict(gate.store.objects)
-    run.goto(f"media-assets?asset={asset_id}")
-    heading(page, filename)
-    button(main(page), "从素材库删除").click()
+    run.goto("media-assets")
+    asset_action(page, "删除", filename)
     expect(button(confirmation(page), "确认删除")).to_be_disabled()
-    for person in (first, second):
-        expect(confirmation(page).get_by_role("link", name=person, exact=True)).to_be_visible()
-    expect(confirmation(page).get_by_text(re.compile("请先解除全部引用"))).to_be_visible()
+    expect(confirmation(page).get_by_text(re.compile("请解除关联后再删除"))).to_be_visible()
     # UI preflight and the authoritative endpoint must agree, including archived references.
     status, body = run.api("DELETE", f"{ASSETS}/{asset_id}")
     assert status == 409 and body["detail"] == "ASSET_IN_USE"
@@ -813,24 +755,24 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
     button(confirmation(page), "取消").click()
 
     run.goto(f"digital-humans?human={first_id}")
-    heading(page, first)
+    heading(page, first + "的素材")
     remove_reference(page, filename)
     assert run.links(first_id) == set() and run.links(second_id) == {asset_id}
-    run.goto(f"media-assets?asset={asset_id}")
-    button(main(page), "从素材库删除").click()
+    run.goto("media-assets")
+    asset_action(page, "删除", filename)
     expect(button(confirmation(page), "确认删除")).to_be_disabled()
-    expect(confirmation(page).get_by_role("link", name=second, exact=True)).to_be_visible()
+    expect(confirmation(page).get_by_text(re.compile("请解除关联后再删除"))).to_be_visible()
     assert_preserved(run, asset_id, {second_id}, objects)
     button(confirmation(page), "取消").click()
 
     # Deleting a linked human must retain both the asset and the other human's reference.
     run.link(first_id, asset_id)
-    run.goto(f"digital-humans?human={first_id}")
-    button(main(page), "删除档案").click()
+    run.goto("digital-humans")
+    button(human_card(page, first), "删除 " + first).click()
     button(confirmation(page), "确认删除").click()
     expect(dialog(page)).to_have_count(0)
     expect(button(main(page), "新建数字人")).to_be_visible()
-    expect(button(main(page), "查看档案 " + first)).to_have_count(0)
+    expect(human_card(page, first)).to_have_count(0)
     with db() as session:
         assert session.get(DigitalHuman, first_id).deleted_at is not None
         assert session.get(MediaAsset, asset_id).deleted_at is None
@@ -838,19 +780,19 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
     assert gate.store.objects == objects and gate.store.removes == 0
 
     run.goto(f"digital-humans?human={second_id}")
-    heading(page, second)
+    heading(page, second + "的素材")
     remove_reference(page, filename)
     assert run.links(second_id) == set()
-    button(main(page), "恢复档案").click()
-    heading(page, second)
-    expect(button(main(page), "归档档案")).to_be_visible()
-    button(main(page), "返回数字人列表").click()
-    heading(page, "数字人列表")
-    expect(button(main(page), "启用中")).to_have_attribute("aria-pressed", "true")
+    button(main(page), "← 返回").click()
+    choose_status(page, "已归档")
+    button(human_card(page, second), "恢复 " + second).click()
+    expect(main(page).get_by_text(re.compile("档案已恢复"))).to_be_visible()
+    choose_status(page, "启用中")
+    expect(human_card(page, second)).to_be_visible()
     with db() as session:
         assert session.get(DigitalHuman, second_id).status == "active"
-    run.goto(f"media-assets?asset={asset_id}")
-    button(main(page), "从素材库删除").click()
+    run.goto("media-assets")
+    asset_action(page, "删除", filename)
     expect(button(confirmation(page), "确认删除")).to_be_enabled()
     button(confirmation(page), "确认删除").click()
     expect(dialog(page)).to_have_count(0)
@@ -865,16 +807,16 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
 def test_new_reference_after_delete_preflight_is_rejected_without_byte_removal(media_run: MediaRun) -> None:
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
-    _filename, asset_id = run.seed_asset("delete_race.png")
-    person, human_id = run.seed_human("late_reference")
+    filename, asset_id = run.seed_asset("delete_race.png")
+    _person, human_id = run.seed_human("late_reference")
     objects = dict(gate.store.objects)
-    run.goto(f"media-assets?asset={asset_id}")
-    button(main(page), "从素材库删除").click()
+    run.goto("media-assets")
+    asset_action(page, "删除", filename)
     expect(button(confirmation(page), "确认删除")).to_be_enabled()
     run.link(human_id, asset_id)  # Genuine API/SQL change while the original confirmation remains open.
     button(confirmation(page), "确认删除").click()
     expect(confirmation(page).get_by_role("alert")).to_contain_text("引用")
-    expect(confirmation(page).get_by_role("link", name=person, exact=True)).to_be_visible()
+    expect(confirmation(page).get_by_text(re.compile("请解除关联后再删除"))).to_be_visible()
     expect(button(confirmation(page), "确认删除")).to_be_disabled()
     assert ("DELETE", f"{ASSETS}/{asset_id}", 409) in gate.responses
     assert_preserved(run, asset_id, {human_id}, objects)
@@ -883,6 +825,7 @@ def test_new_reference_after_delete_preflight_is_rejected_without_byte_removal(m
 def test_read_preview_and_draft_recovery_keeps_objects_isolated(media_run: MediaRun) -> None:
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
+    text(main(page), "没有符合条件的素材。")
     filename, asset_id = run.seed_asset("recover_preview.png")
     gate.fail("GET", ASSETS, 503)
     run.goto("media-assets")
@@ -902,28 +845,29 @@ def test_read_preview_and_draft_recovery_keeps_objects_isolated(media_run: Media
     run.goto("digital-humans")
     other_name, other_id = run.seed_human("other_persona")
     run.goto("digital-humans")
+    expect(human_card(page, other_name)).to_be_visible()
     before_creates = gate.calls["POST", HUMANS]
     person = run.name("created_in_ui")
     button(main(page), "新建数字人").click()
     heading(page, "新建数字人")
     main(page).get_by_label("数字人名称", exact=True).fill(person)
     main(page).get_by_label("人设说明", exact=True).fill("TEST_persona_description")
-    gate.fail("GET", re.compile(rf"{HUMANS}/[1-9][0-9]*"), 503)
+    gate.fail("GET", HUMANS, 503)
     button(main(page), "创建档案").click()
-    button(main(page), "重试数字人档案").wait_for()
+    button(main(page), "重试档案列表").wait_for()
     expect(main(page).get_by_text(re.compile("档案已创建")).first).to_be_visible()
-    button(main(page), "重试数字人档案").click()
+    button(main(page), "重试档案列表").click()
     heading(page, person)
     human_id = run.human_id(person)
     assert gate.calls["POST", HUMANS] == before_creates + 1
-    picker(page, person)
+    picker(page, person, from_list=True)
     choose(page, filename)
     assert run.links(human_id) == set()
     button(main(page), "取消").click()
     button(dialog(page), "确认放弃").click()
     heading(page, person)
     assert run.links(human_id) == set() and gate.calls["POST", f"{HUMANS}/{human_id}/assets"] == 0
-    button(main(page), "编辑档案").click()
+    button(human_card(page, person), "编辑 " + person).click()
     draft = run.name("discard_me")
     main(page).get_by_label("数字人名称", exact=True).fill(draft)
     button(main(page), "取消").click()
@@ -932,10 +876,8 @@ def test_read_preview_and_draft_recovery_keeps_objects_isolated(media_run: Media
     button(main(page), "取消").click()
     button(dialog(page), "确认放弃").click()
     heading(page, person)
-    button(main(page), "返回数字人列表").click()
-    open_human(page, other_name)
     expect(main(page).get_by_text(draft, exact=True)).to_have_count(0)
-    picker(page, other_name)
+    picker(page, other_name, from_list=True)
     expect(main(page).get_by_role("checkbox", name=filename, exact=True)).not_to_be_checked()
     text(main(page), "本次新增 0 项")
     assert run.links(other_id) == set() and run.human_id(person) == human_id
@@ -951,25 +893,25 @@ def test_media_long_content_remains_readable_at_supported_widths(media_run: Medi
     person, human_id = run.seed_human("layout_persona_" + "long_name_" * 6)
     run.link(human_id, asset_id)
     run.goto("media-assets")
-    heading(page, "全局素材库")
     image_ready(page, filename)
     text(main(page), chip)
-    text(main(page), "1 个数字人引用")
-    assert run.gate.asset_pages[-1]["items"][0]["usageCount"] == 1
+    expect(main(page).get_by_text("1 个数字人引用", exact=True)).to_have_count(0)
+    card = main(page).get_by_role("list", name="素材列表").locator(":scope > li").first
+    name_box = bounds(card.get_by_role("heading", name=filename, exact=True))
+    kind_box = bounds(card.get_by_text("图片", exact=True))
+    assert abs((name_box["y"] + name_box["height"] / 2) - (kind_box["y"] + kind_box["height"] / 2)) < 2
     assert_layout(page, tmp_path, "media_library")
     open_asset(page, filename)
     image_ready(page, filename)
-    expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_count(0)
-    expect(main(page).get_by_role("link", name=person, exact=True)).to_be_visible()
     assert_layout(page, tmp_path, "asset_detail")
-    main(page).get_by_role("link", name=person, exact=True).click()
-    heading(page, person)
+    run.goto("digital-humans")
+    expect(human_card(page, person)).to_be_visible()
+    assert_layout(page, tmp_path, "digital_human_cards")
+    open_human(page, person)
     text(main(page), chip)
-    refs = main(page).get_by_role("region", name="引用素材", exact=True)
-    text(refs, "引用素材 · 1 项")
-    expect(refs.locator("img, video")).to_have_count(0)
-    assert_layout(page, tmp_path, "human_detail")
-    button(main(page), "返回数字人列表").click()
+    image_ready(page, filename)
+    assert_layout(page, tmp_path, "human_material_cards")
+    button(main(page), "← 返回").click()
     picker(page, person, from_list=True)
     text(main(page), "本次新增 0 项")
     expect(button(main(page), "确认添加（0）")).to_be_disabled()
@@ -980,216 +922,96 @@ def test_media_long_content_remains_readable_at_supported_widths(media_run: Medi
     assert_layout(page, tmp_path, "asset_picker")
 
 
-def seed_reference_content(run: MediaRun, tmp_path: Path) -> tuple[list[tuple[str, int]], list[tuple[str, int]], list[dict]]:
-    """Reuse the accepted prototype's content, with real PNG/WebM bytes and owned names."""
-    asset_specs = [
-        {"id": 1, "name": "白底半身照", "type": "图片", "description": "用于档案头像与商品讲解开场", "tags": ["人像", "白底"]},
-        {"id": 2, "name": "厨房台面背景", "type": "图片", "description": "暖色厨房场景", "tags": ["场景"]},
-        {"id": 3, "name": "三秒开场口播", "type": "视频", "description": "竖屏开场动作示例", "tags": ["开场"]},
-        {"id": 4, "name": "手持商品特写", "type": "视频", "description": "补充展示商品细节", "tags": ["特写"]},
-        {"id": 5, "name": "侧脸参考照", "type": "图片", "description": "备用人像素材", "tags": ["人像"]},
-        {"id": 6, "name": "收尾致谢", "type": "视频", "description": "短片结束片段", "tags": ["收尾"]},
-    ]
-    people_specs = [
-        {"id": 1, "name": "林溪", "description": "家居好物讲解", "archived": False, "links": [1, 3]},
-        {"id": 2, "name": "周晴", "description": "厨房用品体验", "archived": False, "links": [2, 3]},
-        {"id": 3, "name": "苏宁", "description": "旧版样片档案", "archived": True, "links": [4]},
-    ]
-    clip = (Path(__file__).resolve().parents[1] / "fixtures/media/TEST_preview.webm").read_bytes()
-    assets, humans = {}, {}
-    # API order is newest first; reverse creation keeps the reference's display order.
-    for spec in reversed(asset_specs):
-        video = spec["type"] == "视频"
-        assets[spec["id"]] = run.seed_asset(
-            spec["name"], tags=spec["tags"], description=spec["description"],
-            content_type="video/webm" if video else "image/png", payload=clip if video else png(),
-        )
-    for spec in reversed(people_specs):
-        humans[spec["id"]] = run.seed_human(spec["name"], description=spec["description"])
-        if spec["archived"]:
-            assert run.api("PATCH", f"{HUMANS}/{humans[spec['id']][1]}", {"status": "archived"})[0] == 200
-        for reference in spec["links"]:
-            run.link(humans[spec["id"]][1], assets[reference][1])
-    # Root renders a copy of the immutable prototype with these same data values.
-    # Reference ids are local 1..N; no real database identity is needed for rendering.
-    viewport = run.page.viewport_size
-    assert viewport is not None
-    (tmp_path / "reference-dataset.json").write_text(json.dumps({
-        "marker": run.marker, "width": viewport["width"], "height": viewport["height"],
-        "contentWidth": bounds(main(run.page).locator("[data-media-header]"))["width"],
-        "tagCatalog": tags(run),
-        "assets": [{**spec, "name": assets[spec["id"]][0]} for spec in asset_specs],
-        "people": [{**spec, "name": humans[spec["id"]][0]} for spec in people_specs],
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-    return [assets[index] for index in range(1, 7)], [humans[index] for index in range(1, 4)], asset_specs
-
-
 @pytest.mark.parametrize("media_run", [("admin", width, "/tts", "fidelity") for width in (375, 1007, 1440)], indirect=True)
 def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tmp_path: Path) -> None:
     run, page, gate = media_run, media_run.page, media_run.gate
     run.goto("media-assets")
-    assets, humans, specs = seed_reference_content(run, tmp_path)
-    filename, asset_id = assets[0]
-    person, human_id = humans[0]
+    assets = [run.seed_asset(f"卡片素材_{index:02}.png", tags=[run.name("样例标签")]) for index in range(13)]
     run.goto("media-assets")
-    assert_reference_header(page, "全局素材库", "上传素材")
-    expect(main(page).get_by_role("heading", name="素材列表", exact=True)).to_have_count(0)
-    expect(main(page).get_by_text("筛选标签", exact=True)).to_have_count(0)
-    expect(button(main(page), "清除筛选")).to_have_count(0)
-    assert_reference_grid(page, 4)
-    footer = main(page).get_by_role("navigation", name="素材分页", exact=True)
-    text(footer, "共 6 项 · 第 1 页")
-    expect(button(footer, "上一页")).to_be_disabled()
-    expect(button(footer, "下一页")).to_be_enabled()
-    for spec in specs[:4]:
-        expect(main(page).get_by_text(spec["description"], exact=True)).not_to_be_visible()
-    assert_layout(page, tmp_path, "fidelity_library")
+    root = page.locator("main")
+    expect(root.get_by_role("heading", name="全局素材库", exact=True)).to_have_count(0)
+    expect(button(root, "上传素材")).to_be_visible()
+    cards = root.get_by_role("list", name="素材列表").locator(":scope > li")
+    expect(cards.first).to_be_visible()
+    while cards.count() < len(assets):
+        tail = root.get_by_role("button", name="加载更多", exact=True)
+        if tail.count():
+            tail.evaluate("element => element.scrollIntoView({block: 'end'})")
+        expect(cards).to_have_count(len(assets))
+    assert any(request.query.get("cursor", [""])[0] for request in gate.requests if request.path == ASSETS)
+    assert len(cards.get_by_role("heading").all_text_contents()) == len(assets)
+    assert len(set(cards.get_by_role("heading").all_text_contents())) == len(assets)
+    expect(button(root, "下一页")).to_have_count(0)
+    oldest, oldest_id = assets[0]
+    asset_action(page, "编辑", oldest)
+    heading(page, "编辑素材")
+    main(page).get_by_label("素材说明", exact=True).fill(run.name("最近编辑"))
+    button(main(page), "保存资料").click()
+    expect(cards.first.get_by_role("heading", name=oldest, exact=True)).to_be_visible()
+    assert_layout(page, tmp_path, "recent_first_library")
 
-    open_asset(page, filename)
-    assert_reference_header(page, filename, "返回素材库")
-    details = main(page).get_by_role("heading", name="素材资料", exact=True).locator("xpath=ancestor::section[1]")
-    uses = main(page).get_by_role("heading", name="哪些数字人在用", exact=True).locator("xpath=ancestor::section[1]")
-    assert bounds(details)["y"] + bounds(details)["height"] <= bounds(uses)["y"] + 2
-    expect(button(details, "编辑资料")).to_be_visible()
-    expect(button(details, "从素材库删除")).to_be_visible()
-    image_ready(page, filename, scope=details)
-    assert_layout(page, tmp_path, "fidelity_asset_detail")
-    button(details, "编辑资料").click()
-    assert_reference_form(page, "编辑素材资料", ("素材名称", "素材说明", "新增标签"), "保存资料")
-    text(main(page), "已选 2 个 · 可多选，再次点击取消")
-    assert_layout(page, tmp_path, "fidelity_asset_edit")
-    button(main(page), "取消").click()
-
-    run.goto(f"media-assets?asset={assets[2][1]}")
-    heading(page, assets[2][0])
-    shared_by = main(page).get_by_role("region", name="哪些数字人在用", exact=True)
-    expect(shared_by.get_by_role("link")).to_have_text([humans[0][0], humans[1][0]])
-    video_ready(page, assets[2][0])
-    assert_layout(page, tmp_path, "fidelity_shared_asset_detail")
-    shared_by.get_by_role("link", name=person, exact=True).click()
-    assert_reference_header(page, person, "返回数字人列表")
-    refs = main(page).get_by_role("region", name="引用素材", exact=True)
-    text(refs, "引用素材 · 2 项")
-    reference_rows = refs.locator('ul[aria-label="已引用素材"] > li')
-    expect(reference_rows).to_have_count(2)
-    expect(reference_rows.locator(":scope > strong")).to_have_text([assets[0][0], assets[2][0]])
-    expect(refs.locator("img, video")).to_have_count(0)
-    assert_layout(page, tmp_path, "fidelity_human_detail")
-    button(main(page), "编辑档案").click()
-    assert_reference_form(page, "编辑档案", ("数字人名称", "人设说明"), "保存资料")
-    assert_layout(page, tmp_path, "fidelity_human_edit")
-    name_input = main(page).get_by_role("textbox", name="数字人名称", exact=True)
-    name_input.fill("TEST_尚未保存的名称")
-    main(page).get_by_role("navigation", name="面包屑").get_by_role("link", name="数字人", exact=True).click()
-    button(page.get_by_role("alertdialog"), "继续处理").click()
-    expect(name_input).to_have_value("TEST_尚未保存的名称")
-    name_input.fill(person)
-    button(main(page), "取消").click()
-
-    picker(page, person)
-    assert_reference_picker(page, person, 0)
-    assert_reference_grid(page, 4)
-    picker_footer = main(page).get_by_role("navigation", name="可选素材分页", exact=True)
-    text(picker_footer, "共 4 项 · 第 1 页")
-    expect(button(picker_footer, "上一页")).to_be_disabled()
-    expect(button(picker_footer, "下一页")).to_be_disabled()
-    assert_layout(page, tmp_path, "fidelity_picker")
-    preview = open_picker_preview(page, assets[1][0])
-    image_ready(page, assets[1][0], scope=preview)
-    text(preview, specs[1]["description"])
-    assert_layout(page, tmp_path, "fidelity_picker_preview")
-    preview.locator("summary").click()
-    expect(preview).to_have_js_property("open", False)
-    set_checkbox(page, assets[4][0], True)
-    expect(button(main(page), "取消勾选 " + assets[4][0])).to_be_visible()
-    assert_reference_picker(page, person, 1)
-    assert_layout(page, tmp_path, "fidelity_picker_selected")
-    button(main(page), "取消").click()
-    button(dialog(page), "确认放弃").click()
-    assert run.links(human_id) == {assets[0][1], assets[2][1]}
-
-    picker(page, person)
-    set_checkbox(page, assets[4][0], True)
-    submit_selection(page, 1)
-    heading(page, person)
-    ordered_rows = main(page).locator('ul[aria-label="已引用素材"] > li > strong')
-    expect(ordered_rows).to_have_text([assets[0][0], assets[2][0], assets[4][0]])
-    assert_layout(page, tmp_path, "fidelity_human_after_add")
-    run.link(human_id, assets[2][1])  # Replaying an existing link must not move its row.
-    run.goto(f"digital-humans?human={human_id}")
-    heading(page, person)
-    expect(main(page).locator('ul[aria-label="已引用素材"] > li > strong')).to_have_text(
-        [assets[0][0], assets[2][0], assets[4][0]],
-    )
-    assert run.links(human_id) == {assets[0][1], assets[2][1], assets[4][1]}
-    remove_reference(page, assets[4][0])
-    expect(main(page).locator('ul[aria-label="已引用素材"] > li > strong')).to_have_text([assets[0][0], assets[2][0]])
-
-    button(main(page), "归档档案").click()
-    assert_reference_header(page, "归档「" + person + "」")
-    confirm = confirmation(page)
-    assert gate.calls["PATCH", f"{HUMANS}/{human_id}"] == 0
-    assert_layout(page, tmp_path, "fidelity_archive_confirmation")
-    button(confirm, "确认归档").click()
-    heading(page, "数字人列表")
-    expect(button(main(page), "已归档")).to_have_attribute("aria-pressed", "true")
-    expect(button(main(page), "添加素材 " + person)).to_have_count(0)
-    assert_layout(page, tmp_path, "fidelity_archived_list")
-    button(main(page), "恢复档案 " + person).click()
-    heading(page, person)
-    assert run.links(human_id) == {assets[0][1], assets[2][1]}
-    breadcrumb = main(page).get_by_role("navigation", name="面包屑")
-    parent = breadcrumb.get_by_role("link", name="数字人", exact=True)
-    expect(parent).to_have_attribute("href", "/tts/v2/pages/digital-humans")
-    expect(breadcrumb.get_by_text("档案详情", exact=True)).to_have_attribute("aria-current", "page")
-    parent.press("Enter")
-    assert_reference_header(page, "数字人列表", "新建数字人")
+    run.goto("digital-humans")
+    person = run.name("林溪")
+    button(root, "新建数字人").click()
+    create = page.get_by_role("dialog", name="新建数字人", exact=True)
+    create.get_by_label("数字人名称", exact=True).fill(person)
+    photo = run.name("形象初稿.png")
+    with page.expect_file_chooser() as chooser:
+        button(create, "选择照片").click()
+    chooser.value.set_files({"name": photo, "mimeType": "image/png", "buffer": png()})
+    expect(create.get_by_role("img", name="形象照片预览", exact=True)).to_be_visible()
+    assert_layout(page, tmp_path, "create_with_portrait")
+    button(create, "创建档案").click()
+    card = human_card(page, person)
+    portrait = button(card, "更换" + person + "的形象照片")
+    expect(portrait).to_be_visible()
+    image = portrait.locator("img")
+    expect(image).to_be_visible()
+    page.wait_for_function("img => img.complete && img.naturalWidth === 256", arg=image.element_handle())
+    original = image.get_attribute("src")
     assert "human=" not in page.url
-    expect(button(main(page), "启用中")).to_have_attribute("aria-pressed", "true")
-    expect(main(page).get_by_role("textbox", name="搜索数字人", exact=True)).to_have_count(0)
-    assert_layout(page, tmp_path, "fidelity_active_list")
-    button(main(page), "新建数字人").click()
-    assert_reference_form(page, "新建数字人", ("数字人名称", "人设说明"), "创建档案")
-    assert_layout(page, tmp_path, "fidelity_human_create")
-    button(main(page), "取消").click()
-    open_human(page, person)
-    button(main(page), "删除档案").click()
-    confirmation(page)
-    assert_layout(page, tmp_path, "fidelity_delete_human_confirmation")
-    button(confirmation(page), "取消").click()
-    button(main(page), "移除引用 " + filename).click()
-    confirmation(page)
-    assert_layout(page, tmp_path, "fidelity_unlink_confirmation")
-    button(confirmation(page), "取消").click()
+    human_id = run.human_id(person)
+    with db() as session:
+        assert session.get(DigitalHuman, human_id).portrait_asset_id == run.asset_id(photo)
+    assert_layout(page, tmp_path, "human_portrait_card")
 
-    picker(page, person)
-    button(main(page), "上传新素材").click()
-    text(upload_dialog(page), "上传后添加到「" + person + "」。")
-    expect(upload_dialog(page).get_by_role("textbox", name="素材名称", exact=True)).to_be_focused()
-    assert_layout(page, tmp_path, "fidelity_target_upload_empty")
-    pick_file(run, run.name("本地预览.png"))
-    assert_layout(page, tmp_path, "fidelity_target_upload_preview")
-    button(upload_dialog(page), "取消").click()
-    button(dialog(page), "确认放弃").click()
-    button(main(page), "取消").click()
-    heading(page, person)
-    open_reference(page, assets[2][0])
-    assert not gate.allows("GET", "/v2/pages/media-assets", {"asset": [str(asset_id)], "fromHuman": ["0"]}, None)
-    button(main(page), "从素材库删除").click()
-    expect(button(confirmation(page), "确认删除")).to_be_disabled()
-    assert_layout(page, tmp_path, "fidelity_referenced_delete_confirmation")
-    button(confirmation(page), "取消").click()
-    run.goto("media-assets")
-    button(main(page), "上传素材").click()
-    text(upload_dialog(page), "上传后添加到全局素材库。")
-    expect(upload_dialog(page).get_by_role("textbox", name="素材名称", exact=True)).to_be_focused()
-    assert_layout(page, tmp_path, "fidelity_library_upload_empty")
-    before = gate.calls["POST", ASSETS + "/upload-url"]
-    pick_file(run, run.name("独立本地预览.png"))
-    assert_layout(page, tmp_path, "fidelity_library_upload_preview")
-    assert gate.calls["POST", ASSETS + "/upload-url"] == before
-    button(upload_dialog(page), "取消").click()
-    button(dialog(page), "确认放弃").click()
+    replacement = run.name("形象新版.png")
+    for save in (False, True):
+        portrait.click()
+        edit = page.get_by_role("dialog", name="更换形象照片", exact=True)
+        with page.expect_file_chooser() as chooser:
+            button(edit, "更换照片").click()
+        chooser.value.set_files({"name": replacement, "mimeType": "image/png", "buffer": png()})
+        expect(edit.get_by_role("img", name="形象照片预览", exact=True)).to_be_visible()
+        button(edit, "保存照片" if save else "取消").click()
+        if not save:
+            expect(image).to_have_attribute("src", original)
+    expect(root.get_by_text("形象照片已更新。", exact=True)).to_be_visible()
+    expect(image).not_to_have_attribute("src", original)
+    with db() as session:
+        assert session.get(DigitalHuman, human_id).portrait_asset_id == run.asset_id(replacement)
+    assert run.api("GET", ASSETS + "?keyword=" + run.marker)[1]["total"] == len(assets)
+
+    picker(page, person, from_list=True)
+    for filename, _ in assets[:2]:
+        choose(page, filename)
+    submit_selection(page, 2)
+    expect(dialog(page)).to_have_count(0)
+    open_human(page, person)
+    linked = root.get_by_role("list", name="关联素材", exact=True)
+    expect(linked.locator(":scope > li")).to_have_count(2)
+    image_ready(page, oldest, scope=linked)
+    assert_layout(page, tmp_path, "linked_asset_cards")
+    set_checkbox(page, "全选", True)
+    button(root, "批量移除").click()
+    button(confirmation(page), "确认移除").click()
+    text(root, "当前没有关联素材。")
+    assert run.links(human_id) == set()
+    assert gate.calls["POST", f"{HUMANS}/{human_id}/assets/batch-remove"] == 1
+    assert run.api("GET", f"{ASSETS}/{oldest_id}")[0] == 200
+    breadcrumb = root.get_by_role("navigation", name="面包屑")
+    button(breadcrumb, "数字人").click()
+    expect(human_card(page, person)).to_be_visible()
 
 
 def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRun, tmp_path: Path) -> None:
@@ -1214,7 +1036,7 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     assert_layout(page, tmp_path, "local_video_preview")
 
     button(upload, "开始上传").click()
-    heading(page, "全局素材库")
+    expect(button(page.locator("main"), "上传素材")).to_be_visible()
     button(main(page), "查看刚上传的素材").click()
     heading(page, filename)
     assert video_ready(page, filename) == local_metadata
@@ -1226,7 +1048,7 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     assert gate.store.objects == {object_key: ("video/webm", payload)}
     assert gate.calls["POST", ASSETS + "/upload-url"] == gate.store.puts == 1
     assert gate.calls["POST", f"{ASSETS}/{asset_id}/confirm"] == 1
-    button(main(page), "返回素材库").click()
+    button(main(page), "关闭").click()
     assert video_ready(page, filename) == local_metadata
     assert gate.asset_pages[-1]["items"][0]["asset_id"] == asset_id
     assert gate.asset_pages[-1]["items"][0]["usageCount"] == 0
@@ -1240,10 +1062,9 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     attach_path = f"{HUMANS}/{human_id}/assets"
     assert gate.calls["POST", attach_path] == 0 and run.links(human_id) == set()
     submit_selection(page, 1)
-    heading(page, person)
-    refs = main(page).get_by_role("region", name="引用素材", exact=True)
-    text(refs, "引用素材 · 1 项")
-    expect(refs.locator("img, video")).to_have_count(0)
+    open_human(page, person)
+    refs = main(page).get_by_role("list", name="关联素材", exact=True)
+    assert video_ready(page, filename, scope=refs) == local_metadata
     assert run.links(human_id) == {asset_id} and gate.calls["POST", attach_path] == 1
     assert_layout(page, tmp_path, "shared_video_detail")
 
@@ -1251,7 +1072,6 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     assert video_ready(page, filename) == local_metadata
     status, metadata = run.api("GET", f"{ASSETS}/{asset_id}")
     assert status == 200 and isinstance(metadata, dict) and metadata["usageCount"] == 1
-    expect(main(page).get_by_role("link", name=person, exact=True)).to_be_visible()
     assert gate.store.objects == {object_key: ("video/webm", payload)} and gate.store.removes == 0
 
 
@@ -1263,7 +1083,7 @@ def test_upload_file_control_is_visible_and_opens_native_picker(media_run: Media
     run.goto("media-assets")
     button(main(page), "上传素材").click()
     upload = upload_dialog(page)
-    expect(page.locator("main h1")).to_have_text("全局素材库")
+    expect(page.locator("main h1")).to_have_count(0)
     control = button(upload, "上传文件")
     name_field = upload.get_by_role("textbox", name="素材名称", exact=True)
     expect(name_field).to_be_focused()
@@ -1298,7 +1118,7 @@ def test_upload_file_control_is_visible_and_opens_native_picker(media_run: Media
     expect(upload.locator('input[type="file"]')).to_be_disabled()
     assert_layout(page, tmp_path, "file_control_disabled")
     gate.store.release_put()
-    heading(page, "全局素材库")
+    expect(button(page.locator("main"), "上传素材")).to_be_visible()
     text(main(page), "已入库「" + display_name + "」。")
     assert gate.store.puts == 1 and gate.calls["POST", ASSETS + "/upload-url"] == 1
 

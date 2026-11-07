@@ -12,8 +12,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Select, and_, delete, func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import (
+    BigInteger,
+    Select,
+    and_,
+    any_,
+    bindparam,
+    delete,
+    func,
+    or_,
+    select,
+    tuple_,
+    update,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -52,6 +64,8 @@ class AssetFilter:
     offset: int = 0
     exclude_digital_human_id: int | None = None
     status: AssetStatus | None = None
+    recent: bool = False
+    after: tuple[datetime, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +86,10 @@ class DeleteAssetError(Enum):
     ASSET_IN_USE = "asset_in_use"
 
 
+class PortraitNotReady(ValueError):
+    """The requested portrait is unavailable or has not been confirmed."""
+
+
 def normalize_tags(tags: Iterable[str]) -> list[str]:
     """Keep distinct, nonempty labels with consistent whitespace, in input order."""
     return list(dict.fromkeys(tag for value in tags if (tag := _normalize_tag(value))))
@@ -90,8 +108,9 @@ def _normalized_asset_tag() -> ColumnElement[str]:
     return func.btrim(func.regexp_replace(translated, " +", " ", "g"))
 
 
-def _asset_base_query() -> Select:
-    return select(MediaAsset).where(MediaAsset.deleted_at.is_(None))
+def _asset_base_query(*, include_portrait: bool = False) -> Select:
+    query = select(MediaAsset).where(MediaAsset.deleted_at.is_(None))
+    return query if include_portrait else query.where(MediaAsset.is_portrait.is_(False))
 
 
 def _human_base_query() -> Select:
@@ -109,6 +128,7 @@ def create_asset(
     uploaded_by_key_id: str | None,
     uploaded_by_prefix: str | None,
     tags: list[str] | None = None,
+    is_portrait: bool = False,
 ) -> MediaAsset:
     """Stage a ticket row with its final object key. The caller commits it after signing."""
     asset = MediaAsset(
@@ -122,6 +142,7 @@ def create_asset(
         uploaded_by_key_id=uploaded_by_key_id,
         uploaded_by_prefix=uploaded_by_prefix,
         tags=normalize_tags(tags or []),
+        is_portrait=is_portrait,
     )
     session.add(asset)
     session.flush()
@@ -131,10 +152,14 @@ def create_asset(
     return asset
 
 
-def get_asset(session: Session, asset_id: int) -> MediaAsset | None:
+def get_asset(
+    session: Session, asset_id: int, *, include_portrait: bool = False
+) -> MediaAsset | None:
     """Return one live asset row, or ``None``."""
     return session.scalar(
-        _asset_base_query().where(MediaAsset.id == asset_id),
+        _asset_base_query(include_portrait=include_portrait).where(
+            MediaAsset.id == asset_id
+        ),
     )
 
 
@@ -143,7 +168,7 @@ def record_upload_verification(
 ) -> MediaAsset | None:
     """Record a storage check without overwriting a concurrent success."""
     asset = session.scalar(
-        _asset_base_query()
+        _asset_base_query(include_portrait=True)
         .where(MediaAsset.id == asset_id)
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -187,6 +212,7 @@ def update_asset_metadata(
             .where(
                 MediaAsset.id == asset_id,
                 MediaAsset.deleted_at.is_(None),
+                MediaAsset.is_portrait.is_(False),
             )
             .values(**values),
         )
@@ -201,7 +227,7 @@ def soft_delete_asset(
     # link_asset_to_digital_human takes FOR SHARE on this same row. Once this
     # lock is held, no new reference can commit between the check and deletion.
     asset = session.scalar(
-        _asset_base_query()
+        _asset_base_query(include_portrait=True)
         .where(MediaAsset.id == asset_id)
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -214,6 +240,12 @@ def soft_delete_asset(
             .join(DigitalHuman, DigitalHuman.id == DigitalHumanAsset.digital_human_id)
             .where(
                 DigitalHumanAsset.asset_id == asset_id,
+                DigitalHuman.deleted_at.is_(None),
+            )
+            .exists()
+            | select(DigitalHuman.id)
+            .where(
+                DigitalHuman.portrait_asset_id == asset_id,
                 DigitalHuman.deleted_at.is_(None),
             )
             .exists()
@@ -232,7 +264,7 @@ def soft_delete_asset(
 
 def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
     """List live assets with filters and a total count."""
-    conditions = [MediaAsset.deleted_at.is_(None)]
+    conditions = [MediaAsset.deleted_at.is_(None), MediaAsset.is_portrait.is_(False)]
     if filters.kind is not None:
         conditions.append(MediaAsset.kind == filters.kind.value)
     if filters.status is not None:
@@ -273,12 +305,16 @@ def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
     total = session.scalar(
         select(func.count()).select_from(MediaAsset).where(and_(*conditions))
     )
+    query = select(MediaAsset).where(and_(*conditions))
+    if filters.after is not None:
+        query = query.where(
+            tuple_(MediaAsset.updated_at, MediaAsset.id) < tuple_(*filters.after)
+        )
+    order_time = MediaAsset.updated_at if filters.recent else MediaAsset.created_at
     rows = session.scalars(
-        _asset_base_query()
-        .where(and_(*conditions))
-        .order_by(MediaAsset.created_at.desc(), MediaAsset.id.desc())
+        query.order_by(order_time.desc(), MediaAsset.id.desc())
         .limit(filters.limit)
-        .offset(filters.offset),
+        .offset(filters.offset)
     ).all()
     return AssetPage(items=list(rows), total=total or 0)
 
@@ -290,6 +326,7 @@ def list_asset_tags(session: Session) -> list[str]:
         .select_from(MediaAsset)
         .where(
             MediaAsset.deleted_at.is_(None),
+            MediaAsset.is_portrait.is_(False),
             MediaAsset.status == AssetStatus.READY.value,
         )
         .distinct()
@@ -349,13 +386,17 @@ def create_digital_human(
     name: str,
     description: str | None,
     created_by: str | None,
+    portrait_asset_id: int | None = None,
 ) -> DigitalHuman:
     """Insert one persona record."""
+    if portrait_asset_id is not None:
+        _require_ready_portrait(session, portrait_asset_id)
     human = DigitalHuman(
         name=name,
         description=description,
         status=DigitalHumanStatus.ACTIVE.value,
         created_by=created_by,
+        portrait_asset_id=portrait_asset_id,
     )
     session.add(human)
     session.commit()
@@ -370,15 +411,7 @@ def get_digital_human(session: Session, digital_human_id: int) -> DigitalHuman |
     )
 
 
-def list_digital_humans(
-    session: Session,
-    *,
-    keyword: str | None = None,
-    status: DigitalHumanStatus | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> list[DigitalHuman]:
-    """List live personas, newest first."""
+def _filtered_humans(keyword: str | None, status: DigitalHumanStatus | None) -> Select:
     query = _human_base_query()
     if status is not None:
         query = query.where(DigitalHuman.status == status.value)
@@ -390,13 +423,61 @@ def list_digital_humans(
                 DigitalHuman.description.ilike(pattern),
             )
         )
+    return query
+
+
+def list_digital_humans(
+    session: Session,
+    *,
+    keyword: str | None = None,
+    status: DigitalHumanStatus | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    recent: bool = False,
+    after: tuple[datetime, int] | None = None,
+) -> list[DigitalHuman]:
+    """List live personas in creation or edit order."""
+    query = _filtered_humans(keyword, status)
+    if after is not None:
+        query = query.where(
+            tuple_(DigitalHuman.updated_at, DigitalHuman.id) < tuple_(*after)
+        )
+    order_time = DigitalHuman.updated_at if recent else DigitalHuman.created_at
     return list(
         session.scalars(
-            query.order_by(DigitalHuman.created_at.desc(), DigitalHuman.id.desc())
+            query.order_by(order_time.desc(), DigitalHuman.id.desc())
             .limit(limit)
             .offset(offset)
         ).all()
     )
+
+
+def count_digital_humans(
+    session: Session, keyword: str | None, status: DigitalHumanStatus | None
+) -> int:
+    return (
+        session.scalar(
+            select(func.count()).select_from(
+                _filtered_humans(keyword, status).subquery()
+            )
+        )
+        or 0
+    )
+
+
+def _require_ready_portrait(session: Session, asset_id: int) -> None:
+    asset = session.scalar(
+        _asset_base_query(include_portrait=True)
+        .where(
+            MediaAsset.id == asset_id,
+            MediaAsset.is_portrait.is_(True),
+            MediaAsset.kind == AssetKind.IMAGE.value,
+            MediaAsset.status == AssetStatus.READY.value,
+        )
+        .with_for_update(read=True)
+    )
+    if asset is None:
+        raise PortraitNotReady
 
 
 def update_digital_human(
@@ -406,6 +487,7 @@ def update_digital_human(
     name: str | None = None,
     description: str | None = None,
     status: DigitalHumanStatus | None = None,
+    portrait_asset_id: int | None = None,
 ) -> DigitalHuman | None:
     """Edit one persona; ``None`` fields are left unchanged."""
     values: dict[str, object] = {}
@@ -415,6 +497,9 @@ def update_digital_human(
         values["description"] = description
     if status is not None:
         values["status"] = status.value
+    if portrait_asset_id is not None:
+        _require_ready_portrait(session, portrait_asset_id)
+        values["portrait_asset_id"] = portrait_asset_id
     if values:
         session.execute(
             update(DigitalHuman)
@@ -453,12 +538,9 @@ def link_asset_to_digital_human(
     asset_id: int,
 ) -> DigitalHuman | LinkAssetError:
     """Attach a ready asset or acknowledge a legacy link, including on retries."""
-    # Shared row locks serialize this decision with soft deletes. The unique
-    # pair constraint still allows concurrent attempts to converge on one link.
+    # Lock the persona before changing links and its edited timestamp.
     human = session.scalar(
-        _human_base_query()
-        .where(DigitalHuman.id == digital_human_id)
-        .with_for_update(read=True)
+        _human_base_query().where(DigitalHuman.id == digital_human_id).with_for_update()
     )
     if human is None:
         return LinkAssetError.HUMAN_NOT_FOUND
@@ -477,7 +559,7 @@ def link_asset_to_digital_human(
             .with_for_update(read=True)
         )
         return human if existing is not None else LinkAssetError.ASSET_NOT_READY
-    session.execute(
+    inserted = session.execute(
         insert(DigitalHumanAsset)
         .values(digital_human_id=digital_human_id, asset_id=asset_id)
         .on_conflict_do_nothing(
@@ -486,7 +568,10 @@ def link_asset_to_digital_human(
                 DigitalHumanAsset.asset_id,
             ]
         )
+        .returning(DigitalHumanAsset.id)
     )
+    if inserted.scalar_one_or_none() is not None:
+        human.updated_at = datetime.now(UTC)
     session.commit()
     return human
 
@@ -497,14 +582,31 @@ def unlink_asset_from_digital_human(
     asset_id: int,
 ) -> bool:
     """Detach one asset from one persona. Idempotent."""
-    result = session.execute(
-        delete(DigitalHumanAsset).where(
-            DigitalHumanAsset.digital_human_id == digital_human_id,
-            DigitalHumanAsset.asset_id == asset_id,
-        )
+    return bool(unlink_assets_from_digital_human(session, digital_human_id, [asset_id]))
+
+
+def unlink_assets_from_digital_human(
+    session: Session, digital_human_id: int, asset_ids: list[int]
+) -> int | None:
+    """Remove the specified associations together and keep the global assets."""
+    human = session.scalar(
+        _human_base_query().where(DigitalHuman.id == digital_human_id).with_for_update()
     )
+    if human is None:
+        return None
+    removed = session.scalars(
+        delete(DigitalHumanAsset)
+        .where(
+            DigitalHumanAsset.digital_human_id == digital_human_id,
+            DigitalHumanAsset.asset_id
+            == any_(bindparam("unlink_ids", asset_ids, type_=ARRAY(BigInteger))),
+        )
+        .returning(DigitalHumanAsset.id)
+    ).all()
+    if removed:
+        human.updated_at = datetime.now(UTC)
     session.commit()
-    return bool(result.rowcount)
+    return len(removed)
 
 
 __all__ = [

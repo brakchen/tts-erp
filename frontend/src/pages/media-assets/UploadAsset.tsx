@@ -1,12 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button, Input, Label, Modal, ProgressBar, TextField } from '@heroui/react';
-import { ApiError, retryAfterSeconds } from '../../shared/api/client';
+import { ApiError } from '../../shared/api/client';
 import type { FrontendBootstrap } from '../../shared/contracts';
-import { decodeDigitalHuman, decodeUploadConfirmation, decodeUploadTicket, type UploadTicket } from './contracts';
+import { decodeDigitalHuman, type UploadTicket } from './contracts';
 import { UploadTags } from './TagEditor';
 import { ActionError, DiscardDialog, mediaError, mediaWrite, recordLink, uncertainResult, useLeaveGuard } from './media-ui';
+import { confirmUpload, imageTypes, requestUpload, transferMediaFile } from './media-upload';
 
-const types = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime';
+const types = imageTypes + ',video/mp4,video/webm,video/quicktime';
 type Phase = 'draft' | 'preparing' | 'sending' | 'confirming' | 'attaching' | 'prepare-error' | 'send-error' | 'confirm-error' | 'restart' | 'attach-error';
 
 function LocalFilePreview({ file }: { file: File }) {
@@ -50,14 +51,14 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
   const [discard, setDiscard] = useState(false);
   const busy = useRef(false);
   const putUncertain = useRef(false);
-  const xhr = useRef<XMLHttpRequest | undefined>(undefined);
+  const transfer = useRef<AbortController | undefined>(undefined);
   const pending = phase === 'preparing' || phase === 'sending' || phase === 'confirming' || phase === 'attaching';
   const readyAsset = phase === 'attach-error' ? ticket?.assetId : undefined;
   const href = recordLink(bootstrap, 'media-assets', 'asset', readyAsset);
   const root = bootstrap.rootPath;
 
   useLeaveGuard(Boolean(file || filename.trim() || tags.length) || pending);
-  useEffect(() => () => xhr.current?.abort(), []);
+  useEffect(() => () => transfer.current?.abort(), []);
 
   function close() {
     if (busy.current) return;
@@ -83,8 +84,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
   async function confirm(current: UploadTicket) {
     setPhase('confirming');
     try {
-      await mediaWrite(root, '/assets/' + current.assetId + '/confirm', 'POST',
-        (data) => decodeUploadConfirmation(data, current.assetId));
+      await confirmUpload(root, current);
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 409 && (failure.detail === 'UPLOAD_NOT_FOUND' || failure.detail === 'SIZE_MISMATCH')) {
         const canRetryTransfer = putUncertain.current && Date.parse(current.uploadExpiresAt) > Date.now();
@@ -104,28 +104,16 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
     setPhase('sending');
     setProgress(0);
     try {
-      await new Promise<void>((resolve, reject) => {
-        const request = new XMLHttpRequest();
-        xhr.current = request;
-        request.open('PUT', current.uploadUrl);
-        request.withCredentials = false;
-        Object.entries(current.requiredHeaders).forEach(([key, value]) => request.setRequestHeader(key, value));
-        request.upload.onprogress = (event) => {
-          if (event.lengthComputable && event.total > 0) setProgress(Math.min(100, Math.floor(100 * event.loaded / event.total)));
-        };
-        request.onload = () => request.status >= 200 && request.status < 300 ? resolve() :
-          reject(new ApiError('文件传输失败', request.status, retryAfterSeconds(request.getResponseHeader('Retry-After'))));
-        request.onerror = () => reject(new Error('传输结果未确认'));
-        request.onabort = () => reject(new Error('传输已中断'));
-        request.send(source);
-      });
+      const controller = new AbortController();
+      transfer.current = controller;
+      await transferMediaFile(current, source, controller, setProgress);
     } catch (failure) {
       putUncertain.current = true;
       setError(mediaError(failure, true));
       setPhase('send-error');
       return;
     } finally {
-      xhr.current = undefined;
+      transfer.current = undefined;
     }
     putUncertain.current = false;
     await confirm(current);
@@ -136,9 +124,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
     setPhase('preparing');
     let next: UploadTicket;
     try {
-      next = await mediaWrite(root, '/assets/upload-url', 'POST', decodeUploadTicket, {
-        filename: filename.trim(), contentType: file.type, sizeBytes: file.size, tags,
-      });
+      next = await requestUpload(root, file, filename.trim(), tags);
     } catch (failure) {
       setPrepareUncertain(uncertainResult(failure));
       setError(mediaError(failure, true));
@@ -199,7 +185,7 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
                 <ProgressBar aria-label="传输进度" maxValue={100} value={progress}>
                   <ProgressBar.Output /><ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track>
                 </ProgressBar>
-                <Button variant="secondary" onPress={() => xhr.current?.abort()}>中止传输</Button>
+                <Button variant="secondary" onPress={() => transfer.current?.abort()}>中止传输</Button>
               </>}
               {phase === 'confirming' && <>
                 <p role="status">传输完成，正在确认入库</p>

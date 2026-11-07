@@ -110,10 +110,6 @@ CREATE SCHEMA runninghub;
 CREATE SCHEMA security;
 
 
--- Name: pg_stat_statements; Type: EXTENSION; Schema: -; Owner: -
-
-
-
 -- Name: fn_touch_intercept_configs_updated_at(); Type: FUNCTION; Schema: public; Owner: -
 
 CREATE OR REPLACE FUNCTION public.fn_touch_intercept_configs_updated_at() RETURNS trigger
@@ -894,6 +890,7 @@ CREATE TABLE IF NOT EXISTS media.digital_humans (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
+    portrait_asset_id bigint,
     CONSTRAINT digital_human_status_check CHECK ((status = ANY (ARRAY['active'::text, 'archived'::text])))
 );
 
@@ -924,6 +921,7 @@ CREATE TABLE IF NOT EXISTS media.media_assets (
     deleted_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    is_portrait boolean DEFAULT false NOT NULL,
     CONSTRAINT media_asset_kind_check CHECK ((kind = ANY (ARRAY['image'::text, 'video'::text]))),
     CONSTRAINT media_asset_size_check CHECK ((size_bytes > 0)),
     CONSTRAINT media_asset_status_check CHECK ((status = ANY (ARRAY['awaiting_upload'::text, 'ready'::text, 'failed'::text])))
@@ -3476,9 +3474,19 @@ CREATE INDEX IF NOT EXISTS ix_sync_jobs_name_started ON integration.sync_jobs US
 CREATE INDEX IF NOT EXISTS ix_digital_human_assets_asset ON media.digital_human_assets USING btree (asset_id);
 
 
+-- Name: ix_digital_humans_live_recent; Type: INDEX; Schema: media; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_digital_humans_live_recent ON media.digital_humans USING btree (updated_at DESC, id DESC) WHERE (deleted_at IS NULL);
+
+
 -- Name: ix_digital_humans_name; Type: INDEX; Schema: media; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_digital_humans_name ON media.digital_humans USING btree (name);
+
+
+-- Name: ix_digital_humans_portrait_asset; Type: INDEX; Schema: media; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_digital_humans_portrait_asset ON media.digital_humans USING btree (portrait_asset_id) WHERE (portrait_asset_id IS NOT NULL);
 
 
 -- Name: ix_digital_humans_status; Type: INDEX; Schema: media; Owner: -
@@ -3489,6 +3497,11 @@ CREATE INDEX IF NOT EXISTS ix_digital_humans_status ON media.digital_humans USIN
 -- Name: ix_media_assets_created; Type: INDEX; Schema: media; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_media_assets_created ON media.media_assets USING btree (created_at DESC, id DESC);
+
+
+-- Name: ix_media_assets_live_recent; Type: INDEX; Schema: media; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_media_assets_live_recent ON media.media_assets USING btree (updated_at DESC, id DESC) WHERE ((deleted_at IS NULL) AND (is_portrait IS FALSE));
 
 
 -- Name: ix_media_assets_status; Type: INDEX; Schema: media; Owner: -
@@ -4401,6 +4414,12 @@ ALTER TABLE ONLY media.digital_human_assets
 
 ALTER TABLE ONLY media.digital_human_assets
     ADD CONSTRAINT digital_human_assets_digital_human_id_fkey FOREIGN KEY (digital_human_id) REFERENCES media.digital_humans(id) ON DELETE CASCADE;
+
+
+-- Name: digital_humans fk_digital_humans_portrait_asset; Type: FK CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.digital_humans
+    ADD CONSTRAINT fk_digital_humans_portrait_asset FOREIGN KEY (portrait_asset_id) REFERENCES media.media_assets(id);
 
 
 -- Name: package_gift_items package_gift_items_package_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -
