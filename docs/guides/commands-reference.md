@@ -49,6 +49,18 @@ bash scripts/import_prod_to_test.sh --exclude-credentials --yes
 
 ## 3. 服务管理
 
+在本机仓库根目录执行以下命令。首次运行会安装缺少的前端依赖，默认构建前端后在前台启动服务，后端读取 `.env.local`。
+
+```bash
+bash scripts/local_deploy.sh                  # 构建前端并启动 127.0.0.1:9877
+bash scripts/local_deploy.sh --frontend-only  # 服务已运行时更新前端，完成后刷新页面
+```
+
+Windows PowerShell 可用 Git Bash 执行 `& 'C:/Program Files/Git/bin/bash.exe' scripts/local_deploy.sh`。
+需要重启本机后端时，先在原终端按 Ctrl+C，再运行默认命令。前端锁文件变更后先执行 `npm ci --prefix frontend`。
+
+服务器进程由 systemd 管理：
+
 ```bash
 # 重启 API = systemctl --user restart tts-erp.service
 bash restart.sh
