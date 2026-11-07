@@ -279,7 +279,9 @@ def pick_file(run: MediaRun, name: str) -> None:
     page, gate = run.page, run.gate
     tickets_before = gate.calls["POST", ASSETS + "/upload-url"]
     puts_before = gate.store.puts
-    main(page).locator('input[type="file"]').set_input_files({
+    with page.expect_file_chooser() as chooser:
+        main(page).locator('.media-file-trigger').click()
+    chooser.value.set_files({
         "name": name, "mimeType": "image/png", "buffer": png(),
     })
     preview = main(page).get_by_role("img", name="本地图片预览 " + name, exact=True)
@@ -1183,7 +1185,9 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     run.goto("media-assets")
     button(main(page), "上传素材").click()
     heading(page, "上传素材")
-    main(page).locator('input[type="file"]').set_input_files({
+    with page.expect_file_chooser() as chooser:
+        button(main(page), "选择文件").click()
+    chooser.value.set_files({
         "name": filename, "mimeType": "video/webm", "buffer": payload,
     })
     local_metadata = video_ready(page, filename, local=True)
@@ -1231,6 +1235,55 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     assert status == 200 and isinstance(metadata, dict) and metadata["usageCount"] == 1
     expect(main(page).get_by_role("link", name=person, exact=True)).to_be_visible()
     assert gate.store.objects == {object_key: ("video/webm", payload)} and gate.store.removes == 0
+
+
+@pytest.mark.parametrize("media_run", [("admin", width, "", "fidelity") for width in (375, 1007, 2560)], indirect=True)
+def test_upload_file_control_is_visible_and_opens_native_picker(media_run: MediaRun, tmp_path: Path) -> None:
+    run, page, gate = media_run, media_run.page, media_run.gate
+    if page.viewport_size["width"] == 2560:
+        page.set_viewport_size({"width": 2560, "height": 1215})
+    run.goto("media-assets")
+    button(main(page), "上传素材").click()
+    heading(page, "上传素材")
+    control = button(main(page), "选择文件")
+    expect(control).to_be_visible()
+    expect(main(page).locator('input[type="file"]')).not_to_be_visible()
+    style = control.evaluate("""el => { const style = getComputedStyle(el); return {
+        height: el.getBoundingClientRect().height, border: style.borderTopWidth, borderStyle: style.borderTopStyle,
+    }; }""")
+    assert style["height"] >= 36 and style["border"] == "1px" and style["borderStyle"] == "solid", style
+    assert abs(bounds(control)["width"] - bounds(main(page).get_by_role("textbox", name="素材名称", exact=True))["width"]) <= 2
+    text(main(page), "暂无标签，可在下方新增。")
+    assert_layout(page, tmp_path, "file_control_empty")
+    main(page).locator("form").screenshot(path=tmp_path / f"TEST_file_control_form_empty_{page.viewport_size['width']}.png")
+    # Real visible-trigger activation, rather than setting a hidden input directly.
+    pick_file(run, run.name("本地素材.png"))
+    name = run.name("原始文件名_" + "长名称保持可读_" * 12 + ".png")
+    current = main(page).locator('.media-file-trigger')
+    current.focus()
+    current.press("Tab")
+    page.keyboard.press("Shift+Tab")
+    expect(current).to_be_focused()
+    assert_layout(page, tmp_path, "file_control_keyboard_focus")
+    with page.expect_file_chooser() as chooser:
+        current.press("Enter")
+    chooser.value.set_files({"name": name, "mimeType": "image/png", "buffer": png()})
+    expect(button(main(page), "重新选择文件：" + name)).to_be_visible()
+    expect(current).to_have_text(name)
+    display_name = run.name("只修改素材显示名称")
+    main(page).get_by_role("textbox", name="素材名称", exact=True).fill(display_name)
+    expect(current).to_have_text(name)
+    assert gate.assets == set() and gate.store.puts == 0
+    assert_layout(page, tmp_path, "file_control_selected_long_name")
+    gate.store.hold_put()
+    with page.expect_request(lambda request: request.method == "PUT"):
+        button(main(page), "开始上传").click()
+    expect(current).to_be_disabled()
+    expect(main(page).locator('input[type="file"]')).to_be_disabled()
+    assert_layout(page, tmp_path, "file_control_disabled")
+    gate.store.release_put()
+    heading(page, display_name)
+    assert gate.store.puts == 1 and gate.calls["POST", ASSETS + "/upload-url"] == 1
 
 
 @pytest.mark.parametrize("media_run", [("viewer", 1440, "")], indirect=True)

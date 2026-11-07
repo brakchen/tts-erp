@@ -66,4 +66,5 @@
 .media-error { border-radius: 7px; padding: 8px 11px; background: light-dark(#fff0ed, #392421); color: light-dark(#8f2424, #ffb4ad); }
 .media-status { border-radius: 7px; padding: 8px 11px; background: var(--media-soft); overflow-wrap: anywhere; }
 .media-upload-file { display: grid; gap: 4px; font-weight: 500; }
-.media-upload-file input { max-width: 100%; }
+.media-workspace .media-file-trigger { width: 100%; justify-content: space-between; text-align: start; }
+.media-file-trigger > span { min-width: 0; overflow-wrap: anywhere; }
