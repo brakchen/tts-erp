@@ -1,14 +1,16 @@
 import type { ReactNode } from 'react';
 import { Checkbox, Input, Label, ListBox, Modal, Select, TextField } from '@heroui/react';
 
-export function Choice({ label, value, options, onChange, disabled }: {
+export function Choice({ label, value, options, onChange, disabled, placeholder = '请选择' }: {
   label: string;
   value: string;
   options: { id: string; name: string }[];
   onChange: (value: string) => void;
   disabled?: boolean;
+  placeholder?: string;
 }) {
-  return <Select isDisabled={disabled} selectedKey={value || null} onSelectionChange={(key) => onChange(String(key ?? ''))}>
+  return <Select isDisabled={disabled} selectedKey={value || null} placeholder={placeholder}
+    onSelectionChange={(key) => onChange(String(key ?? ''))}>
     <Label>{label}</Label>
     <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
     <Select.Popover><ListBox>{options.map((option) => (
@@ -43,13 +45,13 @@ export function SelectTile({ label, selected, onChange, disabled, children }: Ch
   </Checkbox>;
 }
 
-export function WorkModal({ title, busy, close, children, footer }: {
-  title: string; busy: boolean; close: () => void; children: ReactNode; footer?: ReactNode;
+export function WorkModal({ title, busy, close, children, footer, dialogClassName }: {
+  title: string; busy: boolean; close: () => void; children: ReactNode; footer?: ReactNode; dialogClassName?: string;
 }) {
   return <Modal.Backdrop isOpen isDismissable={!busy} isKeyboardDismissDisabled={busy}
     onOpenChange={(open) => { if (!open && !busy) close(); }}>
     <Modal.Container size="lg" scroll="inside">
-      <Modal.Dialog>
+      <Modal.Dialog className={dialogClassName}>
         {!busy && <Modal.CloseTrigger aria-label="关闭弹窗" />}
         <Modal.Header><Modal.Heading>{title}</Modal.Heading></Modal.Header>
         <Modal.Body className="space-y-3">{children}</Modal.Body>

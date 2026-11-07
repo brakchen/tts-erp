@@ -8,12 +8,15 @@ const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'runninghub', 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 const assetId = '9007199254740993';
 const asset = { asset_id: assetId, kind: 'image', filename: 'TEST_服装.png', content_type: 'image/png', size_bytes: 16, status: 'ready', created_at: '2026-11-07T00:00:00Z', tags: [] };
-const template = { id: 'TEST_template', humanId: '1', humanName: 'TEST_人物', name: 'A', clips: [] };
+const template = { id: 'TEST_template', humanId: '1', humanName: 'TEST_人物', name: 'A', version: 1,
+  clips: [{ assetId: '10', filename: 'TEST_正面.mp4' }, { assetId: '11', filename: 'TEST_侧面.mp4' }, { assetId: '12', filename: 'TEST_转场.mp4' }] };
 const planned = { id: 'TEST_batch', mode: 'live', status: 'PLANNED', total: 1, counts: { PLANNED: 1 }, groups: [], costs: {}, unknownCostTasks: 1 };
 
-function api(command: (path: string, init: RequestInit) => Promise<Response> = async () => json({}), readBatches = () => [planned]) {
+function api(command: (path: string, init: RequestInit) => Promise<Response> = async () => json({}), readBatches = () => [planned], read?: (path: string) => Response | undefined) {
   return vi.fn(async (path: string, init: RequestInit = {}) => {
     if ((init.method ?? 'GET') !== 'GET') return command(path, init);
+    const override = read?.(path);
+    if (override) return override;
     if (path.includes('/v2/media/assets?')) return json({ items: [asset], total: 1, limit: 6, offset: 0 });
     if (path.includes('/v2/media/digital-humans?')) return json([]);
     if (path.endsWith('/config')) return json({
@@ -78,7 +81,7 @@ describe('RunningHub workbench and write boundaries', () => {
     const drafts: { requestId: string; mode: string; single: boolean; images: { assetId: string }[] }[] = [];
     const starts: object[] = [];
     vi.stubGlobal('fetch', api(async (path, init) => {
-      if (path.endsWith('/plan')) return json({ total: 486, groups: 81, paths: ['成果/TEST/A01.mp4'] });
+      if (path.endsWith('/plan')) return json({ total: 486, fullTotal: 486, groups: 81, paths: ['成果/TEST/A01.mp4'] });
       if (path.endsWith('/batches')) {
         drafts.push(JSON.parse(String(init.body)));
         if (drafts.length === 1) return json({}, 503);
@@ -97,7 +100,7 @@ describe('RunningHub workbench and write boundaries', () => {
     expect(screen.getByRole('checkbox', { name: '仅跑首段' })).not.toBeChecked();
     await user.type(screen.getByLabelText('默认款式编号'), 'TEST_style');
     await user.click(await screen.findByRole('checkbox', { name: asset.filename }));
-    await user.click(await screen.findByRole('checkbox', { name: 'TEST_人物 · 模板 A' }));
+    await user.click(await screen.findByRole('checkbox', { name: /TEST_人物 · 模板 A/ }));
     await user.click(screen.getByRole('button', { name: /预览计划/ }));
     const plan = await screen.findByRole('dialog', { name: '确认生成计划' });
     expect(within(plan).getByText('服务端计划：486 段成片 / 81 组')).toBeVisible();
@@ -133,6 +136,7 @@ describe('RunningHub workbench and write boundaries', () => {
     await user.click(await within(detail).findByRole('button', { name: '终止批次' }));
     await user.click(within(detail).getByRole('button', { name: '返回' }));
     expect(terminate).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(detail).getByRole('button', { name: '终止批次' })).toHaveFocus());
     await user.click(within(detail).getByRole('button', { name: '终止批次' }));
     await user.click(within(detail).getByRole('button', { name: '确认终止' }));
     expect(await within(detail).findByText(/终止中 · 共 1 个任务/)).toBeVisible();
@@ -141,5 +145,71 @@ describe('RunningHub workbench and write boundaries', () => {
       method: 'POST', body: JSON.stringify({ confirmTerminate: true }),
     }));
     expect(within(detail).queryByRole('button', { name: '终止批次' })).toBeNull();
+  });
+
+  it('previews the first clip and continues the original batch after explicit paid confirmation', async () => {
+    const user = userEvent.setup();
+    let batch = { ...planned, status: 'FIRST_CLIP_READY', total: 3, previewJobId: 'TEST_first_job',
+      counts: { PLANNED: 0, SUCCEEDED: 1, DEFERRED: 2 } };
+    const continueBatch = vi.fn(async () => {
+      batch = { ...batch, status: 'ACTIVE', counts: { PLANNED: 2, SUCCEEDED: 1, DEFERRED: 0 } };
+      return json(batch);
+    });
+    vi.stubGlobal('fetch', api(continueBatch, () => [batch], (path) => path.endsWith('/artifacts')
+      ? json({ items: [{ id: 'TEST_video', kind: 'final', url: 'https://example.test/first.mp4' }] }) : undefined));
+    render(<RunningHub {...props} />);
+    await user.click(await screen.findByRole('button', { name: '查看首段 ' + batch.id }));
+    const detail = await screen.findByRole('dialog', { name: '查看首段' });
+    expect(await within(detail).findByLabelText('首段成片', { selector: 'video' })).toHaveAttribute('src', 'https://example.test/first.mp4');
+    expect(within(detail).getByRole('button', { name: '打包下载 ZIP' })).toBeDisabled();
+    await user.click(within(detail).getByRole('button', { name: '继续生成剩余 2 段' }));
+    const confirm = within(detail).getByRole('button', { name: '确认继续生成' });
+    expect(confirm).toBeDisabled();
+    await user.click(within(detail).getByRole('checkbox', { name: /RunningHub 费用/ }));
+    await user.click(confirm);
+    expect(continueBatch).toHaveBeenCalledExactlyOnceWith('/tts/v2/runninghub/batches/' + batch.id + '/continue', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ confirmPaid: true }),
+    }));
+    expect(await screen.findByText('已安排剩余片段继续生成。')).toBeVisible();
+    await user.click(within(detail).getByRole('button', { name: '关闭批次详情' }));
+    batch = { ...batch, status: 'SUCCEEDED', counts: { PLANNED: 0, SUCCEEDED: 3, DEFERRED: 0 } };
+    await user.click(screen.getByRole('button', { name: '刷新状态' }));
+    await user.click(await screen.findByRole('button', { name: '归档' }));
+    const archive = await screen.findByRole('dialog', { name: '归档预览' });
+    expect(await within(archive).findByRole('link', { name: '打包下载 ZIP' }))
+      .toHaveAttribute('href', '/tts/v2/runninghub/batches/' + batch.id + '/export');
+  });
+
+  it('creates a template from one or more ready clips and saves their chosen order', async () => {
+    const user = userEvent.setup();
+    const person = { digital_human_id: '1', name: 'TEST_人物', status: 'active', created_at: asset.created_at, asset_ids: ['10', '11'] };
+    const empty = { ...person, digital_human_id: '2', name: 'TEST_零段人物', asset_ids: [] };
+    const videos = template.clips.slice(0, 2).map((clip) => ({ ...asset, asset_id: clip.assetId, filename: clip.filename, kind: 'video', content_type: 'video/mp4' }));
+    const save = vi.fn(async () => json({ ...template, version: 2, clips: [template.clips[1], template.clips[0]] }));
+    vi.stubGlobal('fetch', api(save, undefined, (path) => {
+      if (path.includes('/digital-humans?')) return json([person, empty]);
+      if (path.endsWith('/digital-humans/2')) return json({ ...empty, assets: [] });
+      if (path.endsWith('/digital-humans/1')) return json({ ...person, assets: videos });
+      return undefined;
+    }));
+    render(<RunningHub {...props} />);
+    await user.click(screen.getByRole('button', { name: '新建模板' }));
+    const editor = await screen.findByRole('dialog', { name: '新建人物模板' });
+    const picker = within(editor).getByRole('button', { name: / 人物$/ });
+    await user.click(picker);
+    await user.click(await screen.findByRole('option', { name: empty.name }));
+    expect(await within(editor).findByRole('link', { name: '去数字人素材库添加视频' }))
+      .toHaveAttribute('href', '/tts/v2/pages/digital-humans');
+    expect(within(editor).getByRole('button', { name: '保存模板' })).toBeDisabled();
+    await user.click(picker);
+    await user.click(await screen.findByRole('option', { name: person.name }));
+    await user.click(await within(editor).findByRole('button', { name: '加入 ' + videos[0].filename }));
+    expect(within(editor).getByRole('button', { name: '保存 1 段模板' })).toBeEnabled();
+    await user.click(within(editor).getByRole('button', { name: '加入 ' + videos[1].filename }));
+    await user.click(within(editor).getByRole('button', { name: '上移 ' + videos[1].filename }));
+    await user.click(within(editor).getByRole('button', { name: '保存 2 段模板' }));
+    expect(save).toHaveBeenCalledExactlyOnceWith('/tts/v2/runninghub/templates', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ humanId: '1', name: 'A', assetIds: ['11', '10'] }),
+    }));
   });
 });

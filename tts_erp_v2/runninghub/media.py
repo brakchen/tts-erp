@@ -34,7 +34,7 @@ def archive_path(inputs: dict) -> str:
     style, sku, human = (
         component(inputs[k]) for k in ("style", "skuLabel", "humanName")
     )
-    template = inputs["templateName"]
+    template = inputs.get("archiveTemplateName", inputs["templateName"])
     return f"成果/{style}/模板{template}/{human}/{sku}/{style}_{sku}_{human}_{template}{inputs['clip']:02d}.mp4"
 
 

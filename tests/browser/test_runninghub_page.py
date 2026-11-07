@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -61,8 +62,9 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
             "humanName": person, "name": template,
             "clips": [
                 {"assetId": str(100 + clip), "filename": f"TEST_{clip}.mp4"}
-                for clip in range(6)
+                for clip in range(3 if template == "A" else 1)
             ],
+            "version": 1,
         }
         for i, (person, template) in enumerate([("TEST_林夏", "A"), ("TEST_安娜", "B")], 1)
     ]
@@ -73,6 +75,10 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
         "costs": {}, "unknownCostTasks": 12,
     }
     empty = False
+    people = [
+        {"digital_human_id": "1", "name": "TEST_林夏", "status": "active",
+         "created_at": "2026-11-07T00:00:00Z", "asset_ids": ["100", "101", "102"]},
+    ]
 
     def mock(route):
         path = route.request.url.split("?", 1)[0]
@@ -82,7 +88,13 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
         if "/v2/media/assets" in path:
             value = {"items": [] if empty else images, "total": 0 if empty else 3, "limit": 6, "offset": 0}
         elif path.endswith("/digital-humans"):
-            value = []
+            value = people
+        elif path.endswith("/digital-humans/1"):
+            value = {**people[0], "assets": [
+                {**image_asset(clip["assetId"], clip["filename"], "#faf2dd", "#eee7d7"),
+                 "kind": "video", "content_type": "video/mp4", "url": None}
+                for clip in templates[0]["clips"]
+            ]}
         elif path.endswith("/config"):
             value = {
                 "credentialRef": "env:RUNNINGHUB_STUDIO_API_KEY", "credentialConfigured": True,
@@ -110,7 +122,7 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
           const fetchNetwork = window.fetch.bind(window);
           window.fetch = (input, options) =>
             input === {plan_path} && options?.method === 'POST'
-              ? Promise.resolve(Response.json({{ total: 12, groups: 2, paths: ['TEST_style/A/01.mp4'] }}))
+              ? Promise.resolve(Response.json({{ total: 6, fullTotal: 6, groups: 2, paths: ['TEST_style/A/01.mp4'] }}))
               : fetchNetwork(input, options);
         }})()"""
     )
@@ -124,7 +136,7 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
     assert not page.get_by_label("生成模式").count()
     assert not page.get_by_role("checkbox", name="仅跑首段").is_checked()
     assert not page.get_by_label("凭据引用", exact=True).is_visible()
-    assert not page.get_by_label("第 6 段", exact=True).is_visible()
+    assert not page.get_by_role("heading", name="新建人物模板").is_visible()
     create_box, plan_box, record_box = (item.bounding_box() for item in (create, plan, records))
     if width == 390:
         assert plan_box["y"] >= create_box["y"] + create_box["height"]
@@ -137,9 +149,17 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
     config = page.get_by_role("dialog", name="工作流配置")
     assert config.get_by_label("凭据引用", exact=True).input_value() == "env:RUNNINGHUB_STUDIO_API_KEY"
     config.get_by_role("button", name="关闭弹窗").click()
-    page.get_by_role("button", name="配置六段模板").click()
-    template_dialog = page.get_by_role("dialog", name="配置人物模板")
-    template_dialog.get_by_label("第 6 段", exact=True).wait_for()
+    page.get_by_role("button", name="新建模板").click()
+    template_dialog = page.get_by_role("dialog", name="新建人物模板")
+    template_dialog.get_by_role("button", name=re.compile(r" 人物$")).click()
+    page.get_by_role("option", name="TEST_林夏", exact=True).click()
+    template_dialog.get_by_role("button", name="加入 TEST_0.mp4", exact=True).click()
+    assert template_dialog.get_by_role("button", name="保存 1 段模板", exact=True).is_enabled()
+    ordered = template_dialog.get_by_role("region", name="生成顺序 · 已选 1 段")
+    assert ordered.get_by_text("TEST_0.mp4", exact=False).bounding_box()["height"] <= 40
+    screenshots = Path(__file__).resolve().parents[2] / "frontend/.cache/screenshots"
+    screenshots.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(screenshots / f"TEST_runninghub_template_{width}.png"))
     template_dialog.get_by_role("button", name="关闭弹窗").click()
 
     page.get_by_label("默认款式编号", exact=True).fill("TEST_style")
@@ -149,16 +169,17 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
     checkbox.focus()
     checkbox.press("Space")
     assert checkbox.is_checked()
-    template_card = page.get_by_role("checkbox", name="TEST_林夏 · 模板 A", exact=True)
+    template_card = page.get_by_role("checkbox", name="TEST_林夏 · 模板 A · v1 · 3 段", exact=True)
     template_card.focus()
     template_card.press("Space")
     page.get_by_role("button", name="预览计划").click()
     review = page.get_by_role("dialog", name="确认生成计划")
-    review.get_by_text("服务端计划：12 段成片 / 2 组").wait_for()
+    review.get_by_text("服务端计划：6 段成片 / 2 组").wait_for()
     review.get_by_role("button", name="返回修改").click()
     page.get_by_role("button", name="批次详情 TEST_024").click()
     detail = page.get_by_role("dialog", name="批次详情")
     detail.get_by_text("派发中 · 共 12 个任务").wait_for()
+    assert not detail.get_by_role("button", name="打包下载 ZIP").is_enabled()
     detail.get_by_role("button", name="终止批次", exact=True).click()
     detail.get_by_role("heading", name="确认终止批次？").wait_for()
     detail.get_by_role("button", name="返回", exact=True).click()
@@ -167,8 +188,6 @@ def test_runninghub_workbench_matches_prototype(frontend_browser_renderer, width
     assert not errors, errors
     report = overflow_report(page)
     assert report["scrollWidth"] <= report["clientWidth"] + 1, report
-    screenshots = Path(__file__).resolve().parents[2] / "frontend/.cache/screenshots"
-    screenshots.mkdir(parents=True, exist_ok=True)
     records.get_by_role("region", name="批次记录表格滚动区域").evaluate("node => { node.scrollLeft = 0; }")
     page.evaluate("window.scrollTo(0, 0)")
     page.screenshot(path=str(screenshots / f"TEST_runninghub_{width}_{prefix.strip('/') or 'direct'}.png"), full_page=True)

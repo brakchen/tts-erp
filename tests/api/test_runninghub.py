@@ -9,6 +9,7 @@ import shutil
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -138,6 +139,7 @@ def setup(db_engine):
             "image": batch_input,
             "config": frozen,
             "extraBatches": [],
+            "extraTemplates": [],
         }
     yield data
     with sessions() as session, session.begin():
@@ -167,7 +169,11 @@ def setup(db_engine):
         # checks that it cannot expose another case's media through real APIs.
         session.get(GenerationProfile, "default").workflow_version_id = previous_version_id
         session.flush()
-        session.execute(delete(VideoTemplate).where(VideoTemplate.id == template.id))
+        session.execute(
+            delete(VideoTemplate).where(
+                VideoTemplate.id.in_([template.id, *data["extraTemplates"]])
+            )
+        )
         session.execute(delete(DigitalHumanAsset).where(
             DigitalHumanAsset.digital_human_id == human.id,
             DigitalHumanAsset.asset_id.in_(asset_ids),
@@ -323,7 +329,7 @@ class MemoryStore:
         shutil.copyfile(self.root / artifact.object_key, destination)
 
     def freeze(self, source, key):
-        return {**source, "etag": "TEST_etag", "objectKey": key}
+        return {**source, "etag": "TEST_etag_" + source["assetId"], "objectKey": key}
 
     def url(self, bucket, key):
         return "https://example.com/TEST.mp4"
@@ -478,7 +484,8 @@ def test_api_roles_idempotency_resolve_retry_and_export(
     setup["extraBatches"].append(body["requestId"])
     response = client.post("/v2/runninghub/batches", json=body)
     assert response.status_code == 201, response.text
-    assert response.json()["mode"] == "dry-run" and response.json()["total"] == 1
+    assert response.json()["mode"] == "dry-run" and response.json()["total"] == 6
+    assert response.json()["counts"] == {"PLANNED": 1, "DEFERRED": 5}
     assert (
         client.post("/v2/runninghub/batches", json=body).json()["id"]
         == body["requestId"]
@@ -828,7 +835,7 @@ def test_readonly_and_readwrite_http_gates(
 
 
 @pytest.fixture()
-def termination_api(monkeypatch):
+def runninghub_api(monkeypatch):
     from tts_erp_v2.middleware.auth import AuthMiddleware
 
     app = FastAPI()
@@ -838,10 +845,136 @@ def termination_api(monkeypatch):
     return TestClient(app)
 
 
+@pytest.mark.parametrize("clip_count", [1, 3])
+def test_first_clip_batch_uses_frozen_template_through_resume_and_zip(
+    setup,
+    runninghub_api,
+    media_tools,
+    monkeypatch,
+    clip_count,
+):
+    monkeypatch.setattr(api, "get_store", lambda: media_tools)
+    prefix = "/v2/runninghub"
+    client = runninghub_api
+    sessions = setup["sessions"]
+    with sessions() as session, session.begin():
+        session.get(GenerationBatch, setup["batch"]).status = "PAUSED"
+        original = session.get(VideoTemplate, setup["template"])
+        ids = [clip["assetId"] for clip in original.clips[:clip_count]][::-1]
+
+    def save_template(asset_ids):
+        response = client.post(
+            prefix + "/templates",
+            json={"humanId": setup["human"], "name": "A", "assetIds": asset_ids},
+        )
+        assert response.status_code == 201, response.text
+        template = response.json()
+        setup["extraTemplates"].append(template["id"])
+        return template
+
+    template = save_template(ids)
+    assert template["version"] == 2
+    assert [clip["assetId"] for clip in template["clips"]] == ids
+    duplicate = client.post(
+        prefix + "/templates",
+        json={"humanId": setup["human"], "name": "A", "assetIds": [ids[0], ids[0]]},
+    )
+    assert duplicate.status_code == 422
+    request = {
+        "images": [setup["image"]],
+        "templateIds": [template["id"]],
+        "single": True,
+    }
+    preview = client.post(prefix + "/plan", json=request).json()
+    assert (preview["total"], preview["fullTotal"], preview["groups"]) == (
+        1,
+        clip_count,
+        1,
+    )
+    full = client.post(
+        prefix + "/plan",
+        json={
+            **request,
+            "single": False,
+            "templateIds": [template["id"], setup["template"]],
+        },
+    ).json()
+    assert (full["total"], full["groups"]) == (clip_count + 6, 2)
+
+    batch_id = "TEST_trial_" + new_id()
+    setup["extraBatches"].append(batch_id)
+    path = prefix + "/batches/" + batch_id
+    created = client.post(prefix + "/batches", json={**request, "requestId": batch_id})
+    assert created.status_code == 201, created.text
+    assert created.json()["templates"][0]["version"] == 2
+    original_config = created.json()["config"]
+    jobs = client.get(path + "/jobs").json()["items"]
+    assert [row["identity"]["clip"] for row in jobs] == list(range(1, clip_count + 1))
+    assert [row["status"] for row in jobs] == ["PLANNED"] + ["DEFERRED"] * (
+        clip_count - 1
+    )
+    assert (
+        client.post(path + "/continue", json={"confirmPaid": True}).status_code == 409
+    )
+    assert client.post(path + "/start", json={}).status_code == 200
+
+    worker = Worker(
+        sessions,
+        media_tools,
+        Mock(side_effect=AssertionError("must not call RunningHub")),
+    )
+    assert all(worker.run_once() for _ in range(4))
+    assert not worker.run_once()
+    first = client.get(path).json()
+    assert first["previewJobId"] == jobs[0]["id"]
+    original_job = client.get(prefix + "/jobs/" + jobs[0]["id"]).json()
+    assert original_job["status"] == "SUCCEEDED"
+    if clip_count == 3:
+        assert first["status"] == "FIRST_CLIP_READY"
+        assert client.get(path + "/export").status_code == 409
+        assert (
+            client.post(path + "/resume", json={"confirmPaid": True}).status_code == 409
+        )
+        updated = save_template(ids[::-1])
+        assert updated["version"] == 3
+        with sessions() as session, session.begin():
+            session.get(GenerationBatch, batch_id).mode = "live"
+        assert client.post(path + "/continue", json={}).status_code == 409
+        continued = client.post(path + "/continue", json={"confirmPaid": True})
+        assert continued.status_code == 200, continued.text
+        assert continued.json()["counts"] == {"SUCCEEDED": 1, "PLANNED": 2}
+        assert continued.json()["config"] == original_config
+        assert (
+            client.post(path + "/continue", json={"confirmPaid": True}).status_code
+            == 409
+        )
+        with sessions() as session, session.begin():
+            session.get(GenerationBatch, batch_id).mode = "dry-run"
+        assert all(worker.run_once() for _ in range(8))
+        assert client.get(prefix + "/jobs/" + jobs[0]["id"]).json() == original_job
+    else:
+        assert first["status"] == "SUCCEEDED"
+        assert (
+            client.post(path + "/continue", json={"confirmPaid": True}).status_code
+            == 409
+        )
+
+    assert client.get(path).json()["status"] == "SUCCEEDED"
+    completed = client.get(path + "/jobs").json()["items"]
+    assert [row["id"] for row in completed] == [row["id"] for row in jobs]
+    archive = client.get(path + "/export")
+    assert archive.status_code == 200, archive.text
+    assert archive.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(BytesIO(archive.content)) as exported:
+        assert exported.namelist() == [row["identity"]["archivePath"] for row in jobs]
+        assert exported.testzip() is None
+
+
 def test_termination_fences_preparation_and_waits_for_unknown_submission(
     setup,
-    termination_api,
+    runninghub_api,
 ):
+    termination_api = runninghub_api
     sessions = setup["sessions"]
     batch_path = f"/v2/runninghub/batches/{setup['batch']}"
     preparing_id, unknown_id, succeeded_id, *_ = setup["jobs"]
@@ -850,6 +983,7 @@ def test_termination_fences_preparation_and_waits_for_unknown_submission(
         reserve(session, unknown_id, "TEST_stop_" + setup["batch"], 5)
         session.get(GenerationJob, unknown_id).status = "SUBMISSION_UNKNOWN"
         session.get(GenerationJob, succeeded_id).status = "SUCCEEDED"
+        session.get(GenerationJob, setup["jobs"][3]).status = "DEFERRED"
 
     assert termination_api.post(batch_path + "/terminate", json={}).status_code == 422
     body = {"confirmTerminate": True}
@@ -888,10 +1022,11 @@ def test_termination_fences_preparation_and_waits_for_unknown_submission(
 @pytest.mark.parametrize("cloud_finishes", [False, True])
 def test_termination_during_create_tracks_original_id_and_preserves_usage(
     setup,
-    termination_api,
+    runninghub_api,
     monkeypatch,
     cloud_finishes,
 ):
+    termination_api = runninghub_api
     key = "TEST_key_" + new_id()
     monkeypatch.setenv("RUNNINGHUB_TEST_API_KEY", key)
     monkeypatch.setattr(Worker, "_uploaded", lambda *_args: "openapi/TEST_uploaded")

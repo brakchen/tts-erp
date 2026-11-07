@@ -14,7 +14,7 @@
 
 ## 操作流程与接口
 
-页面左侧选择服装图片和人物模板，右侧显示服务端生成计划，下方可查看、启动、暂停或归档批次。工作流和六段模板在弹窗中配置。勾选「仅跑首段」时选一张图和一个模板。页面创建真实模式的批次，启动或恢复时须确认付费，API 仍支持离线演练。
+页面左侧选择服装图片和人物模板，右侧显示生成计划，下方可查看、启动、暂停或归档批次。「新建模板」位于人物模板区的标题旁。选择人物后可以逐段加入、移除和调整其就绪参考视频，至少选一段，零段时可跳转数字人素材库。页面创建真实模式的批次，启动、恢复或续跑时须确认付费，API 仍支持离线演练。
 
 浏览器写操作需要现有 cookie + `X-Requested-With: tts-erp`；API Key 仍用既有 Bearer/X-API-Key。会话还需 `page:runninghub`。读取 readonly，计划/批次/模板/恢复/重生成 readwrite，配置更新/账户/工作流检查/提交核对 admin。没有匿名入口。
 
@@ -24,18 +24,19 @@
 | `POST /account` | 只检查账户，不生成任务 |
 | `POST /dispatch/resume` | admin 在修复凭据/余额/工作流后以 `{confirmPaid:true}` 恢复当前凭据的新派发；保留全部在途与不确定任务的配额 |
 | `POST /workflow/check` | `{graph:null}` 从官方读取；`{graph:{...}}` 离线检查并启用新版本，响应只含版本/hash/规格 |
-| `GET /templates`、`POST /templates` | 保存人物 A/B/C 六段顺序；`humanId`、`name`、六个不同的 `assetIds`，视频须已挂载该数字人 |
-| `POST /plan` | 校验 `images`、`templateIds`、`single`，返回数量、组数和全部归档路径；不复制素材、不生成 |
+| `GET /templates`、`POST /templates` | 人物 A/B/C 模板，按 `assetIds` 保存一段或多段不同的已挂载就绪视频；每次保存生成独立版本，列表优先展示新版 |
+| `POST /plan` | 校验 `images`、`templateIds`、`single`，返回本次生成数量 `total`、完整数量 `fullTotal`、分组数及本次的归档路径；不复制素材、不生成 |
 | `POST /batches` | 加 `requestId`、`mode`（默认 dry-run）、可选 `instructions`（173/174/185）；保存完整计划/素材快照/工作流版本/种子，不自动启动 |
 | `GET /batches[/{id}]` | 状态计数、每组完成数、十进制费用及未知项 |
 | `POST /batches/{id}/start`、`/pause`、`/resume` | JSON `{confirmPaid:false}`；live 的启动/恢复要求 true；暂停不取消已受理云端任务 |
+| `POST /batches/{id}/continue` | 从 `FIRST_CLIP_READY` 继续生成同批次的所有待续跑片段；live 必须提交 `{"confirmPaid":true}`，并发或重复请求至多放行一次 |
 | `POST /batches/{id}/terminate` | readwrite，以 `{"confirmTerminate":true}` 终止派发并交给 Worker 处理云端任务；返回当前批次状态，重复请求返回现状 |
 | `GET /batches/{id}/jobs`、`GET /jobs/{id}` | 单任务与所有 Attempt；状态、hash、脱敏回执和费用 |
 | `POST /jobs/{id}/resolve` | admin 提供 `taskId`，或 `confirmedNotCreated:true`，二选一；必须有核对说明 `note` |
 | `POST /jobs/{id}/recover` | 已知 ID 的查询/下载/后处理恢复，不创建新生成任务 |
 | `POST /jobs/{id}/retry` | 仅明确失败/素材准备失败可重新安排，生成新 Attempt，保留旧 ID/费用；没有“重试所有” |
 | `GET /jobs/{id}/artifacts` | raw/final 规格、hash 与短期预签名预览/下载 URL；签名 URL 不写普通日志 |
-| `GET /batches/{id}/export` | 仅全部完成才生成 ZIP；批次按款式/模板/人物/原图片名归档，无占位视频 |
+| `GET /batches/{id}/export` | 仅全部完成时开放「打包下载 ZIP」。服务器从 MinIO 读取已校验成片，在临时磁盘打包，按款式/模板/人物/原图片名和模板顺序归档 |
 
 列表使用 limit/offset：模板最大500（默认100）、批次最大100（默认30）、任务最大500（默认100）。图片输入示例：
 
@@ -49,7 +50,9 @@
 }
 ```
 
-`source=media` 选择全局素材库图片；`source=spu` 使用已有 SPU 图片 ID（服务端验证店铺授权），无需再次上传。`skuLabel` 可选，默认保留原图片名去扩展名；真实 skuId 与文件名独立保存。页面当前从素材库选择图片，SPU 图片可通过同一 API 输入。数字人和模板数量不写死。普通批次每个组合有 1..6 六个明确片段；`single=true` 是主动单任务联调入口，只取一个模板的第1段，明确不视为六段批次。九图×三人×三模板的离线计划=486任务/81组。
+`source=media` 选择全局素材库图片；`source=spu` 使用已有 SPU 图片 ID（服务端验证店铺授权），无需再次上传。`skuLabel` 可选，默认保留原图片名去扩展名；真实 skuId 与文件名独立保存。页面当前从素材库选择图片，SPU 图片可通过同一 API 输入。普通批次按每个已选模板实际包含的片段数生成，完整计划受 `RUNNINGHUB_MAX_BATCH_JOBS` 限制。同一人物同名的多个版本同时入批次时，归档目录与文件名附加版本号，避免覆盖。
+
+`single=true` 只允许一张图和一个模板。批次保存时冻结完整计划，首段可派发，剩余任务为 `DEFERRED`，不会申请云端并发。首段成片通过校验后可在原批次预览，批次为 `FIRST_CLIP_READY`，需要单独确认才派发后续片段。续跑沿用已保存的任务、素材、顺序、种子和工作流快照。只有一段的模板直接完成。历史已保存的批次按原有任务集合继续处理，已有六段模板可直接使用。已应用 `0074_runninghub` 的环境只需更新应用和 Worker。
 
 模板和批次创建会按对象 ETag 条件复制素材到任务 bucket，后续源库整理不破坏运行批次。每个 Attempt 在 Worker 准备阶段读取固定素材，保存 SHA256；同凭据 hash 的上传缓存保守使用20小时，明确失败的新 Attempt 会重传素材。路径清理后碰撞即报错，不覆盖或混合不同图片。
 

@@ -3,10 +3,15 @@ export interface Config {
   instanceType: string; concurrency: number;
   dispatchPausedReason?: string | null;
 }
-export interface Template { id: string; name: string; humanId: string; humanName: string; clips: { assetId: string; filename: string }[] }
+export interface TemplateVersion { id: string; name: string; humanName: string; version: number | null }
+export interface Template extends TemplateVersion { humanId: string; clips: { assetId: string; filename: string }[] }
 export interface Batch {
   id: string; mode: string; status: string; error: string | null; total: number; counts: Record<string, number>;
   groups: { path: string; total: number; succeeded: number }[]; costs: Record<string, string>; unknownCostTasks: number;
+  config?: Pick<Config, 'instanceType' | 'concurrency' | 'workflowVersionId'>;
+  templates?: TemplateVersion[];
+  previewJobId?: string | null;
+  terminationImpact?: { completed: number; unsubmitted: number; cloudInFlight: number; unconfirmed: number };
 }
 export interface Attempt {
   id: string; number: number; taskId: string | null; cloudStatus: string | null; reserved: boolean;
@@ -14,6 +19,7 @@ export interface Attempt {
 }
 export interface Job {
   id: string; batchId: string; status: string; error: string | null; seed: number;
+  referenceFilename?: string;
   identity: { skuId: string; originalFilename: string; humanName: string; templateName: string; clip: number; archivePath: string };
   attempts?: Attempt[];
 }
@@ -24,5 +30,9 @@ export const statuses: Record<string, string> = {
   SUCCEEDED: '已完成', FAILED: '生成失败', SUBMISSION_UNKNOWN: '待管理员核对', TRACKING_INTERRUPTED: '跟踪中断',
   DOWNLOAD_FAILED: '下载失败', FINALIZE_FAILED: '成片处理失败', PREPARATION_FAILED: '素材准备失败',
   TERMINATING: '终止中', TERMINATED: '已终止',
+  FIRST_CLIP_READY: '首段已完成', DEFERRED: '待续跑',
 };
-export const canTerminateBatch = (batch: Batch) => ['PLANNED', 'ACTIVE', 'PAUSED'].includes(batch.status);
+export const canDispatchBatch = (batch: Batch) => ['PLANNED', 'ACTIVE', 'PAUSED'].includes(batch.status);
+export const canTerminateBatch = (batch: Batch) => canDispatchBatch(batch) || batch.status === 'FIRST_CLIP_READY';
+export const templateLabel = (template: TemplateVersion) =>
+  template.humanName + ' · 模板 ' + template.name + ' · ' + (template.version ? 'v' + template.version : template.id.slice(0, 8));
