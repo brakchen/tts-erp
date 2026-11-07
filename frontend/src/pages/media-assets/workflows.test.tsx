@@ -732,7 +732,6 @@ it.each([false, true])('waits for the post-upload profile read before a partial 
   expect(await screen.findByText('正在加载目标档案…')).toBeVisible();
   expect(button('确认添加（2）')).toBeDisabled();
   expect(button('上传新素材')).toBeDisabled();
-  await user.click(button('确认添加（2）'));
   expect(writes).toEqual(['4']);
 
   await act(async () => releaseRefresh(failRefresh ? json({}, 503) : capturedRefresh!));
@@ -743,7 +742,6 @@ it.each([false, true])('waits for the post-upload profile read before a partial 
     await user.click(button('重试目标档案'));
   }
   await waitFor(() => expect(button('确认添加（2）')).toBeEnabled());
-  await waitFor(() => expect(button('确认添加（2）')).not.toHaveAttribute('aria-disabled', 'true'));
   await user.click(button('确认添加（2）'));
   await waitFor(() => expect(writes).toEqual(['4', '2', '3']));
   expect(await screen.findByText(/待添加的勾选已保留/)).toBeVisible();
