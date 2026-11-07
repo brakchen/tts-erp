@@ -432,41 +432,40 @@ export default function RunningHub({ bootstrap }: PageProps) {
       {notice}
     </WorkModal>}
 
-    <Drawer.Root isOpen={Boolean(batchId)} onOpenChange={(open) => { if (!open && !busy) { setBatchId(''); setJobId(''); } }}>
-      <Drawer.Backdrop>
-        <Drawer.Content placement="right" className="w-full max-w-[44rem]">
-          <Drawer.Dialog>
-            <Drawer.Header><Drawer.Heading>批次详情</Drawer.Heading>{!busy && <Drawer.CloseTrigger aria-label="关闭批次详情" />}</Drawer.Header>
-            <Drawer.Body className="space-y-3">
-              {(batch.error || jobs.error) && <p role="alert">{batch.error || jobs.error}</p>}
-              {batch.loading && !selectedBatch && <p role="status">正在读取批次…</p>}
-              {notice}
-              {selectedBatch && <>
-                <p className="break-all font-mono text-xs">{selectedBatch.id}</p>
-                <p>{statuses[selectedBatch.status] ?? selectedBatch.status} · 共 {selectedBatch.total} 个任务
-                  {selectedBatch.mode === 'dry-run' ? ' · 历史演练批次' : ''}</p>
-                <p>{Object.entries(selectedBatch.counts).map(([key, count]) => (statuses[key] ?? key) + ' ' + count).join(' / ')}</p>
-                {selectedBatch.error && <p role="status">{selectedBatch.error}。暂停只停止新提交，已受理任务继续处理。</p>}
-                <p>已知费用：{Object.keys(selectedBatch.costs).length
-                  ? Object.entries(selectedBatch.costs).map(([key, amount]) => key + ' ' + amount).join(' / ')
-                  : '未知'}；未知费用任务 {selectedBatch.unknownCostTasks}</p>
-                <details><summary>分组完成情况</summary>{selectedBatch.groups.map((group) => <p className="break-all" key={group.path}>{group.path} · {group.succeeded}/{group.total} 已完成</p>)}</details>
-              </>}
-              <ul className="space-y-2">{jobs.data?.items.map((job) => <li className="rounded-lg border p-3" key={job.id}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="min-w-0 flex-1 break-all">{job.identity.originalFilename} · {job.identity.humanName} · {job.identity.templateName}{job.identity.clip} · {statuses[job.status] ?? job.status}</p>
-                  <Button size="sm" variant="secondary" onPress={() => setJobId(job.id)}>查看任务 {job.identity.templateName}{job.identity.clip}</Button>
-                </div>
-              </li>)}</ul>
-              {(jobOffset > 0 || (jobs.data?.items.length ?? 0) >= 100) && <div className="rh-pager">
-                <Button variant="secondary" isDisabled={!jobOffset || jobs.loading} onPress={() => setJobOffset((n) => Math.max(0, n - 100))}>上一页任务</Button>
-                <Button variant="secondary" isDisabled={(jobs.data?.items.length ?? 0) < 100 || jobs.loading} onPress={() => setJobOffset((n) => n + 100)}>下一页任务</Button>
-              </div>}
-              {jobId && <JobDetail key={jobId} jobId={jobId} root={root} revision={revision} canWrite={canWrite && !busy} admin={admin && !busy} run={run} />}
-            </Drawer.Body>
-          </Drawer.Dialog>
-        </Drawer.Content>
-      </Drawer.Backdrop>
-    </Drawer.Root>
+    <Drawer.Backdrop isOpen={Boolean(batchId)} isDismissable={!busy} isKeyboardDismissDisabled={busy}
+      onOpenChange={(open) => { if (!open && !busy) { setBatchId(''); setJobId(''); } }}>
+      <Drawer.Content placement="right" className="w-full max-w-[44rem]">
+        <Drawer.Dialog>
+          <Drawer.Header><Drawer.Heading>批次详情</Drawer.Heading>{!busy && <Drawer.CloseTrigger aria-label="关闭批次详情" />}</Drawer.Header>
+          <Drawer.Body className="space-y-3">
+            {(batch.error || jobs.error) && <p role="alert">{batch.error || jobs.error}</p>}
+            {batch.loading && !selectedBatch && <p role="status">正在读取批次…</p>}
+            {notice}
+            {selectedBatch && <>
+              <p className="break-all font-mono text-xs">{selectedBatch.id}</p>
+              <p>{statuses[selectedBatch.status] ?? selectedBatch.status} · 共 {selectedBatch.total} 个任务
+                {selectedBatch.mode === 'dry-run' ? ' · 历史演练批次' : ''}</p>
+              <p>{Object.entries(selectedBatch.counts).map(([key, count]) => (statuses[key] ?? key) + ' ' + count).join(' / ')}</p>
+              {selectedBatch.error && <p role="status">{selectedBatch.error}。暂停只停止新提交，已受理任务继续处理。</p>}
+              <p>已知费用：{Object.keys(selectedBatch.costs).length
+                ? Object.entries(selectedBatch.costs).map(([key, amount]) => key + ' ' + amount).join(' / ')
+                : '未知'}；未知费用任务 {selectedBatch.unknownCostTasks}</p>
+              <details><summary>分组完成情况</summary>{selectedBatch.groups.map((group) => <p className="break-all" key={group.path}>{group.path} · {group.succeeded}/{group.total} 已完成</p>)}</details>
+            </>}
+            <ul className="space-y-2">{jobs.data?.items.map((job) => <li className="rounded-lg border p-3" key={job.id}>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="min-w-0 flex-1 break-all">{job.identity.originalFilename} · {job.identity.humanName} · {job.identity.templateName}{job.identity.clip} · {statuses[job.status] ?? job.status}</p>
+                <Button size="sm" variant="secondary" onPress={() => setJobId(job.id)}>查看任务 {job.identity.templateName}{job.identity.clip}</Button>
+              </div>
+            </li>)}</ul>
+            {(jobOffset > 0 || (jobs.data?.items.length ?? 0) >= 100) && <div className="rh-pager">
+              <Button variant="secondary" isDisabled={!jobOffset || jobs.loading} onPress={() => setJobOffset((n) => Math.max(0, n - 100))}>上一页任务</Button>
+              <Button variant="secondary" isDisabled={(jobs.data?.items.length ?? 0) < 100 || jobs.loading} onPress={() => setJobOffset((n) => n + 100)}>下一页任务</Button>
+            </div>}
+            {jobId && <JobDetail key={jobId} jobId={jobId} root={root} revision={revision} canWrite={canWrite && !busy} admin={admin && !busy} run={run} />}
+          </Drawer.Body>
+        </Drawer.Dialog>
+      </Drawer.Content>
+    </Drawer.Backdrop>
   </div>;
 }
