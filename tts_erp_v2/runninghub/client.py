@@ -1,7 +1,7 @@
 """Official HTTP protocol. No create retries; no credentials in diagnostics.
 
 Uses existing HTTPX (BSD-3-Clause), https://www.python-httpx.org/advanced/transports/.
-Protocol checked 2026-11-07 against RunningHub's five official Markdown endpoints.
+Protocol checked 2026-11-07 against RunningHub's official API documentation.
 """
 
 from __future__ import annotations
@@ -185,6 +185,18 @@ class RunningHubClient:
             value.get("taskId") is not None and str(value["taskId"]) != task_id
         ):
             raise RemoteError("INVALID_QUERY_RESPONSE")
+        return value
+
+    def cancel(self, task_id: str) -> dict:
+        # api-425749015 acknowledges cancellation with code=0 and null data.
+        value = sanitize(
+            self._post(
+                "/task/openapi/cancel", json={"apiKey": self.key, "taskId": task_id}
+            ),
+            (self.key,),
+        )
+        if type(value.get("code")) is not int or value["code"] != 0:
+            raise RemoteError("UPSTREAM_CANCEL_REJECTED", receipt=value)
         return value
 
 

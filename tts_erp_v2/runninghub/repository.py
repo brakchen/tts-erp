@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from tts_erp_v2.db.models.runninghub import (
 
 LEASE = timedelta(minutes=15)
 LOCAL_PHASES = {"DOWNLOADING", "FINALIZING"}
+STOPPING_BATCH_STATES = {"TERMINATING", "TERMINATED"}
 
 
 def reserve(session: Session, job_id: str, quota_id: str, limit: int) -> str | None:
@@ -200,7 +201,59 @@ def pause_failure(batch: GenerationBatch, reason: str) -> None:
         batch.status, batch.error = "PAUSED", reason
 
 
+def request_termination(session: Session, batch: GenerationBatch) -> None:
+    """Stop dispatch under the batch lock; wake tracking without revoking leases."""
+    batch.status, batch.error = "TERMINATING", None
+    session.execute(
+        update(GenerationJob)
+        .where(GenerationJob.batch_id == batch.id, GenerationJob.status == "PLANNED")
+        .values(status="TERMINATED")
+    )
+    tracking = session.execute(
+        select(GenerationJob, GenerationAttempt)
+        .join(
+            GenerationAttempt, GenerationAttempt.id == GenerationJob.current_attempt_id
+        )
+        .where(
+            GenerationJob.batch_id == batch.id,
+            GenerationJob.status.in_(["QUEUED", "RUNNING", "TRACKING_INTERRUPTED"]),
+            GenerationAttempt.reserved.is_(True),
+            GenerationAttempt.task_id.is_not(None),
+        )
+        .with_for_update(of=GenerationJob)
+    )
+    for job, attempt in tracking:
+        attempt.next_poll_at = None
+        attempt.poll_failures = 0
+        if job.status == "TRACKING_INTERRUPTED":
+            job.status, job.error = "QUEUED", None
+    complete_batch(session, batch)
+
+
 def complete_batch(session: Session, batch: GenerationBatch) -> None:
+    if batch.status == "TERMINATED":
+        return
+    session.flush()
+    if batch.status == "TERMINATING":
+        reserved = (
+            select(GenerationAttempt.id)
+            .join(GenerationJob, GenerationJob.id == GenerationAttempt.job_id)
+            .where(
+                GenerationJob.batch_id == batch.id, GenerationAttempt.reserved.is_(True)
+            )
+            .exists()
+        )
+        local_processing = (
+            select(GenerationJob.id)
+            .where(
+                GenerationJob.batch_id == batch.id,
+                GenerationJob.status.in_(LOCAL_PHASES),
+            )
+            .exists()
+        )
+        if not session.scalar(select(or_(reserved, local_processing))):
+            batch.status = "TERMINATED"
+        return
     remaining = session.scalar(
         select(func.count())
         .select_from(GenerationJob)

@@ -29,6 +29,7 @@
 | `POST /batches` | 加 `requestId`、`mode`（默认 dry-run）、可选 `instructions`（173/174/185）；保存完整计划/素材快照/工作流版本/种子，不自动启动 |
 | `GET /batches[/{id}]` | 状态计数、每组完成数、十进制费用及未知项 |
 | `POST /batches/{id}/start`、`/pause`、`/resume` | JSON `{confirmPaid:false}`；live 的启动/恢复要求 true；暂停不取消已受理云端任务 |
+| `POST /batches/{id}/terminate` | readwrite，以 `{"confirmTerminate":true}` 终止派发并交给 Worker 处理云端任务；返回当前批次状态，重复请求返回现状 |
 | `GET /batches/{id}/jobs`、`GET /jobs/{id}` | 单任务与所有 Attempt；状态、hash、脱敏回执和费用 |
 | `POST /jobs/{id}/resolve` | admin 提供 `taskId`，或 `confirmedNotCreated:true`，二选一；必须有核对说明 `note` |
 | `POST /jobs/{id}/recover` | 已知 ID 的查询/下载/后处理恢复，不创建新生成任务 |
@@ -56,13 +57,15 @@
 
 数据库 quota 行锁和唯一约束控制同凭据的提交预留/排队/运行/不确定窗口总计最多5个；较低配置优先，本地下载/编码另以数据库锁限2个。每轮优先恢复已有任务，多个 Worker 可并行工作。新单独 Worker 进程不是第二套应用；复用 PostgreSQL 的现有持久化模式，不引入 Redis/Celery。
 
-create 前提交 SUBMITTING 意图，HTTP 发送一次，不透明重试。收到 taskId 立即单独提交，之后再处理 promptTips。超时/无法解析/Worker 在提交中崩溃进入 SUBMISSION_UNKNOWN，配额保留。只能管理员查平台任务列表后关联 ID 或确认未创建；官方五接口不提供按业务 ID 找回能力。提交中的15分钟 lease 过期不会重提。已受理任务轮询间隔10秒；查询错误按20..300秒退避，12次连续错误或整体1小时等待转 TRACKING_INTERRUPTED，仍保留 taskId/配额并可主动恢复。未知云状态保存并暂停新派发，不当成功。
+create 前提交 SUBMITTING 意图，HTTP 发送一次，不透明重试。收到 taskId 立即单独提交，之后再处理 promptTips。超时/无法解析/Worker 在提交中崩溃进入 SUBMISSION_UNKNOWN，配额保留。只能管理员查平台任务列表后关联 ID 或确认未创建。提交中的15分钟 lease 过期不会重提。已受理任务轮询间隔10秒；查询错误按20..300秒退避，12次连续错误或整体1小时等待转 TRACKING_INTERRUPTED，仍保留 taskId/配额并可主动恢复。未知云状态保存并暂停新派发，不当成功。
 
-只有官方 SUCCESS/FAILED 才释放受理任务的云端配额。SUCCESS 后进入 DOWNLOADING/FINALIZING。查询或下载使用原 taskId；过期 URL 重新查原 ID，取不回时明确失败，不自动再生成。优先节点150；V2 无节点信息时逐个下载候选并用 FFprobe 选择唯一576×1024且足够长的主视频，横向188不当成片，多个符合候选报错。
+官方 SUCCESS/FAILED 或取消成功回执可释放受理任务的云端配额。SUCCESS 后进入 DOWNLOADING/FINALIZING。查询或下载使用原 taskId；过期 URL 重新查原 ID，取不回时明确失败，不自动再生成。优先节点150；V2 无节点信息时逐个下载候选并用 FFprobe 选择唯一576×1024且足够长的主视频，横向188不当成片，多个符合候选报错。
+
+批次详情中的「终止批次」会立即停止派发，未提交任务标记为 TERMINATED，已完成成片和费用记录保留。批次在 TERMINATING 期间继续处理已提交任务。Worker 用原批次凭据查询原 taskId，若云端已完成则按查询结果结算，否则逐个调用官方 [取消任务](https://www.runninghub.cn/runninghub-api-doc-cn/api-425749015.md) `POST /task/openapi/cancel`，发送 Bearer 与 JSON `apiKey`、`taskId`。成功回执为整数 `code: 0`，允许 `data: null`。拒绝（包括 807）或响应不明时保留配额，退避后继续核对，达到上限可在单任务详情恢复跟踪。提交时尚无 taskId 的任务需管理员核对后处理。云端结果明确且在途本地处理结束后进入 TERMINATED。终止后的批次禁止恢复派发和重新生成，原任务的下载和后处理仍可恢复。已安装 0074 的环境只需同步应用与 Worker 版本。
 
 保留 raw，FFmpeg 参数数组生成5秒/24fps/576×1024/120帧视频，验证时长容差0.05秒；音轨可选。有任何下载/编码/发布失败，状态为对应本地阶段失败，recover 仅恢复该阶段。只有已校验 final 成功持久化后 SUCCEEDED。默认 dry-run 会验证实际素材并使用灰色视频走同一个 raw/final/存储链路，不联网 RunningHub，也不代表生成质量验证。
 
-费用按唯一云 taskId（含历史 Attempt）用 Decimal 汇总顶层 usage；轮询和下载链接刷新共用回执记录出口，合并实际出现的字段，避免后一次部分响应丢掉已观测值。RH币与钱包币种分开，显式null保持未知，不与taskUsageList重复相加；完整可选列表保留在脱敏诊断中，不猜测未定义结构的金额。并发限制只覆盖本功能；accountStatus 的其他活动是观察值，不是远端配额预留。没有使用取消、Webhook、retainSeconds 或自动质量迭代。
+费用按唯一云 taskId（含历史 Attempt）用 Decimal 汇总顶层 usage；轮询和下载链接刷新共用回执记录出口，合并实际出现的字段，避免后一次部分响应丢掉已观测值。RH币与钱包币种分开，显式null保持未知，不与taskUsageList重复相加；完整可选列表保留在脱敏诊断中，不猜测未定义结构的金额。并发限制只覆盖本功能；accountStatus 的其他活动是观察值，不是远端配额预留。
 
 官方错误码804/813表示已运行/已排队：有taskId则继续跟踪，没有ID保留额度待核对，禁止当作失败重生成。416/812余额、802/811凭据、380/803/810工作流等配置错误会暂停该凭据所有批次的新派发，仍跟踪已受理任务；修复后由admin主动恢复。普通云终态失败只暂停所属批次。较低并发配置优先；要提高曾降低的账户配额，需要admin明确保存新配置（仍不能超过5）。
 
