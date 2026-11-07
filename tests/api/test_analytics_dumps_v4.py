@@ -19,6 +19,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -447,7 +448,7 @@ def test_campaign_change_log_requires_native_logs_or_a_legacy_table(
 
 
 def test_campaign_change_log_cannot_overwrite_another_scope(
-    api_client, readwrite_key, db_engine, db_session
+    api_client, readwrite_key, db_engine
 ):
     from tts_erp_v2.plugin.ads import repository
 
@@ -456,12 +457,14 @@ def test_campaign_change_log_cannot_overwrite_another_scope(
         "object_id": CAMPAIGN,
         "opt_time": "2026-09-08 15:40:46",
     }
-    repository.upsert_campaign_opt_logs(
-        db_session,
-        seller_id=SELLER,
-        advertiser_id="TEST_original_advertiser",
-        logs=[{**log, "user": "original"}],
-    )
+    # The API request uses its own session, so commit the fixture to this clone.
+    with Session(db_engine) as session:
+        repository.upsert_campaign_opt_logs(
+            session,
+            seller_id=SELLER,
+            advertiser_id="TEST_original_advertiser",
+            logs=[{**log, "user": "original"}],
+        )
     body = _dump_body_v4(endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT, rows=[])
     body["dump"]["response"]["body"]["data"]["logs"] = [{**log, "user": "replacement"}]
     r = _post(api_client, readwrite_key, body)
@@ -480,7 +483,7 @@ def test_campaign_change_log_cannot_overwrite_another_scope(
 
 @pytest.mark.parametrize("requested", [False, True])
 def test_campaign_change_log_coverage_recovers_an_old_partial_archive(
-    api_client, readwrite_key, db_session, requested
+    api_client, readwrite_key, db_engine, requested
 ):
     from tts_erp_v2.plugin.ads import repository
 
@@ -493,22 +496,24 @@ def test_campaign_change_log_coverage_recovers_an_old_partial_archive(
             "opt_time": "2026-09-08 15:40:46",
         }
     ]
-    repository.upsert_daily_rows(
-        db_session,
-        seller_id=SELLER,
-        advertiser_id=ADVERTISER,
-        endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT,
-        campaign_id=CAMPAIGN,
-        day=date.fromisoformat(dump["day"]),
-        rows=[],
-        request_url=dump["request"]["url"],
-        request_body=dump["request"],
-        response_status=200,
-        response_body=dump["response"],
-        created_at=datetime(2026, 9, 9, 2, tzinfo=UTC),
-        request_id="TEST_old_partial_archive",
-        source="tiktok-shop-data-sync",
-    )
+    with Session(db_engine) as session:
+        repository.upsert_daily_rows(
+            session,
+            seller_id=SELLER,
+            advertiser_id=ADVERTISER,
+            endpoint=CAMPAIGN_CHANGE_LOG_ENDPOINT,
+            campaign_id=CAMPAIGN,
+            day=date.fromisoformat(dump["day"]),
+            rows=[],
+            request_url=dump["request"]["url"],
+            request_body=dump["request"],
+            response_status=200,
+            response_body=dump["response"],
+            created_at=datetime(2026, 9, 9, 2, tzinfo=UTC),
+            request_id="TEST_old_partial_archive",
+            source="tiktok-shop-data-sync",
+        )
+    assert _ad_raw_log_count(db_engine) == 1
 
     def coverage():
         r = api_client.get(
