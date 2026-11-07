@@ -33,11 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from tts_erp_v2.api.deps import (
-    get_session,
-    require_destructive_guard,
-    require_role_at_least,
-)
+from tts_erp_v2.api.deps import get_session, require_role_at_least
 from tts_erp_v2.db.models.media import MediaAsset
 from tts_erp_v2.media import repository
 from tts_erp_v2.media.domain import (
@@ -516,7 +512,6 @@ def delete_asset(
     """Reject referenced assets, otherwise delete their metadata and object."""
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    require_destructive_guard(request, op_name="media_asset.delete")
 
     asset = repository.soft_delete_asset(sess, asset_id)
     if asset is repository.DeleteAssetError.ASSET_IN_USE:
@@ -687,7 +682,6 @@ def delete_digital_human(
     """
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    require_destructive_guard(request, op_name="media_digital_human.delete")
     repository.soft_delete_digital_human(sess, digital_human_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
