@@ -537,6 +537,10 @@ with a presigned URL. Design:
    of tags saved on ready, undeleted assets. Pending, failed, and soft-deleted
    assets contribute no candidates. This read does not create tag records.
 
+Media writes require `readwrite`. Deleting an asset or a persona may return
+`403 MEDIA_DELETE_PROTECTED` when the target database is protected by the
+destructive-operation guard. This response is distinct from a role denial.
+
 Upload and metadata PATCH trim leading/trailing whitespace, collapse repeated
 whitespace, remove empty labels, and deduplicate tags while preserving input
 order. Reading and exact filtering apply the same normalization to historical

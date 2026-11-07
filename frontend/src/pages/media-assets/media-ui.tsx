@@ -29,7 +29,12 @@ export function mediaError(error: unknown, writing = false) {
     return writing ? '未能确认操作结果。请先核对当前记录，再决定是否重试。' : '暂时无法读取，请重试。';
   }
   if (error.status === 401) return '会话已失效，请重新登录。';
-  if (error.status === 403) return writing ? '你没有权限执行此操作。' : '你没有权限查看此内容。';
+  if (error.status === 403) {
+    if (error.detail === 'MEDIA_DELETE_PROTECTED' || error.code === 'MEDIA_DELETE_PROTECTED') {
+      return '当前数据库受删除保护。请联系运维核对服务配置。';
+    }
+    return writing ? '你没有权限执行此操作。' : '你没有权限查看此内容。';
+  }
   if (error.status === 404) return '记录不存在，或已被删除。';
   if (error.status === 429) return error.retryAfter ? '请求过于频繁，请至少等待 ' + error.retryAfter + ' 秒后重试。' : '请求过于频繁，请稍后重试。';
   if (error.status === 503) return '服务暂不可用，请稍后重试。';

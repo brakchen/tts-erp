@@ -623,6 +623,32 @@ def test_update_unknown_asset_is_404(api_client_focused, readwrite_key):
     assert r.status_code == 404, r.text
 
 
+@pytest.mark.parametrize(
+    ("path", "delete_operation"),
+    [
+        ("/v2/media/assets/1", "soft_delete_asset"),
+        ("/v2/media/digital-humans/1", "soft_delete_digital_human"),
+    ],
+)
+def test_media_delete_reports_database_protection_to_readwrite(
+    api_client_focused, readwrite_key, fake_store, monkeypatch, path, delete_operation
+):
+    from tts_erp_v2.api import deps
+    from tts_erp_v2.media import repository
+
+    # Simulate the guard decision without replacing the isolated DB connection.
+    monkeypatch.setattr(deps, "is_prod_shaped_db", lambda: True)
+    monkeypatch.delenv("ALLOW_PROD_DESTRUCTIVE", raising=False)
+    with patch.object(repository, delete_operation) as delete_record:
+        response = api_client_focused.delete(
+            path, headers={"Authorization": f"Bearer {readwrite_key}"}
+        )
+    assert response.status_code == 403, response.text
+    assert response.json()["detail"] == "MEDIA_DELETE_PROTECTED"
+    delete_record.assert_not_called()
+    fake_store.remove.assert_not_called()
+
+
 def test_delete_asset_is_soft_and_removes_object(
     api_client_focused, readwrite_key, fake_store
 ):

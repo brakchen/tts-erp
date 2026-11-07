@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v2/media", tags=["media"])
 
+_DELETE_PROTECTED = "MEDIA_DELETE_PROTECTED"
 _store: MediaObjectStore | None = None
 
 
@@ -516,7 +517,9 @@ def delete_asset(
     """Reject referenced assets, otherwise delete their metadata and object."""
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    require_destructive_guard(request, op_name="media_asset.delete")
+    require_destructive_guard(
+        request, op_name="media_asset.delete", reason=_DELETE_PROTECTED
+    )
 
     asset = repository.soft_delete_asset(sess, asset_id)
     if asset is repository.DeleteAssetError.ASSET_IN_USE:
@@ -687,7 +690,9 @@ def delete_digital_human(
     """
     require_role_at_least(request, "readwrite")
     _csrf(request)
-    require_destructive_guard(request, op_name="media_digital_human.delete")
+    require_destructive_guard(
+        request, op_name="media_digital_human.delete", reason=_DELETE_PROTECTED
+    )
     repository.soft_delete_digital_human(sess, digital_human_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
