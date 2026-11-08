@@ -141,7 +141,9 @@ it('recovers an obsolete offset using server total, never client totals', async 
   history.replaceState(null, '', '/?offset=200&limit=50'); const fetcher = api({ ...payload, total: 61 });
   await mount(); await screen.findByText('TEST_CAMPAIGN');
   expect(fetcher.mock.calls.filter(([url]) => !url.endsWith('/options')).map(([url]) => new URL(url, 'https://test.invalid').searchParams.get('offset'))).toEqual(['200', '50']);
-  expect(screen.getByRole('navigation', { name: '广告明细分页' })).toHaveTextContent('51–51 / 61');
+  const pager = screen.getByRole('navigation', { name: '广告明细分页' });
+  expect(within(pager).getByText('61 行')).toBeVisible();
+  expect(within(pager).getByText('第 2 页 · 共 2 页')).toBeVisible();
 });
 it('keeps a failed copy selectable and reports explicit failure', async () => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error('TEST no clipboard')) } });

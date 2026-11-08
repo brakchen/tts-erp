@@ -1,3 +1,4 @@
+import OffsetPagination from '../../shared/OffsetPagination';
 import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
@@ -102,11 +103,9 @@ export default function AdDaily({ bootstrap }: PageProps) {
       </section>
       <AdTable items={data.items} query={query} disabled={disabled} onSort={sort} />
       {data.items.length === 0 && <p role="status">暂无广告日数据</p>}
-      <nav aria-label="广告明细分页" className="erp-pagination">
-        <Button variant="secondary" isDisabled={disabled || query.offset === 0} onPress={() => setQuery((q) => ({ ...q, offset: Math.max(0, q.offset - q.limit) }))}>上一页</Button>
-        <span>{data.total === 0 || data.items.length === 0 ? 0 : query.offset + 1}–{data.items.length === 0 ? 0 : query.offset + data.items.length} / {displayDecimal(data.total)} 行</span>
-        <Button variant="secondary" isDisabled={disabled || query.offset + query.limit >= data.total} onPress={() => setQuery((q) => ({ ...q, offset: q.offset + q.limit }))}>下一页</Button>
-      </nav>
+      <OffsetPagination label="广告明细分页" offset={query.offset} pageSize={query.limit} total={data.total}
+        summaryAddon={<span>{displayDecimal(data.total)} 行</span>}
+        disabled={disabled} onPage={(offset) => setQuery((current) => ({ ...current, offset }))} />
     </>}
   </div>;
 }

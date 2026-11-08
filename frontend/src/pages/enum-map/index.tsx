@@ -131,11 +131,16 @@ export default function EnumMap({ bootstrap }: PageProps) {
   </section>;
   return <div className="erp-page">
     <PageIntro eyebrow="DATA MAPPING" title="让业务数据使用同一种语言" description="集中查看来源字段与标准枚举的映射，确认后维护生效配置。" />
-    <section className="erp-filters" aria-label="映射范围与操作">
-      <Select value={activeType} onChange={(key) => { if (typeof key === 'string') setCategory(key); }} className="erp-field">
-        <Label>分类</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{categories.map((type) => <ListBox.Item key={type} id={type} textValue={categoryName(type)}>{categoryName(type)}</ListBox.Item>)}</ListBox></Select.Popover>
-      </Select>
-      <Button isDisabled={disabled} onPress={() => open({ kind: 'add', enum_type: activeType })}>新增映射</Button><Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>刷新映射</Button>
+    <section className="erp-panel erp-filter-workspace" aria-label="映射范围与操作">
+      <div className="erp-filter-row justify-between">
+        <Select value={activeType} onChange={(key) => { if (typeof key === 'string') setCategory(key); }} className="w-72 max-w-full">
+          <Label>分类</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{categories.map((type) => <ListBox.Item key={type} id={type} textValue={categoryName(type)}>{categoryName(type)}</ListBox.Item>)}</ListBox></Select.Popover>
+        </Select>
+        <div className="erp-filter-row" role="group" aria-label="映射操作">
+          <Button isDisabled={disabled} onPress={() => open({ kind: 'add', enum_type: activeType })}>新增映射</Button>
+          <Button variant="secondary" isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>刷新映射</Button>
+        </div>
+      </div>
     </section>
     {!canManage && <p>当前仅浏览；维护需要 admin 权限，以服务端判定为准。</p>}
     {pending && <p role="status">提交中，请等待确认…</p>}{cooldown && <p role="status">请等待服务端指定时间后再提交；仍可修改或取消草稿，不会自动重试。</p>}

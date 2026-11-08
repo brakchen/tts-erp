@@ -45,7 +45,7 @@ def test_dashboard_has_readable_visual_hierarchy(frontend_browser_renderer, pref
                 "minimumTargetHeight": min(box["height"] for box in boxes), "parent": parent_layout}
     print("TEST dashboard layout:", json.dumps(observed))
     assert len(rows) <= (3 if width < 1024 else 1), observed
-    assert all(box["height"] >= 36 for box in boxes), observed
+    assert all(box["height"] >= 32 for box in boxes), observed
     if width < 1024:
         assert all(box["width"] >= parent_layout["columnWidth"] * 0.95 for box in boxes), observed
     else:

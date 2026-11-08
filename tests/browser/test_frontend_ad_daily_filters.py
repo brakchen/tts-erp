@@ -1,4 +1,4 @@
-"""Compiled filter layout: labels above full-width, consistently sized controls."""
+"""Compiled filter layout: labels beside compact, consistently sized controls."""
 
 from __future__ import annotations
 
@@ -21,23 +21,24 @@ def test_ad_filters_fit_and_align(frontend_browser_renderer, width):
     ]] + [form.get_by_label(label, exact=True) for label in [
         "开始日期", "结束日期", "计划 / 商品 ID 搜索",
     ]]
-    boxes = [control.bounding_box() for control in controls]
-    assert all(box is not None for box in boxes)
     columns = 1 if width == 375 else 2 if width == 900 else 6 if width == 2560 else 3
-    assert len({round(box["x"]) for box in boxes}) == columns
-    assert max(box["width"] for box in boxes) - min(box["width"] for box in boxes) < 2
-    assert all(43 <= box["height"] <= 45 for box in boxes)
+    fields = []
     for control in controls:
         layout = control.evaluate("""el => {
-            const field = el.closest('.ad-filter-field');
-            const label = field.querySelector(':scope > .label');
-            return {labelBottom: label.getBoundingClientRect().bottom,
-                    inputTop: el.getBoundingClientRect().top,
-                    fieldWidth: field.getBoundingClientRect().width,
-                    inputWidth: el.getBoundingClientRect().width};
+            const field = el.closest('.ad-filter-field').getBoundingClientRect();
+            const label = el.closest('.ad-filter-field').querySelector(':scope > .label').getBoundingClientRect();
+            const input = el.getBoundingClientRect();
+            return {fieldLeft: field.left, fieldRight: field.right,
+                    labelRight: label.right, inputLeft: input.left, inputRight: input.right,
+                    labelCenter: label.top + label.height / 2,
+                    inputCenter: input.top + input.height / 2, inputHeight: input.height};
         }""")
-        assert layout["labelBottom"] <= layout["inputTop"]
-        assert abs(layout["fieldWidth"] - layout["inputWidth"]) < 2
+        fields.append(round(layout["fieldLeft"]))
+        assert layout["labelRight"] <= layout["inputLeft"]
+        assert abs(layout["labelCenter"] - layout["inputCenter"]) < 2
+        assert abs(layout["fieldRight"] - layout["inputRight"]) < 2
+        assert 31 <= layout["inputHeight"] <= 33
+    assert len(set(fields)) == columns
     assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1")
 
 

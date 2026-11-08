@@ -64,10 +64,6 @@ export function queryParams(q: Query, focused: boolean): URLSearchParams {
   const fee = percentToRatio(q.feePercent); if (fee !== null) params.set('fee_rate', fee);
   return params;
 }
-export function pageSequence(current: number, pages: number): (number | '…')[] {
-  const selected = [...new Set([1, pages, current - 2, current - 1, current, current + 1, current + 2].filter((page) => page >= 1 && page <= pages))].sort((left, right) => left - right);
-  const result: (number | '…')[] = []; selected.forEach((page, index) => { if (index && page - selected[index - 1] > 1) result.push('…'); result.push(page); }); return result;
-}
 export function persistQuery(profile: Profile, q: Query) {
   try { const { shopPk, wStart, wEnd, datesTouched, includeAll, limit, sort, order, projectionLookbackDays } = q; localStorage.setItem(preferenceKey(profile), JSON.stringify({ shopPk, wStart, wEnd, datesTouched, includeAll, limit, sort, order, projectionLookbackDays })); } catch { /* Storage is optional. */ }
 }

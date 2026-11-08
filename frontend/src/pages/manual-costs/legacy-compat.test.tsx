@@ -54,14 +54,14 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     const views = within(screen.getByLabelText('工作台视图'));
     expect(views.getAllByRole('button').map((button) => button.textContent)).toEqual(['全部 SPU', '缺成本候选', '最近提交']);
     expect(views.getByRole('button', { name: '全部 SPU' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
+    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     await user.click(views.getByRole('button', { name: '最近提交' }));
     const history = (await screen.findByText('TEST 变更记录')).closest('tr')!;
     expect(within(history).getByText('123456789012345.1234 CNY')).toBeVisible();
     expect(within(history).getByText('0.0000 VND')).toBeVisible();
-    expect(screen.getByText(/服务端总数：9007199254740998/)).toBeVisible();
+    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     await user.click(views.getByRole('button', { name: '缺成本候选' }));
-    expect(await screen.findByText(/服务端缺图总数：9007199254740999/)).toBeVisible();
+    expect(await screen.findByText(/缺图总数 9007199254740999/)).toBeVisible();
     expect(screen.getByText('missing_photo：true')).toBeVisible();
     expect(screen.queryByRole('textbox', { name: '按 SPU 或标题搜索' })).toBeNull();
     for (const retired of ['待处理', '待填成本', '待传图片']) expect(document.body.textContent).not.toContain(retired);
@@ -78,7 +78,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     const row = (await screen.findByText(`TEST 店铺 ${other.id}`)).closest('tr')!;
     expect(catalogueQuery(fetcher).get('shop_pk')).toBe(other.id);
     expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '刷新当前列表' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '搜索' })).toBeEnabled();
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });
 
@@ -87,27 +87,25 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     ['status', 'SELLER_DEACTIVATED', '状态'],
     ['status', 'ACTIVATE', '状态'],
     ['has_orders', 'true', '仅看有单'],
-    ['missing_manual_cost', 'true', '仅展示未登记 SPU'],
+    ['missing_manual_cost', 'true', '仅看未登记'],
     ['sort', 'unit_cost', '排序字段'],
     ['sort', 'created_at', '排序字段'],
     ['sort', 'updated_at', '排序字段'],
     ['order', 'desc', '排序方向'],
-    ['limit', '50', '每页行数'],
     ['q', 'TEST 搜索 & SPU', '按 SPU 或标题搜索'],
   ])('sends %s=%s to the server before pagination and resets a nonzero offset', async (key, value, label) => {
     const fetcher = setup((query) => Array.from({ length: Number(query.get('limit')) }, (_, index) => ({ ...product(index), title: `TEST server ${query.get('offset')} row ${index}` })));
     const user = userEvent.setup(); render(<ManualCosts {...props} />);
     const filters = () => within(screen.getByRole('form', { name: '工作台筛选' }));
-    const pagination = () => within(screen.getByLabelText('分页'));
+    const pagination = () => within(screen.getByRole('navigation', { name: '采购工作台分页' }));
     await screen.findByText('TEST server 0 row 0');
     expect(catalogueQuery(fetcher).get('sort')).toBe('status');
     expect(catalogueQuery(fetcher).get('order')).toBe('asc');
-    await chooseOption(user, '每页行数', '25');
-    await waitFor(() => expect(catalogueQuery(fetcher).get('limit')).toBe('25'));
+    expect(catalogueQuery(fetcher).get('limit')).toBe('50');
     await waitFor(() => expect(pagination().getByRole('button', { name: '下一页' })).toBeEnabled());
     await user.click(pagination().getByRole('button', { name: '下一页' }));
-    await screen.findByText('TEST server 25 row 0');
-    expect(catalogueQuery(fetcher).get('offset')).toBe('25');
+    await screen.findByText('TEST server 50 row 0');
+    expect(catalogueQuery(fetcher).get('offset')).toBe('50');
     if (key === 'q') {
       fireEvent.change(filters().getByRole('textbox', { name: label }), { target: { value } });
       expect(catalogueQuery(fetcher).has('q')).toBe(false); // Explicit search, not a local row filter.
@@ -124,7 +122,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     // The server deliberately returns ACTIVATE rows even for DELETED/search scopes.
     // Rendering them unchanged protects server authority, not client-side re-filtering.
     expect(within(screen.getByRole('region', { name: 'SPU 表格滚动区域' })).getAllByText('在售')).toHaveLength(Number(query.get('limit')));
-    expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
+    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     if (key === 'status' || key === 'has_orders' || key === 'missing_manual_cost') {
       if (key === 'status') await chooseOption(user, label, '全部');
       else await user.click(filters().getByRole('checkbox', { name: label }));
@@ -164,7 +162,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     const fetcher = setup([row]); const user = userEvent.setup(); render(<ManualCosts {...props} />);
     await screen.findByText('TEST 商品 0');
     expect(screen.getByText('货源：123456789012345.1234')).toBeVisible();
-    if (view === 'unregistered') await user.click(screen.getByRole('checkbox', { name: '仅展示未登记 SPU' }));
+    if (view === 'unregistered') await user.click(screen.getByRole('checkbox', { name: '仅看未登记' }));
     else await user.click(screen.getByRole('button', { name: '缺成本候选' }));
     await waitFor(() => expect(readRowCost(screen.getByText('TEST 商品 0').closest('tr')!)).toBe(''));
     expect(screen.getByText('货源：123456789012345.1234')).toBeVisible();

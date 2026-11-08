@@ -1,3 +1,4 @@
+import OffsetPagination from '../../shared/OffsetPagination';
 import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Chip, Input, Label, ListBox, Modal, Select, Table, TextField, buttonVariants } from '@heroui/react';
@@ -234,7 +235,11 @@ export default function Shops({ bootstrap }: PageProps) {
       <Table.Cell className="erp-table-cell"><Chip size="sm" variant="soft" color={shop.auth_state === 'authorized' ? 'success' : shop.auth_state === 'reauthorize' ? 'warning' : 'default'}>{authLabels[shop.auth_state ?? 'unknown']}</Chip>{shop.auth_state === 'authorized' && <p className="erp-table-meta">自动同步已接入</p>}{shop.auth_state === 'reauthorize' && <p className="erp-table-meta">请重新完成店铺授权</p>}</Table.Cell>
       <Table.Cell className="erp-table-cell" focusMode="child"><div className="shops-row-actions"><Button variant="secondary" size="sm" isDisabled={blocked(shopKey(shop))} onPress={() => open('edit', shop)}>编辑信息</Button><Button variant="secondary" size="sm" isDisabled={blocked(shopKey(shop))} onPress={() => open('app', shop)}>配置 App</Button><Button className="shops-authorize" variant="tertiary" size="sm" isDisabled={blocked(shopKey(shop)) || !shop.app_credentials_configured || !shop.service_id} onPress={() => { void authorize(shop); }}>{pending[shopKey(shop)] ? '处理中…' : '获取授权链接'}</Button></div></Table.Cell>
     </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>}
-    <footer className="shops-list-footer"><p className="erp-table-meta">每页 {pageSize} 家 · 第 {Math.floor(offset / pageSize) + 1} 页</p><div className="flex gap-2"><Button variant="secondary" size="sm" isDisabled={list.loading || readBlocked || offset === 0} onPress={() => setOffset((value) => Math.max(0, value - pageSize))}>上一页</Button><Button variant="secondary" size="sm" isDisabled={list.loading || readBlocked || (list.total != null ? offset + pageSize >= list.total : (list.shops?.length ?? 0) < pageSize)} onPress={() => setOffset((value) => value + pageSize)}>下一页</Button></div></footer>
+    <footer className="shops-list-footer">
+      <OffsetPagination label="店铺分页" offset={offset} pageSize={pageSize} total={list.total}
+        hasNext={list.total == null ? (list.shops?.length ?? 0) >= pageSize : undefined}
+        disabled={list.loading || readBlocked} onPage={setOffset} />
+    </footer>
     </section>
     <Modal.Backdrop isOpen={dialog !== undefined} isDismissable={!dialogPending} isKeyboardDismissDisabled={dialogPending} onOpenChange={(isOpen) => { if (!isOpen) close(); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭店铺表单" isDisabled={dialogPending} /><Modal.Header><Modal.Heading>{dialog?.kind === 'register' ? '手工补录店铺' : dialog?.kind === 'app' ? '配置当前店铺 App' : '编辑店铺信息'}</Modal.Heading></Modal.Header>

@@ -19,11 +19,13 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -399,6 +401,8 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     if path.endswith("/v2/media/assets"):
         return {"items": [], "total": 0, "limit": 24, "offset": 0}
     if path.endswith("/v2/media/digital-humans"):
+        if "cursor" in parse_qs(query, keep_blank_values=True):
+            return {"items": [], "total": 0, "nextCursor": None}
         return []
     if path.endswith("/v2/video-publish/config"):
         return {
@@ -606,6 +610,12 @@ def frontend_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 @pytest.fixture()
 def browser_renderer(site_url: str) -> Any:
     yield from _browser_renderer(site_url)
+
+
+@pytest.fixture()
+def browser_conftest() -> ModuleType:
+    """Return the fixture module that serves canned data in this test session."""
+    return sys.modules[__name__]
 
 
 @pytest.fixture()

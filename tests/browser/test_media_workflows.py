@@ -933,11 +933,10 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     expect(button(root, "上传素材")).to_be_visible()
     cards = root.get_by_role("list", name="素材列表").locator(":scope > li")
     expect(cards.first).to_be_visible()
-    while cards.count() < len(assets):
-        tail = root.get_by_role("button", name="加载更多", exact=True)
-        if tail.count():
-            tail.evaluate("element => element.scrollIntoView({block: 'end'})")
-        expect(cards).to_have_count(len(assets))
+    # The feed can complete before the scroll. Locate the tail and scroll it
+    # in the same browser operation so its removal cannot race locator resolution.
+    root.evaluate("element => element.querySelector('.media-feed-tail')?.scrollIntoView({block: 'end'})")
+    expect(cards).to_have_count(len(assets))
     assert any(request.query.get("cursor", [""])[0] for request in gate.requests if request.path == ASSETS)
     assert len(cards.get_by_role("heading").all_text_contents()) == len(assets)
     assert len(set(cards.get_by_role("heading").all_text_contents())) == len(assets)

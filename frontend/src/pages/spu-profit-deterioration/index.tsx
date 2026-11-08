@@ -1,3 +1,4 @@
+import OffsetPagination from '../../shared/OffsetPagination';
 import PageIntro from '../../shared/PageIntro';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Input, Label, ListBox, Select } from '@heroui/react';
@@ -146,11 +147,9 @@ export default function SpuProfitDeterioration({ bootstrap }: PageProps) {
       </section>
       <CoverageDetails coverage={data.meta.coverage} />
       {data.items.length > 0 ? <ComparisonTable root={bootstrap.rootPath} data={data} /> : <p role="status">当前条件无匹配 SPU，请调整范围或日期；不代表全店正常或无风险。</p>}
-      <nav aria-label="对比分页" className="erp-pagination">
-        <Button variant="secondary" isDisabled={blocked || loading || Number(applied.offset) === 0} onPress={() => page(Math.max(0, Number(applied.offset) - Number(applied.limit)))}>上一页</Button>
-        <span>第 {Math.floor(Number(applied.offset) / Number(applied.limit)) + 1} 页 · {data.total} 条对比记录（不是订单数）</span>
-        <Button variant="secondary" isDisabled={blocked || loading || Number(applied.offset) + Number(applied.limit) >= data.total} onPress={() => page(Number(applied.offset) + Number(applied.limit))}>下一页</Button>
-      </nav>
+      <OffsetPagination label="对比分页" offset={Number(applied.offset)} pageSize={Number(applied.limit)}
+        total={data.total} disabled={blocked || loading} onPage={page}
+        summaryAddon={<span>{data.total} 条对比记录</span>} />
     </>}
   </div>;
 }

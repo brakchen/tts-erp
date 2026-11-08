@@ -13,12 +13,11 @@ from urllib.parse import parse_qs
 import pytest
 from playwright.sync_api import expect
 
-import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
 
-def test_projection_control_is_visible_and_switches_only_projection(frontend_browser_renderer, monkeypatch) -> None:
+def test_projection_control_is_visible_and_switches_only_projection(browser_conftest, frontend_browser_renderer, monkeypatch) -> None:
     original_mock_payload = cast(  # type: ignore[attr-defined]
         Callable[[str], Any], browser_conftest._mock_payload  # type: ignore[attr-defined]
     )

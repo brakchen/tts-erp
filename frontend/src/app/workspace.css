@@ -16,7 +16,7 @@ body { font-family: var(--sans); background: var(--paper); color: var(--ink); }
 .erp-toolbar > *, .erp-filter-row > *, .erp-filters > * { min-width: 0; max-width: 100%; }
 .erp-filter-workspace { display: grid; gap: 12px; padding: 16px 20px; }
 .erp-filter-workspace .erp-shop-picker { width: 480px; max-width: 100%; }
-.erp-filters label, .erp-filter-row label { display: flex; min-width: 0; flex-direction: column; gap: 8px; color: var(--ink-soft); font-size: 12px; }
+.erp-filters label, .erp-filter-row label { display: flex; min-width: 0; flex-direction: column; gap: 8px; color: var(--ink-soft); font-size: var(--erp-control-font-size); }
 .erp-filters label:has(input[type="checkbox"]), .erp-filter-row label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; min-height: 40px; }
 .erp-field { width: 240px; min-width: 0; max-width: 100%; }
 .erp-field-short { width: 100px; }
@@ -28,7 +28,6 @@ body { font-family: var(--sans); background: var(--paper); color: var(--ink); }
 .erp-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .erp-select:disabled { opacity: .5; cursor: not-allowed; }
 .erp-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px; width: fit-content; max-width: 100%; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); }
-.erp-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; padding: 16px 0; color: var(--muted); font-size: 12px; }
 .erp-metric { min-width: 0; padding: 24px; border: 1px solid var(--rule); border-radius: 16px; background: var(--surface); }
 .erp-metric h2 { color: var(--muted); font-size: 12px; }
 .erp-metric > p { margin-top: 12px; font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -45,5 +44,100 @@ body { font-family: var(--sans); background: var(--paper); color: var(--ink); }
   .erp-filters { width: 100%; }
   .erp-filters > label, .erp-filter-row > label, .erp-field { width: 100%; }
   .erp-filters > label:has(input[type="checkbox"]), .erp-filter-row > label:has(input[type="checkbox"]) { width: auto; }
-  .erp-pagination { justify-content: flex-start; }
 }
+
+/* Keep single-line workspace field labels beside their controls, including
+   page-specific toolbars. The grid can wrap fields as complete units. */
+.erp-shell .erp-main :is([data-slot=textfield], [data-slot=select]):has(> :is(label, [data-slot=label])):has(> :is(input, [data-slot=select-trigger])) {
+  display: grid;
+  grid-template-columns: fit-content(46%) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  min-width: 0;
+}
+.erp-shell .erp-main :is([data-slot=textfield], [data-slot=select]):has(> :is(label, [data-slot=label])):has(> :is(input, [data-slot=select-trigger])) > :is(label, [data-slot=label]) {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+  line-height: 1.35;
+}
+.erp-shell .erp-main :is([data-slot=textfield], [data-slot=select]):has(> :is(label, [data-slot=label])) > :is(input, [data-slot=select-trigger]) {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  width: 100%;
+}
+.erp-shell .erp-main :is([data-slot=textfield], [data-slot=select]):has(> :is(label, [data-slot=label])) > :is([slot=description], [slot=errorMessage], [data-slot=field-error], [data-slot=description]) {
+  grid-column: 2;
+}
+.erp-shell :is(.erp-filters, .erp-filter-row, .erp-filter-workspace, .erp-profit-controls, .ad-filters, .media-filters) {
+  align-items: center;
+}
+.erp-shell :is(.erp-filters, .erp-filter-row, .erp-profit-controls, .ad-filters, .media-filters)
+  label:not([aria-hidden=true] *):has(> :is(input:not([type=checkbox], [type=radio], [type=hidden]), select)) {
+  display: grid;
+  grid-template-columns: fit-content(46%) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+}
+.erp-shell :is(.erp-filters, .erp-filter-row, .erp-profit-controls, .ad-filters, .media-filters) .erp-field-short { width: min(100%, 150px); }
+.erp-shell .erp-filter-row .erp-shop-picker { width: min(100%, 302px); }
+.erp-shell .erp-profit-toolbar > div { align-items: center; }
+.erp-shell .ad-filters-grid { align-items: center; }
+.erp-shell .ad-filter-note { margin-left: 0; }
+.erp-shell .media-filters > :not(button) { flex: 0 1 235px; }
+.erp-shell .media-filters > :not(button):first-child { flex-basis: 286px; }
+.erp-shell .shops-filters { display: flex; flex-wrap: wrap; width: 100%; }
+.erp-shell .shops-filters > [data-slot=textfield] { flex: 0 1 275px; }
+.erp-shell .shops-filters > [data-slot=select] { flex: 0 1 170px; }
+.erp-shell .shops-filter-actions { margin-left: auto; }
+@media (max-width: 767px) {
+  .erp-shell .shops-filter-actions { margin-left: 0; }
+}
+
+.erp-shell .erp-main [data-slot=select]:has(> [data-slot=label]) > [data-slot=select-trigger] [data-slot=select-value] {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.erp-shell .ad-filter-field { max-width: 336px; }
+
+/* One compact density for the standard controls, including portal dialogs. */
+:root {
+  --erp-control-height: 32px;
+  --erp-control-font-size: 13px;
+  --erp-control-line-height: 18px;
+  --jse-font-family: var(--sans);
+  --jse-font-family-mono: var(--sans);
+}
+body :is(input[data-slot=input]:not([type=file]), [data-slot=select-trigger], select.erp-select) {
+  height: var(--erp-control-height);
+  min-height: var(--erp-control-height);
+  padding-block: 4px;
+  font-family: var(--sans);
+  font-size: var(--erp-control-font-size);
+  line-height: var(--erp-control-line-height);
+}
+body [data-slot=select-trigger] { align-items: center; }
+body :is([data-slot=label], [data-slot=select-value], [data-slot=input-group-input]) {
+  font-family: var(--sans);
+  font-size: var(--erp-control-font-size);
+  line-height: var(--erp-control-line-height);
+}
+body [data-slot=input-group]:has([data-slot=input-group-input]):not(:has(textarea)) {
+  min-height: var(--erp-control-height);
+  height: var(--erp-control-height);
+}
+body [data-slot=input-group-input] { padding-block: 4px; }
+body .button:not(.button--icon-only, .erp-metric-hint, :has(> img)) {
+  min-height: var(--erp-control-height);
+  height: auto;
+  padding-block: 6px;
+  font-family: var(--sans);
+  font-size: var(--erp-control-font-size);
+  line-height: var(--erp-control-line-height);
+}
+input[type=date]::-webkit-datetime-edit { font-family: inherit; }

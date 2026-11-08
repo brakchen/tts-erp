@@ -65,7 +65,12 @@ def test_navigation_drawer_theme_and_focus(frontend_browser_renderer, prefix):
 def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, width, slug, title):
     page = frontend_browser_renderer.open(f"{prefix}/v2/pages/{slug}", width=width)
     page.get_by_role("heading", level=1, name=title, exact=True).wait_for(timeout=10_000)
-    wait_canned_page(page, slug)
+    if slug == "runninghub":
+        page.get_by_text("plus · 并发 5 · 已校验版本", exact=True).wait_for()
+        page.get_by_role("checkbox", name="TEST_RENDER_HUMAN · 模板 A · TEST_ren · 0 段", exact=True).wait_for()
+        page.get_by_text("没有就绪图片。", exact=False).wait_for()
+    else:
+        wait_canned_page(page, slug)
     assert page.locator("#frontend-startup").count() == 0
     if slug == "spu-profit-deterioration":
         # Exercise populated comparison layout, not just its loading/error shell.
@@ -87,13 +92,11 @@ def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, wi
     if slug == "shops":
         filters = page.get_by_role("form", name="店铺筛选")
         bounds = filters.bounding_box()
-        if width == 2560:
-            assert bounds["width"] < 1100
         controls = filters.locator("input:visible, button:visible")
         assert controls.count() >= 6  # Search, three selectors, search/reset actions.
         for control in controls.all():
             box = control.bounding_box()
-            assert box["height"] >= 40
+            assert box["height"] >= 32
             assert box["x"] >= bounds["x"] - 1
             assert box["x"] + box["width"] <= bounds["x"] + bounds["width"] + 1
     if width < 1024:

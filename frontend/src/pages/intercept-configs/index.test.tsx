@@ -43,9 +43,9 @@ describe('intercept-configs content', () => {
   it('preserves exact filters/search wire, server total, page size and paging order', async () => {
     const fetcher = api(async () => json({})); const user = userEvent.setup(); render(<InterceptConfigs {...props} />); await screen.findByText(row.domain);
     expect(screen.getByText('共 51 条 · 已选 0 条')).toBeVisible(); await user.click(screen.getByRole('button', { name: '下一页' }));
-    await screen.findByText('第 2 页 / 2 页'); expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/tts/v2/intercept/configs?limit=50&offset=50');
+    await screen.findByText('第 2 页 · 共 2 页'); expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/tts/v2/intercept/configs?limit=50&offset=50');
     fireEvent.change(screen.getByRole('textbox', { name: '筛选域名' }), { target: { value: ' TEST.example ' } }); await user.click(screen.getByRole('button', { name: /筛选状态/ })); await user.click(screen.getByRole('option', { name: '禁用' })); fireEvent.change(screen.getByRole('textbox', { name: '搜索' }), { target: { value: ' test ' } });
-    await user.click(screen.getByRole('button', { name: '查询配置' })); await screen.findByText('第 1 页 / 2 页');
+    await user.click(screen.getByRole('button', { name: '查询配置' })); await screen.findByText('第 1 页 · 共 2 页');
     expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/tts/v2/intercept/configs?domain=TEST.example&enabled=false&search=test&limit=50&offset=0'); expect(screen.getByText(/当前接口未实现搜索/)).toBeVisible();
     await user.click(screen.getByRole('button', { name: /筛选状态/ })); await user.click(screen.getByRole('option', { name: '全部' }));
     await user.click(screen.getByRole('button', { name: '查询配置' }));

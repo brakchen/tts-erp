@@ -1,3 +1,4 @@
+import OffsetPagination from '../../shared/OffsetPagination';
 import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Input, Label, ListBox, Modal, Select, Table } from '@heroui/react';
@@ -14,6 +15,7 @@ interface Draft { target: Product; baseline: Fields; fields: Fields; status?: 's
 interface Attempt { target: Product; fields: Fields }
 interface Recovery { attempt: Attempt; phase: 'unverified' | 'checking' | 'checked' | 'failed'; snapshot?: Product; message?: string }
 interface List { key: string; loading: boolean; products?: Product[]; history?: History[]; total?: string | null; totalPhoto?: string; error?: string }
+const limit = 50;
 const shopPath = '/v2/commerce/channel-accounts?platform=tiktok&limit=500';
 const statuses = { ACTIVATE: '在售', DELETED: '下架', SELLER_DEACTIVATED: '停售' };
 function statusLabel(status: string | null) { return status && Object.hasOwn(statuses, status) ? statuses[status as keyof typeof statuses] : status ?? '—'; }
@@ -33,7 +35,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
   const [shops, setShops] = useState<Shop[]>(); const [shopError, setShopError] = useState(''); const [shopRefresh, setShopRefresh] = useState(0);
   const [shopId, setShopId] = useState(''); const [view, setView] = useState<View>('all');
   const [searchInput, setSearchInput] = useState(''); const [query, setQuery] = useState('');
-  const [limit, setLimit] = useState(50); const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [status, setStatus] = useState(''); const [hasOrders, setHasOrders] = useState(false); const [missingManual, setMissingManual] = useState(false);
   const [sort, setSort] = useState('status'); const [order, setOrder] = useState('asc'); const [onlyPhoto, setOnlyPhoto] = useState(false);
   const [refresh, setRefresh] = useState(0); const [list, setList] = useState<List>({ key: '', loading: false });
@@ -177,50 +179,60 @@ export default function ManualCosts({ bootstrap }: PageProps) {
   return <div className="erp-page">
     <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="把商品成本，管理清楚" description="按店铺核对货源价与人工成本，编辑草稿后确认提交。" />
     <section className="erp-panel erp-filter-workspace" aria-label="采购范围与筛选">
-    <div className="erp-filter-row">
-    <div className="erp-filter-row">
-      <Select className="erp-shop-picker" value={shopId || null} isDisabled={pending || !shops?.length} onChange={(key) => { if (typeof key === 'string') changeScope(() => setShopId(key)); }}>
-        <Label>当前店铺</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{shops?.map((shop) => <ListBox.Item key={shop.id} id={shop.id} textValue={`${shop.account_name ?? shop.shop_id} · ${shop.shop_id} · #${shop.id}`}>{shop.account_name ?? shop.shop_id} · {shop.shop_id} · #{shop.id}</ListBox.Item>)}</ListBox></Select.Popover>
-      </Select>
-      <Button variant="secondary" isDisabled={cooldown || pending} onPress={() => { setShopRefresh((value) => value + 1); setRefresh((value) => value + 1); }}>刷新店铺与列表</Button>
-    </div>
-    <div aria-label="工作台视图" className="erp-tabs">{([['all', '全部 SPU'], ['missing', '缺成本候选'], ['recent', '最近提交']] as const).map(([value, label]) => <Button key={value} variant={view === value ? 'primary' : 'ghost'} aria-pressed={view === value} isDisabled={pending} onPress={() => changeScope(() => setView(value))}>{label}</Button>)}</div>
-    </div>
-    <form aria-label="工作台筛选" className="erp-filter-row" onSubmit={(event) => { event.preventDefault(); changeScope(() => setQuery(searchInput)); }}>
-      {view !== 'missing' && <><label>搜索<Input aria-label="按 SPU 或标题搜索" maxLength={200} value={searchInput} disabled={pending} onChange={(event) => setSearchInput(event.target.value)} /></label><Button type="submit" isDisabled={pending || cooldown}>搜索</Button></>}
-      <Select className="erp-field erp-field-short" value={String(limit)} isDisabled={pending} onChange={(key) => { if (typeof key === 'string') changeScope(() => setLimit(Number(key))); }}>
-        <Label>每页行数</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[25, 50, 100].map((value) => <ListBox.Item key={value} id={String(value)} textValue={String(value)}>{value}</ListBox.Item>)}</ListBox></Select.Popover>
-      </Select>
-      {view === 'all' && <>
-        <Select className="erp-field" value={`choice:${status}`} isDisabled={pending} onChange={(key) => { if (typeof key === 'string') changeScope(() => setStatus(key.slice(7))); }}>
-          <Label>状态</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[['', '全部'], ...Object.entries(statuses)].map(([value, label]) => <ListBox.Item key={value} id={`choice:${value}`} textValue={label}>{label}</ListBox.Item>)}</ListBox></Select.Popover>
+      <div className="erp-filter-row justify-between" aria-label="店铺与视图">
+        <Select className="erp-shop-picker" value={shopId || null} isDisabled={pending || cooldown || !shops?.length} onChange={(key) => { if (typeof key === 'string') changeScope(() => setShopId(key)); }}>
+          <Label>当前店铺</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{shops?.map((shop) => <ListBox.Item key={shop.id} id={shop.id} textValue={`${shop.account_name ?? shop.shop_id} · ${shop.shop_id} · #${shop.id}`}>{shop.account_name ?? shop.shop_id} · {shop.shop_id} · #{shop.id}</ListBox.Item>)}</ListBox></Select.Popover>
         </Select>
-        <Checkbox isSelected={hasOrders} isDisabled={pending} onChange={(checked) => changeScope(() => setHasOrders(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅看有单</Checkbox.Content></Checkbox>
-        <Checkbox isSelected={missingManual} isDisabled={pending} onChange={(checked) => changeScope(() => setMissingManual(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅展示未登记 SPU</Checkbox.Content></Checkbox>
-        <Select className="erp-field" aria-label="排序字段" value={sort} isDisabled={pending} onChange={(key) => { if (typeof key === 'string') changeScope(() => setSort(key)); }}>
-          <Label>排序</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[['status', '状态'], ['unit_cost', '成本'], ['created_at', '创建时间'], ['updated_at', '更新时间']].map(([value, label]) => <ListBox.Item key={value} id={value} textValue={label}>{label}</ListBox.Item>)}</ListBox></Select.Popover>
-        </Select>
-        <Select className="erp-field erp-field-short" aria-label="排序方向" value={order} isDisabled={pending} onChange={(key) => { if (typeof key === 'string') changeScope(() => setOrder(key)); }}>
-          <Label>方向</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="asc" textValue="升序">升序</ListBox.Item><ListBox.Item id="desc" textValue="降序">降序</ListBox.Item></ListBox></Select.Popover>
-        </Select>
-      </>}
-      {view === 'missing' && <Checkbox isSelected={onlyPhoto} isDisabled={pending} onChange={setOnlyPhoto}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅显示本页 missing_photo 候选（展示筛选）</Checkbox.Content></Checkbox>}
-      <Button variant="secondary" isDisabled={cooldown || pending || !shopId} onPress={() => setRefresh((value) => value + 1)}>刷新当前列表</Button>
-    </form>
-    {!shops && !shopError && <p role="status">加载店铺中…</p>}{shops?.length === 0 && <p>暂无可选店铺</p>}
-    {shopError && <Alert status="danger"><Alert.Content><Alert.Title>店铺读取失败</Alert.Title><Alert.Description>{shopError}</Alert.Description></Alert.Content></Alert>}
-    {!canWrite && <p>当前仅浏览；写入需要 readwrite，以服务端判定为准。</p>}{denied && <p role="alert">服务端拒绝写入（HTTP 403）；草稿保留，编辑不会解除权限限制。</p>}
-    {cooldown && <p role="status">服务端冷却中：读取、核对及提交均需等待完整 Retry-After；到期后仍须手动操作。</p>}
+        <div className="erp-tabs" role="group" aria-label="工作台视图">
+          {([['all', '全部 SPU'], ['missing', '缺成本候选'], ['recent', '最近提交']] as const).map(([key, label]) =>
+            <Button key={key} className="whitespace-nowrap" variant={view === key ? 'primary' : 'ghost'} aria-pressed={view === key}
+              isDisabled={pending || cooldown} onPress={() => changeScope(() => setView(key))}>{label}</Button>)}
+        </div>
+      </div>
+      <form aria-label="工作台筛选" className="erp-filter-row justify-between gap-x-5 border-t border-separator pt-3"
+        onSubmit={(event) => { event.preventDefault(); if (!cooldown) changeScope(() => setQuery(searchInput.trim())); }}>
+        {view !== 'missing' && <div className="erp-filter-row w-[19.5rem] flex-nowrap" role="group" aria-label="搜索商品">
+          <label className="flex-1">搜索<Input aria-label="按 SPU 或标题搜索" placeholder="SPU ID 或商品标题"
+            maxLength={200} value={searchInput} disabled={pending || cooldown} onChange={(event) => setSearchInput(event.target.value)} /></label>
+          <Button type="submit" isDisabled={pending || cooldown}>搜索</Button>
+        </div>}
+        {view === 'all' && <>
+          <div className="erp-filter-row" role="group" aria-label="商品状态筛选">
+            <Select className="w-40 max-w-full" value={`choice:${status}`} isDisabled={pending || cooldown} onChange={(key) => { if (typeof key === 'string') changeScope(() => setStatus(key.slice(7))); }}>
+              <Label>状态</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[['', '全部'], ...Object.entries(statuses)].map(([value, label]) => <ListBox.Item key={value} id={`choice:${value}`} textValue={label}>{label}</ListBox.Item>)}</ListBox></Select.Popover>
+            </Select>
+            <div className="erp-filter-row">
+              <Checkbox isSelected={hasOrders} isDisabled={pending || cooldown} onChange={(checked) => changeScope(() => setHasOrders(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅看有单</Checkbox.Content></Checkbox>
+              <Checkbox isSelected={missingManual} isDisabled={pending || cooldown} onChange={(checked) => changeScope(() => setMissingManual(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅看未登记</Checkbox.Content></Checkbox>
+            </div>
+          </div>
+          <div className="erp-filter-row" role="group" aria-label="排序设置">
+            <Select className="w-40 max-w-full" aria-label="排序字段" value={sort} isDisabled={pending || cooldown} onChange={(key) => { if (typeof key === 'string') changeScope(() => setSort(key)); }}>
+              <Label>排序</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[['status', '状态'], ['unit_cost', '成本'], ['created_at', '创建时间'], ['updated_at', '更新时间']].map(([value, label]) => <ListBox.Item key={value} id={value} textValue={label}>{label}</ListBox.Item>)}</ListBox></Select.Popover>
+            </Select>
+            <Select className="w-32 max-w-full" aria-label="排序方向" value={order} isDisabled={pending || cooldown} onChange={(key) => { if (typeof key === 'string') changeScope(() => setOrder(key)); }}>
+              <Label>方向</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="asc" textValue="升序">升序</ListBox.Item><ListBox.Item id="desc" textValue="降序">降序</ListBox.Item></ListBox></Select.Popover>
+            </Select>
+          </div>
+        </>}
+        {view === 'missing' && <>
+          <Checkbox isSelected={onlyPhoto} isDisabled={pending} onChange={setOnlyPhoto}>
+            <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅看本页缺图</Checkbox.Content>
+          </Checkbox>
+          {currentList.totalPhoto != null && <span className="erp-table-meta">缺图总数 {currentList.totalPhoto}</span>}
+        </>}
+      </form>
+      {!shops && !shopError && <p role="status">加载店铺中…</p>}{shops?.length === 0 && <p>暂无可选店铺</p>}
+      {shopError && <Alert status="danger"><Alert.Content><Alert.Title>店铺读取失败</Alert.Title><Alert.Description>{shopError}</Alert.Description><Button variant="secondary" isDisabled={cooldown || pending} onPress={() => setShopRefresh((value) => value + 1)}>重试店铺</Button></Alert.Content></Alert>}
+      {!canWrite && <p>当前仅浏览；写入需要 readwrite，以服务端判定为准。</p>}{denied && <p role="alert">服务端拒绝写入（HTTP 403）；草稿保留，编辑不会解除权限限制。</p>}
+      {cooldown && <p role="status">服务端冷却中：读取、核对及提交均需等待完整 Retry-After；到期后仍须手动操作。</p>}
     </section>
-    {view === 'missing' ? <p>服务端缺图总数：{currentList.totalPhoto ?? '未知'}。缺成本接口不支持搜索或总候选数；缺图筛选仅作用于当前页，翻页仍按服务器原页。</p> : <p>服务端总数：{currentList.total ?? '未知'} · 偏移 {offset}；筛选和排序均由服务端执行。</p>}
     {savedDrafts.length > 0 && <section className="erp-panel" aria-label="保留草稿"><h2>保留草稿（切换店铺、视图、分页或关闭编辑不会丢失）</h2><ul>{savedDrafts.map((draft) => <li key={draft.target.id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">店铺 #{draft.target.shop_pk} · PK {draft.target.id} · {draft.target.title ?? draft.target.spu_id}</span><Button size="sm" variant="secondary" isDisabled={pending} onPress={() => setEditor(draft.target.id)}>继续编辑 PK {draft.target.id}</Button><Button size="sm" variant="secondary" isDisabled={pending || recovery?.attempt.target.id === draft.target.id} onPress={() => undo(draft.target.id)}>撤销草稿 PK {draft.target.id}</Button></li>)}</ul><p>批量提交只包含当前页显示的已编辑行，不会扩大到其他页或其他店铺。</p></section>}
     {recoveryPanel}
     {notice && <p role="status">{notice}</p>}
     {pending && <Button variant="secondary" onPress={() => { stopBatch.current = true; setNotice('已请求停止后续行；正在发送的行仍需等待结果，不能假定已撤销。'); }}>停止后续行</Button>}
-    {shopId && list.key !== path && !cooldown && <p role="status">当前范围尚未读取；请明确刷新当前列表。</p>}
     {currentList.loading && <p role="status">加载列表中…</p>}{currentList.error && <Alert status="danger"><Alert.Content><Alert.Title>列表不可用</Alert.Title><Alert.Description>{currentList.error}</Alert.Description><Button isDisabled={cooldown} onPress={() => setRefresh((value) => value + 1)}>重试列表</Button></Alert.Content></Alert>}
-    {view !== 'recent' && <div className="erp-list-actions"><div><h2 className="erp-section-heading">{view === 'missing' ? '待补全成本的商品' : '商品成本明细'}</h2><p className="erp-description">先核对商品，再编辑成本；本页仅提交你已修改的行。</p></div><Button isDisabled={commandBlocked || dirtyVisible.length === 0} onPress={() => prepare(products)}>提交本页已编辑行</Button></div>}
-    {(currentList.products || currentList.history) && <p>表格可横向滚动，全部业务列均保留。金额、零、空值与历史前值均按服务端原值展示。</p>}
+    {view !== 'recent' && <div className="erp-list-actions"><div><h2 className="erp-section-heading">{view === 'missing' ? '待补全成本的商品' : '商品成本明细'}</h2></div><Button isDisabled={commandBlocked || dirtyVisible.length === 0} onPress={() => prepare(products)}>提交本页已编辑行</Button></div>}
     {currentList.products && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="SPU 表格滚动区域"><Table.Content aria-label="SPU 成本工作台" className="min-w-[75rem] erp-table-content"><Table.Header className="erp-table-head">{['内部 PK / SPU', '标题 / 状态', '当前人工成本 / 货源价', '创建 / 更新', '图片 / 缺图事实', '操作'].map((label, i) => <Table.Column className="erp-table-column" key={label} isRowHeader={i === 0}>{label}</Table.Column>)}</Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'当前页暂无候选'}</div>}>{products.map((product) => {
       const draft = draftFor(product); const shown = product;
       return <Table.Row className="erp-table-row" key={product.id} id={product.id}>
@@ -233,7 +245,9 @@ export default function ManualCosts({ bootstrap }: PageProps) {
       </Table.Row>;
     })}</Table.Body></Table.Content></Table.ScrollContainer></Table>}
     {currentList.history && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="历史表格滚动区域"><Table.Content aria-label="最近提交记录" className="min-w-[85rem] erp-table-content"><Table.Header className="erp-table-head">{['记录 / 内部 PK / SPU', '标题', '变更前', '变更后', '备注', '生效 / 结束', '提交时间', '操作'].map((label, i) => <Table.Column className="erp-table-column" key={label} isRowHeader={i === 0}>{label}</Table.Column>)}</Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'暂无提交记录'}</div>}>{currentList.history.map((row) => <Table.Row className="erp-table-row" key={row.id} id={row.id}><Table.Cell className="erp-table-cell"><p>#{row.id} / PK {row.spu_pk}</p><p className="w-48 break-all">{row.spu_id}</p></Table.Cell><Table.Cell className="erp-table-cell"><p className="w-56 whitespace-normal break-words">{row.title ?? '—'}</p></Table.Cell><Table.Cell className="erp-table-cell">{row.prev_unit_cost ?? '—'} {row.prev_currency ?? '—'}</Table.Cell><Table.Cell className="erp-table-cell">{row.unit_cost} {row.currency}</Table.Cell><Table.Cell className="erp-table-cell"><p className="w-48 whitespace-normal break-words">{row.note ?? '—'}</p></Table.Cell><Table.Cell className="erp-table-cell"><p>{row.valid_from ?? '—'}</p><p>{row.valid_to ?? '当前有效'}</p></Table.Cell><Table.Cell className="erp-table-cell">{row.created_at ?? '—'}</Table.Cell><Table.Cell className="erp-table-cell" focusMode="child"><Button className="erp-table-action" variant="secondary" size="sm" isDisabled={pending} onPress={() => { changeScope(() => { setView('all'); setQuery(row.spu_id); setSearchInput(row.spu_id); }); }}>查看当前商品</Button></Table.Cell></Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>}
-    <div aria-label="分页" className="erp-pagination"><Button variant="secondary" isDisabled={pending || cooldown || offset === 0} onPress={() => setOffset((value) => Math.max(0, value - limit))}>上一页</Button><span>当前偏移 {offset} · 每页 {limit}</span><Button variant="secondary" isDisabled={pending || cooldown || !shopId || currentList.loading || Boolean(currentList.error) || nextPageExhausted} onPress={() => setOffset((value) => value + limit)}>下一页</Button></div>
+    <OffsetPagination label="采购工作台分页" offset={offset} pageSize={limit} total={currentList.total}
+      hasNext={Boolean(shopId) && !currentList.error && !nextPageExhausted}
+      disabled={pending || cooldown || currentList.loading} onPage={setOffset} />
     <Modal.Backdrop isOpen={editor !== undefined} onOpenChange={(open) => { if (!open && !pending) setEditor(undefined); }}>
       <Modal.Container size="lg" scroll="inside"><Modal.Dialog className="max-w-2xl gap-6 sm:p-8">
         <Modal.CloseTrigger aria-label="关闭编辑并保留草稿" />

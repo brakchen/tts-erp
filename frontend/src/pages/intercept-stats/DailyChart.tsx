@@ -21,6 +21,7 @@ export default function DailyChart({ rows }: { rows: DailyCount[] }) {
   }, []);
   const data = useMemo<uPlot.AlignedData>(() => [rows.map((row) => Date.parse(`${row.date}T00:00:00Z`) / 1000), rows.map((row) => row.count)], [rows]);
   const base = useMemo(() => {
+    const font = '12px ' + getComputedStyle(document.documentElement).getPropertyValue('--sans').trim();
     const bars = uPlot.paths.bars;
     if (!bars) throw new Error('图表库不支持条形路径');
     return {
@@ -30,7 +31,7 @@ export default function DailyChart({ rows }: { rows: DailyCount[] }) {
       cursor: { drag: { x: false, y: false } },
       // Display domain padding only: make endpoint bars visible without changing API scope/data.
       scales: { x: { time: true, range: (_plot: uPlot, min: number, max: number) => [min - 43200, max + 43200] as [number, number] } },
-      axes: [{ incrs: [86400, 172800, 604800, 1209600, 2592000], values: (_plot: uPlot, splits: number[]) => splits.map((value) => new Date(value * 1000).toISOString().slice(5, 10)) }, { size: 48 }],
+      axes: [{ font, incrs: [86400, 172800, 604800, 1209600, 2592000], values: (_plot: uPlot, splits: number[]) => splits.map((value) => new Date(value * 1000).toISOString().slice(5, 10)) }, { font, size: 48 }],
       series: [{ label: '日期（UTC）' }, { label: '请求数', fill: () => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(), paths: bars({ size: [0.55, 48] }), points: { show: false } }],
     };
   }, []);

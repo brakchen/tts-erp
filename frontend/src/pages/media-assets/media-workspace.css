@@ -7,7 +7,7 @@
   --media-line: light-dark(#dbe3db, #39483e);
   --media-soft: light-dark(#eaf1e8, #24362a);
   --media-accent: light-dark(#214c3d, #ace2c6);
-  gap: 17px; color: var(--media-ink); font: 14px/1.55 system-ui, 'Microsoft YaHei', sans-serif;
+  gap: 17px; color: var(--media-ink); font: 14px/1.55 var(--sans);
 }
 .media-workspace :where(h1, h2, h3, p) { margin: 0; }
 .media-workspace :where(button, input, textarea) { font: inherit; }
@@ -50,7 +50,7 @@
 .media-list-toolbar h1, .media-list-toolbar h2 { font-size: 20px; font-weight: 700; }
 .media-count { font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 999px; background: var(--media-soft); color: var(--media-muted); }
 .media-status-filter > div { display: flex; flex-direction: row; align-items: center; gap: 6px; padding-inline: 10px; border: 1px solid var(--media-line); border-radius: 7px; background: var(--media-surface); white-space: nowrap; }
-.media-workspace .media-status-filter .media-select-trigger { width: auto; min-height: 34px; padding-inline: 0 24px; border: 0; background: transparent; box-shadow: none; }
+.media-workspace .media-status-filter .media-select-trigger { width: auto; padding-inline: 0 24px; border: 0; background: transparent; box-shadow: none; }
 .media-workspace .media-person-add { --button-bg: var(--media-soft); color: var(--media-accent); font-weight: 600; }
 .media-library-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .media-library-toolbar .media-filters { flex: 1 1 420px; margin: 0; }
@@ -82,7 +82,7 @@
 .media-form { display: grid; gap: 10px; }
 .media-workspace :where(input:not([type="checkbox"]):not([type="file"]), textarea) { min-height: 36px; padding: 7px 9px; border: 1px solid var(--media-line); border-radius: 7px; background: var(--media-surface); color: var(--media-ink); box-shadow: none; }
 .media-workspace label { font-weight: 500; }
-.media-workspace .media-select-trigger { min-height: 36px; width: 100%; border: 1px solid var(--media-line); border-radius: 7px; background: var(--media-surface); }
+.media-workspace .media-select-trigger { width: 100%; border: 1px solid var(--media-line); border-radius: 7px; background: var(--media-surface); }
 .media-picker-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .media-picker-container { width: min(960px, 100%); }
 .media-picker-container .media-picker-dialog { max-width: 900px; }

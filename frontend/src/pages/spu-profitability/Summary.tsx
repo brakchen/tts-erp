@@ -36,21 +36,54 @@ export const metricHints: Record<string, string> = {
   projection_status: '预测可用性由服务端决定，不因切换样本天数自动视为可用。', projection_completed_basis_order_count: '独立成熟样本窗口内的已完结订单数，与当前经营日期窗口分开。', projection_completed_full_loss_order_count: '独立成熟样本中已确认严格全损的订单数。', completed_full_loss_rate: '成熟样本的严格全损订单数占已完结样本订单数的比例。', unsettled_order_count: '当前经营范围内尚未结算的订单数。', delivered_unsettled_order_count: '未结算但已送达或已完成的订单，不再预测未来拒收或配送失败。', full_loss_exposure_unsettled_order_count: '当前经营范围内尚未送达、尚未确认终局全损的未结算风险订单。', projected_future_full_loss_qty: '服务端按成熟样本风险率预测未来新增全损件数，不重复计入已经确认的损失。',
   projected_net_revenue: '服务端提供的预计最终净收入，已结算实际、已送达未结算估算与待完结风险池分开处理。', projected_net_profit: '当前经营范围的预计最终净利润；货本与广告不重复扣除。', projected_roi_real: '预计最终 ROI，仅在大盘展示，不作为单个 SPU 的预测。', projected_roi_breakeven: '服务端按预计净收入与保留货本给出的保本 ROI；样本不足或无解显示 —。', projected_ad_system_actual_roi: '预计广告系统 ROI 使用服务端归因 GMV 与广告消耗；不由浏览器调整归因金额。', projected_ad_system_breakeven_roi: '服务端给出的预计广告系统保本 ROI；分母不可用时显示 —。',
 };
-export function Metrics({ values, metrics = currentMetrics, prefix = '', meta = {}, labels = {} }: { values: RecordValue; metrics?: typeof currentMetrics; prefix?: string; meta?: RecordValue; labels?: Record<string, string> }) {
+export function Metrics({ values, metrics = currentMetrics, prefix = '', meta = {}, labels = {}, showHints = true }: { values: RecordValue; metrics?: typeof currentMetrics; prefix?: string; meta?: RecordValue; labels?: Record<string, string>; showHints?: boolean }) {
   const [hint, setHint] = useState<{ label: string; body: string }>(); const presentation = optionalRecord(meta.presentation); const hints = optionalRecord(presentation.summary_hints); const pnl = optionalRecord(presentation.pnl_hints);
-  return <><dl className="erp-profit-metrics">{metrics.map(([originalLabel, field, id, percent]) => { const label = labels[field] ?? originalLabel; return <div key={field}><dt className="flex items-center gap-1">{label}<Button size="sm" variant="ghost" className="erp-metric-hint" aria-label={`查看${label}口径`} onPress={() => setHint({ label, body: text(hints[field] ?? (field === 'net_profit' ? pnl.net_profit : field === 'spend' ? pnl.ad_spend : undefined) ?? metricHints[field]) })}>?</Button></dt><dd id={prefix + id} className={(field === 'net_profit' && values.profit_status === 'loss') || (field === 'projected_net_profit' && String(values[field]).startsWith('-')) ? 'text-danger' : field === 'net_profit' && values.profit_status === 'profit' ? 'text-accent' : undefined}>{field === 'ad_system_breakeven_roi' && values.ad_system_breakeven_roi_status === 'estimated_known_costs' && values[field] != null ? '≈' : ''}{percent ? displayPercent(values[field]) : displayValue(values[field])}</dd></div>; })}</dl>
+  return <><dl className="erp-profit-metrics">{metrics.map(([originalLabel, field, id, percent]) => { const label = labels[field] ?? originalLabel; return <div key={field}><dt className="flex items-center gap-1">{label}{showHints && <Button size="sm" variant="ghost" className="erp-metric-hint" aria-label={`查看${label}口径`} onPress={() => setHint({ label, body: text(hints[field] ?? (field === 'net_profit' ? pnl.net_profit : field === 'spend' ? pnl.ad_spend : undefined) ?? metricHints[field]) })}>?</Button>}</dt><dd id={prefix + id} className={(field === 'net_profit' && values.profit_status === 'loss') || (field === 'projected_net_profit' && String(values[field]).startsWith('-')) ? 'text-danger' : field === 'net_profit' && values.profit_status === 'profit' ? 'text-accent' : undefined}>{field === 'ad_system_breakeven_roi' && values.ad_system_breakeven_roi_status === 'estimated_known_costs' && values[field] != null ? '≈' : ''}{percent ? displayPercent(values[field]) : displayValue(values[field])}</dd></div>; })}</dl>
     <Modal.Backdrop isOpen={Boolean(hint)} onOpenChange={(open) => { if (!open) setHint(undefined); }}><Modal.Container><Modal.Dialog><Modal.CloseTrigger aria-label="关闭指标说明" /><Modal.Header><Modal.Heading>{hint?.label}口径</Modal.Heading></Modal.Header><Modal.Body><p>{hint?.body}</p></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop></>;
 }
 const overviewLabels = { spend: '广告成本', effective_sales: '有效 GMV', projected_future_full_loss_qty: '预计新增全损', unsettled_order_count: '未结算', delivered_unsettled_order_count: '已送达未结算', full_loss_exposure_unsettled_order_count: '待完结风险' };
+const currentRoiMetrics = currentMetrics.filter((item) => item[1].includes('roi'));
+const projectedRoiMetrics = projectedMetrics.filter((item) => item[1].includes('roi'));
+const profitExposureFields = ['unsettled_order_count', 'delivered_unsettled_order_count', 'full_loss_exposure_unsettled_order_count'];
+
 function RoiComparison({ data }: { data: Overview }) {
-  const [hint, setHint] = useState<{ label: string; body: string }>();
-  const hints = optionalRecord(optionalRecord(data.meta.presentation).summary_hints);
-  const current = currentMetrics.filter((item) => item[1].includes('roi'));
-  const projected = projectedMetrics.filter((item) => item[1].includes('roi'));
-  return <><Table variant="secondary"><Table.ScrollContainer><Table.Content className="erp-overview-roi" aria-label="当前与预计 ROI"><Table.Header><Table.Column isRowHeader>ROI</Table.Column><Table.Column>当前</Table.Column><Table.Column>预计最终</Table.Column></Table.Header><Table.Body>{current.map(([label, field, id], index) => { const [, projectedField, projectedId] = projected[index]; return <Table.Row key={field} id={field}><Table.Cell>{label}</Table.Cell><Table.Cell><span id={id}>{field === 'ad_system_breakeven_roi' && data.totals.ad_system_breakeven_roi_status === 'estimated_known_costs' && data.totals[field] != null ? '≈' : ''}{displayValue(data.totals[field])}</span></Table.Cell><Table.Cell><span id={projectedId}>{displayValue(data.totals[projectedField])}</span></Table.Cell></Table.Row>; })}</Table.Body></Table.Content></Table.ScrollContainer></Table>
-    <div role="group" aria-label="ROI 口径说明" className="flex flex-wrap gap-1">{current.map(([label, field], index) => { const projectedField = projected[index][1]; return <Button key={field} size="sm" variant="ghost" aria-label={`查看${label}口径`} onPress={() => setHint({ label, body: `${text(hints[field] ?? metricHints[field])}\n${text(hints[projectedField] ?? metricHints[projectedField])}` })}>{label}说明</Button>; })}</div>
-    <Modal.Backdrop isOpen={Boolean(hint)} onOpenChange={(open) => { if (!open) setHint(undefined); }}><Modal.Container><Modal.Dialog><Modal.CloseTrigger aria-label="关闭指标说明" /><Modal.Header><Modal.Heading>{hint?.label}口径</Modal.Heading></Modal.Header><Modal.Body><p className="whitespace-pre-line">{hint?.body}</p></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop></>;
+  return <Table variant="secondary"><Table.ScrollContainer>
+    <Table.Content className="erp-overview-roi" aria-label="当前与预计 ROI">
+      <Table.Header><Table.Column isRowHeader>ROI</Table.Column><Table.Column>当前</Table.Column><Table.Column>预计最终</Table.Column></Table.Header>
+      <Table.Body>{currentRoiMetrics.map(([label, field, id], index) => {
+        const [, projectedField, projectedId] = projectedRoiMetrics[index];
+        const estimate = field === 'ad_system_breakeven_roi' && data.totals.ad_system_breakeven_roi_status === 'estimated_known_costs' && data.totals[field] != null;
+        return <Table.Row key={field} id={field}><Table.Cell>{label}</Table.Cell><Table.Cell><span id={id}>{estimate ? '≈' : ''}{displayValue(data.totals[field])}</span></Table.Cell><Table.Cell><span id={projectedId}>{displayValue(data.totals[projectedField])}</span></Table.Cell></Table.Row>;
+      })}</Table.Body>
+    </Table.Content>
+  </Table.ScrollContainer></Table>;
 }
+
+function ProfitHelp({ data }: { data: Overview }) {
+  const presentation = optionalRecord(data.meta.presentation);
+  const hints = optionalRecord(presentation.summary_hints);
+  const pnl = optionalRecord(presentation.pnl_hints);
+  const items = [
+    ['当前净利润', 'net_profit'], ['当前净收入', 'net_revenue'],
+    ['预计净利润', 'projected_net_profit'], ['预计净收入', 'projected_net_revenue'],
+    ...currentRoiMetrics.map(([label, field]) => [label, field]),
+    ...projectedRoiMetrics.map(([label, field]) => [label, field]),
+    ...projectedMetrics.filter(([, field]) => profitExposureFields.includes(field))
+      .map(([label, field]) => [overviewLabels[field as keyof typeof overviewLabels] ?? label, field]),
+  ];
+  return <Modal.Root>
+    <Button size="sm" variant="ghost" className="erp-metric-hint" aria-label="查看利润与 ROI 口径">?</Button>
+    <Modal.Backdrop><Modal.Container size="lg" scroll="inside"><Modal.Dialog>
+      <Modal.CloseTrigger aria-label="关闭利润与 ROI 口径" />
+      <Modal.Header><Modal.Heading>利润与 ROI 口径</Modal.Heading></Modal.Header>
+      <Modal.Body><dl className="grid gap-3">{items.map(([label, field]) => <div key={field}>
+        <dt className="font-semibold">{label}</dt>
+        <dd>{text(hints[field] ?? (field === 'net_profit' ? pnl.net_profit : undefined) ?? metricHints[field])}</dd>
+      </div>)}</dl></Modal.Body>
+    </Modal.Dialog></Modal.Container></Modal.Backdrop>
+  </Modal.Root>;
+}
+
 export function Summary({ data, scope, stateMessage, salesPrices, costPrices, feeFacts }: { data: Overview; scope?: string; stateMessage?: string; salesPrices?: ReactNode; costPrices?: ReactNode; feeFacts?: ReactNode }) {
   const projection = optionalRecord(data.meta.projection); const status: Record<string, string> = { available: '可预测', no_unsettled_orders: '无未结算订单', insufficient_sample: '样本不足' };
   const profitStatus: Record<string, string> = { profit: '盈利', loss: '亏损', break_even: '持平', unavailable: '不可用' };
@@ -70,13 +103,13 @@ export function Summary({ data, scope, stateMessage, salesPrices, costPrices, fe
         <Metrics values={data.totals} meta={data.meta} labels={overviewLabels} metrics={projectedMetrics.filter((item) => item[1] === 'projected_future_full_loss_qty')} />
         <div id="projection-basis-card"><Disclosure><Disclosure.Heading><Disclosure.Trigger className="op-counter-group-label">预测依据<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body><p className="op-projection-window erp-table-meta">样本：<span id="projection-sample-window">{text(projection.sample_start)} ~ {text(projection.sample_end)}</span></p><p className="erp-table-meta">{metricHints.projection_status}</p><Metrics values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => ['projection_completed_basis_order_count', 'projection_completed_full_loss_order_count', 'completed_full_loss_rate'].includes(item[1]))} /></Disclosure.Body></Disclosure.Content></Disclosure></div>
       </Card.Content></Card>
-      <Card className="erp-overview-profit" aria-label="利润"><Card.Header className="flex-row flex-wrap items-center justify-between gap-3"><Card.Title>利润</Card.Title><span id="sum-projection-status" className="erp-table-meta">{status[String(data.totals.projection_status)] ?? text(data.totals.projection_status)}</span></Card.Header><Card.Content>
+      <Card className="erp-overview-profit" aria-label="利润"><Card.Header className="flex-row flex-wrap items-center justify-between gap-3"><Card.Title>利润</Card.Title><div className="flex items-center gap-2"><span id="sum-projection-status" className="erp-table-meta">{status[String(data.totals.projection_status)] ?? text(data.totals.projection_status)}</span><ProfitHelp data={data} /></div></Card.Header><Card.Content>
         <div className="erp-overview-comparison">
-          <div><div className="flex flex-wrap gap-3"><h4>当前</h4><span className={data.totals.profit_status === 'loss' ? 'text-danger' : 'erp-table-meta'}>{profitStatus[String(data.totals.profit_status)] ?? text(data.totals.profit_status)}</span></div><div className="erp-overview-primary"><Metrics values={data.totals} meta={data.meta} metrics={currentMetrics.filter((item) => item[1] === 'net_profit')} /></div><Metrics values={data.totals} meta={data.meta} metrics={[[ '净收入', 'net_revenue', 'sum-net-revenue' ]]} /></div>
-          <div><h4>预计最终</h4><div className="erp-overview-primary"><Metrics values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => item[1] === 'projected_net_profit')} /></div><Metrics values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => item[1] === 'projected_net_revenue')} /></div>
+          <div><div className="flex flex-wrap gap-3"><h4>当前</h4><span className={data.totals.profit_status === 'loss' ? 'text-danger' : 'erp-table-meta'}>{profitStatus[String(data.totals.profit_status)] ?? text(data.totals.profit_status)}</span></div><div className="erp-overview-primary"><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={currentMetrics.filter((item) => item[1] === 'net_profit')} /></div><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={[[ '净收入', 'net_revenue', 'sum-net-revenue' ]]} /></div>
+          <div><h4>预计最终</h4><div className="erp-overview-primary"><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => item[1] === 'projected_net_profit')} /></div><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => item[1] === 'projected_net_revenue')} /></div>
         </div>
         <RoiComparison data={data} />
-        <Metrics values={data.totals} meta={data.meta} labels={overviewLabels} metrics={projectedMetrics.filter((item) => ['unsettled_order_count', 'delivered_unsettled_order_count', 'full_loss_exposure_unsettled_order_count'].includes(item[1]))} />
+        <Metrics showHints={false} values={data.totals} meta={data.meta} labels={overviewLabels} metrics={projectedMetrics.filter((item) => profitExposureFields.includes(item[1]))} />
       </Card.Content></Card>
     </div>
   </section>;

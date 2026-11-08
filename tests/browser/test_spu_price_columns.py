@@ -16,7 +16,6 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from playwright.sync_api import expect
 
-import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
@@ -93,7 +92,7 @@ def _nested_payload(
 
 
 def _open_with_supported_payload(
-    frontend_browser_renderer,
+    browser_conftest, frontend_browser_renderer,
     monkeypatch,
     path: str,
     stats: dict[str, dict[str, Any]] | None = None,
@@ -119,9 +118,9 @@ def _open_with_supported_payload(
     return page
 
 
-def test_price_content_is_only_shown_on_standard_roi_profile(frontend_browser_renderer, monkeypatch):
+def test_price_content_is_only_shown_on_standard_roi_profile(browser_conftest, frontend_browser_renderer, monkeypatch):
     for path in ("/v2/pages/spu-roi", "/v2/pages/focused-spus"):
-        page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, path)
+        page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, path)
         if "/focused-spus" in path:
             expect(page.locator("#price-summary")).to_have_count(0)
             for metric in _METRICS:
@@ -148,7 +147,7 @@ def test_price_content_is_only_shown_on_standard_roi_profile(frontend_browser_re
         assert "加载中…" not in page.locator("#price-summary-status").inner_text()
 
 
-def test_null_and_empty_price_values_never_render_as_zero(frontend_browser_renderer, monkeypatch):
+def test_null_and_empty_price_values_never_render_as_zero(browser_conftest, frontend_browser_renderer, monkeypatch):
     for path, empty_value, status in (
         ("/v2/pages/spu-roi", None, "no_samples"),
         ("/v2/pages/spu-roi", "", "partial"),
@@ -158,7 +157,7 @@ def test_null_and_empty_price_values_never_render_as_zero(frontend_browser_rende
             stats[metric]["mean"] = empty_value
             stats[metric]["median"] = empty_value
             stats[metric]["status"] = status
-        page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, path, stats)
+        page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, path, stats)
         for metric in _METRICS:
             for kind in ("mean", "median"):
                 summary = page.locator(f"#price-{metric}-{kind}")
@@ -171,8 +170,8 @@ def test_null_and_empty_price_values_never_render_as_zero(frontend_browser_rende
         assert expected_status in page.locator("#price-summary").inner_text()
 
 
-def test_each_price_header_sends_its_server_sort_id(frontend_browser_renderer, monkeypatch):
-    page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+def test_each_price_header_sends_its_server_sort_id(browser_conftest, frontend_browser_renderer, monkeypatch):
+    page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     for field, sort_id in zip(
         (
             "priceStats.purchase.mean",
@@ -194,8 +193,8 @@ def test_each_price_header_sends_its_server_sort_id(frontend_browser_renderer, m
         expect(page.locator("#rows").locator("..").get_by_role("status")).to_have_count(0)
 
 
-def test_price_tooltip_is_keyboard_openable_and_restores_focus(frontend_browser_renderer, monkeypatch):
-    page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+def test_price_tooltip_is_keyboard_openable_and_restores_focus(browser_conftest, frontend_browser_renderer, monkeypatch):
+    page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     button = page.locator('[data-price-tip="purchase"]')
     button.focus()
     page.keyboard.press("Enter")
@@ -209,8 +208,8 @@ def test_price_tooltip_is_keyboard_openable_and_restores_focus(frontend_browser_
     expect(button).to_be_focused()
 
 
-def test_price_tooltip_survives_lazy_drill_cycles(frontend_browser_renderer, monkeypatch):
-    page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+def test_price_tooltip_survives_lazy_drill_cycles(browser_conftest, frontend_browser_renderer, monkeypatch):
+    page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     row = page.locator(".tabulator-row").first
     for _ in range(2):
         row.locator('.tabulator-cell[tabulator-field="priceStats.purchase.mean"]').click()
@@ -240,7 +239,7 @@ def test_price_tooltip_survives_lazy_drill_cycles(frontend_browser_renderer, mon
         page.wait_for_timeout(40)
 
 
-def test_price_error_can_retry_to_supported_payload(frontend_browser_renderer, monkeypatch):
+def test_price_error_can_retry_to_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch):
     original = cast(Callable[..., Any], browser_conftest._mock_payload)
     attempts = 0
 
@@ -271,7 +270,7 @@ def test_price_error_can_retry_to_supported_payload(frontend_browser_renderer, m
     assert attempts >= 2
 
 
-def test_rapid_date_requests_keep_latest_price_payload(frontend_browser_renderer, monkeypatch):
+def test_rapid_date_requests_keep_latest_price_payload(browser_conftest, frontend_browser_renderer, monkeypatch):
     original = cast(Callable[..., Any], browser_conftest._mock_payload)
 
     def mock_payload(request_path: str, query: str = ""):
@@ -314,7 +313,7 @@ def test_rapid_date_requests_keep_latest_price_payload(frontend_browser_renderer
     assert page.locator("#price-purchase-mean").inner_text() == "≈11.00"
 
 
-def test_rapid_shop_requests_keep_latest_price_payload(frontend_browser_renderer, monkeypatch):
+def test_rapid_shop_requests_keep_latest_price_payload(browser_conftest, frontend_browser_renderer, monkeypatch):
     original = cast(Callable[..., Any], browser_conftest._mock_payload)
 
     def mock_payload(request_path: str, query: str = ""):
@@ -363,8 +362,8 @@ def test_legacy_payload_hides_price_capability_without_fake_zeroes(frontend_brow
     assert page.locator('.tabulator-header [tabulator-field="priceStats.purchase.mean"]').is_hidden()
 
 
-def test_mobile_price_table_scrolls_without_document_overflow(frontend_browser_renderer, monkeypatch):
-    page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+def test_mobile_price_table_scrolls_without_document_overflow(browser_conftest, frontend_browser_renderer, monkeypatch):
+    page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(100)
     report = page.evaluate(
@@ -421,7 +420,7 @@ _PRICE_FLASH_PROBE_JS = """(() => {
 """
 
 
-def _conftest_mock_payload() -> Callable[..., Any]:
+def _conftest_mock_payload(browser_conftest) -> Callable[..., Any]:
     """conftest 的 canned 载荷：本层共用但其名带下划线，集中一处取用。"""
     return cast(Callable[..., Any], vars(browser_conftest)["_mock_payload"])
 
@@ -447,10 +446,10 @@ def test_first_load_keeps_price_summary_hidden_without_price_stats(frontend_brow
 
 
 def test_supported_price_payload_shows_loading_then_values_on_next_load(
-    frontend_browser_renderer, monkeypatch
+    browser_conftest, frontend_browser_renderer, monkeypatch
 ):
     """已知支持后再次加载（切窗口）：先短暂显示 "加载中…"，响应后出现数值。"""
-    original = _conftest_mock_payload()
+    original = _conftest_mock_payload(browser_conftest)
 
     def mock_payload(request_path: str, query: str = ""):
         if request_path.endswith("/v2/commerce/channel-product-options"):
@@ -574,9 +573,9 @@ _DRILL_CLICK_HELPERS_JS = """(() => {
 """
 
 
-def test_drill_same_row_close_then_reopen_works(frontend_browser_renderer, monkeypatch):
+def test_drill_same_row_close_then_reopen_works(browser_conftest, frontend_browser_renderer, monkeypatch):
     """关闭后 <300ms 内重开同一行：drill 必须能重开（300ms 防重不得吞合法 toggle）。"""
-    page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+    page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     page.locator(".tabulator-row").first.wait_for(state="visible")
     page.evaluate(_DRILL_CLICK_HELPERS_JS)
 
@@ -602,10 +601,10 @@ def test_drill_same_row_close_then_reopen_works(frontend_browser_renderer, monke
 
 
 def test_drill_tabulator_frozen_row_duplicate_event_still_deduplicated(
-    frontend_browser_renderer, monkeypatch
+    browser_conftest, frontend_browser_renderer, monkeypatch
 ):
     """同一原生 click 被重复派发两次（frozen+main 双发）：drill 只开一次，不被关掉。"""
-    page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+    page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     page.locator(".tabulator-row").first.wait_for(state="visible")
     observed = page.evaluate(
         """() => {
@@ -632,7 +631,7 @@ def test_drill_tabulator_frozen_row_duplicate_event_still_deduplicated(
     assert page.locator(".op-drill-row").count() == 1
 
 
-def test_drill_dedup_follows_event_identity_not_reused_time_stamp(frontend_browser_renderer, monkeypatch):
+def test_drill_dedup_follows_event_identity_not_reused_time_stamp(browser_conftest, frontend_browser_renderer, monkeypatch):
     """timeStamp 被强行复用时，去重只认原生事件身份，不认时钟值。
 
     本用例刻意不区分守卫实现（WeakSet 身份守卫与旧的 timeStamp + 50ms 兜底窗口都会过），
@@ -642,7 +641,7 @@ def test_drill_dedup_follows_event_identity_not_reused_time_stamp(frontend_brows
         同一行再点一次必须照常 toggle（最坏情况下 Firefox resistFingerprinting 把
         timeStamp 粗化到 100ms，用户两次点击就会拿到同一个 timeStamp）。
     """
-    page = _open_with_supported_payload(frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
+    page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     page.locator(".tabulator-row").first.wait_for(state="visible")
 
     immediate = page.evaluate(
