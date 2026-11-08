@@ -12,8 +12,8 @@
 
 | 事实 | 位置 |
 | --- | --- |
-| `MIGRATED_PAGE_IDS` 已含 19 个页面 | `tts_erp_v2/api/v2/frontend_pages.py` |
-| `PAGES` 注册表共 19 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
+| `MIGRATED_PAGE_IDS` 已含 19 项 | `tts_erp_v2/api/v2/frontend_pages.py`（18 个注册页 + `login`） |
+| `PAGES` 注册表共 **18** 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
 | 19 个页面目录都有真实 React/TS 代码，合计约 1.4 万行 | `frontend/src/pages/` |
 | 12 个旧 Jinja 模板仍在 | `tts_erp_v2/templates/pages/` |
 | 13 个旧 JS 脚本仍在 | `tts_erp_v2/static/js/` |
