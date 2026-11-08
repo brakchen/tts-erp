@@ -1,6 +1,7 @@
 # P6 退役与收口 —— 并行执行方案
 
 > 建立时间：2026-11-08 · 总管：Chief
+> **状态：已完成（2026-11-08）** —— 路由收敛、测试侧清理、旧资产删除均已落地并验证。
 > 依据：`docs/plans/frontend-progressive-migration.md` §7（P6 批次定义）、§5.1（renderer 选择）、§6.3（发布产物）
 
 ---
@@ -11,8 +12,8 @@
 
 | 事实 | 位置 |
 | --- | --- |
-| `MIGRATED_PAGE_IDS` 已含 19 个页面 | `tts_erp_v2/api/v2/frontend_pages.py` |
-| `PAGES` 注册表共 19 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
+| `MIGRATED_PAGE_IDS` 已含 19 项 | `tts_erp_v2/api/v2/frontend_pages.py`（18 个注册页 + `login`） |
+| `PAGES` 注册表共 **18** 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
 | 19 个页面目录都有真实 React/TS 代码，合计约 1.4 万行 | `frontend/src/pages/` |
 | 12 个旧 Jinja 模板仍在 | `tts_erp_v2/templates/pages/` |
 | 13 个旧 JS 脚本仍在 | `tts_erp_v2/static/js/` |

@@ -68,10 +68,11 @@ def test_spu_deterioration_alert_has_no_horizontal_overflow_at_any_viewport(
 ):
     """告警页逐宽度断言：18 列表格 + 9 个筛选控件的组合条是最易溢出的新布局。"""
     page = browser_renderer.open(f"/v2/pages/{ALERT_SLUG}", width=width)
-    # 就绪信号必须与视口无关。用共享的 canned 就绪契约（按 slug 分派），
-    # 不要硬编码某个 renderer 的 DOM：P6 起该页由 React 拥有，
-    # 旧的 #alert-status 元素已不存在。
-    wait_canned_page(page, ALERT_SLUG)
+    # 等待信号必须与视口无关：< lg 断点下表格容器是 d-none（走卡片列表），
+    # 所以用始终可见的状态面板，而不是只在宽屏可见的表格行。
+    page.wait_for_selector(
+        "#alert-status:not([data-kind='loading'])", timeout=10_000
+    )
     _assert_no_overflow(page, f"{ALERT_SLUG}@{width}")
 
 

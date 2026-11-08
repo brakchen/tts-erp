@@ -13,7 +13,7 @@
 | `2b68b40` | P6 路由收敛（15 处双路分支 → 单一 React renderer）+ 环境修复 + 评审核实文档 |
 | `64f6ff7` | 开发环境自检清单 + 模板库刷新说明 |
 
-### 待验证后合并（10 个提交）
+### 待验证后合并（12 个提交）
 
 | 提交 | 内容 |
 | --- | --- |
@@ -22,6 +22,7 @@
 | `a9605de` | `browser_conftest` 改用包路径导入，消除多目录 conftest 冲突 |
 | `f205c74` | 告警页就绪信号改用共享 canned 契约 |
 | `bd4a7753` | 字体白名单不再要求三套栈互不相同 |
+| `f72a3089` | **旧资产退役**：12 模板 + 12 脚本全删（-9198 行） |
 | `00654af` | 移除 ad-daily 已退役的内联旧页面 HTML（-108 行 + 死代码） |
 
 ---
@@ -83,8 +84,8 @@
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| 删旧模板/旧脚本 | 待做 | 12 模板 + 12 脚本（`console.js` 本轮保留）。测试侧清理已完成，可以删了 |
-| `_render_page` 与 Jinja 基础设施 | 待做 | 路由收敛后成死代码，但 `test_pages.py` 仍 import `_SIDEBAR_CSS` 等常量，需分开处理 |
+| 删旧模板/旧脚本 | ✅ 已做 | 12 模板 + 12 脚本全删（`console.js` 保留），-9198 行 |
+| `_render_page` 与 Jinja 环境 | ✅ 已做 | `pages.py` 的 `_render_page` / `_templates_env` / `_js_version` 已删；`_sidebar` / `_sidebar_css` / `_SIDEBAR_CSS` / `_SIDEBAR_TOGGLE_JS` 按 `docs/design/reuse-evaluation-2026-10.md` 的决定原样保留 |
 | 基线文件陈旧 | 待确认 | `baseline-fast.txt` 仍记 `e04c5e11`（2026-10-15）。`--update` 是 master-only 操作 |
 | `test_spu_price_columns.py` 4 项失败 | 待查 | 单独跑也失败，是 master 上的确定性失败，不是偶发 |
 | 43 个缺 semver 的既有 worktree | 待清理 | 逐个跑 `npm ci` 即可 |
@@ -104,14 +105,30 @@
 
 ---
 
-## 六、相关文档
+## 六、验证记录（实测）
+
+| 验证 | 命令 | 结果 |
+| --- | --- | --- |
+| 路由收敛后 api 域 | `bash scripts/test_isolated.sh api` | `API_EXIT=0`，822 秒，无 FAILED 行 |
+| ad_daily 清理后 api 域 | 同上 | `API_EXIT=0`，348 秒，无 FAILED 行 |
+| 字体栈修正 | `bash scripts/test_isolated.sh fast tests/browser/test_render_smoke.py -k font_stacks` | `[100%]`，14 项全绿 |
+| 告警页溢出修正 | 同上 `-k spu_deterioration_alert_has_no_horizontal` | `[100%]`，4 个视口全绿 |
+| conftest 冲突修正 | `bash scripts/test_isolated.sh fast tests/browser/test_spu_price_columns.py tests/api/test_ad_daily.py tests/proxy/test_miaoshou_rate_limit.py` | 13 个 `_mock_payload` ERROR 消失 |
+| style_tokens 修正 | `bash scripts/test_isolated.sh unit tests/frontend/test_style_tokens.py` | 全部通过 |
+
+**注意**：本仓库 pytest 输出**没有 `N passed` 汇总行**，判成败看退出码和 `FAILED`/`ERROR` 行。
+
+---
+
+## 七、相关文档
 
 | 文档 | 内容 |
 | --- | --- |
 | `docs/handoff/bot-team-setup-2026-11-08.md` | Bot 团队构成、协作流程、环境要点、并发限制 |
 | `docs/handoff/p6-retirement-parallel-plan.md` | P6 并行方案、写域切分、语义变化 |
-| `docs/handoff/p6-test-side-retirement-plan.md` | 19 个测试文件的三类分类与处置 |
+| `docs/handoff/p6-test-side-retirement-plan.md` | 19 个测试文件的三类分类与处置、旧 CSS 未清理的原因 |
 | `docs/handoff/dev-env-checklist.md` | 开发环境自检清单（22 条实测记录、7 类故障排查） |
 | `docs/handoff/test-baseline-verify-2026-11-08.md` | 测试链路独立复核 + 基线失败分类 |
 | `docs/handoff/architecture-review-scope-2026-11-08.md` | 架构评审结论的适用范围核实（v1 vs v2） |
 | `docs/handoff/topic-directory-index.md` | 190 个文档的四段式主题目录索引 |
+| `docs/guides/agent-testing.md` | 已补充：共享主机容量、worktree 准备、conftest 冲突、renderer 切换清单 |

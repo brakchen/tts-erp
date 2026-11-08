@@ -141,8 +141,8 @@ bash scripts/envsetup/install-test-deps.sh --check      # 前置依赖体检
 
 | 事实 | 位置 |
 | --- | --- |
-| `MIGRATED_PAGE_IDS` 已含 19 个页面 | `tts_erp_v2/api/v2/frontend_pages.py` |
-| `PAGES` 注册 19 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
+| `MIGRATED_PAGE_IDS` 已含 19 项 | `tts_erp_v2/api/v2/frontend_pages.py`（18 个注册页 + `login`） |
+| `PAGES` 注册 **18** 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
 | 19 个页面目录有真实 React/TS 代码，约 1.4 万行 | `frontend/src/pages/` |
 | 12 个旧 Jinja 模板 + 13 个旧 JS 脚本仍在 | `tts_erp_v2/templates/pages/`、`tts_erp_v2/static/js/` |
 | 旧 renderer 分支仍在 | `tts_erp_v2/api/v2/pages.py` |
@@ -172,9 +172,16 @@ bash scripts/envsetup/install-test-deps.sh --check      # 前置依赖体检
 
 MiniMax Bot 对**同一个 Bot** 的多个任务不会并行——排队等前一个跑完。同一个 Bot 同一时间只有 1 个活跃任务。
 
-**并发上限 = 团队里的 Bot 数量**，不是任务数。派活时必须一个 lane 对应一个不同的 Bot，否则 lane 会一直排队。
+**并发上限 = 团队里的 Bot 数量**，不是任务数。2026-11-08 实测：给 3 个 Bot 各派 1 个 lane，
+3 个任务全部 queued 50 分钟没启动（每个 Bot 都还在跑先前派的摸底任务）。
 
-每个 Bot 手头的任务动辄跑完整 fast 基线（历史测量 1459 秒，单次可达 20 分钟以上），所以 lane 的启动延迟不短。给 Bot 派活时优先拆小范围任务，避免一上手就跑全量。
+**实操含义**：
+- 想真正并行，lane 必须**一个 Bot 一个**分配，不能把多个 lane 派给同一个 Bot。
+- 给 Bot 派活前先确认它空闲；否则任务会一直排队。
+- 每个任务动辄跑完整 fast 基线（历史测量 1459 秒，单次可达 20+ 分钟），一排就是很久。
+- **需要立刻拿到结果时，改用后台助手**，它不受 Bot 队列限制。
+- `get_tasks` 里 status 为 `waiting_for_tasks` 且带 `dependencies: [{kind: batch, reviewed: false}]`
+  是 Bot 自己在群里拆子任务的正常协作态，不是卡死——但要有人在群里回应它，否则它会一直等。
 
 ---
 
