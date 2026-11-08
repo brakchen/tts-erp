@@ -11,14 +11,20 @@
   ③ 近 N 次成功里有一半以上"读了没写"    —— 源数据陈旧 / 幂等完成，需靠 ④ 区分
   ④ 源数据陈旧                          —— 作业 succeeded，但源表长期未变
 
-**只读保证**：脚本挂 `before_cursor_execute` 事件钩子，断言全程只出现
-SELECT / SHOW 类语句；出现任何写语句立即中止并以非零码退出。这把
-"只读"从注释变成机制。
+**通则 18 · 判据三属性**（Chief 第八轮裁定，2026-11-09）：
+  ① 结构判定 —— 靠语法结构，不靠子串/文本近似
+  ② 双向自测 —— 应拦截 + 应放行，任一方向出错即非零退出
+  ③ 跳过显形 —— 被跳过项数 = 一等指标（正常值 0）；每轮输出与上轮的增删差异；
+                 `removed` 不得被解释成「好转」
+
+**只读保证**：SQL 语句按【首 token】判定类型（SELECT/SHOW 才放行），
+不靠整串扫词；启动时双向自测（7 条应拦截 + 9 条应放行）。
 
 用法：
     python scripts/check_jobs_actually_run.py [--days 7] [--stale-days 7]
                                               [--lookback 5]
                                               [--static-tables FILE]
+                                              [--state-file PATH]
                                               [--json]
 """
 
@@ -33,83 +39,42 @@ from typing import Any
 
 REPO_HINT = "从仓库根目录运行，或确保 tts_erp_v2 可 import"
 
-# 允许出现的语句前缀（只读）。
-# 2026-11-09 修正：去掉了 WITH / EXPLAIN。
-#   理由（@测试质量评审员 W1/W2）：这两种语法可以包裹任意语句，
-#   `WITH x AS (INSERT ...) SELECT * FROM x` 与 `EXPLAIN ANALYZE INSERT ...`
-#   在 PostgreSQL 上【真的会执行写入】⇒ "以 WITH/EXPLAIN 开头"不能作为
-#   只读性证据。
-_ALLOWED_SQL_PREFIXES = ("SELECT", "SHOW")
-
-# 写关键字一票否决。**优先于任何放行条件** ——
-# "看起来像只读"永远不能优先于"含有写关键字"。
-# 用词边界匹配，避免 SET 命中 OFFSET / UPDATE 之类的子串误伤。
-_WRITE_KEYWORDS = (
-    "INSERT", "UPDATE", "DELETE", "TRUNCATE", "CREATE", "ALTER", "DROP",
-    "COPY", "MERGE", "GRANT", "REVOKE", "COMMENT", "VACUUM", "REINDEX",
-    "CLUSTER", "REFRESH", "CALL", "DO", "LOCK", "REASSIGN",
-)
-# ⚠️ 2026-11-09 修正：原先这里有 "SECURITY"，用于覆盖 PostgreSQL 的
-# `SECURITY LABEL` / `SECURITY BARRIER`。但本仓有一个叫 **security** 的
-# schema（security.api_keys / security.roles …）⇒ 词边界匹配命中
-# `SELECT max("updated_at") FROM "security"."api_keys"` ⇒ **7 张表被误判**
-# ⇒ 误判 → 查询抛错 → 被下面 except 吞掉 → **表从清单里静默消失**（④ 从 23 张
-# 掉到 21 张，没人看得出是被守卫挡了）。
-# ⇒ 裸 "SECURITY" 关键字已删除：`SECURITY LABEL` / `SECURITY BARRIER` 只出现在
-# ALTER / CREATE 语句里，已被这两个关键字覆盖。
-# ⇒ 这条要记进通则 13：判据写严会误报，而**误报 + 宽 except = 静默漏报**。
-_WRITE_KEYWORDS = _WRITE_KEYWORDS + ("SET",)
+# ── ① 结构判定：只看首 token（SQL 语法如此） ──────────────────────────
+# 2026-11-09：原先是「整串扫写关键字」，踩了两次：
+#   · 裸 "SECURITY" 关键字误伤本仓的 security schema ⇒ 7 张表被误判
+#   · 子串白名单让「整条语句含 alembic_version」就放行 ⇒ W3
+# ⇒ 现在：语句类型由【首 token】决定，不看整串里出现过什么词。
+# EXPLAIN 单独不执行、EXPLAIN ANALYZE 会执行 ⇒ 两者都不放行。
+# 代价：纯只读 CTE（WITH ... SELECT）会被拦（本脚本的 SQL 不含 CTE，无影响）。
+_READONLY_HEADS = frozenset({"SELECT", "SHOW"})
 
 _write_violations: list[str] = []
 
 
-def _looks_like_write(head: str) -> bool:
-    """语句里是否含写关键字（词边界匹配）。"""
-    for kw in _WRITE_KEYWORDS:
-        # 词边界：前面不是标识符字符，后面也不是
-        idx = 0
-        while True:
-            idx = head.find(kw, idx)
-            if idx < 0:
-                break
-            before = head[idx - 1] if idx > 0 else " "
-            after_i = idx + len(kw)
-            after = head[after_i] if after_i < len(head) else " "
-            if not (before.isalnum() or before == "_") and not (
-                after.isalnum() or after == "_"
-            ):
-                return True
-            idx = after_i
-    return False
+def _is_readonly(raw: str) -> bool:
+    """结构判定：首 token ∈ {SELECT, SHOW} 且不是多语句。"""
+    s = (raw or "").strip()
+    if not s:
+        return False
+    if ";" in s.rstrip(";"):        # 多语句：去掉结尾分号后仍有分号
+        return False
+    head = s.split(None, 1)[0].rstrip(";").upper()
+    return head in _READONLY_HEADS
 
 
 def _guard(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
-    """SQLAlchemy 事件钩子：拦截一切非只读语句。
-
-    2026-11-09 修正（@测试质量评审员 W3）：原实现有
-    `or any(token in head for token in _ALLOWED_SQL_CONTAINS)` ——
-    整条语句只要**含** alembic_version / information_schema / pg_stat
-    任意子串就放行，与"这条语句只读"毫无关系 ⇒
-    `DELETE FROM integration.sync_jobs WHERE job_name='alembic_version'`
-    会被真的执行。
-    ⇒ 现在子串白名单**整体删除**：所有只读查询本来就以 SELECT/SHOW 开头，
-    不需要额外的放行口子。
-    """
+    """SQLAlchemy 事件钩子：拦截一切非只读语句（结构判定）。"""
     raw = (statement or "").strip()
-    head = raw.upper()
-    ok = head.startswith(_ALLOWED_SQL_PREFIXES) and not _looks_like_write(head)
-    # 多语句：除结尾分号外还有分号 => 可能有第二条语句
-    if ok and ";" in raw.rstrip(";"):
-        ok = False
-    if not ok:
-        _write_violations.append(head[:200])
+    if not _is_readonly(raw):
+        _write_violations.append(raw.upper()[:200])
         raise RuntimeError(
-            f"只读巡检被中止：检测到非只读语句 -> {head[:120]}"
+            f"只读巡检被中止：检测到非只读语句 -> {raw.upper()[:120]}"
         )
 
 
-# 守卫的负向自测用例。**不执行，只交给守卫判定** ⇒ 零风险。
-_GUARD_SELFTEST_CASES = (
+# ── ② 双向自测 ───────────────────────────────────────────────────────
+# 应拦截（7 条）：覆盖 @测试质量评审员 的 W1/W2/W3
+_GUARD_BLOCK_CASES = (
     "INSERT INTO integration.sync_jobs (job_name) VALUES ('__guard_selftest__')",
     "UPDATE integration.sync_jobs SET rows_total = 0 WHERE id = -1",
     "DELETE FROM integration.sync_jobs WHERE job_name='alembic_version'",
@@ -118,35 +83,46 @@ _GUARD_SELFTEST_CASES = (
     "SELECT 1; DROP TABLE integration.sync_jobs",
     "TRUNCATE integration.sync_jobs",
 )
+# 应放行（9 条）：覆盖 @测试质量评审员 的放行侧样例集
+#   ★ 这一半以前完全没有 ⇒ "security" schema 误伤没有任何东西能拦住
+_GUARD_ALLOW_CASES = (
+    "SELECT 1",
+    "SELECT version_num FROM alembic_version",
+    "SELECT table_name FROM information_schema.columns WHERE column_name = 'updated_at'",
+    'SELECT MAX("UPDATED_AT") FROM "SECURITY"."API_KEYS"',   # ← 本次踩的坑
+    "SELECT setseed(0.5)",
+    "SELECT * FROM t WHERE status = 'DELETE'",               # ← 字面量含写关键字
+    "SELECT * FROM t WHERE note LIKE '%UPDATE%'",
+    "SELECT * FROM t OFFSET 10",                              # ← OFFSET 不应命中 SET
+    "SHOW transaction_isolation",
+)
 
 
-def _guard_self_test() -> list[str]:
-    """主动制造一次写，确认守卫会拦截。
+def _guard_self_test() -> tuple[list[str], list[str]]:
+    """双向自测。返回 (漏网的写语句, 被误拦的只读语句)。
 
-    2026-11-09：只断言"正常巡检 write_violations == []"是不够的 ——
-    正常巡检本来就不写库，**守卫坏了也会绿**。
-    ⇒ 必须主动把写语句交给守卫判定，断言它确实拒绝。
-    返回未被拦截的语句（空列表 = 守卫正常）。
+    只断言"正常巡检无违规"是不够的 —— 正常巡检本来就不写库，
+    **守卫坏了也会绿**；反过来，只测拦截侧也挡不住误伤。
     """
-    missed: list[str] = []
-    for stmt in _GUARD_SELFTEST_CASES:
+    leaked: list[str] = []
+    blocked_ok = []
+    for stmt in _GUARD_BLOCK_CASES:
         try:
             _guard(None, None, stmt, None, None, False)
-            missed.append(stmt)
+            leaked.append(stmt)
         except RuntimeError:
-            pass
-    return missed
+            blocked_ok.append(stmt)
+    false_positive: list[str] = []
+    for stmt in _GUARD_ALLOW_CASES:
+        try:
+            _guard(None, None, stmt, None, None, False)
+        except RuntimeError:
+            false_positive.append(stmt)
+    return leaked, false_positive
 
 
 def _install_readonly_guard(session_factory):  # noqa: ANN001
-    """把只读守卫挂到 sessionmaker 实际使用的 Engine 上。
-
-    2026-11-08 首版实现有 bug：靠 factory.kw.get("bind") 取 engine 常常拿到
-    None，于是改用"包一层 factory"的写法，结果破坏了 sessionmaker 语义
-    （session.execute 抛 DBAPI 包装错误而不是守卫错误）。
-    现在改为：先建一个 session 取出真实的 bind engine，守卫挂在 engine 上，
-    后续 session 全部共享该 engine ⇒ 守卫覆盖全部语句。
-    """
+    """把只读守卫挂到 sessionmaker 实际使用的 Engine 上。"""
     try:
         from sqlalchemy import event
     except Exception as exc:  # noqa: BLE001
@@ -181,7 +157,6 @@ def _session_factory():
 
 
 def _jobs_source() -> dict[str, Any]:
-    """自证：这份 JOBS 来自哪棵树、哪个 commit、连的是哪个库。"""
     import subprocess
     from pathlib import Path
 
@@ -198,33 +173,26 @@ def _jobs_source() -> dict[str, Any]:
 
 
 def _db_identity(session) -> dict[str, Any]:
-    """连接库标识（不含凭据）：datname + server address + 端口。"""
+    """连接库标识（不含凭据）：datname / user / server addr:port。"""
     from sqlalchemy import text
 
     try:
         row = session.execute(
-            text("SELECT current_database(), current_user, inet_server_addr()::text, inet_server_port()")
+            text("SELECT current_database(), current_user, "
+                 "inet_server_addr()::text, inet_server_port()")
         ).first()
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
     if not row:
         return {}
     return {
-        "datname": row[0],
-        "usename": row[1],
-        "server_addr": row[2],
-        "server_port": row[3],
+        "datname": row[0], "usename": row[1],
+        "server_addr": row[2], "server_port": row[3],
     }
 
 
 def _datname_by_process_group(session) -> list[dict[str, Any]]:
-    """按进程/连接分组统计 datname。
-
-    ⚠️ 2026-11-08 实测教训：全库 `count(DISTINCT datname)` 今天就不等于 1
-    （残留的测试克隆库有 6 条连接）⇒ 那样写会天天误报。
-    正确判据：**生产部署单元的进程组所连的 datname 唯一且等于生产库**。
-    这里按 application_name / client_addr / usename 分组给出事实，不下结论。
-    """
+    """按进程/连接分组统计 datname（不做全库 count）。"""
     from sqlalchemy import text
 
     try:
@@ -243,10 +211,8 @@ def _datname_by_process_group(session) -> list[dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001
         return [{"error": str(exc)}]
     return [
-        {
-            "datname": r[0], "usename": r[1], "client_addr": r[2],
-            "application_name": r[3], "connections": r[4],
-        }
+        {"datname": r[0], "usename": r[1], "client_addr": r[2],
+         "application_name": r[3], "connections": r[4]}
         for r in rows
     ]
 
@@ -308,12 +274,12 @@ def _age_columns(session) -> list[tuple[str, str]]:
     return out
 
 
-def _stale_tables(session, stale_days: int, now: dt.datetime) -> list[dict[str, Any]]:
-    """④ 源数据陈旧。
+def _stale_tables(session, stale_days: int, now: dt.datetime):
+    """④ 源数据陈旧。返回 (陈旧表列表, 查询失败列表)。
 
-    修正（2026-11-08）：不再硬编码只看 max(updated_at) —— **只 insert 不 update
-    的 append-only 表（raw_records 等 PII 主仓）在那种口径下完全不可见**。
-    现在按表声明可用的时间列：优先 updated_at，其次 created_at。
+    ⚠️ 查询失败【不得静默跳过】：守卫误判 → 抛错 → 被宽 except 吞掉 →
+    该表从清单里静默消失（实测 ④ 从 23 张掉到 21 张，零报错）。
+    ⇒ 被跳过的表必须显形。
     """
     from sqlalchemy import text
 
@@ -326,10 +292,6 @@ def _stale_tables(session, stale_days: int, now: dt.datetime) -> list[dict[str, 
                 text(f'SELECT max("{col}") FROM "{schema}"."{table}"')
             ).scalar()
         except Exception as exc:  # noqa: BLE001
-            # ⚠️ 2026-11-09：这里原来是 `except Exception: continue` ——
-            # 与只读守卫叠加时形成【静默漏报】：守卫误判 → 查询抛错 → 这里吞掉
-            # → 该表从清单里消失（实测 ④ 从 23 张掉到 21 张，无人察觉）。
-            # ⇒ 现在必须记录并暴露，不能静默跳过。
             query_failures.append({"table": full_name, "error": str(exc)[:200]})
             continue
         if newest is None:
@@ -338,17 +300,56 @@ def _stale_tables(session, stale_days: int, now: dt.datetime) -> list[dict[str, 
             newest = newest.replace(tzinfo=dt.timezone.utc)
         age_days = (now - newest).total_seconds() / 86400.0
         if age_days >= stale_days:
-            out.append(
-                {
-                    "table": full_name,
-                    "age_column": col,
-                    "newest": newest.isoformat(),
-                    "age_days": round(age_days, 2),
-                }
-            )
-    out.sort(key=lambda r: -r["age_days"])
+            out.append({
+                "table": full_name, "age_column": col,
+                "newest": newest.isoformat(), "age_days": round(age_days, 2),
+            })
     out.sort(key=lambda r: -r["age_days"])
     return out, query_failures
+
+
+def _load_previous(state_path: str) -> dict[str, Any]:
+    try:
+        with open(state_path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_state(state_path: str, report: dict[str, Any]) -> None:
+    try:
+        os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
+        slim = {
+            "generated_at": report["generated_at"],
+            "stale_tables": [r["table"] for r in report["list_4_stale_source_tables"]],
+            "skipped_count": report["skipped"]["count"],
+        }
+        with open(state_path, "w", encoding="utf-8") as fh:
+            json.dump(slim, fh, ensure_ascii=False, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"cannot save state file: {exc}\n")
+
+
+def _delta_vs_previous(current: list[str], previous: dict[str, Any]) -> dict[str, Any]:
+    """与上一轮的增删差异。`removed` 不得被解释成「好转」。"""
+    prev = set(previous.get("stale_tables") or [])
+    cur = set(current)
+    added = sorted(cur - prev)
+    removed = sorted(prev - cur)
+    prev_skipped = previous.get("skipped_count")
+    prev_generated = previous.get("generated_at")
+    reason = "none"
+    if removed and prev_skipped not in (None, 0):
+        reason = "上一轮有被跳过的对象 => removed 可能是查询失败被吞，不是好转"
+    elif removed:
+        reason = "上一轮无跳过 => removed 可能是真好转，也可能是查询失败被吞；需看 skipped_count"
+    return {
+        "added": added,
+        "removed": removed,
+        "removed_reason": reason,
+        "previous_generated_at": prev_generated,
+        "previous_skipped_count": prev_skipped,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -357,25 +358,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--stale-days", type=int, default=7, help="陈旧阈值天数（清单 ④）")
     ap.add_argument("--lookback", type=int, default=5, help="清单③回看最近 N 次成功")
     ap.add_argument("--static-tables", default="", help="静态表豁免文件（每行一个表名）")
+    ap.add_argument("--state-file", default="", help="上轮状态文件（用于增删差异）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     args = ap.parse_args(argv)
 
-    # 参数下限：--days 0 会让窗口为空、清单①把所有 job 误判为"没跑"
     if args.days < 1 or args.stale_days < 1 or args.lookback < 1:
         sys.stderr.write("--days / --stale-days / --lookback 必须 >= 1\n")
         return 2
 
-    # ★ 守卫负向自测：先确认守卫本身能拦住写语句，再连库。
-    # 只断言"正常巡检无违规"是不够的 —— 正常巡检本来就不写库，
-    # **守卫坏了也会绿**。这里主动把写语句交给守卫判定。
-    missed = _guard_self_test()
-    if missed:
+    # ★ ② 双向自测：漏网 ⇒ 3，误伤 ⇒ 4
+    leaked, false_positive = _guard_self_test()
+    if leaked:
         sys.stderr.write(
-            "只读守卫自测失败：以下写语句未被拦截（守卫形同虚设）\n"
-            + "\n".join(f"  - {m}" for m in missed)
-            + "\n"
-        )
+            "只读守卫自测失败（方向一）：以下写语句未被拦截\n"
+            + "\n".join(f"  - {s}" for s in leaked) + "\n")
         return 3
+    if false_positive:
+        sys.stderr.write(
+            "只读守卫自测失败（方向二）：以下只读语句被误拦\n"
+            + "\n".join(f"  - {s}" for s in false_positive) + "\n")
+        return 4
 
     static_tables: set[str] = set()
     if args.static_tables:
@@ -384,7 +386,7 @@ def main(argv: list[str] | None = None) -> int:
                 line.strip() for line in fh if line.strip() and not line.startswith("#")
             }
 
-    now = _utcnow()                      # ★ 单一时钟：整份报告用同一个 now
+    now = _utcnow()
     jobs = _load_jobs()
     factory = _session_factory()
     factory = _install_readonly_guard(factory) or factory
@@ -401,16 +403,13 @@ def main(argv: list[str] | None = None) -> int:
     by_job: dict[str, list[Any]] = {}
     for r in everything:
         by_job.setdefault(r.job_name, []).append(r)
-
     window_since = now - dt.timedelta(days=args.days)
 
-    # ① 注册了但窗口内没有任何行
     not_run = []
     for name in sorted(jobs):
         if not any(r.started_at >= window_since for r in by_job.get(name, [])):
             not_run.append({"job_name": name})
 
-    # ② 超过 2×interval 仍无终态（阈值与 watchdog 规则(d) 一致）
     zombies = []
     for r in everything:
         if r.status != "running":
@@ -419,47 +418,39 @@ def main(argv: list[str] | None = None) -> int:
         threshold = interval * 2 if interval > 0 else None
         age = (now - r.started_at).total_seconds()
         if threshold is not None and age < threshold:
-            continue          # 阈值内 = 可能正在正常跑，不报
-        zombies.append(
-            {
-                "job_name": r.job_name,
-                "started_at": r.started_at.isoformat(),
-                "age_seconds": round(age, 1),
-                "threshold_seconds": threshold,
-                "rows_total": r.rows_total,
-                "rows_inserted": r.rows_inserted,
-                "reason": "no terminal state beyond 2x interval" if threshold else
-                          "interval_seconds<=0 -> no threshold can be derived",
-            }
-        )
+            continue
+        zombies.append({
+            "job_name": r.job_name, "started_at": r.started_at.isoformat(),
+            "age_seconds": round(age, 1), "threshold_seconds": threshold,
+            "rows_total": r.rows_total, "rows_inserted": r.rows_inserted,
+            "reason": "no terminal state beyond 2x interval" if threshold
+                      else "interval_seconds<=0 -> no threshold can be derived",
+        })
 
-    # ③ 近 N 次成功里，"读了没写"占一半以上
     read_but_no_write = []
-    for name in sorted(by_job):
-        succ = [r for r in by_job[name] if r.status == "succeeded" and r.started_at >= window_since]
+    window_by_job: dict[str, list[Any]] = {}
+    for r in windowed:
+        window_by_job.setdefault(r.job_name, []).append(r)
+    for name in sorted(window_by_job):
+        rows = window_by_job[name]
+        succ = [r for r in rows if r.status == "succeeded" and r.started_at >= window_since]
         if not succ:
             continue
         recent = succ[: args.lookback]
         zero = [r for r in recent if (r.rows_total or 0) > 0 and (r.rows_inserted or 0) == 0]
-        if not zero:
+        if not zero or len(zero) * 2 < len(recent):
             continue
-        if len(zero) * 2 < len(recent):
-            continue          # 多数次都写了 => 偶发零写不算
-        read_but_no_write.append(
-            {
-                "job_name": name,
-                "lookback": len(recent),
-                "zero_insert_runs": len(zero),
-                "last_succeeded_at": recent[0].started_at.isoformat(),
-                "rows_total": recent[0].rows_total,
-                "rows_inserted": recent[0].rows_inserted,
-                "rows_updated": recent[0].rows_updated,
-                "note": "succeeded but wrote nothing — distinguish 'idempotent-complete' "
-                        "vs 'source stale' via list 4",
-            }
-        )
+        read_but_no_write.append({
+            "job_name": name, "lookback": len(recent),
+            "zero_insert_runs": len(zero),
+            "last_succeeded_at": recent[0].started_at.isoformat(),
+            "rows_total": recent[0].rows_total,
+            "rows_inserted": recent[0].rows_inserted,
+            "rows_updated": recent[0].rows_updated,
+            "note": "succeeded but wrote nothing — distinguish 'idempotent-complete' "
+                    "vs 'source stale' via list 4",
+        })
 
-    # ④ 源表陈旧（排除静态表）
     session2 = factory()
     try:
         stale, stale_query_failures = _stale_tables(session2, args.stale_days, now)
@@ -467,11 +458,12 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         session2.close()
 
+    previous = _load_previous(args.state_file) if args.state_file else {}
+    delta = _delta_vs_previous([r["table"] for r in stale], previous)
+
     report = {
         "generated_at": now.isoformat(),
-        "window_days": args.days,
-        "stale_days": args.stale_days,
-        "lookback": args.lookback,
+        "window_days": args.days, "stale_days": args.stale_days, "lookback": args.lookback,
         "registered_jobs": len(jobs),
         "source": _jobs_source(),
         "db_identity": db_id,
@@ -480,46 +472,54 @@ def main(argv: list[str] | None = None) -> int:
         "list_2_never_finished": zombies,
         "list_3_read_but_no_write": read_but_no_write,
         "list_4_stale_source_tables": stale,
+        "skipped": {"count": len(stale_query_failures), "items": stale_query_failures},
+        "delta_vs_previous": delta,
         "write_violations": _write_violations,
-        "stale_query_failures": stale_query_failures,
+        "guard_self_test": {
+            "block_cases": len(_GUARD_BLOCK_CASES),
+            "allow_cases": len(_GUARD_ALLOW_CASES),
+            "leaked": leaked, "false_positive": false_positive,
+        },
     }
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
-        return 0
+    else:
+        print(f"作业现状巡检 — 窗口 {args.days} 天 / 陈旧阈值 {args.stale_days} 天 / 回看 {args.lookback} 次")
+        print(f"生成时间(单一时钟): {report['generated_at']}")
+        print(f"JOBS 来源: cwd={report['source']['cwd']}  git_head={report['source']['git_head']}")
+        print(f"连接库: {db_id.get('datname')} @ {db_id.get('server_addr')}:{db_id.get('server_port')} (user={db_id.get('usename')})")
+        print(f"注册表作业数: {report['registered_jobs']}")
+        print()
+        print(f"① 注册了但窗口内没跑 ({len(not_run)})")
+        for r in not_run:
+            print(f"   {r['job_name']}")
+        print()
+        print(f"② 超过 2×interval 仍无终态 ({len(zombies)})")
+        for r in sorted(zombies, key=lambda x: -x["age_seconds"]):
+            thr = r["threshold_seconds"]
+            print(f"   {r['job_name']:<45} age={r['age_seconds']:>10.1f}s threshold={thr if thr is not None else 'N/A'} total={r['rows_total']} inserted={r['rows_inserted']}")
+        print()
+        print(f"③ 近 {args.lookback} 次成功里'读了没写'占多数 ({len(read_but_no_write)})")
+        for r in read_but_no_write:
+            print(f"   {r['job_name']:<45} zero/{r['lookback']} total={r['rows_total']} inserted={r['rows_inserted']}")
+        print()
+        print(f"④ 源表陈旧 ≥{args.stale_days} 天 ({len(stale)})")
+        for r in stale:
+            print(f"   {r['table']:<45} age={r['age_days']:>8.2f}d [{r['age_column']}] newest={r['newest']}")
+        print()
+        print(f"被跳过项数（一等指标，正常值 0）: {report['skipped']['count']}")
+        for r in report["skipped"]["items"]:
+            print(f"   {r['table']}: {r['error']}")
+        print(f"与上轮差异: added={len(delta['added'])} removed={len(delta['removed'])}")
+        if delta["removed"]:
+            print(f"   ⚠ removed 不得被解释成「好转」：{delta['removed_reason']}")
+        print(f"只读守卫违规次数: {len(_write_violations)}")
+        print(f"守卫自测: 拦截样例 {len(_GUARD_BLOCK_CASES)} 条 / 放行样例 {len(_GUARD_ALLOW_CASES)} 条 "
+              f"→ 漏网 {len(leaked)} / 误伤 {len(false_positive)}")
 
-    print(f"作业现状巡检 — 窗口 {args.days} 天 / 陈旧阈值 {args.stale_days} 天 / 回看 {args.lookback} 次")
-    print(f"生成时间(单一时钟): {report['generated_at']}")
-    print(f"JOBS 来源: cwd={report['source']['cwd']}  git_head={report['source']['git_head']}")
-    print(f"连接库: {db_id.get('datname')} @ {db_id.get('server_addr')}:{db_id.get('server_port')} "
-          f"(user={db_id.get('usename')})")
-    print(f"注册表作业数: {report['registered_jobs']}")
-    print()
-    print(f"① 注册了但窗口内没跑 ({len(not_run)})")
-    for r in not_run:
-        print(f"   {r['job_name']}")
-    print()
-    print(f"② 超过 2×interval 仍无终态 ({len(zombies)})")
-    for r in sorted(zombies, key=lambda x: -x["age_seconds"]):
-        thr = r["threshold_seconds"]
-        print(f"   {r['job_name']:<45} age={r['age_seconds']:>10.1f}s "
-              f"threshold={thr if thr is not None else 'N/A'} "
-              f"total={r['rows_total']} inserted={r['rows_inserted']}")
-    print()
-    print(f"③ 近 {args.lookback} 次成功里'读了没写'占多数 ({len(read_but_no_write)})")
-    for r in read_but_no_write:
-        print(f"   {r['job_name']:<45} zero/{r['lookback']} "
-              f"total={r['rows_total']} inserted={r['rows_inserted']}")
-    print()
-    print(f"④ 源表陈旧 ≥{args.stale_days} 天 ({len(stale)})")
-    for r in stale:
-        print(f"   {r['table']:<45} age={r['age_days']:>8.2f}d "
-              f"[{r['age_column']}] newest={r['newest']}")
-    print()
-    print(f"只读守卫违规次数: {len(_write_violations)}")
-    print(f"④ 查询失败(被跳过)的表: {len(stale_query_failures)}")
-    for r in stale_query_failures:
-        print(f"   {r['table']}: {r['error']}")
+    if args.state_file:
+        _save_state(args.state_file, report)
     return 0
 
 
