@@ -447,6 +447,10 @@ lane，仍按同一规则核对 owner。
 3. **按文档目录规则把本方案移至 `docs/design/` 并更新引用**（`AGENTS.md` §9 与
    `docs/guides/frontend-development.md` 的链接）。移动会牵动引用方，属于独立文档任务，
    不在本次状态更新的范围内；不提前写入“已接受/已实施”的 ADR。
-4. **清理 4 个已无引用的旧 CSS**（`ad-daily.css`、`runtime-configs.css`、`sync-jobs.css`、
-   `spu-profit-deterioration.css`）——已逐个核实无生产代码引用、无活契约测试。
-   `video-publish.css` **必须保留**（`tests/publishing/test_contracts.py` 有活契约测试直接读它）。
+4. ~~**清理 4 个已无引用的旧 CSS**~~ —— **已完成**（`0d0b0027`）：`ad-daily.css`、
+   `runtime-configs.css`、`sync-jobs.css`、`spu-profit-deterioration.css` 已删除。
+   `sync-jobs.css` 连同 `tests/frontend/test_source_contracts.py` 里断言它的
+   `test_sync_jobs_css_has_mobile_card_layout_and_disabled_cursor` 一起退役——
+   那个测试断言的是旧页面的 `.jobs-table` 移动端卡片布局，而 React 版用的是共享的
+   `erp-table` 系列类名，不加载这份 CSS。
+   `video-publish.css` **保留**（`tests/publishing/test_contracts.py` 有活契约测试直接读它）。

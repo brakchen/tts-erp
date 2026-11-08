@@ -187,6 +187,12 @@ A 类旧实现断言已删，C 类正向断言已保留并扩展为「不含任�
 
 **结论**：4 个可删（`sync-jobs.css` 需连同 1 个测试），1 个必须留。
 
+**已完成（2026-11-08 23:45，commit `0d0b0027`）**：这 4 个 CSS 已删除，
+`sync-jobs.css` 连同 `tests/frontend/test_source_contracts.py` 里断言它的
+`test_sync_jobs_css_has_mobile_card_layout_and_disabled_cursor` 一起退役。
+`tts_erp_v2/static/css/` 现在只剩 4 个文件：`common.css`、`navigation.css`、
+`tokens.css`、`video-publish.css`——全部仍有真实消费者。
+
 **删除安全性已核实**：`ad-daily.css` / `runtime-configs.css` / `spu-profit-deterioration.css`
 在测试里的 3 处引用全是断言 **HTTP 响应内容**不含旧资产
 （`assert "static/css/xxx.css" not in body`），**不读文件本身**。
