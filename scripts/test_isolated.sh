@@ -118,6 +118,39 @@ prod_alembic_revision() {
   pg_exec psql --no-psqlrc --tuples-only --no-align --quiet \
     --command 'SELECT version_num FROM alembic_version LIMIT 1' "$(plain_pg_url "$1")" 2>/dev/null | head -1 || true
 }
+code_tree_alembic_head() {
+  local alembic
+  alembic="${TTS_ERP_TEST_ALEMBIC_BIN:-.venv/bin/alembic}"
+  [[ -x "$alembic" ]] || alembic='/home/schan/tts-erp/.venv/bin/alembic'
+  [[ -x "$alembic" ]] || return 0
+  "$alembic" heads 2>/dev/null | awk -F'[ (]' '/\(head\)/{print $1; exit}'
+}
+# Diagnose a clone whose schema revision no longer matches this checkout.
+# The clone path never upgrades the clone, so a clone revision below the code
+# head means the checkout is stale relative to the template — an environment
+# condition, not a code defect. Report it here instead of leaving the caller
+# to infer it from a downstream assertion failure.
+warn_revision_drift() {
+  local clone_revision code_head
+  clone_revision="$(pg_exec psql --no-psqlrc --tuples-only --no-align --quiet \
+    --command 'SELECT version_num FROM alembic_version LIMIT 1' "$(plain_pg_url "$RUN_URL")" 2>/dev/null | head -1 || true)"
+  [[ -n "$clone_revision" ]] || return 0
+  code_head="$(code_tree_alembic_head)"
+  [[ -n "$code_head" ]] || return 0
+  [[ "$clone_revision" == "$code_head" ]] && return 0
+  {
+    echo "[isolated-test] WARNING: clone schema revision does not match this checkout" >&2
+    echo "  clone revision : $clone_revision  (copied from $TEMPLATE_DB)" >&2
+    echo "  code head      : $code_head  (this checkout)" >&2
+    echo "  The clone path never upgrades the clone, so a stale checkout always" >&2
+    echo "  produces this drift. It is an environment condition, not a code defect." >&2
+    echo "  Fix: sync this checkout to origin/master, then refresh the template" >&2
+    echo "        git pull --ff-only origin master" >&2
+    echo "        bash scripts/test_isolated.sh --refresh-template fast" >&2
+    echo "        (--refresh-template needs a read-only production-shape source URL;" >&2
+    echo "         see docs/ops/tts-erp.md)" >&2
+  }
+}
 TEMPLATE_CREATED_OR_REFRESHED=0
 refresh_template() {
   echo "[isolated-test] refreshing template DB: $TEMPLATE_DB"
@@ -167,6 +200,7 @@ prepare_template_and_clone() {
   pg_exec createdb --maintenance-db "$MAINTENANCE_URL" -T "$TEMPLATE_DB" "$RUN_DB"
   RUN_CREATED=1
   phase_timing database_clone "$phase_started_us"
+  warn_revision_drift
   flock -u 9
   exec 9>&-
 }
