@@ -174,16 +174,23 @@ A 类旧实现断言已删，C 类正向断言已保留并扩展为「不含任�
 | `ad-daily.css` | 无（内联 HTML 已删） | 仅正向断言「响应不含它」 | 可删 |
 | `runtime-configs.css` | 无 | 仅正向断言 | 可删 |
 | `spu-profit-deterioration.css` | 无 | 仅正向断言 | 可删 |
-| `sync-jobs.css` | 无 | 无 | 可删 |
+| `sync-jobs.css` | 无 | `tests/frontend/test_source_contracts.py:71` 的 `test_sync_jobs_css_has_mobile_card_layout_and_disabled_cursor` **直接读文件**断言 `.jobs-table` / `data-label` 等移动端布局规则 | **连同那个测试一起删** |
 
-**结论**：4 个可删、1 个必须留。但旧 CSS 的退役是一个**独立任务**，
-需要逐个确认契约测试是否还有效、React 侧是否已有等价实现。
-这超出了 P6 的既定范围（方案只覆盖模板与脚本），本轮不动。
+**`sync-jobs.css` 的判断依据（2026-11-08 23:45 补充核实）**：
+那个测试断言的是 `.jobs-table`、`content: attr(data-label)`、`.jobs-table thead { display: none }`
+这类**旧页面的移动端卡片布局**。但 React 版（`frontend/src/pages/sync-jobs/index.tsx`）
+用的是共享的 `erp-table` 系列类名，**完全不使用 `.jobs-table`**，也不加载这份 CSS
+——旧模板已随 P6 退役，React 页面不再引用它。
+所以这是**断言一个死资产的测试**，删掉 CSS + 删掉该测试即可，不丢任何活行为覆盖。
+
+（对比：`console.js` 和 `video-publish.css` 是真活资产，不能删——见下方更正。）
+
+**结论**：4 个可删（`sync-jobs.css` 需连同 1 个测试），1 个必须留。
 
 **删除安全性已核实**：`ad-daily.css` / `runtime-configs.css` / `spu-profit-deterioration.css`
 在测试里的 3 处引用全是断言 **HTTP 响应内容**不含旧资产
 （`assert "static/css/xxx.css" not in body`），**不读文件本身**。
-删掉 CSS 文件后这些断言依然成立。`sync-jobs.css` 连测试引用都没有。
+删掉 CSS 文件后这些断言依然成立。
 
 > **`console.js` 的更正（2026-11-08 23:35）**：有报告认为「模板删完后 `console.js`
 > 全仓只剩 `manual-costs.html` 引用，可直接删」。**这个判断是错的**——
