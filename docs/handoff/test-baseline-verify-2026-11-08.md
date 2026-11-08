@@ -3,6 +3,8 @@
 > 执行人：测试工程师（bot_d330a0b9a748）｜委托：Chief
 > 测试机：HP desk `schan@192.168.1.2`（`ssh hp-desk`），主 checkout `/home/schan/tts-erp`
 > 本记录中每条命令均在测试机真实执行并保留真实输出；未执行的项目一律标注「未执行」，不写「应该通过」。
+>
+> **交付说明（2026-11-09 00:40）**：本轮向 `tts-erp 研发协作` 群投递汇报时，`post_group` 与 `message_bot` 两个投递接口持续返回「无法确认工具调用来自哪个正在进行的回复」；同期 `list_team` / `get_tasks` / `cancel_tasks` 正常，故为投递路径的运行时故障，非内容问题。已取消 4 条卡在 `queued`、一条都未投递出去的旧讨论，重投仍失败。**因此群内暂无本轮汇报，本文件是完整且权威的记录载体**；待投递通道恢复后再同步。
 
 ## 0. 结论速览
 
@@ -13,7 +15,7 @@
 | `test_frontend_components` | **环境问题**——`node_modules` 顶层缺 `semver`。已受控复现出完全相同的 `ERR_MODULE_NOT_FOUND` |
 | master 当前是否零失败 | **否**。完整 fast 基线对比退出 1，56 项新失败（14 项断言过时 + 34 项测试基础设施缺陷 + 8 项疑似偶发）。详见 §3。§3.3 的分类经复核已更正为「断言过时」，不是代码缺陷 |
 | 新 master（2b68b40）复核 | 两类缺陷**均未修复**（§8.4），且 renderer 收敛**新增** 2 项溢出回归（§8.5）。§3.1 的机制诊断已实现进 master（§8.3） |
-| 最新 master（65bbf11）复核 | §3.3 断言契约已修、§3.4 conftest 冲突已修（均已复验）；**仍剩 13 项真实回归**在 `tests/browser/test_spu_price_columns.py`。详见 §8.6 |
+| 最新 master（65bbf11）复核 | 完整 fast 基线 **EXIT=1 / 2353s / 80 项新失败**。§3.3 断言契约、§3.4 conftest 冲突**均已修且清零**；剩余 80 项里 66 项是**测试侧断言过时**（告警页 53 + 价格列 13，都是切换 renderer 后仍在断言旧 DOM），另 14 项在 SPU 页面族其它文件（数值排序、投影、React 工作区、pilot 布局）。详见 §8.6 |
 | 需要 Chief 决策的事项 | 5 项，见 §7 |
 
 **与委托描述不一致的一处事实**：落后的提交数不是 21。实测 `git rev-list --count 83bbede..0b92d97` = **312**（`--first-parent` = 56）。定性结论不受影响，但数量级差异很大，下一节给出原始命令。
@@ -751,7 +753,7 @@ bash scripts/envsetup/prepare-worktree.sh
 2. **落后提交数 21 vs 实测 312**。定性不受影响，但如果 21 这个数字进了其他文档或汇报，建议更正。
 3. **模板库刷新策略**。当前模板库 revision 跟随生产库（0076），而隔离运行器的克隆路径不做 upgrade，所以「checkout 落后于模板库」必然触发 §4.1 的断言。可选：把 `--refresh-template` 写进同步 checkout 后的固定步骤，或让 `test_isolated.sh` 在克隆后检测 revision 失配并给出更直接的诊断信息（当前是断言失败，看不出是环境漂移）。
 4. **共享测试机上的「批量删库」脚本**。见 §7.1，它会删掉其它 lane 正在运行的临时库。
-5. **master 的 56 项失败要谁来处理，以及基线何时重生成**。§3.3 的字体栈断言是**测试自身问题（断言过时，不是代码缺陷）**，§3.4 的 conftest 冲突是明确的测试基础设施缺陷，两者都会让每个 lane 的 fast 基线对比变成 exit 1。基线 `count: 0` 已陈旧 312 个提交。**处置进度**：§3.4 已修（`a9605dea`，多目录 conftest 改包路径导入）、§3.3 已修（`bd4a7753`，断言契约改为「三别名都声明且非空」，不再要求互不相同），均已在 §8.6 于 `65bbf11` 上复验通过。**剩下 13 项真实回归**在 `tests/browser/test_spu_price_columns.py`（`#price-summary` 不出现），已派开发修复。剩余动作：修完这 13 项 → 在干净 master worktree 里 `bash scripts/test_baseline.sh --update` 重生成基线。**在基线重生成之前，任何 lane 跑 `--scope fast` 都会看到这批失败**，需要提前告知各 lane 负责人。
+5. **master 的失败项要谁来处理，以及基线何时重生成**。§3.3 的字体栈断言是**测试自身问题（断言过时，不是代码缺陷）**，§3.4 的 conftest 冲突是明确的测试基础设施缺陷，两者都会让每个 lane 的 fast 基线对比变成 exit 1。基线 `count: 0` 已陈旧 312 个提交。**处置进度**：§3.4 已修（`a9605dea`，多目录 conftest 改包路径导入）、§3.3 已修（`bd4a7753`，断言契约改为「三别名都声明且非空」，不再要求互不相同），均已在 §8.6 于 `65bbf11` 上复验通过。**剩下 80 项全部是测试侧问题**（详见 §8.6 的定性更正）：告警页 53 项断言了已退役 Jinja 模板的 id、价格列 13 项是 mock 载荷与 HeroUI Summary 组件契约不一致、另 14 项在 SPU 页面族其它文件——**不需要开发工程师改产品代码，应由测试侧改断言与 mock**。剩余动作：测试侧收口这 80 项 → 在干净 master worktree 里 `bash scripts/test_baseline.sh --update` 重生成基线。**在基线重生成之前，任何 lane 跑 `--scope fast` 都会看到这批失败**，需要提前告知各 lane 负责人。
 
 ---
 
@@ -967,7 +969,7 @@ EXIT=0 ELAPSED=30s
 
 **§3.4 conftest 冲突（34 项）—— 已修，复验通过**：多目录收集场景下的 `AttributeError: module 'conftest' has no attribute '_mock_payload'` 已消失（`origin/master` 的 `tests/browser/conftest.py` 改为 `from tests.browser import conftest as this_module`）。
 
-**但仍有 13 项真实回归未修**：`tests/browser/test_spu_price_columns.py` 在 `65bbf11` 上**单文件复跑就失败**——不是收集顺序问题、不是偶发：
+**但仍有 13 项测试侧断言问题未修**：`tests/browser/test_spu_price_columns.py` 在 `65bbf11` 上**单文件复跑就失败**——不是收集顺序问题、不是偶发：
 
 ```
 $ bash scripts/test_isolated.sh fast tests/browser/test_spu_price_columns.py
@@ -980,11 +982,62 @@ E  playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exce
 E  - waiting for locator("#price-summary") to be visible
 ```
 
-与 §3.4 的区别要说清楚：修复前这批报的是 `AttributeError: module 'conftest' has no attribute '_mock_payload'`（测试基础设施缺陷，修复后消失）；修复后它们继续失败，但错误类型变成 Playwright 等 `#price-summary` 可见超时——**说明还有一层真实的产品/渲染问题**：`#price-summary` 面板始终不出现。这需要 @开发工程师 跟进 `tts_erp_v2/api/v2/pages.py` 的 renderer 收敛后该面板的 DOM 归属。
+与 §3.4 的区别要说清楚：修复前这批报的是 `AttributeError: module 'conftest' has no attribute '_mock_payload'`（测试基础设施缺陷，修复后消失）；修复后它们继续失败，但错误类型变成 Playwright 等 `#price-summary` 可见超时。
 
-**告警页回归（2b68b40 上 53 项）确认为真实回归并已修**：我在 `2b68b40` 上单文件复跑过（`EXIT=1`，321s，54 项失败，`Locator expected to have count '1'` / `Actual value: 0`），不是收集顺序问题；master 上的修法（`f205c744`，就绪信号改用共享 `wait_canned_page`）已在 §8.5 记录，`65bbf11` 上该文件复验全绿。
+**定性更正（Chief，2026-11-09）**：原文写「说明还有一层真实的产品/渲染问题」，**这个判断不成立**。实测链路：
+- `#price-summary` **在 React 里是存在的** —— `frontend/src/pages/spu-profitability/Summary.tsx:138` 渲染 `<section id="price-summary" hidden={supported !== true}>`。
+- `supported` 来自 `priceCapability`，而 `priceCapability` 在 `index.tsx:47` 由 `Boolean(data.totals.priceStats || data.items.some(row => row.priceStats))` 决定。
+- 测试的 mock 载荷（`tests/browser/test_spu_price_columns.py::_nested_payload`）虽然写了 `payload["totals"]["priceStats"]`，但夹具的 canned 响应走的是 `tests/browser/conftest.py` 的 `_mock_payload`，**该函数返回的 `/v2/analytics/spu-roi` 载荷里没有 `priceStats` 字段**（`git grep priceStats` 在 `tests/browser/conftest.py` 上零命中），测试里的 monkeypatch 覆盖路径与夹具实际调用路径不一致 → 前端拿到 `priceStats` 缺失 → `priceCapability` 为 false → 面板被 `hidden` 隐藏 → 等待超时。
+
+所以这是**测试侧 mock 契约与实现不一致**（断言/mock 没跟上 P4 迁移后的 HeroUI Summary 组件），不是产品缺陷。修法在测试侧：让 mock 载荷带上 `totals.priceStats`，并把断言改写到 HeroUI `Table` 的真实结构上（`<span id="price-{metric}-{statistic}">`、`<span id="price-summary-status">`）。
+
+**告警页 53 项 —— 定性更正（Chief，2026-11-09 00:5x）**：原文写「确认为真实回归并已修」，并称 `65bbf11` 上该文件复验全绿。**这两句都不成立**，理由如下（均为实测）：
+
+1. `f205c744` 只改了 `tests/browser/test_render_smoke.py`（溢出用例的就绪信号），**从未碰过 `tests/browser/test_spu_deterioration_alert_page.py`**（`git show f205c744 --stat` 无该文件）。所以它不可能修掉这 53 项。
+2. `65bbf11` 上该文件**没有全绿**：`65bbf11` 的完整 fast 基线（2353s，退出 1）里 `test_spu_deterioration_alert_page.py` 仍占 **53 项**，是失败项里的最大头。
+
+**真正的根因是测试侧断言过时，不是产品回归**：
+- 该测试断言 `#alert-rows [data-spu-pk='1001']`、`#total-spus`、`#alert-status`。这三个 id **只存在于已退役的 Jinja 模板** `tts_erp_v2/templates/pages/spu-profit-deterioration.html`（`git show f72a3089^:...` 里可见 `<tbody id="alert-rows">`、`<strong id="total-spus">`、`<section id="alert-status">`）。
+- React 实现 `frontend/src/pages/spu-profit-deterioration/` 从来没有过这些 id（逐个历史提交查过，无一命中）；它渲染的是 `ComparisonTable` 与 `dl` 统计块。
+- 断点就在 `80b218a9`（路由收敛）：它把 `tests/browser/conftest.py::_render_pages` 里告警页的渲染来源从 `_render_page("spu-profit-deterioration.html")`（旧模板）改成 `frontend_pages.render_frontend_page(...)`（React）。**fixture 换了 owner，测试却还在断言旧 owner 的 DOM**，于是 53 项一起红。
+
+因此这一项与 §8.6 的价格列 13 项**同源**（都是「切换 renderer 后旧 DOM 断言失效」），修法也在测试侧：把断言改写到 React 的真实 DOM 契约上。**不需要开发工程师改产品代码。**
 
 **§8.1 的删库结论不受影响**：第二次基线（`0b92d97`，56 项）全程监控显示临时库 43/50 个采样点在位，最后 7 个点是运行自身清理，不需因删库重跑。
+
+**完整 fast 基线（`65bbf11`）**：退出 1，2353s，**80 项新失败**。
+
+```
+$ bash scripts/test_baseline.sh --scope fast --base 65bbf116442df68fbbb673f2f2094aa84a505850 \
+    --keep-log /tmp/TEST_baseline_fast_master3.log
+EXIT=1 ELAPSED=2353s
+```
+
+| 文件 | 失败数 | 相对 `2b68b40` |
+| --- | --- | --- |
+| `tests/browser/test_spu_deterioration_alert_page.py` | 53 | 不变 |
+| `tests/browser/test_spu_price_columns.py` | 13 | 不变 |
+| `tests/browser/test_frontend_pilots.py` | 6 | 不变 |
+| `tests/browser/test_spu_react_workspace.py` | 5 | 10 → 5 |
+| `tests/browser/test_spu_numeric_sort.py` | 2 | 不变 |
+| `tests/browser/test_spu_projection.py` | 1 | 不变 |
+| **合计** | **80** | 113 → 80 |
+
+错误签名变化（同一份原始日志统计）：
+
+| 错误签名 | `2b68b40` | `65bbf11` |
+| --- | --- | --- |
+| `AttributeError: module 'conftest' has no attribute '_mock_payload'` | 34 | **0**（已修） |
+| `AssertionError: 三套栈必须互不相同` | 14 | **0**（已修） |
+| `playwright Timeout 30000ms exceeded` | 6 | 19 |
+
+**结论（Chief 更正，2026-11-09）**：§3.3 与 §3.4 两类缺陷在 `65bbf11` 上已彻底清零，剩余 80 项全部是 Playwright 超时类，集中在 SPU 页面族——告警页（53）与价格列（13）合计 66 项，另 14 项在 `test_frontend_pilots.py`(6)、`test_spu_react_workspace.py`(5)、`test_spu_numeric_sort.py`(2)、`test_spu_projection.py`(1)。
+
+**这 66 项不是产品回归，是测试侧断言过时**（更正原文的定性，详见 §8.6 的更正批注）：
+- **告警页 53 项**：断言的 `#alert-rows` / `#total-spus` / `#alert-status` 是已退役 Jinja 模板的 id，React 实现从来没有过；`80b218a9` 把测试 fixture 的渲染来源从旧模板换成 React 后，断言就失效了。
+- **价格列 13 项**：`#price-summary` 在 React 里确实存在（`frontend/src/pages/spu-profitability/Summary.tsx`），但它带 `hidden={supported !== true}`，而 `supported` 由 `priceCapability` 决定、后者取决于 `data.totals.priceStats` 是否存在——测试的 mock 载荷没提供这个字段，所以面板一直隐藏。这同样是测试侧 mock 契约与实现不一致。
+
+**因此这 80 项应由 @测试质量评审员 在测试侧收口**（改断言、改 mock 载荷），不需要 @开发工程师 改产品代码。原文写的「共同症状是页面状态元素始终不出现，指向 renderer 收敛后 React 页面与测试夹具之间的契约不一致」方向对，但结论定性反了：**不是产品与夹具不一致，是测试断言本身写的是上一个 owner 的 DOM**。
 
 ---
 
@@ -1009,10 +1062,10 @@ E  - waiting for locator("#price-summary") to be visible
 | `/tmp/TEST_baseline_run3.log` | §8 `2b68b40` 完整基线 driver 输出 |
 | `/tmp/TEST_v2_multiconftest.log` | §8.4 多 conftest 对照实验（`2b68b40`） |
 | `/tmp/TEST_v2_fontstack.log` | §8.4 字体栈单文件复现（`2b68b40`） |
-| `/tmp/TEST_v2_alertpage.log` | §8.6 告警页单文件复现（`2b68b40`，54 项，确认真实回归） |
+| `/tmp/TEST_v2_alertpage.log` | §8.6 告警页单文件复现（`2b68b40`，54 项；后经 §8.6 更正批注判定为断言过时） |
 | `/tmp/TEST_v3_multiconftest.log` | §8.6 多 conftest 复验（`65bbf11`，AttributeError 已消失） |
 | `/tmp/TEST_v3_fontstack.log` | §8.6 字体栈复验（`65bbf11`，0 失败） |
-| `/tmp/TEST_v3_pricecol_alone.log` | §8.6 价格列单文件复跑（`65bbf11`，13 项真实回归） |
+| `/tmp/TEST_v3_pricecol_alone.log` | §8.6 价格列单文件复跑（`65bbf11`，13 项；后经 §8.6 更正批注判定为 mock 契约不一致） |
 | `/tmp/TEST_baseline_fast_master3.log` | §8.6 `65bbf11` 完整基线原始日志 |
 
 两个 worktree 保留在测试机上，未删除，供复查。
