@@ -193,26 +193,35 @@ def test_every_selected_test_path_still_exists_on_disk():
     P6 退役删掉三个旧前端测试后，选择器仍把它们当作「必跑目标」，
     于是每次非 fast 范围的基线运行都把它们报成 missing 并 exit 1。
     这条断言把「引用了已删文件」变成红灯，而不是等某次基线跑到一半才发现。
+
+    扫描方式是通用的：模块里任何看起来像测试路径的字符串常量都会被检查，
+    所以以后新增映射表时漏改也会被这条抓住。
     """
     from scripts import _test_selection as selection_module
 
-    referenced: list[str] = [
-        selection_module.COMPONENTS,
-        selection_module.PACKAGER,
-        selection_module.SOURCE_CONTRACTS,
-        selection_module.STYLE_TOKENS,
-        selection_module.SELECTOR_TESTS,
-        selection_module.ZABBIX_CHECK,
-        selection_module.SHARED_SHELL_BROWSER,
-        selection_module.DRAWER_BROWSER,
-    ]
-    for _, (_, tests) in selection_module.API_CONTRACTS.items():
-        referenced.extend(tests)
-    for files in selection_module.MOCK_BROWSER.values():
-        referenced.extend(files)
-    for files in selection_module.PAGE_BROWSER.values():
-        referenced.extend(files)
-    referenced.extend(selection_module.SCENARIOS.values())
+    def looks_like_test_path(value: str) -> bool:
+        return value.startswith("tests/") and value.endswith(".py")
+
+    referenced: set[str] = set()
+    for name in dir(selection_module):
+        if name.startswith("_"):
+            continue
+        value = getattr(selection_module, name)
+        if isinstance(value, str):
+            candidates = [value]
+        elif isinstance(value, (tuple, list, set, frozenset)):
+            candidates = [item for item in value if isinstance(item, str)]
+        elif isinstance(value, dict):
+            candidates = [
+                item
+                for entry in value.values()
+                if isinstance(entry, (tuple, list, set, frozenset))
+                for item in entry
+                if isinstance(item, str)
+            ]
+        else:
+            continue
+        referenced.update(item for item in candidates if looks_like_test_path(item))
 
     missing = sorted(
         {
