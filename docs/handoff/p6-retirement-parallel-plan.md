@@ -12,14 +12,21 @@
 
 | 事实 | 位置 |
 | --- | --- |
-| `MIGRATED_PAGE_IDS` 已含 19 项 | `tts_erp_v2/api/v2/frontend_pages.py`（18 个注册页 + `login`） |
+| `MIGRATED_PAGE_IDS` 已含 **19** 项 | `tts_erp_v2/api/v2/frontend_pages.py`（18 个注册页 + `login`） |
 | `PAGES` 注册表共 **18** 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
-| 20 个页面目录都有真实 React/TS 代码，合计约 1.4 万行 | `frontend/src/pages/`（18 注册页 + `login` + `message` / `oauth-onboard`） |
-| 12 个旧 Jinja 模板仍在 | `tts_erp_v2/templates/pages/` |
-| 13 个旧 JS 脚本仍在 | `tts_erp_v2/static/js/` |
-| 旧 renderer 分支仍在代码里 | `tts_erp_v2/api/v2/pages.py`（如 `:309` 的 `_render_page("shops.html", ...)`） |
+| **20** 个页面目录都有真实 React/TS 代码 | `frontend/src/pages/`（18 注册页 + `login` + `message` / `oauth-onboard`）；`spu-roi` 与 `focused-spus` 共用 `spu-profitability/` 目录，见 `frontend/src/app/page-loader.ts:6-7` |
+| 前端页面代码 **16075 行**（含测试）／**9645 行**（不含测试） | `frontend/src/pages/`，141 / 103 个文件；用 `git grep -h '' <ref> -- 'frontend/src/pages/*'` 统计 |
+| 旧 Jinja 模板已清空 | `tts_erp_v2/templates/pages/` 现存 **0** 个（`f72a3089` 退役前为 12 个） |
+| 旧页面 JS 只剩 `console.js` | `tts_erp_v2/static/js/` 现存 **1** 个（`f72a3089` 退役前为 13 个）；`console.js` 是多页面共用的 active 资产，**不是**孤儿 |
+| 旧 renderer 分支已从代码移除 | `tts_erp_v2/api/v2/pages.py` 已无 `_render_page` / Jinja 环境，全仓 `templates/pages` 引用为 0 |
 
-**结论**：剩余工作就是 P6 —— 退役旧实现、清理无消费者资源、收口 renderer。
+**结论**：P6 的退役与收口已落地（见下文「已完成」各节），剩余工作是最终验证与合入。
+
+> **状态更新（2026-11-08 23:00 核实）**：上表「旧 Jinja 模板」「旧页面 JS」「旧 renderer 分支」
+> 三条原描述的是退役**之前**的状态。`f72a3089`（chore: 退役旧 Jinja 页面模板与旧页面脚本）
+> 已删除全部 12 个模板、13 个旧 JS 中的 12 个，并清理 `pages.py` 的 Jinja renderer；
+> 当前 `origin/master` @ `40c44c11` 已无 legacy 模板引用。**lane B / lane C 的写域文件已全部
+> 删除，退役工作实际已由该提交完成。**
 
 ---
 
@@ -176,6 +183,46 @@ git grep -n "templates/pages" -- tests/
 ```
 
 三项都干净才删。**有引用就先改引用方，不要先删文件。**
+
+### 4.1 换 renderer 之前，先 grep 旧 DOM ID（2026-11-08 新增）
+
+上面第 1、2 条查的是**文件路径引用**。但换 renderer 还有一类引用查不出来：**测试断言旧模板的
+DOM 结构**——它不引用文件，只写死了元素 ID 或 class。
+
+**规则：任何页面从 Jinja 旧 renderer 切到 React renderer 之前，必须先把该页旧模板里的
+DOM 标识符 grep 一遍，确认没有测试断言它们。**
+
+具体做法（以 SPU 对比页为例）：
+
+```bash
+# 从旧模板里取出所有 id / data 属性，再逐个反查测试
+git show origin/master:tts_erp_v2/templates/pages/spu-profit-deterioration.html \
+  | grep -oE 'id="[^"]+"|data-[a-z-]+=' | sort -u
+
+# 反查：有没有测试在等这些 ID
+git grep -n "alert-rows\|total-spus\|data-value" -- tests/
+```
+
+**为什么单列一条规则**：这类测试的失败信息（Playwright 等不到某个 id → 10s 超时）
+**不会指向「renderer 换了」**，看起来像环境不稳定或并发争抢，很容易被误判成 flake 而
+重跑掩盖过去。实际是断言本身过时了。
+
+本轮实例：`tests/browser/test_spu_deterioration_alert_page.py` 的 53 个用例断言
+`#alert-rows` / `#total-spus` / `[data-value]`——这些是旧 Jinja 模板的 DOM，React 版本
+里一个都不存在，实跑 53 个全红。
+
+### 4.2 门禁登记：新旧测试都要进 `_test_selection.py`（2026-11-08 新增）
+
+改了 renderer 的页面，**受影响的测试文件必须登记进 `scripts/_test_selection.py` 的
+`PAGE_BROWSER[...]`**，否则 `--scope auto` 根本不会选中它们，DoD 门禁看不见它们变红。
+
+本轮实例：`PAGE_BROWSER["spu-profit-deterioration"]` 只登记了
+`test_spu_deterioration_alert_page.py` 一个文件，而同样受 renderer 切换影响的
+`test_spu_comparison_drilldown_dates.py`、`test_spu_deterioration_alert_smoke.py`
+**不在登记里**——改了 SPU 页面，`--scope auto` 选不中它们，门禁是瞎的。
+
+**规则：改 renderer 时，同步检查该页相关测试文件是否都在 `PAGE_BROWSER` 登记里；
+只改断言、不补登记，等于没改。**
 
 ---
 
