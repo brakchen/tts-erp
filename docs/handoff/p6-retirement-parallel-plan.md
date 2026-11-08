@@ -102,6 +102,23 @@ P6 最适合并行，因为退役对象是**文件**，天然可以按页面组�
 - `tests/browser/conftest.py:589`（跳过未迁移页面的浏览器 fixture）
 - 多个浏览器测试的成员断言
 
+### 路由收敛引入的两处回归（已修）
+
+路由收敛改变了实际 renderer，暴露出两处**依赖旧 DOM 的测试**。两处都是路由收敛的直接后果，不是 master 原有失败：
+
+1. **字体栈断言**：`tests/render_support.py::token_font_stacks` 断言 `len(stacks) == 3`（三套栈必须互不相同）。
+   但 `fa475e0e`（2026-11-08「统一 ERP 中文与数字字体栈」）是有意的产品决定——把 `--mono`/`--serif` 都指向 `--sans`。
+   **是断言过时，不是代码有缺陷**。已改为「三个别名都必须声明且非空」，不再要求互不相同；
+   白名单语义不变（三套栈相同时白名单是单元素集合）。
+
+2. **告警页横向溢出用例**：`tests/browser/test_render_smoke.py` 硬编码等待旧模板的
+   `#alert-status:not([data-kind='loading'])`。收敛后该页由 React 拥有，这个元素不存在，
+   Playwright 等 10 秒超时 → 4 个视口全失败。已改为调用共享的 `wait_canned_page(page, ALERT_SLUG)`，
+   它按 slug 分派到 React 版本的就绪信号（等 `TEST_RENDER_COMPARE_0` 文本）。
+
+**教训**：切换 renderer 不只是改后端路由分支，还要检查**所有断言具体 DOM 结构的测试**——
+这类测试的失败信息（Timeout 等不到某个 id）不会指向"renderer 换了"，很容易误判成环境问题。
+
 ### lane B —— 旧模板退役（基础设置组）
 
 **独占写域：**
