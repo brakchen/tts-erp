@@ -12,6 +12,7 @@
 | `test_probe_reports_current_head_on_authorized_clone` | **环境问题**——代码树 alembic head 与模板库 revision 失配。已在旧 commit worktree 上独立复现出完全相同的断言失败 |
 | `test_frontend_components` | **环境问题**——`node_modules` 顶层缺 `semver`。已受控复现出完全相同的 `ERR_MODULE_NOT_FOUND` |
 | master 当前是否零失败 | **否**。完整 fast 基线对比退出 1，56 项新失败（14 项代码缺陷 + 34 项测试基础设施缺陷 + 8 项疑似偶发）。详见 §3 |
+| 新 master（2b68b40）复核 | 两类缺陷**均未修复**（§8.4），且 renderer 收敛**新增** 2 项溢出回归（§8.5）。§3.1 的机制诊断已实现进 master（§8.3） |
 | 需要 Chief 决策的事项 | 5 项，见 §7 |
 
 **与委托描述不一致的一处事实**：落后的提交数不是 21。实测 `git rev-list --count 83bbede..0b92d97` = **312**（`--first-parent` = 56）。定性结论不受影响，但数量级差异很大，下一节给出原始命令。
@@ -787,6 +788,8 @@ $ docker events --since 30m --until 0s --filter container=postgres \
 
 执行者是一个 20:50 创建的临时脚本：
 
+> **归属更正（2026-11-08 22:5x，Chief 确认）**：这个清理动作是 Chief 执行的。他在 20:53 左右清理 HP desk 上的残留测试库，删除条件是「没有正在运行的 `test_isolated.sh` 进程」——但当时我正在跑的是 `test_baseline.sh`（它以 `scripts/test_isolated.sh` 为子进程），检查条件没有覆盖到，故误删了正在使用的库。脚本内容与其执行动作对得上：
+
 ```
 $ cat /tmp/_dbdrop.sql
 SELECT format('DROP DATABASE %I WITH (FORCE);', datname)
@@ -804,11 +807,140 @@ ORDER BY datname;
 
 **建议**：任何 lane 在做「清理残留测试库」时，只能删自己 worktree/lane 名下的库，不能按 `tts_erp_test_%` 前缀批量删；如果要批量清理，必须先确认没有活跃的 `pytest`/isolated 进程，或者把库名白名单化。这一条建议同步给 @可靠性工程师 与 @开发工程师。
 
+**更稳的判定条件**：只查 `test_isolated.sh` 进程会漏——`scripts/test_baseline.sh` 以 `scripts/test_isolated.sh` 为子进程运行，且其父进程名不匹配。更可靠的判定是查 `pg_stat_activity` 里是否有指向 `tts_erp_test_%` 库的活跃连接，或直接查所有 `pytest` 进程的 cwd 归属（`readlink -f /proc/<pid>/cwd`）。本次的误删正是因为「进程检查」与「实际运行形态」不匹配。
+
 **第二次运行未受影响**：20:57:31 重新克隆的库 `tts_erp_test__schan_20261108125731_2718734_6f163387` 全程存活，pytest 进度正常推进（§3）。删除动作没有重演。
 
 ---
 
-## 8. 本轮留下的现场
+## 8. 在新 master（2b68b40）上的复核
+
+master 在本记录初稿之后又前进了。Chief 的消息里写的是 `047a1ac`，实测 `origin/master` 已经是 **`2b68b40`（feat: 收敛已迁移页面的双路 renderer 分支并补齐 P6 退役准备）**。由于这次改动正好动了 `tests/browser/conftest.py`、`scripts/test_isolated.sh`、`tests/api/test_frontend_pages.py`，本记录的结论必须在新 master 上复验。
+
+### 8.1 「第一次基线被删库」的责任归属与第二次基线的有效性
+
+Chief 说明是他在 20:53 左右清理残留测试库时误删了正在使用的库。**与我的独立测量一致**：docker events 显示批量 DROP 发生在 `1794142270` = **20:51:10**，被删的库中包含本轮克隆的 `tts_erp_test__schan_20261108125034_2703771_29debcad`。我原先把执行者记成「一个临时脚本」，Chief 已确认那是他的清理动作。
+
+**但第二次基线运行没有被这次清理影响**，证据是全程监控日志：
+
+```
+$ head -3 /tmp/TEST_baseline_monitor2.log
+20:59:45 my_run_db_present=1 worktree_procs=5
+21:00:25 my_run_db_present=1 worktree_procs=5
+21:01:05 my_run_db_present=1 worktree_procs=5
+$ tail -3 /tmp/TEST_baseline_monitor2.log
+21:31:15 my_run_db_present=0 worktree_procs=3
+21:31:55 my_run_db_present=0 worktree_procs=2
+21:32:35 my_run_db_present=0 worktree_procs=2
+$ grep -c "my_run_db_present=1" /tmp/TEST_baseline_monitor2.log
+43
+$ grep -c "my_run_db_present=0" /tmp/TEST_baseline_monitor2.log
+7
+```
+
+43 个采样点（每 40 秒一次，覆盖 20:59:45 → 21:31）里临时库全程在位；最后 7 个点为 0 是**运行自身结束后的清理**——pytest 在 21:28:27 完成（`ELAPSED=1856s`，起点 20:57:31），`drop_run_db` 随即执行。**因此 §3 的 56 项结论是有效数据，不是被删库污染的结果，不需要因为删库而重跑。**
+
+### 8.2 Chief 的两条声明已逐一核实
+
+**`prepare-worktree.sh` 已入 master** —— 在新 master 上全新建 worktree，脚本自动到位并直接跑通，无需手工拷贝：
+
+```
+$ git worktree add --detach /home/schan/tts-erp/.worktrees/test-verify-20261108b 2b68b40...
+Preparing worktree (detached HEAD 2b68b40)
+$ ls -l scripts/envsetup/prepare-worktree.sh
+-rwxrwxr-x 1 schan schan 3229 Nov  8 22:57 scripts/envsetup/prepare-worktree.sh
+$ bash scripts/envsetup/prepare-worktree.sh
+[LINK] python venv -> /home/schan/tts-erp/.venv
+[LINK] .env.test -> /home/schan/tts-erp/.env.test
+[INFO] 安装前端依赖（按本 worktree 的 package-lock.json）...
+added 232 packages, and audited 233 packages in 8s
+[DONE] worktree 测试环境已就绪
+PREPARE_EXIT=0
+```
+
+worktree 保持干净（`git status --porcelain --untracked-files=all` 为空），`test_baseline.sh` 不再触发 `scoped runs require a clean committed worktree`。
+
+**模板库不陈旧** —— 三方对齐已复测：
+
+```
+模板库 tts_erp_test_template : 0076_media_packs / 306 表
+生产形状库 tts_erp            : 0076_media_packs / 306 表
+master 代码树 head            : 0076_media_packs
+```
+
+`--refresh-template` 在 HP desk 上因缺 `.env` 仍不可自助执行；按当前三方一致，**现在也不需要刷新**。
+
+### 8.3 §4.1 的机制已被实现进 master
+
+Chief 已把我 §7 决策项 3 建议的诊断写进 `scripts/test_isolated.sh`（新增 `warn_revision_drift()`，在 `prepare_template_and_clone()` 里克隆后调用）。其注释与本记录 §2.3 的机制分析一致：
+
+```
+# The clone path never upgrades the clone, so a clone revision below the code
+# head means the checkout is stale relative to the template — an environment
+# condition, not a code defect.
+```
+
+克隆库 revision 与代码 head 不一致时现在会直接打印两侧取值与修复步骤，而不是只留下一个下游断言失败。本记录 §2.3 的机制结论因此得到独立确认。
+
+### 8.4 两类缺陷在新 master 上均未修复
+
+**A 类（字体栈，14 项）—— 仍在**：
+
+```
+$ cd /home/schan/tts-erp/.worktrees/test-verify-20261108b
+$ bash scripts/test_isolated.sh fast tests/browser/test_render_smoke.py
+EXIT=1 ELAPSED=72s
+ERROR tests/browser/test_render_smoke.py::test_page_font_stacks_come_only_from_tokens[ad-daily]
+... (共 14 项)
+E  AssertionError: 三套栈必须互不相同: {'var(--sans)', 'MicrosoftYaHei,NotoSansSC,PingFangSC,NotoSansCJKSC,SourceHanSansSC,sans-serif'}
+```
+
+`origin/master` 的 `tts_erp_v2/static/css/tokens.css:43-45` 仍是 `--mono: var(--sans); --serif: var(--sans);`，未改。
+
+**B 类（conftest 冲突）—— 仍在**：
+
+```
+$ bash scripts/test_isolated.sh fast tests/browser/test_spu_price_columns.py \
+    tests/api/test_ad_daily.py tests/proxy/test_miaoshou_rate_limit.py
+EXIT=1 ELAPSED=16s
+FAILED tests/browser/test_spu_price_columns.py::test_price_content_is_only_shown_on_standard_roi_profile
+... (共 13 项)
+E  AttributeError: module 'conftest' has no attribute '_mock_payload'
+```
+
+`origin/master` 的 `tests/browser/conftest.py:621-623` 仍是 `return sys.modules[__name__]`；该文件本次的改动只涉及 renderer 退役，与 fixture 无关。
+
+### 8.5 新增回归：renderer 收敛带来 2 项溢出失败
+
+A 类实验在新 master 上除了 14 项字体栈失败，还多出 2 项**此前 56 项清单里没有**的失败：
+
+```
+FAILED tests/browser/test_render_smoke.py::test_spu_deterioration_alert_has_no_horizontal_overflow_at_any_viewport[390]
+FAILED tests/browser/test_render_smoke.py::test_spu_deterioration_alert_has_no_horizontal_overflow_at_any_viewport[768]
+```
+
+这两项对应 master 上的 renderer 收敛改动（`2b68b40` / `80b218a` / `30622f3`，涉及 `tts_erp_v2/api/v2/pages.py` 与 `tests/browser/conftest.py` 的 `_render_pages`）。**属于新引入的回归，不是旧问题残留**，需要 @开发工程师 一并处理。
+
+> **Chief 处置（2026-11-08 23:10）**：§8.4 与 §8.5 指出的问题**全部已修**，但修正在
+> `origin/feature/p6-collapse-migrated-routes` 上，**尚未合入 `master`**——
+> 本节复核的对象是 `origin/master` @ `2b68b40`，所以三项都还在。
+>
+> | §8.4/§8.5 的问题 | 修复提交 | 处置 | 实测 |
+> | --- | --- | --- | --- |
+> | A 类 字体栈 14 项 | `bd4a7753` | 断言改为「三个别名都声明且非空」，不再要求互不相同 | `fast tests/browser/test_render_smoke.py -k font_stacks` → `[100%]` |
+> | B 类 conftest 冲突 13 项 | `a9605de` | `browser_conftest` 改用 `from tests.browser import conftest as this_module` | 混跑三目录时 `_mock_payload` ERROR 消失 |
+> | §8.5 溢出回归 2 项 | `f205c744` | 告警页就绪信号改用共享 `wait_canned_page(page, ALERT_SLUG)` | `-k spu_deterioration_alert_has_no_horizontal` → `[100%]`，4 个视口全绿 |
+>
+> 根因说明：路由收敛把 `spu-profit-deterioration` 从旧 Jinja 模板切到 React renderer，
+> 而该测试硬编码等待旧模板的 `#alert-status` 元素 id——元素不存在，Playwright 等 10 秒超时。
+> **切换 renderer 时，断言旧 DOM 的测试不会告诉你 renderer 变了**，失败信息只是超时。
+>
+> 同时本轮还发现并修掉一个真实 CSS 缺陷：`--surface-secondary` 被引用但全仓未声明
+> （`media-workspace.css` 第 70/104 行背景色实际是透明的），见 §3.6 补充说明。
+
+---
+
+## 9. 本轮留下的现场
 
 | 路径 | 说明 |
 | --- | --- |
