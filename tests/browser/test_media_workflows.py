@@ -1034,7 +1034,6 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     choose(page, assets[1][0])
     submit_selection(page, 1)
     expect(dialog(page)).to_have_count(0)
-    open_human(page, person)
     linked = root.get_by_role("list", name="关联素材", exact=True)
     expect(linked.locator(":scope > li")).to_have_count(2)
     image_ready(page, oldest, scope=linked)

@@ -110,6 +110,10 @@ CREATE SCHEMA runninghub;
 CREATE SCHEMA security;
 
 
+-- Name: pg_stat_statements; Type: EXTENSION; Schema: -; Owner: -
+
+
+
 -- Name: fn_touch_intercept_configs_updated_at(); Type: FUNCTION; Schema: public; Owner: -
 
 CREATE OR REPLACE FUNCTION public.fn_touch_intercept_configs_updated_at() RETURNS trigger
@@ -879,6 +883,16 @@ ALTER TABLE media.digital_human_assets ALTER COLUMN id ADD GENERATED ALWAYS AS I
 );
 
 
+-- Name: digital_human_packs; Type: TABLE; Schema: media; Owner: -
+
+CREATE TABLE IF NOT EXISTS media.digital_human_packs (
+    digital_human_id bigint NOT NULL,
+    pack_id bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: digital_humans; Type: TABLE; Schema: media; Owner: -
 
 CREATE TABLE IF NOT EXISTS media.digital_humans (
@@ -931,6 +945,33 @@ CREATE TABLE IF NOT EXISTS media.media_assets (
 
 ALTER TABLE media.media_assets ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME media.media_assets_id_seq
+);
+
+
+-- Name: media_pack_videos; Type: TABLE; Schema: media; Owner: -
+
+CREATE TABLE IF NOT EXISTS media.media_pack_videos (
+    pack_id bigint NOT NULL,
+    asset_id bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: media_packs; Type: TABLE; Schema: media; Owner: -
+
+CREATE TABLE IF NOT EXISTS media.media_packs (
+    id bigint NOT NULL,
+    name text NOT NULL,
+    creation_token uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+ALTER TABLE media.media_packs ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME media.media_packs_id_seq
 );
 
 
@@ -2633,6 +2674,12 @@ ALTER TABLE ONLY media.digital_human_assets
     ADD CONSTRAINT digital_human_assets_pkey PRIMARY KEY (id);
 
 
+-- Name: digital_human_packs digital_human_packs_pkey; Type: CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.digital_human_packs
+    ADD CONSTRAINT digital_human_packs_pkey PRIMARY KEY (digital_human_id, pack_id);
+
+
 -- Name: digital_humans digital_humans_pkey; Type: CONSTRAINT; Schema: media; Owner: -
 
 ALTER TABLE ONLY media.digital_humans
@@ -2645,10 +2692,28 @@ ALTER TABLE ONLY media.media_assets
     ADD CONSTRAINT media_assets_pkey PRIMARY KEY (id);
 
 
+-- Name: media_pack_videos media_pack_videos_pkey; Type: CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.media_pack_videos
+    ADD CONSTRAINT media_pack_videos_pkey PRIMARY KEY (pack_id, asset_id);
+
+
+-- Name: media_packs media_packs_pkey; Type: CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.media_packs
+    ADD CONSTRAINT media_packs_pkey PRIMARY KEY (id);
+
+
 -- Name: digital_human_assets uq_digital_human_assets_pair; Type: CONSTRAINT; Schema: media; Owner: -
 
 ALTER TABLE ONLY media.digital_human_assets
     ADD CONSTRAINT uq_digital_human_assets_pair UNIQUE (digital_human_id, asset_id);
+
+
+-- Name: media_packs uq_media_packs_creation_token; Type: CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.media_packs
+    ADD CONSTRAINT uq_media_packs_creation_token UNIQUE (creation_token);
 
 
 -- Name: package_gift_items package_gift_items_pkey; Type: CONSTRAINT; Schema: miaoshou; Owner: -
@@ -3474,6 +3539,11 @@ CREATE INDEX IF NOT EXISTS ix_sync_jobs_name_started ON integration.sync_jobs US
 CREATE INDEX IF NOT EXISTS ix_digital_human_assets_asset ON media.digital_human_assets USING btree (asset_id);
 
 
+-- Name: ix_digital_human_packs_pack; Type: INDEX; Schema: media; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_digital_human_packs_pack ON media.digital_human_packs USING btree (pack_id);
+
+
 -- Name: ix_digital_humans_live_recent; Type: INDEX; Schema: media; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_digital_humans_live_recent ON media.digital_humans USING btree (updated_at DESC, id DESC) WHERE (deleted_at IS NULL);
@@ -3507,6 +3577,11 @@ CREATE INDEX IF NOT EXISTS ix_media_assets_live_recent ON media.media_assets USI
 -- Name: ix_media_assets_status; Type: INDEX; Schema: media; Owner: -
 
 CREATE INDEX IF NOT EXISTS ix_media_assets_status ON media.media_assets USING btree (status);
+
+
+-- Name: ix_media_pack_videos_asset; Type: INDEX; Schema: media; Owner: -
+
+CREATE INDEX IF NOT EXISTS ix_media_pack_videos_asset ON media.media_pack_videos USING btree (asset_id);
 
 
 -- Name: ix_miaoshou_package_items_product; Type: INDEX; Schema: miaoshou; Owner: -
@@ -3994,6 +4069,11 @@ CREATE OR REPLACE TRIGGER trg_integration_tiktok_app_credentials_touch BEFORE UP
 CREATE OR REPLACE TRIGGER trg_digital_human_assets_touch BEFORE UPDATE ON media.digital_human_assets FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
+-- Name: digital_human_packs trg_digital_human_packs_touch; Type: TRIGGER; Schema: media; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_digital_human_packs_touch BEFORE UPDATE ON media.digital_human_packs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
 -- Name: digital_humans trg_digital_humans_touch; Type: TRIGGER; Schema: media; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_digital_humans_touch BEFORE UPDATE ON media.digital_humans FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
@@ -4002,6 +4082,16 @@ CREATE OR REPLACE TRIGGER trg_digital_humans_touch BEFORE UPDATE ON media.digita
 -- Name: media_assets trg_media_assets_touch; Type: TRIGGER; Schema: media; Owner: -
 
 CREATE OR REPLACE TRIGGER trg_media_assets_touch BEFORE UPDATE ON media.media_assets FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: media_pack_videos trg_media_pack_videos_touch; Type: TRIGGER; Schema: media; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_media_pack_videos_touch BEFORE UPDATE ON media.media_pack_videos FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
+
+
+-- Name: media_packs trg_media_packs_touch; Type: TRIGGER; Schema: media; Owner: -
+
+CREATE OR REPLACE TRIGGER trg_media_packs_touch BEFORE UPDATE ON media.media_packs FOR EACH ROW EXECUTE FUNCTION public.fn_touch_updated_at();
 
 
 -- Name: package_gift_items trg_miaoshou_package_gift_items_touch; Type: TRIGGER; Schema: miaoshou; Owner: -
@@ -4416,10 +4506,34 @@ ALTER TABLE ONLY media.digital_human_assets
     ADD CONSTRAINT digital_human_assets_digital_human_id_fkey FOREIGN KEY (digital_human_id) REFERENCES media.digital_humans(id) ON DELETE CASCADE;
 
 
+-- Name: digital_human_packs digital_human_packs_digital_human_id_fkey; Type: FK CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.digital_human_packs
+    ADD CONSTRAINT digital_human_packs_digital_human_id_fkey FOREIGN KEY (digital_human_id) REFERENCES media.digital_humans(id) ON DELETE CASCADE;
+
+
+-- Name: digital_human_packs digital_human_packs_pack_id_fkey; Type: FK CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.digital_human_packs
+    ADD CONSTRAINT digital_human_packs_pack_id_fkey FOREIGN KEY (pack_id) REFERENCES media.media_packs(id) ON DELETE CASCADE;
+
+
 -- Name: digital_humans fk_digital_humans_portrait_asset; Type: FK CONSTRAINT; Schema: media; Owner: -
 
 ALTER TABLE ONLY media.digital_humans
     ADD CONSTRAINT fk_digital_humans_portrait_asset FOREIGN KEY (portrait_asset_id) REFERENCES media.media_assets(id);
+
+
+-- Name: media_pack_videos media_pack_videos_asset_id_fkey; Type: FK CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.media_pack_videos
+    ADD CONSTRAINT media_pack_videos_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES media.media_assets(id) ON DELETE CASCADE;
+
+
+-- Name: media_pack_videos media_pack_videos_pack_id_fkey; Type: FK CONSTRAINT; Schema: media; Owner: -
+
+ALTER TABLE ONLY media.media_pack_videos
+    ADD CONSTRAINT media_pack_videos_pack_id_fkey FOREIGN KEY (pack_id) REFERENCES media.media_packs(id) ON DELETE CASCADE;
 
 
 -- Name: package_gift_items package_gift_items_package_id_fkey; Type: FK CONSTRAINT; Schema: miaoshou; Owner: -

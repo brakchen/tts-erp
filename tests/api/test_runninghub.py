@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -22,7 +23,12 @@ from sqlalchemy.orm import sessionmaker
 
 from tests.support.runninghub_workflow import graph
 from tts_erp_v2.api.v2 import runninghub as api
-from tts_erp_v2.db.models.media import DigitalHuman, DigitalHumanAsset, MediaAsset
+from tts_erp_v2.db.models.media import (
+    DigitalHuman,
+    DigitalHumanAsset,
+    MediaAsset,
+    MediaPack,
+)
 from tts_erp_v2.db.models.runninghub import (
     CloudQuota,
     GenerationArtifact,
@@ -34,6 +40,7 @@ from tts_erp_v2.db.models.runninghub import (
     WorkflowVersion,
     new_id,
 )
+from tts_erp_v2.media.packs import create_pack
 from tts_erp_v2.runninghub.client import RemoteError, RunningHubClient
 from tts_erp_v2.runninghub.media import (
     MediaError,
@@ -112,8 +119,16 @@ def setup(db_engine):
         session.flush()
         asset_ids = [int(clip["assetId"]) for clip in clips] + [image.id]
         profile = session.get(GenerationProfile, "default")
+        created_profile = profile is None
+        if profile is None:
+            # A schema-only refresh can stamp a revision without its seed rows.
+            profile = GenerationProfile(
+                id="default", credential_ref="env:RUNNINGHUB_TEST_API_KEY"
+            )
+            session.add(profile)
         previous_version_id = profile.workflow_version_id
         profile.workflow_version_id = version.id
+        session.flush()
         frozen = config_snapshot(profile, {})
         frozen["credentialRef"] = "env:RUNNINGHUB_TEST_API_KEY"
         batch_input = {"assetId": str(image.id), "skuId": marker, "style": marker}
@@ -140,6 +155,7 @@ def setup(db_engine):
             "config": frozen,
             "extraBatches": [],
             "extraTemplates": [],
+            "extraPacks": [],
         }
     yield data
     with sessions() as session, session.begin():
@@ -167,7 +183,11 @@ def setup(db_engine):
         # These rows were committed independently of db_session's rollback.
         # Release only this fixture's exact identities before the browser suite
         # checks that it cannot expose another case's media through real APIs.
-        session.get(GenerationProfile, "default").workflow_version_id = previous_version_id
+        profile = session.get(GenerationProfile, "default")
+        if created_profile:
+            session.delete(profile)
+        else:
+            profile.workflow_version_id = previous_version_id
         session.flush()
         session.execute(
             delete(VideoTemplate).where(
@@ -178,6 +198,7 @@ def setup(db_engine):
             DigitalHumanAsset.digital_human_id == human.id,
             DigitalHumanAsset.asset_id.in_(asset_ids),
         ))
+        session.execute(delete(MediaPack).where(MediaPack.id.in_(data["extraPacks"])))
         session.execute(delete(DigitalHuman).where(DigitalHuman.id == human.id, DigitalHuman.name == marker))
         session.execute(delete(MediaAsset).where(MediaAsset.id.in_(asset_ids)))
         session.execute(delete(WorkflowVersion).where(WorkflowVersion.id == version.id))
@@ -857,10 +878,18 @@ def test_first_clip_batch_uses_frozen_template_through_resume_and_zip(
     prefix = "/v2/runninghub"
     client = runninghub_api
     sessions = setup["sessions"]
-    with sessions() as session, session.begin():
+    with sessions() as session:
         session.get(GenerationBatch, setup["batch"]).status = "PAUSED"
         original = session.get(VideoTemplate, setup["template"])
         ids = [clip["assetId"] for clip in original.clips[:clip_count]][::-1]
+        asset_ids = list(map(int, ids))
+        human_id = int(setup["human"])
+        session.execute(delete(DigitalHumanAsset).where(
+            DigitalHumanAsset.digital_human_id == human_id,
+            DigitalHumanAsset.asset_id.in_(asset_ids),
+        ))
+        pack = create_pack(session, setup["batch"] + "_pack", uuid4(), asset_ids, human_id)
+        setup["extraPacks"].append(pack.id)
 
     def save_template(asset_ids):
         response = client.post(
