@@ -330,25 +330,51 @@ def _save_state(state_path: str, report: dict[str, Any]) -> None:
         sys.stderr.write(f"cannot save state file: {exc}\n")
 
 
-def _delta_vs_previous(current: list[str], previous: dict[str, Any]) -> dict[str, Any]:
-    """与上一轮的增删差异。`removed` 不得被解释成「好转」。"""
+def _delta_vs_previous(
+    current: list[str],
+    previous: dict[str, Any],
+    *,
+    excluded: set[str] | None = None,
+    skipped_tables: set[str] | None = None,
+) -> dict[str, Any]:
+    """与上一轮的增删差异。
+
+    ★ `removed` 的原因必须是【三态判定】，不是自由文本（@测试质量评审员 §二）：
+        resolved           —— 源变新（真好转）
+        excluded_by_config —— 在排除清单里（有意排除）
+        query_failed       —— 在被跳过的表里（**看不见了** ⚠ 不是好转）
+    ⇒ 第三态一旦出现 ⇒ 本轮必须报 finding。
+    """
     prev = set(previous.get("stale_tables") or [])
     cur = set(current)
     added = sorted(cur - prev)
     removed = sorted(prev - cur)
-    prev_skipped = previous.get("skipped_count")
-    prev_generated = previous.get("generated_at")
-    reason = "none"
-    if removed and prev_skipped not in (None, 0):
-        reason = "上一轮有被跳过的对象 => removed 可能是查询失败被吞，不是好转"
-    elif removed:
-        reason = "上一轮无跳过 => removed 可能是真好转，也可能是查询失败被吞；需看 skipped_count"
+    excluded = excluded or set()
+    skipped_tables = skipped_tables or set()
+
+    states: dict[str, str] = {}
+    for t in removed:
+        if t in skipped_tables:
+            states[t] = "query_failed"
+        elif t in excluded:
+            states[t] = "excluded_by_config"
+        else:
+            states[t] = "resolved"
+    unexplained = sorted(t for t, st in states.items() if st == "resolved")
     return {
         "added": added,
         "removed": removed,
-        "removed_reason": reason,
-        "previous_generated_at": prev_generated,
-        "previous_skipped_count": prev_skipped,
+        "removed_states": states,
+        "removed_reason": (
+            "none" if not removed
+            else ("存在 query_failed：被跳过的表不是「好转了」，是「看不见了」"
+                  if any(st == "query_failed" for st in states.values())
+                  else ("全部来自排除清单" if removed and all(st == "excluded_by_config" for st in states.values())
+                        else "判定为源变新（resolved）"))
+        ),
+        "removed_unexplained": unexplained,
+        "previous_generated_at": previous.get("generated_at"),
+        "previous_skipped_count": previous.get("skipped_count"),
     }
 
 
@@ -459,7 +485,12 @@ def main(argv: list[str] | None = None) -> int:
         session2.close()
 
     previous = _load_previous(args.state_file) if args.state_file else {}
-    delta = _delta_vs_previous([r["table"] for r in stale], previous)
+    delta = _delta_vs_previous(
+        [r["table"] for r in stale],
+        previous,
+        excluded=static_tables,
+        skipped_tables={i["table"] for i in stale_query_failures},
+    )
 
     report = {
         "generated_at": now.isoformat(),
@@ -473,6 +504,16 @@ def main(argv: list[str] | None = None) -> int:
         "list_3_read_but_no_write": read_but_no_write,
         "list_4_stale_source_tables": stale,
         "skipped": {"count": len(stale_query_failures), "items": stale_query_failures},
+        # ★ 脚本本来就知道自己排除了哪些表，却没输出 ⇒ 清单变短时
+        #   「排除导致」与「真好转」在输出上不可分辨（@测试质量评审员 §一）
+        "excluded": {
+            "count": len(static_tables),
+            "items": [
+                {"table": t, "reason": "static-table-exempt",
+                 "source": args.static_tables or "(inline)", "added_at": now.isoformat()}
+                for t in sorted(static_tables)
+            ],
+        },
         "delta_vs_previous": delta,
         "write_violations": _write_violations,
         "guard_self_test": {
@@ -513,7 +554,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"   {r['table']}: {r['error']}")
         print(f"与上轮差异: added={len(delta['added'])} removed={len(delta['removed'])}")
         if delta["removed"]:
+            print(f"   removed 三态: {delta['removed_states']}")
             print(f"   ⚠ removed 不得被解释成「好转」：{delta['removed_reason']}")
+        # ★ removed ∩ skipped = ∅ —— 被跳过的表不是「好转了」，是「看不见了」
+        bad = sorted(set(delta["removed"]) & {i["table"] for i in stale_query_failures})
+        if bad:
+            print(f"   ⚠⚠ removed ∩ skipped ≠ ∅：{bad} ⇒ 有表是被跳过的，不是好转")
+        else:
+            print("   removed ∩ skipped = ∅ ✓")
         print(f"只读守卫违规次数: {len(_write_violations)}")
         print(f"守卫自测: 拦截样例 {len(_GUARD_BLOCK_CASES)} 条 / 放行样例 {len(_GUARD_ALLOW_CASES)} 条 "
               f"→ 漏网 {len(leaked)} / 误伤 {len(false_positive)}")

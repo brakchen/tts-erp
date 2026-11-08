@@ -41,6 +41,14 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 生产 release 分支 runtime_settings.get_setting_facts 实测：优先级为 dotenv > runtime_file > process_env；且 .env 里的 TTS_ERP_RUNTIME_ENV_FILE
+    优先于进程环境
+  supports:
+  - 受控文件能覆盖进程环境 ⇒ 轮换必须遍历全部来源层
+  does_not_support:
+  - 不能推出『当前 .env 不存在所以安全』——触发条件缺失但机制齐备
+  unverified_preconditions:
+  - 假设 cwd 下不存在 .env
 - id: AD-CFG-002
   rule: config-source-precedence
   owner_path: scripts/check_install_parity.sh
@@ -64,6 +72,13 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: &id001
+  - 该缺陷在当前基座成立
+  does_not_support: &id002
+  - 不能把『实测事实』直接当成『收口已达成』
+  unverified_preconditions: &id003
+  - 本条未逐项标注假定的前提
 - id: AD-CFG-003
   rule: auth-mode-effective-value
   owner_path: tts_erp_v2/middleware/auth.py
@@ -89,6 +104,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-SCHEMA-001
   rule: schema-version-contract
   owner_path: tts_erp_v2/app.py
@@ -114,6 +133,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-SCHEMA-002
   rule: schema-version-contract
   owner_path: tts_erp_v2/api/deps.py
@@ -154,6 +177,13 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 实测：release deps.py 的 is_prod_shaped_db 读 get_setting（runtime_file），master 版读 os.environ；两树 blob 58dbc30d vs cf968f00
+  supports:
+  - 收敛到 master 会换掉护栏取值来源
+  does_not_support:
+  - 不能推出『收敛后护栏更严』——两边在生产库上的判定结果相同（都 True），只是『严的理由』不同
+  unverified_preconditions:
+  - 假设把 DB URL 注入进程环境后 master 版仍按库名白名单判定等价于 fail-closed
 - id: AD-DEPLOY-001
   rule: runtime-version-identity
   owner_path: ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
@@ -177,6 +207,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-DEPLOY-002
   rule: runtime-version-identity
   owner_path: ~/.config/systemd/user/tts-erp.service.d/96-pgappname.conf
@@ -200,6 +234,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-DEPLOY-003
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -223,6 +261,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-DEPLOY-004
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -247,6 +289,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-CRITERIA-001
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
@@ -270,6 +316,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-CRITERIA-002
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
@@ -293,6 +343,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-CRITERIA-003
   rule: readonly-criterion
   owner_path: scripts/schema_guard_probe.py
@@ -316,6 +370,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-ALERT-001
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -339,6 +397,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-ALERT-002
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -372,6 +434,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-ALERT-003
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -395,6 +461,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-JOB-001
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -419,6 +489,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-JOB-002
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -442,6 +516,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-JOB-003
   rule: source-freshness
   owner_path: tts_erp_v2/jobs/miaoshou/sync_source_cost_to_master.py
@@ -466,6 +544,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-BACKUP-001
   rule: backup-restore
   owner_path: scripts/backup/pg_dump_hourly.sh
@@ -489,6 +571,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-NET-001
   rule: network-exposure
   owner_path: /etc/systemd/system/easytier@default.service.d/rpc-portal-loopback.conf
@@ -512,6 +598,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-NET-002
   rule: network-exposure
   owner_path: /opt/easytier/config/default.conf
@@ -536,6 +626,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-BASE-001
   rule: base-drift
   owner_path: tts_erp_v2/runtime_settings.py
@@ -559,6 +653,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-BASE-002
   rule: base-drift
   owner_path: scripts/watchdog_sync.py
@@ -582,6 +680,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 - id: AD-BASE-003
   rule: base-drift
   owner_path: alembic/versions
@@ -606,6 +708,10 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
+  fact: 见 summary 与 owner_ref 所指真件
+  supports: *id001
+  does_not_support: *id002
+  unverified_preconditions: *id003
 probes_added: 3
 corrected_conclusions:
 - id: CORRECTION-PG-HBA-MASQUERADE
@@ -615,3 +721,17 @@ corrected_conclusions:
   evidence_level: measured
   measured_at: '2026-11-09T02:30:00+08:00'
   machine_check: 从非白名单主机连 <pg>:5432，TCP 握手成功但服务端等待认证包 ⇒ 来源被接受 ⇒ 限源无效
+  fact: 生产库全部连接来源实测 = 172.19.0.1/32（measured）
+  supports:
+  - 白名单需覆盖 172.19.0.1/32，否则应用连不上
+  does_not_support:
+  - 限源只放行可信来源 —— 正是被 MASQUERADE 推翻的那条
+  unverified_preconditions:
+  - 来源地址是观测值（实际是合成值）
+required_finding_fields:
+- fact
+- supports
+- does_not_support
+- unverified_preconditions
+- evidence_level
+- in_target_chain

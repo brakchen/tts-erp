@@ -1,0 +1,35 @@
+# PG 容器的事实声明（2026-11-09 实测 + Chief ①-a 记录）
+#
+# 为什么必须有这个文件：
+#   install.sh 里 docker run=0 / docker create=0 ⇒ 端口绑定的 owner
+#   （-p 5432:5432）只存在于服务器上的 docker 命令历史里，仓库无声明。
+#   ⇒ 不固化 ⇒ 下一次重建会回到 0.0.0.0 ⇒ 收口是一次性的，不是持久的。
+#
+# 事实来源：docker inspect postgres（2026-11-09T02:31 CST）
+spec:
+  name: postgres
+  image: postgres:18
+  restart_policy: unless-stopped
+  network: postgres_default
+  ports:
+    # ★ 收口后的目标绑定（当前运行时仍是 HostIp 空 = 0.0.0.0，收口未执行）
+    #   改 5432:5432 → 127.0.0.1:5432:5432
+    - "127.0.0.1:5432:5432"
+  volumes:
+    # ★ 必须挂到 /var/lib/postgresql（不是 /var/lib/postgresql/data）
+    #   PG18 镜像的 PGDATA=/var/lib/postgresql/18/docker ⇒ 挂错则数据不可见
+    - "1b98586f4daf2b00092c4c9e700d411d15d8dbfa599fd228a0e4c994784953a2:/var/lib/postgresql"
+  env_keys:            # 只声明键名，值在受控文件里，不进仓库
+    - POSTGRES_USER
+    - POSTGRES_PASSWORD
+    - PGDATA
+    - PG_MAJOR
+    - PG_VERSION
+    - LANG
+    - PATH
+    - GOSU_VERSION
+  pgdata: /var/lib/postgresql/18/docker
+  notes:
+    - "容器内 socket（local all all trust）供 docker exec pg_dump 使用，不经端口映射"
+    - "宿主机 → 容器 5432 走 docker 端口映射 ⇒ 源地址被 MASQUERADE 成 172.19.0.1"
+    - "⇒ pg_hba 的地址限源在此路径上无效；访问控制必须做在端口绑定层"
