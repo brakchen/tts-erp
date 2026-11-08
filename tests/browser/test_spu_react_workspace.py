@@ -155,7 +155,7 @@ def _enable_canned_writer(page):
 
     page.route('**/v2/pages/focused-spus*', document)
     page.reload(wait_until='networkidle')
-    page.locator('#spu-selection-count').filter(has_text='2').wait_for()
+    expect(page.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(2)
 
 
 def test_focused_list_reads_all_pages_beyond_a_thousand(frontend_browser_renderer, monkeypatch):
@@ -170,7 +170,7 @@ def test_focused_list_reads_all_pages_beyond_a_thousand(frontend_browser_rendere
 
     monkeypatch.setattr(browser_conftest, '_mock_payload', payload)
     page = frontend_browser_renderer.open('/v2/pages/focused-spus?shop_pk=7')
-    expect(page.locator('#spu-selection-count')).to_have_text('已关注 1003 个')
+    expect(page.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(1003)
     assert offsets == [0, 500, 1000]
     field = page.get_by_role('group', name='SPU 搜索与已选标签', exact=True)
     expect(field.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(1003)
@@ -213,11 +213,11 @@ def test_focused_explicit_add_and_remove_never_replace_the_collection(
     # an operator would, then verify the checkbox's semantic state.
     page.locator('#focused-spu-select').get_by_text(re.compile('TEST_FOCUS_C')).click()
     expect(target).to_be_checked()
-    expect(page.locator('#spu-selection-count')).to_have_text('已关注 3 个')
+    expect(page.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(3)
     assert commands == [{'addSpuIds': ['TEST_FOCUS_C'], 'removeSpuIds': []}]
     assert selected == ['TEST_FOCUS_A', 'TEST_FOCUS_B', 'TEST_FOCUS_C']
     page.get_by_role('button', name='移除 SPU TEST_FOCUS_B', exact=True).click()
-    expect(page.locator('#spu-selection-count')).to_have_text('已关注 2 个')
+    expect(page.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(2)
     assert commands[-1] == {'addSpuIds': [], 'removeSpuIds': ['TEST_FOCUS_B']}
     assert selected == ['TEST_FOCUS_A', 'TEST_FOCUS_C']
 
@@ -244,7 +244,7 @@ def test_focused_failed_patch_requires_readback_and_never_replays(frontend_brows
     assert len(commands) == 1
     retry.click()
     expect(page.get_by_role('button', name='移除 SPU TEST_FOCUS_A', exact=True)).to_be_enabled()
-    expect(page.locator('#spu-selection-count')).to_have_text('已关注 2 个')
+    expect(page.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(2)
     assert len(commands) == 1
     assert selected == ['TEST_FOCUS_A', 'TEST_FOCUS_B']
 
@@ -267,10 +267,14 @@ def test_standard_batch_resolves_a_hundred_in_bounded_chunks(frontend_browser_re
     page = frontend_browser_renderer.open('/v2/pages/spu-roi?shop_pk=7')
     _wait_rows(page)
     identities = [f'TEST_BATCH_{index:03d}' for index in range(100)]
-    page.get_by_role('button', name='批量粘贴', exact=True).click()
-    page.get_by_label('粘贴 SPU ID（逗号、空格或换行分隔）').fill('\n'.join(identities))
-    page.get_by_role('button', name='解析并添加', exact=True).click()
-    expect(page.locator('#spu-selection-count')).to_have_text('已选择 100 个')
+    page.get_by_role('textbox', name='按 SPU ID / 标题搜索').evaluate(
+        '''(input, values) => {
+            const clipboardData = new DataTransfer();
+            clipboardData.setData('text/plain', values.join('\\n'));
+            input.dispatchEvent(new ClipboardEvent('paste', {clipboardData, bubbles: true, cancelable: true}));
+        }''', identities,
+    )
+    expect(page.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(100)
     assert option_sizes == [25, 25, 25, 25]
     assert not any('spu_ids' in query for query in captured)
     with page.expect_response(lambda response: '/v2/analytics/spu-roi?' in response.url and 'spu_ids=' in response.url):
@@ -293,7 +297,7 @@ def test_overview_retry_after_blocks_retry_without_automatic_replay(frontend_bro
                       body=json.dumps({'detail': 'TEST_rate_limited'}), headers={'Retry-After': '120'})
 
     page.route('**/v2/analytics/spu-roi?*', limited)
-    page.get_by_role('button', name='刷新当前数据', exact=True).click()
+    page.get_by_role('button', name='近 30 天', exact=True).click()
     retry = page.locator('#retry-link')
     expect(retry).to_be_disabled()
     assert len(requests) == 1

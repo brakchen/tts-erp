@@ -234,7 +234,6 @@ def test_manual_native_write_preview_and_readback(
         expect(history_row).to_contain_text(f"{AMOUNT} {CURRENCY}")
 
         page.get_by_role("button", name="全部 SPU", exact=True).click()
-        page.get_by_role("button", name="刷新当前列表", exact=True).click()
         page.wait_for_load_state("networkidle")
         region = page.get_by_role("region", name="SPU 表格滚动区域", exact=True)
         row = region.get_by_role("row").filter(has=page.get_by_text(shared_id, exact=True))

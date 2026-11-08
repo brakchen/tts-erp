@@ -51,7 +51,7 @@ describe('manual-costs workbench', () => {
     expect(within(row).queryByRole('button', { name: '提交此行' })).not.toBeInTheDocument();
     expect(within(row).queryByText('未编辑')).not.toBeInTheDocument();
     expect(readRowCost(row)).toBe('0.0000');
-    expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
+    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     expect(screen.getByText('9007199254740995')).toBeVisible();
     expect(fetcher.mock.calls.some(([url]) => url.includes('shop_pk=9007199254740993'))).toBe(true);
   });
@@ -101,8 +101,7 @@ describe('manual-costs server-total pagination', () => {
   it.each(['all', 'recent'] as const)('disables next on a full final %s page at zero and nonzero offsets', async (view) => {
     const fetcher = setupPages(view, '100'); const user = userEvent.setup(); await openView(view, user);
     // Resolve the live controls each time without scanning all 50 rows' actions.
-    const pagingControls = () => within(screen.getByLabelText('分页'));
-    const filterControls = () => within(screen.getByRole('form', { name: '工作台筛选' }));
+    const pagingControls = () => within(screen.getByRole('navigation', { name: '采购工作台分页' }));
     await screen.findByText('TEST page 0 row 0');
     expect(pagingControls().getByRole('button', { name: '上一页' })).toBeDisabled();
     expect(pagingControls().getByRole('button', { name: '下一页' })).toBeEnabled();
@@ -111,9 +110,8 @@ describe('manual-costs server-total pagination', () => {
     expect(pagingControls().getByRole('button', { name: '下一页' })).toBeDisabled();
     const calls = fetcher.mock.calls.length;
     await user.click(pagingControls().getByRole('button', { name: '下一页' })); expect(fetcher.mock.calls).toHaveLength(calls);
-    await user.click(pagingControls().getByRole('button', { name: '上一页' })); await screen.findByText('TEST page 0 row 0');
     fetcher.mockImplementationOnce(async () => view === 'all' ? json(pageRows(), 200, { 'X-Total-Count': '50' }) : json({ items: historyRows(pageRows()), total: 50 }));
-    await user.click(filterControls().getByRole('button', { name: '刷新当前列表' })); await screen.findByText(/服务端总数：50/);
+    await user.click(pagingControls().getByRole('button', { name: '上一页' })); await pagingControls().findByText('第 1 页 · 共 1 页');
     expect(pagingControls().getByRole('button', { name: '下一页' })).toBeDisabled();
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=50') && url.includes(view === 'all' ? 'channel-products?' : '/reporting/manual-costs?'))).toBe(true);
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=100'))).toBe(false);
@@ -126,7 +124,7 @@ describe('manual-costs server-total pagination', () => {
   it.each(['all', 'recent'] as const)('preserves an oversized %s total exactly and leaves remaining pages available', async (view) => {
     setupPages(view, '9007199254740997', false); const user = userEvent.setup(); await openView(view, user);
     await screen.findByText('TEST partial page');
-    expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
+    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
   });
   it('falls back to original row count when the catalogue total is unknown', async () => {
@@ -134,8 +132,8 @@ describe('manual-costs server-total pagination', () => {
     fetcher.mockImplementation(async (url: string) => url.includes('channel-accounts?') ? json([shop])
       : json(new URL(url, 'https://test.invalid').searchParams.get('offset') === '0' ? pageRows() : [product('1050', 'TEST last unknown')]));
     const user = userEvent.setup(); await openView('all', user); await screen.findByText('TEST page 0 row 0');
-    const next = () => within(screen.getByLabelText('分页')).getByRole('button', { name: '下一页' });
-    expect(screen.getByText(/服务端总数：未知/)).toBeVisible();
+    const next = () => within(screen.getByRole('navigation', { name: '采购工作台分页' })).getByRole('button', { name: '下一页' });
+    expect(screen.getByText('第 1 页')).toBeVisible();
     expect(next()).toBeEnabled();
     await user.click(next()); await screen.findByText('TEST last unknown');
     expect(next()).toBeDisabled();
@@ -146,14 +144,14 @@ describe('manual-costs server-total pagination', () => {
       const offset = Number(new URL(url, 'https://test.invalid').searchParams.get('offset'));
       return json({ items: (offset === 0 ? pageRows() : pageRows(offset).slice(0, 1)).map(({ id, ...row }) => ({ ...row, spu_pk: id, missing_photo: false })), total_missing_photo: '9007199254740997' });
     });
-    const next = () => within(screen.getByLabelText('分页')).getByRole('button', { name: '下一页' });
-    await user.click(within(screen.getByLabelText('工作台视图')).getByRole('button', { name: '缺成本候选' })); await screen.findByText(/服务端缺图总数：9007199254740997/);
-    await user.click(within(screen.getByRole('form', { name: '工作台筛选' })).getByRole('checkbox', { name: /仅显示本页 missing_photo/ })); await screen.findByText('当前页暂无候选');
+    const next = () => within(screen.getByRole('navigation', { name: '采购工作台分页' })).getByRole('button', { name: '下一页' });
+    await user.click(within(screen.getByLabelText('工作台视图')).getByRole('button', { name: '缺成本候选' })); await screen.findByText(/缺图总数 9007199254740997/);
+    await user.click(within(screen.getByRole('form', { name: '工作台筛选' })).getByRole('checkbox', { name: /仅看本页缺图/ })); await screen.findByText('当前页暂无候选');
     expect(next()).toBeEnabled();
     await user.click(next());
-    await screen.findByText(/服务端缺图总数：9007199254740997/);
+    await screen.findByText(/缺图总数 9007199254740997/);
     expect(next()).toBeDisabled();
-    expect(screen.queryByText(/服务端总数：/)).toBeNull();
+    expect(screen.queryByText(/共 \d+ 页/)).toBeNull();
     expect(fetcher.mock.calls.some(([url]) => url.includes('missing-cost-products?') && url.includes('offset=50') && !url.includes('q='))).toBe(true);
   });
 });
@@ -219,7 +217,7 @@ describe('manual-costs draft and batch recovery', () => {
     await user.click(within(dialog).getByRole('button', { name: '取消并保留草稿' }));
     await user.click(screen.getByRole('button', { name: '全部 SPU' })); const row = (await screen.findByText('TEST 商品')).closest('tr')!;
     expect(readRowCost(row)).toBe('5.0001');
-    await user.click(screen.getByRole('checkbox', { name: '仅展示未登记 SPU' }));
+    await user.click(screen.getByRole('checkbox', { name: '仅看未登记' }));
     await screen.findByText('TEST 商品'); expect(fetcher.mock.calls.some(([url]) => url.includes('missing_manual_cost=true'))).toBe(true);
     await user.click(within(screen.getByText('TEST 商品').closest('tr')!).getByRole('button', { name: '编辑详情' })); dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('textbox', { name: '备注' })).toHaveValue('TEST draft note');
@@ -229,8 +227,9 @@ describe('manual-costs draft and batch recovery', () => {
     let writes = 0; const fetcher = setup(async () => { writes++; return json({ detail: 'TEST_PRIVATE' }, 403); });
     const user = userEvent.setup(); render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
     await within(row).findByText(/HTTP 403/); await editCost('6.0000');
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled(); expect(screen.getByRole('button', { name: '刷新当前列表' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '刷新当前列表' })); await screen.findByText('TEST 商品');
+    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled(); expect(screen.getByRole('button', { name: '搜索' })).toBeEnabled();
+    fireEvent.change(screen.getByRole('textbox', { name: '按 SPU 或标题搜索' }), { target: { value: 'TEST 查询' } });
+    await user.click(screen.getByRole('button', { name: '搜索' })); await screen.findByText('TEST 商品');
     expect(writes).toBe(1); expect(fetcher.mock.calls.some(([url]) => url.includes('/auth/login'))).toBe(false);
   });
   it('requires explicitly aware optional time without converting decimal inputs or inventing a timezone', async () => {
@@ -267,7 +266,7 @@ describe('manual-costs read fences and cancellation', () => {
     const writes = fetcher.mock.calls.filter(([, init]) => init.method === 'POST').length;
     const reads = fetcher.mock.calls.filter(([, init]) => init.method === 'GET').length;
     const row = screen.getByText('TEST 商品').closest('tr')!; editRowCost(row, '88.0001');
-    expect(screen.getByRole('button', { name: '刷新当前列表' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '搜索' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '最近提交' })); await act(async () => {});
     expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(reads);
@@ -283,7 +282,7 @@ describe('manual-costs read fences and cancellation', () => {
   });
   it('renders missing-photo metadata and its exact server count without adding an ignored q filter', async () => {
     const fetcher = setup(); const user = userEvent.setup(); render(<ManualCosts {...props} />); await screen.findByText('TEST 商品');
-    await user.click(screen.getByRole('button', { name: '缺成本候选' })); await screen.findByText(/服务端缺图总数：9007199254740999/);
+    await user.click(screen.getByRole('button', { name: '缺成本候选' })); await screen.findByText(/缺图总数 9007199254740999/);
     expect(screen.getByText('missing_photo：true')).toBeVisible(); expect(screen.queryByRole('textbox', { name: '按 SPU 或标题搜索' })).toBeNull();
     expect(fetcher.mock.calls.find(([url]) => url.includes('missing-cost-products?'))?.[0]).not.toContain('q=');
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
@@ -294,7 +293,7 @@ describe('manual-costs read fences and cancellation', () => {
       : new Response('[{"id":9007199254740995,"shop_pk":9007199254740993,"spu_id":"TEST_long","title":"TEST exact","unit_cost":"999999999999999.9999","currency":"CNY"}]', { headers: { 'X-Total-Count': '9007199254740997' } })));
     render(<ManualCosts {...props} />); const row = (await screen.findByText('TEST exact')).closest('tr')!;
     expect(within(row).getByText('9007199254740995')).toBeVisible(); expect(readRowCost(row)).toBe('999999999999999.9999');
-    expect(screen.getByText(/服务端总数：9007199254740997/)).toBeVisible();
+    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
   });
   it('does not let an old-shop GET overwrite a newer shop and retains the old-shop draft target', async () => {
     const other = { ...shop, id: '9007199254740994', shop_id: 'TEST_other', account_name: 'TEST 别店' };
@@ -305,7 +304,8 @@ describe('manual-costs read fences and cancellation', () => {
       return json([{ ...product('9007199254740996', 'TEST 别店商品'), shop_pk: other.id }]);
     });
     vi.stubGlobal('fetch', fetcher); const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost('22.2000');
-    await user.click(screen.getByRole('button', { name: '刷新当前列表' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '按 SPU 或标题搜索' }), { target: { value: 'TEST 查询' } });
+    await user.click(screen.getByRole('button', { name: '搜索' }));
     await user.click(screen.getByRole('button', { name: /当前店铺/ }));
     await user.click(await screen.findByRole('option', { name: /TEST 别店/ }));
     await screen.findByText('TEST 别店商品'); await act(async () => stale(json([product('9007199254740997', 'TEST stale')])));
@@ -337,7 +337,7 @@ describe('manual-costs authority and read states', () => {
     await user.click(screen.getByRole('button', { name: '最近提交' }));
     const row = (await screen.findByText('TEST history')).closest('tr')!;
     expect(within(row).getByText('9999999999999.9999 CNY')).toBeVisible(); expect(within(row).getByText('0.0000 VND')).toBeVisible();
-    expect(screen.getByText(/服务端总数：9007199254740999/)).toBeVisible();
+    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     fireEvent.change(screen.getByRole('textbox', { name: '按 SPU 或标题搜索' }), { target: { value: 'TEST search' } });
     await user.click(screen.getByRole('button', { name: '搜索' })); await screen.findByText('暂无提交记录');
     expect(fetcher.mock.calls.some(([url]) => url.includes('/v2/reporting/manual-costs?') && url.includes('q=TEST+search') && url.includes('offset=0'))).toBe(true);
@@ -388,9 +388,9 @@ describe('manual-costs captured-target boundaries', () => {
       { ...product('9007199254740996', 'TEST 有图'), spu_pk: '9007199254740996', missing_photo: false },
     ] }));
     await user.click(screen.getByRole('button', { name: '缺成本候选' })); await editCost(); await editCost('22.0000', 'TEST 有图');
-    await user.click(screen.getByRole('checkbox', { name: /仅显示本页 missing_photo/ })); await confirmBatch(user); await screen.findByText('已确认成功');
+    await user.click(screen.getByRole('checkbox', { name: /仅看本页缺图/ })); await confirmBatch(user); await screen.findByText('已确认成功');
     expect(writes).toHaveLength(1); expect(JSON.parse(writes[0].body as string).spu_pk).toBe('9007199254740995');
-    expect(screen.getByRole('button', { name: '继续编辑 PK 9007199254740996' })).toBeEnabled(); expect(screen.getByText(/服务端缺图总数：81/)).toBeVisible();
+    expect(screen.getByRole('button', { name: '继续编辑 PK 9007199254740996' })).toBeEnabled(); expect(screen.getByText(/缺图总数 81/)).toBeVisible();
   });
 });
 
@@ -530,7 +530,7 @@ describe('manual-costs received error-header fences', () => {
     expect(screen.getByRole('region', { name: '提交结果核对' })).toBeVisible();
     expect(screen.queryByRole('button', { name: '停止后续行' })).toBeNull();
     expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '刷新当前列表' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '搜索' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
     expect(writes).toHaveLength(1); expect(screen.queryByText('已确认成功')).toBeNull();
     const first = screen.getByText('TEST 商品').closest('tr')!;

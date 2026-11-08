@@ -79,7 +79,6 @@
   border-radius: 8px;
   color: var(--muted);
 }
-.rh-pager { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .rh-plan {
   color: #f6faf1;
   border-color: #275045;
@@ -92,7 +91,7 @@
 }
 .rh-plan .rh-step, .rh-plan p { color: #dce9de; }
 .rh-plan-total { display: flex; gap: 10px; align-items: baseline; margin: 17px 0 5px; }
-.rh-plan-total strong { color: #e1edaa; font: 700 clamp(43px, 5.4vw, 65px)/1 monospace; letter-spacing: -.085em; }
+.rh-plan-total strong { color: #e1edaa; font: 700 clamp(43px, 5.4vw, 65px)/1 var(--sans); letter-spacing: -.085em; }
 .rh-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; max-width: 300px; margin: 13px 0 12px; }
 .rh-strip span { display: grid; place-items: center; aspect-ratio: 1.18; border: 1px solid #a2b49b8a; border-radius: 4px; background: #e4f1d91a; font-size: 11px; }
 .rh-specs { display: flex; flex-wrap: wrap; gap: 4px; }

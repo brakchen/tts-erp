@@ -157,14 +157,14 @@ it('clear cancels a standard bulk lookup and ignores its late response', async (
   const fetcher = vi.mocked(fetch); const original = fetcher.getMockImplementation()!; let finish!: (response: Response) => void;
   fetcher.mockImplementation((input, init) => String(input).includes('channel-product-options') ? new Promise<Response>((resolve) => { finish = resolve; }) : original(input, init));
   render(<Page bootstrap={bootstrap} />); await screen.findByText('TEST_RESULT');
-  fireEvent.click(screen.getByRole('button', { name: '批量粘贴' }));
-  fireEvent.change(screen.getByLabelText('粘贴 SPU ID（逗号、空格或换行分隔）'), { target: { value: 'TEST_NEW' } });
-  fireEvent.click(screen.getByRole('button', { name: '解析并添加' }));
+  const input = screen.getByRole('textbox', { name: '按 SPU ID / 标题搜索' });
+  fireEvent.change(input, { target: { value: 'TEST_NEW' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
   await waitFor(() => expect(finish).toBeTypeOf('function'));
   expect(screen.getByRole('button', { name: '清空' })).toBeEnabled(); fireEvent.click(screen.getByRole('button', { name: '清空' }));
   await act(async () => { finish(response([{ spu_id: 'TEST_NEW', title: 'TEST 新商品', status: 'ACTIVATE' }])); });
   expect(screen.queryByRole('button', { name: '移除 SPU TEST_NEW' })).not.toBeInTheDocument();
-  expect(screen.getByText('已选择 0 个')).toBeInTheDocument();
+  expect(input).toHaveValue('');
 });
 it('removing a focused item on the last page resets offset before refreshing the smaller scope', async () => {
   overviewTotal = 101; stored = Array.from({ length: 101 }, (_, index) => ({ spuId: `TEST_PAGE_${index}`, title: `TEST 商品 ${index}` }));
@@ -188,10 +188,8 @@ it('removing a focused item on the last page resets offset before refreshing the
 it('a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs', async () => {
   patchFailure = 503; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
-  fireEvent.click(screen.getByRole('button', { name: '批量粘贴' }));
-  const input = screen.getByLabelText('粘贴 SPU ID（逗号、空格或换行分隔）');
-  fireEvent.change(input, { target: { value: 'TEST_NEW, TEST_MISSING' } });
-  fireEvent.click(screen.getByRole('button', { name: '解析并添加' }));
+  const input = screen.getByRole('textbox', { name: '按 SPU ID / 标题搜索' });
+  fireEvent.paste(input, { clipboardData: { getData: () => 'TEST_NEW, TEST_MISSING' } });
   await screen.findByRole('button', { name: '重新读取关注事实' });
   expect(screen.getByRole('alert')).toHaveTextContent('原选择保留。请先重新读取关注事实');
   expect(input).toHaveValue('TEST_NEW, TEST_MISSING');

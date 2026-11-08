@@ -1,3 +1,4 @@
+import OffsetPagination from '../../shared/OffsetPagination';
 import { useState } from 'react';
 import { Button, Chip, ProgressBar, Table } from '@heroui/react';
 import { canDispatchBatch, statuses, type Batch } from './contracts';
@@ -86,9 +87,7 @@ export default function BatchRecords({ batches, loading, error, canWrite, busy, 
         </Table.Content>
       </Table.ScrollContainer>
     </Table>
-    {(offset > 0 || batches.length === 30) && <div className="rh-pager">
-      <Button size="sm" variant="secondary" isDisabled={!offset || loading} onPress={() => onPage(Math.max(0, offset - 30))}>上一页批次</Button>
-      <Button size="sm" variant="secondary" isDisabled={batches.length < 30 || loading} onPress={() => onPage(offset + 30)}>下一页批次</Button>
-    </div>}
+    {(offset > 0 || batches.length === 30) &&
+      <OffsetPagination label="批次分页" offset={offset} pageSize={30} hasNext={batches.length >= 30} disabled={loading} onPage={onPage} />}
   </section>;
 }

@@ -1,3 +1,4 @@
+import OffsetPagination from '../../shared/OffsetPagination';
 import PageIntro from '../../shared/PageIntro';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Input, Label, ListBox, Modal, Select, Table, TextField } from '@heroui/react';
@@ -132,11 +133,8 @@ export default function InterceptRequests({ bootstrap }: PageProps) {
         <Table.Cell className="erp-table-cell">{item.is_whitelisted ? '是' : '否'}</Table.Cell><Table.Cell className="erp-table-cell" focusMode="child"><Button className="erp-table-action" variant="secondary" size="sm" onPress={() => { setDetail({ loading: true }); setSelected(item.request_id); }}>查看详情</Button></Table.Cell>
       </Table.Row>)}</Table.Body>
     </Table.Content></Table.ScrollContainer></Table>}
-    <div className="flex flex-wrap items-center gap-4">
-      <Button isDisabled={list.loading || list.retryBlocked || offset === 0} onPress={() => setOffset(Math.max(0, offset - pageSize))}>上一页</Button>
-      <span>{total == null ? '—' : `${Math.floor(offset / pageSize) + 1} / ${Math.max(1, Math.ceil(total / pageSize))}`}</span>
-      <Button isDisabled={list.loading || list.retryBlocked || total == null || offset + pageSize >= total} onPress={() => setOffset(offset + pageSize)}>下一页</Button>
-    </div>
+    <OffsetPagination label="拦截记录分页" offset={offset} pageSize={pageSize} total={total}
+      disabled={list.loading || list.retryBlocked} onPage={setOffset} />
     <Modal.Backdrop isOpen={selected !== null} onOpenChange={(open) => { if (!open) setSelected(null); }}><Modal.Container size="lg" scroll="inside"><Modal.Dialog>
         <Modal.CloseTrigger aria-label="关闭详情" />
         <Modal.Header><Modal.Heading>请求详情</Modal.Heading></Modal.Header>

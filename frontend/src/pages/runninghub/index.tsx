@@ -1,3 +1,4 @@
+import OffsetPagination from '../../shared/OffsetPagination';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Chip, Drawer, Label, TextArea, TextField, buttonVariants } from '@heroui/react';
 import PageIntro from '../../shared/PageIntro';
@@ -312,10 +313,9 @@ export default function RunningHub({ bootstrap }: PageProps) {
           ))}</div> : <p className="rh-empty">{assets.loading ? '正在读取图片…' : assets.error ? '图片读取失败。' : <>
             {search ? '没有匹配的就绪图片。' : <>没有就绪图片。请先到 <a className="underline" href={pathFor(root, '/v2/pages/media-assets')}>资产管理</a> 上传服装图。</>}
           </>}</p>}
-          {(offset > 0 || imageRows.length === imagePageSize) && <div className="rh-pager">
-            <Button size="sm" variant="secondary" isDisabled={disabled || !offset || assets.loading} onPress={() => setOffset((n) => Math.max(0, n - imagePageSize))}>上一页图片</Button>
-            <Button size="sm" variant="secondary" isDisabled={disabled || imageRows.length < imagePageSize || assets.loading} onPress={() => setOffset((n) => n + imagePageSize)}>下一页图片</Button>
-          </div>}
+          {(offset > 0 || imageRows.length === imagePageSize) &&
+            <OffsetPagination label="图片分页" offset={offset} pageSize={imagePageSize} hasNext={imageRows.length >= imagePageSize}
+              disabled={disabled || assets.loading} onPage={setOffset} />}
           {selected.length > 0 && <details className="rh-selection-details">
             <summary>已选图片的款式和 SKU</summary>
             <div className="mt-2 space-y-2">{selected.map((entry) => <div className="grid min-w-0 gap-2 rounded-lg border p-2 sm:grid-cols-3" key={entry.asset.assetId}>
@@ -524,10 +524,9 @@ export default function RunningHub({ bootstrap }: PageProps) {
                   onPress={() => setJobId(job.id)}>查看任务 {job.identity.templateName}{job.identity.clip}</Button>}
               </div>
             </li>)}</ul>
-            {(jobOffset > 0 || (jobs.data?.items.length ?? 0) >= 100) && <div className="rh-pager">
-              <Button variant="secondary" isDisabled={!jobOffset || jobs.loading} onPress={() => setJobOffset((n) => Math.max(0, n - 100))}>上一页任务</Button>
-              <Button variant="secondary" isDisabled={(jobs.data?.items.length ?? 0) < 100 || jobs.loading} onPress={() => setJobOffset((n) => n + 100)}>下一页任务</Button>
-            </div>}
+            {(jobOffset > 0 || (jobs.data?.items.length ?? 0) >= 100) &&
+              <OffsetPagination label="任务分页" offset={jobOffset} pageSize={100} hasNext={(jobs.data?.items.length ?? 0) >= 100}
+                disabled={jobs.loading} onPage={setJobOffset} />}
             {jobId && <JobDetail key={jobId} jobId={jobId} root={root} revision={revision} canWrite={canWrite && !busy} admin={admin && !busy} stopping={stopping} run={run} />}
             {selectedBatch && <BatchArchive key={selectedBatch.id} batch={selectedBatch} root={root} />}
             {selectedBatch && firstClipReady && <section aria-label="首段续跑" className="space-y-3 rounded-lg bg-success-soft p-3">
