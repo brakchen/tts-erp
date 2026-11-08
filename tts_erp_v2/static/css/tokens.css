@@ -53,6 +53,10 @@
   --foreground: var(--ink);
   --surface: #FFFFFF;
   --surface-foreground: var(--ink);
+  /* 次级表面：上传区、预览区等需要与主表面区分的底色。
+     此前 frontend/src/pages/media-assets/media-workspace.css 引用了
+     var(--surface-secondary) 但全仓没有声明，浏览器会解析成无效值。 */
+  --surface-secondary: #E9EEE7;
   --default: #E9EEE7;
   --default-foreground: var(--ink-soft);
   --accent-foreground: #FFFFFF;

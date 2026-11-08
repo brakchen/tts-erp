@@ -258,45 +258,6 @@ def test_worker_wires_documented_artemis_and_timing_knobs() -> None:
     assert "_cleanup_orphan_spool" in source
 
 
-def test_queued_content_warning_is_immutable_and_immediate() -> None:
-    source = (ROOT / "tts_erp_v2/templates/pages/video-publish.html").read_text()
-    assert "设备空闲时任务可能立即开始" in source
-    assert "入队后不能修改视频和文案" in source
-
-
-def test_frontend_keeps_idempotency_and_double_click_guards() -> None:
-    source = (ROOT / "tts_erp_v2/static/js/video-publish.js").read_text()
-    assert "state.creating=true" in source
-    assert (
-        "state.clientRequestId = state.clientRequestId || crypto.randomUUID()" in source
-    )
-    assert "!!state.upload || state.creating" in source
-    assert 'headers["If-None-Match"]' in source
-    assert "new AbortController()" in source
-    assert "document.hidden" in source
-    # 02 §18: fixed 5s cadence — the failure backoff table, the per-channel
-    # counters and the smart/interval picker are all retired.
-    assert "const REFRESH_SECONDS = 5;" in source
-    assert "scheduleCurrent()" in source
-    assert "scheduleList()" in source
-    assert "scheduleDetail()" in source
-    assert "backoffSeconds" not in source
-    assert "sharedPollState" not in source
-    assert "[5, 10, 30, 60]" not in source
-    assert "currentChannel.failures" not in source
-    assert "listChannel.failures" not in source
-    assert "detailChannel.failures" not in source
-    assert "localStorage.setItem(REFRESH_KEY, mode)" in source
-    assert "Array.from(value).length" in source
-    assert ".maxLength =" not in source
-    assert 'window.addEventListener("pagehide", destroy)' in source
-    assert "operationalStageStartedAt" in source
-    assert "publish-preview-metadata" in source
-    assert "task.createdBy" in source
-    assert "navigator.clipboard.writeText" in source
-    assert 'document.execCommand("copy")' in source
-
-
 def test_publish_model_metadata_matches_schema_indexes_and_constraints() -> None:
     from tts_erp_v2.db.models.publishing import (
         VideoPublishAttempt,
@@ -320,16 +281,17 @@ def test_publish_model_metadata_matches_schema_indexes_and_constraints() -> None
     assert "uq_video_publish_attempt_task_seq" in attempt_constraints
 
 
-def test_publish_responsive_accessibility_contract_uses_existing_css() -> None:
+def test_publish_responsive_stylesheet_keeps_its_breakpoints() -> None:
+    """The publish stylesheet keeps the agreed breakpoints and motion opt-out.
+
+    The retired ``video-publish.html`` markup is gone; the stylesheet is not
+    part of this retirement, so its own contract still stands.
+    """
     css = (ROOT / "tts_erp_v2/static/css/video-publish.css").read_text()
-    template = (ROOT / "tts_erp_v2/templates/pages/video-publish.html").read_text()
     assert "max-width:1440px" in css
     assert "max-width:900px" in css
     assert "max-width:390px" in css
     assert "prefers-reduced-motion:reduce" in css
-    assert 'class="btn-icon drawer-close"' in template
-    assert 'id="publish-preview-metadata"' in template
-    assert 'maxlength="4000"' not in template
 
 
 def _css_rules(css: str) -> dict[str, str]:
@@ -353,6 +315,9 @@ def test_modal_dialogs_use_the_shared_op_dialog_component() -> None:
     原生 ``<dialog>`` 的 UA 默认样式不消费本站令牌：白底黑框、16px padding、
     ``h2`` 落到 32px、``::backdrop`` 只有 10% 黑。页面内联一份 ``.op-dialog`` 就等于
     制造第二个 owner（曾经就发生过：shops.html 内联一份，video-publish 一份都没有）。
+
+    那些页面模板已随 P6 退役删除，因此「页面不得内联第二份 owner」现在由
+    common.css 这一处声明本身来保证。
     """
     common = (ROOT / "tts_erp_v2/static/css/common.css").read_text()
     rules = _css_rules(common)
@@ -364,23 +329,11 @@ def test_modal_dialogs_use_the_shared_op_dialog_component() -> None:
     assert rules.get(".op-dialog::backdrop"), ".op-dialog 缺少遮罩样式"
     assert "var(--serif)" in rules.get(".op-dialog h2", "")
 
-    for name in ("video-publish.html", "shops.html"):
-        template = (ROOT / f"tts_erp_v2/templates/pages/{name}").read_text()
-        assert 'class="op-dialog"' in template, f"{name} 的弹窗未接入共享组件"
-        assert "common.css" in template
 
-    # 页面模板不得再内联表面/遮罩/标题（common.css 头部约定）。
-    shops = (ROOT / "tts_erp_v2/templates/pages/shops.html").read_text()
-    assert ".op-dialog {" not in shops
-    assert "::backdrop" not in shops
-    assert ".op-dialog .form-field" in shops, "页面特有的表单字段排版应留在页面里"
-
-
-def test_publish_confirm_dialog_layout_and_copy_match_design_spec() -> None:
-    """确认框的内部排版归页面 CSS，文案归设计文档 §22.8。"""
+def test_publish_confirm_dialog_layout_matches_design_spec() -> None:
+    """确认框的内部排版归页面 CSS（文案归设计文档 §22.8，随模板退役）。"""
     css = (ROOT / "tts_erp_v2/static/css/video-publish.css").read_text()
     rules = _css_rules(css)
-    template = (ROOT / "tts_erp_v2/templates/pages/video-publish.html").read_text()
 
     # 表面已上移到 common.css，页面只补长文案滚动 + 两列动作行 + 元数据网格。
     # （_css_rules 按逗号拆开分组选择器，所以成对出现的选择器要合并后再断言。）
@@ -400,9 +353,3 @@ def test_publish_confirm_dialog_layout_and_copy_match_design_spec() -> None:
     assert "display:grid" in rules.get("#publish-confirm-dialog dl", "")
     assert "#publish-confirm-dialog button:first-of-type" in css
     assert "min-height:44px" in css
-
-    # 设计文档 22.8「提交确认」逐项文案。
-    assert "<h2>确认加入发布队列</h2>" in template
-    assert "设备空闲时任务可能立即开始，入队后不能修改视频和文案。" in template
-    assert 'class="btn-secondary">返回修改</button>' in template
-    assert 'class="btn-primary">确认并上传</button>' in template
