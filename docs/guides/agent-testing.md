@@ -36,11 +36,70 @@ Rules for any cleanup of leftover `tts_erp_test_*` databases:
 
 Evidence and incident analysis: `docs/handoff/test-baseline-verify-2026-11-08.md` §7.1.
 
+### 1.2 Shared-host capacity
+
+The test host runs browser tests (Playwright/Chromium) and is memory-bound. Concurrency has a real cost:
+
+- **Run one suite at a time.** Two concurrent pytest runs push the 4-core host's load past 7 and produce
+  **false failures** — `tests/frontend/test_components.py::test_frontend_components` fails under contention
+  and passes alone (`[100%]`). Measured 2026-11-08.
+- **Check before starting**: `pgrep -fc "pytest -q"`. If another lane is running, wait.
+- Prefer the narrowest selection that covers the change; `unit` is ~3.5 min, the full `fast` suite is
+  20–40 min depending on host load.
+- If a browser test fails, **re-run it alone** before treating it as a real failure.
+
 The hard exit is the final safety net, not the normal workflow. Always use `scripts/test_isolated.sh`.
 
 Test prerequisites (PostgreSQL client tools, pytest, `.env.test`) are checked and
 installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` first, then
 `sudo bash scripts/envsetup/install-test-deps.sh` for the root-owned part.
+
+### 1.3 New worktrees need environment preparation
+
+`.venv`, `.env.test` and `frontend/node_modules` are gitignored, so a freshly created
+worktree has none of them and `scripts/test_isolated.sh` fails with
+`missing project Python`, `TTS_ERP_DB_URL_TEST is unset` or
+`Frontend dependencies missing`.
+
+Run `bash scripts/envsetup/prepare-worktree.sh` once per worktree. It links the venv and
+`.env.test` from the main checkout and installs frontend dependencies **for that worktree**.
+
+> **Do not symlink `frontend/node_modules` across worktrees.** Node's ESM resolution follows
+> the real path of the link, so a shared `node_modules` resolves against the *other*
+> worktree's `package.json` and fails with `Cannot find package 'semver'` when the two
+> worktrees sit on different commits.
+
+### 1.4 Conftest basename collisions
+
+`tests/` has no `__init__.py`, so pytest imports every `conftest.py` under its bare basename
+(`"conftest"`). With eight such files, a sibling directory's conftest can own that key.
+
+The symptom is specific: **the same file passes alone and fails in a wider selection**, with
+`AttributeError: module 'conftest' has no attribute '_mock_payload'`. A fixture that resolves
+its own module through `sys.modules[__name__]` is the usual cause.
+
+Import the module by its package path instead:
+
+```python
+from tests.browser import conftest as browser_conftest
+```
+
+### 1.5 Changing which owner renders a page
+
+When a page's renderer changes (Jinja template → React), every test that asserts on the **old
+DOM** breaks — and the failure does not say so. A Playwright `wait_for_selector` on an id that no
+longer exists simply times out.
+
+Before switching a page's owner, list what depends on its markup:
+
+```bash
+git grep -n "<old-element-id>" -- tests/
+git grep -n "<old-template-name>" -- tests/
+```
+
+Prefer a shared readiness contract over a hardcoded selector. `tests/support/page_readiness.py`
+(`wait_canned_page`) dispatches per slug to the signal the current owner actually renders.
+
 
 ## 2. Supported commands
 
