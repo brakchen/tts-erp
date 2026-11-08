@@ -302,11 +302,7 @@ def shops_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   会话（readonly 会话降级只读展示）。注：「待注册候选」section 已于
   2026-10-31：候选端点移除；插件直接登记 commerce.shops 元数据。
   """
-  if "shops" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "shops")
-  return _render_page("shops.html", current_page="shops")
+  return frontend_pages.render_frontend_page(request, "shops")
 
 
 
@@ -329,23 +325,13 @@ def focused_spus_page(request: Request) -> HTMLResponse:
 @router.get("/spu-profit-deterioration", response_class=HTMLResponse)
 def spu_profit_deterioration_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """SPU 盈利变化的只读 7/3 日对比；日期、事实与可用性由既有 API 决定。"""
-  if "spu-profit-deterioration" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "spu-profit-deterioration")
-  return _render_page(
-    "spu-profit-deterioration.html", current_page="spu-profit-deterioration"
-  )
+  return frontend_pages.render_frontend_page(request, "spu-profit-deterioration")
 
 
 @router.get("/manual-costs", response_class=HTMLResponse)
 def manual_costs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Manual cost workbench; existing APIs own identities, currency and persistence."""
-  if "manual-costs" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "manual-costs")
-  return _render_page("manual-costs.html", current_page="manual-costs")
+  return frontend_pages.render_frontend_page(request, "manual-costs")
 
 
 # Marker for the legacy token-paste UI — kept as a comment so future
@@ -370,11 +356,7 @@ def dashboard_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   设计风格：延续工业操作台视觉语言（暖纸/等宽/细线），
   但更轻量 — 卡片式布局，适合快速扫描和点击。
   """
-  if "dashboard" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "dashboard")
-  return _render_page("dashboard.html", current_page="dashboard")
+  return frontend_pages.render_frontend_page(request, "dashboard")
 
 
 
@@ -387,11 +369,7 @@ def intercept_configs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLRes
   功能：配置列表、新增/编辑弹窗、批量操作、导入导出、筛选分页。
   行为在 static/js/intercept-configs.js。
   """
-  if "intercept-configs" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "intercept-configs")
-  return _render_page("intercept-configs.html", current_page="intercept-configs")
+  return frontend_pages.render_frontend_page(request, "intercept-configs")
 
 
 @router.get("/intercept-requests", response_class=HTMLResponse)
@@ -401,11 +379,7 @@ def intercept_requests_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLRe
   功能：记录列表、详情弹窗、筛选（域名/路径/状态码/白名单/时间）、分页。
   行为在 static/js/intercept-requests.js。
   """
-  if "intercept-requests" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "intercept-requests")
-  return _render_page("intercept-requests.html", current_page="intercept-requests")
+  return frontend_pages.render_frontend_page(request, "intercept-requests")
 
 
 @router.get("/intercept-stats", response_class=HTMLResponse)
@@ -415,11 +389,7 @@ def intercept_stats_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLRespo
   功能：总览统计卡片、按域名/方法/状态码分布、最近 7 天每日趋势。
   已迁移内容在 frontend/src/pages/intercept-stats/。
   """
-  if "intercept-stats" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "intercept-stats")
-  return _render_page("intercept-stats.html", current_page="intercept-stats")
+  return frontend_pages.render_frontend_page(request, "intercept-stats")
 
 
 
@@ -438,21 +408,13 @@ def intercept_stats_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLRespo
 @router.get("/enum-map", response_class=HTMLResponse)
 def enum_map_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """枚举映射管理页面。CRUD 管理 config.enum_map 枚举翻译。"""
-  if "enum-map" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "enum-map")
-  return _render_page("enum-map.html", current_page="enum-map")
+  return frontend_pages.render_frontend_page(request, "enum-map")
 
 
 @router.get("/runtime-configs", response_class=HTMLResponse)
 def runtime_configs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Versioned runtime configuration and encrypted secret-reference console."""
-  if "runtime-configs" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "runtime-configs")
-  return _render_page("runtime-configs.html", current_page="runtime-configs")
+  return frontend_pages.render_frontend_page(request, "runtime-configs")
 
 
 @router.get(
@@ -460,21 +422,13 @@ def runtime_configs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLRespo
 )
 def sync_jobs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """定时任务管理页：启停周期调度，或手动触发系统/店铺级任务。"""
-  if "sync-jobs" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "sync-jobs")
-  return _render_page("sync-jobs.html", current_page="sync-jobs")
+  return frontend_pages.render_frontend_page(request, "sync-jobs")
 
 
 @router.get("/video-publish", response_class=HTMLResponse)
 def video_publish_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Serial TikTok video publishing workbench."""
-  if "video-publish" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "video-publish")
-  return _render_page("video-publish.html", current_page="video-publish")
+  return frontend_pages.render_frontend_page(request, "video-publish")
 
 
 @router.get("/users", response_class=HTMLResponse)
@@ -484,21 +438,13 @@ def users_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   入口受 ``page:users`` 权限点控制（access 层按路由判定）；页面行为在
   static/js/users.js，数据 API 为 /v2/users* 与 /v2/roles*。
   """
-  if "users" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "users")
-  return _render_page("users.html", current_page="users")
+  return frontend_pages.render_frontend_page(request, "users")
 
 
 @router.get("/media-assets", response_class=HTMLResponse)
 def media_assets_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Global media asset library: upload, browse, preview and delete media."""
-  if "media-assets" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "media-assets")
-  return _render_page("media-assets.html", current_page="media-assets")
+  return frontend_pages.render_frontend_page(request, "media-assets")
 
 
 @router.get("/runninghub", response_class=HTMLResponse)
@@ -510,11 +456,7 @@ def runninghub_page(request: Request) -> HTMLResponse:
 @router.get("/digital-humans", response_class=HTMLResponse)
 def digital_humans_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """Digital human (persona) console: manage personas and their assets."""
-  if "digital-humans" in frontend_pages.MIGRATED_PAGE_IDS:
-    if request is None:
-      raise RuntimeError("Migrated pages require a request")
-    return frontend_pages.render_frontend_page(request, "digital-humans")
-  return _render_page("digital-humans.html", current_page="digital-humans")
+  return frontend_pages.render_frontend_page(request, "digital-humans")
 
 
 

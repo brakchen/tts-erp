@@ -470,14 +470,4 @@ _PAGE_HTML = """<!doctype html>
 @router.get("/v2/pages/ad-daily", response_class=HTMLResponse)
 def ad_daily_page(request: Request) -> HTMLResponse:
     """Render after the existing readonly/page-permission gates."""
-    if "ad-daily" in frontend_pages.MIGRATED_PAGE_IDS:
-        return frontend_pages.render_frontend_page(request, "ad-daily")
-    html = (
-        _PAGE_HTML.replace("__CSS_VERSION__", _asset_version("css/ad-daily.css"))
-        .replace("__TOKENS_VERSION__", _asset_version("css/tokens.css"))
-        .replace("__COMMON_VERSION__", _asset_version("css/common.css"))
-        .replace("__JS_VERSION__", _asset_version("js/ad-daily.js"))
-        .replace("__SIDEBAR_CSS__", str(_shared_sidebar_css("ad-daily")))
-        .replace("__SIDEBAR_NAV__", str(_shared_sidebar("ad-daily")))
-    )
-    return HTMLResponse(html)
+    return frontend_pages.render_frontend_page(request, "ad-daily")
