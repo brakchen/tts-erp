@@ -52,8 +52,7 @@ entries:
   - 受控文件能覆盖进程环境 ⇒ 轮换必须遍历全部来源层
   does_not_support:
   - 不能推出『当前 .env 不存在所以安全』——触发条件缺失但机制齐备
-  unverified_preconditions:
-  - 假设 cwd 下不存在 .env
+  unverified_preconditions: 假设 cwd 下不存在 .env
   symbol: get_setting_facts
   line_digest: sha256:41822decf73a09b0
   scope_assertion:
@@ -65,8 +64,8 @@ entries:
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-CFG-002
   rule: config-source-precedence
   owner_path: scripts/check_install_parity.sh
@@ -101,17 +100,16 @@ entries:
   - 该缺陷在当前基座成立
   does_not_support: &id002
   - 不能把『实测事实』直接当成『收口已达成』
-  unverified_preconditions: &id003
-  - 本条未逐项标注假定的前提
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-CFG-003
   rule: auth-mode-effective-value
   owner_path: tts_erp_v2/middleware/auth.py
@@ -146,7 +144,7 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: AuthMode
   line_digest: sha256:eb7fc319a0265f8d
   scope_assertion:
@@ -154,12 +152,12 @@ entries:
     note: 鉴权模式的生效判定点
     method: git show <owner_ref>:<owner_path> 定位后按符号名核对
   symbol_line: 17
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-SCHEMA-001
   rule: schema-version-contract
   owner_path: tts_erp_v2/app.py
@@ -193,7 +191,7 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: healthz
   line_digest: sha256:70c98b8f3f8f996d
   scope_assertion:
@@ -201,17 +199,17 @@ entries:
     note: 对外健康端点（承载 service/auth_mode 字段）
     method: git show <owner_ref>:<owner_path> 定位后按符号名核对
   symbol_line: 23
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
-  acceptance: &id004
+  acceptance: &id003
     criterion: over_priced_count <= 56
     applicable_phase: phase_0
     baseline_ref: 'measured 2026-11-08: n_cmp=182, n_default=56, over_priced=54, avg_pct_over=22.37'
     depends_on_actions:
     - visibility_only
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-SCHEMA-002
   rule: schema-version-contract
   owner_path: tts_erp_v2/api/deps.py
@@ -263,8 +261,7 @@ entries:
   - 收敛到 master 会换掉护栏取值来源
   does_not_support:
   - 不能推出『收敛后护栏更严』——两边在生产库上的判定结果相同（都 True），只是『严的理由』不同
-  unverified_preconditions:
-  - 假设把 DB URL 注入进程环境后 master 版仍按库名白名单判定等价于 fail-closed
+  unverified_preconditions: 假设把 DB URL 注入进程环境后 master 版仍按库名白名单判定等价于 fail-closed
   symbol: is_prod_shaped_db
   line_digest: sha256:869937a3a0b7322d
   scope_assertion:
@@ -274,10 +271,10 @@ entries:
   symbol_line: 9
   unverified_preconditions_status: open
   unverified_preconditions_resolve_by: null
-  acceptance: *id004
+  acceptance: *id003
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-DEPLOY-001
   rule: runtime-version-identity
   owner_path: ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
@@ -310,16 +307,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-DEPLOY-002
   rule: runtime-version-identity
   owner_path: ~/.config/systemd/user/tts-erp.service.d/96-pgappname.conf
@@ -352,16 +349,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-DEPLOY-003
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -394,16 +391,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-DEPLOY-004
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -437,16 +434,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-CRITERIA-001
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
@@ -479,16 +476,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-CRITERIA-002
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
@@ -521,16 +518,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-CRITERIA-003
   rule: readonly-criterion
   owner_path: scripts/schema_guard_probe.py
@@ -563,16 +560,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-ALERT-001
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -605,16 +602,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-ALERT-002
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -657,7 +654,7 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: to_public
   line_digest: sha256:64809aec9b7cf761
   scope_assertion:
@@ -665,12 +662,12 @@ entries:
     note: 出网投影的唯一 owner
     method: git show <owner_ref>:<owner_path> 定位后按符号名核对
   symbol_line: 160
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-ALERT-003
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -703,16 +700,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-JOB-001
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -746,16 +743,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-JOB-002
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -788,16 +785,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-JOB-003
   rule: source-freshness
   owner_path: tts_erp_v2/jobs/miaoshou/sync_source_cost_to_master.py
@@ -831,16 +828,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-BACKUP-001
   rule: backup-restore
   owner_path: scripts/backup/pg_dump_hourly.sh
@@ -873,16 +870,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-NET-001
   rule: network-exposure
   owner_path: /etc/systemd/system/easytier@default.service.d/rpc-portal-loopback.conf
@@ -915,16 +912,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-NET-002
   rule: network-exposure
   owner_path: /opt/easytier/config/default.conf
@@ -958,16 +955,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-BASE-001
   rule: base-drift
   owner_path: tts_erp_v2/runtime_settings.py
@@ -1000,16 +997,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-BASE-002
   rule: base-drift
   owner_path: scripts/watchdog_sync.py
@@ -1042,16 +1039,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 - id: AD-BASE-003
   rule: base-drift
   owner_path: alembic/versions
@@ -1085,16 +1082,16 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: *id003
+  unverified_preconditions: null
   symbol: null
   line_digest: null
   scope_assertion: null
-  unverified_preconditions_status: open
+  unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
-  in_target_chain: null
-  in_target_chain_note: 未判定（默认：否）
+  in_target_chain: false
+  in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
 probes_added: 3
 corrected_conclusions:
 - id: CORRECTION-PG-HBA-MASQUERADE

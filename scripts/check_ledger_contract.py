@@ -21,6 +21,46 @@ import yaml
 LEDGER = "docs/architecture/arch-debt-ledger.yaml"
 
 
+def _state_of(row) -> str:
+    """归一三态：verification_state 是权威；verification.state 只在合法时采用。
+
+    2026-11-09 教训：我先后两次把台账里两个语义不同的字段搞混
+    （verification 装命令、verification_state 装三态），
+    于是检查器连报两次"全 0 的假基线"。
+    ⇒ 归一必须**直接判值**，不能依赖字段的嵌套形状。
+    """
+    st = row.get("verification_state")
+    if st in ("green", "red", "absent"):
+        return {"green": "holds", "red": "fails", "absent": "missing"}[st]
+    v = row.get("verification")
+    if isinstance(v, dict) and v.get("state") in ("holds", "fails", "missing"):
+        return v["state"]
+    if isinstance(v, str) and v in ("green", "red", "absent"):
+        return {"green": "holds", "red": "fails", "absent": "missing"}[v]
+    return "missing"
+
+
+def _unverified_of(row):
+    """归一第四格：只有【显式声明了假定】才算；占位文本与未声明都不算。"""
+    up = row.get("unverified_preconditions")
+    if isinstance(up, list):
+        up = up[0] if up else None
+    if not isinstance(up, str) or not up.strip():
+        return None
+    if "未逐项标注" in up or "未标注假定" in up:
+        return None
+    return up.strip()
+
+
+def _cmd_of(row):
+    v = row.get("verification")
+    if isinstance(v, dict):
+        return v.get("command")
+    if isinstance(v, str) and v.startswith(("python", "bash", "sh ")):
+        return v
+    return None
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ledger", default=LEDGER)
@@ -45,20 +85,7 @@ def main(argv=None) -> int:
     # ② 三态 → not_applicable / provisional
     not_applicable, provisional, green, red, absent = [], [], [], [], []
     for row in entries:
-        v = row.get("verification") or {}
-        # ★ 台账里 verification 装的是【命令】，三态在 verification_state。
-        #   两者必须分清，否则会读出"全 0"的假基线。
-        state = None
-        if isinstance(v, str):
-            # 老形态：verification 本身就是三态字符串
-            state = {"green": "holds", "red": "fails", "absent": "missing"}.get(v)
-        elif isinstance(v, dict) and v.get("state"):
-            state = v["state"]
-        if state is None and row.get("verification_state"):
-            state = {"green": "holds", "red": "fails", "absent": "missing"}.get(
-                row["verification_state"], "missing")
-        if state is None:
-            state = "missing"
+        state = _state_of(row)
         rid = row.get("id")
         if state == "missing":
             absent.append(rid); not_applicable.append(rid)
@@ -66,7 +93,7 @@ def main(argv=None) -> int:
             red.append(rid)
         elif state == "holds":
             green.append(rid)
-        if row.get("unverified_preconditions"):
+        if _unverified_of(row):
             provisional.append(rid)   # 显式声明了假定 ⇒ provisional
         if not row.get("acceptance"):
             pass  # 缺 acceptance 不计入五项，但会在下面单独报
@@ -76,8 +103,8 @@ def main(argv=None) -> int:
     #   （否则"我还没填"会被当成"我假定了一条"，计数失去信息量）
     open_unverified = [
         r.get("id") for r in entries
-        if r.get("unverified_preconditions")
-        and r.get("unverified_preconditions_status") == "open"
+        if _unverified_of(r)
+        and r.get("unverified_preconditions_status", "open") == "open"
     ]
 
     # ④ excluded：台账里显式排除的对象
@@ -87,20 +114,6 @@ def main(argv=None) -> int:
     skipped = list(d.get("skipped_entries") or [])
 
     # ⑥ 进度：有多少条 rule 引用了【已落地并可执行】的检查
-    def _cmd_of(r):
-        v = r.get("verification")
-        if isinstance(v, dict):
-            return v.get("command")
-        if isinstance(v, str) and v.startswith(("python", "bash", "sh ")):
-            return v
-        return None
-
-    def _fixture_of(r):
-        v = r.get("verification")
-        if isinstance(v, dict):
-            return v.get("fixture_exists", True)
-        return r.get("verification_state") != "absent"
-
     enforced = [r.get("id") for r in entries
                 if _cmd_of(r) and _fixture_of(r)]
     runnable = list(enforced)
