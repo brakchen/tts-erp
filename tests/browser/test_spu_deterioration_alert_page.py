@@ -263,8 +263,8 @@ class ComparisonSite:
         self.respond: Callable[[Any, dict[str, list[str]]], None] | None = None
         self.shop_respond: Callable[[Any], None] | None = None
         self.shops = [
-            {"id": 7, "account_name": "TEST 店铺 7"},
-            {"id": 8, "account_name": "TEST 店铺 8"},
+            {"id": 7, "account_name": "TEST 店铺 7", "shop_id": "749486486860415"},
+            {"id": 8, "account_name": "TEST 店铺 8", "shop_id": "749486486860416"},
         ]
         self.context.route("**/v2/analytics/spu-profit-deterioration?*", self._data)
         self.context.route("**/v2/commerce/channel-accounts?*", self._shops)
@@ -784,7 +784,9 @@ def test_latest_wins_shop_initialization_does_not_revert_edited_scope(
     with page.expect_response(
         lambda response: "/commerce/channel-accounts" in response.url
     ):
-        held[0].fulfill(json=[{"id": 9, "account_name": "TEST old shops"}])
+        held[0].fulfill(
+            json=[{"id": 9, "account_name": "TEST old shops", "shop_id": "749486486860417"}]
+        )
     page.evaluate(
         "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
     )
