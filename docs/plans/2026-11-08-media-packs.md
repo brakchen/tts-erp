@@ -11,4 +11,4 @@ TDD Route 为 off / skipped。用户授权原型后直接开发，仓库无测�
 1. 在 `alembic/versions/0076_media_packs.py`、`tts_erp_v2/db/models/media.py` 和 `tts_erp_v2/media/packs.py` 增加素材包和两种关联。建包与首次关联同事务提交，成员增量写入可重试。只接纳已入库的视频。新增关联与全局删除使用相同资产行锁。
 2. 在 media API 增加包列表、详情、创建、添加/移出视频和档案关联/解除接口。资产接口复用分页和预览，并展示包引用。RunningHub 复用同一档案参考素材范围。API 保留默认的直接关联读取契约。
 3. 在资产管理加入素材包视图和视频勾选入口。在数字人档案加入素材包区，复用包详情、组包与上传编辑器。多文件按已有上传协议确认入库，重试保留已完成的资产 ID。离开或取消保留已确认入库的文件。
-4. 更新媒体设计和外部接口契约。用隔离 API 测试证明类型、事务、幂等及保留原文件，用实际浏览器走通组包、补传、跨页关联和解除。刷新测试模板后，在精确同步的已提交候选运行 `bash scripts/test_baseline.sh --scope auto --base "$target_sha" --scenario page-assets`。主线集成按仓库锁和精确提交验证流程执行。
+4. 更新媒体设计和外部接口契约。用隔离 API 测试证明类型、事务、幂等及保留原文件，用实际浏览器走通组包、补传、跨页关联和解除。安装工作树的前端依赖后，在精确同步的已提交候选运行 `bash scripts/test_baseline.sh --scope auto --base "$target_sha" --scenario page-assets --refresh-template`。主线集成按仓库锁和精确提交验证流程执行。
