@@ -167,8 +167,38 @@ def main(argv: list[str] | None = None) -> int:
                     "reason": f"only one side resolved: {list(results)}",
                 })
 
+    # ★ 正对照（零依赖、永远可跑）：把【同一个 ref】导出两次并比对。
+    #   若同一来源两次判定不同 ⇒ 检查器本身坏了。
+    #   没有正对照，"恒报差异"与"恒报一致"在输出上不可区分（属性②缺口）。
+    self_check: dict[str, Any] = {"ran": False}
+    probe_rows = [r for r in entries if (r.get("probe") or {}).get("python")]
+    if probe_rows and refs.get("production"):
+        with tempfile.TemporaryDirectory(prefix="conv-self-") as tmp2:
+            t2 = Path(tmp2)
+            outs = []
+            for k in ("a", "b"):
+                dest = t2 / k
+                dest.mkdir(parents=True, exist_ok=True)
+                if _export_tree(repo, refs["production"], dest):
+                    val, err = _run_probe(dest, probe_rows[0]["probe"]["python"])
+                    outs.append((val, err))
+                else:
+                    outs.append((None, "export failed"))
+            if outs[0][0] is not None and outs[1][0] is not None:
+                self_check = {
+                    "ran": True,
+                    "rule": probe_rows[0].get("id"),
+                    "same": outs[0][0] == outs[1][0],
+                    "detail_a": outs[0][0],
+                    "detail_b": outs[1][0],
+                }
+            else:
+                self_check = {"ran": True, "rule": probe_rows[0].get("id"),
+                              "same": False, "error": outs[0][1] or outs[1][1]}
+
     report = {
         "ledger": str(ledger_path),
+        "self_check": self_check,
         "refs": refs,
         "rules_checked": checked,
         "behaviour_findings": findings,
@@ -182,6 +212,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  production_ref = {refs.get('production')}")
         print(f"  target_ref     = {refs.get('target')}")
         print(f"  规则数（带 probe）= {checked}")
+        sc = report.get("self_check") or {}
+        if sc.get("ran"):
+            print(f"  自检（同一来源比两次）: rule={sc.get('rule')} same={sc.get('same')}")
         print()
         print(f"行为差异（收敛会引入规则漂移）: {len(findings)}")
         for f in findings:
