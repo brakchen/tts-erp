@@ -47,6 +47,9 @@ def main(argv=None) -> int:
     for row in entries:
         v = row.get("verification") or {}
         state = v.get("state")
+        if state is None and row.get("verification_state"):
+            state = {"green": "holds", "red": "fails", "absent": "missing"}.get(
+                row["verification_state"], "missing")
         rid = row.get("id")
         if state == "missing":
             absent.append(rid); not_applicable.append(rid)
@@ -55,15 +58,17 @@ def main(argv=None) -> int:
         elif state == "holds":
             green.append(rid)
         if row.get("unverified_preconditions"):
-            provisional.append(rid)
+            provisional.append(rid)   # 显式声明了假定 ⇒ provisional
         if not row.get("acceptance"):
             pass  # 缺 acceptance 不计入五项，但会在下面单独报
 
     # ③ open_unverified：第四格里 status=open 的
+    # ★ "未声明第四格" ≠ "有一条未验证前提" ⇒ 只有显式写了才算 open。
+    #   （否则"我还没填"会被当成"我假定了一条"，计数失去信息量）
     open_unverified = [
         r.get("id") for r in entries
         if r.get("unverified_preconditions")
-        and r.get("unverified_preconditions_status") != "resolved"
+        and r.get("unverified_preconditions_status") == "open"
     ]
 
     # ④ excluded：台账里显式排除的对象
