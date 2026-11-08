@@ -33,25 +33,102 @@ from typing import Any
 
 REPO_HINT = "从仓库根目录运行，或确保 tts_erp_v2 可 import"
 
-# 允许出现的语句前缀（只读）
-_ALLOWED_SQL_PREFIXES = ("SELECT", "SHOW", "WITH", "EXPLAIN")
-# 允许的表元数据查询（information_schema / pg_* 只读）
-_ALLOWED_SQL_CONTAINS = ("information_schema", "pg_catalog", "pg_stat", "alembic_version")
+# 允许出现的语句前缀（只读）。
+# 2026-11-09 修正：去掉了 WITH / EXPLAIN。
+#   理由（@测试质量评审员 W1/W2）：这两种语法可以包裹任意语句，
+#   `WITH x AS (INSERT ...) SELECT * FROM x` 与 `EXPLAIN ANALYZE INSERT ...`
+#   在 PostgreSQL 上【真的会执行写入】⇒ "以 WITH/EXPLAIN 开头"不能作为
+#   只读性证据。
+_ALLOWED_SQL_PREFIXES = ("SELECT", "SHOW")
+
+# 写关键字一票否决。**优先于任何放行条件** ——
+# "看起来像只读"永远不能优先于"含有写关键字"。
+# 用词边界匹配，避免 SET 命中 OFFSET / UPDATE 之类的子串误伤。
+_WRITE_KEYWORDS = (
+    "INSERT", "UPDATE", "DELETE", "TRUNCATE", "CREATE", "ALTER", "DROP",
+    "COPY", "MERGE", "GRANT", "REVOKE", "COMMENT", "VACUUM", "REINDEX",
+    "CLUSTER", "REFRESH", "CALL", "DO", "LOCK", "REASSIGN", "SECURITY",
+)
+# 这些词出现在非写语义里时不算写（如 SET 在 SET search_path 里也是写；
+# 这里保守全拦，巡检脚本不需要任何 SET）。
+_WRITE_KEYWORDS = _WRITE_KEYWORDS + ("SET",)
 
 _write_violations: list[str] = []
 
 
+def _looks_like_write(head: str) -> bool:
+    """语句里是否含写关键字（词边界匹配）。"""
+    for kw in _WRITE_KEYWORDS:
+        # 词边界：前面不是标识符字符，后面也不是
+        idx = 0
+        while True:
+            idx = head.find(kw, idx)
+            if idx < 0:
+                break
+            before = head[idx - 1] if idx > 0 else " "
+            after_i = idx + len(kw)
+            after = head[after_i] if after_i < len(head) else " "
+            if not (before.isalnum() or before == "_") and not (
+                after.isalnum() or after == "_"
+            ):
+                return True
+            idx = after_i
+    return False
+
+
 def _guard(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
-    """SQLAlchemy 事件钩子：拦截一切非只读语句。"""
-    head = (statement or "").lstrip().upper()
-    ok = head.startswith(_ALLOWED_SQL_PREFIXES) or any(
-        token in head for token in _ALLOWED_SQL_CONTAINS
-    )
+    """SQLAlchemy 事件钩子：拦截一切非只读语句。
+
+    2026-11-09 修正（@测试质量评审员 W3）：原实现有
+    `or any(token in head for token in _ALLOWED_SQL_CONTAINS)` ——
+    整条语句只要**含** alembic_version / information_schema / pg_stat
+    任意子串就放行，与"这条语句只读"毫无关系 ⇒
+    `DELETE FROM integration.sync_jobs WHERE job_name='alembic_version'`
+    会被真的执行。
+    ⇒ 现在子串白名单**整体删除**：所有只读查询本来就以 SELECT/SHOW 开头，
+    不需要额外的放行口子。
+    """
+    raw = (statement or "").strip()
+    head = raw.upper()
+    ok = head.startswith(_ALLOWED_SQL_PREFIXES) and not _looks_like_write(head)
+    # 多语句：除结尾分号外还有分号 => 可能有第二条语句
+    if ok and ";" in raw.rstrip(";"):
+        ok = False
     if not ok:
         _write_violations.append(head[:200])
         raise RuntimeError(
             f"只读巡检被中止：检测到非只读语句 -> {head[:120]}"
         )
+
+
+# 守卫的负向自测用例。**不执行，只交给守卫判定** ⇒ 零风险。
+_GUARD_SELFTEST_CASES = (
+    "INSERT INTO integration.sync_jobs (job_name) VALUES ('__guard_selftest__')",
+    "UPDATE integration.sync_jobs SET rows_total = 0 WHERE id = -1",
+    "DELETE FROM integration.sync_jobs WHERE job_name='alembic_version'",
+    "WITH x AS (INSERT INTO integration.sync_jobs (job_name) VALUES ('x') RETURNING *) SELECT * FROM x",
+    "EXPLAIN ANALYZE INSERT INTO integration.sync_jobs (job_name) VALUES ('x')",
+    "SELECT 1; DROP TABLE integration.sync_jobs",
+    "TRUNCATE integration.sync_jobs",
+)
+
+
+def _guard_self_test() -> list[str]:
+    """主动制造一次写，确认守卫会拦截。
+
+    2026-11-09：只断言"正常巡检 write_violations == []"是不够的 ——
+    正常巡检本来就不写库，**守卫坏了也会绿**。
+    ⇒ 必须主动把写语句交给守卫判定，断言它确实拒绝。
+    返回未被拦截的语句（空列表 = 守卫正常）。
+    """
+    missed: list[str] = []
+    for stmt in _GUARD_SELFTEST_CASES:
+        try:
+            _guard(None, None, stmt, None, None, False)
+            missed.append(stmt)
+        except RuntimeError:
+            pass
+    return missed
 
 
 def _install_readonly_guard(session_factory):  # noqa: ANN001
@@ -273,6 +350,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.days < 1 or args.stale_days < 1 or args.lookback < 1:
         sys.stderr.write("--days / --stale-days / --lookback 必须 >= 1\n")
         return 2
+
+    # ★ 守卫负向自测：先确认守卫本身能拦住写语句，再连库。
+    # 只断言"正常巡检无违规"是不够的 —— 正常巡检本来就不写库，
+    # **守卫坏了也会绿**。这里主动把写语句交给守卫判定。
+    missed = _guard_self_test()
+    if missed:
+        sys.stderr.write(
+            "只读守卫自测失败：以下写语句未被拦截（守卫形同虚设）\n"
+            + "\n".join(f"  - {m}" for m in missed)
+            + "\n"
+        )
+        return 3
 
     static_tables: set[str] = set()
     if args.static_tables:

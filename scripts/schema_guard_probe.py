@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -102,35 +103,126 @@ def _heads_and_ancestors(tree: Path) -> tuple[list[str], set[str]]:
         return [], set()
 
 
+def _down_map(tree: Path) -> dict[str, Any]:
+    """revision id -> down_revision（可能��� tuple）。"""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(tree / "alembic"))
+    cfg.set_main_option("version_locations", str(tree / "alembic" / "versions"))
+    try:
+        script = ScriptDirectory.from_config(cfg)
+        return {r.revision: r.down_revision for r in script.walk_revisions()}
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"ScriptDirectory failed for {tree}: {exc}\n")
+        return {}
+
+
+def _descendants(tree: Path, applied: str | None) -> list[str]:
+    """applied 之后的所有 revision（按 down 链往下走，含 tuple 分支）。"""
+    down = _down_map(tree)
+    children: dict[str, list[str]] = {}
+    for rev, d in down.items():
+        if isinstance(d, (list, tuple)):
+            for n in d:
+                children.setdefault(n, []).append(rev)
+        elif d:
+            children.setdefault(d, []).append(rev)
+    out: list[str] = []
+    stack = [applied] if applied else []
+    seen: set[str] = set()
+    while stack:
+        cur = stack.pop()
+        if not cur or cur in seen:
+            continue
+        seen.add(cur)
+        out.append(cur)
+        stack.extend(children.get(cur, []))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--tree", action="append", required=True, help="要检查的代码树（可多次）")
+    ap.add_argument(
+        "--other-tree", action="append", default=[],
+        help="参照树（用于计算 missing_revisions：参照树有、本树缺的 revision）",
+    )
+    ap.add_argument(
+        "--mode", choices=("observe", "enforce"), default="observe",
+        help="observe = 只报告不拒绝（默认）；enforce = 不匹配则拒绝启动",
+    )
+    ap.add_argument("--json", action="store_true", help="输出 JSON finding")
     args = ap.parse_args(argv)
 
     applied = _db_version()
-    print(f"生产库 alembic_version = {applied}")
-    print()
+    if not args.json:
+        print(f"生产库 alembic_version = {applied}")
+        print(f"守卫档位 = {args.mode}（observe 不拒绝启动）")
+        print()
 
-    verdicts = []
+    findings = []
     for raw in args.tree:
         tree = Path(raw).resolve()
         local = _local_revisions(tree)
         heads, ancestors = _heads_and_ancestors(tree)
         unknown = applied is not None and applied not in local
         not_ancestor = applied is not None and applied not in ancestors
-        verdict = "REJECT_START" if (unknown or not_ancestor) else "ALLOW_START"
-        print(f"== {tree}")
-        print(f"   本树 revision 数 : {len(local)}")
-        print(f"   本树 head         : {heads}")
-        print(f"   判据① 应用库版本在本树内? : {not unknown}   (unknown={unknown})")
-        print(f"   判据② 应用库版本是 head 祖先? : {not not_ancestor} (not_ancestor={not_ancestor})")
-        print(f"   ⇒ 守卫判定: {verdict}")
-        print()
-        verdicts.append((str(tree), verdict))
+        compatible = not (unknown or not_ancestor)
 
-    print("汇总:")
-    for t, v in verdicts:
-        print(f"   {v:<12} {t}")
+        # missing_revisions：参照树里【本树缺的】revision。
+        # 口径 = (参照树 head 祖先链上的 revision) − (本树 revision)。
+        # ⚠️ 不能用"applied 的后代"：applied=0076 时，0074/0075 是它的【祖先】，
+        #    而本树缺的恰恰是 0074/0075/0076 三个 ⇒ 用后代会只算出 0076。
+        missing: list[str] = []
+        for other_raw in args.other_tree:
+            other = Path(other_raw).resolve()
+            other_local = set(_local_revisions(other))
+            _, other_ancestors = _heads_and_ancestors(other)
+            for rev in (other_local & other_ancestors) - set(local):
+                missing.append(rev)
+        missing = sorted(set(missing))
+
+        verdict = "ALLOW_START" if compatible else "REJECT_START"
+        action = (
+            "允许启动（observe 档：只报告，不拒绝）" if args.mode == "observe" else
+            ("允许启动" if compatible else "拒绝启动")
+        )
+        findings.append(
+            {
+                "event": "schema_guard",
+                "mode": args.mode,
+                "tree": str(tree),
+                "db_version": applied,
+                "tree_head": heads,
+                "known": not unknown,
+                "ancestor": not not_ancestor,
+                "compatible": compatible,
+                "missing_revisions": missing,
+                "action": action,
+            }
+        )
+        if not args.json:
+            print(f"== {tree}")
+            print(f"   本树 revision 数 : {len(local)}")
+            print(f"   本树 head         : {heads}")
+            print(f"   判据① 应用库版本在本树内?    : {not unknown}   (unknown={unknown})")
+            print(f"   判据② 应用库版本是 head 祖先? : {not not_ancestor} (not_ancestor={not_ancestor})")
+            if missing:
+                print(f"   本树缺少的 revision : {missing}")
+            print(f"   ⇒ 守卫判定: {verdict}  → {action}")
+            print()
+
+    if args.json:
+        print(json.dumps(
+            {"db_version": applied, "mode": args.mode, "findings": findings},
+            ensure_ascii=False, indent=2, default=str,
+        ))
+    else:
+        print("汇总:")
+        for f in findings:
+            print(f"   {f['action']:<34} {f['tree']}")
     return 0
 
 
