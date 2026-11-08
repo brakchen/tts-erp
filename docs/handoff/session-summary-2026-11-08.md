@@ -6,24 +6,27 @@
 
 ## 一、交付物清单
 
-### 已合入 master
+### 已合入 master（`808e4f4c`）
 
-| 提交 | 内容 |
+P6 退役与收口全部落地：**21 个提交，60 个文件，净删 8800 行**。
+
+| 内容 | 说明 |
 | --- | --- |
-| `2b68b40` | P6 路由收敛（15 处双路分支 → 单一 React renderer）+ 环境修复 + 评审核实文档 |
-| `64f6ff7` | 开发环境自检清单 + 模板库刷新说明 |
+| 路由收敛 | `pages.py` 14 处 + `ad_daily.py` 1 处双路分支 → 单一 `render_frontend_page`；`_render_page` / `_templates_env` / `_js_version` 已删 |
+| 旧资产退役 | 12 个旧 Jinja 模板 + 12 个旧页面脚本 + ad-daily 内联旧页面 HTML 全删 |
+| 测试侧清理 | 19 个测试文件里只对旧实现成立的断言清除；新增 `tests/support/retired_frontend_assets.py` 护栏 |
+| 环境修复 | `prepare-worktree.sh`、测试机地址更正、revision 漂移诊断、并发清理规范 |
 
-### 待验证后合并（12 个提交）
+### 验证（全部实测）
 
-| 提交 | 内容 |
+| 验证 | 结果 |
 | --- | --- |
-| `e232f1c` | 测试侧清理：删除只对旧实现成立的断言（21 文件，+200/-1974） |
-| `5a04e70` | 补齐未声明的 `--surface-secondary` 令牌 + 修正设计令牌重定义检查 |
-| `a9605de` | `browser_conftest` 改用包路径导入，消除多目录 conftest 冲突 |
-| `f205c74` | 告警页就绪信号改用共享 canned 契约 |
-| `bd4a7753` | 字体白名单不再要求三套栈互不相同 |
-| `f72a3089` | **旧资产退役**：12 模板 + 12 脚本全删（-9198 行） |
-| `00654af` | 移除 ad-daily 已退役的内联旧页面 HTML（-108 行 + 死代码） |
+| api 域 | `API_EXIT=0`，298 秒，无 FAILED 行 |
+| browser 渲染门槛 | `BROWSER_EXIT=0`，31 秒，无 FAILED 行 |
+| 前端组件 | `COMPONENTS_EXIT=0`，248 秒，无 FAILED 行 |
+| 字体栈用例 | `[100%]`，14 项全绿 |
+| 告警页溢出 | `[100%]`，4 个视口全绿 |
+| conftest 冲突 | 混跑三目录时 `_mock_payload` ERROR 消失 |
 
 ---
 

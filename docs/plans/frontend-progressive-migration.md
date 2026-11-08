@@ -1,14 +1,12 @@
 # ERP 前端工程化与渐进式迁移技术方案
 
-> 状态：**P0–P5 已实施完成；P6 退役与收口已实施完成、待合并 `master`** · 2026-11-08 核实并更正。
+> 状态：**P0–P5 已实施完成；P6 退役与收口已实施完成并合入 `master`** · 2026-11-08 核实并更正。
 > 原状态行「P0 地基与 P1 两个试点已交付；其余阶段待实施」自本日起作废。
 > 实际范围：`accounts/pages.py::PAGES` 注册的 **18 个页面**全部由 React renderer 渲染，加登录页共 19 项，
 > 与 `tts_erp_v2/api/v2/frontend_pages.py::MIGRATED_PAGE_IDS` 的 19 项一一对应。
 > 另有两个辅助文档页（`message`、`oauth-onboard`）复用同一 React shell。
-> P6 路由收敛已合入 `master`（`2b68b40a`）；旧资产删除与测试侧退役已提交并推送至
-> `origin/feature/p6-collapse-migrated-routes`（`f72a3089` 删 12 个旧 Jinja 模板 + 12 个旧页面脚本，
-> `53a98372` 删 ad-daily 内联旧页面 HTML）与 `origin/feature/p6-retire-legacy-assets`（`e232f1c` 测试侧清理），
-> **尚未合入 `master`**——`master` 此刻仍保有那 12 个旧模板与 12 个旧脚本。
+> P6 退役与收口已合入 `master`（`808e4f4c`）：路由收敛、旧 Jinja 模板与旧页面脚本删除、
+> ad-daily 内联旧页面 HTML 删除、测试侧旧实现断言退役，全部通过隔离测试验证。
 > 本状态行只描述代码与文档现状，**不等于生产环境已上线同一版本**，也不扩大后续部署授权。
 > P0/P1 原始证据见[实施计划](frontend-p01-implementation.md)；P2 之后的逐批实施记录见
 > [P2 实现计划](frontend-p2-implementation.md)与[剩余控制台页面迁移实施计划](frontend-remaining-implementation.md)；
@@ -184,7 +182,7 @@ frontend/
 4. 未迁移页使用旧 renderer；已迁移页使用 React renderer。缺 manifest、entry 或 bootstrap 是
    部署/构建错误，必须显式失败并阻止发布，不能悄悄降级成旧页。
    **2026-11-08 更正：注册页面已全部迁移，「未迁移页走旧 renderer」这条回落分支不再有真实使用者**——
-   旧 Jinja renderer 与 `_render_page` 已在 P6 分支退役（`origin/feature/p6-collapse-migrated-routes`），
+   旧 Jinja renderer 与 `_render_page` 已在 P6 退役（合入 `master`：`808e4f4c`），
    `MIGRATED_PAGE_IDS` 的语义从「React / 旧页面开关」收敛为「**哪些页面已迁移**」，它不再是流量或回退开关。
 5. 页面间用真实同源链接整页跳转，保留 query 参数和直达/刷新；没有吞掉 API 路由的 SPA catch-all。
 6. **同一 HTML 文档只运行一套页面 owner**：新页不再加载对应旧页面脚本、Bootstrap、旧侧边栏
@@ -300,7 +298,7 @@ loopback Vite client/entry 获得 HMR。React 插件需要的 Fast Refresh pream
 | P3 运维与高权限页 | `sync-jobs`、`users`、`intercept-configs`、`runtime-configs` | 对应 owner 可交接；权限和专业编辑器行为清单确认 | api_tier/页面权限不退化；配置编辑/脱敏/确认无损；专业控件归属明确 | **已完成。** `frontend/src/pages/sync-jobs/`、`users/`、`intercept-configs/`、`runtime-configs/` 均有真实实现与浏览器用例（`tests/browser/test_runtime_config_workflow.py`、`test_frontend_p2_live.py` 等）；`structured` 配置编辑归属 `vanilla-jsoneditor`。 |
 | P4 复杂经营分析 | `ad-daily`、`manual-costs`，以及一起迁移的 `spu-roi`/`focused-spus` | 表格/选择器能力验证完成，盈利口径不变 | 列/排序/筛选/钻取/精度/图片/编辑与返回定位验证；不复制盈利页面内核 | **已完成。** `frontend/src/pages/ad-daily/`、`manual-costs/`；`spu-roi` 与 `focused-spus` 迁入**共享模块** `frontend/src/pages/spu-profitability/`（`page-loader.ts` 两个 pageId 指向同一模块，未复制盈利页面内核）。Tabulator 作为窄适配由该模块 `ProfitabilityTable.tsx` 复用，仍在 `tts_erp_v2/static/vendor/`。 |
 | P5 独立专题尾部 | `spu-profit-deterioration`、`video-publish`，以及视情况最后迁移的登录展示 | 需求与实现冲突已由 owner 解决；相应专题交接 | 仅迁移确认后的有效契约，权限/状态/确认/恢复不变；登录安全不变 | **已完成。** `frontend/src/pages/spu-profit-deterioration/`、`video-publish/`、`login/`；登录走 React renderer（`auth.py` 的 `MIGRATED_PAGE_IDS` 分支），`/v2/auth/me` 会话契约未变。 |
-| P6 退役与收口 | 删除已迁移页面的旧模板/脚本/样式与无消费者的 vendor、旧 renderer/迁移集合 | 所有目标页完成并通过必要验收；消费者清单为空，不等待回退期 | 新页面只有一套骨架/客户端；无旧资源引用，无永久兼容分支，文档和测试入口完成更新 | **实施完成，待合并 `master`。** ①路由收敛**已合入 `master`**（`2b68b40a`）：`api/v2/pages.py` 14 处 + `api/v2/ad_daily.py` 1 处双路分支收敛为单一 `render_frontend_page`，`_render_page` 零调用。②旧资产删除在 `origin/feature/p6-collapse-migrated-routes`（`f72a3089` 删 12 个旧 Jinja 模板 + 12 个旧页面脚本；`53a98372` 删 ad-daily 内联旧页面 HTML）。③测试侧退役在 `origin/feature/p6-retire-legacy-assets`（`e232f1c`）。④**上述 ②③ 尚未合入 `master`，`master` 此刻仍保有那 12 个旧模板与 12 个旧脚本。**⑤`console.js` 与 `static/vendor/`（13 个文件）按「仍有真实消费者」保留——`console.js` 仍挂在 `app.py` 的 public static mount 上，`vendor/tabulator.*` 被 `ProfitabilityTable.tsx` 直接引用，`vendor/bootstrap.min.css` 被 `auth.py` 的回落登录页引用；**不是遗漏**。 |
+| P6 退役与收口 | 删除已迁移页面的旧模板/脚本/样式与无消费者的 vendor、旧 renderer/迁移集合 | 所有目标页完成并通过必要验收；消费者清单为空，不等待回退期 | 新页面只有一套骨架/客户端；无旧资源引用，无永久兼容分支，文档和测试入口完成更新 | **实施完成，已合入 `master`（`808e4f4c`）。** ①路由收敛：`api/v2/pages.py` 14 处 + `api/v2/ad_daily.py` 1 处双路分支收敛为单一 `render_frontend_page`，`_render_page` 零调用。②旧资产删除：12 个旧 Jinja 模板 + 12 个旧页面脚本、ad-daily 内联旧页面 HTML 全部删除。③测试侧退役：19 个测试文件里只对旧实现成立的断言已清除，新增 `tests/support/retired_frontend_assets.py` 作为退役护栏。④`console.js`、`static/vendor/`（13 个文件）与 `static/css/video-publish.css` 按「仍有真实消费者」保留——`console.js` 仍挂在 `app.py` 的 public static mount 上，`vendor/tabulator.*` 被 `ProfitabilityTable.tsx` 直接引用，`vendor/bootstrap.min.css` 被 `auth.py` 的回落登录页引用，`video-publish.css` 有活契约测试直接读它；**不是遗漏**。⑤仍有 4 个已无引用的旧 CSS 待清理（见 §10.2 剩余动作 4）。 |
 
 **批次表与实际注册表的两处差异（2026-11-08 更正）：**
 
@@ -428,7 +426,7 @@ lane，仍按同一规则核对 owner。
 
 ### 10.2 评审范围与完成条件
 
-**标准及方案方向已获用户认可，P0–P5 已实施完成，P6 退役与收口已实施完成、待合并 `master`。** 认可的方向包括页面级 React MPA、后端单一迁移
+**标准及方案方向已获用户认可，P0–P5 已实施完成，P6 退役与收口已实施完成并合入 `master`（`808e4f4c`）。** 认可的方向包括页面级 React MPA、后端单一迁移
 集合、同源会话与 rootPath、安全 bootstrap、唯一 AppShell、原生 HeroUI 优先、P0→P6 工程分解及必要验收。
 2026-10-24 新指令取消灰度/分批放量/回退期等待：完成后直接合并 `master` 启用；故障可撤销不等于增加放量流程。阶段性类型/构建、热更新、页面和权限证据见实施计划；不能外推到所有其他页面
 或生产发布。具体 DOM、函数名、目录内小文件拆分属于实施决定；付费模板、全站 SPA、业务规则
@@ -441,12 +439,14 @@ lane，仍按同一规则核对 owner。
 
 **剩余动作（2026-11-08）：**
 
-1. **把 P6 的资产删除与测试侧退役分支合入 `master`**（`origin/feature/p6-collapse-migrated-routes`
-   的 `f72a3089`、`53a98372` 与 `origin/feature/p6-retire-legacy-assets` 的 `e232f1c`）。
-   在此之前 `master` 仍同时保有旧模板与旧脚本，新旧 renderer 的产物同版本共存。
+1. ~~**把 P6 的资产删除与测试侧退役分支合入 `master`**~~ —— **已完成**（`808e4f4c`）。
+   `master` 此刻已不含那 12 个旧模板与 12 个旧脚本，新旧 renderer 的产物不再同版本共存。
 2. **清理 `tts_erp_v2/static/vendor/` 中真正无消费者的文件**——目前 Tabulator（被
    `ProfitabilityTable.tsx` 引用）、bootstrap.min.css（被 `auth.py` 回落登录页引用）等仍有
    消费者，清理必须逐个确认，不得整目录删除。
 3. **按文档目录规则把本方案移至 `docs/design/` 并更新引用**（`AGENTS.md` §9 与
    `docs/guides/frontend-development.md` 的链接）。移动会牵动引用方，属于独立文档任务，
    不在本次状态更新的范围内；不提前写入“已接受/已实施”的 ADR。
+4. **清理 4 个已无引用的旧 CSS**（`ad-daily.css`、`runtime-configs.css`、`sync-jobs.css`、
+   `spu-profit-deterioration.css`）——已逐个核实无生产代码引用、无活契约测试。
+   `video-publish.css` **必须保留**（`tests/publishing/test_contracts.py` 有活契约测试直接读它）。
