@@ -11,20 +11,28 @@
 | 项 | 结论 |
 | --- | --- |
 | lane A 派工的 4 项任务 | **在 master 上早已完成**，本轮未重复做，改的是退役**留下的两处陈旧说明**（2 文件，+15/-6，纯注释与文档串） |
-| master 测试链路 | 本轮曾**整体断裂**（任何测试跑批都 0 用例），已定位并修复，独立分支待合 |
+| master 测试链路 | 本轮曾**整体断裂**（任何测试跑批都 0 用例），已定位并修复；**修复已进入 master**（`dab9f4fc`） |
 | 窄范围验证 | 退出码 0 |
-| 全量 unit | `UNIT2_EXIT=0`，`pytest_total=208.383s`，0 个 FAILED/ERROR |
-| DoD 基线 | `BASELINE3_EXIT=1`，**仅 1 个 new failure**，定性为并发时序偶发，非本 lane 引入 |
-| 需要 Chief 决策 | 3 项，见 §6 |
+| 全量 unit | `UNIT3_EXIT=0`（重新同步后复验），`pytest_total=295.833s`，0 个 FAILED/ERROR |
+| DoD 基线 | `BASELINE4_EXIT=1`，**仅 1 个 new failure**，在最终分支上隔离复跑通过 → 并发时序偶发，非本 lane 引入 |
+| 需要 Chief 决策 | 2 项，见 §6 |
 
 ## 1. 分支
 
 | 分支 | HEAD | 内容 |
 | --- | --- | --- |
-| `chore/retire-legacy-frontend-routes` | `7e42f46f` | lane A 本体 + 合入下面的修复 |
-| `fix/selection-legacy-frontend-const` | `82a3bd1b` | 修 master 测试链路断裂，**建议先合这个** |
+| `chore/retire-legacy-frontend-routes` | `a5bed714` | lane A 本体（2 文件）+ 本交接文档；已同步到最新 master `dab9f4fc` |
+| `fix/selection-legacy-frontend-const` | `82a3bd1b` | 修 master 测试链路断裂 —— **已由上游合入 master（`23c69681` → `dab9f4fc`）**，本分支保留作记录 |
 
-两者均已推送，**均未合 master**。worktree 状态干净，本 lane 一次性克隆库已清理。
+lane A 相对 master 的完整改动（**3 个文件**）：
+
+```
+docs/handoff/lane-a-frontend-retirement-2026-11-09.md   | 183 +++++++++++++
+tts_erp_v2/api/v2/pages.py                              |  14 +-
+tts_erp_v2/static/js/console.js                         |   7 +-
+```
+
+worktree 状态干净，本 lane 一次性克隆库已清理。
 
 ## 2. 核实结论：lane A 的 4 项任务在 master 上已经完成
 
@@ -84,6 +92,8 @@ ImportError: cannot import name 'LEGACY_FRONTEND' from 'scripts._test_selection'
 
 改动：`scripts/_run_selected_tests.py`（-2 行）、`tests/scripts/test_selected_runner.py`（+6/-9 行），合计 **+6/-11**。
 
+**该修复现已进入 master**：`git show origin/master:scripts/_run_selected_tests.py | grep -c LEGACY_FRONTEND` → 0；`git show origin/master:tests/scripts/test_selected_runner.py | grep -c LEGACY_FRONTEND` → 0；`git show origin/master:scripts/_test_selection.py | grep -c test_polling_channels.py` → 0。
+
 ### 4.3 护栏作用域缺口
 
 上游同时新增了 `tests/scripts/test_test_selection.py`，但它**只覆盖 `select()` 纯函数，不 import 也不执行 `_run_selected_tests.py`**，因此没能发现这次断点。建议后续把「runner 的参数拼装路径」也纳入护栏。
@@ -112,11 +122,10 @@ ImportError: cannot import name 'LEGACY_FRONTEND' from 'scripts._test_selection'
 
 删除它需要改测试文件 + 推翻已记录的设计决定，超出普通 lane 范围，**本轮未动**。
 
-## 6. 需要 Chief 决策的三项
+## 6. 需要 Chief 决策的两项
 
-1. **`fix/selection-legacy-frontend-const` 是否先合 master**：合了才能解全队 DoD 阻塞；合后 lane A 再 re-sync 一次，其相对 master 的 diff 即回到只剩本 lane 的 2 个文件。
-2. **console.js 去留**（§5）。
-3. **master 的已提交基线文件已陈旧**：`docs/testing/baseline-fast.txt` 记的是 2026-10-15 的 master `e04c5e1`、`count: 0`，而当前 master 已有已知失败（测试工程师 §8.6 记录 80 项，最新提交修掉其中一批）。在基线重新生成之前，门禁里的 "new failures" **不是可靠信号**。
+1. **console.js 去留**（§5）。
+2. **master 的已提交基线文件已陈旧**：`docs/testing/baseline-fast.txt` 记的是 2026-10-15 的 master `e04c5e1`、`count: 0`，而当前 master 已有已知失败（测试工程师 §8.6 记录 80 项，最新提交修掉其中一批）。在基线重新生成之前，门禁里的 "new failures" **不是可靠信号**——本次唯一的那个 new failure 就是这一类。
 
 ## 7. 验证（真实输出）
 
@@ -140,11 +149,21 @@ NARROW_EXIT=0
 bash scripts/test_isolated.sh unit
 ```
 
+合并修复后的首轮：
+
 ```
 UNIT2_EXIT=0
 [test-timing] pytest_total=208.383s
-[test-timing] test_execution=210.483s
 [test-timing] isolated_total=214.447s
+FAILED/ERROR 行数：0
+```
+
+重新同步 master 后的复验（最终分支 `a5bed714`）：
+
+```
+UNIT3_EXIT=0
+[test-timing] pytest_total=295.833s
+[test-timing] isolated_total=302.226s
 FAILED/ERROR 行数：0
 ```
 
@@ -153,19 +172,28 @@ FAILED/ERROR 行数：0
 ### 7.3 DoD 基线对照 — 1 个 new failure，定性为并发时序偶发
 
 ```bash
-bash scripts/test_baseline.sh --scope auto --base ee6424e10e6cd2fea65403edeabb7c84dd35639c
+bash scripts/test_baseline.sh --scope auto --base dab9f4fcec7281bddccb9ab3e711f253c47ac83a
 ```
 
 ```
-BASELINE3_EXIT=1
+BASELINE4_EXIT=1
 [test-baseline] new failures:
 tests/scripts/test_browser_parallel.py::test_termination_allows_children_to_run_cleanup_traps
 ```
 
 定性依据：
 
-- 该用例在**修复前**那次基线（base 为另一个 master）里同样失败，是同一个用例；
-- **隔离复跑通过**：`bash scripts/test_isolated.sh fast tests/scripts/test_browser_parallel.py::test_termination_allows_children_to_run_cleanup_traps` → `EXIT_A=0`（6.4s）；
+- 该用例在**修复前**那次基线（base 为另一个 master）里同样失败，是同一个用例 → **不是本 lane 引入**；
+- 在**最终分支 `a5bed714` 上隔离复跑通过**：
+  ```bash
+  bash scripts/test_isolated.sh fast tests/scripts/test_browser_parallel.py::test_termination_allows_children_to_run_cleanup_traps
+  ```
+  ```
+  FINAL_ISOLATED_EXIT=0
+  [test-timing] isolated_total=7.283s
+  FAILED/ERROR 行数：0
+  ```
+  （注意必须用 `fast` 作用域：该用例没有 `layer_unit` 标记，用 `unit` 跑会因标记过滤而 0 收集、退出码 5，看不出真实结果。）
 - 失败机理是硬超时：等 2 个 worker 就绪 10s + SIGTERM 后等协调进程退出 20s，满负载时正好卡在 20.39s 超时；
 - 与本 lane 改动无任何交互——本 lane 改的是一个 docstring 与一个注释。
 
