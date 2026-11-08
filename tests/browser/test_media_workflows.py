@@ -37,6 +37,7 @@ from tests.support.media_browser import (
     HUMANS,
     LOGIN,
     ME,
+    PACKS,
     MediaBrowserBridge,
     MediaBytes,
 )
@@ -45,7 +46,12 @@ from tts_erp_v2.accounts.models import Role, User
 from tts_erp_v2.api.v2 import media
 from tts_erp_v2.app import build_app
 from tts_erp_v2.db.base import get_engine, get_session_factory
-from tts_erp_v2.db.models.media import DigitalHuman, DigitalHumanAsset, MediaAsset
+from tts_erp_v2.db.models.media import (
+    DigitalHuman,
+    DigitalHumanAsset,
+    MediaAsset,
+    MediaPack,
+)
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
@@ -80,6 +86,8 @@ class MediaRun:
         return self.marker + "_" + suffix
 
     def goto(self, slug: str) -> Response | None:
+        if slug == "media-assets":
+            slug += "?view=all"
         return self.page.goto(f"{APP}{self.gate.prefix}/v2/pages/{slug}")
 
     def asset_id(self, name: str) -> int:
@@ -151,7 +159,9 @@ def clear_owned(gate: MediaBrowserBridge, user_id: int, username: str) -> None:
     with db() as session:
         assets = set(session.scalars(select(MediaAsset.id).where(MediaAsset.filename.startswith(prefix, autoescape=True))))
         humans = set(session.scalars(select(DigitalHuman.id).where(DigitalHuman.name.startswith(prefix, autoescape=True))))
+        packs = set(session.scalars(select(MediaPack.id).where(MediaPack.name.startswith(prefix, autoescape=True))))
         assert gate.assets <= assets and gate.humans <= humans
+        assert gate.packs <= packs
         links = session.execute(
             select(DigitalHumanAsset.digital_human_id, DigitalHumanAsset.asset_id).where(
                 or_(DigitalHumanAsset.digital_human_id.in_(humans), DigitalHumanAsset.asset_id.in_(assets)),
@@ -162,6 +172,7 @@ def clear_owned(gate: MediaBrowserBridge, user_id: int, username: str) -> None:
             DigitalHumanAsset.digital_human_id.in_(humans), DigitalHumanAsset.asset_id.in_(assets),
         ))
         session.execute(delete(DigitalHuman).where(DigitalHuman.id.in_(humans)))
+        session.execute(delete(MediaPack).where(MediaPack.id.in_(packs)))
         session.execute(delete(MediaAsset).where(MediaAsset.id.in_(assets)))
         session.execute(delete(User).where(User.id == user_id, User.username == username))
         session.commit()
@@ -336,7 +347,12 @@ def human_card(page: Page, name: str) -> Locator:
 
 
 def open_human(page: Page, name: str) -> None:
-    human_card(page, name).get_by_role("button", name=re.compile(r"^管理素材 ·")).click()
+    root = page.locator("main")
+    if root.get_by_role("heading", name=name + "的素材", exact=True).is_visible():
+        return
+    if "human=" not in page.url:
+        button(human_card(page, name), "查看档案 " + name).click()
+    root.get_by_role("button", name=re.compile(r"^管理原有素材 ·")).click()
     heading(page, name + "的素材")
 
 
@@ -362,7 +378,9 @@ def open_picker_preview(page: Page, name: str) -> Locator:
 
 
 def picker(page: Page, name: str, *, from_list: bool = False) -> None:
-    button(human_card(page, name) if from_list else main(page), "＋ 添加素材").click()
+    if from_list:
+        open_human(page, name)
+    button(main(page), "＋ 添加素材").click()
     expect(dialog(page)).to_be_visible()
     heading(page, "为「" + name + "」添加素材")
     expect(main(page).get_by_text("目标数字人：" + name, exact=True)).to_have_count(0)
@@ -540,7 +558,7 @@ def test_picker_preserves_selection_and_uses_server_exclusion(media_run: MediaRu
     assert run.links(human_id) == {asset_id for _, asset_id in existing} | {first_id}
     assert gate.calls["POST", path] == 4
     submit_selection(page, 1)
-    heading(page, human)
+    heading(page, human + "的素材")
     assert run.links(human_id) == {asset_id for _, asset_id in existing} | {first_id, second_id}
     attempts = [item.body["assetId"] for item in gate.requests[before:] if item.method == "POST" and item.path == path]
     assert list(map(int, attempts)) == [first_id, second_id, second_id]
@@ -552,8 +570,10 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     run.goto("media-assets")
     first, aid = run.seed_asset("pending_A.png")
     second, bid = run.seed_asset("pending_B.png")
+    _, legacy_id = run.seed_asset("previously_linked.png")
     person, human_id = run.seed_human("upload_target")
     _other, other_id = run.seed_human("other_target")
+    run.link(human_id, legacy_id)
     run.goto("digital-humans")
     picker(page, person, from_list=True)
     choose(page, first)
@@ -563,7 +583,7 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     button(main(page), "上传新素材").click()
     upload = upload_dialog(page)
     text(upload, "上传后添加到「" + person + "」。")
-    expect(page.locator("main h1")).to_contain_text("档案")
+    expect(page.locator("main h1")).to_contain_text(person)
     button(upload, "取消").click()
     heading(page, "为「" + person + "」添加素材")
     expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value(second)
@@ -588,7 +608,7 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     expect(upload.get_by_role("progressbar", name="传输完成", exact=True)).to_have_attribute("aria-valuenow", "100")
     uploaded_id, = gate.assets - before_assets
     confirm_path = f"{ASSETS}/{uploaded_id}/confirm"
-    assert gate.store.puts == before_puts + 1 and gate.calls["POST", attach_path] == 0
+    assert gate.store.puts == before_puts + 1 and gate.calls["POST", attach_path] == 1
     with db() as session:
         assert session.get(MediaAsset, uploaded_id).status == "awaiting_upload"
     assert_layout(page, tmp_path, "upload_confirming")
@@ -601,7 +621,7 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     button(upload, "重试添加").wait_for()
     with db() as session:
         assert session.get(MediaAsset, uploaded_id).status == "ready"
-    assert run.links(human_id) == set()
+    assert run.links(human_id) == {legacy_id}
     expect(upload.get_by_role("alert")).to_be_visible()
     assert_layout(page, tmp_path, "upload_attach_error")
     button(upload, "重试添加").click()
@@ -610,13 +630,13 @@ def test_picker_upload_keeps_pending_assets_and_retries_the_same_ticket(media_ru
     expect(main(page).get_by_role("textbox", name="搜索素材", exact=True)).to_have_value(second)
     expect(main(page).get_by_role("checkbox", name=second, exact=True)).to_be_checked()
     choose(page, first)
-    assert run.links(human_id) == {uploaded_id} and run.links(other_id) == set()
+    assert run.links(human_id) == {legacy_id, uploaded_id} and run.links(other_id) == set()
     assert gate.calls["POST", ASSETS + "/upload-url"] == before_tickets + 1
     assert gate.store.puts == before_puts + 1
-    assert gate.calls["POST", confirm_path] == gate.calls["POST", attach_path] == 2
+    assert gate.calls["POST", confirm_path] == 2 and gate.calls["POST", attach_path] == 3
     submit_selection(page, 2)
-    heading(page, person)
-    assert run.links(human_id) == {aid, bid, uploaded_id} and run.links(other_id) == set()
+    heading(page, person + "的素材")
+    assert run.links(human_id) == {legacy_id, aid, bid, uploaded_id} and run.links(other_id) == set()
 
 
 def test_tag_editor_upload_selection_failed_save_and_shared_chips(media_run: MediaRun) -> None:
@@ -723,7 +743,7 @@ def test_tag_editor_upload_selection_failed_save_and_shared_chips(media_run: Med
     person, human_id = run.seed_human("tag_reference")
     run.link(human_id, asset_id)
     run.goto(f"digital-humans?human={human_id}")
-    heading(page, person + "的素材")
+    open_human(page, person)
     for tag in expected:
         text(main(page), tag)
     run.goto("media-assets")
@@ -767,7 +787,7 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
     assert status == 409 and body["detail"] == "ASSET_IN_USE"
     assert_preserved(run, asset_id, {first_id, second_id}, objects)
     first_link.click()
-    heading(page, first + "的素材")
+    open_human(page, first)
     remove_reference(page, filename)
     assert run.links(first_id) == set() and run.links(second_id) == {asset_id}
     run.goto("media-assets")
@@ -792,10 +812,11 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
     assert gate.store.objects == objects and gate.store.removes == 0
 
     run.goto(f"digital-humans?human={second_id}")
-    heading(page, second + "的素材")
+    open_human(page, second)
     remove_reference(page, filename)
     assert run.links(second_id) == set()
     button(main(page), "← 返回").click()
+    button(main(page), "← 数字人").click()
     choose_status(page, "已归档")
     button(human_card(page, second), "恢复 " + second).click()
     expect(main(page).get_by_text(re.compile("档案已恢复"))).to_be_visible()
@@ -872,13 +893,18 @@ def test_read_preview_and_draft_recovery_keeps_objects_isolated(media_run: Media
     heading(page, person)
     human_id = run.human_id(person)
     assert gate.calls["POST", HUMANS] == before_creates + 1
+    _, legacy_id = run.seed_asset("existing_draft_fixture.png")
+    run.link(human_id, legacy_id)
+    run.link(other_id, legacy_id)
     picker(page, person, from_list=True)
     choose(page, filename)
-    assert run.links(human_id) == set()
+    assert run.links(human_id) == {legacy_id}
     button(main(page), "取消").click()
     button(dialog(page), "确认放弃").click()
-    heading(page, person)
-    assert run.links(human_id) == set() and gate.calls["POST", f"{HUMANS}/{human_id}/assets"] == 0
+    heading(page, person + "的素材")
+    assert run.links(human_id) == {legacy_id} and gate.calls["POST", f"{HUMANS}/{human_id}/assets"] == 1
+    button(main(page), "← 返回").click()
+    button(main(page), "← 数字人").click()
     button(human_card(page, person), "编辑 " + person).click()
     draft = run.name("discard_me")
     main(page).get_by_label("数字人名称", exact=True).fill(draft)
@@ -892,7 +918,7 @@ def test_read_preview_and_draft_recovery_keeps_objects_isolated(media_run: Media
     picker(page, other_name, from_list=True)
     expect(main(page).get_by_role("checkbox", name=filename, exact=True)).not_to_be_checked()
     text(main(page), "本次新增 0 项")
-    assert run.links(other_id) == set() and run.human_id(person) == human_id
+    assert run.links(other_id) == {legacy_id} and run.human_id(person) == human_id
     assert gate.calls["PATCH", f"{HUMANS}/{human_id}"] == 0
 
 
@@ -1003,10 +1029,10 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
         assert session.get(DigitalHuman, human_id).portrait_asset_id == run.asset_id(replacement)
     assert run.api("GET", ASSETS + "?keyword=" + run.marker)[1]["total"] == len(assets)
 
+    run.link(human_id, assets[0][1])
     picker(page, person, from_list=True)
-    for filename, _ in assets[:2]:
-        choose(page, filename)
-    submit_selection(page, 2)
+    choose(page, assets[1][0])
+    submit_selection(page, 1)
     expect(dialog(page)).to_have_count(0)
     open_human(page, person)
     linked = root.get_by_role("list", name="关联素材", exact=True)
@@ -1022,6 +1048,7 @@ def test_media_pages_match_confirmed_prototype_structure(media_run: MediaRun, tm
     assert run.api("GET", f"{ASSETS}/{oldest_id}")[0] == 200
     breadcrumb = root.get_by_role("navigation", name="面包屑")
     button(breadcrumb, "数字人").click()
+    button(root, "← 数字人").click()
     expect(human_card(page, person)).to_be_visible()
 
 
@@ -1071,20 +1098,21 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
 
     person, human_id = run.seed_human("video_target")
     run.goto("digital-humans")
-    picker(page, person, from_list=True)
-    kind(page, "视频")
-    assert video_ready(page, filename, scope=open_picker_preview(page, filename)) == local_metadata
-    set_checkbox(page, filename, True)
-    attach_path = f"{HUMANS}/{human_id}/assets"
-    assert gate.calls["POST", attach_path] == 0 and run.links(human_id) == set()
-    submit_selection(page, 1)
-    open_human(page, person)
-    refs = main(page).get_by_role("list", name="关联素材", exact=True)
+    button(human_card(page, person), "查看档案 " + person).click()
+    button(main(page), "添加素材包").click()
+    button(dialog(page), "新建素材包").click()
+    pack_name = run.name("video_pack")
+    dialog(page).get_by_label("包名称").fill(pack_name)
+    dialog(page).get_by_role("checkbox", name=filename, exact=True).check()
+    assert gate.calls["POST", PACKS] == 0 and run.links(human_id) == set()
+    button(dialog(page), "创建素材包").click()
+    button(main(page), "打开素材包 " + pack_name).click()
+    refs = main(page).get_by_role("list", name="包内视频", exact=True)
     assert video_ready(page, filename, scope=refs) == local_metadata
-    assert run.links(human_id) == {asset_id} and gate.calls["POST", attach_path] == 1
+    assert run.links(human_id) == set() and gate.calls["POST", PACKS] == 1
     assert_layout(page, tmp_path, "shared_video_detail")
 
-    open_reference(page, filename)
+    button(refs, "预览 " + filename).click()
     assert video_ready(page, filename) == local_metadata
     status, metadata = run.api("GET", f"{ASSETS}/{asset_id}")
     assert status == 200 and isinstance(metadata, dict) and metadata["usageCount"] == 1
@@ -1146,3 +1174,73 @@ def test_viewer_media_permission_denial(media_run: MediaRun) -> None:
         response = media_run.goto(slug)
         assert response is not None and response.status == 403
     assert media_run.gate.calls["GET", ASSETS] == media_run.gate.calls["GET", HUMANS] == 0
+
+
+@pytest.mark.parametrize("media_run", [("admin", width, "/tts") for width in (375, 1440)], indirect=True)
+def test_shared_video_pack_workflow(media_run: MediaRun, tmp_path: Path) -> None:
+    run, page, gate = media_run, media_run.page, media_run.gate
+    payload = (Path(__file__).parents[1] / "fixtures/media/TEST_preview.webm").read_bytes()
+    run.goto("media-assets?view=packs")
+    expect(button(main(page), "新建素材包")).to_be_visible()
+    clips = [
+        run.seed_asset(f"pack_clip_{index}.webm", content_type="video/webm", payload=payload)
+        for index in range(3)
+    ]
+    person, human_id = run.seed_human("pack_target")
+    run.goto("media-assets?view=videos")
+    for filename, _ in clips[:2]:
+        set_checkbox(page, "选择 " + filename, True)
+    button(main(page), "新建素材包").click()
+    name = run.name("室内带货")
+    dialog(page).get_by_label("包名称").fill(name)
+    text(dialog(page), "已选 2 段视频")
+    assert_layout(page, tmp_path, "pack_create")
+    button(dialog(page), "创建素材包").click()
+    heading(page, name)
+    text(main(page), "2 段视频")
+    pack_id, = gate.packs
+    button(main(page), "← 视频").click()
+    set_checkbox(page, "选择 " + clips[2][0], True)
+    button(main(page), "加入已有包").click()
+    button(dialog(page), name + " 2 段视频").click()
+    button(dialog(page), "确认加入").click()
+    heading(page, name)
+    text(main(page), "3 段视频")
+
+    run.goto("digital-humans")
+    button(human_card(page, person), "查看档案 " + person).click()
+    button(main(page), "添加素材包").click()
+    button(dialog(page), name + " 3 段视频").click()
+    button(dialog(page), "确认关联").click()
+    button(main(page), "打开素材包 " + name).click()
+    text(main(page), "3 段视频")
+    button(main(page), "添加视频").click()
+    uploaded = [run.name(f"pack_uploaded_{index}.webm") for index in range(2)]
+    with page.expect_file_chooser() as chooser:
+        button(dialog(page), "选择视频文件").click()
+    chooser.value.set_files([
+        {"name": filename, "mimeType": "video/webm", "buffer": payload} for filename in uploaded
+    ])
+    gate.fail("POST", re.compile(rf"{ASSETS}/[1-9][0-9]*/confirm"), 503, after=1)
+    puts_before = gate.store.puts
+    button(dialog(page), "添加到素材包").click()
+    expect(dialog(page).get_by_role("alert")).to_be_visible()
+    text(dialog(page), "已入库 1 段。重试会保留这些视频。")
+    assert gate.store.puts == puts_before + 2
+    button(dialog(page), "添加到素材包").click()
+    text(main(page), "5 段视频")
+    assert gate.store.puts == puts_before + 2
+    button(main(page), "移出 " + uploaded[0]).click()
+    button(confirmation(page), "移出视频").click()
+    text(main(page), "4 段视频")
+    assert run.api("GET", f"{ASSETS}/{run.asset_id(uploaded[0])}")[0] == 200
+    assert gate.store.removes == 0
+    button(main(page), "← " + person).click()
+    button(main(page), "解除关联 " + name).click()
+    button(confirmation(page), "解除关联").click()
+    text(main(page), "还没有关联素材包。")
+    assert run.api("GET", PACKS + f"?digitalHumanId={human_id}")[1]["items"] == []
+    run.goto("media-assets?view=packs")
+    button(main(page), "打开素材包 " + name).click()
+    text(main(page), "4 段视频")
+    assert run.api("GET", f"{PACKS}/{pack_id}")[1]["videoCount"] == 4

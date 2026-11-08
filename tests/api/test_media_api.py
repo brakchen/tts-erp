@@ -29,6 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Event
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -58,6 +59,7 @@ def _wipe_media_test_rows(db_engine):
 
     def wipe() -> None:
         with db_engine.begin() as conn:
+            conn.execute(text("DELETE FROM media.media_packs WHERE name LIKE 'TEST_%'"))
             conn.execute(
                 text(
                     "DELETE FROM media.digital_human_assets "
@@ -234,6 +236,70 @@ def _upload_one(api_client_focused, key: str, **body) -> int:
     )
     assert r.status_code == 201, r.text
     return int(r.json()["asset_id"])
+
+
+def test_video_packs_share_assets_and_preserve_originals(
+    api_client_focused, readwrite_key, readonly_key, fake_store
+):
+    client = api_client_focused
+    root = "/v2/media"
+    write = {"Authorization": f"Bearer {readwrite_key}"}
+    read = {"Authorization": f"Bearer {readonly_key}"}
+    video = _upload_one(client, readwrite_key, filename="TEST_pack.webm", contentType="video/webm")
+    pending = _upload_one(client, readwrite_key, filename="TEST_pending.webm", contentType="video/webm")
+    image = _upload_one(client, readwrite_key, filename="TEST_pack.jpg")
+    for asset_id in (video, image):
+        assert client.post(f"{root}/assets/{asset_id}/confirm", headers=write).status_code == 200
+    humans = [
+        client.post(f"{root}/digital-humans", headers=write, json={"name": f"TEST_pack_{i}"}).json()["digital_human_id"]
+        for i in range(2)
+    ]
+    human_path = f"{root}/digital-humans/{humans[0]}"
+    packs_path = f"{root}/packs"
+    body = {"name": "TEST_indoor", "creationToken": str(uuid4()), "assetIds": [video], "digitalHumanId": humans[0]}
+    assert client.post(packs_path, headers=read, json=body).status_code == 403
+    for invalid_id in (pending, image):
+        rejected = client.post(packs_path, headers=write, json={**body, "assetIds": [video, invalid_id]})
+        assert (rejected.status_code, rejected.json()["detail"]) == (422, "PACK_REQUIRES_READY_VIDEOS")
+    assert client.get(packs_path, headers=read).json()["total"] == 0
+
+    created = client.post(packs_path, headers=write, json=body)
+    assert created.status_code == 201, created.text
+    pack = created.json()
+    assert pack["videoCount"] == 1
+    assert client.post(packs_path, headers=write, json=body).json() == pack
+    pack_id = pack["packId"]
+    path = f"{packs_path}/{pack_id}"
+    assert client.get(packs_path, headers=read, params={"digitalHumanId": humans[0]}).json()["items"] == [pack]
+    assert client.get(packs_path, headers=read, params={"excludeDigitalHumanId": humans[0]}).json()["items"] == []
+    assert client.get(human_path, headers=read).json()["asset_ids"] == []
+    combined = client.get(human_path, headers=read, params={"includePackVideos": "true"}).json()
+    assert combined["asset_ids"] == [video]
+    assert combined["assets"][0]["asset_id"] == video
+    assert client.post(f"{human_path}/assets", headers=write, json={"assetId": video}).status_code == 200
+    other = f"{root}/digital-humans/{humans[1]}"
+    for _ in range(2):
+        assert client.post(f"{other}/packs", headers=write, json={"packId": pack_id}).json() == pack
+    assert client.get(f"{root}/assets/{video}", headers=read).json()["usageCount"] == 2
+
+    assert client.post(f"{root}/assets/{pending}/confirm", headers=write).status_code == 200
+    for _ in range(2):
+        added = client.post(f"{path}/videos", headers=write, json={"assetIds": [video, pending]})
+        assert added.status_code == 200 and added.json()["videoCount"] == 2
+    members = client.get(f"{root}/assets", headers=read, params={"packId": pack_id}).json()
+    assert {item["asset_id"] for item in members["items"]} == {video, pending}
+    for human in (human_path, other):
+        assert client.delete(f"{human}/packs/{pack_id}", headers=write).status_code == 204
+    assert client.get(path, headers=read).json()["videoCount"] == 2
+    references = client.get(f"{root}/assets/{pending}", headers=read).json()
+    assert references["usedByPacks"] == [{"packId": pack_id, "name": body["name"]}]
+    assert not references["used_by"]
+    assert client.delete(f"{root}/assets/{pending}", headers=write).status_code == 409
+    fake_store.remove.assert_not_called()
+    for _ in range(2):
+        assert client.delete(f"{path}/videos/{pending}", headers=write).status_code == 204
+    assert client.get(f"{root}/assets/{pending}", headers=read).status_code == 200
+    fake_store.remove.assert_not_called()
 
 
 def test_failed_ticket_signing_does_not_leave_an_asset(

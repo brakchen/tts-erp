@@ -21,6 +21,7 @@ APP = "https://media-erp.test"
 STORE = "https://media-objects.test"
 ASSETS = "/v2/media/assets"
 HUMANS = "/v2/media/digital-humans"
+PACKS = "/v2/media/packs"
 PAGES = {"/v2/pages/media-assets", "/v2/pages/digital-humans"}
 ME = "/v2/auth/me"
 LOGIN = "/v2/auth/login"
@@ -142,6 +143,7 @@ class MediaBrowserBridge:
         self.prefix = prefix
         self.assets: set[int] = set()
         self.humans: set[int] = set()
+        self.packs: set[int] = set()
         self.calls: Counter[tuple[str, str]] = Counter()
         self.requests: list[MediaRequest] = []
         self.responses: list[tuple[str, str, int]] = []
@@ -181,11 +183,19 @@ class MediaBrowserBridge:
             return value in ids
         return isinstance(value, str) and bool(re.fullmatch(r"[1-9][0-9]{0,18}", value)) and int(value) in ids
 
+    def _owned_videos(self, body: dict) -> bool:
+        ids = body.get("assetIds")
+        return isinstance(ids, list) and bool(ids) and all(self._owned_id(value, self.assets) for value in ids)
+
     def allows(self, method: str, path: str, query: dict, body: object) -> bool:
         if method == "GET" and path in PAGES:
             if not query:
                 return True
             if path.endswith("media-assets"):
+                if query in ({"view": ["all"]}, {"view": ["videos"]}, {"view": ["packs"]}):
+                    return True
+                if set(query) == {"pack"}:
+                    return len(query["pack"]) == 1 and self._owned_id(query["pack"][0], self.packs)
                 return (
                     set(query) <= {"asset", "fromHuman"} and "asset" in query
                     and len(query["asset"]) == 1 and self._owned_id(query["asset"][0], self.assets)
@@ -207,12 +217,15 @@ class MediaBrowserBridge:
             return isinstance(body, dict) and body.get("username") == self.username
         if method == "GET" and not query and path == ASSETS + "/tags":
             return True
-        if method == "GET" and path in {ASSETS, HUMANS}:
-            if set(query) - {"keyword", "kind", "limit", "offset", "cursor", "status", "tag", "digitalHumanId", "excludeDigitalHumanId"}:
+        if method == "GET" and path in {ASSETS, HUMANS, PACKS}:
+            owned = {
+                "digitalHumanId": self.humans, "excludeDigitalHumanId": self.humans,
+                "packId": self.packs, "excludePackId": self.packs,
+            }
+            if set(query) - {"keyword", "kind", "limit", "offset", "cursor", "status", "tag", *owned}:
                 return False
             return all(
-                len(values) == 1 and (key not in {"digitalHumanId", "excludeDigitalHumanId"}
-                or self._owned_id(values[0], self.humans))
+                len(values) == 1 and (key not in owned or self._owned_id(values[0], owned[key]))
                 for key, values in query.items()
             )
         if query:
@@ -228,6 +241,22 @@ class MediaBrowserBridge:
                 return self._owned_name(body.get("name")) and (
                     "portraitAssetId" not in body or self._owned_id(body["portraitAssetId"], self.assets)
                 )
+            if path == PACKS:
+                return self._owned_name(body.get("name")) and self._owned_videos(body) and (
+                    "digitalHumanId" not in body or self._owned_id(body["digitalHumanId"], self.humans)
+                )
+        pack = re.fullmatch(rf"{PACKS}/([1-9][0-9]{{0,18}})(/videos(?:/([1-9][0-9]{{0,18}}))?)?", path)
+        if pack and self._owned_id(pack[1], self.packs):
+            if pack[3]:
+                return method == "DELETE" and self._owned_id(pack[3], self.assets)
+            if pack[2]:
+                return method == "POST" and isinstance(body, dict) and self._owned_videos(body)
+            return method == "GET"
+        linked_pack = re.fullmatch(rf"{HUMANS}/([1-9][0-9]{{0,18}})/packs(?:/([1-9][0-9]{{0,18}}))?", path)
+        if linked_pack and self._owned_id(linked_pack[1], self.humans):
+            if linked_pack[2]:
+                return method == "DELETE" and self._owned_id(linked_pack[2], self.packs)
+            return method == "POST" and isinstance(body, dict) and self._owned_id(body.get("packId"), self.packs)
         asset = re.fullmatch(rf"{ASSETS}/([1-9][0-9]{{0,18}})(/confirm)?", path)
         if asset and self._owned_id(asset[1], self.assets):
             if asset[2]:
@@ -276,6 +305,8 @@ class MediaBrowserBridge:
                 self.assets.add(response.json()["asset_id"])
             elif path == HUMANS:
                 self.humans.add(response.json()["digital_human_id"])
+            elif path == PACKS:
+                self.packs.add(response.json()["packId"])
         route.fulfill(
             status=response.status_code,
             headers={

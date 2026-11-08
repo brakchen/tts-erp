@@ -33,9 +33,10 @@ export function mediaError(error: unknown, writing = false) {
   if (error.status === 404) return '记录不存在，或已被删除。';
   if (error.status === 429) return error.retryAfter ? '请求过于频繁，请至少等待 ' + error.retryAfter + ' 秒后重试。' : '请求过于频繁，请稍后重试。';
   if (error.status === 503) return '服务暂不可用，请稍后重试。';
+  if (error.detail === 'PACK_REQUIRES_READY_VIDEOS') return '素材包只接收已入库的视频。请重新选择。';
   if (error.status === 400 || error.status === 422) return '资料未通过校验，请检查文件类型、大小或填写内容。';
   if (error.status === 409) {
-    if (error.detail === 'ASSET_IN_USE' || error.code === 'ASSET_IN_USE') return '此素材仍被数字人引用。请先解除全部引用，再从素材库删除。';
+    if (error.detail === 'ASSET_IN_USE' || error.code === 'ASSET_IN_USE') return '此素材仍被引用。请先解除全部引用，再从素材库删除。';
     if (error.detail === 'ASSET_NOT_READY' || error.code === 'ASSET_NOT_READY') return '此资产还没有完成入库，暂时无法添加。';
     if (error.detail === 'PORTRAIT_NOT_READY' || error.code === 'PORTRAIT_NOT_READY') return '形象照片尚未就绪，请重新选择照片。';
     return '记录状态已变化，请重新查看后再操作。';

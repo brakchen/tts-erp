@@ -3,6 +3,7 @@ import { decodeUploadConfirmation, decodeUploadTicket, type UploadTicket } from 
 import { mediaWrite } from './media-ui';
 
 export const imageTypes = 'image/jpeg,image/png,image/webp,image/gif';
+export const videoTypes = 'video/mp4,video/webm,video/quicktime';
 
 export function requestUpload(root: string, file: File, filename: string, tags: string[], isPortrait = false) {
   return mediaWrite(root, '/assets/upload-url', 'POST', decodeUploadTicket, {

@@ -116,10 +116,11 @@
 （历史 analytics 4 张僵尸表 0007 drop、0024 并入 plugin；0068 重建该 schema。）
 契约见 [`docs/design/spu-profit-deterioration-alert.md`](../design/spu-profit-deterioration-alert.md)。
 
-### media —— 媒体资产库与数字人（3 表）
+### media —— 媒体资产库、素材包与数字人（6 表）
 `media_assets` 保存图片和视频元数据与对象存储绑定。`is_portrait` 标记形象照，普通素材查询排除这些记录；
 `digital_humans` 保存数字人（人设档案）记录，`portrait_asset_id` 指向可选的形象照。素材和档案的卡片列表按 `updated_at` 与 `id` 降序续载；
 `digital_human_assets` 是数字人 ↔ 资产多对多链接（资产可无归属，也可同时挂多个数字人）。
+`media_packs` 保存包名与创建幂等令牌，`media_pack_videos` 关联包与视频，`digital_human_packs` 关联数字人与包。
 对象字节流不进数据库，浏览器凭预签名 URL 直传对象存储。契约见
 [`docs/design/media-asset-library.md`](../design/media-asset-library.md)。
 

@@ -19,7 +19,7 @@ export default function ViewAsset({ bootstrap, id, onClose }: { bootstrap: Front
           <p>{assetType(asset)}{asset.status !== 'ready' && ' · ' + assetStatus(asset.status)}</p>
           <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{asset.description || '暂无说明'}</p>
           <AssetTags tags={asset.tags} />
-          <AssetReferences bootstrap={bootstrap} references={asset.usedBy} />
+          <AssetReferences bootstrap={bootstrap} references={asset.usedBy} packs={asset.usedByPacks} />
         </>}
       </Modal.Body>
       <Modal.Footer><Button variant="secondary" onPress={onClose}>关闭</Button></Modal.Footer>

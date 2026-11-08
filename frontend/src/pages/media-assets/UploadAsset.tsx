@@ -5,9 +5,9 @@ import type { FrontendBootstrap } from '../../shared/contracts';
 import { decodeDigitalHuman, type UploadTicket } from './contracts';
 import { UploadTags } from './TagEditor';
 import { ActionError, DiscardDialog, mediaError, mediaWrite, recordLink, uncertainResult, useLeaveGuard } from './media-ui';
-import { confirmUpload, imageTypes, requestUpload, transferMediaFile } from './media-upload';
+import { confirmUpload, imageTypes, requestUpload, transferMediaFile, videoTypes } from './media-upload';
 
-const acceptedTypes = (imageTypes + ',video/mp4,video/webm,video/quicktime').split(',');
+const acceptedTypes = (imageTypes + ',' + videoTypes).split(',');
 type Phase = 'draft' | 'preparing' | 'sending' | 'confirming' | 'attaching' | 'prepare-error' | 'send-error' | 'confirm-error' | 'restart' | 'attach-error';
 
 function LocalFilePreview({ file }: { file: File }) {

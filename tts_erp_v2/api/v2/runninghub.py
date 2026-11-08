@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from tts_erp_v2.api.deps import get_session, require_cookie_csrf, require_role_at_least
-from tts_erp_v2.db.models.media import DigitalHuman, DigitalHumanAsset
+from tts_erp_v2.db.models.media import DigitalHuman
 from tts_erp_v2.db.models.runninghub import (
     CloudQuota,
     GenerationArtifact,
@@ -34,6 +34,7 @@ from tts_erp_v2.db.models.runninghub import (
     WorkflowVersion,
     new_id,
 )
+from tts_erp_v2.media.repository import asset_ids_for_digital_human
 from tts_erp_v2.proxy.errors import DecryptionError, SigningError
 from tts_erp_v2.proxy.token_service import load_runninghub_api_key
 from tts_erp_v2.runninghub.client import RemoteError, RunningHubClient
@@ -363,13 +364,7 @@ def add_template(body: TemplateIn, session: SessionDep) -> dict:
         raise HTTPException(422, "BATCH_SIZE_EXCEEDED")
     if len(set(body.assetIds)) != len(body.assetIds):
         raise HTTPException(422, "DISTINCT_REFERENCE_CLIPS_REQUIRED")
-    linked = set(
-        session.scalars(
-            select(DigitalHumanAsset.asset_id).where(
-                DigitalHumanAsset.digital_human_id == human.id
-            )
-        )
-    )
+    linked = set(asset_ids_for_digital_human(session, human.id, include_pack_videos=True))
     try:
         sources = [asset_snapshot(session, i, "video") for i in body.assetIds]
         if any(int(source["assetId"]) not in linked for source in sources):

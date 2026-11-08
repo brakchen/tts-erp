@@ -32,7 +32,9 @@ from sqlalchemy.sql.elements import ColumnElement
 from tts_erp_v2.db.models.media import (
     DigitalHuman,
     DigitalHumanAsset,
+    DigitalHumanPack,
     MediaAsset,
+    MediaPackVideo,
 )
 from tts_erp_v2.media.domain import (
     AssetKind,
@@ -66,6 +68,8 @@ class AssetFilter:
     status: AssetStatus | None = None
     recent: bool = False
     after: tuple[datetime, int] | None = None
+    pack_id: int | None = None
+    exclude_pack_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +253,9 @@ def soft_delete_asset(
                 DigitalHuman.deleted_at.is_(None),
             )
             .exists()
+            | select(MediaPackVideo.asset_id)
+            .where(MediaPackVideo.asset_id == asset_id)
+            .exists()
         )
     )
     if in_use:
@@ -301,6 +308,16 @@ def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
             DigitalHumanAsset.digital_human_id == filters.exclude_digital_human_id
         )
         conditions.append(MediaAsset.id.not_in(linked))
+    if filters.pack_id is not None:
+        members = select(MediaPackVideo.asset_id).where(
+            MediaPackVideo.pack_id == filters.pack_id
+        )
+        conditions.append(MediaAsset.id.in_(members))
+    if filters.exclude_pack_id is not None:
+        members = select(MediaPackVideo.asset_id).where(
+            MediaPackVideo.pack_id == filters.exclude_pack_id
+        )
+        conditions.append(MediaAsset.id.not_in(members))
 
     total = session.scalar(
         select(func.count()).select_from(MediaAsset).where(and_(*conditions))
@@ -334,25 +351,37 @@ def list_asset_tags(session: Session) -> list[str]:
     return sorted(normalize_tags(tags))
 
 
+def _asset_references(asset_ids: list[int]):
+    direct = select(
+        DigitalHumanAsset.asset_id, DigitalHumanAsset.digital_human_id
+    ).where(DigitalHumanAsset.asset_id.in_(asset_ids))
+    packed = (
+        select(MediaPackVideo.asset_id, DigitalHumanPack.digital_human_id)
+        .join(DigitalHumanPack, DigitalHumanPack.pack_id == MediaPackVideo.pack_id)
+        .where(MediaPackVideo.asset_id.in_(asset_ids))
+    )
+    return direct.union(packed).subquery()
+
+
 def usage_counts_for_assets(session: Session, asset_ids: list[int]) -> dict[int, int]:
     """Count live persona references, including archived personas, in one query."""
     if not asset_ids:
         return {}
     counts = dict.fromkeys(asset_ids, 0)
+    references = _asset_references(asset_ids)
     rows = session.execute(
-        select(DigitalHumanAsset.asset_id, func.count())
-        .join(DigitalHuman, DigitalHuman.id == DigitalHumanAsset.digital_human_id)
-        .where(
-            DigitalHumanAsset.asset_id.in_(asset_ids),
-            DigitalHuman.deleted_at.is_(None),
-        )
-        .group_by(DigitalHumanAsset.asset_id)
+        select(references.c.asset_id, func.count())
+        .join(DigitalHuman, DigitalHuman.id == references.c.digital_human_id)
+        .where(DigitalHuman.deleted_at.is_(None))
+        .group_by(references.c.asset_id)
     ).all()
     counts.update({asset_id: count for asset_id, count in rows})
     return counts
 
 
-def asset_ids_for_digital_human(session: Session, digital_human_id: int) -> list[int]:
+def asset_ids_for_digital_human(
+    session: Session, digital_human_id: int, *, include_pack_videos: bool = False
+) -> list[int]:
     """Return live asset ids in addition order; new references append at the end."""
     rows = session.scalars(
         select(DigitalHumanAsset.asset_id)
@@ -363,15 +392,28 @@ def asset_ids_for_digital_human(session: Session, digital_human_id: int) -> list
         )
         .order_by(DigitalHumanAsset.created_at, DigitalHumanAsset.id)
     ).all()
-    return list(rows)
+    if not include_pack_videos:
+        return list(rows)
+    packed = session.scalars(
+        select(MediaPackVideo.asset_id)
+        .join(DigitalHumanPack, DigitalHumanPack.pack_id == MediaPackVideo.pack_id)
+        .join(MediaAsset, MediaAsset.id == MediaPackVideo.asset_id)
+        .where(
+            DigitalHumanPack.digital_human_id == digital_human_id,
+            MediaAsset.deleted_at.is_(None),
+            MediaAsset.status == AssetStatus.READY.value,
+        )
+        .order_by(MediaPackVideo.created_at, MediaPackVideo.asset_id)
+    )
+    return list(dict.fromkeys([*rows, *packed]))
 
 
 def digital_humans_for_asset(session: Session, asset_id: int) -> list[DigitalHuman]:
     """Return the live personas that reference an asset, including archived ones."""
+    references = _asset_references([asset_id])
     rows = session.scalars(
         _human_base_query()
-        .join(DigitalHumanAsset, DigitalHumanAsset.digital_human_id == DigitalHuman.id)
-        .where(DigitalHumanAsset.asset_id == asset_id)
+        .join(references, references.c.digital_human_id == DigitalHuman.id)
         .order_by(DigitalHuman.created_at.desc(), DigitalHuman.id.desc())
     ).all()
     return list(rows)
@@ -526,6 +568,11 @@ def soft_delete_digital_human(session: Session, digital_human_id: int) -> bool:
     session.execute(
         delete(DigitalHumanAsset).where(
             DigitalHumanAsset.digital_human_id == digital_human_id
+        )
+    )
+    session.execute(
+        delete(DigitalHumanPack).where(
+            DigitalHumanPack.digital_human_id == digital_human_id
         )
     )
     session.commit()
