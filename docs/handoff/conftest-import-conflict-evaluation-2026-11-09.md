@@ -68,7 +68,35 @@ pytest 默认 `prepend` 导入模式下，`tests/` 下无 `__init__.py` 的目�
 | --- | --- | --- |
 | `tests/browser/conftest.py:449` `from tests.browser import conftest as canonical` | 双路径导入 → monkeypatch 失效 → 价格列 13 项失败 | ✅ **已修**（`0c7bea73`） |
 | `tests/browser/conftest.py:654` `from tests.browser import conftest as this_module` | 同上 | ✅ 已修 |
-| `tests/e2e/test_video_publish_smoke.py:121` `import conftest`（**裸名**） | **同类隐患残留**：一旦该文件与其它无 `__init__.py` 的目录同时收集，`import conftest` 可能拿到别的目录的模块 | ⚠ **未修** |
+| `tests/e2e/test_video_publish_smoke.py:121` `import conftest`（**裸名**） | **同类隐患残留**：一旦该文件与其它无 `__init__.py` 的目录同时收集，`import conftest` 可能拿到别的目录的模块 | ⚠ **未修**（但触发条件比看上去窄，见 §1.4） |
+
+### 1.4 为什么这处残留至今没炸（实测机制）
+
+**不是「碰巧没触发」，是有明确的排除机制。**
+
+`tests/e2e/conftest.py:36-45` 给该目录下所有用例动态补两个标记：
+
+```python
+E2E_MARKS = [pytest.mark.requires_service, pytest.mark.domain_e2e]
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        if here in Path(item_path).parents:
+            for mark in E2E_MARKS:
+                item.add_marker(mark)
+```
+
+而 `scripts/test.sh:54` 的 fast 套件过滤条件是：
+
+```bash
+run_fast() { run_pytest -m "not slow and not requires_service and not domain_migration" "$@"; }
+```
+
+⇒ **`requires_service` 在 fast 套件里被排除**，e2e 用例根本不参与 fast 收集，所以裸名 `import conftest` 不会被执行。
+
+**触发条件收窄为**：显式跑 e2e 域（`bash scripts/test_isolated.sh e2e`）或 `--scope all` 时，`tests/e2e/` 与其它无 `__init__.py` 的目录被同时收集 ⇒ 裸名 `import conftest` 可能拿到别的目录的模块对象。
+
+⇒ **风险等级：中等偏低但非零。** e2e 目录是全仓唯一「同名 conftest + 无 `__init__.py` + 大量裸名 import + 会被显式单独运行」四项特征齐备的目录。
 
 ---
 
@@ -197,6 +225,8 @@ storage(有)  support  sync_worker(有)
 
 > ⚠ 实测确认：`from tests.e2e import conftest` 在 `tests/e2e/` **没有** `__init__.py` 时会失败（`tests.e2e` 不是包）。**所以这一层仍需要 `tests/e2e/__init__.py`。**
 
+> 📌 **触发条件收窄（实测）**：这处裸名 import 在 fast 套件里**不会被执行** —— `tests/e2e/conftest.py` 给该目录所有用例动态补了 `requires_service` 标记（`E2E_MARKS`），而 fast 的过滤条件是 `-m "not slow and not requires_service and not domain_migration"`。它只在**显式跑 e2e 域或 `--scope all`** 时才成为风险。因此第 1 层的紧急度中等，不必抢在其它工作前面，但**不能不做** —— e2e 是全仓唯一四项特征齐备的目录。
+
 **第 2 层（必须做）：给 `tests/e2e/` 加 `__init__.py`，并同步修该目录内的裸名 import**
 
 | 需改 | 位置 | 改成 |
@@ -270,7 +300,7 @@ bash scripts/test_baseline.sh --scope fast --base <base_sha>
 ## 7. 遗留风险（即使实施 C 也存在）
 
 1. **8 个同名 conftest 仍在**。C 只是消除了触发条件，没有消除同名本身。将来若有人写裸名 import，护栏能挡，但护栏本身也可能被绕过（`# noqa`、动态 import）。
-2. **`tests/e2e/` 是最脆弱的一个**：它同时具备「有同名 conftest」「无 `__init__.py`」「10 处裸名 `from conftest import`」「被 `domain_e2e` marker 标记、可能与其余目录同时收集」四个特征。**建议把 `tests/e2e/` 成包列为第一优先**，即使暂不做全仓成包。
+2. **`tests/e2e/` 是最脆弱的一个**，四个特征齐备：① 有同名 `conftest.py` ② 无 `__init__.py` ③ 有 10 处 `from conftest import` + 1 处 `import conftest` ④ 会被显式单独运行（`bash scripts/test_isolated.sh e2e` / `--scope all`）。**缓解事实**：fast 套件用 `requires_service` 把它排除了，所以日常 fast 基线跑不到它。**建议把 `tests/e2e/` 成包列为第一优先**，即使暂不做全仓成包。
 3. `tests/api/`、`tests/proxy/`、`tests/` 根虽无跨目录 import，但**同名 conftest 共存**这一事实本身在 importlib 之外仍脆弱。
 
 ---
@@ -289,6 +319,9 @@ bash scripts/test_baseline.sh --scope fast --base <base_sha>
 | 8 | importlib 收集：同上 + `--import-mode=importlib` | **EXIT=4**，`ModuleNotFoundError: No module named 'render_support'`（`tests/browser/conftest.py:33`），收集结果行数 **0** |
 | 9 | 成包收集：`touch tests/browser/__init__.py tests/e2e/__init__.py` 后同上 | **EXIT=4**，`ModuleNotFoundError: No module named 'test_spu_price_columns'`（`tests/browser/test_spu_react_workspace.py:16`），`Interrupted: 1 error during collection` |
 | 10 | 实验清理 | 两个 `__init__.py` 已删除，`git status` 恢复为仅 5 个预期改动文件 |
+| 11 | e2e 的标记注入机制 | `tests/e2e/conftest.py:36-45` | `E2E_MARKS = [pytest.mark.requires_service, pytest.mark.domain_e2e]`；`pytest_collection_modifyitems` 按路径给该目录用例补标记 |
+| 12 | fast 套件的 marker 过滤 | `scripts/test.sh:54` | `run_fast() { run_pytest -m "not slow and not requires_service and not domain_migration" "$@"; }` ⇒ e2e 用例**不进 fast 收集** |
+| 13 | 选测器对 `tests/e2e/` 的处理 | `scripts/_test_selection.py:263` | `return "explicit smoke change; validate affected smoke separately in its approved environment"` —— e2e 改动**不进自动门禁** |
 
 **未执行**：未跑完整 fast 基线（HP desk 当时有别的 lane 在跑 `--scope auto`）；未实施任何解法（Chief 明确本轮只出结论）。
 
