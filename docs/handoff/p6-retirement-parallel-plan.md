@@ -45,7 +45,22 @@ P6 最适合并行，因为退役对象是**文件**，天然可以按页面组�
 
 ## 三、三个 lane 的写域
 
-### lane A —— 退役路由与共享资源（由 lane A owner 写）
+### 3.0 实测补充：退役还牵涉 19 个测试文件（2026-11-08 21:30 核实）
+
+原方案只列了生产代码，**漏了测试侧**。实测：`tests/` 下有 **19 个文件、39 处**引用旧模板或旧脚本。
+
+这些引用分两类，**不能一刀切删除**：
+
+| 类型 | 例子 | 处置 |
+| --- | --- | --- |
+| **旧实现断言**（只对旧代码成立，React 版本已用行为测试覆盖） | `tests/api/test_pages.py:98` 读 `intercept-configs.html` 检查样式表顺序；`tests/publishing/test_contracts.py:262` 读 `video-publish.html` 检查文案 | 删除，或改写为对 React 组件的行为断言 |
+| **仍有效的契约**（约束的是接口/路由行为，不是旧文件本身） | `tests/api/test_middleware.py:310` 检查 `/static/js/console.js` 静态可达；`tests/browser/conftest.py:448` 的 `_render_pages` 辅助 | 改写为对 React 页面的等价断言，或保留对应资产 |
+
+`tests/browser/conftest.py` 的 `_render_pages()` 直接 import `_render_page` 并渲染旧模板给浏览器测试用——这是**渲染依赖**，删模板前必须先改它。
+
+**已知等价覆盖**：video-publish 的旧 JS 源码字符串断言（幂等 `clientRequestId`、`If-None-Match`、`AbortController`、5 秒刷新节奏）在 `frontend/src/pages/video-publish/index.test.tsx` 已有 700+ 行**行为级测试**覆盖，比源码字符串断言更强。这类可以直接删旧断言。
+
+### 3.1 lane A —— 退役路由与共享资源（由 lane A owner 写）
 
 **独占写域：**
 - `tts_erp_v2/api/v2/pages.py`
@@ -60,6 +75,32 @@ P6 最适合并行，因为退役对象是**文件**，天然可以按页面组�
 4. 清理无消费者的 `vendor/` 资源
 
 **顺序约束：** 本 lane 的第 3 步依赖 lane B 删除 manual-costs 模板后开始。
+
+**已有进展（Chief 于 2026-11-08 完成，待合并）**：
+
+第 1 步已实现并落盘，用一次性脚本 `scripts/oneoff_p6_collapse_migrated_routes.py` 做精确片段替换
+（该脚本逐条断言片段在源码中唯一存在，避免正则跨行匹配的脆弱性）：
+
+- `tts_erp_v2/api/v2/pages.py`：14 处双路分支收敛为单一 `render_frontend_page(request, "<page>")`
+- `tts_erp_v2/api/v2/ad_daily.py`：1 处（该页旧 HTML 内联在 Python 里，形态与其它页不同）
+- 合计 15 处，`git diff --stat` 为 2 文件 +15 / -83 行
+- 收敛后 `_render_page` 零调用，`MIGRATED_PAGE_IDS` 条件分支全部消失
+
+**语义变化（重要）**：`MIGRATED_PAGE_IDS` 的含义从「哪些页面用 React / 其余回落旧 renderer」
+收敛为「**哪些页面已迁移**」——不再兼任回落开关。依据：
+
+- `accounts.pages.PAGES` 注册的 **18 个页面全部已迁移**（`login` 由 `auth.py` 的独立分支拥有，不在注册表里）
+- 因此「未迁移页面走旧 renderer」这个能力**已无真实使用者**，旧 Jinja renderer 可以整体退役
+
+**受影响的测试**：`tests/api/test_frontend_pages.py::test_non_migrated_route_keeps_legacy_renderer`
+用 `activated` fixture 缩小迁移集合来模拟「未迁移」状态，收敛后该能力不存在，测试失败。
+已替换为 `test_every_registered_page_is_migrated`：断言注册页面集合 ⊆ `MIGRATED_PAGE_IDS`，
+且每个注册页面确实由 React renderer 渲染（响应含 `frontend-bootstrap`）。
+
+**`MIGRATED_PAGE_IDS` 本身保留**，它仍是以下几处的唯一接线：
+- `tts_erp_v2/api/v2/auth.py:130`（登录页分支）
+- `tests/browser/conftest.py:589`（跳过未迁移页面的浏览器 fixture）
+- 多个浏览器测试的成员断言
 
 ### lane B —— 旧模板退役（基础设置组）
 

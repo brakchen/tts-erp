@@ -452,12 +452,9 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
     from tts_erp_v2.access import AccessGrant, AuthMode, Role
     from tts_erp_v2.api.v2 import frontend_pages
     from tts_erp_v2.api.v2.ad_daily import ad_daily_page
-    from tts_erp_v2.api.v2.pages import (
-        _render_page,
-    )
 
     effective = frontend_pages.MIGRATED_PAGE_IDS if migrated is None else migrated
-    for slug, tpl in _PLAIN.items():
+    for slug in _PLAIN:
         if slug in effective:
             for prefix in ("", "/tts"):
                 request = Request(
@@ -468,8 +465,11 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
                 name = ("tts-" if prefix else "") + slug
                 (out / f"{name}.html").write_bytes(resp.body)
         else:
-            resp = _render_page(tpl, current_page=slug)
-            (out / f"{slug}.html").write_bytes(resp.body)
+            # Every registered page is migrated; the legacy Jinja renderer is
+            # retired with P6, so an unmigrated page has no owner to render.
+            raise AssertionError(
+                f"page {slug!r} is not migrated and has no legacy renderer owner"
+            )
     for slug in _SPU_PAGES:
         for prefix in ("", "/tts"):
             request = Request(
@@ -478,9 +478,14 @@ def _render_pages(out: Path, *, migrated: frozenset[str] | None = None) -> None:
             response = frontend_pages.render_frontend_page(request, slug)
             name = ("tts-" if prefix else "") + slug
             (out / f"{name}.html").write_bytes(response.body)
-    (out / f"{_ALERT_SLUG}.html").write_bytes(
-        _render_page(f"{_ALERT_SLUG}.html", current_page=_ALERT_SLUG).body
-    )
+    for prefix in ("", "/tts"):
+        request = Request(
+            {"type": "http", "root_path": prefix, "path": f"/v2/pages/{_ALERT_SLUG}",
+             "access_grant": AccessGrant(mode=AuthMode.ENFORCE, role=Role.ADMIN)}
+        )
+        response = frontend_pages.render_frontend_page(request, _ALERT_SLUG)
+        name = ("tts-" if prefix else "") + _ALERT_SLUG
+        (out / f"{name}.html").write_bytes(response.body)
     request = Request({"type": "http", "root_path": "", "path": "/v2/pages/ad-daily"})
     (out / "ad-daily.html").write_bytes(ad_daily_page(request).body)
 
