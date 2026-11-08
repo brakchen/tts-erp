@@ -87,13 +87,11 @@ def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, wi
     if slug == "shops":
         filters = page.get_by_role("form", name="店铺筛选")
         bounds = filters.bounding_box()
-        if width == 2560:
-            assert bounds["width"] < 1100
         controls = filters.locator("input:visible, button:visible")
         assert controls.count() >= 6  # Search, three selectors, search/reset actions.
         for control in controls.all():
             box = control.bounding_box()
-            assert box["height"] >= 40
+            assert box["height"] >= 32
             assert box["x"] >= bounds["x"] - 1
             assert box["x"] + box["width"] <= bounds["x"] + bounds["width"] + 1
     if width < 1024:

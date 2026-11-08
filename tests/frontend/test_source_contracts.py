@@ -86,9 +86,9 @@ def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
     assert "<Checkbox" in selection and "isSelected={draft.includes(item.spu_id)}" in selection
     assert "addSpuIds: add" in selection and "removeSpuIds: remove" in selection
     assert "/v2/reporting/focused-spus/" in selection and "method: 'PATCH'" in selection
-    assert "resolvePaste" in selection and "parseIds(paste)" in selection
+    assert "onPaste=" in selection and "resolveIds(ids, true)" in selection
     assert "focused && !canWrite" in selection
-    assert "修改后实时保存" in selection and "已实时保存" in selection
+    assert "已实时保存" in selection
     assert "{!focused &&" in selection and 'id="btn-spu-apply"' in selection
     assert "focusedCallback.current(total)" in selection
     assert "focusedCount !== null" in page

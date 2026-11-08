@@ -399,6 +399,8 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     if path.endswith("/v2/media/assets"):
         return {"items": [], "total": 0, "limit": 24, "offset": 0}
     if path.endswith("/v2/media/digital-humans"):
+        if "cursor" in parse_qs(query, keep_blank_values=True):
+            return {"items": [], "total": 0, "nextCursor": None}
         return []
     if path.endswith("/v2/video-publish/config"):
         return {
