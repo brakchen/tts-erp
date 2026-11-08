@@ -1103,7 +1103,7 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     button(dialog(page), "新建素材包").click()
     pack_name = run.name("video_pack")
     dialog(page).get_by_label("包名称").fill(pack_name)
-    dialog(page).get_by_role("checkbox", name=filename, exact=True).check()
+    set_checkbox(page, filename, True)
     assert gate.calls["POST", PACKS] == 0 and run.links(human_id) == set()
     button(dialog(page), "创建素材包").click()
     button(main(page), "打开素材包 " + pack_name).click()
