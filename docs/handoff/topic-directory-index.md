@@ -116,7 +116,18 @@
 
 **因此本索引的处理方式：** §5 该行只写「读侧已退役、写侧仍在运行、快照表无读取方」，**不写「已归档」**。旧方案文档本身也不移入 `docs/archive/`——归档状态与实际运行状态不符，比不归档更危险。
 
-**待 Chief / 运维决定的一个残留风险（不属于文档范畴，但影响是否停写）：** 开发工程师 2026-11-08 核查生产形状库时发现，该 config key 的 `published_version` 为空、`runtime_config_revisions` 表无该 key 的任何 revision，只有 `draft_version=1`，实际生效的是代码内 `SEED_FALLBACK_CONFIG`（回测暂定、enabled=true），落库 `effective_config_source=seed_fallback`。即：**这套阈值从未被人正式 publish，却每天在生产上产出判定，而快照表已无读取方。** 是否停写、是否归档，等该决定做出后再更新本行。
+**待决事项 —— 旧 evaluator 是否停写（2026-11-08：状态 = 待决，用户尚未确认）**
+
+开发工程师 2026-11-08 核查生产形状库时发现，该 config key 的 `published_version` 为空、`runtime_config_revisions` 表无该 key 的任何 revision，只有 `draft_version=1`，实际生效的是代码内 `SEED_FALLBACK_CONFIG`（回测暂定、enabled=true），落库 `effective_config_source=seed_fallback`。即：**这套阈值从未被人正式 publish，却每天在生产上产出判定，而快照表已无读取方。**
+
+| 事项 | 当前状态 |
+| --- | --- |
+| 旧 evaluator 是否停写（撤销 scheduler 注册 / 停跑该 job） | **待决** —— 属产品/运维授权动作，**本索引不预设结论** |
+| 旧方案文档是否归档 | **待决** —— 归档与「写侧是否仍运行」联动，不能先于停写决定 |
+| 阈值配置是否补一次正式 publish | **待决** —— 若不停写，需决定是把 `SEED_FALLBACK_CONFIG` 正式发布，还是承认它只是回测暂定值 |
+
+**处置纪律（无论最后怎么定）：** 决定落地前，本文与 PRD 01 一律按「读侧已退役、写侧仍在运行」表述；
+**不写「已归档」**，也不写「已废弃」。决定做出并落地后，再回填本表并同步 §5 该行。
 
 ---
 
