@@ -434,6 +434,23 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
     return {"items": [], "total": 0, "options": [], "configs": [], "jobs": []}
 
 
+def _canned_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
+    """Resolve the canned payload from the canonical fixture module.
+
+    ``tests/`` has no ``__init__.py``, so pytest imports this file twice: once
+    under the bare basename ``conftest`` (the module that owns the HTTP
+    handler below) and once as ``tests.browser.conftest`` (the object the
+    ``browser_conftest`` fixture hands to test modules). Test modules patch
+    ``_mock_payload`` on the module the fixture returns, so the handler has to
+    read the attribute from that same object — reading its own module global
+    silently ignores the patch and serves the unpatched payload, which makes
+    every patched fixture look like "the page never received the data".
+    """
+    from tests.browser import conftest as canonical
+
+    return canonical._mock_payload(path, query)
+
+
 def _intercept_record(request_id: str) -> dict[str, Any]:
     return {
         "request_id": request_id, "method": "GET", "endpoint_host": "api.example.test",
@@ -502,7 +519,7 @@ class _Handler(BaseHTTPRequestHandler):
         if length:
             self.rfile.read(length)
         path = self.path.split("?", 1)[0]
-        self._send(json.dumps(_mock_payload(path)).encode("utf-8"), _MIME[".json"])
+        self._send(json.dumps(_canned_payload(path)).encode("utf-8"), _MIME[".json"])
 
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
@@ -524,7 +541,7 @@ class _Handler(BaseHTTPRequestHandler):
                                   _MIME.get(target.suffix, "application/octet-stream"))
         if path.startswith("/v2/") or path == "/healthz":
             query = self.path.split("?", 1)[1] if "?" in self.path else ""
-            payload = _mock_payload(path, query)
+            payload = _canned_payload(path, query)
             body = json.dumps(payload).encode("utf-8")
             headers = {"X-Total-Count": str(len(payload))} if path.endswith("/channel-accounts") and isinstance(payload, list) else {}
             return self._send(body, _MIME[".json"], headers)
@@ -630,6 +647,9 @@ def browser_conftest() -> ModuleType:
 
     Import the module by its package path instead, exactly as the browser
     test modules already do (``from tests.browser import conftest as ...``).
+    That object is a second module instance of this same file, so the HTTP
+    handler resolves ``_mock_payload`` through ``_canned_payload`` to keep
+    reading the attribute from this very object.
     """
     from tests.browser import conftest as this_module
 
