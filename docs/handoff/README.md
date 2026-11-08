@@ -6,6 +6,7 @@ The **tower-do board is the only live task and lane registry**. Do not maintain 
 - Use the permanent `lane-registry` task's message thread for lane ownership, child reservations and the ready queue.
 - Read [the canonical Git workflow](../guides/agent-git-workflow.md) for the record schema, read-only projection, identity/handoff checks and integration rules.
 - [ACTIVE.md](ACTIVE.md) remains only as a relocation notice for older sessions and links.
+- [topic-directory-index.md](topic-directory-index.md) is the navigation index for `docs/<主题>/01..04` four-part topic directories. It holds no live status.
 
 This checkout's board is host-local; another worktree or machine does not automatically share it. Do not confuse ordinary task completion with validated lane readiness. Preserve foreign WIP and all production/test safety boundaries.
 
