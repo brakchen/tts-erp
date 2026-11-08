@@ -58,8 +58,7 @@ schan
 /home/schan
 ```
 
-- 连不上先确认走的是 `hp-desk` 这个 alias（`~/.ssh/config` 里已配 `schan@192.168.1.2`）。
-- 旧地址 `192.168.47.129` 已失效，不要再用。
+- 连不上先确认走的是 `hp-desk` 这个 alias（`~/.ssh/config` 里已配 `schan@192.168.1.2`）；旧机器已下线，不要再用旧 IP 直连。
 - 登录后 `pwd` 应是 `/home/schan`，仓库在 `/home/schan/tts-erp`。
 
 ---
