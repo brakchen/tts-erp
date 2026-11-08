@@ -30,6 +30,36 @@
 ssh hp-desk
 ```
 
+### 模板库刷新依赖生产 schema 源（2026-11-08 实测）
+
+`scripts/test_isolated.sh --refresh-template` 需要一个**生产形状库**的只读连接串来取当前 alembic 版本和 schema。查找顺序（`scripts/test_isolated.sh` 的 `source_prod_url()`）：
+
+1. 环境变量 `TTS_ERP_DB_URL_PROD_SOURCE`
+2. 仓库根目录 `.env` 的 `TTS_ERP_DB_URL`
+3. 上级目录 `../../.env` 的 `TTS_ERP_DB_URL`
+
+**HP desk 当前没有 `.env`**，所以刷新路径不可自助执行。
+
+**但当前模板库不陈旧**，无需刷新。2026-11-08 实测比对：
+
+| 库 | alembic 版本 | 表数 |
+| --- | --- | --- |
+| `tts_erp`（生产形状） | `0076_media_packs` | 306 |
+| `tts_erp_test_template` | `0076_media_packs` | 306 |
+
+两者一致，且与仓库最新 migration（`alembic/versions/0076_media_packs.py`）三方对齐。
+
+**注意**：`.env.test` 里的 `TTS_ERP_DB_URL` 和 `TTS_ERP_DB_URL_TEST` 都指向 `tts_erp_v3_test`，**不是生产形状库**，不能用来充当刷新源。
+
+**何时需要处理**：当仓库新增 migration（`alembic/versions/`）而模板库版本落后时，必须先解决生产 schema 源问题，否则 `--refresh-template` 必然失败。届时需要运维提供一条**只读**的生产形状库连接串，写入 HP desk 的 `.env`。
+
+### 残留临时库清理
+
+崩溃或中断的测试会留下 `tts_erp_test_<branch>_<session>_<时间戳>_<pid>` 形态的临时库（正常流程跑完会自动 drop）。2026-11-08 清点：22 个非 template 残留库 + 9 个 `*_template_*` 基线库，合计约 432 MB。
+
+- **可删**：非 template 残留库。删除前确认 `pg_stat_activity` 中无连接，且无正在运行的 `test_isolated.sh` 进程。
+- **不可删**：`tts_erp_test_template` 及所有 `*_template_*` 库（`template_ads_ack`、`template_price_data`、`template_price_e2e`、`template_spu_compare_0069`、`video_publish_v1x/v2x_template`、`monitor_health_template` 等），它们是其他 lane 的测试基线。
+
 ## v2 进程托管
 
 v2 由 systemd user 单元托管（`~/.config/systemd/user/`，`Linger=yes`，开机自启）：
