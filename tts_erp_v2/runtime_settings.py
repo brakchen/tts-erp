@@ -187,6 +187,32 @@ class RuntimeSettings:
                 return runtime_map[name]
             return os.environ.get(name, default)
 
+    def get_with_source(
+        self, name: str, default: str | None = None
+    ) -> tuple[str | None, str]:
+        """Return ``(value, source)`` — source is one of
+        ``dotenv`` / ``runtime_file`` / ``process_env`` / ``default``.
+
+        2026-11-09：暴露本模块的来源判定，供核对工具**消费事实**而不是
+        **复制规则**（通则 22：验证工具不得复制被验证的规则）。
+
+        与 :meth:`get` 共用 :meth:`_source_maps`，**不复制优先级链**；
+        行为与 :meth:`get` 完全一致，只是多返回来源。
+
+        ``dotenv`` 与 ``runtime_file`` 的具体路径由 :meth:`_source_maps`
+        决定（含 ``TTS_ERP_DOTENV_FILE`` 优先于 cwd 隐式默认、
+        ``.env`` 里的 ``TTS_ERP_RUNTIME_ENV_FILE`` 优先于进程环境）。
+        """
+        with self._lock:
+            dotenv_map, runtime_map = self._source_maps()
+            if name in dotenv_map:
+                return dotenv_map[name], "dotenv"
+            if name in runtime_map:
+                return runtime_map[name], "runtime_file"
+            if name in os.environ:
+                return os.environ[name], "process_env"
+            return default, "default"
+
     def revision(self) -> int:
         """Refresh file signatures and return the monotonic config revision."""
         with self._lock:
@@ -230,6 +256,16 @@ _settings = RuntimeSettings()
 
 def get_setting(name: str, default: str | None = None) -> str | None:
     return _settings.get(name, default)
+
+
+def get_setting_with_source(
+    name: str, default: str | None = None
+) -> tuple[str | None, str]:
+    """Module-level twin of :meth:`RuntimeSettings.get_with_source`.
+
+    2026-11-09：供核对工具消费 owner 的来源判定，避免工具自建第二套链。
+    """
+    return _settings.get_with_source(name, default)
 
 
 def config_revision() -> int:
