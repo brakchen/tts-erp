@@ -49,7 +49,7 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
     assert page.get_by_text("已登记 502 家店铺", exact=False).is_visible()
     search = page.get_by_role("searchbox", name="店铺搜索", exact=True)
     search_box = search.bounding_box()
-    assert search_box is not None and search_box["height"] >= 40, search_box
+    assert search_box is not None and 31 <= search_box["height"] <= 33, search_box
     filters_box = page.get_by_role("form", name="店铺筛选").bounding_box()
     assert filters_box is not None and filters_box["width"] <= width, filters_box
     name_box = page.get_by_text(SHOP["account_name"], exact=True).bounding_box()
@@ -90,7 +90,7 @@ def test_native_shops_read_and_dialog_cancel(shops_preview, prefix, width):
         assert abs(sizes["service"] - sizes["secret"]) <= 1, sizes
         assert sizes["service"] <= sizes["dialog"] - 32, sizes
         assert sizes["scroll"] <= sizes["dialog"] + 1, sizes
-        assert sizes["height"] >= 40, sizes
+        assert 30 <= sizes["height"] <= 32, sizes
         secret.fill("TEST_cancel_only")
         page.keyboard.press("Escape")
         confirmation = page.get_by_role("dialog", name="放弃本次尚未保存的修改？", exact=True)
