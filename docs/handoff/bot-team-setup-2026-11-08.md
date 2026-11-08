@@ -198,6 +198,8 @@ MiniMax Bot 对**同一个 Bot** 的多个任务不会并行——排队等前�
 | `--scope auto` 的假绿 | ✅ | 空计划时 driver 直接 exit 0。已在 `docs/guides/agent-testing.md` 写明「要看 master 真实状态就跑 `--scope fast`」 |
 | 多目录 conftest 冲突 | ✅ | `tests/` 无 `__init__.py`，8 个同名 `conftest.py` 按 basename 导入互相覆盖。`browser_conftest` 改用包路径导入 |
 | `--surface-secondary` 未声明 | ✅ | React 侧真实 CSS 缺陷（全仓唯一未声明令牌），已在 `tokens.css` 补齐 |
+| 前端旧资产未退役 | ✅ | 12 模板 + 12 脚本 + 4 旧 CSS + 9 个无消费者 vendor 副本全部删除 |
+| P6 退役无护栏 | ✅ | `tests/api/test_retired_frontend_assets.py`，7 条结构性断言，红→绿双向验证 |
 
 **已知的存量问题**：HP desk 上有 **43 个既有 worktree** 处于「有 vitest、缺 semver」状态（按旧 lock 装过 `node_modules`，但代码已前进到需要 `semver`）。这些 worktree 里跑前端测试会报 `ERR_MODULE_NOT_FOUND`。修复方式是在各自 worktree 内跑 `npm ci`（或 `prepare-worktree.sh`），逐个处理，未批量清理。
 
