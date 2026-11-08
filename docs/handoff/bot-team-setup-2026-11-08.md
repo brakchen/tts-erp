@@ -143,7 +143,7 @@ bash scripts/envsetup/install-test-deps.sh --check      # 前置依赖体检
 | --- | --- |
 | `MIGRATED_PAGE_IDS` 已含 19 项 | `tts_erp_v2/api/v2/frontend_pages.py`（18 个注册页 + `login`） |
 | `PAGES` 注册 **18** 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
-| 19 个页面目录有真实 React/TS 代码，约 1.4 万行 | `frontend/src/pages/` |
+| 20 个页面目录有真实 React/TS 代码，约 1.4 万行 | `frontend/src/pages/`（18 注册页 + `login` + `message` / `oauth-onboard`；`spu-profitability` 被 `spu-roi` 与 `focused-spus` 共用） |
 | 12 个旧 Jinja 模板 + 13 个旧 JS 脚本仍在 | `tts_erp_v2/templates/pages/`、`tts_erp_v2/static/js/` |
 | 旧 renderer 分支仍在 | `tts_erp_v2/api/v2/pages.py` |
 
