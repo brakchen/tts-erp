@@ -114,6 +114,7 @@ P6 退役与收口全部落地：**21 个提交，60 个文件，净删 8800 行
 | --- | --- | --- |
 | 删旧模板/旧脚本 | ✅ | 12 模板 + 12 脚本全删（`console.js` 保留） |
 | 删旧 CSS | ✅ | `ad-daily` / `runtime-configs` / `sync-jobs` / `spu-profit-deterioration` 已删（-670 行）；`video-publish.css` 有活契约测试，保留 |
+| 清理 vendor | ✅ | uPlot / JSONEditor / Tom Select 的 vendored 副本删除（9 文件、-1665 行）；保留 `bootstrap.min.css` 与 `tabulator.min.{js,css}` |
 | `_render_page` 与 Jinja 环境 | ✅ | 已删；`_sidebar` / `_sidebar_css` / `_SIDEBAR_CSS` / `_SIDEBAR_TOGGLE_JS` 按 `docs/design/reuse-evaluation-2026-10.md` 决定保留 |
 | 路由收敛 | ✅ | 15 处双路分支 → 单一 `render_frontend_page` |
 | P6 退役护栏 | ✅ | `tests/api/test_retired_frontend_assets.py`，7 条结构性断言，红→绿已验证 |
