@@ -3965,13 +3965,13 @@ def test_spu_roi_page_toolbar_shop_and_date_filters(api_client, readonly_key):
     assert 'type="date"' in page and 'aria-label="快捷日期范围"' in page
     assert "起始日期不能晚于截止日期" in page
     assert page.index('id="filter-w-start"') < page.index("<Selection ")
-    for hook in ("filter-spu-ids", "spu-selection-count", "btn-spu-apply", "btn-spu-clear"):
+    for hook in ("filter-spu-ids", "spu-search-input", "btn-spu-apply", "btn-spu-clear"):
         assert hook in selection
     assert "/v2/commerce/channel-product-options" in selection
-    assert "批量粘贴" in selection and "onApply(draft)" in selection and "onApply([])" in selection
+    assert "onPaste=" in selection and "onApply(draft)" in selection and "onApply([])" in selection
     assert page.count('id="filter-limit"') == 1
     assert page.index('id="filter-limit"') > page.index("<ProfitabilityTable ")
-    assert 'aria-label="SPU ROI 分页"' in page
+    assert '<OffsetPagination label="SPU ROI 分页"' in page
     assert "tom-select" not in body and "bootstrap.min" not in body
     for forbidden in ("onchange=", "onclick=", "onsubmit="):
         assert forbidden not in body
@@ -4256,32 +4256,24 @@ def test_spu_roi_filter_actions_keep_a_stable_mobile_layout():
     selection = _react_profitability_source("Selection.tsx")
     css = _react_profitability_source("profitability.css")
     assert 'className="erp-spu-selection-search"' in selection
-    assert ".erp-spu-selection-search" in css and "width: min(100%, 480px)" in css
+    assert ".erp-spu-selection-search" in css and ".erp-spu-selection-field" in css
     assert "flex-wrap: wrap" in css
     actions = selection.split('id="btn-spu-apply"', 1)[1].split("</div>", 1)[0]
     assert 'id="btn-spu-clear"' in actions and "onApply([])" in actions
     assert "onApply(draft)" in actions
-    assert 'id="spu-selection-count"' in selection
+    assert 'id="spu-search-input"' in selection
     assert "min-w-0" in selection and "break-all" in selection
     assert "按 Ctrl" not in selection
 
 
-def test_spu_roi_pagination_uses_bootstrap_page_navigation():
-    """One HeroUI action group owns page count, page size and previous/next."""
+def test_spu_roi_pagination_uses_shared_heroui_navigation():
+    """SPU applies offsets and page size through the shared HeroUI pager."""
     page = _react_profitability_source("index.tsx")
-    pagination = page.split('<nav className="erp-profit-pagination"', 1)[1].split("</nav>", 1)[0]
-    assert 'aria-label="SPU ROI 分页"' in pagination
-    assert pagination.count('id="filter-limit"') == 1
-    assert 'id="pager-label"' in pagination
-    assert "上一页" in pagination and "下一页" in pagination
-    assert "offset: Math.max(0, query.offset - query.limit)" in pagination
-    assert "offset: query.offset + query.limit" in pagination
-    assert "query.offset === 0" in pagination
-    assert "query.offset + query.limit >= data.total" in pagination
-    assert "query.offset / query.limit" in page and "data.total / query.limit" in page
-    assert "pageSequence(currentPage, pages)" in pagination
-    assert 'aria-label="跳转页"' in pagination
-    assert "Number.isSafeInteger(page)" in pagination and "page <= pages" in pagination
+    assert '<OffsetPagination label="SPU ROI 分页"' in page
+    assert "offset={query.offset} pageSize={query.limit} total={data?.total}" in page
+    assert "onPage={(offset) => update({ offset })}" in page
+    assert page.count('id="filter-limit"') == 1
+    assert 'aria-label="跳转页"' not in page
 
 
 def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
