@@ -97,5 +97,46 @@ bash scripts/test_baseline.sh --scope auto --base "$target_sha"
 
 - `tts_erp_v2/api/v2/pages.py`：14 处双路分支 → 单一 `render_frontend_page`
 - `tts_erp_v2/api/v2/ad_daily.py`：1 处（该页旧 HTML 内联在 Python）
-- `tests/browser/conftest.py`：3 处 → React renderer
+- `tests/browser/conftest.py`：3 处 → React renderer；另修复多目录 `conftest` basename 冲突
+- `tests/browser/test_render_smoke.py`：告警页就绪信号改用共享 `wait_canned_page`
+- `tests/render_support.py`：字体白名单不再要求三套栈互不相同
+- `tests/frontend/test_style_tokens.py`：检查对象迁到 React 样式源；区分设计令牌与组件作用域令牌
+- `tts_erp_v2/static/css/tokens.css`：补齐未声明的 `--surface-secondary`
 - `scripts/oneoff_p6_collapse_migrated_routes.py`：一次性转换脚本（逐条断言片段唯一存在）
+
+**测试侧清理**（分支 `feature/p6-retire-legacy-assets`）：21 个文件，+200/-1974。
+A 类旧实现断言已删，C 类正向断言已保留并扩展为「不含任何已退役脚本名」
+（名单集中在 `tests/support/retired_frontend_assets.py`）。
+
+---
+
+## 六、还剩什么：删文件
+
+| 类型 | 文件 | 数量 |
+| --- | --- | --- |
+| 旧 Jinja 模板 | `tts_erp_v2/templates/pages/*.html` | 12 |
+| 旧页面脚本 | `tts_erp_v2/static/js/*.js`（**除 `console.js`**） | 12 |
+| `_render_page` 辅助函数 + Jinja 环境初始化 | `tts_erp_v2/api/v2/pages.py` | — |
+
+**`console.js` 本轮不删**：它挂在 `app.py` 的 public static mount 上，是公共静态资源而非页面资产，
+`tests/api/test_middleware.py` 仍在断言它可达。
+
+**执行顺序**：测试侧清理已完成 → 可以删文件了。删完必须跑一次 `fast` 全套确认零失败。
+
+**删除前的强制检查**（每个文件都要过）：
+```bash
+git grep -n "dashboard.html" -- tts_erp_v2/ tests/
+git grep -n "dashboard.js" -- tts_erp_v2/ tests/
+```
+
+---
+
+## 七、本轮发现的真实缺陷（不属于 P6，但被 P6 的断言扩展暴露）
+
+**`--surface-secondary` 未声明**（`c2089bb` 引入）：
+`frontend/src/pages/media-assets/media-workspace.css` 的第 70、104 行引用了 `var(--surface-secondary)`，
+但全仓没有任何声明——浏览器会把它解析成无效值，这两个元素的背景色实际是透明的。
+全仓扫描确认这是**唯一**一个未声明的 CSS 令牌。已在 `tokens.css` 的 surface 组补
+`--surface-secondary: #E9EEE7`（与既有的 `--default` 同色）。
+
+**教训**：旧断言只检查旧模板，React 侧的 CSS 契约从未被覆盖过。
