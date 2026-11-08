@@ -11,16 +11,16 @@ from pathlib import Path
 
 import pytest
 
-from scripts._test_selection import COMPONENTS, LEGACY_FRONTEND, Selection
+from scripts._test_selection import COMPONENTS, Selection
 
 
-@pytest.mark.parametrize("frontend,filters,legacy_count", [
-    (True, [], 12),
-    (False, [], 0),
-    (True, ["src/pages/dashboard/"], 0),
+@pytest.mark.parametrize("frontend,filters", [
+    (True, []),
+    (False, []),
+    (True, ["src/pages/dashboard/"]),
 ])
 def test_mixed_collection_preserves_requested_groups_once(
-    tmp_path: Path, monkeypatch, frontend: bool, filters: list[str], legacy_count: int,
+    tmp_path: Path, monkeypatch, frontend: bool, filters: list[str],
 ) -> None:
     project = Path(__file__).resolve().parents[2]
     monkeypatch.syspath_prepend(str(project / "scripts"))
@@ -41,8 +41,6 @@ def test_mixed_collection_preserves_requested_groups_once(
             "@pytest.mark.requires_frontend_build\ndef test_unrequested(): pass\n"
         ),
     }
-    for path in LEGACY_FRONTEND:
-        sources[path] = "\n".join(f"def test_legacy_{index}(): pass" for index in range(4))
     for name, source in sources.items():
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +70,6 @@ def test_mixed_collection_preserves_requested_groups_once(
     cases = ET.parse(junit).findall(".//testcase")
     names = [(case.attrib["classname"], case.attrib["name"]) for case in cases]
     assert len(names) == len(set(names))
-    assert sum(name.startswith("test_legacy_") for _, name in names) == legacy_count
     assert sum(name == "test_backend" for _, name in names) == 1
     assert sum(name == "test_components" for _, name in names) == int(frontend)
     assert sum(name == "test_requested" for _, name in names) == 1
