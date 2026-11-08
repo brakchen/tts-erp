@@ -68,8 +68,11 @@
 - `tts_erp_v2/api/v2/ad_daily.py`：广告日明细的旧 HTML 曾内联在 Python 里。**2026-11-08 更正：该内联 HTML 已删除**（`53a98372`），该页现走 `render_frontend_page`；扫描旧实现时仍须包含本文件。
 - `tts_erp_v2/api/v2/auth.py`：登录展示已迁到 React（`frontend/src/pages/login/`）。**2026-11-08 更正：**`_LOGIN_HTML` 仅作为 `MIGRATED_PAGE_IDS` 不含 `login` 时的回落分支保留（`auth.py:132`），不再是主路径；`/auth/me` 仍提供会话信息。
 - 旧 ROI/重点 SPU 内核（曾为 `static/js/spu-profitability-page.js` 等约 3200 行页面脚本）：**2026-11-08 更正：这些旧脚本文件已不存在**，共享内核的所有权已迁到 `frontend/src/pages/spu-profitability/`；Tabulator 仍被该模块的 `ProfitabilityTable.tsx` 直接复用。「共享内核不重新分叉」的设计约束仍然有效。
-- [vendored assets](../../tts_erp_v2/static/vendor/NOTICE.md)：Bootstrap、Tabulator、Tom Select、
-  JSONEditor、uPlot 已有固定版本和许可证。
+- [vendored assets](../../tts_erp_v2/static/vendor/NOTICE.md)：**2026-11-08 更正：现只剩
+  Bootstrap 与 Tabulator 有固定版本和许可证**（分别为 `auth.py` 回落登录页与
+  `ProfitabilityTable.tsx`）。Tom Select / JSONEditor / uPlot 的 vendored 副本已删除，
+  React 侧改用 npm 依赖 `uplot`/`uplot-react`/`vanilla-jsoneditor`/`lossless-json` 与
+  HeroUI `Select`。
 - [测试指南](../guides/agent-testing.md)、[测试域](../guides/test-domains.md)、
   [浏览器布局巡检](../guides/browser-ui-layout-audit.md)、`tests/browser/conftest.py`。
 
@@ -298,7 +301,7 @@ loopback Vite client/entry 获得 HMR。React 插件需要的 Fast Refresh pream
 | P3 运维与高权限页 | `sync-jobs`、`users`、`intercept-configs`、`runtime-configs` | 对应 owner 可交接；权限和专业编辑器行为清单确认 | api_tier/页面权限不退化；配置编辑/脱敏/确认无损；专业控件归属明确 | **已完成。** `frontend/src/pages/sync-jobs/`、`users/`、`intercept-configs/`、`runtime-configs/` 均有真实实现与浏览器用例（`tests/browser/test_runtime_config_workflow.py`、`test_frontend_p2_live.py` 等）；`structured` 配置编辑归属 `vanilla-jsoneditor`。 |
 | P4 复杂经营分析 | `ad-daily`、`manual-costs`，以及一起迁移的 `spu-roi`/`focused-spus` | 表格/选择器能力验证完成，盈利口径不变 | 列/排序/筛选/钻取/精度/图片/编辑与返回定位验证；不复制盈利页面内核 | **已完成。** `frontend/src/pages/ad-daily/`、`manual-costs/`；`spu-roi` 与 `focused-spus` 迁入**共享模块** `frontend/src/pages/spu-profitability/`（`page-loader.ts` 两个 pageId 指向同一模块，未复制盈利页面内核）。Tabulator 作为窄适配由该模块 `ProfitabilityTable.tsx` 复用，仍在 `tts_erp_v2/static/vendor/`。 |
 | P5 独立专题尾部 | `spu-profit-deterioration`、`video-publish`，以及视情况最后迁移的登录展示 | 需求与实现冲突已由 owner 解决；相应专题交接 | 仅迁移确认后的有效契约，权限/状态/确认/恢复不变；登录安全不变 | **已完成。** `frontend/src/pages/spu-profit-deterioration/`、`video-publish/`、`login/`；登录走 React renderer（`auth.py` 的 `MIGRATED_PAGE_IDS` 分支），`/v2/auth/me` 会话契约未变。 |
-| P6 退役与收口 | 删除已迁移页面的旧模板/脚本/样式与无消费者的 vendor、旧 renderer/迁移集合 | 所有目标页完成并通过必要验收；消费者清单为空，不等待回退期 | 新页面只有一套骨架/客户端；无旧资源引用，无永久兼容分支，文档和测试入口完成更新 | **实施完成，已合入 `master`（`808e4f4c`）。** ①路由收敛：`api/v2/pages.py` 14 处 + `api/v2/ad_daily.py` 1 处双路分支收敛为单一 `render_frontend_page`，`_render_page` 零调用。②旧资产删除：12 个旧 Jinja 模板 + 12 个旧页面脚本、ad-daily 内联旧页面 HTML 全部删除。③测试侧退役：19 个测试文件里只对旧实现成立的断言已清除，新增 `tests/support/retired_frontend_assets.py` 作为退役护栏。④`console.js`、`static/vendor/`（13 个文件）与 `static/css/video-publish.css` 按「仍有真实消费者」保留——`console.js` 仍挂在 `app.py` 的 public static mount 上，`vendor/tabulator.*` 被 `ProfitabilityTable.tsx` 直接引用，`vendor/bootstrap.min.css` 被 `auth.py` 的回落登录页引用，`video-publish.css` 有活契约测试直接读它；**不是遗漏**。⑤仍有 4 个已无引用的旧 CSS 待清理（见 §10.2 剩余动作 4）。 |
+| P6 退役与收口 | 删除已迁移页面的旧模板/脚本/样式与无消费者的 vendor、旧 renderer/迁移集合 | 所有目标页完成并通过必要验收；消费者清单为空，不等待回退期 | 新页面只有一套骨架/客户端；无旧资源引用，无永久兼容分支，文档和测试入口完成更新 | **实施完成，已合入 `master`（`cec49a02`）。** ①路由收敛：`api/v2/pages.py` 14 处 + `api/v2/ad_daily.py` 1 处双路分支收敛为单一 `render_frontend_page`，`_render_page` 零调用。②旧资产删除：12 个旧 Jinja 模板 + 12 个旧页面脚本、ad-daily 内联旧页面 HTML 全部删除。③测试侧退役：19 个测试文件里只对旧实现成立的断言已清除；新增 `tests/api/test_retired_frontend_assets.py`（7 条结构性断言，红→绿双向验证）与 `tests/support/retired_frontend_assets.py`（退役名单常量）。④旧 CSS 清理：4 个已无引用的页面样式表删除（`ad-daily` / `runtime-configs` / `sync-jobs` / `spu-profit-deterioration`），`video-publish.css` 因有活契约测试而保留。⑤vendor 清理：uPlot / JSONEditor / Tom Select 的 vendored 副本删除（9 个文件），React 侧改用 npm 依赖；**保留** `bootstrap.min.css`（`auth.py` 回落登录页）与 `tabulator.min.js` / `tabulator.min.css`（`ProfitabilityTable.tsx` 直接 import）。⑥`console.js` 保留——仍挂在 `app.py` 的 public static mount 上，且 `tests/api/test_manual_costs_page_v2.py` 有 20 余处源码级断言；**不是遗漏**。 |
 
 **批次表与实际注册表的两处差异（2026-11-08 更正）：**
 
@@ -307,9 +310,11 @@ loopback Vite client/entry 获得 HMR。React 插件需要的 Fast Refresh pream
    `accounts/pages.py::PAGES`（如 `e23e31a9`、`3b8074e5`），属**计划外新增**，不是本表任一批次的交付物。
    连同 `login` 与两个辅助页（`message`、`oauth-onboard`），共 21 个 pageId 落在
    `frontend/src/pages/` 的 **20 个目录**（`spu-roi` 与 `focused-spus` 共用 `spu-profitability/`）。
-2. **P6 的退出条件「消费者清单为空」实际未对 `vendor/` 成立**：`vendor/` 至今仍有三个真实消费者
-   （见上表 P6 行 ⑤）。P6 的收口因此以「删除无消费者的旧模板/脚本 + 收敛 renderer」为准，
-   `vendor/` 清理属于未完成的后续项，不应记为已交付。
+2. **P6 的退出条件「消费者清单为空」现已对 `vendor/` 成立**：2026-11-08 清理后，`vendor/`
+   只剩三个真实消费者——`bootstrap.min.css`（`auth.py` 的回落登录页）、
+   `tabulator.min.js` + `tabulator.min.css`（`ProfitabilityTable.tsx` 直接 import）。
+   uPlot / JSONEditor / Tom Select 的 vendored 副本已删除，React 侧改用 npm 依赖
+   （`uplot`、`uplot-react`、`vanilla-jsoneditor`、`lossless-json`）与 HeroUI `Select`。
 
 **试点不是 Hello World。** `intercept-requests` 已有 GET 列表/详情、筛选和分页，适合检验读路径；
 第二个 dashboard 用来检验不同页面是否真能共享骨架，不能等迁完整站才发现公共组件实际不可复用。
@@ -441,9 +446,12 @@ lane，仍按同一规则核对 owner。
 
 1. ~~**把 P6 的资产删除与测试侧退役分支合入 `master`**~~ —— **已完成**（`808e4f4c`）。
    `master` 此刻已不含那 12 个旧模板与 12 个旧脚本，新旧 renderer 的产物不再同版本共存。
-2. **清理 `tts_erp_v2/static/vendor/` 中真正无消费者的文件**——目前 Tabulator（被
-   `ProfitabilityTable.tsx` 引用）、bootstrap.min.css（被 `auth.py` 回落登录页引用）等仍有
-   消费者，清理必须逐个确认，不得整目录删除。
+2. ~~**清理 `tts_erp_v2/static/vendor/` 中真正无消费者的文件**~~ —— **已完成**
+   （`3ef5c387`）：删除 uPlot / JSONEditor / Tom Select 的 vendored 副本（9 个文件，
+   1665 行）。它们的消费者随 P6 退役，React 侧已改用 npm 依赖与 HeroUI `Select`。
+   **保留** `bootstrap.min.css`（`auth.py` 回落登录页）与
+   `tabulator.min.js` / `tabulator.min.css`（`ProfitabilityTable.tsx` 直接 import）。
+   `NOTICE.md` 已同步为当前清单。
 3. **按文档目录规则把本方案移至 `docs/design/` 并更新引用**（`AGENTS.md` §9 与
    `docs/guides/frontend-development.md` 的链接）。移动会牵动引用方，属于独立文档任务，
    不在本次状态更新的范围内；不提前写入“已接受/已实施”的 ADR。
