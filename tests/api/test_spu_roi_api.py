@@ -3997,7 +3997,7 @@ def test_spu_roi_page_remembers_filters_and_enhances_date_range():
     assert 'type="date"' in page and "data-date-preset={id}" in page
     assert "datePresets(today)" in page
     assert "option.start !== month.start || option.end !== month.end" in query
-    assert "截止日包含当天" in page and "清空一端表示不限该端" in page
+    assert "销售/退款起始日期（空 = 不限）" in page and "销售/退款截止日期（空 = 不限）" in page
     assert "无法确定报表时区" in page and "!unknownZone" in page
     assert "flatpickr" not in page + query and "bootstrap-datepicker" not in page + query
 
