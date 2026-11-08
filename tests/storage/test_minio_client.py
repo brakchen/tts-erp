@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from minio.error import (
@@ -48,6 +48,7 @@ def _env(**overrides):
         "MINIO_PRESIGN_EXPIRY_SECONDS": "900",
         "MINIO_PUBLIC_BASE_URL": "",
         "MINIO_PUBLIC_HOST": "",
+        "MINIO_PRESIGN_ENDPOINT": "",
     }
     base.update(overrides)
     return base
@@ -240,6 +241,41 @@ def test_presign_get_rewrites_host_when_public_host_set(monkeypatch):
         url, _ = client.presign_get("k.jpg")
     # No path prefix on the public host this time.
     assert url == "https://cdn.example.com/k.jpg?X-Amz-Signature=xyz"
+
+
+def test_proxy_host_signs_browser_requests_while_storage_uses_tunnel(monkeypatch):
+    for k, v in _env(
+        MINIO_ENDPOINT="127.0.0.1:6005",
+        MINIO_PRESIGN_ENDPOINT="127.0.0.1:9000",
+        MINIO_PUBLIC_HOST="https://example.test/minio",
+    ).items():
+        monkeypatch.setenv(k, v)
+    key = "TEST_clip.mp4"
+    bucket = "tts-erp-media"
+    with patch("tts_erp_v2.storage.minio_client.Minio") as sdk:
+        storage = sdk.return_value
+        signer = Mock()
+        sdk.side_effect = [storage, signer]
+        signer.presigned_get_object.return_value = f"http://127.0.0.1:9000/{bucket}/{key}?sig=get"
+        signer.presigned_put_object.return_value = f"http://127.0.0.1:9000/{bucket}/{key}?sig=put"
+        client = MinioClient.from_env().with_bucket(bucket)
+
+        assert client.presign_get(key)[0] == f"https://example.test/minio/{bucket}/{key}?sig=get"
+        assert client.presign_put(key, "video/mp4") == f"https://example.test/minio/{bucket}/{key}?sig=put"
+        client.stat(key)
+
+    assert [call.args[0] for call in sdk.call_args_list] == ["127.0.0.1:6005", "127.0.0.1:9000"]
+    assert sdk.call_args.kwargs["region"] == "us-east-1"
+    signer.presigned_get_object.assert_called_once_with(bucket, key, expires=timedelta(seconds=900))
+    signer.presigned_put_object.assert_called_once_with(bucket, key, expires=timedelta(seconds=900))
+    storage.stat_object.assert_called_once_with(bucket, key)
+
+
+def test_presign_endpoint_requires_browser_host(monkeypatch):
+    for k, v in _env(MINIO_PRESIGN_ENDPOINT="127.0.0.1:9000").items():
+        monkeypatch.setenv(k, v)
+    with pytest.raises(MinioConfigError, match="MINIO_PRESIGN_ENDPOINT requires MINIO_PUBLIC_HOST"):
+        MinioClient.from_env()
 
 
 def test_presign_put_unchanged_when_public_host_unset(monkeypatch):

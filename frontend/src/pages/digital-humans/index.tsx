@@ -88,10 +88,9 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
               <div className="media-person-identity">
                 <PortraitTile url={human.portraitUrl} label={(human.portraitUrl ? '更换' : '上传') + human.name + '的形象照片'}
                   onPress={canWrite ? () => setEditor({ mode: 'portrait', human }) : undefined} />
-                <div className="min-w-0 [overflow-wrap:anywhere]">
-                  <h2 id={'human-' + human.digitalHumanId} tabIndex={-1} className="font-semibold">{human.name}</h2>
-                  <p className="text-muted">{human.description || '暂无人设说明'}</p>
-                </div>
+                <h2 id={'human-' + human.digitalHumanId} tabIndex={-1} className="min-w-0 self-center [overflow-wrap:anywhere]">
+                  {human.name}
+                </h2>
                 <Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
               </div>
               <div className="media-actions">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '@heroui/react';
+import { Button, Disclosure } from '@heroui/react';
 import type { FrontendBootstrap } from '../../shared/contracts';
 import { PackCatalog, PackDetail } from '../media-assets/PackViews';
 import { decodeDigitalHuman } from '../media-assets/contracts';
@@ -26,10 +26,7 @@ export default function HumanPackWorkspace({ bootstrap, id, revision, canWrite, 
       <Button variant="ghost" className="media-back self-start" onPress={onBack}>← 数字人</Button>
       {human && <div className="media-person-identity">
         <PortraitTile url={human.portraitUrl} label={human.name + '的形象照片'} />
-        <div className="min-w-0 [overflow-wrap:anywhere]">
-          <h1>{human.name}</h1>
-          <p className="text-muted">{human.description || '数字人档案'}</p>
-        </div>
+        <h1 className="min-w-0 self-center">{human.name}</h1>
       </div>}
     </header>
     <ReadStatus title="数字人档案" loading={read.loading} error={read.error} onRetry={read.retry} />
@@ -38,6 +35,16 @@ export default function HumanPackWorkspace({ bootstrap, id, revision, canWrite, 
       {human.assetIds.length > 0 && <Button variant="secondary" className="self-start" onPress={onLegacy}>
         管理原有素材 · {human.assetIds.length}
       </Button>}
+      {human.description && <Disclosure className="media-box">
+        <Disclosure.Heading>
+          <Disclosure.Trigger>人设说明<Disclosure.Indicator /></Disclosure.Trigger>
+        </Disclosure.Heading>
+        <Disclosure.Content>
+          <Disclosure.Body>
+            <p className="media-muted whitespace-pre-wrap">{human.description}</p>
+          </Disclosure.Body>
+        </Disclosure.Content>
+      </Disclosure>}
     </>}
   </section>;
 }

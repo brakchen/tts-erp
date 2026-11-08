@@ -6,13 +6,10 @@ unit tests trivial (patch ``tts_erp_v2.storage.minio_client.Minio``).
 
 Spec: docs/archive/procurement-ui-redesign.md §5.
 
-NGINX requirement (verified 2026-09-01): the reverse proxy that
-forwards presigned URLs to MinIO must rewrite the upstream
-`Host` header to the SDK endpoint (``127.0.0.1:9000``). The
-SigV4 signature covers the `host` header (X-Amz-SignedHeaders=host),
-and the SDK signs against the local endpoint — not the public
-hostname. Without this rewrite MinIO returns 403. See
-~/setup/nginx/conf.d/services.conf for the canonical location block.
+The proxy must forward the same `Host` that the SDK signs. Set
+``MINIO_PRESIGN_ENDPOINT`` when that host differs from the endpoint used
+for server-side operations. ``MINIO_PUBLIC_HOST`` is the browser-facing
+URL, including any path prefix that the proxy strips before forwarding.
 """
 
 from __future__ import annotations
@@ -97,12 +94,13 @@ class _Config:
     # the LAN-only endpoint the SDK uses for server-side calls.
     # See docs/archive/procurement-ui-redesign.md §5.
     public_host: str | None
+    presign_endpoint: str | None
 
 
 def _rewrite_presigned_host(sdk_url: str, public_host: str) -> str:
     """Swap the scheme + host[:port] of a presigned URL and prepend a path.
 
-    The SDK signs requests against ``endpoint`` (server-side only). When
+    The SDK signs requests against the Host expected by MinIO. When
     a browser needs the same URL it must point at the NGINX-fronted
     public host — same path, same signature query string, only the
     scheme/host/port (and any path prefix) change.
@@ -175,6 +173,9 @@ def _read_config() -> _Config:
         )
     base = os.environ.get("MINIO_PUBLIC_BASE_URL", "").strip()
     public_host = os.environ.get("MINIO_PUBLIC_HOST", "").strip() or None
+    presign_endpoint = os.environ.get("MINIO_PRESIGN_ENDPOINT", "").strip() or None
+    if presign_endpoint and public_host is None:
+        raise MinioConfigError("MINIO_PRESIGN_ENDPOINT requires MINIO_PUBLIC_HOST.")
     # 2026-09-01: warn at startup when the SDK endpoint looks LAN-only
     # (127.0.0.1, localhost, or a private RFC1918 IP) but no public
     # host is configured. The browser receives a presigned URL
@@ -203,6 +204,7 @@ def _read_config() -> _Config:
         presign_expiry=timedelta(seconds=expiry_seconds),
         public_base_url=base or None,
         public_host=public_host,
+        presign_endpoint=presign_endpoint,
     )
 
 
@@ -222,8 +224,11 @@ class MinioClient:
     - :meth:`public_url_or_none`
     """
 
-    def __init__(self, sdk: Minio, *, config: _Config) -> None:
+    def __init__(
+        self, sdk: Minio, *, config: _Config, presign_sdk: Minio | None = None
+    ) -> None:
         self._sdk = sdk
+        self._presign_sdk = presign_sdk if presign_sdk is not None else sdk
         self._config = config
 
     # -- factories --------------------------------------------------------
@@ -232,19 +237,28 @@ class MinioClient:
     def from_env(cls) -> MinioClient:
         """Read required env vars and construct the SDK client."""
         cfg = _read_config()
-        try:
-            sdk = Minio(
-                cfg.endpoint,
+
+        def make_sdk(endpoint: str) -> Minio:
+            return Minio(
+                endpoint,
                 access_key=cfg.access_key,
                 secret_key=cfg.secret_key,
                 secure=cfg.secure,
                 region=cfg.region,
             )
+
+        try:
+            sdk = make_sdk(cfg.endpoint)
+            presign_sdk = None
+            if cfg.presign_endpoint and cfg.presign_endpoint != cfg.endpoint:
+                # The SDK uses the explicit region when signing, so this
+                # client needs no network connection to the signed host.
+                presign_sdk = make_sdk(cfg.presign_endpoint)
         except ValueError as error:
             # SDK endpoint/region validation is part of environment config,
             # not a failure of the product/cost query that consumes an image.
             raise MinioConfigError("Invalid MinIO client configuration.") from error
-        return cls(sdk, config=cfg)
+        return cls(sdk, config=cfg, presign_sdk=presign_sdk)
 
     def with_bucket(self, bucket: str) -> MinioClient:
         """Bind the same endpoint/credentials to another bucket.
@@ -257,7 +271,9 @@ class MinioClient:
             raise ValueError("PUBLISH_BUCKET_MISMATCH")
         if bucket == self._config.bucket:
             return self
-        return MinioClient(self._sdk, config=replace(self._config, bucket=bucket))
+        return MinioClient(
+            self._sdk, config=replace(self._config, bucket=bucket), presign_sdk=self._presign_sdk
+        )
 
     # -- accessors (for callers that need them) --------------------------
 
@@ -304,7 +320,7 @@ class MinioClient:
         ``response-content-type`` is a GET-only override param, so we
         pass no extra query params. The browser just PUTs the bytes.
         """
-        url = self._sdk.presigned_put_object(
+        url = self._presign_sdk.presigned_put_object(
             self._config.bucket,
             object_key,
             expires=expiry or self._config.presign_expiry,
@@ -346,7 +362,7 @@ class MinioClient:
         expiry: timedelta | None = None,
     ) -> tuple[str, datetime]:
         """Return ``(url, expires_at)`` for a presigned GET."""
-        url = self._sdk.presigned_get_object(
+        url = self._presign_sdk.presigned_get_object(
             self._config.bucket,
             object_key,
             expires=expiry or self._config.presign_expiry,
