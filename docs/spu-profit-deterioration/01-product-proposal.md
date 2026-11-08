@@ -6,7 +6,8 @@
 > **允许查看旧结果，但日期最多选到后台确认的最新可用日期；不规定试用人员、周期或效果评分，功能实现后根据实际反馈持续改进。**本文不是实现完成声明或上线批准。
 > 本次只修改产品方案，不修改现有页面名称、访问地址或应用实现。
 > [技术设计](02-technical-design.md)、[实施计划](03-implementation-plan.md)、[测试计划](04-test-plan-and-results.md)已按本版（PRD v3，2026-10-24 修订）重写并对齐：旧阈值、严重程度、历史确认设计不再适用于这三份文件；[历史回测](02a-backtest-report.md)是旧 evaluator 的历史证据，不是产品契约。
-> 补充（2026-11-08 核实）：旧阈值 evaluator 的**读侧已退役**（HTTP 接口不返回 severity/sample_status，前端已挡掉旧筛选参数），但**写侧仍在生产运行**（每日调度仍写 `analytics.spu_deterioration_alerts` 快照表，且该快照表已无读取方）。因此本 PRD 的产品口径不受影响，但旧 evaluator 代码尚未退役——停写与否由运维/产品决定，见 [`docs/handoff/topic-directory-index.md`](../handoff/topic-directory-index.md) §5.1。
+> 补充（2026-11-08 核实）：旧阈值 evaluator 的**读侧已退役**（HTTP 接口不返回 severity/sample_status，前端已挡掉旧筛选参数），但**写侧仍在生产运行**（每日调度仍写 `analytics.spu_deterioration_alerts` 快照表，且该快照表已无读取方）。因此本 PRD 的产品口径不受影响，但旧 evaluator 代码尚未退役。
+> **旧 evaluator 是否停写＝待决**（属产品/运维授权动作，用户尚未确认）。在决定落地前，本文与主题目录索引一律按「读侧已退役、写侧仍在运行」表述，**不写「已归档」/「已废弃」**。见 [`docs/handoff/topic-directory-index.md`](../handoff/topic-directory-index.md) §5.1。
 
 ## 1. 决策摘要
 
