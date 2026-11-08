@@ -112,10 +112,14 @@ P6 退役与收口全部落地：**21 个提交，60 个文件，净删 8800 行
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| 删旧模板/旧脚本 | ✅ 已做 | 12 模板 + 12 脚本全删（`console.js` 保留），-9198 行 |
-| `_render_page` 与 Jinja 环境 | ✅ 已做 | `pages.py` 的 `_render_page` / `_templates_env` / `_js_version` 已删；`_sidebar` / `_sidebar_css` / `_SIDEBAR_CSS` / `_SIDEBAR_TOGGLE_JS` 按 `docs/design/reuse-evaluation-2026-10.md` 的决定原样保留 |
+| 删旧模板/旧脚本 | ✅ | 12 模板 + 12 脚本全删（`console.js` 保留） |
+| 删旧 CSS | ✅ | `ad-daily` / `runtime-configs` / `sync-jobs` / `spu-profit-deterioration` 已删（-670 行）；`video-publish.css` 有活契约测试，保留 |
+| `_render_page` 与 Jinja 环境 | ✅ | 已删；`_sidebar` / `_sidebar_css` / `_SIDEBAR_CSS` / `_SIDEBAR_TOGGLE_JS` 按 `docs/design/reuse-evaluation-2026-10.md` 决定保留 |
+| 路由收敛 | ✅ | 15 处双路分支 → 单一 `render_frontend_page` |
+| P6 退役护栏 | ✅ | `tests/api/test_retired_frontend_assets.py`，7 条结构性断言，红→绿已验证 |
 | 基线文件陈旧 | 待确认 | `baseline-fast.txt` 仍记 `e04c5e11`（2026-10-15）。`--update` 是 master-only 操作 |
-| `test_spu_price_columns.py` 4 项失败 | 待查 | 单独跑也失败，是 master 上的确定性失败，不是偶发 |
+| `test_spu_price_columns.py` 4 项失败 | 待查 | 单独跑也失败，是 master 上的确定性失败 |
+| `media-assets` 6 项浏览器失败 | 待查 | 同样在 master 上就存在（对照实验证实），与本轮退役无关 |
 | 43 个缺 semver 的既有 worktree | 待清理 | 逐个跑 `npm ci` 即可 |
 | 9877 绑 `0.0.0.0` | 待用户确认 | 真实暴露面。改法：`/home/schan/.config/tts-erp/runtime.env` 的 `TTS_ERP_HOST` |
 
