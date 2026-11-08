@@ -67,7 +67,15 @@ def _db_version() -> str | None:
 
 
 def _heads_and_ancestors(tree: Path) -> tuple[list[str], set[str]]:
-    """用 alembic 自己的 ScriptDirectory 求 heads 与祖先集合。"""
+    """向 alembic【问】heads 与祖先集合。
+
+    2026-11-09 修正（通则 22：验证工具不得复制被验证的规则）：
+      原实现自己按 `down_revision` 走链 ⇒ 那是在**复制** alembic 的祖先判定，
+      而 alembic 的 revision 图有 tuple 分叉，自己走链必然写不对。
+      ⇒ 现在改为问 alembic 自己的拓扑序：`ScriptDirectory.walk_revisions()`
+      无参调用返回 base→heads 的全部 revision（alembic 内部处理分叉/合并）。
+      ⇒ 「某 revision 是某 head 的祖先」= 它在拓扑序里位于那个 head 之前。
+    """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -77,26 +85,17 @@ def _heads_and_ancestors(tree: Path) -> tuple[list[str], set[str]]:
     try:
         script = ScriptDirectory.from_config(cfg)
         heads = list(script.get_heads())
-        # 不用 walk_revisions(head, "base")：本仓的 revision 图存在分叉
-        #（0037_merge_0036_heads / 0067_merge_price_and_publish 是 tuple 形
-        #  down_revision），alembic 会报 "Requested range ... does not refer to
-        #  ancestor/descendant revisions along the same branch"。
-        # 改为按 down_revision 自己走链，并对 tuple 的每个分支都走一遍。
-        all_revs = list(script.walk_revisions())
-        down = {r.revision: r.down_revision for r in all_revs}
+        # ↓↓↓ 问 alembic 的拓扑序，不再自己走 down_revision 链 ↓↓↓
+        order = [rev.revision for rev in script.walk_revisions()]
+        pos = {rid: i for i, rid in enumerate(order)}
         ancestors: set[str] = set()
         for head in heads:
-            stack = [head]
-            while stack:
-                cur = stack.pop()
-                if not cur or cur in ancestors:
-                    continue
-                ancestors.add(cur)
-                nxt = down.get(cur)
-                if isinstance(nxt, (list, tuple)):
-                    stack.extend(n for n in nxt if n)
-                elif nxt:
-                    stack.append(nxt)
+            hi = pos.get(head)
+            if hi is None:
+                continue
+            for rid, i in pos.items():
+                if i < hi:
+                    ancestors.add(rid)
         return heads, ancestors
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"alembic ScriptDirectory failed for {tree}: {exc}\n")

@@ -1,41 +1,36 @@
 #!/usr/bin/env bash
 # check_install_parity.sh — 【只读】装配核对：一次性回答「我以为的 == 实际的 == 吗」
 #
-# 用途（Chief 第八轮裁定为第 0 项）：
-#   装配声明唯一化之前，先让现状可核对。
-#   本脚本【不修改任何东西】，只读 unit / 文件属主 / 配置生效值 / 凭据来源链。
+# ★ 通则 22（验证工具不得复制被验证的规则）：
+#   本脚本【不自己实现】配置来源优先级链 —— 改为向 owner
+#   （tts_erp_v2.runtime_settings）询问 (value, source)。
+#   owner 侧新增 get_with_source()（纯增量，与 get() 行为完全一致）。
 #
-# ★ 关键方法论：**"生效值"必须从【运行中进程的环境】读，不是从核对脚本自己的环境读。**
-#   2026-11-09 实测：脚本自己 source 了 runtime.env，于是 get_setting 读到的
-#   TTS_ERP_RUNTIME_ENV_FILE = ''（脚本环境里没有这一项），而真实进程里它有值
-#   ⇒ 用脚本环境评估"生效值"会得出错误结论。本脚本改为从 /proc/<pid>/environ 读。
+# ★ 方法论（2026-11-09 实测修正）：
+#   **「生效值」必须在【运行中进程的环境】下问 owner。**
+#   同一个键在脚本环境与进程环境里来源可能不同（实测 AUTH_MODE：
+#   脚本环境 = process_env，真实进程 = runtime_file）。
+#   ⇒ 本脚本读 /proc/<pid>/environ，临时灌进 os.environ，再问 owner。
 #
-# 九个问题：
-#   1. unit 实际 WorkingDirectory / ExecStart / EnvironmentFile
-#   2. unit 文件属主
-#   3. 锚文件属主（锚的判据是【属主】，不是【来源】）
-#   4. AUTH_MODE 生效值 + 生效来源（resolved_from）
-#   5. get_setting 的来源链
-#   6. DB URL 在 get_setting 侧与 os.environ 侧各读到什么
-#   7. cwd 下是否存在 .env
-#   8. is_prod_shaped_db() 的判定输入 vs current_database()
-#   9. 三个授权开关各读到什么
+# ★ 属性③（跳过显形）：读不到就是「未能判定」，**不得**用 unit 声明的
+#   Environment 冒充进程真实环境（那是造假不是兜底）。
 set +e
 export LC_ALL=C
 UNITS="${*:-tts-erp.service tts-erp-sync.service tts-erp-publish.service}"
 PY=/home/schan/tts-erp/.venv/bin/python
-# 凭据加载层只存在于 release worktree（master 没有 runtime_settings.py）。
-PROD_TREE=/home/schan/tts-erp-releases/erp-runtime-secret-84ec0a49
+RELEASE=/home/schan/tts-erp-releases/erp-runtime-secret-84ec0a49
+export PYTHONPATH="$RELEASE:${PYTHONPATH:-}"
 
 echo "################ 装配核对（只读） ################"
 echo "时间: $(date -u +%Y-%m-%dT%H:%M:%SZ)   主机: $(hostname)   用户: $(id -un) uid=$(id -u)"
+echo "owner: $RELEASE  ($(git -C "$RELEASE" rev-parse --short HEAD 2>/dev/null))"
 echo
 
 echo "################ 1-3. unit 实际形态与属主 ################"
 for u in $UNITS; do
   echo "--- $u"
   systemctl --user show "$u" -p WorkingDirectory -p ExecStart -p EnvironmentFiles \
-    -p FragmentPath -p MainPID -p Environment --no-pager 2>/dev/null | sed 's/^/    /'
+    -p FragmentPath -p MainPID --no-pager 2>/dev/null | sed 's/^/    /'
   F=$(systemctl --user show "$u" -p FragmentPath --value 2>/dev/null)
   [ -f "$F" ] && echo "    unit 文件属主: $(stat -c '%U:%G %a' "$F")  $F"
   D=~/.config/systemd/user/$(basename "$u").d
@@ -51,122 +46,107 @@ echo
 echo "################ 3. 候选锚文件属主（锚 ≠ 应用进程属主 才算锚） ################"
 for f in /home/schan/.config/tts-erp/runtime.env /etc/tts-erp/runtime.env \
          /etc/systemd/system/tts-erp.service /etc/systemd/system/tts-erp.service.d \
-         /home/schan/tts-erp/.env "$PROD_TREE/.env"; do
+         /home/schan/tts-erp/.env "$RELEASE/.env"; do
   if [ -e "$f" ]; then echo "  存在  $(stat -c '%U:%G %a' "$f")  $f"
   else echo "  缺失  -  $f"; fi
 done
 echo
 
-echo "################ 4-9. 生效值 / 来源链 / cwd .env / 授权开关 ################"
+echo "################ 4-9. 生效值（问 owner）/ 来源链 / cwd .env / 授权开关 ################"
 $PY - <<'PYEOF' 2>&1 | sed 's/^/  /'
 import os, subprocess, sys
 from pathlib import Path
 
 RELEASE = "/home/schan/tts-erp-releases/erp-runtime-secret-84ec0a49"
-sys.path.insert(0, "/home/schan/tts-erp")
-sys.path.insert(0, RELEASE)          # release 必须最前（master 的包会遮蔽它）
+sys.path.insert(0, RELEASE)
 
 def sec(t): print("\n--- " + t)
 
 UNITS = ["tts-erp.service", "tts-erp-sync.service", "tts-erp-publish.service"]
 
-def unit_env(unit):
-    """unit 声明的 Environment + 运行中进程的真实环境（/proc/<pid>/environ）。"""
-    out = {}
-    try:
-        raw = subprocess.run(["systemctl", "--user", "show", unit, "-p", "Environment",
-                              "--value"], capture_output=True, text=True, timeout=10).stdout
-        for item in raw.split():
-            if "=" in item:
-                k, v = item.split("=", 1); out[k] = v
-    except Exception:
-        pass
+# owner：只问，不复制规则
+from tts_erp_v2.runtime_settings import get_setting_with_source
+OWNER_REF = subprocess.run(["git", "-C", RELEASE, "rev-parse", "HEAD"],
+                            capture_output=True, text=True).stdout.strip()
+OWNER_BLOB = subprocess.run(["git", "-C", RELEASE, "hash-object",
+                              "tts_erp_v2/runtime_settings.py"],
+                             capture_output=True, text=True).stdout.strip()
+print(f"  owner_ref  = {OWNER_REF}")
+print(f"  owner_blob = {OWNER_BLOB}")
+
+def proc_env(unit):
+    """返回 (env, status)；status ∈ ok / not_running / unreadable。
+
+    ★ 绝不回退到 unit 声明的 Environment —— 那是【冒充】。
+    """
     try:
         pid = subprocess.run(["systemctl", "--user", "show", unit, "-p", "MainPID",
                               "--value"], capture_output=True, text=True, timeout=10).stdout.strip()
-        if pid and pid != "0":
-            data = Path(f"/proc/{pid}/environ").read_bytes()
-            for kv in data.split(b"\0"):
-                if b"=" in kv:
-                    k, v = kv.decode("utf-8", "replace").split("=", 1)
-                    out[k] = v          # 进程真实环境优先
     except Exception:
-        pass
-    return out
-
-def parse_env_file(path):
+        return {}, "unreadable"
+    if not pid or pid == "0":
+        return {}, "not_running"
     try:
-        vals = {}
-        for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            vals[k.strip()] = v.strip().strip("\"'")
-        return vals
-    except Exception:
-        return {}
+        data = Path(f"/proc/{pid}/environ").read_bytes()
+    except Exception as exc:
+        return {}, f"unreadable: {type(exc).__name__}"
+    env = {}
+    for kv in data.split(b"\0"):
+        if b"=" in kv:
+            k, v = kv.decode("utf-8", "replace").split("=", 1)
+            env[k] = v
+    return env, "ok"
 
-def resolved_from(key, env, cwd):
-    """自己实现来源判定（runtime_settings 未暴露 source API）。"""
-    dotenv = env.get("TTS_ERP_DOTENV_FILE") or str(Path(cwd) / ".env")
-    dmap = parse_env_file(dotenv) if Path(dotenv).is_file() else {}
-    if key in dmap:
-        return f"dotenv:{dotenv}"
-    runtime = env.get("TTS_ERP_RUNTIME_ENV_FILE", "")
-    rmap = parse_env_file(runtime) if runtime and Path(runtime).is_file() else {}
-    if key in rmap:
-        return f"runtime_file:{runtime}"
-    if key in env:
-        return "process_env"
-    return "default"
-
-def effective(key, env, cwd, default):
-    dotenv = env.get("TTS_ERP_DOTENV_FILE") or str(Path(cwd) / ".env")
-    dmap = parse_env_file(dotenv) if Path(dotenv).is_file() else {}
-    if key in dmap:
-        return dmap[key]
-    runtime = env.get("TTS_ERP_RUNTIME_ENV_FILE", "")
-    rmap = parse_env_file(runtime) if runtime and Path(runtime).is_file() else {}
-    if key in rmap:
-        return rmap[key]
-    return env.get(key, default)
-
+unresolved = []
 for unit in UNITS:
     sec(f"unit: {unit}")
-    env = unit_env(unit)
+    env, status = proc_env(unit)
     cwd = subprocess.run(["systemctl", "--user", "show", unit, "-p", "WorkingDirectory",
                           "--value"], capture_output=True, text=True).stdout.strip() or os.getcwd()
-    print(f"  运行中进程环境键数 = {len(env)}")
-    print(f"  WorkingDirectory    = {cwd}")
+    print(f"  进程环境状态 = {status}   WorkingDirectory = {cwd}")
     print(f"  cwd 下隐式 .env 存在 = {Path(cwd, '.env').is_file()}")
+    if status != "ok":
+        unresolved.append({"unit": unit, "status": status})
+        print("  ⚠ 未能判定该 unit 的生效值（不冒充 unit 声明的环境）")
+        continue
 
-    for key, default in (("TTS_ERP_AUTH_MODE", "off"),
-                          ("TTS_ERP_RUNTIME_ENV_FILE", ""),
-                          ("TTS_ERP_DOTENV_FILE", ""),
-                          ("ALLOW_PROD_DESTRUCTIVE", "<unset>"),
-                          ("ALLOW_PROD_PURGE", "<unset>"),
-                          ("TTS_ERP_ENVIRONMENT", "<unset>")):
-        val = effective(key, env, cwd, default)
-        if key.endswith("DB_URL") and isinstance(val, str) and "@" in val:
-            val = val.split("://", 1)[0] + "://***:***@" + val.split("@", 1)[1]
-        print(f"  {key:<28} 生效值={val!r}")
-        print(f"  {'':<28} 来源  ={resolved_from(key, env, cwd)!r}")
+    # 把真实进程环境灌进 os.environ，再问 owner
+    saved = dict(os.environ)
+    os.environ.clear(); os.environ.update(env)
+    try:
+        for key, default in (("TTS_ERP_AUTH_MODE", "off"),
+                              ("TTS_ERP_RUNTIME_ENV_FILE", ""),
+                              ("TTS_ERP_DOTENV_FILE", ""),
+                              ("TTS_ERP_DB_URL", ""),
+                              ("ALLOW_PROD_DESTRUCTIVE", "<unset>"),
+                              ("ALLOW_PROD_PURGE", "<unset>"),
+                              ("TTS_ERP_ENVIRONMENT", "<unset>")):
+            val, src = get_setting_with_source(key, default)
+            shown = val
+            if key.endswith("DB_URL") and isinstance(val, str) and "@" in val:
+                shown = val.split("://", 1)[0] + "://***:***@" + val.split("@", 1)[1]
+            print(f"  {key:<28} 生效值={shown!r}")
+            print(f"  {'':<28} 来源  ={src!r}   (owner 判定)")
+        # DB URL 两侧
+        gs, gsrc = get_setting_with_source("TTS_ERP_DB_URL", "")
+        oe = os.environ.get("TTS_ERP_DB_URL", "")
+        def dbname(u):
+            try:
+                from urllib.parse import urlsplit
+                return urlsplit(u).path.lstrip("/") or "(none)"
+            except Exception:
+                return "(unparsable)"
+        print(f"  DB URL get_setting 侧库名 = {dbname(gs) if gs else '(empty)'} (source={gsrc})")
+        print(f"  DB URL os.environ 侧库名 = {dbname(oe) if oe else '(empty)'}")
+        print(f"  两侧库名一致 = {(dbname(gs) if gs else '') == (dbname(oe) if oe else '')}")
+    finally:
+        os.environ.clear(); os.environ.update(saved)
 
-    # DB URL 两侧
-    gs = effective("TTS_ERP_DB_URL", env, cwd, "")
-    oe = env.get("TTS_ERP_DB_URL", "")
-    def dbname(u):
-        try:
-            from urllib.parse import urlsplit
-            return urlsplit(u).path.lstrip("/") or "(none)"
-        except Exception:
-            return "(unparsable)"
-    print(f"  DB URL get_setting 侧库名 = {dbname(gs) if gs else '(empty)'}")
-    print(f"  DB URL os.environ 侧库名 = {dbname(oe) if oe else '(empty)'}")
-    print(f"  两侧库名一致 = {(dbname(gs) if gs else '') == (dbname(oe) if oe else '')}")
+sec("未能判定的 unit（一等指标，正常值 0）")
+print(f"  unresolved_units = {len(unresolved)}")
+for u in unresolved:
+    print(f"    {u['unit']}: {u['status']}")
 
-# 数据库事实 vs 配置判定
 sec("当前数据库事实 vs 配置判定")
 try:
     from sqlalchemy import text
@@ -198,6 +178,7 @@ cat <<'EOF'
   3) 「拒绝启动」类检查必须晚于「移除触发条件】：
      install.sh 默认布局里 cwd 本来就有 .env ⇒ 先上"检测到 .env 即拒绝启动"
      会让官方安装路径产出的服务全部起不来。
+  4) 本脚本的配置来源判定【向 owner 询问】，不复制优先级链（通则 22）。
 EOF
 echo
 echo "（本脚本只读；未修改任何文件、配置或服务）"
