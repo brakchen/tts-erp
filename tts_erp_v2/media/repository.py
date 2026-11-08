@@ -270,17 +270,17 @@ def list_assets(session: Session, filters: AssetFilter) -> AssetPage:
     if filters.status is not None:
         conditions.append(MediaAsset.status == filters.status.value)
     if filters.keyword:
-        pattern = f"%{filters.keyword}%"
+        keyword = filters.keyword
         matching_tag = (
             select(1)
-            .where(_normalized_asset_tag().ilike(pattern))
+            .where(_normalized_asset_tag().icontains(keyword, autoescape=True))
             .correlate(MediaAsset)
             .exists()
         )
         conditions.append(
             or_(
-                MediaAsset.filename.ilike(pattern),
-                MediaAsset.description.ilike(pattern),
+                MediaAsset.filename.icontains(keyword, autoescape=True),
+                MediaAsset.description.icontains(keyword, autoescape=True),
                 matching_tag,
             )
         )

@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Button, Chip, Input, Label, Modal, TextArea, TextField } from '@heroui/react';
 import { ApiError } from '../../shared/api/client';
-import type { PageProps } from '../../shared/contracts';
+import type { FrontendBootstrap, PageProps } from '../../shared/contracts';
 import AssetCard from './AssetCard';
+import AssetReferences from './AssetReferences';
 import { CursorTail, useCursorFeed } from './CursorFeed';
 import OperationConfirmation from './OperationConfirmation';
 import TagEditor, { withPendingTag } from './TagEditor';
@@ -16,12 +17,13 @@ import {
 
 const emptyFilters = { keyword: '', kind: '' };
 
-function DeleteAsset({ root, asset, onDone, onClose }: {
-  root: string; asset: Asset; onDone: () => void; onClose: () => void;
+function DeleteAsset({ bootstrap, asset, onDone, onClose }: {
+  bootstrap: FrontendBootstrap; asset: Asset; onDone: () => void; onClose: () => void;
 }) {
+  const root = bootstrap.rootPath;
   const action = useMediaAction();
   const read = useMediaRead(root, '/assets/' + asset.assetId, decodeAsset);
-  const references = read.data?.usedBy;
+  const references = read.data?.usedBy ?? null;
   const inUse = Boolean(references?.length);
   return <OperationConfirmation title={'删除素材「' + asset.filename + '」'}
     description={inUse ? '该素材已添加至数字人档案。请解除关联后再删除。' : '删除后，该素材将从全局素材库移除。'}
@@ -38,6 +40,7 @@ function DeleteAsset({ root, asset, onDone, onClose }: {
     }}>
     <ReadStatus title="素材引用" loading={read.loading}
       error={read.error ?? (!read.loading && !references ? '无法确认当前关联。' : undefined)} onRetry={read.retry} />
+    {inUse && !read.loading && <AssetReferences bootstrap={bootstrap} references={references} />}
   </OperationConfirmation>;
 }
 
@@ -168,10 +171,10 @@ export default function MediaAssets({ bootstrap }: PageProps) {
       </AssetCard></li>)}
     </ul>
     <CursorTail {...feed} paused={Boolean(upload || selected || editing || deleting)} />
-    {selected && <ViewAsset key={selected} root={root} id={selected} onClose={closeView} />}
+    {selected && <ViewAsset key={selected} bootstrap={bootstrap} id={selected} onClose={closeView} />}
     {canWrite && editing && <EditAsset root={root} asset={editing} onClose={() => setEditing(undefined)}
       onDone={() => { setEditing(undefined); changed('素材资料已保存。'); document.scrollingElement?.scrollTo(0, 0); }} />}
-    {canWrite && deleting && <DeleteAsset root={root} asset={deleting} onClose={() => setDeleting(undefined)}
+    {canWrite && deleting && <DeleteAsset bootstrap={bootstrap} asset={deleting} onClose={() => setDeleting(undefined)}
       onDone={() => { setDeleting(undefined); changed('素材已从全局库删除。'); }} />}
     {canWrite && upload && <UploadAsset bootstrap={bootstrap} onClose={() => setUpload(false)}
       onComplete={(id, filename) => { setUpload(false); changed('已入库「' + filename + '」。', id); document.scrollingElement?.scrollTo(0, 0); }} />}

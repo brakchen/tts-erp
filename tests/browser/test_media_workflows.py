@@ -745,16 +745,28 @@ def test_references_block_global_deletion_including_archived_humans(media_run: M
     assert run.api("PATCH", f"{HUMANS}/{second_id}", {"status": "archived"})[0] == 200
     objects = dict(gate.store.objects)
     run.goto("media-assets")
+    asset_action(page, "查看", filename)
+    detail_references = dialog(page).get_by_role("region", name="哪些数字人在用")
+    expect(detail_references.get_by_role("link", name=first, exact=True)).to_be_visible()
+    expect(detail_references.get_by_role("link", name=second, exact=True)).to_be_visible()
+    text(detail_references, "启用中")
+    text(detail_references, "已归档")
+    button(dialog(page), "关闭").click()
+    expect(dialog(page)).to_have_count(0)
+
     asset_action(page, "删除", filename)
     expect(button(confirmation(page), "确认删除")).to_be_disabled()
     expect(confirmation(page).get_by_text(re.compile("请解除关联后再删除"))).to_be_visible()
+    first_link = confirmation(page).get_by_role("link", name=first, exact=True)
+    expect(first_link).to_have_attribute("href", f"{gate.prefix}/v2/pages/digital-humans?human={first_id}")
+    expect(confirmation(page).get_by_role("link", name=second, exact=True)).to_have_attribute(
+        "href", f"{gate.prefix}/v2/pages/digital-humans?human={second_id}"
+    )
     # UI preflight and the authoritative endpoint must agree, including archived references.
     status, body = run.api("DELETE", f"{ASSETS}/{asset_id}")
     assert status == 409 and body["detail"] == "ASSET_IN_USE"
     assert_preserved(run, asset_id, {first_id, second_id}, objects)
-    button(confirmation(page), "取消").click()
-
-    run.goto(f"digital-humans?human={first_id}")
+    first_link.click()
     heading(page, first + "的素材")
     remove_reference(page, filename)
     assert run.links(first_id) == set() and run.links(second_id) == {asset_id}
@@ -1022,11 +1034,16 @@ def test_video_local_preview_upload_and_shared_metadata_match(media_run: MediaRu
     run.goto("media-assets")
     button(main(page), "上传素材").click()
     upload = upload_dialog(page)
+    initial_name = run.name("replace_me.png")
+    pick_file(run, initial_name)
+    name_field = upload.get_by_role("textbox", name="素材名称", exact=True)
+    expect(name_field).to_have_value(initial_name)
     with page.expect_file_chooser() as chooser:
-        button(upload, "上传文件").click()
+        button(upload, "更换文件").click()
     chooser.value.set_files({
         "name": filename, "mimeType": "video/webm", "buffer": payload,
     })
+    expect(name_field).to_have_value(filename)
     local_metadata = video_ready(page, filename, local=True, scope=upload)
     assert (local_metadata["width"], local_metadata["height"]) == (320, 180)
     assert local_metadata["duration"] == pytest.approx(1.0, abs=0.05)
