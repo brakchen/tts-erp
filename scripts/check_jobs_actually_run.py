@@ -41,7 +41,7 @@ _ALLOWED_SQL_CONTAINS = ("information_schema", "pg_catalog", "pg_stat", "alembic
 _write_violations: list[str] = []
 
 
-def _guard(event, conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+def _guard(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
     """SQLAlchemy 事件钩子：拦截一切非只读语句。"""
     head = (statement or "").lstrip().upper()
     ok = head.startswith(_ALLOWED_SQL_PREFIXES) or any(
@@ -54,36 +54,27 @@ def _guard(event, conn, cursor, statement, parameters, context, executemany):  #
         )
 
 
-def _install_readonly_guard(session_factory) -> None:  # noqa: ANN001
+def _install_readonly_guard(session_factory):  # noqa: ANN001
+    """把只读守卫挂到 sessionmaker 实际使用的 Engine 上。
+
+    2026-11-08 首版实现有 bug：靠 factory.kw.get("bind") 取 engine 常常拿到
+    None，于是改用"包一层 factory"的写法，结果破坏了 sessionmaker 语义
+    （session.execute 抛 DBAPI 包装错误而不是守卫错误）。
+    现在改为：先建一个 session 取出真实的 bind engine，守卫挂在 engine 上，
+    后续 session 全部共享该 engine ⇒ 守卫覆盖全部语句。
+    """
     try:
         from sqlalchemy import event
-        from sqlalchemy.engine import Engine
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"cannot install read-only guard: {exc}\n")
         raise SystemExit(2)
+    probe = session_factory()
     try:
-        engine = session_factory.kw.get("bind")  # type: ignore[union-attr]
-    except Exception:  # noqa: BLE001
-        engine = None
-    if engine is not None:
-        event.listen(engine, "before_cursor_execute", _guard)
-        return
-    # sessionmaker 可能不暴露 bind：改为在每次建 session 时监听其 engine
-    from sqlalchemy import event as _event
-
-    orig = session_factory
-
-    def factory_with_guard():  # noqa: ANN001
-        s = orig()
-        try:
-            bind = s.get_bind()
-            _event.listen(bind, "before_cursor_execute", _guard)
-        except Exception:  # noqa: BLE001
-            pass
-        return s
-
-    factory_with_guard.__wrapped__ = orig  # type: ignore[attr-defined]
-    return factory_with_guard
+        engine = probe.get_bind()
+    finally:
+        probe.close()
+    event.listen(engine, "before_cursor_execute", _guard)
+    return session_factory
 
 
 def _utcnow() -> dt.datetime:
@@ -205,7 +196,7 @@ def _age_columns(session) -> list[tuple[str, str]]:
     rows = session.execute(
         text(
             """
-            SELECT table_schema, table_name
+            SELECT DISTINCT table_schema, table_name
               FROM information_schema.columns
              WHERE column_name IN ('updated_at','created_at')
                AND table_schema NOT IN ('pg_catalog','information_schema')

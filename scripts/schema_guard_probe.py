@@ -20,33 +20,30 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
 
 def _local_revisions(tree: Path) -> dict[str, str]:
-    """本树 alembic/versions/*.py 的 revision id → 文件名。"""
-    versions = tree / "alembic" / "versions"
-    out: dict[str, str] = {}
-    if not versions.is_dir():
-        return out
-    for f in sorted(versions.glob("*.py")):
-        if f.name.startswith("__"):
-            continue
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-        except Exception:  # noqa: BLE001
-            continue
-        rev = None
-        for line in text.splitlines():
-            if line.startswith("revision"):
-                rev = line.split("=", 1)[1].strip().strip("\"'").strip(",")
-                break
-            if line.startswith("down_revision"):
-                break
-        if rev:
-            out[rev] = f.name
-    return out
+    """本树 alembic/versions/*.py 的 revision id → 文件名。
+
+    2026-11-08 实测教训：用正则扫文件只能命中少数几种书写形式
+    （`revision = "x"` / `revision: str = "x"` / 缩进不同）——
+    75 个 migration 只命中 6 个。改用 alembic 自己的 ScriptDirectory。
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(tree / "alembic"))
+    cfg.set_main_option("version_locations", str(tree / "alembic" / "versions"))
+    try:
+        script = ScriptDirectory.from_config(cfg)
+        return {rev.revision: (getattr(rev, "path", "") or "") for rev in script.walk_revisions()}
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"ScriptDirectory failed for {tree}: {exc}\n")
+        return {}
 
 
 def _db_version() -> str | None:
@@ -79,10 +76,26 @@ def _heads_and_ancestors(tree: Path) -> tuple[list[str], set[str]]:
     try:
         script = ScriptDirectory.from_config(cfg)
         heads = list(script.get_heads())
+        # 不用 walk_revisions(head, "base")：本仓的 revision 图存在分叉
+        #（0037_merge_0036_heads / 0067_merge_price_and_publish 是 tuple 形
+        #  down_revision），alembic 会报 "Requested range ... does not refer to
+        #  ancestor/descendant revisions along the same branch"。
+        # 改为按 down_revision 自己走链，并对 tuple 的每个分支都走一遍。
+        all_revs = list(script.walk_revisions())
+        down = {r.revision: r.down_revision for r in all_revs}
         ancestors: set[str] = set()
         for head in heads:
-            for rev in script.walk_revisions(head, "base"):
-                ancestors.add(rev.revision)
+            stack = [head]
+            while stack:
+                cur = stack.pop()
+                if not cur or cur in ancestors:
+                    continue
+                ancestors.add(cur)
+                nxt = down.get(cur)
+                if isinstance(nxt, (list, tuple)):
+                    stack.extend(n for n in nxt if n)
+                elif nxt:
+                    stack.append(nxt)
         return heads, ancestors
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"alembic ScriptDirectory failed for {tree}: {exc}\n")
