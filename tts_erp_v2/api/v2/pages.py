@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import escape
 
 from tts_erp_v2.access._context import user_label_var, user_pages_var
@@ -40,7 +39,6 @@ def _require_readwrite(request: Request) -> None:
 # gets its own content hash. CSS and JS must not share a version token: a CSS-
 # only hotfix otherwise keeps the old URL and remains stale on mobile browsers.
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
-_JS_DIR = _STATIC_DIR / "js"
 _CSS_DIR = _STATIC_DIR / "css"
 
 # ── Shared sidebar navigation ─────────────────────────────────────────
@@ -227,10 +225,6 @@ def _asset_version(path: Path) -> str:
   return digest[:8]
 
 
-def _js_version(filename: str) -> str:
-  return _asset_version(_JS_DIR / filename)
-
-
 def _css_version(filename: str) -> str:
   return _asset_version(_CSS_DIR / filename)
 
@@ -255,37 +249,6 @@ def _sidebar_css(current_page: str = "") -> _TrustedHtml:
   ) if current_page else _TrustedHtml("")
 
 
-_TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
-class _TrustedHtml(str):
-  """HTML generated only from fixed templates and escaped labels."""
-  def __html__(self) -> str:
-    return self
-
-
-_templates_env = Environment(
-  loader=FileSystemLoader(_TEMPLATES_DIR),
-  autoescape=select_autoescape(["html"]),
-  keep_trailing_newline=True,
-)
-_templates_env.globals.update(
-  js_version=_js_version,
-  css_version=_css_version,
-  sidebar=_sidebar,
-  sidebar_css=_sidebar_css,
-)
-
-
-def _render_page(template: str, *, current_page: str = "", **context: Any) -> HTMLResponse:
-  """Render ``templates/pages/<template>`` (Jinja2) into an HTML response.
-
-  Template context: ``current_page`` (sidebar active slug) plus per-page
-  extras. Asset cache-busting is exposed to templates as the
-  ``js_version``/``css_version`` globals (SHA-256 content stamps).
-  """
-  html = _templates_env.get_template(f"pages/{template}").render(
-    current_page=current_page, **context
-  )
-  return HTMLResponse(html)
 
 
 @router.get("/shops", response_class=HTMLResponse)
