@@ -84,6 +84,41 @@ Import the module by its package path instead:
 from tests.browser import conftest as browser_conftest
 ```
 
+#### 1.4.1 The same file imported twice: patching the payload silently does nothing
+
+Resolving the module by package path fixes the `AttributeError`, but it creates a second
+instance of the **same file**: `tests/browser/conftest.py` is imported both as `conftest`
+(the module that owns the HTTP handler) and as `tests.browser.conftest` (the object the
+`browser_conftest` fixture hands out). They are different objects with different globals.
+
+The browser HTTP handler answers `/v2/**` from `_mock_payload`. Test modules patch it on the
+module the fixture returns:
+
+```python
+monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
+```
+
+If the handler reads its own module global instead, the patch never reaches the server.
+
+**The symptom is not an exception — it is silence.** The page renders the *unpatched* canned
+payload, so the browser sees a fixture without the fields the test meant to inject. That reads
+as "the page never received the data" (a missing summary panel, a price block that stays
+`hidden`, a retry link that never appears) and sends you hunting for a renderer or DOM
+regression that does not exist.
+
+Check which object the server reads before touching any selector:
+
+```python
+import sys
+print(sys.modules["conftest"].__file__, id(sys.modules["conftest"]))
+print(sys.modules["tests.browser.conftest"].__file__, id(sys.modules["tests.browser.conftest"]))
+```
+
+`tests/browser/conftest.py` therefore routes every canned lookup through `_canned_payload()`,
+which resolves `_mock_payload` on the canonical `tests.browser.conftest` object — the one the
+fixture returns. Keep that indirection when adding new canned endpoints, and assert on the
+served payload when a browser test depends on injected data.
+
 ### 1.5 Changing which owner renders a page
 
 When a page's renderer changes (Jinja template → React), every test that asserts on the **old
