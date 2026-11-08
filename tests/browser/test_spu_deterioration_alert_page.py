@@ -58,8 +58,12 @@ METRIC_KEYS = {
 
 
 def _row(page: Any, spu_pk: str) -> Any:
-    """One React comparison row; ``Table.Row`` carries the SPU primary key as id."""
-    return page.locator(f'{ROWS}[id="{spu_pk}"]')
+    """One React comparison row.
+
+    ``Table.Row`` renders a React-Aria collection id, so the row is identified
+    by the public ARIA link to the detail region it owns (``detail-<spuPk>``).
+    """
+    return page.locator(f'{ROWS}:has([aria-controls="detail-{spu_pk}"])')
 
 
 def _metric(scope: Any, label: str) -> Any:
@@ -1024,13 +1028,21 @@ def test_long_missing_reasons_keep_columns_balanced_and_notes_expandable(
             "el => [...el.querySelectorAll('thead th')].map(th => "
             "th.getBoundingClientRect().width / el.querySelector('table').getBoundingClientRect().width)"
         )
-        assert all(0.07 <= value <= 0.26 for value in proportions), proportions
-        # The first four filters share one row; the React filter bar aligns
-        # their bottom edges.
-        fields = page.locator(f"{FILTERS} > *:nth-child(-n+4)").evaluate_all(
-            "els => els.map(el => el.getBoundingClientRect().bottom)"
+        # The retired template calibrated 7%–26%; the React table hands its
+        # facts column ~27% at 2560px, so the ceiling follows the React layout
+        # while the floor still rejects a squeezed column.
+        assert all(0.07 <= value <= 0.30 for value in proportions), proportions
+        # The first four filters share one row; their controls are aligned.
+        controls = page.locator(FILTERS).evaluate(
+            """el => [...el.children].filter(c => c.tagName !== 'TEMPLATE').slice(0, 4)
+                 .map(c => {
+                   const control = c.querySelector('button.select__trigger, input');
+                   const r = control.getBoundingClientRect();
+                   return [r.top, r.bottom];
+                 })"""
         )
-        assert max(fields) - min(fields) <= 1, fields
+        assert max(box[0] for box in controls) - min(box[0] for box in controls) <= 1, controls
+        assert max(box[1] for box in controls) - min(box[1] for box in controls) <= 1, controls
     else:
         # One comparison table serves every width; narrow screens keep it
         # reachable through the labelled scroll region.
