@@ -77,9 +77,9 @@ entries:
   guard_phase: 测量
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python scripts/check_convergence_invariants.py --ledger docs/architecture/arch-debt-ledger.yaml --json
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
@@ -222,9 +222,9 @@ entries:
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python scripts/check_convergence_invariants.py --ledger docs/architecture/arch-debt-ledger.yaml --json
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
@@ -455,9 +455,9 @@ entries:
   guard_phase: 测量
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python scripts/check_jobs_actually_run.py --days 7 --stale-days 7 --lookback 5
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
@@ -497,9 +497,9 @@ entries:
   guard_phase: 测量
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python scripts/check_jobs_actually_run.py --days 7 --stale-days 7 --lookback 5
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
@@ -623,9 +623,9 @@ entries:
   guard_phase: 测量
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python scripts/check_convergence_invariants.py --ledger docs/architecture/arch-debt-ledger.yaml --json
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
@@ -1018,9 +1018,9 @@ entries:
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python scripts/check_convergence_invariants.py --ledger docs/architecture/arch-debt-ledger.yaml --json
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
