@@ -108,7 +108,7 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(api_client, readonly_key
     for component in ("<Summary ", "<FeeFacts ", "<PriceSummary ", "<ProfitabilityTable ", "<DrillDetails "):
         assert component in page
     assert 'id="rows"' in table and 'id="filter-limit"' in page
-    assert 'aria-label="SPU ROI 分页"' in page
+    assert '<OffsetPagination label="SPU ROI 分页"' in page
     assert "<Metrics values={row}" in drill
     for retired in ("sum-unresolved-qty", "sum-projected-terminal-loss-qty"):
         assert retired not in summary and retired not in page
