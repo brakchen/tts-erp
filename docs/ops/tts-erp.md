@@ -106,6 +106,15 @@ ssh schan@192.168.47.130 "bash /home/schan/tts-erp/restart.sh"
 - 对客户端 / 文档 / TikTok redirect URL 一律用 `https://chen.daqiangplatform.com/tts/<path>`，不带端口
 - 本机 curl 测试仍可 `http://127.0.0.1:9877/...`（带端口）
 
+### 生产 MinIO 预签名
+
+207 上 `/opt/tts-erp/.env` 的 `MINIO_ENDPOINT=127.0.0.1:6005` 用于应用经
+frp 访问 MinIO。浏览器经 `MINIO_PUBLIC_HOST` 的 `/minio` 路径访问时，
+HP desk 的 nginx 向 MinIO 转发 `Host: 127.0.0.1:9000`。在 207 的环境文件中
+设置 `MINIO_PRESIGN_ENDPOINT=127.0.0.1:9000`，让上传和预览 URL 的签名匹配
+该请求头。部署重启后，从资产管理的视频卡片打开素材，确认能播放和拖动进度。
+直连地址与代理转发 Host 相同的环境可省略 `MINIO_PRESIGN_ENDPOINT`。
+
 ## 健康检查
 
 ```bash
