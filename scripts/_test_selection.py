@@ -19,11 +19,14 @@ SELECTOR_TESTS = "tests/scripts/test_test_selection.py"
 ZABBIX_TEMPLATE = "docs/plugins/monitor/zabbix-monitor.yaml"
 ZABBIX_CHECK = "tests/scripts/test_zabbix_monitor_template.py"
 DRAWER_BROWSER = "tests/browser/test_frontend_pilots.py::test_navigation_drawer_theme_and_focus"
-LEGACY_FRONTEND = (
-    "tests/publishing/test_polling_channels.py",
-    "tests/publishing/test_upload_cancellation.py",
-    "tests/publishing/test_video_publish_frontend.py",
-)
+# The old per-page JavaScript implementations were retired with P6 (2026-11-08),
+# and their Node-VM behaviour tests went with them. The selection used to carry
+# them here so a frontend change would also run them; keeping the paths after
+# the files were deleted made every non-fast selection report them as
+# "missing" and fail the baseline gate. Frontend coverage now lives under
+# ``tests/frontend/`` and is picked up by the glob in ``_run_selected_tests.py``.
+# ``tests/scripts/test_test_selection.py`` guards that every path referenced
+# from this module still exists on disk.
 
 # Only map a domain narrowly when its provider and consumer tests are known.
 API_CONTRACTS = {
@@ -200,9 +203,7 @@ def _classify(selection: Selection, path: str) -> str:
             if page not in PAGE_BROWSER:
                 return f"frontend page {page}; review the unregistered layout check"
         return f"frontend page {page}"
-    if path in LEGACY_FRONTEND or (
-        path.startswith("tests/frontend/") and Path(path).name.startswith("test_")
-    ):
+    if path.startswith("tests/frontend/") and Path(path).name.startswith("test_"):
         _frontend_all(selection)
         selection.checks.append(path)
         return "changed frontend test"

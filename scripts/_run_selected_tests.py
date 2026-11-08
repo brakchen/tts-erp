@@ -11,7 +11,6 @@ from dataclasses import asdict
 
 from _test_selection import (
     COMPONENTS,
-    LEGACY_FRONTEND,
     ROOT,
     SCENARIOS,
     git,
@@ -37,7 +36,6 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
     if plan.frontend:
         targets.append(COMPONENTS)
         if not plan.vitest:
-            targets.extend(LEGACY_FRONTEND)
             targets.extend(
                 path.relative_to(ROOT).as_posix() for path in sorted((ROOT / "tests/frontend").glob("test_*.py"))
             )
