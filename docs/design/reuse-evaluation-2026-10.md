@@ -36,6 +36,11 @@
 - `static/vendor/uplot.iife.min.js` + `uplot.min.css`（1.6.32，MIT，
   <https://github.com/leeoniya/uPlot>，jsDelivr 自托管，登记于
   `static/vendor/NOTICE.md`）。
+  **2026-11-08 更新（P6 退役）**：这两个 vendored 文件已删除——`intercept-stats.js`
+  随旧页面退役，React 侧 `frontend/src/pages/intercept-stats/DailyChart.tsx`
+  改用 npm 依赖 `uplot@1.6.32` + `uplot-react@1.2.4`。
+  `common.css` 的 `html .uplot` 规则保留（npm 版 uplot CSS 同样声明了
+  system-ui/Arial 字体栈，特异性提升仍必要）。
 - `intercept-stats.js` 的「最近 7 天每日趋势」从 div 进度条改为
   `uPlot.paths.bars()` 柱状图：坐标轴、hover 值、resize 自适应。
 - 按域名/方法/状态码分布保留 div 横条（它们是带内联标签/百分比的列表，

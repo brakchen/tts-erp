@@ -64,11 +64,13 @@ a:hover { color: var(--accent-deep); }
 
 .mono { font-family: var(--mono); font-size: 13px; }
 
-/* vendor 组件的自带字体栈一律回落令牌：
- * uplot.min.css 的 `.uplot { font-family: system-ui, ... Arial ... }` 会在
+/* 组件库的自带字体栈一律回落令牌：
+ * uplot 的 `.uplot { font-family: system-ui, ... Arial ... }` 会在
  * 图例/坐标标签上产生全站第 4 套字体（2026-10-04 intercept-stats 实测）。
- * `html` 前缀是刻意的：该页 uplot.min.css 排在 common.css **之后**，同特异性
- * 后写者赢，必须抬一档特异性才压得住（写 !important 会连带锁死子元素）。 */
+ * `html` 前缀是刻意的：uplot 的样式表排在 common.css **之后**，同特异性
+ * 后写者赢，必须抬一档特异性才压得住（写 !important 会连带锁死子元素）。
+ * 2026-11-08：对手从已退役的 vendored uplot.min.css 换成 npm 版 uplot 的
+ * `dist/uPlot.min.css`（同样声明了 system-ui/Arial 字体栈），规则继续有效。 */
 html .uplot { font-family: var(--sans); }
 
 /* ── 页头 op-header ───────────────────────────────────── */
