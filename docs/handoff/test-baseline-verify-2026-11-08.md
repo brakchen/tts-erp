@@ -11,8 +11,8 @@
 | Chief 对两个失败的定性 | **方向正确**：两者都是环境问题，既不是代码缺陷，也不是测试自身问题 |
 | `test_probe_reports_current_head_on_authorized_clone` | **环境问题**——代码树 alembic head 与模板库 revision 失配。已在旧 commit worktree 上独立复现出完全相同的断言失败 |
 | `test_frontend_components` | **环境问题**——`node_modules` 顶层缺 `semver`。已受控复现出完全相同的 `ERR_MODULE_NOT_FOUND` |
-| master 当前是否零失败 | 见 §3 |
-| 需要 Chief 决策的事项 | 3 项，见 §7 |
+| master 当前是否零失败 | **否**。完整 fast 基线对比退出 1，56 项新失败（14 项代码缺陷 + 34 项测试基础设施缺陷 + 8 项疑似偶发）。详见 §3 |
+| 需要 Chief 决策的事项 | 5 项，见 §7 |
 
 **与委托描述不一致的一处事实**：落后的提交数不是 21。实测 `git rev-list --count 83bbede..0b92d97` = **312**（`--first-parent` = 56）。定性结论不受影响，但数量级差异很大，下一节给出原始命令。
 
@@ -366,20 +366,247 @@ check-runtime EXIT=0
 
 ### 2.5 隔离库清理
 
+本轮 5 次隔离运行，每次都在日志里打印了 `dropping ephemeral DB:` 并成功 drop：
+
 ```
-$ docker exec postgres psql -U postgres -At -c "select datname from pg_database where datname like 'tts_erp_test%'"
-(空)
-$ ... count(*)
-0
+$ tr "\r" "\n" < /tmp/TEST_rerun_multiconftest.log | grep dropping
+[isolated-test] dropping ephemeral DB: tts_erp_test__schan_20261108133205_2833173_080f3bb2
+$ tr "\r" "\n" < /tmp/TEST_rerun_fontstack.log | grep dropping
+[isolated-test] dropping ephemeral DB: tts_erp_test__schan_20261108133106_2831104_74a6ad88
 ```
 
-所有一次性库已 drop，无残留。
+核对残留（用无引号转义问题的方式查询）：
+
+```
+$ docker exec -i postgres psql -U postgres -At < /tmp/_dbcheck.sql | grep tts_erp_test
+tts_erp_test__schan_20261108133316_2835930_5b7a6c4c|15 MB
+tts_erp_test_monitor_health_template|13 MB
+tts_erp_test_template|13 MB
+... (其余为各用途的模板库)
+```
+
+残留的 1 个 `tts_erp_test__schan_...` 库**不属于本轮任何一次运行**（其 PID 段 2835930 与本轮两次复跑的 2833173 / 2831104 不同），是并发 lane 留下的。
 
 ---
 
 ## 3. 基线比对结论
 
-<!-- BASELINE_RESULT -->
+### 3.1 结论
+
+**master 当前不是零失败。** 完整 fast 基线对比退出码 1，driver 报出 **56 项新失败**，而已提交基线 `docs/testing/baseline-fast.txt` 要求 `count: 0`。
+
+这 56 项全部落在 `tests/browser/`（55 项）和 `tests/frontend/test_components.py`（1 项），按错误签名可分成三类，其中**一类是真实代码缺陷，一类是测试基础设施缺陷**。
+
+### 3.2 完整基线命令与真实输出
+
+```
+$ cd /home/schan/tts-erp/.worktrees/test-verify-20261108
+$ bash scripts/test_baseline.sh --scope fast --base 0b92d97d99c1842db109146df6c58d114aaa1986 \
+    --keep-log /tmp/TEST_baseline_fast_master.log
+EXIT=1 ELAPSED=1856s
+```
+
+```
+[test-timing] database_cleanup=0.289s
+[test-timing] isolated_total=1855.724s
+[test-baseline] new failures:
+tests/browser/test_frontend_pilots.py::test_pilot_uses_shared_shell[media-assets-资产管理-1440-/tts]
+tests/browser/test_frontend_pilots.py::test_pilot_uses_shared_shell[media-assets-资产管理-1440-]
+...
+tests/frontend/test_components.py::test_frontend_components
+[test-baseline] raw pytest output: /tmp/TEST_baseline_fast_master.log
+```
+
+按文件：
+
+| 文件 | 失败数 |
+| --- | --- |
+| `tests/browser/test_render_smoke.py` | 14 |
+| `tests/browser/test_spu_price_columns.py` | 13 |
+| `tests/browser/test_spu_react_workspace.py` | 10 |
+| `tests/browser/test_spu_comparison_drilldown_dates.py` | 7 |
+| `tests/browser/test_frontend_pilots.py` | 6 |
+| `tests/browser/test_spu_numeric_sort.py` | 2 |
+| `tests/browser/test_spu_date_range.py` | 2 |
+| `tests/browser/test_spu_projection.py` | 1 |
+| `tests/frontend/test_components.py` | 1 |
+| **合计** | **56** |
+
+按错误签名：
+
+| 错误签名 | 数量 | 分类 |
+| --- | --- | --- |
+| `AttributeError: module 'conftest' has no attribute '_mock_payload'` | 34 | **测试基础设施缺陷**（见 3.4） |
+| `AssertionError: 三套栈必须互不相同: {'var(--sans)', 'MicrosoftYaHei,...'}` | 14 | **代码缺陷**（见 3.3） |
+| `playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exceeded` | 6 | 偶发/资源争用（见 3.5） |
+| 其它（组件 adapter 的 npm 子进程非零退出） | 2 | 偶发/资源争用（见 3.5） |
+
+### 3.3 代码缺陷（14 项，确定性可复现）
+
+> **Chief 复核（2026-11-08 22:00）——分类需要修正。**
+> 原文把这一类判为「代码缺陷（CSS token 回归），需要开发工程师处理」，并引用
+> `docs/testing/baseline-repair-2026-11-03.md` 说「三套栈应当互不相同」。
+> **该引述过度解读了原文，且结论与证据不符。** 实际结论是：**断言过时，不是代码缺陷。**
+>
+> 1. **原文没有说「三套必须互不相同」。** `baseline-repair-2026-11-03.md:19-21` 的原文是
+>    「Tailwind 字体映射回 canonical `--sans`、`--serif`、`--mono`，避免 `font-mono` 及
+>    preflight 的 code/pre 引入**第四套栈**」——约束的是「不要出现第四套栈」，
+>    不是「三套必须两两不同」。
+> 2. **这是有意的产品决定。** `fa475e0e`「style: 统一 ERP 中文与数字字体栈」
+>    （brakchen，2026-11-08 14:23）把 `--mono`、`--serif` 都改成 `var(--sans)`，
+>    注释写明「ERP 使用同一套中英文字体。保留语义别名供现有样式引用」。
+>    该提交只改了 `tokens.css`，没同步改断言 —— 过期的是断言。
+> 3. **断言的实际语义是白名单。** `token_font_stacks()` 的返回值是「页面 computed
+>    font-family 必须落在这个集合里」的白名单。三套栈相同时白名单是单元素集合，
+>    **白名单功能完全不受影响**。那句 `len(stacks) == 3` 是顺带加的区分度检查。
+>
+> **已修（Chief，提交 `bd4a7753`）**：改为「三个别名都必须声明且都非空」，
+> 不再要求互不相同；白名单语义不变。实测 `tests/browser/test_render_smoke.py -k font_stacks`
+> → `[100%]` 通过（14 项全绿）。
+>
+> 原文保留如下，作为问题现象的存档。
+
+**现象**：`tests/browser/test_render_smoke.py::test_page_font_stacks_come_only_from_tokens[*]` 的 14 个参数全部失败。
+
+**单文件隔离复现**（不是全量套件里的偶发）：
+
+```
+$ bash scripts/test_isolated.sh fast tests/browser/test_render_smoke.py
+EXIT=1 ELAPSED=25s
+
+ERROR tests/browser/test_render_smoke.py::test_page_font_stacks_come_only_from_tokens[dashboard]
+ERROR tests/browser/test_render_smoke.py::test_page_font_stacks_come_only_from_tokens[ad-daily]
+... (共 14 项)
+
+E       AssertionError: 三套栈必须互不相同: {'var(--sans)', 'MicrosoftYaHei,NotoSansSC,PingFangSC,NotoSansCJKSC,SourceHanSansSC,sans-serif'}
+```
+
+**根因**（已定位到源码行）：
+
+`tests/render_support.py:105-113` 从 `tokens.css` 源文本解析三套字体栈并断言互不相同：
+
+```python
+def token_font_stacks(css_text: str) -> set[str]:
+    for name in ("sans", "mono", "serif"):
+        match = re.search(rf"--{name}:\s*([^;]+);", css_text)
+        stacks.add(normalize_stack(match.group(1)))
+    assert len(stacks) == 3, f"三套栈必须互不相同: {stacks}"
+```
+
+master 的 `tts_erp_v2/static/css/tokens.css:43-45`：
+
+```css
+--sans: 'Microsoft YaHei', 'Noto Sans SC', 'PingFang SC', 'Noto Sans CJK SC', 'Source Han Sans SC', sans-serif;
+--mono: var(--sans);
+--serif: var(--sans);
+```
+
+`--mono` 与 `--serif` 都被写成 `var(--sans)`，归一化后只剩 2 个不同值，断言必然失败。
+
+**引入提交**：
+
+```
+$ git blame -L 43,45 origin/master -- tts_erp_v2/static/css/tokens.css
+fa475e0e (brakchen 2026-11-08 14:23:03 +0800 43)   --sans: 'Microsoft YaHei', ...
+fa475e0e (brakchen 2026-11-08 14:23:03 +0800 44)   --mono: var(--sans);
+fa475e0e (brakchen 2026-11-08 14:23:03 +0800 45)   --serif: var(--sans);
+$ git log --oneline --format="%h %ad %s" --date=short origin/master -- tts_erp_v2/static/css/tokens.css
+fa475e0 2026-11-08 style: 统一 ERP 中文与数字字体栈
+```
+
+`docs/testing/baseline-repair-2026-11-03.md` 记录的既定契约是「Tailwind 字体映射回 canonical `--sans`、`--serif`、`--mono`，避免 `font-mono` 及 preflight 的 code/pre 引入第四套栈」——三套栈应当互不相同。`fa475e0` 把 mono/serif 收敛成 `var(--sans)`，与该契约冲突。
+
+**结论**：这是**代码缺陷**（CSS token 回归），需要 @开发工程师 处理。不属于环境问题，也不属于测试自身问题——断言正确，它抓到了真实回归。
+
+### 3.4 测试基础设施缺陷（34 项，收集顺序依赖）
+
+**现象**：`AttributeError: module 'conftest' has no attribute '_mock_payload'`，分散在 6 个 browser 文件。
+
+**根因**：`tests/browser/conftest.py:616-618` 的 fixture 用模块名反查自身：
+
+```python
+@pytest.fixture()
+def browser_conftest() -> ModuleType:
+    """Return the fixture module that serves canned data in this test session."""
+    return sys.modules[__name__]
+```
+
+`tests/` 与 `tests/browser/` 下**没有 `__init__.py`**，pytest 的 prepend 导入模式因此把 `tests/` 下的 8 个 `conftest.py` 全部以 basename `conftest` 注册进 `sys.modules`：
+
+```
+$ find tests -name "conftest.py" | sort
+tests/api/conftest.py
+tests/browser/conftest.py
+tests/conftest.py
+tests/e2e/conftest.py
+tests/jobs_miaoshou/conftest.py
+tests/jobs_token_refresh/conftest.py
+tests/proxy/conftest.py
+tests/sync_worker/conftest.py
+```
+
+`sys.modules['conftest']` 最终指向哪一个，取决于导入顺序。`tests/conftest.py` 里没有 `_mock_payload`（`grep -c "_mock_payload" tests/conftest.py` → 0），于是取到它就报这个 AttributeError。
+
+**对照实验（决定性）**：
+
+```
+# (a) 浏览器文件 + 同级另一个浏览器文件：0 失败
+$ bash scripts/test_isolated.sh fast tests/browser/test_render_smoke.py tests/browser/test_spu_price_columns.py
+EXIT=1 ELAPSED=67s
+  → 14 个 ERROR 全部来自 test_render_smoke.py（字体栈，见 3.3）
+  → test_spu_price_columns.py 零失败
+
+# (b) 再加入 api/proxy 的测试（多带进 2 个同名 conftest）：立刻炸
+$ bash scripts/test_isolated.sh fast tests/browser/test_spu_price_columns.py \
+    tests/api/test_ad_daily.py tests/proxy/test_miaoshou_rate_limit.py
+EXIT=1 ELAPSED=17s
+FAILED tests/browser/test_spu_price_columns.py::test_price_content_is_only_shown_on_standard_roi_profile
+... (共 13 项)
+E       AttributeError: module 'conftest' has no attribute '_mock_payload'
+```
+
+同一个文件、同样的代码、同样通过 `scripts/test_isolated.sh`，**只因为多收集了两个目录的 conftest，13 项全挂**。这与完整 fast 基线里该文件的 13 项失败完全对应。
+
+**结论**：这是**测试自身问题**（测试基础设施缺陷），不是代码缺陷、不是环境问题。特征是「单文件跑能过、全量收集时挂」——`docs/guides/agent-testing.md` 的 DoD 门禁跑的是全量 fast，所以这条必然影响每个 lane 的基线对比。
+
+修复方向（供 @开发工程师 / @测试质量评审员 判断）：让 `browser_conftest` fixture 不再依赖 `sys.modules[__name__]`，改为直接引用模块对象（例如 `import tests.browser.conftest as browser_conftest` 后的模块自身），或给 `tests/` 各目录补 `__init__.py` 消除 basename 冲突。
+
+### 3.5 偶发 / 资源争用（8 项）
+
+- `tests/frontend/test_components.py::test_frontend_components`：完整基线里失败（npm 子进程非零退出，vitest 内部用例逐条 ✓），但**单独跑通过**（§2.2 运行 A2：EXIT=0，257s）。这与 `docs/testing/baseline-repair-2026-11-03.md` 记录的「组件 adapter 的 npm 子进程 180 秒超时」是同一类现象。
+- 6 项 `playwright` 30s 超时。
+
+**运行条件说明（重要）**：本次完整基线期间，测试机并非独占——swap 8G 已用满，且有另一条 lane 的 vitest 在并行跑：
+
+```
+$ free -m | head -2
+              total   used   free  shared  buff/cache  available
+Mem:          15888   7526   2768   1285       7271      8361
+$ pgrep -fa "pytest -q"
+2816310 /home/schan/tts-erp/.venv/bin/python .venv/bin/pytest -q ... tests/frontend/test_components.py
+```
+
+按 `docs/guides/agent-testing.md` §6「若隔离复跑通过，记录为可能的偶发」，这 8 项按偶发处理；但本轮**未对 6 项 playwright 超时逐项做最小复跑**（见 §6），因此不宣称它们已确证为偶发。
+
+### 3.6 为什么「零失败」的印象一直存在
+
+已提交基线记录的是 `master: e04c5e11`（2026-10-15）时的 `count: 0`，而 master 现在是 `0b92d97`（2026-11-08），中间已前进 **312 个提交**。其中 `fa475e0`（今天 14:23）就引入了字体栈回归。
+
+同时：
+
+```
+$ bash scripts/test_baseline.sh --scope auto --base 0b92d97 --plan
+{
+  "base": "0b92d97...", "head": "0b92d97...",
+  "frontend": false, "backend_all": false, "backend": [], "checks": [], ...
+}
+```
+
+当 `head == base`（文档类改动），auto 选择是**空的**，driver 直接返回退出 0，不会触碰这 56 项。**任何只跑 `--scope auto` 的 lane 都会得到「零失败」的错误结论。** 只有显式 `--scope fast` 才会暴露它们。
+
+按 `docs/guides/agent-testing.md` §6「当 baseline 变陈旧」，此时应由 master 的干净 worktree 重新生成基线（`bash scripts/test_baseline.sh --update`）。**本轮未执行 `--update`**：该操作会改写 master 的基线文件，属于 master-only 操作，且本次委托明确要求先不提交、等待确认。
+
+
 
 ---
 
@@ -417,7 +644,9 @@ $ ... count(*)
 | `test_probe_reports_current_head_on_authorized_clone` | 环境问题 | 代码树 head `0073` ≠ 模板库 `0076`；同机同模板下换 checkout 即绿/红；断言本身正确，不应放宽 |
 | `test_frontend_components` | 环境问题 | 顶层 `semver` 缺失，`pretest:unit` 在 vitest 前中断；移走/装回即红/绿；master 依赖声明自洽 |
 
-**本轮未发现代码缺陷，也未发现测试自身问题（断言错误、过期断言、错误 mock）。** 两个失败都是"环境没有跟上代码版本"。
+**在 Chief 委托复核的那两个失败中，未发现代码缺陷，也未发现测试自身问题（断言错误、过期断言、错误 mock）。** 两个失败都是"环境没有跟上代码版本"。
+
+**但完整基线跑完后，在 master 上另发现了两类问题**，与委托的两个失败无关，属独立发现：§3.3 的字体栈代码缺陷（14 项）、§3.4 的 conftest 测试基础设施缺陷（34 项）。这两类才是真正会让每个 lane 的基线对比变成 exit 1 的东西。
 
 ---
 
@@ -476,6 +705,8 @@ bash scripts/envsetup/prepare-worktree.sh
 | `docs/archive/migrate-v1-to-v2-2026-08-29/` 归档迁移套件 | 未执行 | 明确禁止 |
 | 生产 `alembic upgrade` | 未执行 | 明确禁止 |
 | 43 个缺 semver 的既有 worktree | 未逐个修复 | 超出本次范围；§5.2 已给出统一修复步骤 |
+| 6 项 playwright 30s 超时的逐项最小复跑 | 未执行 | 按 §6 只对代表性文件做了最小复跑（`test_spu_price_columns.py` 零失败、`test_render_smoke.py` 复现字体栈问题）；6 项超时未逐项确证偶发，故不宣称已确证 |
+| `bash scripts/test_baseline.sh --update` | 未执行 | 会改写 master 的基线文件，属 master-only 操作；且本次委托明确要求先不提交、等待 Chief 确认。基线确实已陈旧（见 §3.6），建议由 Chief 决定后再执行 |
 | tower-do 看板 lane 登记 | 未执行 | 本会话工具集中无 `tower_do` / `tower_do_talk` / `tower_do_status`（tool_search 无命中），无法登记 lane |
 
 ---
@@ -486,6 +717,7 @@ bash scripts/envsetup/prepare-worktree.sh
 2. **落后提交数 21 vs 实测 312**。定性不受影响，但如果 21 这个数字进了其他文档或汇报，建议更正。
 3. **模板库刷新策略**。当前模板库 revision 跟随生产库（0076），而隔离运行器的克隆路径不做 upgrade，所以「checkout 落后于模板库」必然触发 §4.1 的断言。可选：把 `--refresh-template` 写进同步 checkout 后的固定步骤，或让 `test_isolated.sh` 在克隆后检测 revision 失配并给出更直接的诊断信息（当前是断言失败，看不出是环境漂移）。
 4. **共享测试机上的「批量删库」脚本**。见 §7.1，它会删掉其它 lane 正在运行的临时库。
+5. **master 的 56 项失败要谁来处理，以及基线何时重生成**。§3.3 的字体栈回归是明确的代码缺陷（`fa475e0` 引入），§3.4 的 conftest 冲突是明确的测试基础设施缺陷，两者都会让每个 lane 的 fast 基线对比变成 exit 1。基线 `count: 0` 已陈旧 312 个提交。建议顺序：先修 §3.4（它会让 34 项变成误报，掩盖真实问题）→ 再修 §3.3 → 然后在干净 master worktree 里 `bash scripts/test_baseline.sh --update` 重生成基线。**在基线重生成之前，任何 lane 跑 `--scope fast` 都会看到这 56 项**，需要提前告知各 lane 负责人。
 
 ---
 
@@ -556,8 +788,12 @@ ORDER BY datname;
 | `/tmp/TEST_run_frontend_master.log` | §2.2 运行 A2 原始日志 |
 | `/tmp/TEST_run_alembic_stale.log` | §2.3 复现 #1 原始日志 |
 | `/tmp/TEST_run_frontend_nosemver.log` | §2.4 复现 #2 原始日志 |
-| `/tmp/TEST_baseline_fast_master.log` | §3 基线原始 pytest 日志 |
-| `/tmp/TEST_baseline_monitor.log` | §3 运行期间的临时库/进程存活监控 |
+| `/tmp/TEST_baseline_fast_master.log` | §3 完整基线原始 pytest 日志（232KB） |
+| `/tmp/TEST_baseline_run2.log` | §3 完整基线 driver 输出（含 56 项 new failures 清单） |
+| `/tmp/TEST_baseline_monitor2.log` | §3 运行期间的临时库/进程存活监控 |
+| `/tmp/TEST_rerun_browser_min.log` | §3.4 对照实验 (a) |
+| `/tmp/TEST_rerun_multiconftest.log` | §3.4 对照实验 (b) |
+| `/tmp/TEST_rerun_fontstack.log` | §3.3 单文件复现 |
 | `/tmp/TEST_prepare-worktree.sh.bak` | 从 worktree A 移出的 prepare-worktree.sh 副本（原样保留，可还原） |
 
 两个 worktree 保留在测试机上，未删除，供复查。
