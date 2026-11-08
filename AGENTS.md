@@ -22,7 +22,7 @@
 - Sole live task/lane registry for non-Codex sessions: tower-do (`tower_do`, `tower_do_talk`, `tower_do_status`; see §8).
 - Stable lane lifecycle and board record format: `docs/guides/agent-git-workflow.md`. `docs/handoff/ACTIVE.md` is only a relocation notice; do not maintain live rows there.
 
-- 本机虚拟机测试服务器：`schan@192.168.47.129`（Ubuntu 26.04 LTS）；SSH 密钥位置、登录验证和适用边界见 `docs/ops/tts-erp.md` 的「本机虚拟机测试服务器（项目记忆）」。
+- 测试服务器：**`schan@192.168.1.2`（HP desk，`schan-HP-ProDesk-400-G2-MINI`，Ubuntu 24.04 LTS）**。代码在 `/home/schan/tts-erp`，测试环境、venv（Python 3.13）、docker `postgres:18` / `minio` 都在这台机器上；隔离测试只走 `bash scripts/test_isolated.sh ...`（§3 不变）。SSH 连接方式与适用边界见 `docs/ops/tts-erp.md` 的「本机虚拟机测试服务器（项目记忆）」。
 
 ### 运行环境拓扑（2026-11-03 起）
 
@@ -129,6 +129,7 @@ Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md
 | Unit layer (isolated DB) | `bash scripts/test_isolated.sh unit` |
 | Refresh isolated test template | `bash scripts/test_isolated.sh --refresh-template fast` |
 | 测试前置依赖体检 / 安装 | `bash scripts/envsetup/install-test-deps.sh --check` / `sudo bash scripts/envsetup/install-test-deps.sh` |
+| 新 worktree 测试环境准备 | `bash scripts/envsetup/prepare-worktree.sh` |
 | API restart | `bash restart.sh` |
 | 部署 HP desk 测试环境（前端构建 + release worktree checkout + 重启校验） | `bash scripts/test_deploy.sh [ref]` |
 | 部署 207 生产环境（tar 同步 + 原子替换 + 重启校验，需逐字确认） | `bash scripts/prod_deploy.sh [--yes] [origin/master]` |
@@ -139,6 +140,7 @@ Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md
 - `scripts/test_isolated.sh` is the sole agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, injects `TTS_ERP_DB_URL_TEST`, runs the selected scope, then drops the clone.
 - Refresh the template with `bash scripts/test_isolated.sh --refresh-template fast` when migrations/schema change or the template is missing/stale.
 - If template cloning or its prerequisites fail, stop and repair them with `bash scripts/envsetup/install-test-deps.sh --check`; do not substitute another runner or database.
+- **New worktrees need environment preparation before any test run.** `.venv`, `.env.test` and `frontend/node_modules` are gitignored, so a freshly created worktree has none of them and `test_isolated.sh` fails with `missing project Python`, `TTS_ERP_DB_URL_TEST is unset` or `Frontend dependencies missing`. Run `bash scripts/envsetup/prepare-worktree.sh` once per worktree; it links them from the main checkout (`/home/schan/tts-erp`) and changes nothing there.
 - Full command reference: `docs/guides/commands-reference.md`.
 
 ### 5.1 Reuse-first implementation policy
