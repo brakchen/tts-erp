@@ -1,8 +1,19 @@
 # ERP 前端工程化与渐进式迁移技术方案
 
-> 状态：**P0 地基与 P1 两个试点已交付；其余阶段待实施** · 2026-10-23。
-> 用户另行授权的首批代码已合入 `master`（`8f1b752`）：共享 AppShell、构建/热更新、`dashboard` 与 `intercept-requests`；证据见[实施计划](frontend-p01-implementation.md)。
-> 独立审查及分支/精确集成提交 fast 基线均通过；这不等于 P2–P6 或生产上线完成，也不扩大后续开发/部署授权。
+> 状态：**P0–P5 已实施完成；P6 退役与收口已实施完成、待合并 `master`** · 2026-11-08 核实并更正。
+> 原状态行「P0 地基与 P1 两个试点已交付；其余阶段待实施」自本日起作废。
+> 实际范围：`accounts/pages.py::PAGES` 注册的 **18 个页面**全部由 React renderer 渲染，加登录页共 19 项，
+> 与 `tts_erp_v2/api/v2/frontend_pages.py::MIGRATED_PAGE_IDS` 的 19 项一一对应。
+> 另有两个辅助文档页（`message`、`oauth-onboard`）复用同一 React shell。
+> P6 路由收敛已合入 `master`（`2b68b40a`）；旧资产删除与测试侧退役已提交并推送至
+> `origin/feature/p6-collapse-migrated-routes`（`f72a3089` 删 12 个旧 Jinja 模板 + 12 个旧页面脚本，
+> `53a98372` 删 ad-daily 内联旧页面 HTML）与 `origin/feature/p6-retire-legacy-assets`（`e232f1c` 测试侧清理），
+> **尚未合入 `master`**——`master` 此刻仍保有那 12 个旧模板与 12 个旧脚本。
+> 本状态行只描述代码与文档现状，**不等于生产环境已上线同一版本**，也不扩大后续部署授权。
+> P0/P1 原始证据见[实施计划](frontend-p01-implementation.md)；P2 之后的逐批实施记录见
+> [P2 实现计划](frontend-p2-implementation.md)与[剩余控制台页面迁移实施计划](frontend-remaining-implementation.md)；
+> P6 退役执行记录见[并行执行方案](../handoff/p6-retirement-parallel-plan.md)与
+> [本期工作总结](../handoff/session-summary-2026-11-08.md)。
 > 开发标准唯一入口：[前端开发规范](../guides/frontend-development.md)。
 > **2026-10-24 用户更新交付口径：本次不做灰度、分批放量或流量观察等待。改造与必要验收完成后直接合并 `master` 启用；下述 P0–P6 是开发分解，不是放量流程。此口径覆盖旧版逐页放量/回退期等待要求。**
 
@@ -54,12 +65,11 @@
 - 根目录 [AGENTS.md](../../AGENTS.md)：安全、前端计算和协作边界。
 - [架构概览](../architecture/architecture-overview.md)、[External API](../api/external-api.md)
   的会话、页面、CORS、错误和路径契约。
-- `tts_erp_v2/accounts/pages.py`：当前 **15 个页面**的标识、分组和页面权限唯一目录。
-- `tts_erp_v2/api/v2/pages.py`：共享侧边栏、13 个 Jinja 模板的渲染入口；ROI/重点 SPU 复用同一模板。
-- `tts_erp_v2/api/v2/ad_daily.py`：广告日明细的 HTML 内联于 Python，不能只扫描 templates 目录。
-- `tts_erp_v2/api/v2/auth.py`：登录 HTML 同样不在 pages 模板目录；`/auth/me` 已提供会话信息。
-- `static/js/spu-profitability-page.js`：约 3200 行，Tabulator 分组列/冻结列/服务端排序/行内钻取；
-  `spu-roi.js`、`focused-spus.js` 已有共享页面内核，应保留这种所有权关系而非重新分叉。
+- `tts_erp_v2/accounts/pages.py`：页面标识、分组和页面权限的唯一目录。**2026-11-08 更正：当前为 18 个页面**（原记 15 个；后增 `media-assets`、`digital-humans`、`runninghub` 三个「内容资产」组页面）。
+- `tts_erp_v2/api/v2/pages.py`：共享侧边栏与页面路由入口。**2026-11-08 更正：旧 Jinja renderer 已退役**（原记「13 个 Jinja 模板的渲染入口」；`master` 此刻仍保有 12 个旧模板待 P6 分支合入，但 `_render_page` 已零调用，已迁移页一律走 `render_frontend_page`）。
+- `tts_erp_v2/api/v2/ad_daily.py`：广告日明细的旧 HTML 曾内联在 Python 里。**2026-11-08 更正：该内联 HTML 已删除**（`53a98372`），该页现走 `render_frontend_page`；扫描旧实现时仍须包含本文件。
+- `tts_erp_v2/api/v2/auth.py`：登录展示已迁到 React（`frontend/src/pages/login/`）。**2026-11-08 更正：**`_LOGIN_HTML` 仅作为 `MIGRATED_PAGE_IDS` 不含 `login` 时的回落分支保留（`auth.py:132`），不再是主路径；`/auth/me` 仍提供会话信息。
+- 旧 ROI/重点 SPU 内核（曾为 `static/js/spu-profitability-page.js` 等约 3200 行页面脚本）：**2026-11-08 更正：这些旧脚本文件已不存在**，共享内核的所有权已迁到 `frontend/src/pages/spu-profitability/`；Tabulator 仍被该模块的 `ProfitabilityTable.tsx` 直接复用。「共享内核不重新分叉」的设计约束仍然有效。
 - [vendored assets](../../tts_erp_v2/static/vendor/NOTICE.md)：Bootstrap、Tabulator、Tom Select、
   JSONEditor、uPlot 已有固定版本和许可证。
 - [测试指南](../guides/agent-testing.md)、[测试域](../guides/test-domains.md)、
@@ -80,6 +90,12 @@
 技术说明，保留发布权限、状态机、确认和失败恢复；不借 UI 迁移新建或扩大店铺写能力。本次
 不修改这些 owner 持有的文档或源码。
 
+**2026-11-08 更正：这两页的前置条件均已满足并完成迁移。** `spu-profit-deterioration` 按已确认的
+7/3 天对比契约迁入 `frontend/src/pages/spu-profit-deterioration/`，**未恢复旧阈值告警**；
+`video-publish` 迁入 `frontend/src/pages/video-publish/`，发布权限、状态机、确认、取消与失败恢复
+按原契约保留，未新增店铺写 API。逐条实施记录见
+[剩余控制台页面迁移实施计划](frontend-remaining-implementation.md)。
+
 ## 3. 路径比较与推荐
 
 | 路径 | 收益 | 成本/风险 | 决策 |
@@ -93,7 +109,7 @@
 
 ## 4. 目标模块边界
 
-下面是**拟议目录**，不是已经创建的文件；具体小文件拆分由实施 owner 在此边界内决定。
+下面是**目标模块边界**。**2026-11-08 更正：这些文件现已实际创建**，不再是「拟议目录」；具体小文件拆分由实施 owner 在此边界内决定（实际落地差异见本节末对照表）。
 
 ```text
 frontend/
@@ -118,6 +134,15 @@ frontend/
 
 依赖为 `main → AppShell + 页面`、`页面 → shared/HeroUI`。共享层不反向导入 pages，不建立通用
 事件总线或复杂插件框架。页面私有请求/状态可放在该页目录，不强行挪入全局 store。
+
+**2026-11-08 更正：以上目录已实际落地，不再是「拟议」。** 与设计稿的实际差异：
+
+| 设计稿 | 实际 | 说明 |
+| --- | --- | --- |
+| `app/navigation.tsx` | `app/AppShell.tsx` + `app/navigation-drawer.css` + `app/SessionActions.tsx` | 导航与会话动作并入骨架 owner，样式集中在 drawer CSS |
+| `shared/components/` | 未落地 | 按「有真实消费者才抽取」的原则，暂不需要独立共享组件目录；`shared/api/` 已有 `client.ts`、`paths.ts`、`command-errors.ts`、`request-lifetime.ts`、`identity-json.ts` |
+| `pages/` 只列 3 个示例 | **20 个页面目录** | 18 个注册页面 + `login` + 两个辅助页（`oauth-onboard`、`message`）共 21 个 pageId，落在 20 个目录——`spu-roi` 与 `focused-spus` 共用 `pages/spu-profitability/` |
+| `dist/` | `tts_erp_v2/static/frontend/<releaseId>/` | 产物由 `scripts/build_frontend.sh` 打包进同版本发布包，不留在 `frontend/dist` |
 
 ### 4.1 AppShell 与页面接口
 
@@ -152,12 +177,15 @@ frontend/
 
 1. 保留 `/v2/pages/<id>` 的显式路由和原鉴权/handler dependencies。广告日明细虽定义在另一模块，
    也纳入同一迁移登记。
-2. 后端增加小的页面 renderer 适配 owner（拟 `tts_erp_v2/api/v2/frontend_pages.py`），只负责已迁移
+2. 后端增加小的页面 renderer 适配 owner（**2026-11-08 更正：已落地为 `tts_erp_v2/api/v2/frontend_pages.py`**），只负责已迁移
    pageId 的 HTML shell、bootstrap 和 manifest 读取。业务处理仍归原 API/module。
 3. **后端只有一个显式的已迁移页面集合**，作为开发期间的新旧技术接线；在任务分支接好候选以便隔离验收，完成后随版本直接启用，不将它扩展为流量放量系统。
    不另设浏览器开关、用户灰度开关、服务端自动探测和多个互相兜底的路由注册表。
 4. 未迁移页使用旧 renderer；已迁移页使用 React renderer。缺 manifest、entry 或 bootstrap 是
    部署/构建错误，必须显式失败并阻止发布，不能悄悄降级成旧页。
+   **2026-11-08 更正：注册页面已全部迁移，「未迁移页走旧 renderer」这条回落分支不再有真实使用者**——
+   旧 Jinja renderer 与 `_render_page` 已在 P6 分支退役（`origin/feature/p6-collapse-migrated-routes`），
+   `MIGRATED_PAGE_IDS` 的语义从「React / 旧页面开关」收敛为「**哪些页面已迁移**」，它不再是流量或回退开关。
 5. 页面间用真实同源链接整页跳转，保留 query 参数和直达/刷新；没有吞掉 API 路由的 SPA catch-all。
 6. **同一 HTML 文档只运行一套页面 owner**：新页不再加载对应旧页面脚本、Bootstrap、旧侧边栏
    注入或旧通用 CSS；不通过多 root、iframe 或旧 DOM 与 React 同时写同一节点长期混合。
@@ -237,13 +265,17 @@ loopback Vite client/entry 获得 HMR。React 插件需要的 Fast Refresh pream
 
 ### 6.3 生产构建与交付
 
-- 只构建一次，经 typecheck/build 后将 `frontend/dist`（含 Vite manifest、entry/chunks/CSS 和必要
+- 只构建一次，经 typecheck/build 后将 Vite 产物（含 manifest、entry/chunks/CSS 和必要
   资源）纳入**同一版本包**；前端由 FastAPI 托管，不新增 Node/Vite 生产进程或联网安装前端依赖。
   现有 sync/publish 等进程的职责不因前端工程化改变。
 - 前端产物使用相对资源基址；服务端按 manifest 和 request rootPath 生成带前缀的资源地址。
   初始模块、CSS、modulepreload 和动态 chunk 都要验证，不能只验证首页 JS。
-- 产物拟安装到 `/static/frontend/<releaseId>/` 对应的发布目录；manifest 与后端 renderer 使用
-  同一个 releaseId。实际磁盘拷贝和校验归发布构建 owner，不在 UI 层另造 deploy.sh。
+- 产物安装到 `/static/frontend/<releaseId>/` 对应的发布目录；manifest 与后端 renderer 使用
+  同一个 releaseId。**2026-11-08 更正：**这一条已落地——`scripts/build_frontend.sh`（typecheck →
+  `vite build` → `frontend/scripts/package-build.mjs`）产出带 `release.json` 与 `.vite/manifest.json`
+  的 release 目录，落盘到 `tts_erp_v2/static/frontend/<releaseId>/`；
+  后端 `frontend_pages.py::_production_assets` 校验 manifest 全图闭包并生成带 rootPath 前缀的
+  资源地址。**2026-11-08 更正：**`frontend/dist` 不是最终安装位置，只是构建中间产物。
 - 静态 hash 资源可 immutable 缓存，个性化 HTML 不缓存。发布包缺 entry、依赖 chunk、CSS 或映射
   不一致时 preflight 失败，未通过前不切流；绝不能返回 200 的空 React 容器冒充页面成功。
 - 当前版本仍有 manifest 或页面消费者的资产不得删除；无消费者且替代已验证的旧资源可直接清理，
@@ -257,15 +289,29 @@ loopback Vite client/entry 获得 HMR。React 插件需要的 Fast Refresh pream
 以下是工程任务和验收边界，不是生产放量批次。按真实文件所有权在任务分支实现、提交并验证；
 改造完成后直接合并 `master` 启用，不设逐页放量、灰度开关或流量观察等待，也不按页面数量硬定工期。
 
-| 批次 | 范围与交付 | 进入条件 | 退出/验收条件 |
-| --- | --- | --- | --- |
-| P0 工程地基 | 免费依赖/lock、TS/Vite、bootstrap/路径/client、manifest renderer、测试和构建入口 | 技术方案批准；协调共享热点写队列 | 不切生产页面；构建产物闭合，空/有前缀、会话/错误负例可验证 |
-| P1 完整试点与复用证明 | `intercept-requests` 完整只读查询/筛选/详情/分页，随后 `dashboard`，共享同一 AppShell | P0 通过，逐页行为清单齐全 | 两页在隔离环境通过；跨新旧导航正确；Header/导航修改一次两页生效，无重复骨架 |
-| P2 普通页面与首个写闭环 | `intercept-stats`、`shops`、`enum-map`；完成普通页面与隔离写闭环后直接交付 | P1 通过；统计图表原生/第三方缺口有结论 | 原有效查询/写能力、只读禁用、字段校验、CSRF、失败输入保留、无重复提交均验证 |
-| P3 运维与高权限页 | `sync-jobs`、`users`、`intercept-configs`、`runtime-configs` | 对应 owner 可交接；权限和专业编辑器行为清单确认 | api_tier/页面权限不退化；配置编辑/脱敏/确认无损；专业控件归属明确 |
-| P4 复杂经营分析 | `ad-daily`、`manual-costs`，以及一起迁移的 `spu-roi`/`focused-spus` | 表格/选择器能力验证完成，盈利口径不变 | 列/排序/筛选/钻取/精度/图片/编辑与返回定位验证；不复制盈利页面内核 |
-| P5 独立专题尾部 | `spu-profit-deterioration`、`video-publish`，以及视情况最后迁移的登录展示 | 需求与实现冲突已由 owner 解决；相应专题交接 | 仅迁移确认后的有效契约，权限/状态/确认/恢复不变；登录安全不变 |
-| P6 退役与收口 | 删除已迁移页面的旧模板/脚本/样式与无消费者的 vendor、旧 renderer/迁移集合 | 所有目标页完成并通过必要验收；消费者清单为空，不等待回退期 | 新页面只有一套骨架/客户端；无旧资源引用，无永久兼容分支，文档和测试入口完成更新 |
+「进入条件 / 退出条件」两列是 2026-10-23 设计时写下的契约，原样保留不改；「实际状态」列为
+2026-11-08 对仓库现状逐项核实后的结论。
+
+| 批次 | 范围与交付 | 进入条件 | 退出/验收条件 | 实际状态（2026-11-08 核实） |
+| --- | --- | --- | --- | --- |
+| P0 工程地基 | 免费依赖/lock、TS/Vite、bootstrap/路径/client、manifest renderer、测试和构建入口 | 技术方案批准；协调共享热点写队列 | 不切生产页面；构建产物闭合，空/有前缀、会话/错误负例可验证 | **已完成。** `frontend/package.json`、`package-lock.json`、`tsconfig.json`、`vite.config.ts` 齐备；脚本 `dev`/`typecheck`/`build`/`test:unit` 齐备。依赖版本与 §6.1 快照一致（react/react-dom 19.3.1、@heroui/react 与 @heroui/styles 3.2.6、vite 8.3.5、@vitejs/plugin-react 6.1.2、tailwindcss 与 @tailwindcss/vite 4.3.3、typescript 7.0.2），另按 §7.1 复用 `uplot`/`uplot-react`，按 §4.2 复用 `vanilla-jsoneditor`/`lossless-json`/`diff`。manifest renderer：`tts_erp_v2/api/v2/frontend_pages.py`（`_production_assets` 校验 manifest 全图闭包、`_safe_json` 转义、`_development_origin` 只允许 loopback）。构建打包入口：`scripts/build_frontend.sh`（typecheck → build → `package-build.mjs`）。前端测试已接入隔离 wrapper：`tests/frontend/test_components.py` 调 `npm run test:unit`。 |
+| P1 完整试点与复用证明 | `intercept-requests` 完整只读查询/筛选/详情/分页，随后 `dashboard`，共享同一 AppShell | P0 通过，逐页行为清单齐全 | 两页在隔离环境通过；跨新旧导航正确；Header/导航修改一次两页生效，无重复骨架 | **已完成。** `frontend/src/pages/intercept-requests/`、`frontend/src/pages/dashboard/` 均有真实实现与组件测试；唯一骨架 `frontend/src/app/AppShell.tsx`。 |
+| P2 普通页面与首个写闭环 | `intercept-stats`、`shops`、`enum-map`；完成普通页面与隔离写闭环后直接交付 | P1 通过；统计图表原生/第三方缺口有结论 | 原有效查询/写能力、只读禁用、字段校验、CSRF、失败输入保留、无重复提交均验证 | **已完成。** `frontend/src/pages/intercept-stats/`、`shops/`、`enum-map/` 均有真实实现；写闭环经隔离 clone 实测（双前缀、三内置角色、真实提交后独立读回与恢复路径），记录见 [P2 实现计划](frontend-p2-implementation.md)。 |
+| P3 运维与高权限页 | `sync-jobs`、`users`、`intercept-configs`、`runtime-configs` | 对应 owner 可交接；权限和专业编辑器行为清单确认 | api_tier/页面权限不退化；配置编辑/脱敏/确认无损；专业控件归属明确 | **已完成。** `frontend/src/pages/sync-jobs/`、`users/`、`intercept-configs/`、`runtime-configs/` 均有真实实现与浏览器用例（`tests/browser/test_runtime_config_workflow.py`、`test_frontend_p2_live.py` 等）；`structured` 配置编辑归属 `vanilla-jsoneditor`。 |
+| P4 复杂经营分析 | `ad-daily`、`manual-costs`，以及一起迁移的 `spu-roi`/`focused-spus` | 表格/选择器能力验证完成，盈利口径不变 | 列/排序/筛选/钻取/精度/图片/编辑与返回定位验证；不复制盈利页面内核 | **已完成。** `frontend/src/pages/ad-daily/`、`manual-costs/`；`spu-roi` 与 `focused-spus` 迁入**共享模块** `frontend/src/pages/spu-profitability/`（`page-loader.ts` 两个 pageId 指向同一模块，未复制盈利页面内核）。Tabulator 作为窄适配由该模块 `ProfitabilityTable.tsx` 复用，仍在 `tts_erp_v2/static/vendor/`。 |
+| P5 独立专题尾部 | `spu-profit-deterioration`、`video-publish`，以及视情况最后迁移的登录展示 | 需求与实现冲突已由 owner 解决；相应专题交接 | 仅迁移确认后的有效契约，权限/状态/确认/恢复不变；登录安全不变 | **已完成。** `frontend/src/pages/spu-profit-deterioration/`、`video-publish/`、`login/`；登录走 React renderer（`auth.py` 的 `MIGRATED_PAGE_IDS` 分支），`/v2/auth/me` 会话契约未变。 |
+| P6 退役与收口 | 删除已迁移页面的旧模板/脚本/样式与无消费者的 vendor、旧 renderer/迁移集合 | 所有目标页完成并通过必要验收；消费者清单为空，不等待回退期 | 新页面只有一套骨架/客户端；无旧资源引用，无永久兼容分支，文档和测试入口完成更新 | **实施完成，待合并 `master`。** ①路由收敛**已合入 `master`**（`2b68b40a`）：`api/v2/pages.py` 14 处 + `api/v2/ad_daily.py` 1 处双路分支收敛为单一 `render_frontend_page`，`_render_page` 零调用。②旧资产删除在 `origin/feature/p6-collapse-migrated-routes`（`f72a3089` 删 12 个旧 Jinja 模板 + 12 个旧页面脚本；`53a98372` 删 ad-daily 内联旧页面 HTML）。③测试侧退役在 `origin/feature/p6-retire-legacy-assets`（`e232f1c`）。④**上述 ②③ 尚未合入 `master`，`master` 此刻仍保有那 12 个旧模板与 12 个旧脚本。**⑤`console.js` 与 `static/vendor/`（13 个文件）按「仍有真实消费者」保留——`console.js` 仍挂在 `app.py` 的 public static mount 上，`vendor/tabulator.*` 被 `ProfitabilityTable.tsx` 直接引用，`vendor/bootstrap.min.css` 被 `auth.py` 的回落登录页引用；**不是遗漏**。 |
+
+**批次表与实际注册表的两处差异（2026-11-08 更正）：**
+
+1. **P0–P5 的原始页面清单未包含三个「内容资产」组页面** —— `media-assets`（资产管理）、
+   `digital-humans`（数字人）、`runninghub`（换装视频）。它们由后续并行 lane 以 React 实现并注册进
+   `accounts/pages.py::PAGES`（如 `e23e31a9`、`3b8074e5`），属**计划外新增**，不是本表任一批次的交付物。
+   连同 `login` 与两个辅助页（`message`、`oauth-onboard`），共 21 个 pageId 落在
+   `frontend/src/pages/` 的 **20 个目录**（`spu-roi` 与 `focused-spus` 共用 `spu-profitability/`）。
+2. **P6 的退出条件「消费者清单为空」实际未对 `vendor/` 成立**：`vendor/` 至今仍有三个真实消费者
+   （见上表 P6 行 ⑤）。P6 的收口因此以「删除无消费者的旧模板/脚本 + 收敛 renderer」为准，
+   `vendor/` 清理属于未完成的后续项，不应记为已交付。
 
 **试点不是 Hello World。** `intercept-requests` 已有 GET 列表/详情、筛选和分页，适合检验读路径；
 第二个 dashboard 用来检验不同页面是否真能共享骨架，不能等迁完整站才发现公共组件实际不可复用。
@@ -292,15 +338,16 @@ P0/P1 建工程，P4 以前另做小范围、可丢弃的真实能力验证；�
 
 | 层 | 主要覆盖 | 机制 |
 | --- | --- | --- |
-| 类型/构建 | DTO、props、模块依赖、manifest 与全部依赖资源闭合 | 拟 `npm ci`、`npm run typecheck`、`npm run build`；这些脚本在 P0 创建，当前不可执行 |
-| 前端单元/组件 | 路径幂等、错误解析、取消/迟到响应、骨架复用、弹层/表单交互 | P0 评估并锁定 Vitest + Testing Library 等维护中工具，接入隔离 wrapper 后运行 |
+| 类型/构建 | DTO、props、模块依赖、manifest 与全部依赖资源闭合 | **2026-11-08 更正：`npm ci`、`npm run typecheck`、`npm run build` 已可用**（`frontend/package.json`），不再是「当前不可执行」；`scripts/build_frontend.sh` 串起 typecheck → build → `package-build.mjs` |
+| 前端单元/组件 | 路径幂等、错误解析、取消/迟到响应、骨架复用、弹层/表单交互 | **2026-11-08 更正：已锁定并接入** —— Vitest 5.0.5 + Testing Library（react 16.3.3 / user-event 14.6.8 / jest-dom 7.0.1 / jsdom 30.1.3），经 `tests/frontend/test_components.py` 在隔离 wrapper 内运行 `npm run test:unit` |
 | 后端页面/鉴权 | renderer 选择、原 handler gate、bootstrap 转义/no-store、302/403、缺产物失败 | 现有 API/鉴权测试域，使用测试会话与显式 rootPath |
-| browser | 当前分支构建产物、mock 业务响应、真实渲染/键盘/截图/布局 | 扩展现有 `tests/browser/`，保持进 fast，不能只继续打开旧 Jinja 而宣称新页被覆盖 |
+| browser | 当前分支构建产物、mock 业务响应、真实渲染/键盘/截图/布局 | 扩展现有 `tests/browser/`，保持进 fast，不能只继续打开旧 Jinja 而宣称新页被覆盖。**2026-11-08 更正：旧 Jinja renderer 退役后，浏览器用例改为按 slug 分派到各 React 页的就绪信号**（`wait_canned_page`），不再有旧模板可渲染 |
 | 隔离全链路 | 会话登录/撤销、授权、真实 API 数据与读写闭环 | 临时 API 必须连接该轮 clone；只用 TEST_ 数据，服务基址与凭据显式注入 |
 
-**入口约束：** `bash scripts/test_isolated.sh ...` 仍为 agent 唯一测试入口。P0 必须先在原 runner
-中接入前端测试及前端构建准备；拟新增 `frontend` 选择器，并将快速组件回归接入 baseline 所用
-fast 流程。该选择器目前不存在，不能直接运行或绕过 wrapper 执行 npm test/Vitest。
+**入口约束：** `bash scripts/test_isolated.sh ...` 仍为 agent 唯一测试入口。
+**2026-11-08 更正：`frontend` 选择器已存在**（`scripts/_test_selection.py` 的 `scope in {"frontend", "fast"}`），
+前端测试与前端构建准备已接入原 runner，快速组件回归已进入 baseline 所用 fast 流程；
+**仍不得绕过 wrapper 直接执行 npm test/Vitest**。
 `npm ci/typecheck/build` 是安装/静态构建，不是测试入口替代品。
 
 现有可用窄选择包括 `bash scripts/test_isolated.sh browser`、`api`；代码/测试变更最终执行
@@ -308,8 +355,9 @@ fast 流程。该选择器目前不存在，不能直接运行或绕过 wrapper 
 前端测试接入不能使新 React 页面从 baseline/browser 门禁消失；构建失败应使测试失败而非跳过。
 
 `tests/e2e/` 当前部分用例默认连接 live `:9877`，wrapper 创建 DB clone **不等于那个 live 服务
-也切换到了 clone**。不得用默认 live 地址验证 mutation。P0/P2 须在现有隔离 fixture 模式下显式
-启动测试 API 并注入该轮 DB/测试凭据，不读取生产 `.env`；如无法隔离就阻止相应验证而非降级。
+也切换到了 clone**。不得用默认 live 地址验证 mutation。**2026-11-08 更正：P0/P2 要求已在现有隔离
+fixture 模式下落实**——显式启动测试 API 并注入该轮 DB/测试凭据，不读取生产 `.env`；
+root 与 `/tts` 两个 prefix 各起独立应用 child 跑同一轮 clone。仍无法隔离的用例继续阻止相应验证而非降级。
 
 ### 8.2 必须覆盖的验收矩阵
 
@@ -350,6 +398,9 @@ fast 流程。该选择器目前不存在，不能直接运行或绕过 wrapper 
   刷新/联系管理员，不能自动提交、重复执行或恢复未知结果的 mutation。
 - P6 在所有页面验收、所有旧消费者退出后执行，不等待回退期；保留 Git/完整发布包应急撤销能力，
   不为灰度长期保留两套运行时、Bootstrap 皮肤或“临时”大 adapter。
+  **2026-11-08 更正：P6 已按此执行**（不含 `vendor/`：它仍有真实消费者，见 §7 表 P6 行 ⑤）。
+  回退路径随之变化——**「撤回该页迁移登记」这条路已不再成立**，因为旧 Jinja renderer 与旧页面脚本
+  已退役；局部 UI 问题只能通过受控提交修 React 页，或回退完整旧发布包。
 
 ## 10. 所有权、风险与评审结论
 
@@ -359,6 +410,11 @@ fast 流程。该选择器目前不存在，不能直接运行或绕过 wrapper 
 `tests/browser/conftest.py`、`scripts/test_isolated.sh` 及底层 runner/发布脚本等须按 canonical tower-do 的
 lane-registry 全前驱记录重新核对当前 owner。本文描述未来修改面**不等于认领这些文件**；一个 writer 改共享 renderer，
 页面 lane 通过其公开接口接入，不能多 writer 同时改骨架。
+
+**2026-11-08 更正：本节的热点清单是设计期归属，所列迁移工作已完成。** `api/v2/pages.py`、
+`ad_daily.py` 的 renderer 分支已收敛为单一 `render_frontend_page`；`accounts/pages.py` 的页面目录
+已扩到 18 项；`tests/browser/conftest.py` 已改为按 slug 分派 React 页面就绪信号。后续若再有并行
+lane，仍按同一规则核对 owner。
 
 | 风险 | 设计防线 | 能否局部阻塞 |
 | --- | --- | --- |
@@ -372,7 +428,7 @@ lane-registry 全前驱记录重新核对当前 owner。本文描述未来修改
 
 ### 10.2 评审范围与完成条件
 
-**标准及方案方向已获用户认可，P0/P1 已交付，后续开发进行中。** 认可的方向包括页面级 React MPA、后端单一迁移
+**标准及方案方向已获用户认可，P0–P5 已实施完成，P6 退役与收口已实施完成、待合并 `master`。** 认可的方向包括页面级 React MPA、后端单一迁移
 集合、同源会话与 rootPath、安全 bootstrap、唯一 AppShell、原生 HeroUI 优先、P0→P6 工程分解及必要验收。
 2026-10-24 新指令取消灰度/分批放量/回退期等待：完成后直接合并 `master` 启用；故障可撤销不等于增加放量流程。阶段性类型/构建、热更新、页面和权限证据见实施计划；不能外推到所有其他页面
 或生产发布。具体 DOM、函数名、目录内小文件拆分属于实施决定；付费模板、全站 SPA、业务规则
@@ -380,6 +436,17 @@ lane-registry 全前驱记录重新核对当前 owner。本文描述未来修改
 
 本次文档完成条件：规范可被开发入口发现、方案覆盖现状/差异/所有权/风险/验收/退出，链接与
 路径可验证；**不等于依赖已安装、测试已执行、页面已迁移或生产已上线**。
-文档先行阶段已结束，用户已授权开始开发。当前按独立P0/P1切片实施，后续仍须逐批确认实际
-写队列并通过对应验证门槛；开发授权不是生产部署或无限扩大范围的授权。全部迁移落地后再按
-文档目录规则将本方案移至 `docs/design/` 并更新状态与引用，不提前写入“已接受/已实施”的 ADR。
+文档先行阶段已结束，用户已授权开始开发。**2026-11-08 更正：P0–P6 各批次实施已结束**，
+逐批确认实际写队列与对应验证门槛的阶段不再有后续批次。开发授权仍不是生产部署或无限扩大范围的授权。
+
+**剩余动作（2026-11-08）：**
+
+1. **把 P6 的资产删除与测试侧退役分支合入 `master`**（`origin/feature/p6-collapse-migrated-routes`
+   的 `f72a3089`、`53a98372` 与 `origin/feature/p6-retire-legacy-assets` 的 `e232f1c`）。
+   在此之前 `master` 仍同时保有旧模板与旧脚本，新旧 renderer 的产物同版本共存。
+2. **清理 `tts_erp_v2/static/vendor/` 中真正无消费者的文件**——目前 Tabulator（被
+   `ProfitabilityTable.tsx` 引用）、bootstrap.min.css（被 `auth.py` 回落登录页引用）等仍有
+   消费者，清理必须逐个确认，不得整目录删除。
+3. **按文档目录规则把本方案移至 `docs/design/` 并更新引用**（`AGENTS.md` §9 与
+   `docs/guides/frontend-development.md` 的链接）。移动会牵动引用方，属于独立文档任务，
+   不在本次状态更新的范围内；不提前写入“已接受/已实施”的 ADR。
