@@ -619,8 +619,21 @@ def browser_renderer(site_url: str) -> Any:
 
 @pytest.fixture()
 def browser_conftest() -> ModuleType:
-    """Return the fixture module that serves canned data in this test session."""
-    return sys.modules[__name__]
+    """Return the fixture module that serves canned data in this test session.
+
+    ``sys.modules[__name__]`` is not safe here: ``tests/`` has no
+    ``__init__.py``, so pytest imports every ``conftest.py`` under its bare
+    basename (``"conftest"``). A sibling directory's conftest can therefore
+    own that key, and this fixture would hand back the wrong module —
+    surfacing as ``AttributeError: module 'conftest' has no attribute
+    '_mock_payload'`` only when a multi-directory selection is collected.
+
+    Import the module by its package path instead, exactly as the browser
+    test modules already do (``from tests.browser import conftest as ...``).
+    """
+    from tests.browser import conftest as this_module
+
+    return this_module
 
 
 @pytest.fixture()
