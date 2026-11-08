@@ -83,7 +83,7 @@ git pull --ff-only origin master
 npm ci --prefix frontend     # 依赖落后于 master 时
 ```
 
-2026-11-08 检查时，主 checkout 停在 `83bbede`，落后 master 21 个提交，且 `node_modules` 缺 `semver`（master 的 `check-runtime.mjs` 需要它）。已同步并修复。
+2026-11-08 检查时，主 checkout 停在 `83bbede`，落后 master **312 个提交**（`git rev-list --count 83bbede..0b92d97`；首父口径 56 个），且 `node_modules` 缺 `semver`（master 的 `check-runtime.mjs` 需要它，该文件在 `a3815db` 才引入）。已同步并修复。
 
 ---
 
@@ -162,4 +162,31 @@ bash scripts/envsetup/install-test-deps.sh --check      # 前置依赖体检
 **已交付的其他产出**：
 - `docs/handoff/topic-directory-index.md` —— 190 个文档的四段式主题目录索引
 - `docs/handoff/p6-retirement-parallel-plan.md` —— P6 并行执行方案
-- `scripts/envsetup/prepare-worktree.sh` —— worktree 环境准备脚本
+- `docs/handoff/dev-env-checklist.md` —— 开发环境自检清单（16+6 条实测记录、7 类故障排查）
+- `docs/handoff/test-baseline-verify-2026-11-08.md` —— 测试链路独立复核记录（对照实验）
+- `scripts/envsetup/prepare-worktree.sh` —— worktree 环境准备脚本（已进 master）
+
+---
+
+## 十、并发调度的实际限制
+
+MiniMax Bot 对**同一个 Bot** 的多个任务不会并行——排队等前一个跑完。同一个 Bot 同一时间只有 1 个活跃任务。
+
+**并发上限 = 团队里的 Bot 数量**，不是任务数。派活时必须一个 lane 对应一个不同的 Bot，否则 lane 会一直排队。
+
+每个 Bot 手头的任务动辄跑完整 fast 基线（历史测量 1459 秒，单次可达 20 分钟以上），所以 lane 的启动延迟不短。给 Bot 派活时优先拆小范围任务，避免一上手就跑全量。
+
+---
+
+## 十一、已解决的仓库级问题
+
+| 问题 | 状态 | 说明 |
+| --- | --- | --- |
+| 测试机地址失效 | ✅ | `192.168.47.129` → `192.168.1.2`（HP desk），`AGENTS.md` §2 与 `docs/ops/tts-erp.md` 均已更新 |
+| 新 worktree 跑不了测试 | ✅ | 新增 `scripts/envsetup/prepare-worktree.sh` 并合入 master |
+| 主 checkout 落后 master | ✅ | 已同步到最新 master，`node_modules` 补齐（master 需要 `semver`） |
+| 模板库刷新路径不可用 | ⚠️ | 当前模板库不陈旧（`0076_media_packs` / 306 表，三方对齐），暂不影响；但仓库新增 migration 前必须先解决 |
+| 22 个残留测试临时库 | ✅ | 已清理，template 基线库全部保留 |
+| revision 漂移难以诊断 | ✅ | `test_isolated.sh` 克隆后检测失配，直接打印原因和修复步骤 |
+
+**已知的存量问题**：HP desk 上有 **43 个既有 worktree** 处于「有 vitest、缺 semver」状态（按旧 lock 装过 `node_modules`，但代码已前进到需要 `semver`）。这些 worktree 里跑前端测试会报 `ERR_MODULE_NOT_FOUND`。修复方式是在各自 worktree 内跑 `npm ci`（或 `prepare-worktree.sh`），逐个处理，未批量清理。
