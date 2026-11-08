@@ -47,10 +47,17 @@ _ALLOWED_SQL_PREFIXES = ("SELECT", "SHOW")
 _WRITE_KEYWORDS = (
     "INSERT", "UPDATE", "DELETE", "TRUNCATE", "CREATE", "ALTER", "DROP",
     "COPY", "MERGE", "GRANT", "REVOKE", "COMMENT", "VACUUM", "REINDEX",
-    "CLUSTER", "REFRESH", "CALL", "DO", "LOCK", "REASSIGN", "SECURITY",
+    "CLUSTER", "REFRESH", "CALL", "DO", "LOCK", "REASSIGN",
 )
-# 这些词出现在非写语义里时不算写（如 SET 在 SET search_path 里也是写；
-# 这里保守全拦，巡检脚本不需要任何 SET）。
+# ⚠️ 2026-11-09 修正：原先这里有 "SECURITY"，用于覆盖 PostgreSQL 的
+# `SECURITY LABEL` / `SECURITY BARRIER`。但本仓有一个叫 **security** 的
+# schema（security.api_keys / security.roles …）⇒ 词边界匹配命中
+# `SELECT max("updated_at") FROM "security"."api_keys"` ⇒ **7 张表被误判**
+# ⇒ 误判 → 查询抛错 → 被下面 except 吞掉 → **表从清单里静默消失**（④ 从 23 张
+# 掉到 21 张，没人看得出是被守卫挡了）。
+# ⇒ 裸 "SECURITY" 关键字已删除：`SECURITY LABEL` / `SECURITY BARRIER` 只出现在
+# ALTER / CREATE 语句里，已被这两个关键字覆盖。
+# ⇒ 这条要记进通则 13：判据写严会误报，而**误报 + 宽 except = 静默漏报**。
 _WRITE_KEYWORDS = _WRITE_KEYWORDS + ("SET",)
 
 _write_violations: list[str] = []
@@ -311,13 +318,19 @@ def _stale_tables(session, stale_days: int, now: dt.datetime) -> list[dict[str, 
     from sqlalchemy import text
 
     out: list[dict[str, Any]] = []
+    query_failures: list[dict[str, Any]] = []
     for full_name, col in _age_columns(session):
         schema, table = full_name.split(".", 1)
         try:
             newest = session.execute(
                 text(f'SELECT max("{col}") FROM "{schema}"."{table}"')
             ).scalar()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            # ⚠️ 2026-11-09：这里原来是 `except Exception: continue` ——
+            # 与只读守卫叠加时形成【静默漏报】：守卫误判 → 查询抛错 → 这里吞掉
+            # → 该表从清单里消失（实测 ④ 从 23 张掉到 21 张，无人察觉）。
+            # ⇒ 现在必须记录并暴露，不能静默跳过。
+            query_failures.append({"table": full_name, "error": str(exc)[:200]})
             continue
         if newest is None:
             continue
@@ -334,7 +347,8 @@ def _stale_tables(session, stale_days: int, now: dt.datetime) -> list[dict[str, 
                 }
             )
     out.sort(key=lambda r: -r["age_days"])
-    return out
+    out.sort(key=lambda r: -r["age_days"])
+    return out, query_failures
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -448,10 +462,8 @@ def main(argv: list[str] | None = None) -> int:
     # ④ 源表陈旧（排除静态表）
     session2 = factory()
     try:
-        stale = [
-            r for r in _stale_tables(session2, args.stale_days, now)
-            if r["table"] not in static_tables
-        ]
+        stale, stale_query_failures = _stale_tables(session2, args.stale_days, now)
+        stale = [r for r in stale if r["table"] not in static_tables]
     finally:
         session2.close()
 
@@ -469,6 +481,7 @@ def main(argv: list[str] | None = None) -> int:
         "list_3_read_but_no_write": read_but_no_write,
         "list_4_stale_source_tables": stale,
         "write_violations": _write_violations,
+        "stale_query_failures": stale_query_failures,
     }
 
     if args.json:
@@ -504,6 +517,9 @@ def main(argv: list[str] | None = None) -> int:
               f"[{r['age_column']}] newest={r['newest']}")
     print()
     print(f"只读守卫违规次数: {len(_write_violations)}")
+    print(f"④ 查询失败(被跳过)的表: {len(stale_query_failures)}")
+    for r in stale_query_failures:
+        print(f"   {r['table']}: {r['error']}")
     return 0
 
 
