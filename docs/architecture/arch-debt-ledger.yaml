@@ -36,6 +36,11 @@ entries:
   convergence_target_blob: null
   threat_model: null
   distribution: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-CFG-002
   rule: config-source-precedence
   owner_path: scripts/check_install_parity.sh
@@ -54,6 +59,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-CFG-003
   rule: auth-mode-effective-value
   owner_path: tts_erp_v2/middleware/auth.py
@@ -74,6 +84,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-SCHEMA-001
   rule: schema-version-contract
   owner_path: tts_erp_v2/app.py
@@ -94,6 +109,11 @@ entries:
   convergence_target_blob: 5690736655f51db970176a372fcc75b686174f5b
   threat_model: null
   distribution: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-SCHEMA-002
   rule: schema-version-contract
   owner_path: tts_erp_v2/api/deps.py
@@ -129,6 +149,11 @@ entries:
   convergence_target_blob: cf968f00a144f34b8e05d552780d0f243817029c
   threat_model: null
   distribution: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-DEPLOY-001
   rule: runtime-version-identity
   owner_path: ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
@@ -147,6 +172,11 @@ entries:
   convergence_target_blob: null
   threat_model: null
   distribution: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-DEPLOY-002
   rule: runtime-version-identity
   owner_path: ~/.config/systemd/user/tts-erp.service.d/96-pgappname.conf
@@ -165,6 +195,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-DEPLOY-003
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -183,6 +218,11 @@ entries:
   convergence_target_blob: 0124e3636b334f38f8daafeaf4f154d0c14697ef
   threat_model: null
   distribution: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-DEPLOY-004
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -202,6 +242,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-CRITERIA-001
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
@@ -220,6 +265,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-CRITERIA-002
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
@@ -238,6 +288,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-CRITERIA-003
   rule: readonly-criterion
   owner_path: scripts/schema_guard_probe.py
@@ -256,6 +311,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-ALERT-001
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -274,6 +334,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-ALERT-002
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -302,6 +367,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-ALERT-003
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -320,6 +390,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-JOB-001
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -339,6 +414,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-JOB-002
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -357,6 +437,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-JOB-003
   rule: source-freshness
   owner_path: tts_erp_v2/jobs/miaoshou/sync_source_cost_to_master.py
@@ -376,6 +461,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-BACKUP-001
   rule: backup-restore
   owner_path: scripts/backup/pg_dump_hourly.sh
@@ -394,6 +484,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-NET-001
   rule: network-exposure
   owner_path: /etc/systemd/system/easytier@default.service.d/rpc-portal-loopback.conf
@@ -412,6 +507,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-NET-002
   rule: network-exposure
   owner_path: /opt/easytier/config/default.conf
@@ -431,6 +531,11 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-BASE-001
   rule: base-drift
   owner_path: tts_erp_v2/runtime_settings.py
@@ -449,6 +554,11 @@ entries:
   convergence_target_blob: null
   threat_model: null
   distribution: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-BASE-002
   rule: base-drift
   owner_path: scripts/watchdog_sync.py
@@ -467,6 +577,11 @@ entries:
   convergence_target_blob: dbb5067ff6c8f349b500e38b759785398f3f1426
   threat_model: null
   distribution: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 - id: AD-BASE-003
   rule: base-drift
   owner_path: alembic/versions
@@ -486,4 +601,17 @@ entries:
   threat_model: null
   distribution: null
   owner_ref_note: null
+  precondition:
+    object_ref: null
+    in_target_chain: null
+    evidence_level: inferred
+    measured_at: null
 probes_added: 3
+corrected_conclusions:
+- id: CORRECTION-PG-HBA-MASQUERADE
+  was: 生产库全部连接来源实测为 172.19.0.1/32 ⇒ 限源白名单按此写 ⇒ 限源零影响
+  now: 实测事实对，推论错：docker 端口映射把所有入站连接的源地址统一 MASQUERADE 成 172.19.0.1 ⇒ pg_hba 的地址限源在这条路径上完全无效（限源必须在端口绑定层做）
+  who: 可靠性工程师
+  evidence_level: measured
+  measured_at: '2026-11-09T02:30:00+08:00'
+  machine_check: 从非白名单主机连 <pg>:5432，TCP 握手成功但服务端等待认证包 ⇒ 来源被接受 ⇒ 限源无效

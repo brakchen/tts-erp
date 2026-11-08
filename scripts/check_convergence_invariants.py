@@ -39,6 +39,17 @@ LEDGER_DEFAULT = "docs/architecture/arch-debt-ledger.yaml"
 _CRED_RE = re.compile(r"://([^/@\s:]+):([^/@\s]+)@")
 
 
+def _digest(obj: Any) -> str:
+    """Stable digest of the inputs a probe was evaluated against.
+
+    2026-11-09：通则「恒绿即坏」⇒ 一条 finding 必须能报告
+    「它检查的是哪一类对象 / 它命中了几个 / 输入是什么」。
+    """
+    import hashlib
+    blob = json.dumps(obj, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
 def _redact(text: str) -> str:
     """把 URL 里的 user:password@ 段打码（探针输出的兜底防护）。"""
     return _CRED_RE.sub(r"://\1:***@", text)
@@ -149,7 +160,15 @@ def main(argv: list[str] | None = None) -> int:
             for key, tree in trees.items():
                 val, err = _run_probe(tree, probe)
                 if err:
-                    unresolved.append({"id": rid, "rule": rule, "ref": key, "reason": err})
+                    unresolved.append({
+                        "id": rid, "rule": rule, "ref": key,
+                        "reason": f"该分支上 probe 未能判定：{err}",
+                        "repro_command": (
+                            "python scripts/check_convergence_invariants.py "
+                            f"--ledger docs/architecture/arch-debt-ledger.yaml --json"
+                        ),
+                        "inputs_digest": _digest({"probe": probe, "rule": rid, "ref": key}),
+                    })
                 else:
                     results[key] = val
             if len(results) == 2:
@@ -159,7 +178,17 @@ def main(argv: list[str] | None = None) -> int:
                         "id": rid, "rule": rule,
                         "kind": "behaviour_differs",
                         "production": a, "target": b,
-                        "note": "收敛后同一输入下判定结果不一致 ⇒ 收敛会引入规则漂移",
+                        "reason": (
+                            f"同一 probe 输入下两分支判定不同："
+                            f"production={a!r} target={b!r}。"
+                            f"⚠ 这只说明『两处不同』，不说明『哪处错』——"
+                            f"规格必须以 owner 为参照（Chief 第十三轮裁定：C1=检测器，C2/C3=规格）。"
+                        ),
+                        "repro_command": (
+                            "python scripts/check_convergence_invariants.py "
+                            f"--ledger docs/architecture/arch-debt-ledger.yaml --json"
+                        ),
+                        "inputs_digest": _digest({"probe": probe, "rule": rid}),
                     })
             elif len(results) == 1:
                 unresolved.append({
