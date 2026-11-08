@@ -72,7 +72,32 @@
 绝不按前缀批量删、删前确认无活跃 pytest/test_baseline、绝不删 template 家族、
 `psql -f` 批量 DROP 会因事务块静默失败必须逐条执行。
 
-### 2. 并发跑测试导致假失败
+### 2. 用 `git checkout <branch> -- <dir>` 覆盖工作区，静默丢掉了自己的三处修正
+
+为了把另一个分支的测试侧清理同步到本地，我用了
+`git checkout origin/feature/X -- tests/` + `git reset`。这**不是 merge，git 不会报冲突**，
+`git diff` 也显示"与目标分支一致"——看起来完全正常。
+
+但它把我在同三个文件上的修正一并覆盖成了旧版：
+
+| 文件 | 被丢掉的修正 | 后果 |
+| --- | --- | --- |
+| `tests/browser/conftest.py` | `browser_conftest` 改用包路径导入 | 34 项测试在多目录收集时全挂 |
+| `tests/render_support.py` | 字体白名单不再要求三套栈互不相同 | 14 项字体栈用例全挂 |
+| `tests/browser/test_render_smoke.py` | 告警页就绪信号改用 `wait_canned_page` | 4 个视口溢出用例超时失败 |
+
+**暴露时机**：合并后的 browser 渲染门槛出现 FAILED。查根因时对比"合并候选 vs 我的分支"，
+两边**完全一致**——因为两边一致的都是**被覆盖后的错版本**。
+
+**教训**：多来源汇合时，最终状态要按**意图**验收（本轮该有哪些修正），
+而不是按**来源一致性**验收。工作区"干净"不等于"正确"。
+
+**正确做法**：
+1. 合并两个来源的改动用 `git merge` / `git cherry-pick`，不要用 checkout 覆盖
+2. 已经用了 checkout 的话，事后逐个核对本次会话的每个修正是否还在（用 grep 找特征串）
+3. 提交前按修正点逐条验证，不只看文件是否一致
+
+### 3. 并发跑测试导致假失败
 
 4 核机器上同时跑多个 pytest，负载到 9.8，浏览器测试因资源竞争假失败
 （`test_frontend_components` 并发下失败、单独跑 `[100%]` 通过）。
