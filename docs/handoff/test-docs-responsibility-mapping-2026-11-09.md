@@ -145,6 +145,21 @@
 | D | checklist §10 / §11 混装「时点性实测记录」与「长期有效规则」 | L519-603 | **腐化风险** | §11 的 22 条实测记录是 2026-11-08 的快照。半年后读的人会当成现状。建议 §10/§11 标注「快照日期 + 复核有效期」，或迁到 `docs/handoff/` 下的日期化文件名 |
 | E | checklist §2 写「旧地址 `192.168.47.129` 已失效」 | L62 | 陈旧风险 | 该地址在 user memory 里记的是 `192.168.47.130`（schan 的旧服务器）。**129 vs 130 疑似笔误**，建议核对后修正，避免下次连错机器 |
 | F | agent-testing.md 与 checklist 各自维护「模板库家族名单」 | agent-testing L30-32 / checklist L511、L553 | 重复 + 漂移风险 | 名单以 agent-testing §1.1 为准；checklist 改为链接 |
+| G | **（2026-11-09 补充）master 上的 `agent-testing.md` 已是 439 行**，§1.2 共享机容量、§1.3 worktree 准备、§1.4 conftest basename 冲突、§1.5 换 renderer 断旧 DOM 断言**全部已合入 master** | 实测 `git show origin/master:docs/guides/agent-testing.md \| wc -l` = **439**；章节清单含 §1.1–§1.5 | **状态已变** | 本文档 §4 的「问题 A」（那 79 行 stranded 在本地）**已自然消解**，无需再提合 master。§2 对照表按新行数重读即可 |
+| H | **（2026-11-09 补充）master 上 `test_spu_deterioration_alert_page.py` 仍有 53 处 legacy 选择器** | 实测 `grep -cE "alert-rows\|total-spus\|alert-status"` = **53**；而修复提交 `6e07b394`/`ed6811eb`/`08c44603` 均在 `origin/fix/alert-page-react-dom-assertions` 分支上，`git merge-base --is-ancestor` 验证**均未进 master** | 状态澄清 | 开发工程师所说「P6 lane 已改完」指**分支上已改**，master 尚未合。**「53 项」这个数字对 master 仍然成立**；合入后需重测 |
+
+---
+
+## 4.5 复核时点说明
+
+本文档初版写于 2026-11-08 晚，§4 的问题清单基于当时的 master（`2b68b40a`）。2026-11-09 复核时 master 已到 `dab9f4fc`，逐条复核后：
+
+- **问题 A（79 行 stranded）**：**已消解** —— §1.2–§1.5 与假绿警告块已进 master，`agent-testing.md` 现 439 行。
+- **问题 B（第 228 行过时警告）**：**已消解** —— 开发工程师 `b94fb2cc` 已修，随 `6c99ecc3` 合入。
+- **问题 C（模板库刷新三处重复）**：仍开着，需按本文档 §3.2 收敛。
+- **问题 D（§10/§11 时点性内容腐化）**：仍开着。
+- **问题 E（`192.168.47.129`）**：**已消解** —— 已改为指向 `hp-desk` alias、不列具体旧 IP，随 `e152ec15` 合入。
+- **问题 F（模板库家族名单重复）**：仍开着。
 
 ---
 
