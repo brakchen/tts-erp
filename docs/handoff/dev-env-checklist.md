@@ -225,9 +225,9 @@ found 0 vulnerabilities
 | `.env.test` | 软链到主 checkout | 没有它就拿不到测试连接串 |
 | `frontend/node_modules` | **按本 worktree 的 `package-lock.json` 执行 `npm ci`** | 必须真装，不能软链：Node ESM 会解析软链接的真实路径，主 checkout 与 worktree 的 `package.json` 版本不同会直接 `ERR_MODULE_NOT_FOUND` |
 
-> ⚠ **当前 `scripts/envsetup/prepare-worktree.sh` 尚未提交到 `origin/master`**（只在主 checkout 工作区里，`git status` 显示 `AM`）。
-> 新建的 worktree 里**没有这个脚本**，直接跑会报 `No such file or directory`。
-> 临时办法：从主 checkout 复制过去（见 §9.6），但复制后 worktree 变脏，会挡住 §8 的 DoD 基线命令。
+> ✅ **已解决（2026-11-08 20:50）**：`scripts/envsetup/prepare-worktree.sh` 已随 `047a1ac` 合入 `origin/master`。
+> 新建的 worktree 里该脚本自动到位，直接跑 `bash scripts/envsetup/prepare-worktree.sh` 即可；处置记录见 §10.1。
+> §9.6 记录的是脚本尚未进 master 时的历史现象，现在不再适用；当时的「从主 checkout 手工复制」办法会让 worktree 变脏、挡住 §8 的 DoD 基线命令，不该再走。
 
 ---
 
@@ -523,7 +523,7 @@ docker exec postgres psql -U postgres -Atc \
 > **处置结果**：由 Chief 用干净 worktree 完成合并并实测验收。
 > - 提交：`bc2fbb7 chore: 新增 worktree 测试环境准备脚本`
 > - 合并提交：`047a1ac docs: 修正测试服务器地址、新增 worktree 准备脚本与团队交接文档`
-> - 当前 `origin/master` = `047a1ac`，`git ls-tree origin/master scripts/envsetup/` 已含 `prepare-worktree.sh`（mode 100755）
+> - 当前 `origin/master` = `047a1ac`（记录时点 2026-11-08 20:50），`git ls-tree origin/master scripts/envsetup/` 已含 `prepare-worktree.sh`（mode 100755）
 > - 实测：从该 master 新建 worktree，脚本自动到位并跑通（venv/.env.test 链接 + `npm ci` 232 包，退出码 0）
 > - `AGENTS.md` §5 命令表已增「新 worktree 测试环境准备」一行
 >
