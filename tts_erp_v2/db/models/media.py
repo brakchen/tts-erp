@@ -1,6 +1,6 @@
 """SQLAlchemy models for the global media asset library.
 
-3 tables in the ``media`` schema:
+The ``media`` schema stores the asset library, personas and shared video packs:
 
 - ``media.assets`` — one uploaded image or video (the source of truth for the
   object store binding).
@@ -13,15 +13,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
+    Identity,
     Index,
     Text,
     UniqueConstraint,
+    Uuid,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -164,8 +168,81 @@ class DigitalHumanAsset(Base):
     )
 
 
+class MediaPack(Base):
+    """A named collection of references to existing library videos."""
+
+    __tablename__ = "media_packs"
+    __table_args__ = (
+        UniqueConstraint("creation_token", name="uq_media_packs_creation_token"),
+        {"schema": "media"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    creation_token: Mapped[UUID] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=text("now()")
+    )
+
+
+class MediaPackVideo(Base):
+    __tablename__ = "media_pack_videos"
+    __table_args__ = (
+        Index("ix_media_pack_videos_asset", "asset_id"),
+        {"schema": "media"},
+    )
+
+    pack_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("media.media_packs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    asset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("media.media_assets.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=text("now()")
+    )
+
+
+class DigitalHumanPack(Base):
+    __tablename__ = "digital_human_packs"
+    __table_args__ = (
+        Index("ix_digital_human_packs_pack", "pack_id"),
+        {"schema": "media"},
+    )
+
+    digital_human_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("media.digital_humans.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    pack_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("media.media_packs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=text("now()")
+    )
+
+
 __all__ = [
     "DigitalHuman",
     "DigitalHumanAsset",
+    "DigitalHumanPack",
     "MediaAsset",
+    "MediaPack",
+    "MediaPackVideo",
 ]

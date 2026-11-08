@@ -9,6 +9,7 @@ import {
 } from '../media-assets/media-ui';
 import HumanEditor, { PortraitTile, type EditorMode } from './HumanEditor';
 import HumanMaterials from './HumanMaterials';
+import HumanPackWorkspace from './HumanPackWorkspace';
 import PickAssets from './PickAssets';
 
 const statusOptions = [
@@ -21,6 +22,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   const [status, setStatus] = useState('active');
   const [revision, setRevision] = useState(0);
   const [selected, select] = useRecordSelection('human');
+  const [legacy, setLegacy] = useState(false);
   const [editor, setEditor] = useState<{ mode: EditorMode; human?: DigitalHuman }>();
   const [picker, setPicker] = useState<DigitalHuman>();
   const [operation, setOperation] = useState<{ mode: 'archive' | 'delete'; human: DigitalHuman }>();
@@ -63,9 +65,10 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   }
 
   return <div className="erp-page media-workspace">
-    {selected ? <HumanMaterials key={selected} bootstrap={bootstrap} id={selected} revision={revision} canWrite={canWrite}
-      onBack={() => { returning.current = selected; select(null); }}
-      onPick={setPicker} onChanged={refresh} /> : <>
+    {selected ? (legacy ? <HumanMaterials key={selected} bootstrap={bootstrap} id={selected} revision={revision} canWrite={canWrite}
+      onBack={() => setLegacy(false)} onPick={setPicker} onChanged={refresh} /> :
+      <HumanPackWorkspace key={selected} bootstrap={bootstrap} id={selected} revision={revision} canWrite={canWrite}
+        onBack={() => { returning.current = selected; select(null); }} onLegacy={() => setLegacy(true)} />) : <>
       <div className="media-list-toolbar">
         <h1 ref={listHeading} tabIndex={-1}>档案 {feed.data && <span className="media-count">{feed.data.total} 个</span>}</h1>
         <div className="media-actions">
@@ -92,10 +95,8 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
                 <Chip size="sm" className="media-chip"><Chip.Label>{humanStatus(human.status)}</Chip.Label></Chip>
               </div>
               <div className="media-actions">
-                {canWrite && human.status === 'active' && <Button variant="secondary" className="media-person-add" aria-haspopup="dialog"
-                  onPress={() => setPicker(human)}>＋ 添加素材</Button>}
-                <Button variant="secondary" isDisabled={!human.assetIds.length}
-                  onPress={() => { select(human.digitalHumanId); document.scrollingElement?.scrollTo(0, 0); }}>管理素材 · {human.assetIds.length}</Button>
+                <Button variant="secondary" aria-label={'查看档案 ' + human.name}
+                  onPress={() => { select(human.digitalHumanId); document.scrollingElement?.scrollTo(0, 0); }}>查看档案</Button>
               </div>
               {canWrite && <div className="media-card-actions">
                 <Button variant="ghost" aria-label={'编辑 ' + human.name} onPress={() => setEditor({ mode: 'edit', human })}>编辑</Button>
@@ -112,7 +113,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
     </>}
     {canWrite && editor && <HumanEditor root={root} {...editor} onClose={() => setEditor(undefined)} onSaved={() => {
       if (editor.mode === 'create' && status === 'archived') setStatus('active');
-      setNotice(editor.mode === 'create' ? '档案已创建。可以在卡片上添加素材。'
+      setNotice(editor.mode === 'create' ? '档案已创建。打开档案即可添加素材包。'
         : editor.mode === 'portrait' ? '形象照片已更新。' : '档案资料已保存。');
       setEditor(undefined);
       refresh();

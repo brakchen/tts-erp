@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
-import type { Asset, DigitalHuman, FeedPage } from './contracts';
+import type { Asset, DigitalHuman, FeedPage, MediaPack } from './contracts';
 import { mediaPageSize, useMediaRead } from './media-ui';
 
-export function useCursorFeed<T extends Asset | DigitalHuman>(
+export function useCursorFeed<T extends Asset | DigitalHuman | MediaPack>(
   root: string, path: string | null, decode: (value: unknown) => FeedPage<T>, revision: number | string = 0,
 ) {
   const key = JSON.stringify([root, path, revision]);
@@ -18,7 +18,7 @@ export function useCursorFeed<T extends Asset | DigitalHuman>(
     if (!data) return;
     setPage((previous) => {
       if (previous?.key === key && previous.cursor === cursor) return previous;
-      const id = (row: T) => 'assetId' in row ? row.assetId : row.digitalHumanId;
+      const id = (row: T) => 'assetId' in row ? row.assetId : 'packId' in row ? row.packId : row.digitalHumanId;
       const rows = cursor && previous?.key === key ? previous.data.items : [];
       const seen = new Set(rows.map(id));
       return { key, cursor, data: { ...data, items: [...rows, ...data.items.filter((row) => !seen.has(id(row)))] } };

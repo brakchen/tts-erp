@@ -7,7 +7,7 @@
 
 | 文件 | 是什么 |
 | --- | --- |
-| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：16 个业务 schema、87 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
+| [`schema_tts_erp.sql`](schema_tts_erp.sql) | 全库 DDL 快照（幂等、可对空库重放）：16 个业务 schema、90 张表 + `public.alembic_version`。由 `scripts/regen_schema.py` 生成，**禁止手改** |
 | [`schema_storage.sql`](schema_storage.sql) | `procurement.spu_images`（SPU 图片元数据）的补丁式幂等 DDL，不走 ORM；测试在 `tests/api/conftest.py` 会用到它描述的表 |
 
 ## 2. 维护规则（怎么保持"是现在的数据结构"）
@@ -19,7 +19,7 @@
    ```
    `scripts/regen_schema.py` 只读不写库；它剥掉序列/`\restrict` 等噪音、给
    `CREATE TABLE`/`CREATE FUNCTION` 加 `IF NOT EXISTS`，使快照可重复执行。
-2. **生成源必须在当前 alembic head**（当前 head：`0075_media_card_feeds`）：
+2. **生成源必须在当前 alembic head**（当前 head：`0076_media_packs`）：
    ```bash
    docker exec postgres psql -U postgres -tAc "SELECT version_num FROM alembic_version" -d tts_erp_test_template
    ```
@@ -30,7 +30,7 @@
 4. 历史漂移教训（2026-08-25）：手维护的 schema.sql 曾漏 7 张表、列名写错，
    healthz/sync/db 三处互相矛盾——**只有"生成 + 同步"这条路是可靠的**。
 
-## 3. 数据结构索引（截至 migration 0075）
+## 3. 数据结构索引（截至 migration 0076）
 
 领域模型与表间关系见 [`docs/architecture/data-model-target-v3.md`](../architecture/data-model-target-v3.md)；
 「业务概念 ↔ 物理表字段」映射见 [`docs/business/spu-profitability.md`](../business/spu-profitability.md) 附录 A；
@@ -116,10 +116,11 @@
 （历史 analytics 4 张僵尸表 0007 drop、0024 并入 plugin；0068 重建该 schema。）
 契约见 [`docs/design/spu-profit-deterioration-alert.md`](../design/spu-profit-deterioration-alert.md)。
 
-### media —— 媒体资产库与数字人（3 表）
+### media —— 媒体资产库、素材包与数字人（6 表）
 `media_assets` 保存图片和视频元数据与对象存储绑定。`is_portrait` 标记形象照，普通素材查询排除这些记录；
 `digital_humans` 保存数字人（人设档案）记录，`portrait_asset_id` 指向可选的形象照。素材和档案的卡片列表按 `updated_at` 与 `id` 降序续载；
 `digital_human_assets` 是数字人 ↔ 资产多对多链接（资产可无归属，也可同时挂多个数字人）。
+`media_packs` 保存包名与创建幂等令牌，`media_pack_videos` 关联包与视频，`digital_human_packs` 关联数字人与包。
 对象字节流不进数据库，浏览器凭预签名 URL 直传对象存储。契约见
 [`docs/design/media-asset-library.md`](../design/media-asset-library.md)。
 

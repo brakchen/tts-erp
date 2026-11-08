@@ -105,3 +105,30 @@
 .media-upload-file > span { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
 .media-upload-tag-panel { display: grid; gap: 8px; margin-block-start: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
 .media-upload-tag-options { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr)); }
+
+.media-pack-options {
+  display: grid;
+  gap: .35rem;
+  max-height: 12rem;
+  overflow: auto;
+  padding: .5rem;
+  border: 1px solid var(--border);
+  border-radius: .65rem;
+}
+
+.media-pack-options > li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.media-pack-footer {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.media-pack-choice {
+  width: 100%;
+  justify-content: space-between;
+  min-width: 0;
+  white-space: normal;
+}

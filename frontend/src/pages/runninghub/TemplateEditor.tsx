@@ -19,7 +19,7 @@ export default function TemplateEditor({ root, busy, feedback, close, save }: {
   const [ordered, setOrdered] = useState<Asset[]>([]);
   const [revision, setRevision] = useState(0);
   const people = useRead<unknown>(root, '/v2/media/digital-humans?status=active&limit=200', revision);
-  const person = useRead<unknown>(root, humanId ? '/v2/media/digital-humans/' + humanId : null, revision);
+  const person = useRead<unknown>(root, humanId ? '/v2/media/digital-humans/' + humanId + '?includePackVideos=true' : null, revision);
   let peopleRows: DigitalHuman[] = [];
   let videos: Asset[] = [];
   let currentPerson = false;

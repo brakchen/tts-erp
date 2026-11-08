@@ -56,6 +56,7 @@ credential kinds:
 | SPU image list / upload / delete | `GET /v2/spu-images`, `POST /v2/spu-images/upload-url`, `POST /v2/spu-images/{id}/confirm`, `DELETE /v2/spu-images/{id}` | readonly / readwrite |
 | Media asset library | `GET /v2/media/assets[?kind=&status=&keyword=&tag=&digitalHumanId=&excludeDigitalHumanId=]`, `GET /v2/media/assets/tags`, `GET/PATCH/DELETE /v2/media/assets/{id}`, `POST /v2/media/assets/upload-url`, `POST /v2/media/assets/{id}/confirm` | readonly / readwrite |
 | Digital humans (personas) | `GET/POST /v2/media/digital-humans`, `GET/PATCH/DELETE /v2/media/digital-humans/{id}`, `POST /v2/media/digital-humans/{id}/assets`, `DELETE /v2/media/digital-humans/{id}/assets/{assetId}` | readonly / readwrite |
+| Shared video packs | `GET/POST /v2/media/packs`, `GET /v2/media/packs/{id}`, pack-video and persona-pack associations | readonly / readwrite |
 | RunningHub outfit generation | `/v2/runninghub/*`, page `/v2/pages/runninghub` | session `page:runninghub`; GET readonly, normal commands readwrite, config/account/workflow/reconciliation admin; [protocol and recovery](runninghub.md) |
 | Media asset / digital human pages (HTML) | `GET /v2/pages/media-assets`, `GET /v2/pages/digital-humans` | readonly (browser → 302 login)；页面权限点 `page:media-assets` / `page:digital-humans` |
 | TikTok video publish workflow | `GET /v2/pages/video-publish`, `GET /v2/video-publish/config`, `GET /v2/video-publish/tasks[/{id}]`, `POST /v2/video-publish/tasks`, upload-url, confirm, cancel, retry, replace-upload, verify, `/cleanup/retry`, `POST /v2/video-publish/tasks/{id}/confirm-published`, `PATCH /v2/video-publish/tasks/{id}/settings` | session: page:video-publish + readonly/readwrite action tier; API key: admin by default; page-level scope (every task in the workspace) |
@@ -497,7 +498,7 @@ with a presigned URL. Design:
 4. `GET /v2/media/assets` (readonly) — optional `kind` (`image`/`video`),
    `status` (`awaiting_upload`/`ready`/`failed`), `keyword`, `tag`,
    `digitalHumanId` (linked to this persona), and
-   `excludeDigitalHumanId` (unlinked to this persona) filters; returns
+   `excludeDigitalHumanId` (unlinked to this persona), `packId` and `excludePackId` filters; returns
    `{items, total, limit, offset}`. `keyword` matches a literal substring in
    the filename, description, or a tag, ignoring case. Characters such as
    `%` and `_` match themselves. `tag` matches one complete normalized label
@@ -510,15 +511,16 @@ with a presigned URL. Design:
 5. `GET/PATCH/DELETE /v2/media/assets/{asset_id}` — detail / metadata edit /
    soft-delete (204, idempotent; the stored object is removed best-effort).
    Single-asset DELETE is available to `readwrite` on production databases.
-   DELETE returns 409 `ASSET_IN_USE` while any undeleted persona references the
-   asset, including archived personas; metadata, references, and object bytes
+   DELETE returns 409 `ASSET_IN_USE` while a pack or any undeleted persona references the
+   asset, including archived personas. Metadata, references, and object bytes
    are preserved. There is no force-delete option. Reference checking and
    deletion hold the asset's exclusive row lock, serializing concurrent links.
    Detail includes `used_by: [{digital_human_id, name, status}]` for current
    persona references, including archived personas, and matching `usageCount`.
-   References follow persona-list order (newest persona first).
-   Existing snake_case response fields remain unchanged; only `usageCount`
-   uses camelCase. In PATCH responses where usage has not been calculated,
+   Persona references include pack membership and are deduplicated. They follow
+   persona-list order (newest persona first). `usedByPacks` lists `{packId, name}`
+   for all containing packs, including packs with no linked persona.
+   In PATCH responses where usage has not been calculated,
    `usageCount` is null.
 6. `GET/POST /v2/media/digital-humans` (readonly / readwrite) — list /
    create. List accepts optional `status=active|archived`. Returned
@@ -539,6 +541,15 @@ with a presigned URL. Design:
 9. `GET /v2/media/assets/tags` (readonly) — a deduplicated, sorted `string[]`
    of tags saved on ready, undeleted assets. Pending, failed, and soft-deleted
    assets contribute no candidates. This read does not create tag records.
+
+### Shared video packs
+
+- `GET /v2/media/packs` returns `{items, total, nextCursor}` with `{packId, name, videoCount}` items. Optional `digitalHumanId` or `excludeDigitalHumanId` scope the results. Pass the prior `nextCursor` to continue. `GET /packs/{packId}` returns the same item shape.
+- `POST /v2/media/packs` takes `{name, assetIds, creationToken, digitalHumanId?}` and returns 201. A UUID creation token identifies one logical create request. A replay returns the same pack. An optional persona is associated in the same transaction.
+- `POST /v2/media/packs/{packId}/videos` takes `{assetIds}` and returns the updated pack. Writes accept up to 200 IDs per request and only confirmed library videos. Repeated video IDs resolve to one membership.
+- `DELETE /v2/media/packs/{packId}/videos/{assetId}` returns 204 and removes membership. The original asset stays in the library.
+- `POST /v2/media/digital-humans/{id}/packs` takes `{packId}`. `DELETE /v2/media/digital-humans/{id}/packs/{packId}` returns 204 and detaches the pack. The shared pack and its videos stay in the library.
+- Reads require readonly. Writes require readwrite and the existing cookie CSRF header. Persona details retain direct asset references by default. `includePackVideos=true` includes ready videos from linked packs with duplicate asset IDs removed.
 
 Upload and metadata PATCH trim leading/trailing whitespace, collapse repeated
 whitespace, remove empty labels, and deduplicate tags while preserving input

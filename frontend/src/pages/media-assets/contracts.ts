@@ -18,6 +18,7 @@ export interface Asset {
   url: string | null;
   urlExpiresAt: string | null;
   usedBy: AssetReference[] | null;
+  usedByPacks?: PackReference[];
   usageCount: Count | null;
 }
 
@@ -25,6 +26,15 @@ export interface AssetReference {
   id: string;
   name: string;
   status: string;
+}
+
+export interface PackReference {
+  packId: string;
+  name: string;
+}
+
+export interface MediaPack extends PackReference {
+  videoCount: Count;
 }
 
 export interface FeedPage<T> {
@@ -98,8 +108,24 @@ function decodeReferences(value: unknown): AssetReference[] | null {
   });
 }
 
+function decodePackReference(value: unknown): PackReference {
+  const row = object(value);
+  return { packId: identity(row.packId), name: text(row.name) };
+}
+
+export function decodeMediaPack(value: unknown): MediaPack {
+  return { ...decodePackReference(value), videoCount: count(object(value).videoCount) };
+}
+
+export function decodeMediaPackFeed(value: unknown): FeedPage<MediaPack> {
+  const row = object(value);
+  if (!Array.isArray(row.items)) return invalid();
+  return { items: row.items.map(decodeMediaPack), total: count(row.total), nextCursor: nullableText(row.nextCursor) };
+}
+
 export function decodeAsset(value: unknown): Asset {
   const row = object(value);
+  if (row.usedByPacks !== undefined && !Array.isArray(row.usedByPacks)) return invalid();
   return {
     assetId: identity(row.asset_id),
     kind: text(row.kind),
@@ -116,6 +142,7 @@ export function decodeAsset(value: unknown): Asset {
     url: nullableText(row.url),
     urlExpiresAt: nullableText(row.url_expires_at),
     usedBy: decodeReferences(row.used_by),
+    ...(row.usedByPacks !== undefined && { usedByPacks: row.usedByPacks.map(decodePackReference) }),
     usageCount: row.usageCount === null || row.usageCount === undefined ? null : count(row.usageCount),
   };
 }

@@ -4,7 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 import DigitalHumans from '../digital-humans';
 import AssetPicker, { emptyPickerDraft } from '../digital-humans/AssetPicker';
-import { decodeDigitalHumanDetail } from './contracts';
+import PickAssets from '../digital-humans/PickAssets';
+import { decodeDigitalHuman, decodeDigitalHumanDetail } from './contracts';
 import MediaAssets from './index';
 
 const bootstrap: PageProps['bootstrap'] = {
@@ -29,6 +30,7 @@ const json = (data: unknown, status = 200) => new Response(JSON.stringify(data),
 function apiFetch(handler: (url: string, init: RequestInit) => Promise<Response>) {
   return vi.fn(async (url: string, init: RequestInit) => {
     if (url.endsWith('/assets/tags')) return json([]);
+    if (new URL(url, window.location.origin).pathname.endsWith('/packs')) return json({ items: [], total: 0, nextCursor: null });
     const response = await handler(url.replace(/\?includeAssets=false$/, ''), init);
     const parsed = new URL(url, window.location.origin);
     if (parsed.pathname.endsWith('/digital-humans') && parsed.searchParams.has('cursor') && response.ok) {
@@ -58,6 +60,7 @@ class Upload {
 }
 
 beforeEach(() => {
+  history.replaceState(null, '', '/?view=all');
   let nextUrl = 0;
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:TEST_local_' + ++nextUrl) });
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
@@ -73,6 +76,12 @@ const button = (name: string) => screen.getByRole('button', { name });
 const findButton = (name: string) => screen.findByRole('button', { name });
 const references = () => within(screen.getByRole('list', { name: '关联素材' }));
 const findConfirmation = async () => within(await screen.findByRole('alertdialog'));
+
+function renderLegacyPicker() {
+  const onClose = vi.fn();
+  render(<PickAssets bootstrap={bootstrap} target={decodeDigitalHuman(human)} onClose={onClose} onChanged={() => undefined} />);
+  return onClose;
+}
 
 async function chooseStatus(user: ReturnType<typeof userEvent.setup>, label: string) {
   await user.click(screen.getByRole('button', { name: /状态/ }));
@@ -195,8 +204,7 @@ it('retries a failed association without creating or uploading another asset', a
     return json([{ ...human, asset_ids: linked ? [2] : [] }]);
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<DigitalHumans bootstrap={bootstrap} />);
-  await user.click(await findButton('＋ 添加素材'));
+  const onClose = renderLegacyPicker();
   await user.click(await findButton('上传新素材'));
   chooseFile();
   await user.click(button('开始上传'));
@@ -209,8 +217,7 @@ it('retries a failed association without creating or uploading another asset', a
   expect(screen.getByRole('heading', { name: '为「' + human.name + '」添加素材' })).toBeVisible();
   await waitFor(() => expect(button('取消')).toBeEnabled());
   await user.click(button('取消'));
-  await user.click(await findButton('管理素材 · 1'));
-  expect(await references().findByText(asset.filename)).toBeVisible();
+  expect(onClose).toHaveBeenCalled();
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/upload-url'))).toHaveLength(1);
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/confirm'))).toHaveLength(1);
   expect(attempts).toBe(2);
@@ -241,8 +248,7 @@ it('keeps selections across searches and retries only the remaining asset after 
     return json([{ ...human, asset_ids: [...linkedIds] }]);
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<DigitalHumans bootstrap={bootstrap} />);
-  await user.click(await findButton('＋ 添加素材'));
+  const onClose = renderLegacyPicker();
   expect(button('确认添加（0）')).toBeDisabled();
   const card = (await screen.findByRole('checkbox', { name: asset.filename })).closest('li');
   expect(card).not.toBeNull();
@@ -275,9 +281,7 @@ it('keeps selections across searches and retries only the remaining asset after 
   expect(screen.getByRole('checkbox', { name: asset.filename })).toBeDisabled();
   expect(screen.queryByLabelText(/资产 ID/)).not.toBeInTheDocument();
   await user.click(button('确认添加（1）'));
-  await user.click(await findButton('管理素材 · 2'));
-  expect(await references().findByText(asset.filename)).toBeVisible();
-  expect(references().getByText(second.filename)).toBeVisible();
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
   expect(writes).toEqual(['2', '3', '3']);
 });
 
@@ -397,7 +401,7 @@ it('keeps the detail and refreshes references when a concurrent association reje
   await waitFor(() => expect(confirmation.getByRole('button', { name: '确认删除' })).toBeEnabled());
   await user.click(confirmation.getByRole('button', { name: '确认删除' }));
   expect(await confirmation.findByText(/请解除关联后再删除/)).toBeVisible();
-  expect(confirmation.getByRole('alert')).toHaveTextContent('此素材仍被数字人引用。请先解除全部引用，再从素材库删除。');
+  expect(confirmation.getByRole('alert')).toHaveTextContent('此素材仍被引用。请先解除全部引用，再从素材库删除。');
   expect(confirmation.getByRole('button', { name: '确认删除' })).toBeDisabled();
   await user.click(confirmation.getByRole('button', { name: '取消' }));
   expect(screen.getByRole('heading', { name: asset.filename })).toBeVisible();
@@ -448,8 +452,7 @@ it('preserves A/B, query and type while C is uploaded and associated from the pi
     return json([{ ...human, asset_ids: [...linked] }]);
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<DigitalHumans bootstrap={bootstrap} />);
-  await user.click(await findButton('＋ 添加素材'));
+  const onClose = renderLegacyPicker();
   await user.click(await screen.findByRole('checkbox', { name: asset.filename }));
   await user.click(screen.getByRole('checkbox', { name: second.filename }));
   expect(screen.getByRole('checkbox', { name: asset.filename })).toBeVisible();
@@ -468,7 +471,7 @@ it('preserves A/B, query and type while C is uploaded and associated from the pi
   expect(screen.getByRole('checkbox', { name: second.filename })).toBeChecked();
   expect(writes).toEqual(['4']);
   await user.click(button('确认添加（2）'));
-  expect(await screen.findByRole('heading', { name: human.name })).toBeVisible();
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
   expect(writes).toEqual(['4', '2', '3']);
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/upload-url'))).toHaveLength(1);
 });
@@ -720,8 +723,7 @@ it.each([false, true])('waits for the post-upload profile read before a partial 
     return json([{ ...human, asset_ids: [...linked] }]);
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<DigitalHumans bootstrap={bootstrap} />);
-  await user.click(await findButton('＋ 添加素材'));
+  const onClose = renderLegacyPicker();
   await user.click(await screen.findByRole('checkbox', { name: asset.filename }));
   await user.click(screen.getByRole('checkbox', { name: second.filename }));
   await user.click(button('上传新素材'));
@@ -750,9 +752,7 @@ it.each([false, true])('waits for the post-upload profile read before a partial 
   expect(await screen.findByRole('checkbox', { name: second.filename })).toBeChecked();
   await waitFor(() => expect(screen.queryByRole('checkbox', { name: asset.filename })).not.toBeInTheDocument());
   await user.click(button('确认添加（1）'));
-  expect(await screen.findByRole('heading', { name: human.name })).toBeVisible();
-  await user.click(await findButton('管理素材 · 3'));
-  for (const row of [asset, second, third]) expect(await references().findByText(row.filename)).toBeVisible();
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
   expect(writes).toEqual(['4', '2', '3', '3']);
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/upload-url'))).toHaveLength(1);
 });
@@ -840,7 +840,8 @@ it('confirms archiving before a write and keeps its pending confirmation exclusi
   await screen.findByText(/档案已恢复/);
   await chooseStatus(user, '启用中');
   expect(await screen.findByRole('heading', { name: human.name })).toBeVisible();
-  expect(await findButton('管理素材 · 1')).toBeVisible();
+  await user.click(await findButton('查看档案 ' + human.name));
+  expect(await findButton('管理原有素材 · 1')).toBeVisible();
   expect(fetcher.mock.calls.filter(([, init]) => init.method === 'PATCH').map(([, init]) => JSON.parse(String(init.body)).status))
     .toEqual(['archived', 'active']);
 });
@@ -862,7 +863,8 @@ it('keeps removal confirmation exclusive while pending and retains its failures'
   });
   vi.stubGlobal('fetch', fetcher);
   render(<DigitalHumans bootstrap={bootstrap} />);
-  await user.click(await findButton('管理素材 · 1'));
+  await user.click(await findButton('查看档案 ' + human.name));
+  await user.click(await findButton('管理原有素材 · 1'));
   await user.click(await findButton('移除关联 ' + asset.filename));
   const confirmation = await findConfirmation();
   await user.click(confirmation.getByRole('button', { name: '确认移除' }));

@@ -38,8 +38,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session, require_role_at_least
+from tts_erp_v2.api.v2 import media_packs
 from tts_erp_v2.db.models.media import DigitalHuman, MediaAsset
-from tts_erp_v2.media import repository
+from tts_erp_v2.media import packs, repository
 from tts_erp_v2.media.domain import (
     AssetKind,
     AssetStatus,
@@ -125,8 +126,14 @@ class DigitalHumanReferenceOut(BaseModel):
     status: DigitalHumanStatus
 
 
+class PackReferenceOut(BaseModel):
+    pack_id: int = Field(serialization_alias="packId")
+    name: str
+
+
 class AssetDetailOut(AssetOut):
     used_by: list[DigitalHumanReferenceOut]
+    used_by_packs: list[PackReferenceOut] = Field(serialization_alias="usedByPacks")
 
 
 class AssetListOut(BaseModel):
@@ -466,6 +473,8 @@ def list_assets(
     exclude_digital_human_id: int | None = Query(
         default=None, ge=1, alias="excludeDigitalHumanId"
     ),
+    pack_id: int | None = Query(default=None, ge=1, alias="packId"),
+    exclude_pack_id: int | None = Query(default=None, ge=1, alias="excludePackId"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     cursor: str | None = Query(default=None, max_length=256),
@@ -491,6 +500,8 @@ def list_assets(
             tag=tag,
             digital_human_id=digital_human_id,
             exclude_digital_human_id=exclude_digital_human_id,
+            pack_id=pack_id,
+            exclude_pack_id=exclude_pack_id,
             status=asset_status,
             limit=limit + (cursor is not None),
             offset=offset,
@@ -551,6 +562,10 @@ def get_asset_detail(
                 status=DigitalHumanStatus(human.status),
             )
             for human in humans
+        ],
+        used_by_packs=[
+            PackReferenceOut(pack_id=pack_id, name=name)
+            for pack_id, name in packs.packs_for_video(sess, asset_id)
         ],
     )
 
@@ -688,6 +703,7 @@ def get_digital_human(
     request: Request,
     sess: Annotated[Session, Depends(get_session)],
     include_assets: bool = Query(default=True, alias="includeAssets"),
+    include_pack_videos: bool = Query(default=False, alias="includePackVideos"),
 ) -> DigitalHumanDetailOut:
     """Return one persona with the full asset records it references."""
     require_role_at_least(request, "readonly")
@@ -697,7 +713,9 @@ def get_digital_human(
             status.HTTP_404_NOT_FOUND,
             f"digital human not found: {digital_human_id}",
         )
-    asset_ids = repository.asset_ids_for_digital_human(sess, human.id)
+    asset_ids = repository.asset_ids_for_digital_human(
+        sess, human.id, include_pack_videos=include_pack_videos
+    )
     if not include_assets:
         return DigitalHumanDetailOut(**_human_out(sess, human, asset_ids).model_dump())
     usage_counts = repository.usage_counts_for_assets(sess, asset_ids)
@@ -843,5 +861,7 @@ def unlink_asset(
     repository.unlink_asset_from_digital_human(sess, digital_human_id, asset_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+
+router.include_router(media_packs.router)
 
 __all__ = ["router"]

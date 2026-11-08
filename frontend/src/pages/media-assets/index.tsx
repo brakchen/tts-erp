@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react';
-import { Button, Chip, Input, Label, Modal, TextArea, TextField } from '@heroui/react';
+import { Button, Checkbox, Chip, Input, Label, Modal, TextArea, TextField } from '@heroui/react';
 import { ApiError } from '../../shared/api/client';
 import type { FrontendBootstrap, PageProps } from '../../shared/contracts';
 import AssetCard from './AssetCard';
 import AssetReferences from './AssetReferences';
 import { CursorTail, useCursorFeed } from './CursorFeed';
 import OperationConfirmation from './OperationConfirmation';
+import PackEditor from './PackEditor';
+import { PackCatalog, PackDetail, PackPicker } from './PackViews';
 import TagEditor, { withPendingTag } from './TagEditor';
 import UploadAsset from './UploadAsset';
 import ViewAsset from './ViewAsset';
@@ -16,6 +18,8 @@ import {
 } from './media-ui';
 
 const emptyFilters = { keyword: '', kind: '' };
+const assetTabs = [{ id: 'packs', label: '素材包' }, { id: 'videos', label: '视频' }, { id: 'all', label: '全部素材' }] as const;
+type AssetTab = (typeof assetTabs)[number]['id'];
 
 function DeleteAsset({ bootstrap, asset, onDone, onClose }: {
   bootstrap: FrontendBootstrap; asset: Asset; onDone: () => void; onClose: () => void;
@@ -24,9 +28,11 @@ function DeleteAsset({ bootstrap, asset, onDone, onClose }: {
   const action = useMediaAction();
   const read = useMediaRead(root, '/assets/' + asset.assetId, decodeAsset);
   const references = read.data?.usedBy ?? null;
-  const inUse = Boolean(references?.length);
+  const usedByPacks = read.data?.usedByPacks;
+  const inUse = Boolean(references?.length || usedByPacks?.length);
   return <OperationConfirmation title={'删除素材「' + asset.filename + '」'}
-    description={inUse ? '该素材已添加至数字人档案。请解除关联后再删除。' : '删除后，该素材将从全局素材库移除。'}
+    description={usedByPacks?.length ? '此视频仍在素材包内。请解除全部引用后再删除。'
+      : inUse ? '该素材已添加至数字人档案。请解除关联后再删除。' : '删除后，该素材将从全局素材库移除。'}
     pending={action.pending} error={action.error} confirmDisabled={!references || read.loading || inUse}
     onCancel={onClose} onConfirm={async () => {
       try {
@@ -40,7 +46,7 @@ function DeleteAsset({ bootstrap, asset, onDone, onClose }: {
     }}>
     <ReadStatus title="素材引用" loading={read.loading}
       error={read.error ?? (!read.loading && !references ? '无法确认当前关联。' : undefined)} onRetry={read.retry} />
-    {inUse && !read.loading && <AssetReferences bootstrap={bootstrap} references={references} />}
+    {inUse && !read.loading && <AssetReferences bootstrap={bootstrap} references={references} packs={usedByPacks} />}
   </OperationConfirmation>;
 }
 
@@ -109,14 +115,22 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   const [applied, setApplied] = useState(emptyFilters);
   const [revision, setRevision] = useState(0);
   const [selected, select] = useRecordSelection('asset');
+  const [pack, selectPack] = useRecordSelection('pack');
+  const [tab, setTab] = useState<AssetTab>(() => {
+    const view = new URLSearchParams(window.location.search).get('view');
+    return view === 'videos' ? 'videos' : view === 'all' || selected ? 'all' : 'packs';
+  });
+  const [picked, setPicked] = useState<string[]>([]);
+  const [packAction, setPackAction] = useState<'create' | 'append'>();
   const [editing, setEditing] = useState<Asset>();
   const [deleting, setDeleting] = useState<Asset>();
   const [upload, setUpload] = useState(false);
   const [notice, setNotice] = useState<{ message: string; assetId?: string }>();
   const params = new URLSearchParams();
   if (applied.keyword) params.set('keyword', applied.keyword);
-  if (applied.kind) params.set('kind', applied.kind);
-  const feed = useCursorFeed(root, '/assets?' + params, decodeAssetList, revision);
+  if (tab === 'videos') params.set('kind', 'video');
+  else if (applied.kind) params.set('kind', applied.kind);
+  const feed = useCursorFeed(root, tab === 'packs' || pack ? null : '/assets?' + params, decodeAssetList, revision);
   const assets = feed.data?.items ?? [];
   const uploadedAssetId = notice?.assetId;
 
@@ -130,7 +144,31 @@ export default function MediaAssets({ bootstrap }: PageProps) {
     if (link) window.location.assign(link);
     else select(null);
   }
+  function changeTab(next: AssetTab) {
+    const url = new URL(window.location.href);
+    if (next === 'packs') url.searchParams.delete('view');
+    else url.searchParams.set('view', next);
+    window.history.replaceState(window.history.state, '', url);
+    setTab(next);
+    setPicked([]);
+    setNotice(undefined);
+  }
+  function packSaved(id: string) {
+    setPackAction(undefined);
+    setPicked([]);
+    setRevision((value) => value + 1);
+    selectPack(id);
+  }
+  if (pack) return <div className="erp-page media-workspace"><PackDetail key={pack} bootstrap={bootstrap} id={pack}
+    canWrite={canWrite} backLabel={assetTabs.find((item) => item.id === tab)?.label ?? '资产管理'} onBack={() => {
+      selectPack(null);
+      setRevision((value) => value + 1);
+    }} /></div>;
+
   return <div className="erp-page media-workspace">
+    <div className="media-actions" role="group" aria-label="资产类型">{assetTabs.map((item) => <Button key={item.id}
+      variant={tab === item.id ? 'primary' : 'secondary'} aria-pressed={tab === item.id} onPress={() => changeTab(item.id)}>{item.label}</Button>)}</div>
+    {tab === 'packs' ? <PackCatalog bootstrap={bootstrap} canWrite={canWrite} revision={revision} onOpen={selectPack} /> : <>
     <div className="media-library-toolbar">
       <form className="media-filters" onSubmit={(event) => {
         event.preventDefault();
@@ -141,12 +179,19 @@ export default function MediaAssets({ bootstrap }: PageProps) {
         <TextField value={filters.keyword} onChange={(keyword) => setFilters({ ...filters, keyword })}>
           <Label>搜索素材</Label><Input placeholder="名称、说明或标签" maxLength={120} />
         </TextField>
-        <MediaSelect label="素材类型" value={filters.kind} options={assetKinds}
-          onChange={(kind) => setFilters({ ...filters, kind })} />
+        {tab === 'all' && <MediaSelect label="素材类型" value={filters.kind} options={assetKinds}
+          onChange={(kind) => setFilters({ ...filters, kind })} />}
         <Button type="submit" variant="secondary">搜索</Button>
       </form>
       {canWrite && <Button aria-haspopup="dialog" onPress={() => setUpload(true)}>上传素材</Button>}
     </div>
+    {tab === 'videos' && canWrite && <div className="media-list-toolbar media-status">
+      <span role="status">已选 {picked.length} 段视频</span>
+      <div className="media-actions">
+        <Button variant="secondary" isDisabled={!picked.length} onPress={() => setPackAction('append')}>加入已有包</Button>
+        <Button isDisabled={!picked.length} onPress={() => setPackAction('create')}>新建素材包</Button>
+      </div>
+    </div>}
     {notice && <div className="media-status media-actions">
       <p role="status">{notice.message}</p>
       {uploadedAssetId && <Button variant="secondary" size="sm" onPress={() => select(uploadedAssetId)}>查看刚上传的素材</Button>}
@@ -155,6 +200,11 @@ export default function MediaAssets({ bootstrap }: PageProps) {
     {feed.data && !assets.length && <p className="media-box">没有符合条件的素材。</p>}
     <ul className="media-grid" data-media-grid aria-label="素材列表">
       {assets.map((asset) => <li key={asset.assetId} className="min-w-0"><AssetCard asset={asset} root={root}>
+        {tab === 'videos' && canWrite && asset.status === 'ready' && <Checkbox className="media-linked-check"
+          aria-label={'选择 ' + asset.filename} isSelected={picked.includes(asset.assetId)} onChange={(checked) =>
+            setPicked((current) => checked ? [...current, asset.assetId] : current.filter((id) => id !== asset.assetId))}>
+          <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control></Checkbox.Content>
+        </Checkbox>}
         <div className="media-card-title">
           <h3 title={asset.filename}>{asset.filename}</h3>
           <Chip size="sm" className="media-kind"><Chip.Label>{assetType(asset)}</Chip.Label></Chip>
@@ -170,7 +220,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
         </div>
       </AssetCard></li>)}
     </ul>
-    <CursorTail {...feed} paused={Boolean(upload || selected || editing || deleting)} />
+    <CursorTail {...feed} paused={Boolean(upload || selected || editing || deleting || packAction)} />
     {selected && <ViewAsset key={selected} bootstrap={bootstrap} id={selected} onClose={closeView} />}
     {canWrite && editing && <EditAsset root={root} asset={editing} onClose={() => setEditing(undefined)}
       onDone={() => { setEditing(undefined); changed('素材资料已保存。'); document.scrollingElement?.scrollTo(0, 0); }} />}
@@ -178,5 +228,10 @@ export default function MediaAssets({ bootstrap }: PageProps) {
       onDone={() => { setDeleting(undefined); changed('素材已从全局库删除。'); }} />}
     {canWrite && upload && <UploadAsset bootstrap={bootstrap} onClose={() => setUpload(false)}
       onComplete={(id, filename) => { setUpload(false); changed('已入库「' + filename + '」。', id); document.scrollingElement?.scrollTo(0, 0); }} />}
+    {packAction === 'create' && <PackEditor root={root} initialAssetIds={picked} onDone={(result) => packSaved(result.packId)}
+      onClose={(refresh) => { setPackAction(undefined); if (refresh) setRevision((value) => value + 1); }} />}
+    {packAction === 'append' && <PackPicker root={root} assetIds={picked} onDone={(result) => packSaved(result.packId)}
+      onClose={() => setPackAction(undefined)} />}
+    </>}
   </div>;
 }

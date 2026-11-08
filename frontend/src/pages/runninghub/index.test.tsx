@@ -188,8 +188,8 @@ describe('RunningHub workbench and write boundaries', () => {
     const save = vi.fn(async () => json({ ...template, version: 2, clips: [template.clips[1], template.clips[0]] }));
     vi.stubGlobal('fetch', api(save, undefined, (path) => {
       if (path.includes('/digital-humans?')) return json([person, empty]);
-      if (path.endsWith('/digital-humans/2')) return json({ ...empty, assets: [] });
-      if (path.endsWith('/digital-humans/1')) return json({ ...person, assets: videos });
+      if (path.endsWith('/digital-humans/2?includePackVideos=true')) return json({ ...empty, assets: [] });
+      if (path.endsWith('/digital-humans/1?includePackVideos=true')) return json({ ...person, assets: videos });
       return undefined;
     }));
     render(<RunningHub {...props} />);
