@@ -77,8 +77,6 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str) -> 
     ]
     if scope != "fast":
         args.append("-rP")
-    if plan.backend_all and scope != "fast":
-        args.extend(f"--ignore={path}" for path in LEGACY_FRONTEND if path not in required)
     if plan.frontend and not plan.build:
         subprocess.run(["npm", "--prefix", "frontend", "run", "typecheck"], cwd=ROOT, env=env, check=True, timeout=120)
     return subprocess.run([*args, *targets], cwd=ROOT, env=env, check=False).returncode
