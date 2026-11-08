@@ -11,8 +11,9 @@
 | Chief 对两个失败的定性 | **方向正确**：两者都是环境问题，既不是代码缺陷，也不是测试自身问题 |
 | `test_probe_reports_current_head_on_authorized_clone` | **环境问题**——代码树 alembic head 与模板库 revision 失配。已在旧 commit worktree 上独立复现出完全相同的断言失败 |
 | `test_frontend_components` | **环境问题**——`node_modules` 顶层缺 `semver`。已受控复现出完全相同的 `ERR_MODULE_NOT_FOUND` |
-| master 当前是否零失败 | **否**。完整 fast 基线对比退出 1，56 项新失败（14 项代码缺陷 + 34 项测试基础设施缺陷 + 8 项疑似偶发）。详见 §3 |
+| master 当前是否零失败 | **否**。完整 fast 基线对比退出 1，56 项新失败（14 项断言过时 + 34 项测试基础设施缺陷 + 8 项疑似偶发）。详见 §3。§3.3 的分类经复核已更正为「断言过时」，不是代码缺陷 |
 | 新 master（2b68b40）复核 | 两类缺陷**均未修复**（§8.4），且 renderer 收敛**新增** 2 项溢出回归（§8.5）。§3.1 的机制诊断已实现进 master（§8.3） |
+| 最新 master（65bbf11）复核 | §3.3 断言契约已修、§3.4 conftest 冲突已修（均已复验）；**仍剩 13 项真实回归**在 `tests/browser/test_spu_price_columns.py`。详见 §8.6 |
 | 需要 Chief 决策的事项 | 5 项，见 §7 |
 
 **与委托描述不一致的一处事实**：落后的提交数不是 21。实测 `git rev-list --count 83bbede..0b92d97` = **312**（`--first-parent` = 56）。定性结论不受影响，但数量级差异很大，下一节给出原始命令。
@@ -442,7 +443,7 @@ tests/frontend/test_components.py::test_frontend_components
 | `playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exceeded` | 6 | 偶发/资源争用（见 3.5） |
 | 其它（组件 adapter 的 npm 子进程非零退出） | 2 | 偶发/资源争用（见 3.5） |
 
-### 3.3 代码缺陷（14 项，确定性可复现）
+### 3.3 测试契约过严（14 项）—— 已修
 
 > **Chief 复核（2026-11-08 22:00）——分类需要修正。**
 > 原文把这一类判为「代码缺陷（CSS token 回归），需要开发工程师处理」，并引用
@@ -517,7 +518,9 @@ fa475e0 2026-11-08 style: 统一 ERP 中文与数字字体栈
 
 `docs/testing/baseline-repair-2026-11-03.md` 记录的既定契约是「Tailwind 字体映射回 canonical `--sans`、`--serif`、`--mono`，避免 `font-mono` 及 preflight 的 code/pre 引入第四套栈」——三套栈应当互不相同。`fa475e0` 把 mono/serif 收敛成 `var(--sans)`，与该契约冲突。
 
-**结论**：这是**代码缺陷**（CSS token 回归），需要 @开发工程师 处理。不属于环境问题，也不属于测试自身问题——断言正确，它抓到了真实回归。
+**结论（初稿，存档用）**：这是**代码缺陷**（CSS token 回归），需要 @开发工程师 处理。不属于环境问题，也不属于测试自身问题——断言正确，它抓到了真实回归。
+
+> ⚠️ **上面的初稿结论是错的，已被本节开头的复核批注更正**：这一类的正确分类是**测试自身问题（断言过时）**，不是代码缺陷。`fa475e0` 的字体栈收敛是有意的产品决定，过期的是断言。master 已按此修订契约（提交 `bd4a7753`），并经本记录在 65bbf11 上复验通过（§8.6）。
 
 ### 3.4 测试基础设施缺陷（34 项，收集顺序依赖）
 
@@ -677,7 +680,7 @@ $ bash scripts/test_baseline.sh --scope auto --base 0b92d97 --plan
 
 **在 Chief 委托复核的那两个失败中，未发现代码缺陷，也未发现测试自身问题（断言错误、过期断言、错误 mock）。** 两个失败都是"环境没有跟上代码版本"。
 
-**但完整基线跑完后，在 master 上另发现了两类问题**，与委托的两个失败无关，属独立发现：§3.3 的字体栈代码缺陷（14 项）、§3.4 的 conftest 测试基础设施缺陷（34 项）。这两类才是真正会让每个 lane 的基线对比变成 exit 1 的东西。
+**但完整基线跑完后，在 master 上另发现了两类问题**，与委托的两个失败无关，属独立发现：§3.3 的字体栈断言过时（14 项，经复核已更正为「测试自身问题」）、§3.4 的 conftest 测试基础设施缺陷（34 项）。这两类才是真正会让每个 lane 的基线对比变成 exit 1 的东西。
 
 ---
 
@@ -940,6 +943,51 @@ FAILED tests/browser/test_render_smoke.py::test_spu_deterioration_alert_has_no_h
 
 ---
 
+### 8.6 在最新 master（65bbf11）上的复验
+
+§8.4 / §8.5 复核的对象是 `2b68b40`。之后 master 继续前进到 **`65bbf11`**（含 `a9605dea test: browser_conftest 改用包路径导入，消除多目录 conftest 冲突`），本节是在 `65bbf11` 上的复验。
+
+**worktree 按新流程准备**（脚本已在 master，无需手工拷贝，worktree 保持干净）：
+
+```
+$ git worktree add --detach /home/schan/tts-erp/.worktrees/test-verify-20261108c 65bbf116...
+HEAD is now at 65bbf116 docs: 核实并更正 console.js 与旧 CSS 的处置结论
+$ bash scripts/envsetup/prepare-worktree.sh
+[DONE] worktree 测试环境已就绪
+PREPARE_EXIT=0
+```
+
+**§3.3 断言契约（14 项）—— 已修，复验通过**：
+
+```
+$ bash scripts/test_isolated.sh fast tests/browser/test_render_smoke.py
+EXIT=0 ELAPSED=30s
+失败数: 0
+```
+
+**§3.4 conftest 冲突（34 项）—— 已修，复验通过**：多目录收集场景下的 `AttributeError: module 'conftest' has no attribute '_mock_payload'` 已消失（`origin/master` 的 `tests/browser/conftest.py` 改为 `from tests.browser import conftest as this_module`）。
+
+**但仍有 13 项真实回归未修**：`tests/browser/test_spu_price_columns.py` 在 `65bbf11` 上**单文件复跑就失败**——不是收集顺序问题、不是偶发：
+
+```
+$ bash scripts/test_isolated.sh fast tests/browser/test_spu_price_columns.py
+EXIT=1 ELAPSED=425s
+失败数: 13
+FAILED tests/browser/test_spu_price_columns.py::test_price_content_is_only_shown_on_standard_roi_profile
+FAILED tests/browser/test_spu_price_columns.py::test_null_and_empty_price_values_never_render_as_zero
+...
+E  playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exceeded.
+E  - waiting for locator("#price-summary") to be visible
+```
+
+与 §3.4 的区别要说清楚：修复前这批报的是 `AttributeError: module 'conftest' has no attribute '_mock_payload'`（测试基础设施缺陷，修复后消失）；修复后它们继续失败，但错误类型变成 Playwright 等 `#price-summary` 可见超时——**说明还有一层真实的产品/渲染问题**：`#price-summary` 面板始终不出现。这需要 @开发工程师 跟进 `tts_erp_v2/api/v2/pages.py` 的 renderer 收敛后该面板的 DOM 归属。
+
+**告警页回归（2b68b40 上 53 项）确认为真实回归并已修**：我在 `2b68b40` 上单文件复跑过（`EXIT=1`，321s，54 项失败，`Locator expected to have count '1'` / `Actual value: 0`），不是收集顺序问题；master 上的修法（`f205c744`，就绪信号改用共享 `wait_canned_page`）已在 §8.5 记录，`65bbf11` 上该文件复验全绿。
+
+**§8.1 的删库结论不受影响**：第二次基线（`0b92d97`，56 项）全程监控显示临时库 43/50 个采样点在位，最后 7 个点是运行自身清理，不需因删库重跑。
+
+---
+
 ## 9. 本轮留下的现场
 
 | 路径 | 说明 |
@@ -957,5 +1005,14 @@ FAILED tests/browser/test_render_smoke.py::test_spu_deterioration_alert_has_no_h
 | `/tmp/TEST_rerun_multiconftest.log` | §3.4 对照实验 (b) |
 | `/tmp/TEST_rerun_fontstack.log` | §3.3 单文件复现 |
 | `/tmp/TEST_prepare-worktree.sh.bak` | 从 worktree A 移出的 prepare-worktree.sh 副本（原样保留，可还原） |
+| `/tmp/TEST_baseline_fast_master2.log` | §8 `2b68b40` 完整基线原始日志（113 项） |
+| `/tmp/TEST_baseline_run3.log` | §8 `2b68b40` 完整基线 driver 输出 |
+| `/tmp/TEST_v2_multiconftest.log` | §8.4 多 conftest 对照实验（`2b68b40`） |
+| `/tmp/TEST_v2_fontstack.log` | §8.4 字体栈单文件复现（`2b68b40`） |
+| `/tmp/TEST_v2_alertpage.log` | §8.6 告警页单文件复现（`2b68b40`，54 项，确认真实回归） |
+| `/tmp/TEST_v3_multiconftest.log` | §8.6 多 conftest 复验（`65bbf11`，AttributeError 已消失） |
+| `/tmp/TEST_v3_fontstack.log` | §8.6 字体栈复验（`65bbf11`，0 失败） |
+| `/tmp/TEST_v3_pricecol_alone.log` | §8.6 价格列单文件复跑（`65bbf11`，13 项真实回归） |
+| `/tmp/TEST_baseline_fast_master3.log` | §8.6 `65bbf11` 完整基线原始日志 |
 
 两个 worktree 保留在测试机上，未删除，供复查。

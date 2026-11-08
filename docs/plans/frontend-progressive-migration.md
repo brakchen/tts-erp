@@ -5,8 +5,9 @@
 > 实际范围：`accounts/pages.py::PAGES` 注册的 **18 个页面**全部由 React renderer 渲染，加登录页共 19 项，
 > 与 `tts_erp_v2/api/v2/frontend_pages.py::MIGRATED_PAGE_IDS` 的 19 项一一对应。
 > 另有两个辅助文档页（`message`、`oauth-onboard`）复用同一 React shell。
-> P6 退役与收口已合入 `master`（`808e4f4c`）：路由收敛、旧 Jinja 模板与旧页面脚本删除、
-> ad-daily 内联旧页面 HTML 删除、测试侧旧实现断言退役，全部通过隔离测试验证。
+> P6 退役与收口已合入 `master`（最终合入提交 `3b12f35b`；各步骤的里程碑提交见 §10.2）：
+> 路由收敛、旧 Jinja 模板与旧页面脚本删除、ad-daily 内联旧页面 HTML 删除、
+> 测试侧旧实现断言退役、旧 CSS 与无消费者 vendor 副本清理、退役护栏补齐，全部通过隔离测试验证。
 > 本状态行只描述代码与文档现状，**不等于生产环境已上线同一版本**，也不扩大后续部署授权。
 > P0/P1 原始证据见[实施计划](frontend-p01-implementation.md)；P2 之后的逐批实施记录见
 > [P2 实现计划](frontend-p2-implementation.md)与[剩余控制台页面迁移实施计划](frontend-remaining-implementation.md)；
@@ -185,7 +186,7 @@ frontend/
 4. 未迁移页使用旧 renderer；已迁移页使用 React renderer。缺 manifest、entry 或 bootstrap 是
    部署/构建错误，必须显式失败并阻止发布，不能悄悄降级成旧页。
    **2026-11-08 更正：注册页面已全部迁移，「未迁移页走旧 renderer」这条回落分支不再有真实使用者**——
-   旧 Jinja renderer 与 `_render_page` 已在 P6 退役（合入 `master`：`808e4f4c`），
+   旧 Jinja renderer 与 `_render_page` 已在 P6 退役（合入 `master`：最终提交 `3b12f35b`），
    `MIGRATED_PAGE_IDS` 的语义从「React / 旧页面开关」收敛为「**哪些页面已迁移**」，它不再是流量或回退开关。
 5. 页面间用真实同源链接整页跳转，保留 query 参数和直达/刷新；没有吞掉 API 路由的 SPA catch-all。
 6. **同一 HTML 文档只运行一套页面 owner**：新页不再加载对应旧页面脚本、Bootstrap、旧侧边栏
@@ -431,7 +432,7 @@ lane，仍按同一规则核对 owner。
 
 ### 10.2 评审范围与完成条件
 
-**标准及方案方向已获用户认可，P0–P5 已实施完成，P6 退役与收口已实施完成并合入 `master`（`808e4f4c`）。** 认可的方向包括页面级 React MPA、后端单一迁移
+**标准及方案方向已获用户认可，P0–P5 已实施完成，P6 退役与收口已实施完成并合入 `master`（最终提交 `3b12f35b`）。** 认可的方向包括页面级 React MPA、后端单一迁移
 集合、同源会话与 rootPath、安全 bootstrap、唯一 AppShell、原生 HeroUI 优先、P0→P6 工程分解及必要验收。
 2026-10-24 新指令取消灰度/分批放量/回退期等待：完成后直接合并 `master` 启用；故障可撤销不等于增加放量流程。阶段性类型/构建、热更新、页面和权限证据见实施计划；不能外推到所有其他页面
 或生产发布。具体 DOM、函数名、目录内小文件拆分属于实施决定；付费模板、全站 SPA、业务规则
@@ -444,7 +445,8 @@ lane，仍按同一规则核对 owner。
 
 **剩余动作（2026-11-08）：**
 
-1. ~~**把 P6 的资产删除与测试侧退役分支合入 `master`**~~ —— **已完成**（`808e4f4c`）。
+1. ~~**把 P6 的资产删除与测试侧退役分支合入 `master`**~~ —— **已完成**（最终合入提交 `3b12f35b`；
+   路由收敛的里程碑提交 `808e4f4c`、旧资产删除 `0d0b0027`、vendor 清理 `3ef5c387`）。
    `master` 此刻已不含那 12 个旧模板与 12 个旧脚本，新旧 renderer 的产物不再同版本共存。
 2. ~~**清理 `tts_erp_v2/static/vendor/` 中真正无消费者的文件**~~ —— **已完成**
    （`3ef5c387`）：删除 uPlot / JSONEditor / Tom Select 的 vendored 副本（9 个文件，
