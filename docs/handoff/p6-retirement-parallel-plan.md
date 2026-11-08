@@ -86,6 +86,22 @@ P6 最适合并行，因为退役对象是**文件**，天然可以按页面组�
 - 合计 15 处，`git diff --stat` 为 2 文件 +15 / -83 行
 - 收敛后 `_render_page` 零调用，`MIGRATED_PAGE_IDS` 条件分支全部消失
 
+**语义变化（重要）**：`MIGRATED_PAGE_IDS` 的含义从「哪些页面用 React / 其余回落旧 renderer」
+收敛为「**哪些页面已迁移**」——不再兼任回落开关。依据：
+
+- `accounts.pages.PAGES` 注册的 **18 个页面全部已迁移**（`login` 由 `auth.py` 的独立分支拥有，不在注册表里）
+- 因此「未迁移页面走旧 renderer」这个能力**已无真实使用者**，旧 Jinja renderer 可以整体退役
+
+**受影响的测试**：`tests/api/test_frontend_pages.py::test_non_migrated_route_keeps_legacy_renderer`
+用 `activated` fixture 缩小迁移集合来模拟「未迁移」状态，收敛后该能力不存在，测试失败。
+已替换为 `test_every_registered_page_is_migrated`：断言注册页面集合 ⊆ `MIGRATED_PAGE_IDS`，
+且每个注册页面确实由 React renderer 渲染（响应含 `frontend-bootstrap`）。
+
+**`MIGRATED_PAGE_IDS` 本身保留**，它仍是以下几处的唯一接线：
+- `tts_erp_v2/api/v2/auth.py:130`（登录页分支）
+- `tests/browser/conftest.py:589`（跳过未迁移页面的浏览器 fixture）
+- 多个浏览器测试的成员断言
+
 ### lane B —— 旧模板退役（基础设置组）
 
 **独占写域：**

@@ -348,8 +348,32 @@ def test_activated_route_never_falls_back_when_release_missing(
     assert "bootstrap.min.css" not in response.text
 
 
-def test_non_migrated_route_keeps_legacy_renderer(api_client, readonly_key, activated):
-    response = api_client.get("/v2/pages/intercept-configs", headers={"X-API-Key": readonly_key})
-    assert response.status_code == 200
-    assert "bootstrap.min.css" in response.text
-    assert "frontend-bootstrap" not in response.text
+def test_every_registered_page_is_migrated(api_client, readonly_key):
+    """每个注册页面都必须由 React renderer 拥有。
+
+    P6 退役了旧 Jinja renderer 的回落分支：``MIGRATED_PAGE_IDS`` 现在是
+    「哪些页面用 React」的唯一接线，不再兼任「是否回落旧实现」的开关。
+    页面集合与 ``accounts.pages.PAGES`` 必须完全一致——少一个会 404，
+    多一个说明登记了没有路由的页面。
+    """
+    registered = {page.page_id for page in PAGES}
+    migrated = frontend_pages.MIGRATED_PAGE_IDS
+
+    assert registered <= migrated, (
+        "registered pages missing from MIGRATED_PAGE_IDS: "
+        f"{sorted(registered - migrated)}"
+    )
+    # login 由 auth.py 的独立分支拥有，不在 pages.py 的注册表里。
+    assert migrated - registered == {"login"}
+
+    for page_id in sorted(registered):
+        response = api_client.get(
+            f"/v2/pages/{page_id}", headers={"X-API-Key": readonly_key}
+        )
+        assert response.status_code in (200, 403), (
+            f"{page_id} returned {response.status_code}"
+        )
+        if response.status_code == 200:
+            assert "frontend-bootstrap" in response.text, (
+                f"{page_id} did not render through the React renderer"
+            )
