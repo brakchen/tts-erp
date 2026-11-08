@@ -104,7 +104,48 @@ bash scripts/test_baseline.sh --scope auto --base "$target_sha"
 - `tts_erp_v2/static/css/tokens.css`：补齐未声明的 `--surface-secondary`
 - `scripts/oneoff_p6_collapse_migrated_routes.py`：一次性转换脚本（逐条断言片段唯一存在）
 
-**测试侧清理**（分支 `feature/p6-retire-legacy-assets`）：21 个文件，+200/-1974。
+### 5.1 退役护栏（`tests/api/test_retired_frontend_assets.py`）
+
+`tests/support/retired_frontend_assets.py` 只提供**退役名单常量**，供其它套件断言
+「响应不含这些旧脚本名」。**它本身挡不住回归**——有人重新加一个模板或一条回落分支，
+没有任何测试会失败。
+
+本文件补上另一半，用 7 条结构性断言锁住退役本身：
+
+| 断言 | 拦什么 |
+| --- | --- |
+| `test_no_page_template_may_reappear` | `tts_erp_v2/templates/pages/` 下不得再有 `.html` |
+| `test_only_kept_assets_remain_under_static_js` | `static/js/` 下只允许白名单（当前只有 `console.js`） |
+| `test_retired_page_scripts_are_gone_from_disk` | 退役名单里的每个脚本名都不得存在于磁盘 |
+| `test_pages_module_has_no_legacy_jinja_renderer` | `pages.py` 不得再有 `_render_page` / `_templates_env` / `MIGRATED_PAGE_IDS` 分支 |
+| `test_ad_daily_module_has_no_inline_legacy_document` | `ad_daily.py` 不得再有 `_PAGE_HTML` / `MIGRATED_PAGE_IDS` 分支 |
+| `test_page_modules_do_not_point_at_old_scripts`（参数化 2 项） | 两个模块的说明文字不得再指向 `static/js/` |
+
+**红→绿验证证据**（2026-11-08 23:38，实测）：
+
+绿 —— 当前 master 状态：
+```
+$ bash scripts/test_isolated.sh unit tests/api/test_retired_frontend_assets.py
+[test-timing] test_execution=2.209s
+EXIT=0
+```
+
+红 —— 在临时 worktree 里恢复旧资源（`templates/pages/dashboard.html` + `static/js/dashboard.js`）后：
+```
+E  AssertionError: 旧 Jinja 页面模板回来了，请确认是否该用 React 版本并重新退役：['dashboard.html']
+E  AssertionError: static/js 下出现未登记的页面脚本: ['dashboard.js']；若确为退役资产，请一并删除并更新 ... 的名单
+E  AssertionError: 退役脚本仍在磁盘上: ['dashboard.js']
+E  AssertionError: pages.py 的页面说明不应再指向旧页面脚本
+FAILED ...::test_no_page_template_may_reappear
+FAILED ...::test_retired_page_scripts_are_gone_from_disk
+```
+
+**护栏在写完当场就抓到了 3 处残留**：`pages.py` 的 docstring 里还写着
+`static/js/intercept-configs.js`、`static/js/intercept-requests.js`、`static/js/users.js`
+（指向已删除的文件）。已一并改为指向 React 实现目录。
+**这正是护栏的价值**——这些残留不会被任何现有测试发现。
+
+### 5.2 测试侧清理（分支 `feature/p6-retire-legacy-assets`）
 A 类旧实现断言已删，C 类正向断言已保留并扩展为「不含任何已退役脚本名」
 （名单集中在 `tests/support/retired_frontend_assets.py`）。
 
