@@ -967,17 +967,3 @@ def test_live_schema_matches_publishing_model_constraints_and_indexes(
     assert attempt_indexes["ix_video_publish_attempt_task_seq"].get(
         "column_sorting", {}
     ).get("sequence_no") == ("desc",)
-
-
-def test_browser_contract_has_codepoint_count_dialog_and_load_more() -> None:
-    source = Path("tts_erp_v2/static/js/video-publish.js").read_text()
-    template = Path("tts_erp_v2/templates/pages/video-publish.html").read_text()
-    assert "Array.from(value).length" in source
-    assert ".maxLength =" not in source
-    assert "window.confirm" not in source
-    assert 'id="publish-action-dialog"' in template
-    assert 'id="publish-load-more"' in template
-    assert 'role="status" aria-live="polite"' in template
-    assert "resumeTask.filename" in source
-    assert "resumeTask.sizeBytes" in source
-    assert "error.allowedActions" in source

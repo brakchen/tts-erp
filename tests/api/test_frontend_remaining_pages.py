@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+from tests.support.retired_frontend_assets import RETIRED_PAGE_SCRIPTS
 from tts_erp_v2.api.v2 import frontend_pages
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -62,6 +63,9 @@ def test_actual_reviewed_page_routes_use_one_document(
     assert response.headers["cache-control"] == "private, no-store"
     assert 'id="frontend-root"' in response.text
     assert f"static/js/{page_id}.js" not in response.text
+    # P6: the page must not pull in any retired per-page script.
+    for retired in RETIRED_PAGE_SCRIPTS:
+        assert retired not in response.text
     assert admin_key not in response.text
 
 
@@ -92,6 +96,9 @@ def test_missing_candidate_assets_are_not_a_legacy_fallback(
     assert response.headers["cache-control"] == "private, no-store"
     assert "TEST_missing_candidate" not in response.text
     assert f"static/js/{page_id}.js" not in response.text
+    # P6: the failure path must not fall back to a retired per-page script.
+    for retired in RETIRED_PAGE_SCRIPTS:
+        assert retired not in response.text
 
 
 def test_existing_sync_page_gate_is_not_broadened(

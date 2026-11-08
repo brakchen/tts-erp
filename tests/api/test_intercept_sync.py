@@ -524,23 +524,6 @@ def test_distribution_percentage_uses_full_backend_denominator():
     assert [item["percentage"] for item in payload] == ["40.0", "10.0"]
 
 
-def test_intercept_stats_frontend_only_renders_backend_percentages():
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "intercept-stats.js"
-    ).read_text(encoding="utf-8")
-
-    assert "item.percentage" in src
-    assert "normalizeDistribution" not in src
-    assert ".reduce(" not in src
-    assert ".sort(" not in src
-
-
 def test_get_requests_stats_empty(api_client, readwrite_key):
     """空数据统计"""
     resp = api_client.get(

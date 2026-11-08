@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from tests.support.retired_frontend_assets import RETIRED_PAGE_SCRIPTS
 from tts_erp_v2.access import AccessGrant, AuthMode, Role
 from tts_erp_v2.access._context import user_pages_var
 from tts_erp_v2.accounts.pages import PAGES
@@ -66,6 +67,9 @@ def test_document_bootstrap_and_recursive_assets(release, prefix):
         "dashboard.js",
     ):
         assert legacy not in body
+    # P6: no served document may reference a retired per-page script.
+    for retired in RETIRED_PAGE_SCRIPTS:
+        assert retired not in body
 
 
 @pytest.mark.parametrize("mode,role,bypass,expected", [

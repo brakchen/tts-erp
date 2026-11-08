@@ -46,35 +46,6 @@ def test_dashboard_consumes_backend_owned_summary_fields():
     assert "value: total" in src
 
 
-def test_shops_page_js_manages_service_app_credentials() -> None:
-    source = Path("tts_erp_v2/static/js/shops.js").read_text()
-    assert "app_secret: appSecret || null" in source
-    assert (
-        'configBtn.className = "shop-action shop-action--credentials btn-config-app"'
-        in source
-    )
-    assert 'authBtn.className = "shop-action shop-action--authorize btn-auth"' in source
-    assert 'setActionContent(configBtn, "⚙", "配置 App")' in source
-    assert "shop-action:focus-visible" in source
-    assert "app_credentials_configured" in source
-    assert "bindAppCredentialsDialog();" in source
-    assert "admin 会话" in source
-
-
-def test_spu_profit_deterioration_page_assets_are_readonly_comparison():
-    """PRD v3 retires config writes and frontend business decisions."""
-    root = Path(__file__).resolve().parents[2] / "tts_erp_v2" / "static"
-    js = (root / "js" / "spu-profit-deterioration.js").read_text(encoding="utf-8")
-    assert "/analytics/spu-profit-deterioration" in js
-    for forbidden in (
-        "/config/runtime/items/",
-        "meta.effectiveConfig",
-        "calculateRoi",
-        "net_profit =",
-    ):
-        assert forbidden not in js, forbidden
-
-
 def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
     """Focused editing remains immediate; selection UI now belongs to React."""
     root = Path(__file__).resolve().parents[2]
@@ -95,28 +66,6 @@ def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
     assert "params.set('scope', 'focused')" in query
     assert "TomSelect" not in selection
     assert "编辑关注 SPU" not in selection and "保存修改" not in selection
-
-
-def test_sync_jobs_js_uses_prefix_aware_api_paths() -> None:
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "sync-jobs.js"
-    ).read_text(encoding="utf-8")
-
-    assert "const API = `${rootPrefix}/v2`;" in src
-    assert "api('/sync/jobs')" in src
-    assert "api('/auth/me')" in src
-    assert "CSS.escape" not in src
-    assert "state.canAdmin" in src
-    assert "state.canTrigger" in src
-    assert "disabled" in src
-    assert "window.confirm" in src
-    assert "window.alert" in src
-    assert "data-label=\"任务\"" in src
-    assert "is-busy" in src
 
 
 def test_sync_jobs_css_has_mobile_card_layout_and_disabled_cursor() -> None:

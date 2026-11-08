@@ -1,14 +1,14 @@
 """Server-rendered page tests (Lane E v2/pages/manual-costs).
 
-2026-08-31 (feature/procurement-ui): the page was redesigned as a thin
-HTML shell that links static assets — Bootstrap 5.3.8 (vendored at
-``/static/vendor/bootstrap.min.css``) + ``/static/js/console.js``.
-The detailed shell assertions (tab labels, static refs, no token-paste
-block) live in ``tests/api/test_manual_costs_page_v2.py``.
-
-This file keeps the two load-bearing contract checks:
-- GET returns 200 + text/html and links the static assets
+The pages are React shells now: each route serves one bootstrap document
+that mounts the shared frontend release. This file keeps the load-bearing
+contract checks:
+- GET returns 200 + text/html and does not load the retired page assets
 - No Authorization header → 401 (any /v2/* path requires readonly+)
+
+P6 retired the old Jinja templates and their per-page scripts, so the
+guards that only held for that implementation were removed. The React
+behaviour lives in ``frontend/src/pages/*/`` and the browser suites.
 """
 
 from __future__ import annotations
@@ -34,7 +34,6 @@ from tts_erp_v2.accounts.pages import (
 from tts_erp_v2.api.v2.pages import (
     _SIDEBAR_CSS,
     _SIDEBAR_TOGGLE_JS,
-    _render_page,
     _sidebar_html,
 )
 
@@ -83,74 +82,6 @@ def test_sidebar_script_synchronizes_persisted_and_responsive_state():
     assert "setMobileOpen(false, false);" in _SIDEBAR_TOGGLE_JS
     assert "sb.toggleAttribute('inert', hidden);" in _SIDEBAR_TOGGLE_JS
     assert "desktopQuery.addEventListener('change'" in _SIDEBAR_TOGGLE_JS
-
-
-def test_sidebar_css_is_injected_after_page_styles():
-    """Sidebar CSS must win over page styles at equal specificity.
-
-    Page styles now live in linked stylesheets (``tokens.css`` →
-    ``common.css`` → page CSS) rather than inline ``<style>`` rules, so the
-    ordering guarantee is document order: the injected sidebar ``<style>``
-    has to come after every ``<link rel="stylesheet">``. A page-level
-    ``margin`` must not override the sidebar offset.
-    """
-    # Retained legacy assets still support the not-yet-replaced runtime.
-    body = bytes(_render_page("intercept-configs.html", current_page="intercept-configs").body).decode()
-    sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
-
-    stylesheet_links = [m.start() for m in re.finditer(r'<link rel="stylesheet"', body)]
-    assert stylesheet_links, "dashboard must link its stylesheets"
-    assert max(stylesheet_links) < sidebar_css_at < body.index("</style>")
-    assert "margin-left: var(--sidebar-width);" in _SIDEBAR_CSS
-
-
-def test_pages_share_the_design_token_stylesheet():
-    """Every page consumes the shared token layer instead of defining its own.
-
-    ``tokens.css`` is the single :root source and ``common.css`` the shared
-    component layer; both must load before any page-specific stylesheet.
-    """
-    # Retained legacy templates remain coherent until same-version runtime
-    # activation/retirement. Migrated routes are tested through their bootstrap.
-    for page_id in ("intercept-configs", "runtime-configs", "sync-jobs"):
-        body = bytes(_render_page(f"{page_id}.html", current_page=page_id).body).decode()
-        tokens_at = body.index("static/css/tokens.css")
-        common_at = body.index("static/css/common.css")
-
-        assert tokens_at < common_at, "tokens.css must load before common.css"
-        assert ":root {" not in body.split("<style", 1)[0], (
-            "pages must not define :root tokens before the shared layer"
-        )
-
-
-def test_sidebar_css_is_injected_for_external_stylesheet_pages():
-    """Pages with only linked CSS still need the shared responsive sidebar CSS."""
-    for page_id in ("runtime-configs", "sync-jobs"):
-        body = bytes(_render_page(f"{page_id}.html", current_page=page_id).body).decode()
-        sidebar_css_at = body.index(_SIDEBAR_CSS.strip())
-
-        assert "<style>" in body
-        assert "margin-left: var(--sidebar-width);" in body
-        assert "@media (max-width: 1023.98px)" in body
-        assert body.index("</head>") > sidebar_css_at
-
-
-def test_sidebar_uses_the_shared_navigation_palette():
-    """Legacy pages consume the same approved navigation tokens as React."""
-    body = bytes(_render_page("intercept-configs.html", current_page="intercept-configs").body).decode()
-
-    assert "static/css/tokens.css" in body
-    assert "static/css/common.css" in body
-    common_css = (
-        Path(__file__).resolve().parents[2] / "tts_erp_v2/static/css/common.css"
-    ).read_text(encoding="utf-8")
-    assert "body > #sidebar.sidebar" in common_css
-    assert "--sidebar-paper-deep: var(--navigation-background);" in common_css
-    assert "--sidebar-ink: var(--navigation-foreground);" in common_css
-    assert "--sidebar-accent: var(--navigation-active);" in common_css
-    assert "--sidebar-paper:" not in _SIDEBAR_CSS
-    assert 'static/css/navigation.css?v=' in body
-    assert "font-family: var(--mono);" not in _SIDEBAR_CSS
 
 
 @pytest.mark.parametrize("page_id,profile,entry", [
@@ -273,7 +204,7 @@ def test_sync_jobs_page_is_in_pages_shell_and_sidebar(api_client, readonly_key, 
 
 
 def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
-    """GET stays readonly React HTML; old asset checks describe only the artifact."""
+    """GET stays readonly React HTML and loads no retired page asset."""
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -295,15 +226,8 @@ def test_manual_costs_page_returns_200_with_html(api_client, readonly_key):
     # Active interactions: manual-costs/{index,legacy-compat}.test.tsx.
     # Shared manifest/prefix and fail-closed policy: test_frontend_pages.py
     # and test_frontend_remaining_pages.py, not legacy relative-URL rules.
-    # Match test_manual_costs_page_v2.py's retained-artifact owner; never
-    # reroute the real HTTP request or re-enable the old console.
-    legacy_body = bytes(
-        _render_page("manual-costs.html", current_page="manual-costs").body
-    ).decode("utf-8")
-    assert "../../static/vendor/bootstrap.min.css" in legacy_body
-    assert "../../static/js/console.js" in legacy_body
-    assert 'href="/static/' not in legacy_body
-    assert 'src="/static/' not in legacy_body
+    # The retired Jinja artifact is gone; never reroute the real HTTP
+    # request or re-enable the old console.
 
 
 def test_manual_costs_page_requires_some_auth(api_client):

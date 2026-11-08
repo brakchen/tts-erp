@@ -1,4 +1,11 @@
-"""Legacy ad-daily UI and audit-mock contracts without a live API."""
+"""Ad-daily layout-audit mock contracts without a live API.
+
+The retired per-page ad-daily/dashboard script implementation guards were
+removed with the P6 asset retirement; the React ad-daily page owns the
+behaviour now (see ``frontend/src/pages/ad-daily/``). What stays here is the
+shared layout-audit mock contract, which guards the audit probes rather
+than the retired page assets.
+"""
 
 from __future__ import annotations
 
@@ -8,37 +15,6 @@ from pathlib import Path
 import pytest
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
-
-
-def test_dashboard_installs_ad_daily_navigation_card():
-    source = Path("tts_erp_v2/static/js/dashboard.js").read_text()
-
-    assert "installAdDailyNav();" in source
-    assert "../../v2/pages/ad-daily" in source
-    assert "广告日明细" in source
-
-
-def test_ad_daily_frontend_resets_filters_and_stale_results():
-    source = Path("tts_erp_v2/static/js/ad-daily.js").read_text()
-
-    assert "elements.seller.value = state.seller_id;" in source
-    assert "elements.advertiser.value = state.advertiser_id;" in source
-    assert "elements.endpoint.value = state.endpoint;" in source
-    assert "function clearResults()" in source
-    assert source.count("clearResults();") >= 2
-    assert "elements.sumSpend.textContent = '—';" in source
-    assert "elements.prev.disabled = true;" in source
-
-
-def test_ad_daily_frontend_wires_header_sorting():
-    """前端把点击翻成 sort/order 参数，并保持 URL 可分享。"""
-    source = Path("tts_erp_v2/static/js/ad-daily.js").read_text()
-
-    assert "const SORT_KEYS = ['day', 'shop', 'campaign', 'product'" in source
-    assert "function updateSortIndicators()" in source
-    assert "params.set('sort', state.sort)" in source
-    assert "params.set('order', state.order)" in source
-    assert "state.offset = 0;" in source
 
 
 def test_ui_audit_mock_follows_current_ad_daily_contract():
