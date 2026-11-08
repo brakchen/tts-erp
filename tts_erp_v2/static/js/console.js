@@ -1,5 +1,10 @@
 /* tts-erp operator console — page JS.
-   No frameworks. Plain DOM + fetch. Wired from /v2/pages/manual-costs.
+   No frameworks. Plain DOM + fetch.
+   P6 退役后已无页面在运行时加载本文件：manual-costs 页由 React 接管
+   （frontend/src/pages/manual-costs/），原 Jinja 模板随 P6 一并删除。
+   现在它只是 app.py public static mount 上仍可访问的公共静态资产，
+   没有任何页面在运行时加载它；是否删除见
+   docs/handoff/p6-retirement-parallel-plan.md §7（待确认项）。
    Styling: Bootstrap 5 classes only — no custom stylesheet (2026-08-31).
    Strings: 中文界面 (2026-08-31).
    See docs/archive/procurement-ui-redesign.md §6 for the contract. */
