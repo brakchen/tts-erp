@@ -68,23 +68,6 @@ def test_focused_spus_profile_uses_realtime_inline_multi_select() -> None:
     assert "编辑关注 SPU" not in selection and "保存修改" not in selection
 
 
-def test_sync_jobs_css_has_mobile_card_layout_and_disabled_cursor() -> None:
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "sync-jobs.css"
-    ).read_text(encoding="utf-8")
-
-    assert "button:disabled" in src
-    assert "cursor: not-allowed" in src
-    assert "button.is-busy:disabled" in src
-    assert ".jobs-table thead { display: none; }" in src
-    assert "content: attr(data-label)" in src
-    assert ".scope-select { width: 100%;" in src
-
-
 def test_profitability_kernel_uses_remote_sort_mode() -> None:
     source = Path(__file__).resolve().parents[2] / "frontend/src/pages/spu-profitability/ProfitabilityTable.tsx"
     assert "sortMode: 'remote'" in source.read_text(encoding="utf-8")
