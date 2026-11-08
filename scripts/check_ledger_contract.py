@@ -46,10 +46,19 @@ def main(argv=None) -> int:
     not_applicable, provisional, green, red, absent = [], [], [], [], []
     for row in entries:
         v = row.get("verification") or {}
-        state = v.get("state")
+        # ★ 台账里 verification 装的是【命令】，三态在 verification_state。
+        #   两者必须分清，否则会读出"全 0"的假基线。
+        state = None
+        if isinstance(v, str):
+            # 老形态：verification 本身就是三态字符串
+            state = {"green": "holds", "red": "fails", "absent": "missing"}.get(v)
+        elif isinstance(v, dict) and v.get("state"):
+            state = v["state"]
         if state is None and row.get("verification_state"):
             state = {"green": "holds", "red": "fails", "absent": "missing"}.get(
                 row["verification_state"], "missing")
+        if state is None:
+            state = "missing"
         rid = row.get("id")
         if state == "missing":
             absent.append(rid); not_applicable.append(rid)
@@ -78,14 +87,27 @@ def main(argv=None) -> int:
     skipped = list(d.get("skipped_entries") or [])
 
     # ⑥ 进度：有多少条 rule 引用了【已落地并可执行】的检查
+    def _cmd_of(r):
+        v = r.get("verification")
+        if isinstance(v, dict):
+            return v.get("command")
+        if isinstance(v, str) and v.startswith(("python", "bash", "sh ")):
+            return v
+        return None
+
+    def _fixture_of(r):
+        v = r.get("verification")
+        if isinstance(v, dict):
+            return v.get("fixture_exists", True)
+        return r.get("verification_state") != "absent"
+
     enforced = [r.get("id") for r in entries
-                if (r.get("verification") or {}).get("command")
-                and (r.get("verification") or {}).get("fixture_exists")]
+                if _cmd_of(r) and _fixture_of(r)]
     runnable = list(enforced)
     if args.run_checks:
         runnable = []
         for r in entries:
-            cmd = (r.get("verification") or {}).get("command")
+            cmd = _cmd_of(r)
             if not cmd:
                 continue
             try:

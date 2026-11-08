@@ -66,6 +66,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-CFG-002
   rule: config-source-precedence
   owner_path: scripts/check_install_parity.sh
@@ -110,6 +111,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-CFG-003
   rule: auth-mode-effective-value
   owner_path: tts_erp_v2/middleware/auth.py
@@ -157,6 +159,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-SCHEMA-001
   rule: schema-version-contract
   owner_path: tts_erp_v2/app.py
@@ -208,6 +211,7 @@ entries:
     - visibility_only
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-SCHEMA-002
   rule: schema-version-contract
   owner_path: tts_erp_v2/api/deps.py
@@ -273,6 +277,7 @@ entries:
   acceptance: *id004
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-DEPLOY-001
   rule: runtime-version-identity
   owner_path: ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
@@ -314,6 +319,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-DEPLOY-002
   rule: runtime-version-identity
   owner_path: ~/.config/systemd/user/tts-erp.service.d/96-pgappname.conf
@@ -355,6 +361,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-DEPLOY-003
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -396,6 +403,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-DEPLOY-004
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -438,6 +446,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-CRITERIA-001
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
@@ -479,6 +488,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-CRITERIA-002
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
@@ -520,6 +530,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-CRITERIA-003
   rule: readonly-criterion
   owner_path: scripts/schema_guard_probe.py
@@ -561,6 +572,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-ALERT-001
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -602,6 +614,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-ALERT-002
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -657,6 +670,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-ALERT-003
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -698,6 +712,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-JOB-001
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -740,6 +755,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-JOB-002
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -781,6 +797,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-JOB-003
   rule: source-freshness
   owner_path: tts_erp_v2/jobs/miaoshou/sync_source_cost_to_master.py
@@ -823,6 +840,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-BACKUP-001
   rule: backup-restore
   owner_path: scripts/backup/pg_dump_hourly.sh
@@ -864,6 +882,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-NET-001
   rule: network-exposure
   owner_path: /etc/systemd/system/easytier@default.service.d/rpc-portal-loopback.conf
@@ -905,6 +924,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-NET-002
   rule: network-exposure
   owner_path: /opt/easytier/config/default.conf
@@ -947,6 +967,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-BASE-001
   rule: base-drift
   owner_path: tts_erp_v2/runtime_settings.py
@@ -988,6 +1009,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-BASE-002
   rule: base-drift
   owner_path: scripts/watchdog_sync.py
@@ -1029,6 +1051,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 - id: AD-BASE-003
   rule: base-drift
   owner_path: alembic/versions
@@ -1071,6 +1094,7 @@ entries:
   acceptance: null
   evidence_level: inferred
   in_target_chain: null
+  in_target_chain_note: 未判定（默认：否）
 probes_added: 3
 corrected_conclusions:
 - id: CORRECTION-PG-HBA-MASQUERADE
