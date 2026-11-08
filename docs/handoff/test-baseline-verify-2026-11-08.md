@@ -485,6 +485,64 @@ bash scripts/envsetup/prepare-worktree.sh
 1. **`scripts/envsetup/prepare-worktree.sh` 的提交**。它目前只在主 checkout 的暂存区和本地分支 `chore/fix-test-server-address` 上，**master 里没有**。直接后果：任何 lane 想用它都得先把它拷进 worktree——而拷贝一个 master 里不存在的文件会让 worktree 变成 dirty，`scripts/test_baseline.sh` 随即以 `scoped runs require a clean committed worktree` 退出 2。本轮第一次尝试基线就是这样失败的（§3）。建议：先把这个脚本连同 `AGENTS.md` 的相应章节一起提交进 master。
 2. **落后提交数 21 vs 实测 312**。定性不受影响，但如果 21 这个数字进了其他文档或汇报，建议更正。
 3. **模板库刷新策略**。当前模板库 revision 跟随生产库（0076），而隔离运行器的克隆路径不做 upgrade，所以「checkout 落后于模板库」必然触发 §4.1 的断言。可选：把 `--refresh-template` 写进同步 checkout 后的固定步骤，或让 `test_isolated.sh` 在克隆后检测 revision 失配并给出更直接的诊断信息（当前是断言失败，看不出是环境漂移）。
+4. **共享测试机上的「批量删库」脚本**。见 §7.1，它会删掉其它 lane 正在运行的临时库。
+
+---
+
+## 7.1 跨 lane 隐患：共享测试机上的「批量删库」脚本
+
+本轮第一次跑完整 fast 基线时，pytest 进度行从第 6% 起出现 1 个 `F` 后连续 700+ 个 `E`。**这不是 master 的失败，是运行中的临时库被人删掉了。**
+
+证据链：
+
+```
+# 1) 第一次基线运行：pytest 仍在跑，但本轮克隆的库已经不在
+$ head -6 /tmp/tmp.lVw17tiOoI/pytest.log
+[isolated-test] cloning tts_erp_test_template -> tts_erp_test__schan_20261108125034_2703771_29debcad
+[isolated-test] using existing template DB: tts_erp_test_template
+[isolated-test] running: bash scripts/test.sh selected --scope fast ...
+
+$ pgrep -fa "pytest -q"
+2704130 .../test-verify-20261108/.venv/bin/python -m pytest -q ... tests
+
+$ docker exec -i postgres psql -U postgres -At < /tmp/_dbcheck.sql
+tts_erp
+tts_erp_test_monitor_health_template
+tts_erp_test_template
+...            ← 已无 tts_erp_test__schan_20261108125034_2703771_29debcad
+```
+
+postgres 容器本身没问题（`RestartCount=0`，`StartedAt=2026-10-31`，全程未重启）。真正的动作在 docker events 里——本轮的库和另外 20+ 个库在 20:51:10 被同一个 psql 批量删除：
+
+```
+$ docker events --since 30m --until 0s --filter container=postgres \
+    --format "{{.Time}}|{{.Action}}|{{.Actor.Attributes.execCmd}}" | grep -i "drop database"
+1794142270|exec_create: psql -U postgres -c DROP DATABASE IF EXISTS "tts_erp_test__schan_20261108125034_2703771_29debcad" WITH (FORCE);|
+1794142270|exec_create: psql -U postgres -c DROP DATABASE IF EXISTS "tts_erp_test_feature_frontend_p4_costs_01a16ed2_7_f7cea148" WITH (FORCE);|
+1794142271|exec_create: psql -U postgres -c DROP DATABASE IF EXISTS "tts_erp_test_master_01a111a0_33b8_72e1_940e_449fe_39ff98f0" WITH (FORCE);|
+... (共 20+ 个，含本轮运行的库)
+```
+
+执行者是一个 20:50 创建的临时脚本：
+
+```
+$ cat /tmp/_dbdrop.sql
+SELECT format('DROP DATABASE %I WITH (FORCE);', datname)
+FROM pg_database
+WHERE datname LIKE 'tts\_erp\_test\_%'
+  AND datname NOT LIKE '%template%'
+  AND datname NOT LIKE 'tts\_erp\_test\_template'
+  AND datname NOT LIKE 'tts\_erp\_test\_monitor\_health\_template'
+ORDER BY datname;
+```
+
+同批还有 `/tmp/_dbcheck.sql`（20:51）、`/tmp/_schema.sql`（20:41）、`/tmp/env-check-*.sh`（20:24–20:38），属于同一串环境排查动作。
+
+**风险点**：这个脚本按名字前缀删库，**不区分库是不是正在被别的 lane 使用**。`docs/guides/agent-testing.md` §4 承诺「Concurrent isolated runs do not delete each other's `TEST_` rows」，但那是**行级**保证；这个脚本是**库级**删除，把该承诺在库层面破了。被删的 20+ 个库里有明显属于其它 lane 的（`feature_frontend_p4_costs`、`fix_spu_compare_ui`、`master_01a111a0` 等）。
+
+**建议**：任何 lane 在做「清理残留测试库」时，只能删自己 worktree/lane 名下的库，不能按 `tts_erp_test_%` 前缀批量删；如果要批量清理，必须先确认没有活跃的 `pytest`/isolated 进程，或者把库名白名单化。这一条建议同步给 @可靠性工程师 与 @开发工程师。
+
+**第二次运行未受影响**：20:57:31 重新克隆的库 `tts_erp_test__schan_20261108125731_2718734_6f163387` 全程存活，pytest 进度正常推进（§3）。删除动作没有重演。
 
 ---
 
@@ -499,6 +557,7 @@ bash scripts/envsetup/prepare-worktree.sh
 | `/tmp/TEST_run_alembic_stale.log` | §2.3 复现 #1 原始日志 |
 | `/tmp/TEST_run_frontend_nosemver.log` | §2.4 复现 #2 原始日志 |
 | `/tmp/TEST_baseline_fast_master.log` | §3 基线原始 pytest 日志 |
+| `/tmp/TEST_baseline_monitor.log` | §3 运行期间的临时库/进程存活监控 |
 | `/tmp/TEST_prepare-worktree.sh.bak` | 从 worktree A 移出的 prepare-worktree.sh 副本（原样保留，可还原） |
 
 两个 worktree 保留在测试机上，未删除，供复查。

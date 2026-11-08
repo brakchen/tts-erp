@@ -14,6 +14,28 @@ This document defines the only supported test workflow for coding agents in `tts
 - `tests/conftest.py` hard-exits with status 2 before dotenv/schema probing when the current isolated-run proof is absent or inconsistent. A test-shaped URL alone is not authorization to use that database.
 - Agents must never set `TTS_ERP_TEST_OFF=1`.
 
+### 1.1 Cleaning up leftover ephemeral databases
+
+The per-run clause above guarantees **row-level** isolation between concurrent runs. It does **not** protect against an
+agent that drops whole databases by name pattern. On a shared test host, a bulk cleanup can therefore delete a
+database another lane is actively running against.
+
+Rules for any cleanup of leftover `tts_erp_test_*` databases:
+
+1. **Only delete databases your own lane created.** A run's database name embeds its branch, session and pid
+   (`tts_erp_test_<branch>_<session>_<timestamp>_<pid>`). Delete only names matching your own branch/session.
+2. **Never delete by prefix alone.** `DELETE ... WHERE datname LIKE 'tts_erp_test_%'` hits other lanes' databases.
+3. **Before any bulk cleanup, confirm no isolated run is active.** Check both `pgrep -f "pytest -q"` and
+   `pgrep -f test_baseline` — a `test_isolated.sh` wrapper is not the only way a run can be active.
+4. **Never delete the template family.** `tts_erp_test_template` and every `*_template_*` database are other
+   lanes' baselines (`template_ads_ack`, `template_price_data`, `template_price_e2e`, `template_spu_compare_0069`,
+   `video_publish_v1x/v2x_template`, `monitor_health_template`).
+5. **Drop databases one statement at a time.** `psql -f` wraps the script in a single transaction, and PostgreSQL
+   refuses `DROP DATABASE` inside a transaction block — the whole batch fails silently. Loop with individual
+   `DROP DATABASE ...` statements instead.
+
+Evidence and incident analysis: `docs/handoff/test-baseline-verify-2026-11-08.md` §7.1.
+
 The hard exit is the final safety net, not the normal workflow. Always use `scripts/test_isolated.sh`.
 
 Test prerequisites (PostgreSQL client tools, pytest, `.env.test`) are checked and
