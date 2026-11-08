@@ -397,7 +397,7 @@ tts_erp_test_template|13 MB
 
 **master 当前不是零失败。** 完整 fast 基线对比退出码 1，driver 报出 **56 项新失败**，而已提交基线 `docs/testing/baseline-fast.txt` 要求 `count: 0`。
 
-这 56 项全部落在 `tests/browser/`（55 项）和 `tests/frontend/test_components.py`（1 项），按错误签名可分成三类，其中**一类是真实代码缺陷，一类是测试基础设施缺陷**。
+这 56 项全部落在 `tests/browser/`（55 项）和 `tests/frontend/test_components.py`（1 项），按错误签名可分成三类，其中**一类是测试断言过时，一类是测试基础设施缺陷**。（本节结论已按 §3.3 的复核批注更正；原文写「一类是真实代码缺陷」，是误判。）
 
 ### 3.2 完整基线命令与真实输出
 
@@ -439,7 +439,7 @@ tests/frontend/test_components.py::test_frontend_components
 | 错误签名 | 数量 | 分类 |
 | --- | --- | --- |
 | `AttributeError: module 'conftest' has no attribute '_mock_payload'` | 34 | **测试基础设施缺陷**（见 3.4） |
-| `AssertionError: 三套栈必须互不相同: {'var(--sans)', 'MicrosoftYaHei,...'}` | 14 | **代码缺陷**（见 3.3） |
+| `AssertionError: 三套栈必须互不相同: {'var(--sans)', 'MicrosoftYaHei,...'}` | 14 | **测试自身问题（断言过时）**（见 3.3） |
 | `playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exceeded` | 6 | 偶发/资源争用（见 3.5） |
 | 其它（组件 adapter 的 npm 子进程非零退出） | 2 | 偶发/资源争用（见 3.5） |
 
@@ -751,7 +751,7 @@ bash scripts/envsetup/prepare-worktree.sh
 2. **落后提交数 21 vs 实测 312**。定性不受影响，但如果 21 这个数字进了其他文档或汇报，建议更正。
 3. **模板库刷新策略**。当前模板库 revision 跟随生产库（0076），而隔离运行器的克隆路径不做 upgrade，所以「checkout 落后于模板库」必然触发 §4.1 的断言。可选：把 `--refresh-template` 写进同步 checkout 后的固定步骤，或让 `test_isolated.sh` 在克隆后检测 revision 失配并给出更直接的诊断信息（当前是断言失败，看不出是环境漂移）。
 4. **共享测试机上的「批量删库」脚本**。见 §7.1，它会删掉其它 lane 正在运行的临时库。
-5. **master 的 56 项失败要谁来处理，以及基线何时重生成**。§3.3 的字体栈回归是明确的代码缺陷（`fa475e0` 引入），§3.4 的 conftest 冲突是明确的测试基础设施缺陷，两者都会让每个 lane 的 fast 基线对比变成 exit 1。基线 `count: 0` 已陈旧 312 个提交。建议顺序：先修 §3.4（它会让 34 项变成误报，掩盖真实问题）→ 再修 §3.3 → 然后在干净 master worktree 里 `bash scripts/test_baseline.sh --update` 重生成基线。**在基线重生成之前，任何 lane 跑 `--scope fast` 都会看到这 56 项**，需要提前告知各 lane 负责人。
+5. **master 的 56 项失败要谁来处理，以及基线何时重生成**。§3.3 的字体栈断言是**测试自身问题（断言过时，不是代码缺陷）**，§3.4 的 conftest 冲突是明确的测试基础设施缺陷，两者都会让每个 lane 的 fast 基线对比变成 exit 1。基线 `count: 0` 已陈旧 312 个提交。**处置进度**：§3.4 已修（`a9605dea`，多目录 conftest 改包路径导入）、§3.3 已修（`bd4a7753`，断言契约改为「三别名都声明且非空」，不再要求互不相同），均已在 §8.6 于 `65bbf11` 上复验通过。**剩下 13 项真实回归**在 `tests/browser/test_spu_price_columns.py`（`#price-summary` 不出现），已派开发修复。剩余动作：修完这 13 项 → 在干净 master worktree 里 `bash scripts/test_baseline.sh --update` 重生成基线。**在基线重生成之前，任何 lane 跑 `--scope fast` 都会看到这批失败**，需要提前告知各 lane 负责人。
 
 ---
 
