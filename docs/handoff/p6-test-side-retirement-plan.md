@@ -110,6 +110,26 @@ A 类旧实现断言已删，C 类正向断言已保留并扩展为「不含任�
 
 ---
 
+## 六、另一件没做的事：旧 CSS 尚未清理
+
+`tts_erp_v2/static/css/` 下仍有 7 个文件，其中 5 个是旧页面专用的：
+`ad-daily.css`、`runtime-configs.css`、`sync-jobs.css`、
+`spu-profit-deterioration.css`、`video-publish.css`。
+
+**它们没有在生产代码或 React 侧被引用**（已 grep 确认），但**不能顺手删**：
+
+- `scripts/_test_selection.py:209` 明确把 `tts_erp_v2/static/css/video-publish.css`
+  登记为**活的**资产，改动它会触发
+  `tests/publishing/test_contracts.py::test_publish_confirm_dialog_layout_and_copy_match_design_spec`
+  等可访问性契约测试。
+- `docs/design/reuse-evaluation-2026-10.md` 记录了旧样式表与 React 共存的复用决策。
+
+**结论**：旧 CSS 的退役是一个**独立任务**，需要逐个确认对应契约测试是否还有效、
+React 侧是否已有等价实现。这超出了 P6 的既定范围（方案只覆盖模板与脚本），
+本轮不动。
+
+---
+
 ## 六、还剩什么：删文件
 
 | 类型 | 文件 | 数量 |
