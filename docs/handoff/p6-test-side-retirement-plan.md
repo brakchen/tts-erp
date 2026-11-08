@@ -108,15 +108,24 @@ bash scripts/test_baseline.sh --scope auto --base "$target_sha"
 A 类旧实现断言已删，C 类正向断言已保留并扩展为「不含任何已退役脚本名」
 （名单集中在 `tests/support/retired_frontend_assets.py`）。
 
+**清理者发现的 3 处方案漏网引用**（`git grep` 抓不到 `Path()/"static"/"js"/...` 这种分段拼路径）：
+`tests/api/test_intercept_sync.py`（读 `intercept-stats.js`）、
+`tests/api/test_runtime_config.py`（读 `runtime-configs.js` + `.html`）、
+`tests/frontend/test_source_contracts.py`（读 `spu-profit-deterioration.js` / `sync-jobs.js`）。
+不清理的话删文件后这 3 个测试直接 `FileNotFoundError`，会掩盖真实失败。
+
+**`media-assets` 的 6 个浏览器失败：既有问题，与本轮退役无关**。
+`tests/browser/test_media_workflows.py` 共 12 个测试，**零处引用被退役的模板或脚本**；
+在 master `2b68b40` 的独立 worktree 上跑同一文件，出现完全相同的 6 个失败、相同 test id。
+当前已提交的基线 `baseline-fast.txt` 记录的是 2026-10-15 的状态（`count: 0`），
+里面没有这些条目——**基线陈旧看不到这条**，是「零失败」错觉的来源之一。
+
 ---
 
 ## 六、另一件没做的事：旧 CSS 尚未清理
 
-`tts_erp_v2/static/css/` 下仍有 7 个文件，其中 5 个是旧页面专用的：
-`ad-daily.css`、`runtime-configs.css`、`sync-jobs.css`、
-`spu-profit-deterioration.css`、`video-publish.css`。
-
-**核实结论（2026-11-08）**：
+`tts_erp_v2/static/css/` 下仍有 7 个文件，其中 5 个是旧页面专用的。
+**2026-11-08 23:35 逐项核实结论**：
 
 | 文件 | 生产代码引用 | 测试引用 | 处置 |
 | --- | --- | --- | --- |
@@ -130,11 +139,27 @@ A 类旧实现断言已删，C 类正向断言已保留并扩展为「不含任�
 需要逐个确认契约测试是否还有效、React 侧是否已有等价实现。
 这超出了 P6 的既定范围（方案只覆盖模板与脚本），本轮不动。
 
-> 顺带一提：`console.js` 与 `static/vendor/` 同样必须保留——
-> `console.js` 仍挂在 `app.py:149` 的 public static mount 上，
-> `vendor/tabulator.*` 被 `frontend/src/pages/spu-profitability/ProfitabilityTable.tsx` 直接 import，
+**删除安全性已核实**：`ad-daily.css` / `runtime-configs.css` / `spu-profit-deterioration.css`
+在测试里的 3 处引用全是断言 **HTTP 响应内容**不含旧资产
+（`assert "static/css/xxx.css" not in body`），**不读文件本身**。
+删掉 CSS 文件后这些断言依然成立。`sync-jobs.css` 连测试引用都没有。
+
+> **`console.js` 的更正（2026-11-08 23:35）**：有报告认为「模板删完后 `console.js`
+> 全仓只剩 `manual-costs.html` 引用，可直接删」。**这个判断是错的**——
+> `console.js` 还有两类活消费者：
+> 1. `tests/api/test_manual_costs_page_v2.py` 直接**读它的源码**做行为断言
+>    （`submitAllEdited`、`postManualCost`、`loadAll`、`unwrap`、`prev_unit_cost`
+>    等 20 余处）。该文件头部明确写着「`console.js` … is **not** part of this
+>    retirement, so its source-level contracts stay here」。
+> 2. `tests/api/test_middleware.py:310,317` 断言它作为 public static 资源可达。
+>
+> 加上 `tts_erp_v2/app.py:149` 的 mount 和 `tts_erp_v2/static/__init__.py:8` 的路径说明，
+> **`console.js` 必须保留**。
+
+> **`static/vendor/` 的更正**：`vendor/tabulator.*` 被
+> `frontend/src/pages/spu-profitability/ProfitabilityTable.tsx` 直接 import；
 > `vendor/bootstrap.min.css` 被 `auth.py:305` 的回落登录页引用。
-> **P6 的退出条件「消费者清单为空」对这两处不成立**，不是遗漏。
+> **P6 的退出条件「消费者清单为空」对 `vendor/` 不成立**，不是遗漏。
 
 ---
 
