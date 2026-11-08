@@ -105,14 +105,30 @@
 
 ---
 
-## 六、相关文档
+## 六、验证记录（实测）
+
+| 验证 | 命令 | 结果 |
+| --- | --- | --- |
+| 路由收敛后 api 域 | `bash scripts/test_isolated.sh api` | `API_EXIT=0`，822 秒，无 FAILED 行 |
+| ad_daily 清理后 api 域 | 同上 | `API_EXIT=0`，348 秒，无 FAILED 行 |
+| 字体栈修正 | `bash scripts/test_isolated.sh fast tests/browser/test_render_smoke.py -k font_stacks` | `[100%]`，14 项全绿 |
+| 告警页溢出修正 | 同上 `-k spu_deterioration_alert_has_no_horizontal` | `[100%]`，4 个视口全绿 |
+| conftest 冲突修正 | `bash scripts/test_isolated.sh fast tests/browser/test_spu_price_columns.py tests/api/test_ad_daily.py tests/proxy/test_miaoshou_rate_limit.py` | 13 个 `_mock_payload` ERROR 消失 |
+| style_tokens 修正 | `bash scripts/test_isolated.sh unit tests/frontend/test_style_tokens.py` | 全部通过 |
+
+**注意**：本仓库 pytest 输出**没有 `N passed` 汇总行**，判成败看退出码和 `FAILED`/`ERROR` 行。
+
+---
+
+## 七、相关文档
 
 | 文档 | 内容 |
 | --- | --- |
 | `docs/handoff/bot-team-setup-2026-11-08.md` | Bot 团队构成、协作流程、环境要点、并发限制 |
 | `docs/handoff/p6-retirement-parallel-plan.md` | P6 并行方案、写域切分、语义变化 |
-| `docs/handoff/p6-test-side-retirement-plan.md` | 19 个测试文件的三类分类与处置 |
+| `docs/handoff/p6-test-side-retirement-plan.md` | 19 个测试文件的三类分类与处置、旧 CSS 未清理的原因 |
 | `docs/handoff/dev-env-checklist.md` | 开发环境自检清单（22 条实测记录、7 类故障排查） |
 | `docs/handoff/test-baseline-verify-2026-11-08.md` | 测试链路独立复核 + 基线失败分类 |
 | `docs/handoff/architecture-review-scope-2026-11-08.md` | 架构评审结论的适用范围核实（v1 vs v2） |
 | `docs/handoff/topic-directory-index.md` | 190 个文档的四段式主题目录索引 |
+| `docs/guides/agent-testing.md` | 已补充：共享主机容量、worktree 准备、conftest 冲突、renderer 切换清单 |
