@@ -273,6 +273,26 @@ bash scripts/test_baseline.sh --scope auto --base "$target_sha" --keep-log /tmp/
 Exit codes: `0` zero new stable failures (DoD pass), `1` new failures present,
 `2` usage/baseline error.
 
+> **A `0` exit from `--scope auto` does not always mean "the suite is green".**
+> When the auto selection plan comes out empty — which happens for
+> documentation-only changes, and whenever `head == base` — the driver prints
+> `no application tests selected; perform any indicated documentation checks`
+> and exits `0` **without running anything** (`scripts/test_baseline.sh`,
+> the empty-plan branch). A lane that only runs `--scope auto` therefore gets a
+> clean verdict that never touched the suite.
+>
+> This matters because the committed baseline is a **property of master**, and it
+> goes stale as master advances. On 2026-11-08 the baseline still described
+> `e04c5e11` (2026-10-15, `count: 0`) while master had moved on by hundreds of
+> commits; a full `--scope fast` run then surfaced 56 failures that every
+> auto-scoped lane had been reporting as zero.
+>
+> **When you need to know the real state of master, run `--scope fast`, not
+> `--scope auto`.** Use `--scope auto` to check *your own* change against the
+> baseline, and read the selection plan (`--plan`) before trusting its verdict.
+> If the baseline is stale, regenerate it from a clean master worktree
+> (`bash scripts/test_baseline.sh --update`, master only).
+
 The diff is computed on normalized test ids only (`FAILED`/`ERROR <id>` with the
 reason text stripped), because reason text carries line numbers and assertion
 reprs that churn between runs and would make every diff look like noise.
