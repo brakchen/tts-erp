@@ -86,6 +86,36 @@ HP desk 这台的 `tts-erp.service` 是 v1 时代遗留的 `--host 0.0.0.0`。
 1. 把 HP desk 的 `tts-erp.service` 绑定改回 `127.0.0.1`——业务方都在同机走 loopback。
 2. 外部访问一律经 nginx `/tts` 前缀，不直连 9877。
 
+**准确改动位置（2026-11-08 21:10 实测）**：
+
+```
+$ systemctl --user cat tts-erp.service | grep ExecStart
+ExecStart=/home/schan/tts-erp/.venv/bin/python -m uvicorn tts_erp_v2.app:app \
+  --host ${TTS_ERP_HOST} --port ${TTS_ERP_PORT} --proxy-headers --no-access-log
+
+$ grep -E "^TTS_ERP_(HOST|PORT)=" /home/schan/.config/tts-erp/runtime.env
+TTS_ERP_HOST=0.0.0.0
+TTS_ERP_PORT=9877
+```
+
+单元文件用 `--host ${TTS_ERP_HOST}` 变量，**实际值来自 `/home/schan/.config/tts-erp/runtime.env`**
+（权限 0600，目录 0700）。所以改绑定**只需要改这个文件里的 `TTS_ERP_HOST=127.0.0.1`**，
+不需要动 systemd 单元，也不需要动仓库代码。
+
+注意：主 checkout 的 `/home/schan/tts-erp/.env` **不存在**；单元里 `EnvironmentFile=` 指向的
+是 release worktree 的 `runtime.env`（`Environment=TTS_ERP_RUNTIME_ENV_FILE=/home/schan/.config/tts-erp/runtime.env`）。
+
+**改动后必须验证**（改的是生产服务，不能只看配置）：
+```bash
+systemctl --user restart tts-erp.service
+ss -ltnp | grep 9877              # 期望看到 127.0.0.1:9877
+curl -s http://127.0.0.1:9877/healthz
+# 再从另一台机器确认外部已不可直连（应超时或拒绝）
+```
+
+**风险提示**：改之前先确认没有外部主机在直连 9877（绕过 nginx）。公网入口走 nginx `/tts/*`，
+不受影响；但局域网内若有其它服务直连 9877，改绑后会断。改前应查 nginx 与其它服务配置。
+
 ### 3.5 密钥明文散落 —— **部分成立，需区分**
 
 P0-3 称 `app_secret` 与 PG 口令明文在 F 盘快照的 `.env`、`handoff.md`、`setup/*.md` 里。
