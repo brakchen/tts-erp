@@ -606,6 +606,36 @@ $ bash scripts/test_baseline.sh --scope auto --base 0b92d97 --plan
 
 按 `docs/guides/agent-testing.md` §6「当 baseline 变陈旧」，此时应由 master 的干净 worktree 重新生成基线（`bash scripts/test_baseline.sh --update`）。**本轮未执行 `--update`**：该操作会改写 master 的基线文件，属于 master-only 操作，且本次委托明确要求先不提交、等待确认。
 
+> **Chief 处置（2026-11-08 22:10）**：已把这条陷阱写进 `docs/guides/agent-testing.md` 的完成标准一节——
+> 明确「`--scope auto` 的 `0` 退出码不等于套件是绿的」，并写清空计划分支的源码位置
+> （`scripts/test_baseline.sh` 的 `no application tests selected` 分支）、
+> 基线陈旧的成因与后果，以及「要看 master 的真实状态就跑 `--scope fast`」。
+>
+> **基线文件本身仍未更新**（`docs/testing/baseline-fast.txt` 仍记 `e04c5e11` / `count: 0`）。
+> `--update` 是 master-only 操作且会改写基线，等确认后执行。
+>
+> **另一条从这次基线复核里挖出来的真实缺陷（Chief 于 2026-11-08 22:20 发现并修复）**：
+>
+> 把 `test_style_tokens.py` 的检查对象从旧 Jinja 模板切到 React 样式源后，
+> 暴露出一个**原先被旧断言范围掩盖的真实 CSS 缺陷**：
+>
+> ```
+> frontend/src/pages/media-assets/media-workspace.css:70
+>   .media-preview-upload { ... background: var(--surface-secondary); }
+> frontend/src/pages/media-assets/media-workspace.css:104
+>   .media-upload-file { ... background: var(--surface-secondary); }
+> ```
+>
+> `--surface-secondary` **在全仓没有任何声明**——引用了但没定义，浏览器会把它解析成无效值，
+> 这两个元素的背景色实际是透明的。引入于 `c2089bb`「feat: 支持共享视频素材包」。
+>
+> 全仓扫描确认这是**唯一**一个未声明的 CSS 令牌（`--bs-*` 属 vendor，不计）。
+> 修复：在 `tts_erp_v2/static/css/tokens.css` 的 surface 组补 `--surface-secondary: #E9EEE7`
+> （与既有的 `--default` 同色，与 HeroUI 语义一致）。
+>
+> **教训**：旧断言只覆盖旧模板，React 侧的 CSS 契约从来没被它检查过。
+> 扩展断言范围时可能会暴露此前无人发现的真实缺陷——这正是扩展的价值所在。
+
 
 
 ---

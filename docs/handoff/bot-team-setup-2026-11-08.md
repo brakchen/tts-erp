@@ -188,5 +188,10 @@ MiniMax Bot 对**同一个 Bot** 的多个任务不会并行——排队等前�
 | 模板库刷新路径不可用 | ⚠️ | 当前模板库不陈旧（`0076_media_packs` / 306 表，三方对齐），暂不影响；但仓库新增 migration 前必须先解决 |
 | 22 个残留测试临时库 | ✅ | 已清理，template 基线库全部保留 |
 | revision 漂移难以诊断 | ✅ | `test_isolated.sh` 克隆后检测失配，直接打印原因和修复步骤 |
+| `--scope auto` 的假绿 | ✅ | 空计划时 driver 直接 exit 0。已在 `docs/guides/agent-testing.md` 写明「要看 master 真实状态就跑 `--scope fast`」 |
+| 多目录 conftest 冲突 | ✅ | `tests/` 无 `__init__.py`，8 个同名 `conftest.py` 按 basename 导入互相覆盖。`browser_conftest` 改用包路径导入 |
+| `--surface-secondary` 未声明 | ✅ | React 侧真实 CSS 缺陷（全仓唯一未声明令牌），已在 `tokens.css` 补齐 |
 
 **已知的存量问题**：HP desk 上有 **43 个既有 worktree** 处于「有 vitest、缺 semver」状态（按旧 lock 装过 `node_modules`，但代码已前进到需要 `semver`）。这些 worktree 里跑前端测试会报 `ERR_MODULE_NOT_FOUND`。修复方式是在各自 worktree 内跑 `npm ci`（或 `prepare-worktree.sh`），逐个处理，未批量清理。
+
+**基线文件仍然陈旧**：`docs/testing/baseline-fast.txt` 记录的是 `e04c5e11`（2026-10-15）的 `count: 0`，而 master 已前进 300 多个提交。`--update` 是 master-only 操作且会改写基线，待确认后执行。
