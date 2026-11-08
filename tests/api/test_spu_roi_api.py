@@ -4084,7 +4084,7 @@ def test_spu_roi_hidden_state_overrides_bootstrap_display_utilities(api_client, 
 def test_spu_roi_mobile_sticky_product_cells_use_opaque_backgrounds():
     css = _react_profitability_source("profitability.css")
     table = _react_profitability_source("ProfitabilityTable.tsx")
-    for selector in (".erp-profit-grid .tabulator-row .tabulator-cell.tabulator-frozen", ".erp-profit-grid .tabulator-row.erp-profit-loss .tabulator-cell.tabulator-frozen"):
+    for selector in (".erp-profit-grid.tabulator .tabulator-row .tabulator-cell.tabulator-frozen-left", ".erp-profit-grid .tabulator-row.erp-profit-loss .tabulator-cell.tabulator-frozen"):
         match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
         assert match is not None, selector
         assert "background: var(--surface)" in match[1]
@@ -4229,7 +4229,7 @@ def test_spu_roi_js_targets_dashboard_hooks():
     assert "/v2/commerce/channel-product-options" in selection
     assert "params.set('spu_ids', q.spuIds.join(','))" in query
     assert "replaceAll('，', ',')" in query
-    assert "resolvePaste" in selection and "scope?.signal.aborted" in selection
+    assert "resolveIds" in selection and "scope?.signal.aborted" in selection
     assert "controller.abort()" in selection and "controller.abort()" in read
     assert "onApply([])" in selection and "onApply(draft)" in selection
     assert "url.searchParams.set('spu_ids'" in page and "url.searchParams.delete('spu_ids')" in page
