@@ -83,8 +83,8 @@
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| 删旧模板/旧脚本 | 待做 | 12 模板 + 12 脚本（`console.js` 本轮保留）。测试侧清理已完成，可以删了 |
-| `_render_page` 与 Jinja 基础设施 | 待做 | 路由收敛后成死代码，但 `test_pages.py` 仍 import `_SIDEBAR_CSS` 等常量，需分开处理 |
+| 删旧模板/旧脚本 | ✅ 已做 | 12 模板 + 12 脚本全删（`console.js` 保留），-9198 行 |
+| `_render_page` 与 Jinja 环境 | ✅ 已做 | `pages.py` 的 `_render_page` / `_templates_env` / `_js_version` 已删；`_sidebar` / `_sidebar_css` / `_SIDEBAR_CSS` / `_SIDEBAR_TOGGLE_JS` 按 `docs/design/reuse-evaluation-2026-10.md` 的决定原样保留 |
 | 基线文件陈旧 | 待确认 | `baseline-fast.txt` 仍记 `e04c5e11`（2026-10-15）。`--update` 是 master-only 操作 |
 | `test_spu_price_columns.py` 4 项失败 | 待查 | 单独跑也失败，是 master 上的确定性失败，不是偶发 |
 | 43 个缺 semver 的既有 worktree | 待清理 | 逐个跑 `npm ci` 即可 |
