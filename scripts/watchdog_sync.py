@@ -310,6 +310,59 @@ def _check_credential_error(
     )
 
 
+# ─── Rule (d): zombie running rows ──────────────────────────────────────
+# A run whose worker was SIGKILLed (OOM killer) never writes finished_at,
+# so its sync_jobs row stays status='running' forever. The scheduler uses
+# max_instances=1, so that stale run blocks every later trigger of the same
+# job: the job stops running without ever failing. Rules (a)-(c) cannot see
+# this — (a) only looks at the last 'succeeded' row.
+# Marker: RULE_D_ZOMBIE_RUNNING
+
+ZOMBIE_MULTIPLIER = 2
+
+
+def _check_zombie_running(
+    job_name: str,
+    interval_seconds: int,
+    *,
+    now: dt.datetime,
+    session,
+) -> Finding | None:
+    """Rule (d): a 'running' row older than ``ZOMBIE_MULTIPLIER × interval``."""
+    from sqlalchemy import select
+
+    from tts_erp_v2.db.models import SyncJob
+
+    if interval_seconds <= 0:
+        return None
+    threshold = now - dt.timedelta(seconds=interval_seconds * ZOMBIE_MULTIPLIER)
+    stmt = (
+        select(SyncJob.started_at)
+        .where(
+            SyncJob.job_name == job_name,
+            SyncJob.status == "running",
+            SyncJob.started_at < threshold,
+        )
+        .order_by(SyncJob.started_at.asc())
+        .limit(1)
+    )
+    oldest = session.execute(stmt).scalar_one_or_none()
+    if oldest is None:
+        return None
+    return Finding(
+        job_name=job_name,
+        rule="zombie_running",
+        severity="critical",
+        detected_at=now.isoformat(),
+        details={
+            "interval_seconds": interval_seconds,
+            "threshold_seconds": interval_seconds * ZOMBIE_MULTIPLIER,
+            "oldest_running_started_at": oldest.isoformat(),
+            "zombie_age_seconds": (now - oldest).total_seconds(),
+        },
+    )
+
+
 # ─── Orchestration ─────────────────────────────────────────────────────
 
 
@@ -362,6 +415,9 @@ def evaluate(
                 ),
                 _check_credential_error(
                     job_name, interval, now=now, runs=runs
+                ),
+                _check_zombie_running(
+                    job_name, interval, now=now, session=sess
                 ),
             ):
                 if finding is not None:
