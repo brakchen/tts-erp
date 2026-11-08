@@ -20,7 +20,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, Any, Mapping
 
 from dotenv import dotenv_values
 
@@ -161,15 +161,25 @@ class RuntimeSettings:
             return None
         return Path(raw).expanduser().resolve(strict=False)
 
-    def _source_maps(self) -> tuple[dict[str, str], dict[str, str]]:
+    def _source_maps(
+        self, env: Mapping[str, str] | None = None
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Return (dotenv_map, runtime_map).
+
+        ``env`` 默认 None ⇒ 读 os.environ，**行为与改动前完全一致**；
+        传入显式 env ⇒ 用它替代 os.environ 解析来源链
+        （2026-11-09：owner 的接口必须能表达"上下文"，否则调用方只能
+        临时改全局 os.environ 再恢复 —— 那是 workaround，不是接口）。
+        """
+        e = os.environ if env is None else env
         dotenv_path = self._as_path(
-            os.environ.get(DOTENV_FILE_VAR),
+            e.get(DOTENV_FILE_VAR),
             default=(Path.cwd() / ".env").resolve(strict=False),
         )
         dotenv_map = self._read_file(dotenv_path)
         runtime_raw = dotenv_map.get(RUNTIME_ENV_FILE_VAR)
         if runtime_raw is None:
-            runtime_raw = os.environ.get(RUNTIME_ENV_FILE_VAR)
+            runtime_raw = e.get(RUNTIME_ENV_FILE_VAR)
         runtime_path = self._as_path(runtime_raw)
         runtime_map = self._read_file(
             runtime_path,
@@ -212,6 +222,56 @@ class RuntimeSettings:
             if name in os.environ:
                 return os.environ[name], "process_env"
             return default, "default"
+
+    def get_setting_facts(
+        self,
+        name: str,
+        default: str | None = None,
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Return the full source picture for one setting.
+
+        2026-11-09：为通则 22/Chief 第十轮「owner 暴露事实」而暴露。
+
+        Returns::
+
+            {"layers":   {"dotenv":…, "runtime_file":…, "process_env":…},
+             "effective": …,
+             "source":    "dotenv"|"runtime_file"|"process_env"|"default",
+             "shadowed":  {"dotenv": "old-value", …}}
+
+        ``shadowed`` 是关键一格：**被遮蔽但仍然存在的层及其值** ——
+        单值接口表达不了"旧值藏在低优先级层"，轮换验收因此必须靠它。
+
+        ``env`` 显式传参 ⇒ 调用方**不需要**临时改全局 os.environ。
+        """
+        with self._lock:
+            e = os.environ if env is None else env
+            dotenv_map, runtime_map = self._source_maps(env)
+            layers = {
+                "dotenv": dotenv_map.get(name),
+                "runtime_file": runtime_map.get(name),
+                "process_env": e.get(name),
+            }
+            if name in dotenv_map:
+                effective, source = dotenv_map[name], "dotenv"
+            elif name in runtime_map:
+                effective, source = runtime_map[name], "runtime_file"
+            elif name in e:
+                effective, source = e[name], "process_env"
+            else:
+                effective, source = default, "default"
+            shadowed = {
+                k: v for k, v in layers.items()
+                if k != source and v is not None
+            }
+            return {
+                "layers": layers,
+                "effective": effective,
+                "source": source,
+                "shadowed": shadowed,
+            }
 
     def revision(self) -> int:
         """Refresh file signatures and return the monotonic config revision."""
@@ -266,6 +326,16 @@ def get_setting_with_source(
     2026-11-09：供核对工具消费 owner 的来源判定，避免工具自建第二套链。
     """
     return _settings.get_with_source(name, default)
+
+
+def get_setting_facts(
+    name: str,
+    default: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Module-level twin of :meth:`RuntimeSettings.get_setting_facts`."""
+    return _settings.get_setting_facts(name, default, env=env)
 
 
 def config_revision() -> int:
