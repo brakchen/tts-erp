@@ -1,15 +1,17 @@
 """Guard the P6 retirement of the per-page frontend assets.
 
 P6 (2026-11-08) retired the old per-page implementations: the Jinja page
-templates under ``tts_erp_v2/templates/pages/`` and the per-page JavaScript
-under ``tts_erp_v2/static/js/``. Every registered page now renders through the
+templates under ``tts_erp_v2/templates/pages/``, the per-page JavaScript under
+``tts_erp_v2/static/js/``, and the per-page stylesheets under
+``tts_erp_v2/static/css/``. Every registered page now renders through the
 shared React release.
 
 ``tests/support/retired_frontend_assets.py`` keeps the *names* of the retired
-page scripts so other suites can assert that no served document references
-them. **This module is the other half**: it locks the retirement itself in
-place, so that re-adding a template, a legacy renderer, or an inline legacy
-document fails the suite instead of passing silently.
+page scripts and stylesheets so other suites can assert that no served
+document references them. **This module is the other half**: it locks the
+retirement itself in place, so that re-adding a template, a legacy renderer,
+an inline legacy document, or a retired stylesheet fails the suite instead of
+passing silently.
 
 These are pure filesystem and source-text assertions — no database, no
 fixtures, no browser.
@@ -21,13 +23,18 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.retired_frontend_assets import RETIRED_PAGE_SCRIPTS
+from tests.support.retired_frontend_assets import (
+    RETIRED_ASSETS,
+    RETIRED_PAGE_SCRIPTS,
+    RETIRED_PAGE_STYLES,
+)
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_unit]
 
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES_PAGES = REPO / "tts_erp_v2" / "templates" / "pages"
 STATIC_JS = REPO / "tts_erp_v2" / "static" / "js"
+STATIC_CSS = REPO / "tts_erp_v2" / "static" / "css"
 PAGES_PY = REPO / "tts_erp_v2" / "api" / "v2" / "pages.py"
 AD_DAILY_PY = REPO / "tts_erp_v2" / "api" / "v2" / "ad_daily.py"
 
@@ -35,6 +42,18 @@ AD_DAILY_PY = REPO / "tts_erp_v2" / "api" / "v2" / "ad_daily.py"
 # ``app.py`` (not a page asset) and ``tests/api/test_manual_costs_page_v2.py``
 # asserts against its source. It is not a per-page asset.
 KEPT_JS = frozenset({"console.js"})
+
+# The stylesheets that legitimately remain under ``static/css``: the shared
+# token palette and navigation rules are imported by ``frontend/src/styles.css``,
+# and the publishing contracts assert against the other two.
+KEPT_CSS = frozenset(
+    {
+        "common.css",
+        "navigation.css",
+        "tokens.css",
+        "video-publish.css",
+    }
+)
 
 
 def test_no_page_template_may_reappear():
@@ -62,6 +81,46 @@ def test_retired_page_scripts_are_gone_from_disk():
     """Each name on the retirement list must not exist as a file."""
     remaining = sorted(name for name in RETIRED_PAGE_SCRIPTS if (STATIC_JS / name).exists())
     assert not remaining, f"退役脚本仍在磁盘上: {remaining}"
+
+
+def test_retired_page_stylesheets_are_gone_from_disk():
+    """A retired stylesheet must not come back to disk either.
+
+    A stylesheet is an asset exactly like a script. Re-adding one would give
+    the old page-specific styling a second owner next to the React release.
+    """
+    remaining = sorted(name for name in RETIRED_PAGE_STYLES if (STATIC_CSS / name).exists())
+    assert not remaining, f"退役样式表仍在磁盘上: {remaining}"
+
+
+def test_only_kept_stylesheets_remain_under_static_css():
+    """Only the shared/live stylesheets may remain in ``static/css``.
+
+    An unregistered file here is either a leftover page stylesheet or a new
+    asset that nobody registered; both must be deliberate, so the list is
+    closed.
+    """
+    present = {path.name for path in STATIC_CSS.glob("*.css")}
+    unexpected = sorted(present - KEPT_CSS)
+    assert not unexpected, (
+        f"static/css 下出现未登记的样式表: {unexpected}；"
+        "若确为退役资产，请一并删除并更新 "
+        "tests/support/retired_frontend_assets.py 的名单"
+    )
+    assert present <= KEPT_CSS, f"意外的 static/css 内容: {sorted(present)}"
+
+
+def test_retired_assets_cover_scripts_and_styles():
+    """The combined retirement list must contain both asset categories.
+
+    Guard against the two lists drifting apart: a style added to one list but
+    not the other would silently escape the "no served document may reference
+    a retired asset" assertion.
+    """
+    assert set(RETIRED_ASSETS) == set(RETIRED_PAGE_SCRIPTS) | set(RETIRED_PAGE_STYLES)
+    assert set(RETIRED_PAGE_SCRIPTS) & set(RETIRED_PAGE_STYLES) == set()
+    assert any(name.endswith(".js") for name in RETIRED_ASSETS)
+    assert any(name.endswith(".css") for name in RETIRED_ASSETS)
 
 
 def test_pages_module_has_no_legacy_jinja_renderer():
@@ -121,3 +180,26 @@ def test_page_modules_do_not_point_at_old_scripts(
         if needle in line
     ]
     assert not offenders, f"{reason}:\n  " + "\n  ".join(offenders)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [PAGES_PY, AD_DAILY_PY],
+)
+def test_page_modules_do_not_point_at_retired_stylesheets(path: Path):
+    """A retired stylesheet must not be referenced by the page modules.
+
+    The check names the retired stylesheets individually instead of matching
+    the ``static/css/`` prefix: live stylesheets such as ``navigation.css``
+    are still imported by React and are referenced from ``pages.py``, so a
+    directory-prefix match would flag a healthy reference.
+    """
+    source = path.read_text(encoding="utf-8")
+    offenders = [
+        f"{index}: {line.strip()}"
+        for index, line in enumerate(source.splitlines(), start=1)
+        if any(style in line for style in RETIRED_PAGE_STYLES)
+    ]
+    assert not offenders, (
+        f"{path.name} 又指向了已退役的页面样式表:\n  " + "\n  ".join(offenders)
+    )

@@ -9,7 +9,7 @@ import pytest
 from render_support import overflow_report
 
 from tests.support.page_readiness import wait_canned_page
-from tests.support.retired_frontend_assets import RETIRED_PAGE_SCRIPTS
+from tests.support.retired_frontend_assets import RETIRED_ASSETS
 from tts_erp_v2.accounts.pages import PAGES
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
@@ -117,9 +117,9 @@ def test_pilot_uses_shared_shell(frontend_browser_renderer, tmp_path, prefix, wi
     resources = page.evaluate("performance.getEntriesByType('resource').map(x => x.name)")
     assert not any("bootstrap.min" in url or "/static/js/" in url for url in resources)
     assert all(url.startswith(frontend_browser_renderer._base) for url in resources)
-    # P6: the rendered document must not reference a retired per-page script.
+    # P6: the rendered document must not reference a retired per-page asset.
     document = page.content()
-    for retired in RETIRED_PAGE_SCRIPTS:
+    for retired in RETIRED_ASSETS:
         assert retired not in document
     artifacts = Path(__file__).resolve().parents[2] / "frontend/.cache/screenshots"
     artifacts.mkdir(parents=True, exist_ok=True)
