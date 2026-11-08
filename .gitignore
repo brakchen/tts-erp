@@ -73,6 +73,11 @@ tiktok-data-sync-runtime-*.json
 # .gitignore 管理。下列规则只针对 superproject 层可能出现的本地产物。
 plugins/*/node_modules/
 
+# 仓库根目录的 node_modules（root 级 vite/vitest 等工具缓存）。
+# AGENTS.md §7 提到 worktree 里 git add -A 会把这类未被保护的本地产物卷进提交，
+# 合并 checkout 还可能覆盖别人的环境；这里只忽略，目录本身保留。
+/node_modules/
+
 # ERP frontend dependencies and generated build/test assets
 /frontend/node_modules
 /frontend/.cache/
