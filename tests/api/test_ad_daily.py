@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from tests._job_invocation import authorize_test_shop
 from tests.api.test_frontend_pages import _bootstrap
-from tts_erp_v2.api.v2.ad_daily import _PAGE_HTML
 from tts_erp_v2.db.models import ChannelAccount
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -102,7 +101,7 @@ def _auth(readonly_key: str) -> dict[str, str]:
 
 
 def test_ad_daily_page_returns_authenticated_shell(api_client, readonly_key):
-    """The real readonly route uses React; old DOM belongs only to its artifact."""
+    """The real readonly route uses React and loads no retired page asset."""
     response = api_client.get(
         "/v2/pages/ad-daily",
         headers=_auth(readonly_key),
@@ -128,16 +127,8 @@ def test_ad_daily_page_returns_authenticated_shell(api_client, readonly_key):
     # frontend/src/pages/ad-daily/{index,query}.test.* (not legacy DOM hooks).
     # Sidebar markup/offset: test_pages.py::test_sidebar_*; active navigation
     # and current-page semantics: frontend/src/app/AppShell.test.tsx.
-    # This retained inline artifact is NOT the response or a fallback renderer.
-    legacy_body = _PAGE_HTML
-    assert "../../static/css/ad-daily.css?v=" in legacy_body
-    assert "../../static/js/ad-daily.js?v=" in legacy_body
-    assert "plugin.ad_daily" in legacy_body
-    assert 'data-sort="day"' in legacy_body
-    assert 'class="mld-sort-button"' in legacy_body
-    assert legacy_body.count('class="mld-sort-button"') == 9
-    assert 'href="/static/' not in legacy_body
-    assert 'src="/static/' not in legacy_body
+    # The retired inline artifact is gone; it was never the response or a
+    # fallback renderer.
 
 
 def test_ad_daily_page_requires_auth(api_client):

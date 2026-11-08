@@ -14,6 +14,8 @@ from tts_erp_v2.access._context import user_pages_var
 from tts_erp_v2.accounts.pages import PAGES
 from tts_erp_v2.api.v2 import frontend_pages
 
+from tests.support.retired_frontend_assets import RETIRED_PAGE_SCRIPTS
+
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
 
@@ -66,6 +68,9 @@ def test_document_bootstrap_and_recursive_assets(release, prefix):
         "dashboard.js",
     ):
         assert legacy not in body
+    # P6: no served document may reference a retired per-page script.
+    for retired in RETIRED_PAGE_SCRIPTS:
+        assert retired not in body
 
 
 @pytest.mark.parametrize("mode,role,bypass,expected", [

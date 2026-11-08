@@ -919,23 +919,6 @@ def test_list_and_current_attempt_summary_queries_are_bounded(
         )
 
 
-def test_frontend_resets_dialogs_handles_escape_and_cleans_drawer_on_close() -> None:
-    source = (ROOT / "tts_erp_v2/static/js/video-publish.js").read_text()
-    assert "function showConfirmationDialog(dialog)" in source
-    assert 'dialog.returnValue = "cancel"' in source
-    assert 'dialog.addEventListener("cancel", onCancel)' in source
-    assert 'dialog.removeEventListener("cancel", onCancel)' in source
-    assert '$("publish-task-drawer").addEventListener("close"' in source
-    close_section = source[
-        source.index('$("publish-task-drawer").addEventListener("close"') :
-    ]
-    assert "state.detailTaskId = null" in close_section
-    assert "state.detailChannel.controller?.abort()" in close_section
-    assert "clearTimeout(state.detailTimer)" in close_section
-    assert "opener?.focus?.()" in close_section
-    assert "writeBlockReason" in source
-
-
 def test_registry_and_docs_cover_v14_contracts() -> None:
     notice = (ROOT / "docs/handoff/ACTIVE.md").read_text()
     workflow = (ROOT / "docs/guides/agent-git-workflow.md").read_text()

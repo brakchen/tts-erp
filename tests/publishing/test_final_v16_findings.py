@@ -579,17 +579,6 @@ def test_v16_registry_rollout_and_operations_docs_are_precise() -> None:
         assert absent_name not in design
 
 
-def test_upload_selection_and_artemis_copy_controls_are_explicit() -> None:
-    root = Path(__file__).parents[2]
-    template = (root / "tts_erp_v2/templates/pages/video-publish.html").read_text()
-    source = (root / "tts_erp_v2/static/js/video-publish.js").read_text()
-    assert 'id="publish-file-reselect"' in template and "重新选择" in template
-    assert 'id="publish-file-clear"' in template and "清除选择" in template
-    assert 'document.execCommand("copy")' in source
-    assert 'trigger.textContent = "已复制"' in source
-    assert "artemis-copy" in source
-
-
 def test_architecture_inventory_is_derived_from_live_schema(
     db_session: Session,
 ) -> None:

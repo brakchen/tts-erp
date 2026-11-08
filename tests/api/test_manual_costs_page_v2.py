@@ -1,9 +1,16 @@
-"""Manual-costs page v2 redesign — frontend HTML shell contract tests.
+"""Manual-costs page v2 — HTTP document and console-asset contracts.
 
-Scope: assert the redesigned page renders the three operational-state tabs,
-references external static assets, and removes the legacy token-paste block.
-We only test the HTML shell — runtime JS behaviour (fetch/upload) lives in
-the browser and is covered by manual smoke tests, not FastAPI TestClient.
+Scope: the route serves one React bootstrap document. The HTTP-level checks
+below cover status, content type, cache headers, the absence of the retired
+token-paste UI and of inline event handlers.
+
+The retired Jinja template is gone with the P6 asset retirement, so its
+asset / tab / shop-switcher / pager guards were old-implementation guards
+and were removed together with it. The active interactions live in
+``frontend/src/pages/manual-costs/`` and the browser suites.
+
+``console.js`` is mounted as a public static asset and is **not** part of
+this retirement, so its source-level contracts stay here.
 
 See ``docs/archive/procurement-ui-redesign.md`` §2 (design tokens) and §6
 (frontend contracts) for the full design rationale.
@@ -11,19 +18,21 @@ See ``docs/archive/procurement-ui-redesign.md`` §2 (design tokens) and §6
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 
-def _retained_legacy_manual_costs_html() -> str:
-    """Render the retained Jinja artifact explicitly, without rerouting HTTP.
+_CONSOLE_JS = (
+    Path(__file__).resolve().parents[2]
+    / "tts_erp_v2"
+    / "static"
+    / "js"
+    / "console.js"
+)
 
-    These 15 template/asset contracts do not describe the active React DOM.
-    Active interactions live in manual-costs/legacy-compat.test.tsx and
-    index.test.tsx; shared release/prefix wiring is covered by
-    test_frontend_pages.py and test_frontend_remaining_pages.py.
-    """
-    from tts_erp_v2.api.v2.pages import _render_page
 
-    response = _render_page("manual-costs.html", current_page="manual-costs")
-    return bytes(response.body).decode("utf-8")
+def _console_js() -> str:
+    """Read the still-mounted console asset."""
+    return _CONSOLE_JS.read_text(encoding="utf-8")
 
 
 def test_manual_costs_page_v2_returns_200_html(api_client, readonly_key):
@@ -34,50 +43,6 @@ def test_manual_costs_page_v2_returns_200_html(api_client, readonly_key):
     )
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("text/html"), r.headers
-
-
-def test_manual_costs_page_v2_references_static_assets():
-    """Retained legacy artifact, not the active React route.
-
-    Page HTML must link Bootstrap (vendored) + console.js, prefix-relative.
-
-    Styling is Bootstrap 5.3.8 self-hosted at /static/vendor/ (2026-08-31:
-    the custom console.css design system was dropped per user decision).
-    All asset paths must be RELATIVE (../../static/...) so the page works
-    behind the NGINX /tts prefix as well as on :9877 directly.
-    """
-    body = _retained_legacy_manual_costs_html()
-    assert "../../static/vendor/bootstrap.min.css" in body, "missing Bootstrap CSS link"
-    assert "../../static/js/console.js" in body, "missing JS link"
-    assert "/static/css/console.css" not in body, (
-        "retired custom stylesheet still linked"
-    )
-
-
-def test_manual_costs_page_v2_has_two_operational_tabs():
-    """Retained legacy artifact, not the active React route.
-
-    Page must render exactly two tabs: 全部 SPU + 最近提交.
-
-    2026-09-06: the 待处理 tab is retired. The editable catalogue (全部
-    SPU, cost inline-editable + 提交全部) and the change log (最近提交,
-    变更前 → 变更后) are the only two views.
-    """
-    body = _retained_legacy_manual_costs_html()
-    for label in ("全部 SPU", "最近提交"):
-        assert label in body, f"missing tab label: {label!r}"
-    # The retired labels must be gone (regression guard).
-    for retired in ("待处理", "待填成本", "待传图片"):
-        assert retired not in body, f"retired tab label still rendered: {retired!r}"
-
-
-def test_manual_costs_page_v2_has_shop_switcher():
-    """Retained legacy artifact, not the active React route.
-
-    Header must expose a shop switcher dropdown (id="shop-switcher")."""
-    body = _retained_legacy_manual_costs_html()
-    assert 'id="shop-switcher"' in body, "missing shop switcher control"
-    assert 'name="shop_pk"' in body, "shop switcher missing name attr"
 
 
 def test_manual_costs_page_v2_drops_token_paste_block(api_client, readonly_key):
@@ -95,22 +60,6 @@ def test_manual_costs_page_v2_drops_token_paste_block(api_client, readonly_key):
         "legacy token paste UI still present"
     )
     assert "mc_token" not in body, "legacy localStorage key still referenced"
-
-
-def test_manual_costs_page_v2_asset_paths_prefix_safe():
-    """Retained legacy artifact, not the active React route.
-
-    No root-absolute asset hrefs/srcs — regression guard for the 404.
-
-    2026-08-31: absolute /static/... links 404'd behind the NGINX /tts
-    prefix (daqiang.nat100.top/static/... has no route), leaving the page
-    completely unstyled in production. The page is served at
-    /v2/pages/manual-costs, so ../../static/ resolves to the deployment
-    root under any prefix.
-    """
-    body = _retained_legacy_manual_costs_html()
-    assert 'href="/' not in body, "root-absolute href found"
-    assert 'src="/' not in body, "root-absolute src found"
 
 
 def test_manual_costs_page_v2_no_inline_event_handlers(api_client, readonly_key):
@@ -137,8 +86,6 @@ def test_manual_costs_page_v2_uses_design_token_variables(api_client, readonly_k
     Everything that needs to render a colour must reference a class
     that resolves through :root { --accent: … } etc.
     """
-    import re
-
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -156,39 +103,34 @@ def test_manual_costs_page_v2_uses_design_token_variables(api_client, readonly_k
     )
 
 
-def test_manual_costs_page_v2_signature_counter_present():
-    """Retained legacy artifact, not the active React route.
+def test_manual_costs_page_v2_self_hosted_font_hint(api_client, readonly_key):
+    """Page must not link a public CDN for fonts.
 
-    The signature oversized queue counter element must render.
-
-    The .op-counter block (with id="op-counter", the .op-counter-num
-    span, and the .op-counter-label) is the page's primary visual
-    element. JS populates .op-counter-num with the active tab's row
-    count (catalogue SPUs on 全部 SPU, change-log rows on 最近提交).
+    Operators reach this service over a private NAT tunnel; CDN links
+    leak operator IPs. We assert no fonts.googleapis.com or
+    fonts.gstatic.com link in the HTML. The page actually uses
+    Bootstrap 5.3.8's default font stack now (2026-08-31 — the custom
+    IBM Plex typography was dropped with the rest of console.css).
     """
-    body = _retained_legacy_manual_costs_html()
-    assert 'id="op-counter"' in body, "signature counter section missing"
-    assert 'id="op-counter-num"' in body, "signature counter num span missing"
-    assert "op-counter-label" in body, "counter label class missing"
-    assert "全部 SPU" in body, "counter label text missing"
-    # 工业控制台视觉指纹：令牌已外置到共享 tokens.css（由页面 <link> 引入）
-    from pathlib import Path
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    body = r.text
+    assert "fonts.googleapis.com" not in body, "Google Fonts CDN leak"
+    assert "fonts.gstatic.com" not in body, "Google Fonts CDN leak"
 
-    tokens = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "css"
-        / "tokens.css"
-    ).read_text(encoding="utf-8")
-    assert "--paper:" in tokens, "paper token not declared in tokens.css"
-    assert "--accent:" in tokens, "accent token not declared in tokens.css"
-    assert "--mono:" in tokens, "monospace font stack not declared in tokens.css"
-    # 页面必须消费共享令牌层，不得自己重建 :root
-    assert "css/tokens.css" in body, "page must link the shared token layer"
-    assert ":root" not in body, "page must not redefine :root tokens inline"
-    # Border-radius zero is part of the aesthetic (no rounded corners)
-    assert "--radius:" in tokens, "radius token missing"
+
+def test_page_does_not_render_source_price_badge(api_client, readonly_key):
+    """Source-price values may prefill the input, but the badge is removed."""
+    r = api_client.get(
+        "/v2/pages/manual-costs",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert r.status_code == 200, r.text
+    assert "op-source-badge" not in r.text
+
+    assert "op-source-badge" not in _console_js()
 
 
 def test_console_js_uses_redesign_class_names():
@@ -200,16 +142,7 @@ def test_console_js_uses_redesign_class_names():
     gone (fixed CNY + MinIO main-image mirror); the hooks below are the
     live set in the current row template.
     """
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
+    src = _console_js()
     for cls in (
         "op-td-sku",
         "op-td-cost",
@@ -242,16 +175,7 @@ def test_console_js_populates_signature_counter():
     The signature counter is purely JS-driven — without the population
     step the page would render '·' forever.
     """
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
+    src = _console_js()
     assert '"#op-counter-num"' in src or "#op-counter-num" in src, (
         "console.js does not target #op-counter-num"
     )
@@ -260,35 +184,9 @@ def test_console_js_populates_signature_counter():
     )
 
 
-def test_manual_costs_page_v2_self_hosted_font_hint(api_client, readonly_key):
-    """Page must not link a public CDN for fonts.
-
-    Operators reach this service over a private NAT tunnel; CDN links
-    leak operator IPs. We assert no fonts.googleapis.com or
-    fonts.gstatic.com link in the HTML. The page actually uses
-    Bootstrap 5.3.8's default font stack now (2026-08-31 — the custom
-    IBM Plex typography was dropped with the rest of console.css).
-    """
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    body = r.text
-    assert "fonts.googleapis.com" not in body, "Google Fonts CDN leak"
-    assert "fonts.gstatic.com" not in body, "Google Fonts CDN leak"
-
-
 def test_console_search_is_server_side():
     """Search must be part of API scope before pagination, never a DOM filter."""
-    from pathlib import Path
-
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    ).read_text(encoding="utf-8")
+    src = _console_js()
 
     assert '"&q=" + encodeURIComponent(searchQuery)' in src
     assert "setTimeout(refreshActiveTab, 250)" in src
@@ -306,16 +204,7 @@ def test_console_js_unwraps_api_envelope():
     Needs photo tab. Also protects loadNeedsCost + loadRecent against
     any future envelope roll-out on their endpoints.
     """
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
+    src = _console_js()
     assert "function unwrap(payload)" in src, "unwrap helper missing from console.js"
     # Both load functions (catalogue + change log) must pipe their
     # payload through unwrap().
@@ -330,179 +219,19 @@ def test_console_js_unwraps_api_envelope():
     )
 
 
-def test_page_has_submit_all_button():
-    """Retained legacy artifact, not the active React route.
-
-    The toolbar must expose a 提交全部 (batch submit) control.
-
-    2026-09-06 operator request: one click files every EDITED row on the
-    全部 SPU tab (dirty-tracking marks rows whose cost input changed).
-    The button lives in the toolbar (data-act="submit-all") and the JS
-    wires it to submitAllEdited(); a live status banner (.op-batch-status)
-    reports filed / failed counts.
-    """
-    body = _retained_legacy_manual_costs_html()
-    assert 'data-act="submit-all"' in body, "submit-all button missing"
-    assert "提交全部" in body, "submit-all button label missing"
-    assert 'class="op-batch-status"' in body, "batch status banner missing"
-
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
-    assert "function submitAllEdited()" in src, "console.js missing submitAllEdited"
-    assert "function postManualCost(tr)" in src, "console.js missing postManualCost"
-    assert "submit-all" in src, "console.js must bind [data-act=submit-all]"
-
-
-def test_page_has_all_spu_tab():
-    """Retained legacy artifact, not the active React route.
-
-    The tab bar exposes a 全部 SPU view.
-
-    2026-09-06 operator request: see every SPU (not just pending / recent)
-    with its status, current manual cost, and mirrored main image. The tab
-    reads GET /v2/commerce/channel-products which now carries per-row
-    unit_cost / currency / image_url alongside the legacy fields.
-    """
-    body = _retained_legacy_manual_costs_html()
-    assert 'data-tab="all"' in body, "all-SPU tab missing"
-    assert "全部 SPU" in body, "all-SPU tab label missing"
-    assert 'id="badge-all"' in body, "all-SPU badge missing"
-
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
-    assert "function loadAll()" in src, "console.js missing loadAll"
-    assert "function renderAllRows(items)" in src, "console.js missing renderAllRows"
-    assert "/v2/commerce/channel-products" in src, (
-        "console.js all tab must read channel-products"
-    )
-
-
-def test_page_has_no_pending_tab():
-    """Retained legacy artifact, not the active React route.
-
-    待处理 tab retired: the data-tab=pending button is gone entirely."""
-    body = _retained_legacy_manual_costs_html()
-    assert 'data-tab="pending"' not in body, "pending tab button still rendered"
-    assert 'id="badge-pending"' not in body, "pending badge still rendered"
-    assert 'data-tab="all"' in body, "all tab must still be present"
-    assert 'data-tab="recent"' in body, "recent tab must still be present"
-
-
-def test_manual_costs_page_labels_product_identifier_as_spu():
-    """Retained legacy artifact, not the active React route.
-
-    The workbench renders ``spu_id`` values, so every label says SPU."""
-    body = _retained_legacy_manual_costs_html()
-    assert ">SKU<" not in body
-    assert 'placeholder="SKU 或标题"' not in body
-    assert ">SPU<" in body
-    assert 'placeholder="SPU 或标题"' in body
-
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
-    assert "SKU" not in src, "workbench must not label spu_id values as SKU"
-    assert 'data-label="SPU"' in src
-    assert 'search.placeholder = "SPU 或标题"' in src
-
-
-def test_page_has_editable_catalogue_hooks():
-    """Retained legacy artifact, not the active React route.
-
-    全部 SPU rows are editable: cost input + dirty markers.
-
-    The static thead carries the sortable headers (data-sort on 成本 /
-    创建 / 更新) so the operator can re-sort the catalogue.
-    """
-    body = _retained_legacy_manual_costs_html()
-    for hook in (
-        'data-sort="unit_cost"',
-        'data-sort="created_at"',
-        'data-sort="updated_at"',
-        "op-th-sortable",
-        "op-sort-arrow",
-    ):
-        assert hook in body, f"page missing sort hook: {hook!r}"
-
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
-    assert "function bindSortableHeaders(tr)" in src, "sort binder missing"
-    assert "catalogueSort" in src, "catalogue sort state missing"
-    assert "is-dirty" in src, "row dirty tracking missing"
-    assert "submitAllEdited" in src, "edited-rows batch submit missing"
-    # Sort state must flow into the channel-products request.
-    assert "&sort=" in src, "loadAll must send the sort query"
-    assert "source_created_at" in src, "catalogue row must render created time"
-    assert "source_updated_at" in src, "catalogue row must render updated time"
-
-
 def test_console_js_recent_tab_renders_prev_and_new():
     """最近提交 = change log: rows show 变更前 → 变更后.
 
     renderRecentRows must read prev_unit_cost / unit_cost (the backend
     LAG pairing) and render both columns.
     """
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
+    src = _console_js()
     assert "function renderRecentRows(items)" in src
     assert "prev_unit_cost" in src, "console.js must read prev_unit_cost"
     assert "变更前" in src and "变更后" in src, (
         "recent thead/rows must label the before/after price columns"
     )
     assert 'data-label="变更时间"' in src, "recent rows must show the change timestamp"
-
-
-def test_page_has_status_filter_dropdown():
-    """Retained legacy artifact, not the active React route.
-
-    The toolbar exposes a 状态 filter dropdown (id="filter-status").
-
-    Options are populated from console.js' STATUS_LABELS at boot, so the
-    static HTML only carries the empty <select> — the page test asserts
-    the select exists, and the JS test below locks the label mapping.
-    """
-    body = _retained_legacy_manual_costs_html()
-    assert 'id="filter-status"' in body, "status filter select missing"
-    assert 'aria-label="按状态过滤"' in body, "status filter aria-label missing"
 
 
 def test_console_js_status_label_mapping_and_sort():
@@ -514,16 +243,7 @@ def test_console_js_status_label_mapping_and_sort():
     data-sort="status" and the URL carries ?status= for filtering. The
     catalogue defaults to status-asc so in-sale products lead.
     """
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
+    src = _console_js()
     assert "STATUS_LABELS" in src, "status label map missing"
     assert 'ACTIVATE: "在售"' in src, "ACTIVATE must map to 在售"
     assert "商家" not in src, "old 商家 label must be gone"
@@ -538,31 +258,52 @@ def test_console_js_status_label_mapping_and_sort():
     assert 'order: "asc"' in src, "default order must be asc (在售 first)"
 
 
-def test_page_has_pager_controls():
-    """Retained legacy artifact, not the active React route.
+def test_console_js_batches_edited_rows_and_submits_each_row():
+    """提交全部 / 逐行提交：console.js 的绑定与调用。"""
+    src = _console_js()
+    assert "function submitAllEdited()" in src, "console.js missing submitAllEdited"
+    assert "function postManualCost(tr)" in src, "console.js missing postManualCost"
+    assert "submit-all" in src, "console.js must bind [data-act=submit-all]"
 
-    The catalogue has prev/next paging + a row-count label.
+
+def test_console_js_renders_the_all_spu_catalogue():
+    """全部 SPU 目录：loadAll / renderAllRows 与它的数据源。"""
+    src = _console_js()
+    assert "function loadAll()" in src, "console.js missing loadAll"
+    assert "function renderAllRows(items)" in src, "console.js missing renderAllRows"
+    assert "/v2/commerce/channel-products" in src, (
+        "console.js all tab must read channel-products"
+    )
+
+
+def test_console_js_labels_spu_values_as_spu():
+    """工作台渲染的是 ``spu_id``，所以所有标签都写 SPU。"""
+    src = _console_js()
+    assert "SKU" not in src, "workbench must not label spu_id values as SKU"
+    assert 'data-label="SPU"' in src
+    assert 'search.placeholder = "SPU 或标题"' in src
+
+
+def test_console_js_tracks_dirty_rows_and_sorts_the_catalogue():
+    """全部 SPU 行可编辑：成本输入 + 脏标记 + 可排序列。"""
+    src = _console_js()
+    assert "function bindSortableHeaders(tr)" in src, "sort binder missing"
+    assert "catalogueSort" in src, "catalogue sort state missing"
+    assert "is-dirty" in src, "row dirty tracking missing"
+    assert "submitAllEdited" in src, "edited-rows batch submit missing"
+    # Sort state must flow into the channel-products request.
+    assert "&sort=" in src, "loadAll must send the sort query"
+    assert "source_created_at" in src, "catalogue row must render created time"
+    assert "source_updated_at" in src, "catalogue row must render updated time"
+
+
+def test_console_js_paginates_the_catalogue():
+    """目录翻页：updatePager / 页偏移 / 每页条数。
 
     2026-09-06: channel-products is a bare-array contract, so the total
-    travels in X-Total-Count; the pager lives under the table.
+    travels in X-Total-Count.
     """
-    body = _retained_legacy_manual_costs_html()
-    assert 'id="grid-pager"' in body, "pager section missing"
-    assert 'id="btn-prev"' in body, "prev button missing"
-    assert 'id="btn-next"' in body, "next button missing"
-    assert 'id="pager-label"' in body, "pager label missing"
-    assert "上一页" in body and "下一页" in body, "pager button labels missing"
-
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
+    src = _console_js()
     assert "function updatePager(total, pageLen)" in src, (
         "updatePager missing from console.js"
     )
@@ -574,97 +315,17 @@ def test_page_has_pager_controls():
     )
 
 
-def test_page_script_has_cache_bust_version():
-    """Retained legacy artifact, not the active React route.
-
-    console.js must be referenced with ?v=<content hash>.
-
-    2026-09-06: /static has no Cache-Control and browsers heuristically
-    cache console.js, so users kept seeing the previous build (e.g. the
-    pre-pagination 50-row catalogue). Stamping a content-hash query makes
-    every deploy invalidate the stale copy automatically.
-    """
-    body = _retained_legacy_manual_costs_html()
-    import re
-
-    m = re.search(r'src="([^"]*console\.js[^"]*)"', body)
-    assert m, "console.js script tag missing"
-    src = m.group(1)
-    assert "?v=" in src, f"console.js src must carry ?v= cache-bust, got: {src}"
-    version = src.split("?v=")[1]
-    assert re.fullmatch(r"[0-9a-f]{8}", version), (
-        f"version must be an 8-char content hash, got: {version!r}"
-    )
-
-
-def test_page_has_has_orders_toggle():
-    """Retained legacy artifact, not the active React route.
-
-    The toolbar exposes 仅看有单 (id="filter-has-orders") and console.js
-    forwards has_orders=true on the channel-products request."""
-    body = _retained_legacy_manual_costs_html()
-    assert 'id="filter-has-orders"' in body, "has-orders checkbox missing"
-    assert "仅看有单" in body, "has-orders label missing"
-
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
+def test_console_js_forwards_the_catalogue_filters():
+    """工具栏过滤条件：仅看有单 / 仅展示未登记 SPU 都交给 API。"""
+    src = _console_js()
     assert "catalogueHasOrders" in src, "has-orders state missing"
     assert "has_orders=true" in src, "loadAll must forward has_orders=true"
     assert 'id="filter-has-orders"' in src or "filter-has-orders" in src, (
         "checkbox binding missing"
     )
-
-
-def test_page_has_backend_missing_manual_cost_toggle():
-    """Retained legacy artifact, not the active React route.
-
-    The unregistered-only checkbox delegates filtering to the API."""
-    body = _retained_legacy_manual_costs_html()
-    assert 'id="filter-missing-manual-cost"' in body
-    assert "仅展示未登记 SPU" in body
-
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    src = js.read_text(encoding="utf-8")
     assert "catalogueMissingManualCost" in src
     assert "missing_manual_cost=true" in src
     assert "filter-missing-manual-cost" in src
     assert "catalogueMissingManualCost || it.source_unit_cost == null" in src, (
         "unregistered-only rows must not prefill the source price"
     )
-
-
-def test_page_does_not_render_source_price_badge(api_client, readonly_key):
-    """Source-price values may prefill the input, but the badge is removed."""
-    r = api_client.get(
-        "/v2/pages/manual-costs",
-        headers={"Authorization": f"Bearer {readonly_key}"},
-    )
-    assert r.status_code == 200, r.text
-    assert "op-source-badge" not in r.text
-
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parents[2]
-        / "tts_erp_v2"
-        / "static"
-        / "js"
-        / "console.js"
-    )
-    assert "op-source-badge" not in js.read_text(encoding="utf-8")

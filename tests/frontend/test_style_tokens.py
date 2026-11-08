@@ -18,8 +18,11 @@ pytest 的 API/契约层完全发现不了这类问题：HTML 里链接是对的
    这条直接锁死上述事故（出事时 ``:root`` 会消失）。
 2. 所有 ``var(--x)`` 引用必须能解析到已声明的令牌 —— 锁死「令牌被删但引用还在」
    （如 spu-roi.css 的 ``--paper-danger`` 丢失）。
-3. 页面模板不得重新定义 ``:root``。
+3. 页面样式不得重新定义 ``:root``。
 4. 各 CSS 文件不得有解析错误。
+
+（P6 退役后，第 2/3/4 条的「页面」从旧 Jinja 模板改为 React 样式源
+``frontend/src/**/*.css``；旧模板与旧页面脚本已随资产退役删除。）
 
 依赖
 ----
@@ -40,8 +43,18 @@ pytestmark = [pytest.mark.domain_api, pytest.mark.layer_unit]
 
 REPO = Path(__file__).resolve().parents[2]
 CSS_DIR = REPO / "tts_erp_v2" / "static" / "css"
-TEMPLATES_DIR = REPO / "tts_erp_v2" / "templates" / "pages"
+FRONTEND_DIR = REPO / "frontend" / "src"
 API_DIR = REPO / "tts_erp_v2" / "api" / "v2"
+
+
+def _react_css_files() -> list[Path]:
+    """The React stylesheets that replaced the retired page templates.
+
+    The old Jinja page templates are gone with the P6 asset retirement, so
+    the page-level contracts they used to be checked against now point at
+    the React CSS sources.
+    """
+    return sorted(FRONTEND_DIR.rglob("*.css"))
 
 # tokens.css 必须声明的规范令牌（暖纸编辑体）。
 CANONICAL_TOKENS = {
@@ -157,7 +170,7 @@ def test_every_var_reference_resolves():
     problems: list[str] = []
 
     scan: list[Path] = list(CSS_DIR.glob("*.css"))
-    scan += list(TEMPLATES_DIR.glob("*.html"))
+    scan += _react_css_files()
     scan += [API_DIR / "auth.py", API_DIR / "oauth.py", API_DIR / "ad_daily.py"]
 
     for path in scan:
@@ -178,13 +191,13 @@ def test_every_var_reference_resolves():
 
 
 def test_pages_do_not_redefine_root_tokens():
-    """页面模板不得重新定义 ``:root`` —— 令牌唯一来源是 tokens.css。"""
+    """页面样式不得重新定义 ``:root`` —— 令牌唯一来源是 tokens.css。"""
     offenders = []
-    for path in sorted(TEMPLATES_DIR.glob("*.html")):
+    for path in _react_css_files():
         if re.search(r":root\s*\{", _load(path)):
             offenders.append(path.name)
     assert not offenders, (
-        f"以下页面模板重新定义了 :root 令牌: {offenders} —— 请改为引用 tokens.css"
+        f"以下页面样式重新定义了 :root 令牌: {offenders} —— 请改为引用 tokens.css"
     )
 
 
@@ -208,7 +221,7 @@ def test_font_declarations_only_reference_token_stacks():
     """全站字体声明只能引用 tokens 的三套栈（静态 lint，无浏览器也能拦）。
 
     浏览器层（tests/browser/）与 live e2e 能抓「渲染态」字体旁路，但它们要
-    chromium + 才能跑；这条是零成本兜底：自研 css/html/py/js 里出现
+    chromium + 才能跑；这条是零成本兜底：自研 css/py 里出现
     ``font-family: arial`` / ``font: 12px SFMono…`` 这类字面量就直接红，
     逼新代码回到 ``var(--mono|sans|serif)``。``static/vendor/`` 不扫（上游原样）。
 
@@ -218,8 +231,7 @@ def test_font_declarations_only_reference_token_stacks():
     import re
 
     targets = sorted(CSS_DIR.glob("*.css"))
-    targets += sorted(TEMPLATES_DIR.glob("*.html"))
-    targets += sorted(REPO.glob("tts_erp_v2/static/js/*.js"))
+    targets += _react_css_files()
     targets += [API_DIR / "auth.py", API_DIR / "oauth.py", API_DIR / "ad_daily.py"]
 
     token_vars = {"var(--mono)", "var(--sans)", "var(--serif)"}
