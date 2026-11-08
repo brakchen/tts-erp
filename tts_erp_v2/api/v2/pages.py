@@ -330,7 +330,7 @@ def intercept_configs_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLRes
   """拦截配置管理页面。
 
   功能：配置列表、新增/编辑弹窗、批量操作、导入导出、筛选分页。
-  行为在 static/js/intercept-configs.js。
+  行为在 frontend/src/pages/intercept-configs/。
   """
   return frontend_pages.render_frontend_page(request, "intercept-configs")
 
@@ -340,7 +340,7 @@ def intercept_requests_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLRe
   """拦截记录查询页面。
 
   功能：记录列表、详情弹窗、筛选（域名/路径/状态码/白名单/时间）、分页。
-  行为在 static/js/intercept-requests.js。
+  行为在 frontend/src/pages/intercept-requests/。
   """
   return frontend_pages.render_frontend_page(request, "intercept-requests")
 
@@ -399,7 +399,7 @@ def users_page(request: Request = _DIRECT_RENDER_REQUEST) -> HTMLResponse:
   """用户管理（设计 §9）：用户 + 角色权限两页签。
 
   入口受 ``page:users`` 权限点控制（access 层按路由判定）；页面行为在
-  static/js/users.js，数据 API 为 /v2/users* 与 /v2/roles*。
+  frontend/src/pages/users/，数据 API 为 /v2/users* 与 /v2/roles*。
   """
   return frontend_pages.render_frontend_page(request, "users")
 

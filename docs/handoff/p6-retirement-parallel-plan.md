@@ -14,7 +14,7 @@
 | --- | --- |
 | `MIGRATED_PAGE_IDS` 已含 19 项 | `tts_erp_v2/api/v2/frontend_pages.py`（18 个注册页 + `login`） |
 | `PAGES` 注册表共 **18** 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
-| 19 个页面目录都有真实 React/TS 代码，合计约 1.4 万行 | `frontend/src/pages/` |
+| 20 个页面目录都有真实 React/TS 代码，合计约 1.4 万行 | `frontend/src/pages/`（18 注册页 + `login` + `message` / `oauth-onboard`） |
 | 12 个旧 Jinja 模板仍在 | `tts_erp_v2/templates/pages/` |
 | 13 个旧 JS 脚本仍在 | `tts_erp_v2/static/js/` |
 | 旧 renderer 分支仍在代码里 | `tts_erp_v2/api/v2/pages.py`（如 `:309` 的 `_render_page("shops.html", ...)`） |
@@ -31,7 +31,7 @@ P6 最适合并行，因为退役对象是**文件**，天然可以按页面组�
 
 1. **一个文件只有一个 writer**。三个 lane 的文件清单不得有交集。
 2. **共享文件只有一处能改**。见下方「共享资源」一节，由 lane A 独家负责。
-3. **不改 `MIGRATED_PAGE_IDS` 内容**。它已经是 19 个页面全集，本次不增不减。
+3. **不改 `MIGRATED_PAGE_IDS` 内容**。它已经是 19 项全集（18 个注册页 + `login`），本次不增不减。
 
 ### 共享资源（只有 lane A 能碰）
 

@@ -6,24 +6,27 @@
 
 ## 一、交付物清单
 
-### 已合入 master
+### 已合入 master（`808e4f4c`）
 
-| 提交 | 内容 |
+P6 退役与收口全部落地：**21 个提交，60 个文件，净删 8800 行**。
+
+| 内容 | 说明 |
 | --- | --- |
-| `2b68b40` | P6 路由收敛（15 处双路分支 → 单一 React renderer）+ 环境修复 + 评审核实文档 |
-| `64f6ff7` | 开发环境自检清单 + 模板库刷新说明 |
+| 路由收敛 | `pages.py` 14 处 + `ad_daily.py` 1 处双路分支 → 单一 `render_frontend_page`；`_render_page` / `_templates_env` / `_js_version` 已删 |
+| 旧资产退役 | 12 个旧 Jinja 模板 + 12 个旧页面脚本 + ad-daily 内联旧页面 HTML 全删 |
+| 测试侧清理 | 19 个测试文件里只对旧实现成立的断言清除；新增 `tests/support/retired_frontend_assets.py` 护栏 |
+| 环境修复 | `prepare-worktree.sh`、测试机地址更正、revision 漂移诊断、并发清理规范 |
 
-### 待验证后合并（12 个提交）
+### 验证（全部实测）
 
-| 提交 | 内容 |
+| 验证 | 结果 |
 | --- | --- |
-| `e232f1c` | 测试侧清理：删除只对旧实现成立的断言（21 文件，+200/-1974） |
-| `5a04e70` | 补齐未声明的 `--surface-secondary` 令牌 + 修正设计令牌重定义检查 |
-| `a9605de` | `browser_conftest` 改用包路径导入，消除多目录 conftest 冲突 |
-| `f205c74` | 告警页就绪信号改用共享 canned 契约 |
-| `bd4a7753` | 字体白名单不再要求三套栈互不相同 |
-| `f72a3089` | **旧资产退役**：12 模板 + 12 脚本全删（-9198 行） |
-| `00654af` | 移除 ad-daily 已退役的内联旧页面 HTML（-108 行 + 死代码） |
+| api 域 | `API_EXIT=0`，298 秒，无 FAILED 行 |
+| browser 渲染门槛 | `BROWSER_EXIT=0`，31 秒，无 FAILED 行 |
+| 前端组件 | `COMPONENTS_EXIT=0`，248 秒，无 FAILED 行 |
+| 字体栈用例 | `[100%]`，14 项全绿 |
+| 告警页溢出 | `[100%]`，4 个视口全绿 |
+| conftest 冲突 | 混跑三目录时 `_mock_payload` ERROR 消失 |
 
 ---
 
@@ -42,7 +45,7 @@
 ### P6 退役（前端迁移最后阶段）
 
 核实结论：**P2–P5 实质已完成**，方案文档"P2–P6 待实施"的状态说明过时。
-`MIGRATED_PAGE_IDS` 已含全部 18 个注册页面，19 个页面目录有真实 React/TS 代码（约 1.4 万行）。
+`MIGRATED_PAGE_IDS` 已含全部 18 个注册页面（+ `login` = 19 项），`frontend/src/pages/` 下 20 个目录都有真实 React/TS 代码（约 1.4 万行）。
 
 - **路由收敛**：`pages.py` 14 处 + `ad_daily.py` 1 处双路分支 → 单一 `render_frontend_page`。
 - **测试侧清理**：19 个测试文件、39 处读旧文件内容的断言，分三类处置（详见
@@ -72,7 +75,32 @@
 绝不按前缀批量删、删前确认无活跃 pytest/test_baseline、绝不删 template 家族、
 `psql -f` 批量 DROP 会因事务块静默失败必须逐条执行。
 
-### 2. 并发跑测试导致假失败
+### 2. 用 `git checkout <branch> -- <dir>` 覆盖工作区，静默丢掉了自己的三处修正
+
+为了把另一个分支的测试侧清理同步到本地，我用了
+`git checkout origin/feature/X -- tests/` + `git reset`。这**不是 merge，git 不会报冲突**，
+`git diff` 也显示"与目标分支一致"——看起来完全正常。
+
+但它把我在同三个文件上的修正一并覆盖成了旧版：
+
+| 文件 | 被丢掉的修正 | 后果 |
+| --- | --- | --- |
+| `tests/browser/conftest.py` | `browser_conftest` 改用包路径导入 | 34 项测试在多目录收集时全挂 |
+| `tests/render_support.py` | 字体白名单不再要求三套栈互不相同 | 14 项字体栈用例全挂 |
+| `tests/browser/test_render_smoke.py` | 告警页就绪信号改用 `wait_canned_page` | 4 个视口溢出用例超时失败 |
+
+**暴露时机**：合并后的 browser 渲染门槛出现 FAILED。查根因时对比"合并候选 vs 我的分支"，
+两边**完全一致**——因为两边一致的都是**被覆盖后的错版本**。
+
+**教训**：多来源汇合时，最终状态要按**意图**验收（本轮该有哪些修正），
+而不是按**来源一致性**验收。工作区"干净"不等于"正确"。
+
+**正确做法**：
+1. 合并两个来源的改动用 `git merge` / `git cherry-pick`，不要用 checkout 覆盖
+2. 已经用了 checkout 的话，事后逐个核对本次会话的每个修正是否还在（用 grep 找特征串）
+3. 提交前按修正点逐条验证，不只看文件是否一致
+
+### 3. 并发跑测试导致假失败
 
 4 核机器上同时跑多个 pytest，负载到 9.8，浏览器测试因资源竞争假失败
 （`test_frontend_components` 并发下失败、单独跑 `[100%]` 通过）。

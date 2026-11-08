@@ -16,7 +16,7 @@
 | [`plans/`](plans/) | **尚未落地**的方案、草案、待评审提案 | [`plans/plugin-sourced-shop-analytics.md`](plans/plugin-sourced-shop-analytics.md) |
 | [`guides/`](guides/) | 流程、操作、排障指南（agent 流程、测试、命令、常见坑） | [`guides/agent-safety.md`](guides/agent-safety.md)、[`guides/common-bugs.md`](guides/common-bugs.md) |
 | [`ops/`](ops/) | 部署、运行维护、备份、事故复盘 | [`ops/tts-erp.md`](ops/tts-erp.md)、[`ops/incident-reports/`](ops/incident-reports/) |
-| [`handoff/`](handoff/) | 实时 lane 登记表（协调状态，不是文档） | [`handoff/ACTIVE.md`](handoff/ACTIVE.md) |
+| [`handoff/`](handoff/) | 协调文档：团队上手说明、环境清单、专题执行记录（**不含实时状态表**） | [`handoff/README.md`](handoff/README.md)、[`handoff/session-summary-2026-11-08.md`](handoff/session-summary-2026-11-08.md) |
 | [`archive/`](archive/) | 归档区：过时、已完成、被取代、仅供取证的内容 | 见 [`archive/README.md`](archive/README.md) |
 
 写新文档时按上表选目录；`design/` 与 `plans/` 的区别是**是否已落地**，落地后把
