@@ -483,16 +483,18 @@ bash scripts/test_isolated.sh --refresh-template fast
 bash: scripts/envsetup/prepare-worktree.sh: No such file or directory
 ```
 
-**根因**：该脚本目前只在主 checkout 的工作区，尚未进入 `origin/master`（`git status` 显示 `AM`）。
+**根因**：该脚本已在 `origin/master`（`047a1ac`）。本节记录的是脚本尚未进 master 时的现象，现已不适用。
 
-**临时绕行**：
+**当前做法**：新建 worktree 后直接跑 `bash scripts/envsetup/prepare-worktree.sh`，脚本随 master 自动到位。
+
+**历史绕行方式（已不需要）**：
 
 ```bash
 cp /home/schan/tts-erp/scripts/envsetup/prepare-worktree.sh scripts/envsetup/prepare-worktree.sh
 ```
 
 > 拷贝后 worktree 变脏，§8 的 DoD 基线命令会以 `scoped runs require a clean committed worktree`（退出码 2）失败。
-> 根治办法是把该脚本提交到 master —— 见 §10.1。
+> 根治办法是把该脚本提交到 master —— 见 §10.1（已解决）。
 
 ---
 
@@ -505,15 +507,27 @@ docker exec postgres psql -U postgres -Atc \
   "select datname, pg_size_pretty(pg_database_size(datname)) from pg_database where datname like 'tts_erp%' order by pg_database_size(datname) desc;"
 ```
 
-实测 2026-11-08：除 `tts_erp_test_template` 外还有 **30 个** 残留库（多为 `tts_erp_test_<分支>_<sha>_<随机>` 形态，合计约 400 MB）。
+实测 2026-11-08：除 `tts_erp_test_template` 外还有 **22 个** 残留库（`tts_erp_test_<分支>_<会话>_<时间戳>_<pid>` 形态，合计约 400 MB）。
 其中 `tts_erp_test_template_*`、`tts_erp_test_video_publish_v*_template` 一类是别的 lane 刻意建的模板，**不要删**。
 清理残留前先确认归属，且只删本次任务产生的库。
+
+> **已清理（2026-11-08 20:55）**：22 个残留库已删除，template 基线库全部保留。
+> 两个必须注意的坑见 §10.3。
 
 ---
 
 ## 10. 本次复核发现的问题（需 owner 处理）
 
-### 10.1 `scripts/envsetup/prepare-worktree.sh` 未提交到 master —— 阻断性
+### 10.1 `scripts/envsetup/prepare-worktree.sh` 未提交到 master —— 阻断性 ✅ **已解决（2026-11-08 20:50）**
+
+> **处置结果**：由 Chief 用干净 worktree 完成合并并实测验收。
+> - 提交：`bc2fbb7 chore: 新增 worktree 测试环境准备脚本`
+> - 合并提交：`047a1ac docs: 修正测试服务器地址、新增 worktree 准备脚本与团队交接文档`
+> - 当前 `origin/master` = `047a1ac`，`git ls-tree origin/master scripts/envsetup/` 已含 `prepare-worktree.sh`（mode 100755）
+> - 实测：从该 master 新建 worktree，脚本自动到位并跑通（venv/.env.test 链接 + `npm ci` 232 包，退出码 0）
+> - `AGENTS.md` §5 命令表已增「新 worktree 测试环境准备」一行
+>
+> **下面的原始记录保留，作为问题现象的存档。**
 
 - 现象：主 checkout `git status` 显示 `AM scripts/envsetup/prepare-worktree.sh`；`git ls-tree origin/master scripts/envsetup/` 只有 `install.sh` 和 `install-test-deps.sh`。
 - 影响：
@@ -521,13 +535,26 @@ docker exec postgres psql -U postgres -Atc \
   2. 手工拷贝进去会让 worktree 变脏，DoD 基线命令退出码 2（§8.1 / §9.6）。
 - 建议：把该脚本提交到 master（commit 类型 `chore`），并由 owner 同步更新 `AGENTS.md` §5 的命令表。
 
-### 10.2 模板库刷新路径当前不可用 —— 高
+### 10.2 模板库刷新路径当前不可用 —— 高 ⚠️ **当前不阻断，但需在新增 migration 前解决**
+
+> **Chief 复核（2026-11-08 21:00）**：
+> - 模板库**当前不陈旧**。`tts_erp`（生产形状）与 `tts_erp_test_template` 均为 `0076_media_packs` / 306 张表，与 `alembic/versions/0076_media_packs.py` 三方对齐。
+> - **重要陷阱**：`.env.test` 里的 `TTS_ERP_DB_URL` 和 `TTS_ERP_DB_URL_TEST` **都指向 `tts_erp_v3_test`**，不是生产形状库，**不能拿来当刷新源**。
+> - 因此当前无需刷新。但只要仓库新增 migration 而模板库落后，就必须先解决生产 schema 源问题，否则 `--refresh-template` 必然失败。
+> - 详细说明见 `docs/ops/tts-erp.md` 的「模板库刷新依赖生产 schema 源」。
 
 - HP desk 上 `.env` 全都不存在，`TTS_ERP_DB_URL_PROD_SOURCE` 未设置 →
   `--refresh-template` 必然失败（§5.3 实测）。
 - 建议：由运维在测试机提供只读的生产形状库连接串（写 `.env` 或设 `TTS_ERP_DB_URL_PROD_SOURCE`），并明确该串的权限边界。
 
-### 10.3 30 个残留一次性克隆库 —— 低
+### 10.3 30 个残留一次性克隆库 —— 低 ✅ **已清理（2026-11-08 20:55）**
+
+> **处置结果**：清理了 22 个非 template 残留临时库，释放约 400 MB。
+> 保留未动：`tts_erp`、`tts_erp_test_template`、全部 `*_template_*` 基线库（`template_ads_ack`、`template_price_data`、`template_price_e2e`、`template_spu_compare_0069`、`video_publish_v1x/v2x_template`、`monitor_health_template`）、`tts_erp_v3_test`。
+>
+> **两个坑（后续清理必读）**：
+> 1. `psql -f -` 批量执行 `DROP DATABASE` 会包在单事务里，PG 报 "DROP DATABASE cannot run inside a transaction block"，**全部静默失败**。必须逐条单独执行。
+> 2. 删除前必须确认**没有正在跑的 pytest / test_baseline.sh 进程**——本次清理时有一个 Bot 正在跑 fast 基线，其临时库被误删，已通知其重跑。只查 `test_isolated.sh` 进程是不够的。
 
 - 约 400 MB，占用不大但会随时间累积；建议定期清理（§9.7）。
 
@@ -563,6 +590,17 @@ docker exec postgres psql -U postgres -Atc \
 | 14 | DoD 基线（脏 worktree） | `test_baseline.sh --scope auto --base 0b92d97` | `ERROR: scoped runs require a clean committed worktree`，退出码 2 |
 | 15 | DoD 基线（干净 worktree） | 同上 | `no application tests selected; perform any indicated documentation checks`，退出码 0 |
 | 16 | 基线查看 | `bash scripts/test_baseline.sh --show` | scope `fast`，master `e04c5e1...`，`count: 0` |
+
+**Chief 补充实测（2026-11-08 21:00）**
+
+| # | 检查项 | 命令 | 结果 |
+| --- | --- | --- | --- |
+| 17 | 模板库表数对比 | 分别查 `tts_erp` 与 `tts_erp_test_template` 的 `information_schema.tables` | 均为 306 张（排除 `pg_catalog`/`information_schema`） |
+| 18 | 生产形状库 alembic | `psql -d tts_erp -c "SELECT version_num FROM public.alembic_version;"` | `0076_media_packs` |
+| 19 | 模板库 alembic | `psql -d tts_erp_test_template -c "..."` | `0076_media_packs`（与生产形状库一致，模板不陈旧） |
+| 20 | `.env.test` 实际指向 | 解析 `.env.test` 两个变量（脱敏） | `TTS_ERP_DB_URL` 与 `TTS_ERP_DB_URL_TEST` **都指向 `tts_erp_v3_test`**，不是生产形状库，不能当刷新源 |
+| 21 | 脚本合并验收 | 从 `origin/master`（`047a1ac`）新建 worktree 后跑 `prepare-worktree.sh` | 脚本自动到位，venv/.env.test 链接 + `npm ci` 232 包，退出码 0 |
+| 22 | 残留库清理 | 逐条 `DROP DATABASE ... WITH (FORCE)` | 22 个删除成功，10 个 template 基线库 + `tts_erp` + `tts_erp_v3_test` 保留 |
 
 ---
 
