@@ -14,7 +14,6 @@ from urllib.parse import parse_qs
 
 import pytest
 
-import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
@@ -43,7 +42,7 @@ def _ordered_items(base: dict[str, Any], query: str) -> list[dict[str, Any]]:
     return sorted(items, key=lambda row: int(row["total_orders"]), reverse=reverse)
 
 
-def _open_page(frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str) -> Any:
+def _open_page(browser_conftest, frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str) -> Any:
     original = cast(Callable[..., Any], browser_conftest._mock_payload)
 
     def mock_payload(request_path: str, query: str = "") -> Any:
@@ -76,9 +75,9 @@ def _visible_total_orders(page: Any) -> list[int]:
 
 @pytest.mark.parametrize("path", ("/v2/pages/focused-spus", "/v2/pages/spu-roi"))
 def test_total_orders_header_keeps_numeric_server_order(
-    frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str
+    browser_conftest, frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:
-    page = _open_page(frontend_browser_renderer, monkeypatch, path)
+    page = _open_page(browser_conftest, frontend_browser_renderer, monkeypatch, path)
     # Replay load(): clearData → setSort → replaceData(server numeric desc).
     # Local string sorter (empty-table findSorter) rewrites 63,50,9 into 9,8,63.
     page.evaluate(

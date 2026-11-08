@@ -15,7 +15,6 @@ from playwright.sync_api import expect
 from render_support import overflow_report
 from test_spu_price_columns import _nested_payload
 
-import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
@@ -28,7 +27,7 @@ def _wait_rows(page):
 @pytest.mark.parametrize('profile', ['spu-roi', 'focused-spus'])
 @pytest.mark.parametrize('width', [375, 1440, 2560])
 def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
-    frontend_browser_renderer, monkeypatch, profile, width,
+    browser_conftest, frontend_browser_renderer, monkeypatch, profile, width,
 ):
     original = browser_conftest._mock_payload
 
@@ -158,7 +157,7 @@ def _enable_canned_writer(page):
     expect(page.get_by_role('button', name='移除 SPU ', exact=False)).to_have_count(2)
 
 
-def test_focused_list_reads_all_pages_beyond_a_thousand(frontend_browser_renderer, monkeypatch):
+def test_focused_list_reads_all_pages_beyond_a_thousand(browser_conftest, frontend_browser_renderer, monkeypatch):
     original = browser_conftest._mock_payload
     selected = [f'TEST_FOCUS_{index:04d}' for index in range(1003)]
     offsets = []
@@ -180,7 +179,7 @@ def test_focused_list_reads_all_pages_beyond_a_thousand(frontend_browser_rendere
 
 
 def test_focused_explicit_add_and_remove_never_replace_the_collection(
-    frontend_browser_renderer, monkeypatch,
+    browser_conftest, frontend_browser_renderer, monkeypatch,
 ):
     original = browser_conftest._mock_payload
     selected = ['TEST_FOCUS_A', 'TEST_FOCUS_B']
@@ -222,7 +221,7 @@ def test_focused_explicit_add_and_remove_never_replace_the_collection(
     assert selected == ['TEST_FOCUS_A', 'TEST_FOCUS_C']
 
 
-def test_focused_failed_patch_requires_readback_and_never_replays(frontend_browser_renderer, monkeypatch):
+def test_focused_failed_patch_requires_readback_and_never_replays(browser_conftest, frontend_browser_renderer, monkeypatch):
     original = browser_conftest._mock_payload
     selected = ['TEST_FOCUS_A', 'TEST_FOCUS_B']
     commands = []
@@ -249,7 +248,7 @@ def test_focused_failed_patch_requires_readback_and_never_replays(frontend_brows
     assert selected == ['TEST_FOCUS_A', 'TEST_FOCUS_B']
 
 
-def test_standard_batch_resolves_a_hundred_in_bounded_chunks(frontend_browser_renderer, monkeypatch):
+def test_standard_batch_resolves_a_hundred_in_bounded_chunks(browser_conftest, frontend_browser_renderer, monkeypatch):
     original = browser_conftest._mock_payload
     option_sizes = []
     captured = []

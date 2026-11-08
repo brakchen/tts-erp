@@ -11,12 +11,11 @@ from typing import Any, cast
 
 import pytest
 
-import conftest as browser_conftest
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
 
-def _open_spu_roi(frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+def _open_spu_roi(browser_conftest, frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     original = cast(Callable[..., Any], browser_conftest._mock_payload)
 
     def mock_payload(request_path: str, query: str = "") -> Any:
@@ -39,9 +38,9 @@ def _open_spu_roi(frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatc
 
 
 def test_inverted_range_keeps_the_date_just_typed(
-    frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+    browser_conftest, frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    page = _open_spu_roi(frontend_browser_renderer, monkeypatch)
+    page = _open_spu_roi(browser_conftest, frontend_browser_renderer, monkeypatch)
     page.evaluate(
         """() => {
           const start = document.querySelector('#filter-w-start');
@@ -58,9 +57,9 @@ def test_inverted_range_keeps_the_date_just_typed(
 
 
 def test_empty_change_while_focused_does_not_commit_clear(
-    frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
+    browser_conftest, frontend_browser_renderer: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    page = _open_spu_roi(frontend_browser_renderer, monkeypatch)
+    page = _open_spu_roi(browser_conftest, frontend_browser_renderer, monkeypatch)
     requests: list[str] = []
     page.on("request", lambda request: requests.append(request.url))
     page.evaluate(
