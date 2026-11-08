@@ -1,8 +1,9 @@
 # 主题目录索引（docs/ 四段式主题目录）
 
-> 建立时间：2026-11-08 · 维护者：产品经理（受 Chief 指派）
-> 扫描基线：本地克隆 `F:\MiniMax Work Result\agents\mavis\workspace\tts-erp`，分支 `chore/fix-test-server-address` @ `553f2231`。该分支的 `docs/` 与 `origin/master` @ `0b92d97d` **逐文件一致**，无差异，因此下文结论对当前 master 同样成立。
-> 扫描范围：`docs/` 下共 **190 个 markdown**（其中 `docs/README.md` 1 个，子目录下 189 个），分布在 16 个子目录。
+> 状态：待评审
+> 建立时间：2026-11-08 · 维护者：产品经理（受 Chief 指派）· 2026-11-08 修订（Chief 复核后）
+> 扫描基线：本地克隆 `F:\MiniMax Work Result\agents\mavis\workspace\tts-erp`，分支 `chore/fix-test-server-address` @ `553f2231`。**结论基线为 `553f2231`**，不是 `origin/master` @ `0b92d97d`——两者 `docs/` 相差 2 个文件（`docs/handoff/bot-team-setup-2026-11-08.md` 新增、`docs/ops/tts-erp.md` 修改），而 §1 三条硬约束的依据正是前者，因此以 `553f2231` 为准。
+> 计数复核（2026-11-08）：`553f2231` 的 `docs/` 有 **190 个 markdown**（`docs/README.md` 1 个 + 子目录 189 个），分布在 16 个子目录；`origin/master` @ `2b68b40a` 现有 **196 个**，多出的 6 个全部是 2026-11-08 的协调文档（`handoff/architecture-review-scope-2026-11-08.md`、`handoff/dev-env-checklist.md`、`handoff/p6-retirement-parallel-plan.md`、`handoff/p6-test-side-retirement-plan.md`、`handoff/test-baseline-verify-2026-11-08.md`、`handoff/topic-directory-index.md`），**不是新的主题方案**。按 190 去找文件会漏掉这 6 个；按 196 去找则要知道多出的都是协调文档。
 > **本文是目录导航，不是需求依据，也不是功能完成声明。** 每个主题的业务结论仍以该主题目录下的 `01` 文档为准；本文只回答「有哪些主题目录、齐不齐、在做什么」。
 
 ---
@@ -25,6 +26,10 @@
 2. 01 写产品经理，02+03 写开发工程师，04 写测试工程师；缺哪一段就在 §2 表格里如实标缺，**不要用别的名字凑数**（`plugins/monitor` 就是反面例子，见 §3）。
 3. 每个文档开头保留状态行（`docs/README.md` §2 要求）：待评审 / 待实施 / 已实施 / 已废弃。
 
+**再加两条本次修订补上的约束（见 §6 第 8、9 条）：** 目录随主题开工而建、不预建空壳；写「已归档」前必须先核实代码里是否真的已退役。
+
+**两个完整四段式目录的内容对齐情况：文件齐，口径也齐。** 早前版本称 `spu-profit-deterioration/`「文件齐了但内容口径没齐」，该结论已按 02/03/04 头部修订声明改正——详见 §2 末尾。需要单独注意的是**代码运行状态**（旧阈值 evaluator 写侧仍在生产跑），那不是文档口径问题。
+
 ---
 
 ## 2. 完整四段式主题目录（2 个）
@@ -41,7 +46,15 @@
 | `spu-profit-deterioration/` | 2026-10-08 | 2026-10-27 | 2026-10-27 | 2026-10-27 | `02a` 为 2026-10-07 |
 | `video-publish/` | 2026-10-08 | 2026-10-13 | 2026-10-13 | 2026-10-13 | — |
 
-**需要知道的一处不一致：** `spu-profit-deterioration/01`（PRD v3）明确写了「02/02a/03/04 仍包含旧告警方案，后续须对齐，不能用旧阈值、严重程度、历史确认规则替代本版本需求」。也就是说——**这个四段式目录内部，01 与 02/03/04 的业务方案尚未对齐**。文件齐了，但内容口径没齐。
+**关于「01 与 02/03/04 是否对齐」——已核实，对齐成立（2026-11-08 修订，改正旧结论）：**
+
+早前版本写「`spu-profit-deterioration/01` 明确写了『02/02a/03/04 仍包含旧告警方案』，因此这个四段式目录内部 01 与 02/03/04 业务方案尚未对齐」。**这条不成立**，原因有三：
+
+1. **02/03/04 已在 PRD v3 之后重写过。** 三份文件头部均写明：`02` = 「2026-10-24 修订……旧阈值、严重程度、历史确认设计不再适用于本页」；`03` = 「2026-10-24 修订。依据 PRD v3；本文替代旧阈值告警迁移计划……不得恢复阈值、严重程度、历史确认或策略建议」；`04` = 「2026-10-24 重建。权威为 PRD v3 AC-001～023、技术契约 02」。
+2. **真正过时的是 PRD 01 头部第 7 行**那句「02/02a/03/04 仍包含旧告警方案，后续须对齐」——写于 2026-10-07，之后 02/03/04 已按 v3 对齐。该句已在本次修订中改掉。
+3. **只有 `02a` 是旧方案**（脚本 `probe_spu_profit_deterioration_thresholds.py`、fast/confirmation seed、warning/critical），但它自己已标注「历史、不可直接外推到当前生产 evaluator……不是产品契约，也不是当前生产阈值的证明」——**这是该留着的历史证据，不是口径冲突**，不构成「未对齐」。
+
+**仍需知道的一处真实状态差异（不是文档口径问题，是代码运行状态）：** 旧阈值告警方案在代码里处于**「读侧已退役、写侧仍在生产跑」**的半退役状态，详见 §5 的对应条目。文档已对齐，但旧 evaluator 代码仍在线并每天产出快照。
 
 ---
 
@@ -80,11 +93,41 @@
 | 运行配置交互改造 | `docs/plans/2026-11-01-runtime-config-ux-design.md`、`docs/aegis/work/2026-11-01-runtime-config-ux/` | 运行配置 UI、原子发布、只读检查 | 建 `docs/runtime-config-ux/`；`aegis/work` 是执行记录，留在原处 |
 | RunningHub 换装工作流 | `docs/api/runninghub.md`、`docs/aegis/work/2026-11-07-runninghub/` | AI 工作流接入、凭据级配额、批量任务 | 建 `docs/runninghub/`；`api/runninghub.md` 是活契约，**留在原处只做引用，不要移动** |
 | 店铺入驻 / OAuth 授权 | `docs/plans/2026-10-31-shop-onboarding-design.md`、`docs/ops/shop-onboarding-upgrade.md` | 店铺注册台、OAuth、运营流程 | 建 `docs/shop-onboarding/`；注意 `api/tiktok-shop-oauth.md` 是活契约，别动 |
-| 前端渐进迁移 | `docs/plans/frontend-progressive-migration.md`、`frontend-p01-implementation.md`、`frontend-p02-implementation.md`、`frontend-remaining-implementation.md` | React/TS/Vite 迁移、HeroUI 应用壳 | 建 `docs/frontend-migration/` |
+| 前端渐进迁移 | `docs/plans/frontend-progressive-migration.md`、`docs/plans/frontend-p01-implementation.md`、`docs/plans/frontend-p2-implementation.md`、`docs/plans/frontend-remaining-implementation.md` | React/TS/Vite 迁移、HeroUI 应用壳 | 建 `docs/frontend-migration/` |
 | 插件架构清理 / dumps 重构 | `docs/plans/plugin-arch-cleanup-plan.md`、`docs/plans/dumps-tts-erp-refactor-proposal.md` | 插件接入协议、dumps 契约 | 建 `docs/plugin-arch-cleanup/` |
-| 测试基建提速 | `docs/plans/2026-11-06-test-feedback-speed.md`、`2026-11-07-test-throughput.md`、`docs/testing/baseline-*.md` | 隔离测试 runner、基线比对 | 建 `docs/test-infra/` |
-| SPU 利润劣化告警（旧方案） | `docs/design/spu-profit-deterioration-alert.md`、`docs/aegis/plans/2026-10-05-spu-profit-deterioration-alert.md` | — | **已被 §2 的 `spu-profit-deterioration/` PRD v3 取代**（PRD 明确「旧阈值、严重程度、历史确认规则不再适用」）。建议移 `docs/archive/`，保留取证价值 |
-| TikTok 视频发布（原单体方案） | `docs/design/tiktok-video-publish.md` | — | 是 `docs/video-publish/` 四段式的**拆分来源**（原 2781 行单体文档），当前状态行仍写 `Implemented`。建议标注指向四段式目录，或在四段式稳定后归档 |
+| 测试基建提速 | `docs/plans/2026-11-06-test-feedback-speed.md`、`docs/plans/2026-11-07-test-throughput.md`、`docs/testing/baseline-*.md` | 隔离测试 runner、基线比对 | 建 `docs/test-infra/` |
+| SPU 利润劣化告警（旧方案） | `docs/design/spu-profit-deterioration-alert.md`、`docs/aegis/plans/2026-10-05-spu-profit-deterioration-alert.md` | SPU 盈利、阈值告警 | **不能归档，只能标注**（2026-11-08 核实，详见下方说明） |
+| TikTok 视频发布（原单体方案） | `docs/design/tiktok-video-publish.md` | 内容运营、视频发布 | 是 `docs/video-publish/` 四段式的**拆分来源**（原 2781 行单体文档），当前状态行仍写 `Implemented`。建议标注指向四段式目录，或在四段式稳定后归档 |
+
+### 5.1 「SPU 利润劣化告警（旧方案）」为什么只能标注、不能归档
+
+旧方案（severity / sample_status / confirmation_status / thresholds / fast|confirmation）**在代码里处于「读侧已退役、写侧仍在生产跑」的半退役状态**，不是死代码。归档它等于文档说一套、代码跑另一套。
+
+**读侧已退役（已核实）：**
+
+- HTTP `/v2/analytics/spu-profit-deterioration` 只返回两期对比结果，**不吐** severity / sample_status 等旧字段。
+- `read_alerts()`（`tts_erp_v2/analytics/spu_deterioration_alert/read.py:310`）**没有任何 HTTP 调用方**——全仓仅这一处定义，无引用。
+- 前端直接挡掉旧筛选：`tts_erp_v2/static/js/spu-profit-deterioration.js` 中 `retired = ['layer', 'sample', 'severity', 'state']` 命中即返回「不支持旧告警筛选……请从链接移除」。
+
+**写侧仍在生产跑（已核实）：**
+
+- `sync_worker/scheduler.py` 仍注册 `analytics.spu_profit_deterioration_alert`（`interval_seconds=86400`）→ `tts_erp_v2/jobs/spu_deterioration_alert.py` → `read.py` 的 `evaluate()` → `materialize.py` 落库 `analytics.spu_deterioration_alerts`（表模型 `tts_erp_v2/db/models/analytics.py:29`，索引仍含 severity）。
+- 该 runtime config key `analytics.spu_profit_deterioration_alert.v1` 仍接通用 runtime-config API（create/draft/publish/rollback，见 `api/v2/config.py`、`runtime_config/workflow.py`）。
+
+**因此本索引的处理方式：** §5 该行只写「读侧已退役、写侧仍在运行、快照表无读取方」，**不写「已归档」**。旧方案文档本身也不移入 `docs/archive/`——归档状态与实际运行状态不符，比不归档更危险。
+
+**待决事项 —— 旧 evaluator 是否停写（2026-11-08：状态 = 待决，用户尚未确认）**
+
+开发工程师 2026-11-08 核查生产形状库时发现，该 config key 的 `published_version` 为空、`runtime_config_revisions` 表无该 key 的任何 revision，只有 `draft_version=1`，实际生效的是代码内 `SEED_FALLBACK_CONFIG`（回测暂定、enabled=true），落库 `effective_config_source=seed_fallback`。即：**这套阈值从未被人正式 publish，却每天在生产上产出判定，而快照表已无读取方。**
+
+| 事项 | 当前状态 |
+| --- | --- |
+| 旧 evaluator 是否停写（撤销 scheduler 注册 / 停跑该 job） | **待决** —— 属产品/运维授权动作，**本索引不预设结论** |
+| 旧方案文档是否归档 | **待决** —— 归档与「写侧是否仍运行」联动，不能先于停写决定 |
+| 阈值配置是否补一次正式 publish | **待决** —— 若不停写，需决定是把 `SEED_FALLBACK_CONFIG` 正式发布，还是承认它只是回测暂定值 |
+
+**处置纪律（无论最后怎么定）：** 决定落地前，本文与 PRD 01 一律按「读侧已退役、写侧仍在运行」表述；
+**不写「已归档」**，也不写「已废弃」。决定做出并落地后，再回填本表并同步 §5 该行。
 
 ---
 
@@ -96,13 +139,24 @@
 4. **文档 ≠ 实现**：01–04 里写「已实现」必须能指到具体的实施记录；PRD 本身永远只是需求依据。
 5. **口径单点定义**：盈利 / ROI / 费率只在 `docs/business/spu-profitability.md` 定义一次，别处只引用。
 6. **索引更新**：新建或补齐主题目录后，把 §2 / §3 表格同步改掉，并更新 §1 摘要计数。
-7. **目录归属提醒**：`docs/README.md` 把 `handoff/` 定义为「实时 lane 登记表（协调状态，不是文档）」。本索引放在这里是 Chief 指定的位置；`docs/handoff/bot-team-setup-2026-11-08.md` 已经是同目录的普通文档，先例存在。但如果你认为导航类文档更适合 `docs/README.md` 或 `docs/design/`，可以改挂载位置——**本索引不维护任何实时状态**，不会像 `ACTIVE.md` 那样过期。
+7. **目录归属提醒**：本索引留在 `docs/handoff/`，这是 Chief 2026-11-08 的决定——`handoff/` 实际已经是跨会话协调文档目录（已有 `bot-team-setup`、`dev-env-checklist`、P6 两份计划、`test-baseline-verify`、`architecture-review-scope` 等普通文档），本索引不含实时状态，不违反 `handoff/README.md`「不要维护实时状态表」。`docs/README.md` 里 `handoff/` 那一行的描述已同步改准。
+8. **目录随主题开工而建，不预先批量补空壳**（2026-11-08 Chief 决定）：新建 `docs/<主题>/` 目录的时机是**主题开工**，不是索引盘点。开工时由产品经理出 `01-product-proposal.md`、开发工程师出 `02`/`03`、测试工程师出 `04`。**不要为还没开工的主题预建目录**——空壳目录会让本索引自身制造它要避免的那种「文件齐了但内容没齐」的误导。已被取代的旧方案同理：先核实它在代码里是否已退役，再决定归档还是只加指向标注。
+9. **「已归档」必须有代码依据**：写某个方案已归档前，先确认它在当前 `origin/master` 上确实不再运行。文档与代码不一致时，索引按代码事实写，并标注「读侧已退役、写侧仍在运行」这类半退役状态（见 §5.1）。
 
 ---
 
 ## 7. 本次扫描没有做的事
 
-- **没有核对每个主题的业务内容是否与代码一致**——本次只做目录索引和文档头部阅读，没有查实现代码。
-- **没有评估主题的实现完成度**——各目录内部状态行自相矛盾的情况（见 §2 末尾）已如实标注，未做判定。
-- **没有移动、归档或改写任何既有文档**——§5 的「建议动作」全部只是建议，等 Chief 确认后再由对应 Bot 执行。
-- **没有提交到 git**——等待 Chief 确认。当前分支 `chore/fix-test-server-address`，本文件是工作区**唯一**新增/改动，未动任何既有文档，也未提交、未推送。
+- **没有核对每个主题的业务内容是否与代码一致**——除 §5.1 的 SPU 旧告警方案外，其余主题的业务内容与代码是否一致未做核对（本次是目录索引和文档头部阅读）。
+- **没有评估主题的实现完成度**——各目录内部状态行自相矛盾的情况已如实标注，未做判定。
+- **没有移动、归档或改写任何既有方案文档**——§5 的「建议动作」只是建议，等 Chief 确认后再由对应 Bot 执行。
+
+**本次修订（2026-11-08）做了什么：**
+
+- 修正扫描基线（原写「与 `origin/master` @ `0b92d97d` 逐文件一致」，实为差 2 个文件）。
+- 补 `状态：待评审` 状态行；更新计数说明（190 → 196 的构成）。
+- 改正 §2「01 与 02/03/04 未对齐」的结论（依据 02/03/04 头部修订声明）。
+- 按代码核实结果重写 §5 中 SPU 旧告警方案的处置（读侧退役 / 写侧在跑，不能归档）。
+- 维护规则新增第 8、9 条。
+
+**提交状态：** 本索引已提交（`13fa8074`），并已在 `origin/master` 中。本次修订基于 `origin/master` @ `2b68b40a`，在分支 `docs/fix-topic-directory-index` 上提交并推送。
