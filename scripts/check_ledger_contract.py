@@ -52,6 +52,14 @@ def _unverified_of(row):
     return up.strip()
 
 
+def _fixture_of(row) -> bool:
+    """夹具是否存在（决定这条 rule 有没有判定力）。"""
+    v = row.get("verification")
+    if isinstance(v, dict):
+        return bool(v.get("fixture_exists", True))
+    return row.get("verification_state") != "absent"
+
+
 def _cmd_of(row):
     v = row.get("verification")
     if isinstance(v, dict):
