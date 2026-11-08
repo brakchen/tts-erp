@@ -103,13 +103,23 @@ def normalize_stack(value: str) -> str:
 
 
 def token_font_stacks(css_text: str) -> set[str]:
-    """从 tokens.css 源文本解析 --sans/--mono/--serif 三套栈（归一化）。"""
+    """从 tokens.css 源文本解析 --sans/--mono/--serif 字体栈（归一化）。
+
+    返回值是**字体白名单**：页面上每一段文字的 computed font-family 必须落在
+    这个集合里，才能证明字体全部来自 tokens 而没有 vendor 或内联旁路。
+
+    三个别名必须都声明且都非空，但**不要求互不相同**：`fa475e0e`（2026-11-08
+    「统一 ERP 中文与数字字体栈」）把 --mono/--serif 都指向 --sans，这是有意的
+    产品决定，白名单此时是单元素集合，语义不变。
+    """
     stacks = set()
     for name in ("sans", "mono", "serif"):
         match = re.search(rf"--{name}:\s*([^;]+);", css_text)
         assert match is not None, f"tokens.css 未声明 --{name}"
-        stacks.add(normalize_stack(match.group(1)))
-    assert len(stacks) == 3, f"三套栈必须互不相同: {stacks}"
+        value = match.group(1).strip()
+        assert value, f"tokens.css 的 --{name} 是空值"
+        stacks.add(normalize_stack(value))
+    assert stacks, "tokens.css 未解析出任何字体栈"
     return stacks
 
 
