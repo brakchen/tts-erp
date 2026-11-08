@@ -273,6 +273,53 @@ class RuntimeSettings:
                 "shadowed": shadowed,
             }
 
+    @staticmethod
+    def _fingerprint(value: str | None) -> str | None:
+        """Stable, non-reversible fingerprint of a setting value.
+
+        2026-11-09：PG 口令曾因 owner 接口按设计返回明文而进入会话/聊天记录
+        （2026-11-09 实测事故）。⇒ 诊断接口一律只出指纹。
+
+        指纹用于回答三个诊断问题：哪几层有值 / 各层值是否相同 / 旧值是否还在。
+        用 sha256（含固定 salt）⇒ 不可从指纹反推原文；高熵值（口令/密钥）不可爆破。
+        """
+        if value is None:
+            return None
+        import hashlib
+        salt = os.environ.get("TTS_ERP_FINGERPRINT_SALT", "tts-erp-fp-v1")
+        return hashlib.sha256(f"{salt}\x00{value}".encode("utf-8")).hexdigest()[:32]
+
+    def get_setting_identity(
+        self,
+        name: str,
+        default: str | None = None,
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """**Identity** view of one setting — 永不含值域。
+
+        与 :meth:`get_setting_facts` 的区别：**这一层的返回值域里没有秘密**，
+        所以它可以出现在日志/工单/群聊里而不需要任何脱敏。
+
+        Returns::
+
+            {"layers":   {层: 指纹},
+             "effective": 指纹,
+             "source":    "dotenv"|"runtime_file"|"process_env"|"default",
+             "shadowed":  {层: 指纹},
+             "all_equal": bool}
+        """
+        facts = self.get_setting_facts(name, default, env=env)
+        layers = {k: self._fingerprint(v) for k, v in facts["layers"].items()}
+        shadowed = {k: self._fingerprint(v) for k, v in facts["shadowed"].items()}
+        return {
+            "layers": layers,
+            "effective": self._fingerprint(facts["effective"]),
+            "source": facts["source"],
+            "shadowed": shadowed,
+            "all_equal": len({v for v in layers.values() if v is not None}) <= 1,
+        }
+
     def revision(self) -> int:
         """Refresh file signatures and return the monotonic config revision."""
         with self._lock:
@@ -336,6 +383,16 @@ def get_setting_facts(
 ) -> dict[str, Any]:
     """Module-level twin of :meth:`RuntimeSettings.get_setting_facts`."""
     return _settings.get_setting_facts(name, default, env=env)
+
+
+def get_setting_identity(
+    name: str,
+    default: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Module-level twin of :meth:`RuntimeSettings.get_setting_identity`."""
+    return _settings.get_setting_identity(name, default, env=env)
 
 
 def config_revision() -> int:
