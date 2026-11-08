@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from urllib.parse import urlsplit
 import logging
 import sys
 from collections.abc import Iterable
@@ -155,6 +156,46 @@ class Finding:
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, sort_keys=True)
+
+    def to_public(self) -> dict[str, Any]:
+        """Outbound projection — allowlisted, non-identifying fields only.
+
+        ``details`` is filtered key by key: rules (b)/(c) and the
+        zombie rule can carry upstream error text, shop identifiers
+        and credential hints in there, and this payload is about to
+        leave the host.
+        """
+        return {
+            "job_name": self.job_name,
+            "rule": self.rule,
+            "severity": self.severity,
+            "detected_at": self.detected_at,
+            "details": {
+                k: v for k, v in self.details.items() if k in PUBLIC_DETAIL_FIELDS
+            },
+        }
+
+
+# ─── Outbound payload allowlist (脱敏在出网面，不在存储面) ───────────
+# The webhook payload leaves this host. Only these keys may travel:
+# internal job names, rule names, severity, timestamps, and threshold /
+# duration style evidence that carries no business identifier.
+#
+# Explicitly NOT allowed outbound: shop_id / external_id / credential_id,
+# upstream error codes and error text (may embed shop identifiers),
+# any sync_jobs.extra field, and any request/response body.
+#
+# sync_jobs.error_message keeps its full text in the database for local
+# audit; redaction happens here, on the way out.
+PUBLIC_DETAIL_FIELDS: frozenset[str] = frozenset({
+    "interval_seconds",
+    "threshold_seconds",
+    "stale_for_seconds",
+    "zombie_age_seconds",
+    "consecutive_failure_count",
+    "oldest_running_started_at",
+    "exit_code",
+})
 
 
 # ─── DB-side helpers ───────────────────────────────────────────────────
@@ -488,10 +529,13 @@ def post_webhook(url: str, findings: list[Finding], *, timeout: float = WEBHOOK_
         # Don't ping the webhook when there's nothing to say — keeps
         # the pager quiet and saves a round-trip.
         return True
+    if not url.lower().startswith(("http://", "https://")):
+        log.warning("webhook URL must be http(s); refusing to POST")
+        return False
     payload = {
         "event": "watchdog_alert",
         "ts": dt.datetime.now(tz=dt.timezone.utc).isoformat(),
-        "findings": [json.loads(f.to_json()) for f in findings],
+        "findings": [f.to_public() for f in findings],
     }
     try:
         import httpx
@@ -572,7 +616,24 @@ def main(argv: list[str] | None = None) -> int:
     emit(findings)
     webhook_url = (get_setting("TTS_ERP_ALERT_WEBHOOK_URL", "") or "").strip()
     if webhook_url:
-        post_webhook(webhook_url, findings)
+        delivered = post_webhook(webhook_url, findings)
+        if not delivered:
+            # A dropped alert must leave a trace. Otherwise "the webhook
+            # is configured" is indistinguishable from "the webhook works",
+            # and a 401/400 from the destination looks exactly like success.
+            sys.stderr.write(
+                json.dumps(
+                    {
+                        "event": "watchdog_webhook_failed",
+                        "ts": dt.datetime.now(tz=dt.timezone.utc).isoformat(),
+                        "url_host": urlsplit(webhook_url).hostname or "",
+                        "finding_count": len(findings),
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            sys.stderr.flush()
     return 1 if findings else 0
 
 
