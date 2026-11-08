@@ -185,3 +185,40 @@ def test_changed_backend_test_is_narrow_but_deleted_and_shared_tests_stay_broad(
     assert select([path], deleted=frozenset({path})).backend_all
     assert select(["tests/api/conftest.py"]).backend_all
     assert select(["tts_erp_v2/db/session.py"]).backend_all
+
+
+def test_every_selected_test_path_still_exists_on_disk():
+    """选择器引用的测试文件必须真实存在。
+
+    P6 退役删掉三个旧前端测试后，选择器仍把它们当作「必跑目标」，
+    于是每次非 fast 范围的基线运行都把它们报成 missing 并 exit 1。
+    这条断言把「引用了已删文件」变成红灯，而不是等某次基线跑到一半才发现。
+    """
+    from scripts import _test_selection as selection_module
+
+    referenced: list[str] = [
+        selection_module.COMPONENTS,
+        selection_module.PACKAGER,
+        selection_module.SOURCE_CONTRACTS,
+        selection_module.STYLE_TOKENS,
+        selection_module.SELECTOR_TESTS,
+        selection_module.ZABBIX_CHECK,
+        selection_module.SHARED_SHELL_BROWSER,
+        selection_module.DRAWER_BROWSER,
+    ]
+    for _, (_, tests) in selection_module.API_CONTRACTS.items():
+        referenced.extend(tests)
+    for files in selection_module.MOCK_BROWSER.values():
+        referenced.extend(files)
+    for files in selection_module.PAGE_BROWSER.values():
+        referenced.extend(files)
+    referenced.extend(selection_module.SCENARIOS.values())
+
+    missing = sorted(
+        {
+            target
+            for target in referenced
+            if not (selection_module.ROOT / target.split("::")[0]).is_file()
+        }
+    )
+    assert not missing, f"选择器引用了不存在的测试文件: {missing}"
