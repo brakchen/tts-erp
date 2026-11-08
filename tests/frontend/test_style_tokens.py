@@ -166,6 +166,10 @@ def test_every_var_reference_resolves():
     不是允许令牌缺失。
     """
     declared = set(_declared_tokens())
+    # React 侧允许声明组件作用域令牌（如 --erp-control-height），
+    # 这些由自己在同一层声明，属于合法契约，不是缺失。
+    for path in _react_css_files():
+        declared |= set(_custom_property_declarations(_load(path)))
     # Bootstrap 自带变量（--bs-*）由 vendor 提供，不在本仓库声明
     problems: list[str] = []
 
@@ -194,10 +198,14 @@ def test_pages_do_not_redefine_root_tokens():
     """页面样式不得重新定义 ``:root`` —— 令牌唯一来源是 tokens.css。"""
     offenders = []
     for path in _react_css_files():
-        if re.search(r":root\s*\{", _load(path)):
-            offenders.append(path.name)
+        declared = set(_custom_property_declarations(_load(path), selector=":root"))
+        redefined = sorted(declared & CANONICAL_TOKENS)
+        if redefined:
+            offenders.append(f"{path.relative_to(REPO)}: {redefined}")
     assert not offenders, (
-        f"以下页面样式重新定义了 :root 令牌: {offenders} —— 请改为引用 tokens.css"
+        "以下页面样式重新定义了设计令牌: "
+        + "; ".join(offenders)
+        + " —— 请改为引用 tokens.css"
     )
 
 
