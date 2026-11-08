@@ -1,11 +1,15 @@
-"""Authenticated page routes and retained legacy-document rendering helpers.
+"""Authenticated page routes; every route renders through the React frontend.
 
 Registered pages use the manifest-backed React renderer; HTTP route and role
 gates remain here. Both profitability URLs load one shared React module.
-Their former Jinja shell and global DOM-owning scripts are retired.
+Their former Jinja shell and global DOM-owning scripts are retired, and the
+legacy Jinja document renderer is gone — no route here serves a Jinja document.
 
-Legacy helpers remain for other retained documents and their tests. They own
-Jinja context, shared navigation and independent CSS/JS content hashes only.
+The shared navigation shell constants (``_sidebar_html`` / ``_SIDEBAR_CSS`` /
+``_SIDEBAR_TOGGLE_JS``) and the content-hash helpers stay in this module on
+purpose: no route reaches them, but ``docs/design/reuse-evaluation-2026-10.md``
+decided to keep them unchanged and the test suite asserts them directly.
+They are a reuse reference, not a rendering path.
 Frontend assets and API URLs respect the server-provided root_path.
 """
 
