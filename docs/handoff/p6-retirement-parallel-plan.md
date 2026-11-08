@@ -15,10 +15,26 @@
 | `MIGRATED_PAGE_IDS` 已含 **19** 项 | `tts_erp_v2/api/v2/frontend_pages.py`（18 个注册页 + `login`） |
 | `PAGES` 注册表共 **18** 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
 | **20** 个页面目录都有真实 React/TS 代码 | `frontend/src/pages/`（18 注册页 + `login` + `message` / `oauth-onboard`）；`spu-roi` 与 `focused-spus` 共用 `spu-profitability/` 目录，见 `frontend/src/app/page-loader.ts:6-7` |
-| 前端页面代码 **16075 行**（含测试）／**9645 行**（不含测试） | `frontend/src/pages/`，141 / 103 个文件；用 `git grep -h '' <ref> -- 'frontend/src/pages/*'` 统计 |
+| 前端页面代码 **16075 行**（含测试）／**9645 行**（不含测试） | `frontend/src/pages/`，共 **141** 个文件 = **103** 个实现文件 + **38** 个测试文件（`*.test.ts` / `*.test.tsx`）；用 `git grep -h '' <ref> -- 'frontend/src/pages/*'` 统计；排除测试文件用 `':(exclude)frontend/src/pages/*.test.*'` |
 | 旧 Jinja 模板已清空 | `tts_erp_v2/templates/pages/` 现存 **0** 个（`f72a3089` 退役前为 12 个） |
 | 旧页面 JS 只剩 `console.js` | `tts_erp_v2/static/js/` 现存 **1** 个（`f72a3089` 退役前为 13 个）；`console.js` 是多页面共用的 active 资产，**不是**孤儿 |
 | 旧 renderer 分支已从代码移除 | `tts_erp_v2/api/v2/pages.py` 已无 `_render_page` / Jinja 环境，全仓 `templates/pages` 引用为 0 |
+
+**统计口径（2026-11-08 补充，避免下次又写出别的数）**
+
+「前端代码多少行」这个问题有三个数，取决于口径，引用时必须带口径：
+
+| 口径 | 行数 | 文件数 | 怎么数 |
+| --- | --- | --- | --- |
+| 全部前端页面代码 | **16075** | 141 | `git grep -h '' <ref> -- 'frontend/src/pages/*'` |
+| 排除测试文件 | **9645** | 103 | 同上 + `':(exclude)frontend/src/pages/*.test.*'` |
+| 仅测试文件 | 6430 | 38 | `git grep -h '' <ref> -- 'frontend/src/pages/*.test.ts' 'frontend/src/pages/*.test.tsx'` |
+
+**38 个测试文件全部是 `*.test.ts` / `*.test.tsx`**（无 `.spec.` 命名），分布在各页面目录内。
+三个数自洽可复算：38 + 103 = 141 文件，6430 + 9645 = 16075 行。
+
+写"约 X 千行"这类近似值时，本项目历史上有过 1.4 万 / 1.6 万 / 1 万三种说法——
+**不要再用近似值，直接带口径写精确数**。
 
 **结论**：P6 的退役与收口已落地（见下文「已完成」各节），剩余工作是最终验证与合入。
 
