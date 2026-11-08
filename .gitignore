@@ -79,3 +79,6 @@ plugins/*/node_modules/
 /frontend/.hmr-probe/
 /frontend/coverage/
 /tts_erp_v2/static/frontend/
+
+# 部署账本：由 git rev-parse HEAD 生成，不进版本库
+.deployed-commit
