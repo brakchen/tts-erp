@@ -121,13 +121,45 @@ bash scripts/envsetup/install-test-deps.sh --check      # 前置依赖体检
 
 ---
 
-## 八、待确认事项
+## 八、看板不可用时的并行方案
 
-**tower-do 看板工具在本会话不可用**。仓库 `AGENTS.md` §8 要求：多会话/多 agent 并行开发时，必须用 tower-do 看板登记 lane、写明文件归属，避免多个 Bot 撞同一批文件。HP desk 上已有 50 多个 worktree 并行，这个冲突风险是真实存在的。
+**tower-do 看板工具在本会话不可用**（`mcp list` 为空）。仓库 `AGENTS.md` §8 要求：多会话/多 agent 并行开发时，必须用 tower-do 看板登记 lane、写明文件归属，避免多个 Bot 撞同一批文件。HP desk 上已有 50 多个 worktree 并行，这个冲突风险是真实存在的。
 
-目前 Bot 之间靠群聊消息交接文件范围来规避。如果要上真正的并行开发，需要先解决看板接入；在此之前建议串行推进（一次一个开发任务）。
+**替代方案（本期采用）**：用 `docs/handoff/p6-retirement-parallel-plan.md` 里的**显式写域声明**协调。每个 lane 开工前在群里声明自己的文件清单，三份清单互不重叠。退役前强制 `git grep` 三连检查（有引用先改引用方，不先删文件）。
 
-如果本期要并行，需要你决定：
+这套办法的前提是：切分依据是**文件**，而不是逻辑任务。P6 退役旧模板正好满足——退役对象就是文件，天然可切。
 
-- 接入 tower-do（Pi 扩展，需要在 MiniMax Bot 侧有对应 MCP）
-- 或者接受用群聊 + 明确的文件范围声明来协调
+如果后续要并行做**逻辑任务**（比如同时改同一个模块的上下游），这套办法不够，必须先接入 tower-do。
+
+---
+
+## 九、本期主线与当前状态
+
+**主线**：前端渐进迁移的 P6 退役与收口。
+
+**核实结论（与方案文档的状态说明不同，以实测为准）**：P2–P5 实质已完成。
+
+| 事实 | 位置 |
+| --- | --- |
+| `MIGRATED_PAGE_IDS` 已含 19 个页面 | `tts_erp_v2/api/v2/frontend_pages.py` |
+| `PAGES` 注册 19 个页面，全部已迁移 | `tts_erp_v2/accounts/pages.py:26` |
+| 19 个页面目录有真实 React/TS 代码，约 1.4 万行 | `frontend/src/pages/` |
+| 12 个旧 Jinja 模板 + 13 个旧 JS 脚本仍在 | `tts_erp_v2/templates/pages/`、`tts_erp_v2/static/js/` |
+| 旧 renderer 分支仍在 | `tts_erp_v2/api/v2/pages.py` |
+
+`docs/plans/frontend-progressive-migration.md` 顶部"P2–P6 待实施"的说法已过时，应在合并 P6 时一并更新。
+
+**三个 lane 的写域分配**：
+
+| lane | 负责人 | 写域 |
+| --- | --- | --- |
+| A | 开发工程师 | `api/v2/pages.py`、`static/js/console.js`、`static/vendor/`、`frontend/src/app/` |
+| B | 产品经理 | 基础设置组 6 个模板 + 5 个脚本 |
+| C | 测试工程师 | 数据工具与内容资产组 5 个模板 + 6 个脚本 + `api/v2/ad_daily.py` |
+
+**合并顺序**：lane B、C 相互独立可先合；lane A 依赖 lane B 删除 `manual-costs.html`（console.js 的最后一个页面级引用在那里）。
+
+**已交付的其他产出**：
+- `docs/handoff/topic-directory-index.md` —— 190 个文档的四段式主题目录索引
+- `docs/handoff/p6-retirement-parallel-plan.md` —— P6 并行执行方案
+- `scripts/envsetup/prepare-worktree.sh` —— worktree 环境准备脚本
