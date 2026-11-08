@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react';
 import { Button, Input, Label, Modal, ProgressBar, TextField } from '@heroui/react';
 import { ApiError } from '../../shared/api/client';
 import type { FrontendBootstrap } from '../../shared/contracts';
@@ -7,7 +7,7 @@ import { UploadTags } from './TagEditor';
 import { ActionError, DiscardDialog, mediaError, mediaWrite, recordLink, uncertainResult, useLeaveGuard } from './media-ui';
 import { confirmUpload, imageTypes, requestUpload, transferMediaFile } from './media-upload';
 
-const types = imageTypes + ',video/mp4,video/webm,video/quicktime';
+const acceptedTypes = (imageTypes + ',video/mp4,video/webm,video/quicktime').split(',');
 type Phase = 'draft' | 'preparing' | 'sending' | 'confirming' | 'attaching' | 'prepare-error' | 'send-error' | 'confirm-error' | 'restart' | 'attach-error';
 
 function LocalFilePreview({ file }: { file: File }) {
@@ -41,7 +41,8 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
   const formId = useId();
   const [file, setFile] = useState<File>();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [filename, setFilename] = useState('');
+  const [customFilename, setCustomFilename] = useState<string>();
+  const filename = customFilename ?? file?.name.slice(0, 255) ?? '';
   const [tags, setTags] = useState<string[]>([]);
   const [ticket, setTicket] = useState<UploadTicket>();
   const [phase, setPhase] = useState<Phase>('draft');
@@ -64,6 +65,26 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
     if (busy.current) return;
     if (file || filename.trim() || tags.length) setDiscard(true);
     else onClose();
+  }
+
+  function selectFile(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const next = input.files?.[0];
+    if (!next) return;
+    setTicket(undefined);
+    setPrepareUncertain(false);
+    setPhase('draft');
+    if (!next.size || !acceptedTypes.includes(next.type)) {
+      input.value = '';
+      setFile(undefined);
+      setError(next.size
+        ? '不支持此文件格式。请选择 JPEG、PNG、WebP、GIF、MP4、WebM 或 MOV 文件。'
+        : '请选择非空的文件。');
+      return;
+    }
+    setFile(next);
+    setCustomFilename((current) => current?.trim() ? current : undefined);
+    setError('');
   }
 
   async function attach(current: UploadTicket) {
@@ -158,21 +179,13 @@ export default function UploadAsset({ bootstrap, target, onClose, onComplete }: 
               event.preventDefault();
               if (editable && file?.size) void run(start);
             }}>
-              <TextField value={filename} onChange={setFilename} isDisabled={!editable}>
+              <TextField value={filename} onChange={setCustomFilename} isDisabled={!editable}>
                 <Label>素材名称</Label><Input maxLength={255} autoFocus />
               </TextField>
               <div className="media-upload-file">
                 <span className={file ? undefined : 'text-muted'}>{file?.name ?? '图片或视频'}</span>
-                <input ref={fileInput} type="file" hidden aria-label="素材文件" accept={types} disabled={!editable} onChange={(event) => {
-                  const next = event.currentTarget.files?.[0];
-                  if (!next) return;
-                  setTicket(undefined);
-                  setPrepareUncertain(false);
-                  setPhase('draft');
-                  setFile(next);
-                  setFilename((current) => current.trim() ? current : next.name.slice(0, 255));
-                  setError(next.size === 0 ? '请选择非空的文件。' : '');
-                }} />
+                <input ref={fileInput} type="file" hidden aria-label="素材文件" accept={acceptedTypes.join(',')}
+                  disabled={!editable} onChange={selectFile} />
                 <Button type="button" variant="secondary" isDisabled={!editable} onPress={() => fileInput.current?.click()}>
                   {file ? '更换文件' : '上传文件'}
                 </Button>

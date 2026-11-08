@@ -63,7 +63,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   }
 
   return <div className="erp-page media-workspace">
-    {selected ? <HumanMaterials key={selected} root={root} id={selected} revision={revision} canWrite={canWrite}
+    {selected ? <HumanMaterials key={selected} bootstrap={bootstrap} id={selected} revision={revision} canWrite={canWrite}
       onBack={() => { returning.current = selected; select(null); }}
       onPick={setPicker} onChanged={refresh} /> : <>
       <div className="media-list-toolbar">

@@ -393,6 +393,39 @@ def test_confirm_unknown_asset_is_404(api_client_focused, readwrite_key):
 # ---------------------------------------------------------------------------
 
 
+def test_asset_keyword_matches_literal_substrings(api_client_focused, readwrite_key):
+    headers = {"Authorization": f"Bearer {readwrite_key}"}
+    exact = _upload_one(
+        api_client_focused,
+        readwrite_key,
+        filename="TEST_100%.jpg",
+        tags=[r"TEST rack\path / blue"],
+    )
+    decoy = _upload_one(
+        api_client_focused,
+        readwrite_key,
+        filename="TEST_100X.jpg",
+        tags=["TEST rackpath X blue"],
+    )
+    for asset_id, description in [(exact, "TEST preset_blue"), (decoy, "TEST presetXblue")]:
+        saved = api_client_focused.patch(
+            f"/v2/media/assets/{asset_id}",
+            headers=headers,
+            json={"description": description},
+        )
+        assert saved.status_code == 200
+
+    for keyword in ("100%", "PRESET_BLUE", r"rack\path", "/ blue"):
+        result = api_client_focused.get(
+            "/v2/media/assets",
+            headers=headers,
+            params={"keyword": keyword, "cursor": ""},
+        )
+        assert result.status_code == 200
+        assert result.json()["total"] == 1
+        assert [item["asset_id"] for item in result.json()["items"]] == [exact], keyword
+
+
 def test_list_assets_requires_readonly(api_client_focused, readwrite_key):
     # readwrite satisfies readonly, so a readwrite key must still succeed.
     r = api_client_focused.get(

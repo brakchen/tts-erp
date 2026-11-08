@@ -883,6 +883,30 @@ it('keeps removal confirmation exclusive while pending and retains its failures'
   expect(fetcher.mock.calls.some(([, init]) => init.method === 'PATCH')).toBe(false);
 });
 
+it('blocks unsupported replacement files before preview or requesting an upload ticket', async () => {
+  const user = userEvent.setup();
+  const fetcher = apiFetch(async () => json(page()));
+  vi.stubGlobal('fetch', fetcher);
+  render(<MediaAssets bootstrap={bootstrap} />);
+  await user.click(button('上传素材'));
+
+  const input = screen.getByLabelText('素材文件');
+  const image = new File(['abc'], 'TEST_local.png', { type: 'image/png' });
+  fireEvent.change(input, { target: { files: [image] } });
+  expect(button('开始上传')).toBeEnabled();
+
+  fireEvent.change(input, { target: { files: [new File(['text'], 'TEST_notes.txt', { type: 'text/plain' })] } });
+  expect(screen.getByRole('alert')).toHaveTextContent('不支持此文件格式');
+  expect(button('开始上传')).toBeDisabled();
+  expect(screen.queryByRole('img', { name: /本地图片预览/ })).not.toBeInTheDocument();
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
+
+  fireEvent.change(input, { target: { files: [image] } });
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(button('开始上传')).toBeEnabled();
+});
+
 it('previews the selected local file before upload and releases URLs on replacement and departure', async () => {
   const user = userEvent.setup();
   vi.stubGlobal('XMLHttpRequest', Upload);

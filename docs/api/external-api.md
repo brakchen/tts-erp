@@ -498,9 +498,10 @@ with a presigned URL. Design:
    `status` (`awaiting_upload`/`ready`/`failed`), `keyword`, `tag`,
    `digitalHumanId` (linked to this persona), and
    `excludeDigitalHumanId` (unlinked to this persona) filters; returns
-   `{items, total, limit, offset}`. `keyword` matches filename, description, or
-   a tag substring, case-insensitively; `tag` matches one complete normalized
-   label and accepts saved labels of any length. Exclusions apply before both
+   `{items, total, limit, offset}`. `keyword` matches a literal substring in
+   the filename, description, or a tag, ignoring case. Characters such as
+   `%` and `_` match themselves. `tag` matches one complete normalized label
+   and accepts saved labels of any length. Exclusions apply before both
    pagination and the total count. Each item includes server-calculated
    `usageCount`, counting references from undeleted personas, including archived
    personas. Asset metadata remains readable when MinIO

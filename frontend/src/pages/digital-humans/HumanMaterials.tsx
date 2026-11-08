@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Checkbox, Chip, Label } from '@heroui/react';
+import type { FrontendBootstrap } from '../../shared/contracts';
 import AssetCard from '../media-assets/AssetCard';
 import { CursorTail, useCursorFeed } from '../media-assets/CursorFeed';
 import OperationConfirmation from '../media-assets/OperationConfirmation';
@@ -7,10 +8,11 @@ import ViewAsset from '../media-assets/ViewAsset';
 import { decodeAssetList, decodeDigitalHuman, type DigitalHuman } from '../media-assets/contracts';
 import { AssetTags, ReadStatus, assetType, mediaWrite, useMediaAction, useMediaRead } from '../media-assets/media-ui';
 
-export default function HumanMaterials({ root, id, revision, canWrite, onBack, onPick, onChanged }: {
-  root: string; id: string; revision: number; canWrite: boolean;
+export default function HumanMaterials({ bootstrap, id, revision, canWrite, onBack, onPick, onChanged }: {
+  bootstrap: FrontendBootstrap; id: string; revision: number; canWrite: boolean;
   onBack: () => void; onPick: (human: DigitalHuman) => void; onChanged: () => void;
 }) {
+  const root = bootstrap.rootPath;
   const read = useMediaRead(root, '/digital-humans/' + id + '?includeAssets=false', decodeDigitalHuman, revision);
   const human = read.data;
   const feed = useCursorFeed(root, human ? '/assets?digitalHumanId=' + id : null, decodeAssetList, revision);
@@ -99,7 +101,7 @@ export default function HumanMaterials({ root, id, revision, canWrite, onBack, o
       </ul>
       <CursorTail {...feed} paused={Boolean(view || removing)} />
     </>}
-    {view && <ViewAsset root={root} id={view} onClose={() => setView(undefined)} />}
+    {view && <ViewAsset bootstrap={bootstrap} id={view} onClose={() => setView(undefined)} />}
     {removing && <OperationConfirmation title={removing.title}
       description="仅解除与当前档案的关联，素材和其他档案的关联会保留。"
       pending={action.pending} error={action.error} confirmLabel="确认移除"
