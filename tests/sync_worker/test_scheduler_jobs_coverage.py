@@ -76,13 +76,23 @@ EXPECTED_JOB_INTERVALS = {
     "spu.image_mirror": 1800,
     "fx.sync": 3600,
     "analytics.shop_fee_rate": 86400,
-    "analytics.spu_profit_deterioration_alert": 86400,
 }
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """The registry contains 6 TikTok jobs and 14 system jobs."""
-    assert len(JOBS) == 20
+    """The registry contains 6 TikTok jobs and 13 system jobs."""
+    assert len(JOBS) == 19
+
+
+def test_legacy_threshold_alert_job_stays_unregistered() -> None:
+    """The old severity/sample_status evaluator was stopped on 2026-11-09.
+
+    PRD v3 reads profitability directly and nothing consumes the
+    ``analytics.spu_deterioration_alerts`` snapshot any more, so
+    re-registering the job would only recreate daily writes nobody reads.
+    Re-enabling it is a product decision, not a silent registry edit.
+    """
+    assert "analytics.spu_profit_deterioration_alert" not in JOBS
 
 
 @pytest.mark.parametrize(
@@ -206,7 +216,8 @@ def test_overdue_first_runs_fires_job_that_never_succeeded() -> None:
     deployed, the worker started 21:17, and the job did not fire until
     2026-10-07 21:17 — so ``analytics.spu_deterioration_alerts`` stayed
     empty and the read API 503'd with
-    "materialized alert snapshot is unavailable".
+    "materialized alert snapshot is unavailable". That job was unregistered
+    on 2026-11-09, so the exemplar here is the remaining 24 h job.
     """
     from datetime import UTC, datetime, timedelta
 
@@ -215,8 +226,8 @@ def test_overdue_first_runs_fires_job_that_never_succeeded() -> None:
 
     overdue = _overdue_first_runs(factory, now=now, jitter_seconds=30)
 
-    assert "analytics.spu_profit_deterioration_alert" in overdue
-    first_fire = overdue["analytics.spu_profit_deterioration_alert"]
+    assert "analytics.shop_fee_rate" in overdue
+    first_fire = overdue["analytics.shop_fee_rate"]
     assert now <= first_fire <= now + timedelta(seconds=300)
 
 

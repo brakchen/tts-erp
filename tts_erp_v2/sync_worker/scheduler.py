@@ -255,13 +255,14 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="run_scheduled",
     ),
-    "analytics.spu_profit_deterioration_alert": JobSpec(
-        job_name="analytics.spu_profit_deterioration_alert",
-        module_path="tts_erp_v2.jobs.spu_deterioration_alert",
-        interval_seconds=86400,
-        is_tiktok=False,
-        entrypoint="run_scheduled",
-    ),
+    # ── 旧阈值告警 evaluator 已于 2026-11-09 停写 ──────────────────────
+    # `analytics.spu_profit_deterioration_alert` 不再注册。PRD v3 的对比页
+    # 直接读 `analytics.spu_profitability`，从不读 `analytics.spu_deterioration_alerts`；
+    # 旧 evaluator 每天算出的 severity / sample_status 判定已无任何读取方
+    # （`read_alerts()` 零调用方）。JOBS 数 20 → 19。
+    # 只撤销注册：不删 `tts_erp_v2/jobs/spu_deterioration_alert.py`，也不删
+    # 快照表 —— 删表属破坏性操作，需用户授权后另开 migration 处置。
+    # 重新启用属产品决定，不接受在注册表里静默改回。
 }
 
 
