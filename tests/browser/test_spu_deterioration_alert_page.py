@@ -773,7 +773,10 @@ def test_latest_wins_data_response_and_error(
     page.evaluate(
         "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
     )
-    expect(page.locator(ROWS)).not_to_contain_text("TEST-A-late")
+    # The late answer must not appear anywhere on the page. When the winning
+    # scope failed there is no table at all, so assert on the document text
+    # rather than on the (absent) row locator.
+    expect(page.locator("body")).not_to_contain_text("TEST-A-late")
     if b_status == 200:
         expect(page.locator(ROWS)).to_contain_text("TEST-B-latest")
     else:
