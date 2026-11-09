@@ -116,7 +116,13 @@ export default function SpuProfitDeterioration({ bootstrap }: PageProps) {
   return <div className="erp-page">
     <PageIntro eyebrow="PROFIT MONITORING" title="及时发现利润的变化" description="选择店铺和分析日期，对比商品表现，查看服务端分析结果。" />
     <p>SPU 盈利表现对比：7 天主参考，3 天观察近期变化；不做阈值告警或投放建议。</p>
-    <form aria-label="对比范围" className="erp-filters" onSubmit={(event) => { event.preventDefault(); apply(); }}>
+    {/* noValidate: the date input carries a learned ``max``, and the browser's
+        native range validation would swallow the submit before ``apply()`` runs —
+        leaving the operator with a browser tooltip instead of this page's own
+        Chinese reason. The application validates the range itself (query.ts) and
+        shows it as an alert; ``max`` stays as an input affordance.
+        Same pattern as the ad-daily filters form. */}
+    <form aria-label="对比范围" className="erp-filters" noValidate onSubmit={(event) => { event.preventDefault(); apply(); }}>
         <Select className="w-60 min-w-0" aria-label="店铺" value={`choice:${draft.shop}`} onChange={(key) => { if (typeof key === 'string') { update({ ...draft, shop: key.slice(7) }); } } }><Label>店铺</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="choice:" textValue="选择店铺">选择店铺</ListBox.Item>{draft.shop && !shops?.some((s) => String(s.id) === draft.shop) && <ListBox.Item key={draft.shop} id={`choice:${draft.shop}`} textValue={`请求的店铺 ${draft.shop}（待确认）`}>{`请求的店铺 ${draft.shop}（待确认）`}</ListBox.Item>}{shops?.map((s) => <ListBox.Item key={String(s.id)} id={`choice:${String(s.id)}`} textValue={s.account_name || s.shop_id || String(s.id)}>{s.account_name || s.shop_id || String(s.id)}</ListBox.Item>)}</ListBox></Select.Popover></Select>
         <label className="w-52 min-w-0">精确 SPU 内部编号<Input fullWidth className="min-w-0" aria-label="精确 SPU 内部编号" placeholder="留空使用活动范围；如 1001,1002" value={draft.spus} onChange={(event) => update({ ...draft, spus: event.target.value })} /></label>
         <Select className="w-36 min-w-0" aria-label="比较窗口" value={`choice:${draft.window}`} onChange={(key) => { if (typeof key === 'string') { update({ ...draft, window: key.slice(7) }); } } }><Label>比较窗口</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{!['7', '3'].includes(draft.window) && <ListBox.Item key={draft.window} id={`choice:${draft.window}`} textValue={`${draft.window}（无效）`}>{`${draft.window}（无效）`}</ListBox.Item>}<ListBox.Item id="choice:7" textValue="7 天主参考">7 天主参考</ListBox.Item><ListBox.Item id="choice:3" textValue="3 天近期变化">3 天近期变化</ListBox.Item></ListBox></Select.Popover></Select>
