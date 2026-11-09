@@ -44,7 +44,11 @@ def wait_canned_page(page: Any, slug: str) -> None:
         elif slug == "spu-profit-deterioration":
             page.get_by_text("TEST_RENDER_COMPARE_0", exact=True).wait_for()
         elif slug == "media-assets":
-            page.get_by_text("没有符合条件的素材。", exact=True).wait_for()
+            # The React page opens on the 素材包 tab (index.tsx picks it unless
+            # ?view=all|videos), whose empty state is 资产库还没有素材包。
+            # The 全部素材 tab carries 没有符合条件的素材。, so wait for the
+            # tab that is actually on screen.
+            page.get_by_text("资产库还没有素材包。", exact=True).wait_for()
         elif slug == "digital-humans":
             page.get_by_text("当前没有档案。", exact=True).wait_for()
         elif slug == "video-publish":
