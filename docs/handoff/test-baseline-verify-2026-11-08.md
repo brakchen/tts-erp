@@ -16,7 +16,7 @@
 | master 当前是否零失败 | **否**。完整 fast 基线对比退出 1，56 项新失败（14 项断言过时 + 34 项测试基础设施缺陷 + 8 项疑似偶发）。详见 §3。§3.3 的分类经复核已更正为「断言过时」，不是代码缺陷 |
 | 新 master（2b68b40）复核 | 两类缺陷**均未修复**（§8.4），且 renderer 收敛**新增** 2 项溢出回归（§8.5）。§3.1 的机制诊断已实现进 master（§8.3） |
 | 最新 master（65bbf11）复核 | 完整 fast 基线 **EXIT=1 / 2353s / 80 项新失败**。§3.3 断言契约、§3.4 conftest 冲突**均已修且清零**；剩余 80 项里 66 项是**测试侧断言过时**（告警页 53 + 价格列 13，都是切换 renderer 后仍在断言旧 DOM），另 14 项在 SPU 页面族其它文件（数值排序、投影、React 工作区、pilot 布局）。详见 §8.6 |
-| **收口后（`1aa33dd5`）** | **完整 fast 基线 EXIT=0 / 0 项失败**。80 项全部收口：告警页 53（含一处真实前端修复：表单加 `noValidate`）、价格列 13、SPU 页面族 8、media-assets pilot 6。详见 §10 |
+| **收口后（`1aa33dd5`）** | **fast 套件实质零失败**：§8.6 的 80 项全部收口（告警页 53 含一处真实前端修复：表单加 `noValidate`、价格列 13、SPU 页面族 8、media-assets pilot 6）。完整基线仅余 1 项并发时序 flake，隔离复跑 3/3 通过。详见 §10 |
 | 需要 Chief 决策的事项 | 5 项，见 §7（其中 §7 第 5 项的基线重生成前提已具备，见 §10.3） |
 
 **与委托描述不一致的一处事实**：落后的提交数不是 21。实测 `git rev-list --count 83bbede..0b92d97` = **312**（`--first-parent` = 56）。定性结论不受影响，但数量级差异很大，下一节给出原始命令。
@@ -1097,11 +1097,26 @@ EXIT=1 ELAPSED=2353s
 
 ```
 $ bash scripts/test_isolated.sh fast
-EXIT=0
-0 个 FAILED / ERROR
+EXIT=1（完整基线 1481s）
+FAILED tests/browser/test_frontend_p2_errors.py::test_real_http_rejection_and_wire_error_recovery[/tts]
 ```
 
-**结论：master 当前 fast 基线零失败。** 这意味着 §7 第 5 项「基线文件重生成」的前提已经具备——`docs/testing/baseline-fast.txt` 现在可以按真实状态重新生成，且不会把任何失败洗白成「已知失败」。
+**这一项是并发时序 flake，不是真实回归**，隔离复跑连续 3 次全部通过：
+
+```
+$ bash scripts/test_isolated.sh fast tests/browser/test_frontend_p2_errors.py
+..                    [100%]     （第 1 次）
+..                    [100%]     （第 2 次）
+..                    [100%]     （第 3 次）
+```
+
+判定依据：该用例属于 `docs/guides/agent-testing.md` §1.2 记录的「共享主机容量」类时序敏感用例；隔离复跑 3/3 通过；与本轮改动（测试侧断言 + 告警页表单 `noValidate`）无交互路径。
+
+**结论：master 当前 fast 套件实质零失败**（§8.6 的 80 项全部清零，仅余 1 项已定性为偶发 flake）。
+
+### 10.4 基线重生成的前提已具备
+
+`docs/testing/baseline-fast.txt` 仍记 2026-10-15 的 master `e04c5e1` / `count: 0`。§7 第 5 项原本的前提是「先修完断言再重生成，否则等于把失败洗白成已知失败」——**该前提现已满足**：套件实质零失败，重生成不会掩盖任何东西。
 
 ### 10.4 本轮沉淀的判断规则
 
