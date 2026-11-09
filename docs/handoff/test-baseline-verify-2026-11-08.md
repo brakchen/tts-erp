@@ -4,7 +4,7 @@
 > 测试机：HP desk `schan@192.168.1.2`（`ssh hp-desk`），主 checkout `/home/schan/tts-erp`
 > 本记录中每条命令均在测试机真实执行并保留真实输出；未执行的项目一律标注「未执行」，不写「应该通过」。
 >
-> **交付说明（2026-11-09 00:40）**：本轮向 `tts-erp 研发协作` 群投递汇报时，`post_group` 与 `message_bot` 两个投递接口持续返回「无法确认工具调用来自哪个正在进行的回复」；同期 `list_team` / `get_tasks` / `cancel_tasks` 正常，故为投递路径的运行时故障，非内容问题。已取消 4 条卡在 `queued`、一条都未投递出去的旧讨论，重投仍失败。**因此群内暂无本轮汇报，本文件是完整且权威的记录载体**；待投递通道恢复后再同步。
+> **交付说明（2026-11-09 00:45）**：本轮向 `tts-erp 研发协作` 群投递汇报时，`post_group` 与 `message_bot` 两个投递接口一度持续返回「无法确认工具调用来自哪个正在进行的回复」；同期 `list_team` / `get_tasks` / `cancel_tasks` 正常，故为投递路径的运行时故障，非内容问题。已取消 4 条卡在 `queued`、一条都未投递出去的旧讨论，队列清空后重投**已被受理并持久化**，当前停在群侧派发队列（`status: queued`），待群 worker 排到即送达——**本条不再取消**。本文件同时作为完整且权威的记录载体，供验收直接引用。
 
 ## 0. 结论速览
 
@@ -16,7 +16,8 @@
 | master 当前是否零失败 | **否**。完整 fast 基线对比退出 1，56 项新失败（14 项断言过时 + 34 项测试基础设施缺陷 + 8 项疑似偶发）。详见 §3。§3.3 的分类经复核已更正为「断言过时」，不是代码缺陷 |
 | 新 master（2b68b40）复核 | 两类缺陷**均未修复**（§8.4），且 renderer 收敛**新增** 2 项溢出回归（§8.5）。§3.1 的机制诊断已实现进 master（§8.3） |
 | 最新 master（65bbf11）复核 | 完整 fast 基线 **EXIT=1 / 2353s / 80 项新失败**。§3.3 断言契约、§3.4 conftest 冲突**均已修且清零**；剩余 80 项里 66 项是**测试侧断言过时**（告警页 53 + 价格列 13，都是切换 renderer 后仍在断言旧 DOM），另 14 项在 SPU 页面族其它文件（数值排序、投影、React 工作区、pilot 布局）。详见 §8.6 |
-| 需要 Chief 决策的事项 | 5 项，见 §7 |
+| **收口后（`1aa33dd5`）** | **完整 fast 基线 EXIT=0 / 0 项失败**。80 项全部收口：告警页 53（含一处真实前端修复：表单加 `noValidate`）、价格列 13、SPU 页面族 8、media-assets pilot 6。详见 §10 |
+| 需要 Chief 决策的事项 | 5 项，见 §7（其中 §7 第 5 项的基线重生成前提已具备，见 §10.3） |
 
 **与委托描述不一致的一处事实**：落后的提交数不是 21。实测 `git rev-list --count 83bbede..0b92d97` = **312**（`--first-parent` = 56）。定性结论不受影响，但数量级差异很大，下一节给出原始命令。
 
@@ -1069,3 +1070,42 @@ EXIT=1 ELAPSED=2353s
 | `/tmp/TEST_baseline_fast_master3.log` | §8.6 `65bbf11` 完整基线原始日志 |
 
 两个 worktree 保留在测试机上，未删除，供复查。
+
+---
+
+## 10. 收口：80 项失败全部清零（2026-11-09）
+
+本节记录 §8.6 遗留的 80 项失败如何被逐类收口，以及每类的真实根因。
+
+### 10.1 三类根因与处置
+
+| 类别 | 数量 | 真实根因 | 处置 | 提交 |
+| --- | --- | --- | --- | --- |
+| 告警页旧 DOM 断言 | 53 | 断言的 `#alert-rows` / `#total-spus` / `#alert-status` **只存在于已退役的 Jinja 模板**（`git show f72a3089^:tts_erp_v2/templates/pages/spu-profit-deterioration.html` 可证）。React 实现从来没有这三个 id。断点是 `80b218a9`：它把 `tests/browser/conftest.py::_render_pages` 的渲染来源从 `_render_page(...)` 换成 `render_frontend_page(...)`，fixture 换了 owner，测试还在断言旧 owner | 断言改写到 React 真实 DOM 契约（`table[aria-label="SPU 两期盈利对比"]`、`section[aria-label="完整分析范围统计"]` 等）；**另有一处真实前端修复**（见 10.2） | `e88aca01` |
+| 价格列用例 | 13 | **不是**断言过时，而是夹具的 mock 载荷没送到浏览器：`tests/` 无 `__init__.py`，`tests/browser/conftest.py` 被 pytest 导入两次（`conftest` 与 `tests.browser.conftest`），HTTP handler 读自己模块的 `_mock_payload`，测试却在另一个对象上 `monkeypatch.setattr` → 补丁静默失效，页面渲染未打补丁的载荷（没有 `totals.priceStats`）→ `#price-summary` 恒为 `hidden` | handler 统一经 `_canned_payload()` 在 canonical `tests.browser.conftest` 上解析；**断言与选择器一行未改** | `ee6424e1` |
+| SPU 页面族 + media-assets pilot | 14 | 同一根因的其它表现：React 真实 DOM 与断言的旧 DOM 不匹配（数值排序、投影、React 工作区），以及就绪信号等的是另一个标签页的文案（media-assets 页默认落在「素材包」，空态是「资产库还没有素材包。」，而信号等的是「全部素材」页的「没有符合条件的素材。」） | 断言与就绪信号对齐 React 真实契约 | `1aa33dd5` |
+
+### 10.2 一处真实的产品缺陷（用户已决策：改前端）
+
+告警页「截至日」输入带 `max` 属性时，**浏览器原生校验会拦下提交**，页面自己的中文提示「日期超过最新可用日期」永远不显示。实测：`form.checkValidity()` 为 false、`input.validity.rangeOverflow` 为 true、点击「应用筛选」后 URL 不变、`role=alert` 里找不到该提示。旧模板没有 `max`，所以提示本来是能显示的。
+
+同项目的 `ad-daily` 页已用 `noValidate` 规避同类问题（`frontend/src/pages/ad-daily/Filters.tsx:12`，配 `aria-invalid` + `role="alert"`）。
+
+**用户决策：改前端**，给告警页表单加 `noValidate`，保留 `max` 作为输入提示，由应用层校验负责拦截并给出中文提示。已落地于 `frontend/src/pages/spu-profit-deterioration/index.tsx`。
+
+### 10.3 最终验证（master `1aa33dd5`）
+
+```
+$ bash scripts/test_isolated.sh fast
+EXIT=0
+0 个 FAILED / ERROR
+```
+
+**结论：master 当前 fast 基线零失败。** 这意味着 §7 第 5 项「基线文件重生成」的前提已经具备——`docs/testing/baseline-fast.txt` 现在可以按真实状态重新生成，且不会把任何失败洗白成「已知失败」。
+
+### 10.4 本轮沉淀的判断规则
+
+1. **切换 renderer 后，断言写的是上一个 owner 的 DOM**：判据是「该 id 在 React 源码全部历史提交里都搜不到」。
+2. **`tests/` 没有 `__init__.py` 时，同一个 conftest 会被导入两次**：`monkeypatch.setattr` 打在哪个对象上，handler 就必须从哪个对象读属性。判据是「id 在 React 里存在，但页面不显示」。
+3. **`max` 属性会吞掉自定义校验**：给日期输入加 `max` 前，先确认表单没有 `noValidate`。
+4. **断言写法本身也会骗人**：`expect(locator).not_to_contain_text(...)` 在元素不存在时**报错**而不是通过；要断言「迟到数据没出现」得用文档级断言（`page.locator("body")`）。`page.expect_response(...)` 等一个已被 abort 的请求会超时，改用精确捕获 `PlaywrightError`（只容忍 "already handled"/"request failed"/"aborted"/"closed"），**不要用 `suppress(Exception)`** ——那会把真实失败一起吞掉。
