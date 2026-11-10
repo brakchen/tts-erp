@@ -10,16 +10,61 @@
 `opOrderPackageList[].purchaseItems[].unitPrice` 是下游 TikTok 订单商品价格，币种由包裹的
 `currency` 指定（本次数据主要为 VND），不能当采购价。
 
-接口没有给顶层货源行与下游 SPU 行提供显式关联键。实测可用的关系是：
+接口没有给顶层货源行与下游 SPU 行提供显式关联键。默认（`ordinal`）关系是：
 
 1. 顶层 `purchaseItems` 按 `sourceItemId` 去重并保留首次出现顺序；
 2. 将所有 `opOrderPackageList[].purchaseItems` 展平，按 `platformItemId` 去重并保留首次出现顺序；
 3. 两组的唯一项数量必须相等；
 4. 按唯一组序号配对：第 N 个 `sourceItemId` 对应第 N 个 `platformItemId`；
-5. 数量不相等的采购单不做推断，整单跳过并记录异常。
+5. 数量不相等的采购单不做推断，整单跳过并记录异常（issue 里带**具体未配上的
+   货源组 / SPU 组清单**，不再只有两个计数）。
 
 **不能直接逐行 `zip(purchaseItems, opOrderPackageList)`。** 同一 SPU/货源商品可能包含多个 SKU，
 而两个数组的 SKU 排列并不一致。
+
+### 1.1 官方关联键模式（`official_keys`，默认关闭）
+
+设置 `MIAOSHOU_PAIRING_MODE` = `official_keys`（运行期设置，实际名字是
+`MIAOSHOU_PURCHASE_PAIRING_MODE`）启用：平台侧分组改为按官方关联键
+`opOrderItemId` **确定性排序**，并与本地官方包裹表逐条交叉校验。
+
+**先说清楚事实（2026-11-10 生产库只读实测，1,954 条载荷 / 857 张采购单）：**
+
+- **两侧之间没有任何关联键**。顶层货源行只有 `sourceItemId`/`sourceSkuId`/
+  `sourceUnitPrice`/`sourceQuantity`/`sourceTitle`；包裹行只有 `platformItemId`/
+  `opOrderItemId`/`opOrderPackageId`/`opOrderPackageItemId`/`platformOuterSkuId`…。
+  `platformOuterSkuId` 非空率 1/5445，`skuSubName`/`title` 与货源侧 0 命中；
+  官方包裹接口的 `items[]` 同样没有 `sourceItemId`
+  ⇒ **官方接口也提供不了 source↔platform 的键，序号配对无法被"替换"**。
+- **官方关联键 cookie 侧已经有了**（同名同义）：包裹行的 `opOrderItemId`/
+  `opOrderPackageId`/`opOrderPackageItemId` 与官方接口 `items[]` 一致
+  ⇒ 官方接口给的是同一份平台侧映射的**独立副本**。
+- **官方副本已经在本地库里**：`miaoshou.packages` 作业把官方包裹列表同步进
+  `miaoshou.package_items`（`external_order_item_id`=opOrderItemId、
+  `platform_product_id`=platformItemId，3,444 行，分钟级新鲜）
+  ⇒ 交叉校验**只读本地表，不新增上游调用、不新增凭据路径**。
+- **序号配对从未漂移**：253 张多版本采购单里源侧/平台侧顺序变化 0 次、zip 配对
+  结果变化 0 次；按 `opOrderItemId` 的确定性排序与"首次出现顺序"在 98 张多 SPU
+  采购单上完全一致（差异 0）
+  ⇒ 新模式**不改变任何现有结果**，只把"依赖抓取顺序"换成"有据可查"。
+- **交叉校验实测**：cookie 5,445 条包裹行中 5,395 条能在官方表找到，
+  `platformItemId` **冲突 0 处**；50 条（0.9%）官方表未覆盖（覆盖缺口，不是冲突）。
+
+两种模式的全量对跑（1,954 条载荷）：产出 162 条采购价，键与值**逐条一致，
+差异 0**；新模式额外记 49 条 `OFFICIAL_KEY_NOT_FOUND`（覆盖缺口，不阻断）。
+
+**新模式的行为：**
+
+| 情况 | 行为 |
+| --- | --- |
+| 官方映射与 cookie 载荷一致 | 正常产出（与默认模式逐条相同） |
+| 同一 `opOrderItemId` 两边 `platformItemId` 不一致 | **显式失败**：跳过该采购单，记 `OFFICIAL_KEY_CONFLICT`（不静默） |
+| 官方表里没有这条行 | 只记 `OFFICIAL_KEY_NOT_FOUND`（覆盖缺口，**不阻断**） |
+| 官方表读不到 / 为空 | **自动降级**回 `ordinal`（新模式永远不能成为 cookie 链的单点故障） |
+
+官方接口**不能**替代 cookie：采购成本（`sourceUnitPrice`/`sourceItemId`/
+`sourceQuantity`）只有网页版采购单接口有。本模式降低的是**脆弱性**
+（顺序依赖 → 有据可查），不是消除依赖。
 
 ## 2. 响应结构与字段关系
 
@@ -110,7 +155,9 @@ miaoshou.purchase_prices
 
 1. 要求每页 `list` / `total` / `page` / `pageSize` 完整且跨页恒定；累计原始行数必须等于 `total`；
    `purchaseOrderFilterId` 的完全相同行可去重，冲突重复 ID 直接失败；
-2. 仅处理唯一货源组数等于唯一 SPU 组数的采购单；
+2. 仅处理唯一货源组数等于唯一 SPU 组数的采购单；数量不等时整单跳过，
+   issue `GROUP_COUNT_MISMATCH` 里带**具体未配上的货源组 / SPU 组清单**
+   （`source_item_ids` / `platform_item_ids` / `platform_group_keys`）；
 3. 对每个货源组计算数量加权采购价，价格和数量必须为有限正数；
 4. 以 `(purchaseOrderSn, sourceItemId, platformItemId)` 去重；
 5. 排除 `purchaseOrderStatus IN ('cancel', 'wait_pay')`；
