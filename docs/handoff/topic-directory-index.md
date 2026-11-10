@@ -16,9 +16,9 @@
 | --- | --- | --- | --- |
 | 1 | 四段式齐全 | **2** | `spu-profit-deterioration`、`video-publish` |
 | 2 | 编号齐全但与标准四段式不对齐 | **1** | `plugins/monitor`（01–05，且实际混了两个主题） |
-| 3 | 只建了 01，缺 02/03/04 | **1** | `plugins/ads-data-sync` |
+| 3 | 只建了 01，缺 02/03/04 | **2** | `plugins/ads-data-sync`、`media-asset-library` |
 | 4 | 其它编号约定目录，**不是**主题目录 | 4 个子目录 + 4 个单文件目录 / 共 22 个文件 | `aegis/work/`（4 个工作记录目录）、`aegis/plans/`（1）、`architecture/adr/`（3）、`ops/incident-reports/`（1）、`plans/`（17） |
-| 5 | 有方案文档但**没建主题目录**的候选主题 | **9** | 媒体资产、运行配置、RunningHub、店铺入驻、前端迁移等（见 §5） |
+| 5 | 有方案文档但**没建主题目录**的候选主题 | **8** | 运行配置、RunningHub、店铺入驻、前端迁移等（见 §5） |
 
 **给后续新主题的三条硬约束（依据 Chief 指示 + `docs/handoff/bot-team-setup-2026-11-08.md`）：**
 
@@ -58,10 +58,11 @@
 
 ---
 
-## 3. 编号存在但不完整或不对齐（2 个）
+## 3. 编号存在但不完整或不对齐（3 个）
 
 | 主题 | 路径 | 实际现状 | 涉及业务领域 | 一句话说明 |
 | --- | --- | --- | --- | --- |
+| 媒体资产库 / 素材包 | `docs/media-asset-library/` | 🟡 **只有 `01-product-proposal.md`**（2026-11-09 开工）；缺 02 技术设计 / 03 实施计划 / 04 测试计划 | 媒体资产、数字人档案、素材包、MinIO 对象存储 | 在全局媒体资产库里维护「有名字的视频分组」，数字人档案可引用同一个包、两处看到同一份内容。**代码已落地**（迁移 `0076_media_packs` + 7 个包端点 + React 页面），本主题是产品化收口：固化可验收契约并补齐测试覆盖 |
 | Monitor 广告插件接口兼容 ＋ 最小探活 | `docs/plugins/monitor/` | 编号 01–05 **齐全**，但①`01` 是原始抓包记录，不是产品方案；②`03-verification.md` 不是 `03-implementation-plan.md`；③`04-health-reporting-requirements.md` 不是 `04-test-plan-and-results.md`；④**04/05 讲的是另一个主题**（插件探活），与 01–03 的「`post_campaign_list_v2` 接口兼容」不是同一件事 | 广告监控插件、Seller Center 私有接口协议、插件探活与飞书告警 | 01–03 是新旧广告列表接口兼容（URL 决定协议版本 + `table_v2` cell-row 解析，共用同一 Campaign 规范化出口）；04–05 是插件最小探活：四个业务字段上报、服务器端扫描、统一飞书群告警（ERP 已退役 `POST /v2/plugin/monitor/health`）。**两个主题共用一个目录。** |
 | ads-data-sync 大重构 | `docs/plugins/ads-data-sync/` | ❌ **只有 `01-refactor-technical-design.md`**；缺 02 / 03 / 04。且这个「01」本身是技术设计，不是产品方案 | 广告数据采集插件、Outbox 可靠交付、同步降级策略 | 插件内部模型重构（Phase B）＋ 产品级增量（Phase C）的技术设计：分阶段交付、Outbox 可靠本地交付、ERP 不可用时不启动新采集先排空队列；不写店铺、不关广告、不发飞书。 |
 
@@ -83,13 +84,14 @@
 
 ---
 
-## 5. 有方案文档但还没建主题目录的候选主题（9 项）
+## 5. 有方案文档但还没建主题目录的候选主题（8 项）
 
 这些主题的文档是真实存在的、且散落在 `design/` `plans/` `aegis/` `api/` `ops/` 里，但没有 `docs/<主题>/01..04` 目录。**新主题开工前，先查这里，避免重复造方案。**
 
+> **媒体资产库已移出本表**（2026-11-09 开工，主题目录 `docs/media-asset-library/` 已建并出了 01）。它的原始散落文档 `docs/design/media-asset-library.md` 等**留在原处不动**——设计文档是历史依据，`01` 是当前产品契约，两者都要可查。
+
 | 候选主题 | 现有散落文档 | 业务领域 | 建议动作 |
 | --- | --- | --- | --- |
-| 媒体资产库 / 数字人 | `docs/design/media-asset-library.md`、`docs/plans/2026-11-05-media-interaction-implementation.md`、`docs/plans/2026-11-08-media-packs.md` | 媒体资产、数字人、MinIO 对象存储 | 建 `docs/media-asset-library/`；design 迁 01，plans 迁 02/03 |
 | 运行配置交互改造 | `docs/plans/2026-11-01-runtime-config-ux-design.md`、`docs/aegis/work/2026-11-01-runtime-config-ux/` | 运行配置 UI、原子发布、只读检查 | 建 `docs/runtime-config-ux/`；`aegis/work` 是执行记录，留在原处 |
 | RunningHub 换装工作流 | `docs/api/runninghub.md`、`docs/aegis/work/2026-11-07-runninghub/` | AI 工作流接入、凭据级配额、批量任务 | 建 `docs/runninghub/`；`api/runninghub.md` 是活契约，**留在原处只做引用，不要移动** |
 | 店铺入驻 / OAuth 授权 | `docs/plans/2026-10-31-shop-onboarding-design.md`、`docs/ops/shop-onboarding-upgrade.md` | 店铺注册台、OAuth、运营流程 | 建 `docs/shop-onboarding/`；注意 `api/tiktok-shop-oauth.md` 是活契约，别动 |
