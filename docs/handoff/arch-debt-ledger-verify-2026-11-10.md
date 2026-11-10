@@ -197,9 +197,59 @@ $ ssh tts-erp-prod "grep -nE 'rpc_portal|bind_addr' /opt/easytier/config/default
 - `AD-DEPLOY-004` 期望「env_get 里不得再有 `|| true`」（fail-open 标记），实测有 ⇒ **判红**
 - `AD-JOB-002` 期望「owner 树里至少有 kill/SIGKILL/timeout 之一」，实测 0 ⇒ **判红**
 
----
+### 3.5 count 判据必须支持「下限」语义（本轮修正自己的一处缺陷）
 
-## 4. ③ 契约检查器去恒绿
+初稿把「超时 kill 机制必须存在」写成 `expected_count: 1`（**恰好** 1 次）。
+复核别人那份「OOM P0 已进 master」的报告时发现：master 的 `scheduler.py` 里
+`kill|SIGKILL|timeout` 是 **3 次命中**（含 docstring 里对 SIGKILL/SIGTERM 的提及），
+`1caa296b` 修的就是「父进程把被杀子进程遗留的 running 行结成 failed」。
+
+**⇒ 写死「恰好 1」的话，修复落地后生产树会有 3 处命中，判据仍然判红 —— 判据本身是坏的。**
+这正是「绿/红不等于进度」的另一个形态：红得没有道理。
+
+修正：`check_ledger_owners.py` 的 count 判据支持三种语义，判据自己选：
+
+| 字段 | 语义 | 用在哪 |
+| --- | --- | --- |
+| `expected_count` | **恰好** N 次 | AD-NET-002（期望通配绑定数 = 0）、AD-ALERT-003（期望 absent 事实数 = 0） |
+| `min_count` | **至少** N 次 | AD-JOB-002（期望 kill/timeout ≥ 1）、AD-BACKUP-001（期望两道校验 ≥ 2） |
+| `max_count` | 至多 N 次 | 预留 |
+
+**前向验证**（模拟「修复已落地」：把 AD-JOB-002 的 owner 指到含 OOM 修复的 master）：
+
+```
+模拟：AD-JOB-002 的 owner 指到 master（含 OOM 修复）
+  blob: 4ef41312f182a157d1c94686c37e7221f2295134  line: 539  sha256:2138e4b0d08e459b
+$ python3 scripts/check_ledger_owners.py --ledger /tmp/TEST_ledger_job002_on_master.yaml --rule AD-JOB-002
+  检查规则数 = 1
+  通过 = 1   失败 = 0
+EXIT=0
+```
+
+⇒ 修复落地后判据**如期转绿**；修正前（`恰好 1`）这里会是 3≠1 ⇒ 继续判红。
+
+### 3.6 一处「差点改错」的地方：target_ref 不是 master
+
+台账的 `base.target_ref` = `5597dcca`，看起来像「master 的某个旧 SHA」。
+复核时差点把它改指当前 master（`e3e85e0e`），**先查了一步**：
+
+```
+$ git merge-base --is-ancestor 5597dcca origin/master ; echo $?
+1                                   # 不在 master 上
+$ git rev-list --count 5597dcca..origin/master
+63                                  # master 比它超前 63 个提交，且已分叉
+$ git cat-file -e origin/master:scripts/check_jobs_actually_run.py
+MISSING_ON_MASTER                   # 那三个 target-only 文件在 master 上不存在
+```
+
+⇒ 台账的两棵树是**生产 release 线**（`50978019`）与**目标 inspection 线**（`5597dcca`），
+不是「master 的旧版本」。**不能把 target_ref 改指 master**，否则三条 rule 的 owner 解析不出来。
+已作为「别误改」记在这里。
+
+⇒ 同时得到一条维护规则：**这两条线各自前进时，`base.*_ref` 与相关 `owner_ref` 必须重指**，
+否则检查器会以「owner 身份对不上」判红（契约退出 1）——这正是我们想要的显形。
+
+
 
 ### 4.1 改了什么
 
@@ -279,7 +329,7 @@ $ python3 scripts/check_ledger_owners.py
 | --- | --- | --- |
 | AD-DEPLOY-004 | `install.sh` 的 `env_get` 里仍有 `\|\| true`（凭据解析失败仍继续 = fail-open） | 环境/实现未收口 |
 | AD-ALERT-003 | watchdog unit 的 `SuccessExitStatus=1` drop-in 尚未写入主机（事实表里记为 `absent`） | 环境未收口 |
-| AD-JOB-002 | `scheduler.py` 里 kill/SIGKILL/timeout 出现 0 次 ⇒ 超时后 running 行不会被终结 | 代码未收口 |
+| AD-JOB-002 | `scheduler.py` 里 kill/SIGKILL/timeout 出现 0 次 ⇒ 超时后 running 行不会被终结 | 代码未收口（**OOM P0 已进 master**，等 release 线合入后自动转绿，见 §3.5） |
 | AD-BACKUP-001 | `pg_dump_hourly.sh` 里 `gzip -t` / `pg_restore --list` 出现 0 次 ⇒ 损坏备份也会被当成功 | 代码未收口 |
 | AD-NET-002 | 207 公网机上仍有 2 个 `bind_addr = "0.0.0.0:` 绑定 | 环境未收口 |
 | AD-BASE-002 | 生产树 `watchdog_sync.py` blob `b73ffad1` ≠ 目标树 `dbb5067f` ⇒ 收敛未完成 | 收敛未完成 |
@@ -482,3 +532,12 @@ $ ps -eo pid,etimes,args | grep -E "python.*pytest" | grep -v grep
 
 - `70091a40` chore: 固化四条运行时事实，使 AD-DEPLOY/ALERT/NET 具备 git owner
 - `52929fa0` fix: 台账 24 条 rule 补齐六字段，契约检查改为缺字段即非零退出
+- `c1051075` docs: 新增台账 owner 身份与契约检查的验证记录
+- `cb5eb7b3` fix: count 判据支持下限语义，避免修复落地后仍判红
+
+远端分支（两个名字都指向同一 commit）：
+
+- `origin/chore/arch-debt-ledger-20261110` = `cb5eb7b3`
+- `origin/chore/arch-debt-ledger-to-master` = `cb5eb7b3`
+- `origin/chore/check-jobs-actually-run-20261110` = `7bab4486`
+- `origin/master` = `e3e85e0e`（**本轮全程未推 master**）
