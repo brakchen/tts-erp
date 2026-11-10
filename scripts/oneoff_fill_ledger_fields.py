@@ -34,7 +34,7 @@ from pathlib import Path
 
 import yaml
 
-PROD = "50978019f39c4e6ea3671872b540c8ea79644b00"
+PROD = "1e6c77ee15285d8298cfe890ff774b765f606c88"
 TARGET = "5597dcca2139ae210873616b65081246d9b032e3"
 LEDGER = "docs/architecture/arch-debt-ledger.yaml"
 RUNTIME_FACTS = "scripts/infra/runtime-facts.yaml"
@@ -154,15 +154,16 @@ SPEC: dict[str, dict] = {
     ),
     "AD-JOB-002": dict(
         ref=PROD, path="tts_erp_v2/sync_worker/scheduler.py",
-        symbol="_scheduled_child_command",
-        kind="count", scope="file",
-        pattern=r"kill|SIGKILL|timeout",
-        min_count=1,
-        method="父进程以独立子进程调度 job（_scheduled_child_command）；"
-               "但超时 kill 机制在 owner 树里必须存在（kill/SIGKILL/timeout 至少一处），"
-               "当前 0 处 ⇒ 超时后 running 行不会被终结 ⇒ 判红。"
-               "★ 用「至少 1 处」而不是「恰好 1 处」：OOM P0 的修复在 master 上带来 3 处命中"
-               "（含 docstring 提及），写死恰好 1 会让修好的代码继续判红。",
+        symbol="_close_orphaned_running_row",
+        kind="branch", scope="block",
+        anchors=['row.status = "failed"', "finished_at"],
+        method="父进程必须实现『把被杀子进程遗留的 running 行结成 failed』——"
+               "落点是 _close_orphaned_running_row 的【实现体】里必须出现 "
+               "row.status = \"failed\" 与 finished_at。"
+               "★ 锚在实现体而不是计数 kill|SIGKILL|timeout：那 3 处命中全是 "
+               "docstring 与日志文案（实测 release 树 1e6c77ee 的 3 处命中里 "
+               "没有一处是判定逻辑），计数口径会被散文满足。"
+               "反向基准：旧生产树 50978019 里没有这个符号 ⇒ 判红。",
     ),
     "AD-JOB-003": dict(
         ref=PROD, path="tts_erp_v2/jobs/miaoshou/sync_source_cost_to_master.py",
@@ -345,6 +346,12 @@ def main(argv: list[str] | None = None) -> int:
         if f not in req:
             req.append(f)
     data["required_finding_fields"] = req
+
+    # base 块必须与规则侧一致：规则 owner_ref 已重指到当前生产树，
+    # base.production_ref 还留在旧树 ⇒ 台账自相矛盾，读者会按 base 去核对。
+    base = data.setdefault("base", {})
+    base["production_ref"] = PROD
+    base.setdefault("production_tree", "/home/schan/tts-erp-releases/erp-runtime-secret-84ec0a49")
 
     if problems:
         for p in problems:
