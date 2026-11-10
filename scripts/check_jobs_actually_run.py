@@ -25,7 +25,25 @@
                                               [--lookback 5]
                                               [--static-tables FILE]
                                               [--state-file PATH]
+                                              [--expect-db tts_erp]
+                                              [--expect-code-root /path/to/tree]
+                                              [--unit tts-erp]
+                                              [--units a,b,c]
                                               [--json]
+
+身份断言（三条，全部在【任何业务查询之前】失败即非零退出）：
+    ① 连库：current_database() 必须 == --expect-db（事实 vs DSN 声称）
+    ② 代码路径：服务加载的 tts_erp_v2 必须来自 --expect-code-root
+       （判据 = find_spec('tts_erp_v2').origin，不是 git HEAD / 目录名）
+    ③ 世代：进程自证的 TTS_ERP_DEPLOYED_COMMIT 必须 == 磁盘 HEAD
+       （四个 unit 同一路径但可分属不同代际，路径断言抓不到）
+
+退出码：
+    0  巡检完成（清单里有发现也返回 0 —— 发现项看输出，别拿退出码当"没问题"）
+    2  参数错误
+    3  只读守卫自测方向一失败（漏网写语句）
+    4  只读守卫自测方向二失败（误伤只读语句）
+    5  身份断言失败（连错库 / 跑错树 / 世代不一致）
 """
 
 from __future__ import annotations
@@ -49,6 +67,10 @@ REPO_HINT = "从仓库根目录运行，或确保 tts_erp_v2 可 import"
 _READONLY_HEADS = frozenset({"SELECT", "SHOW"})
 
 _write_violations: list[str] = []
+# 自测期间不把【自测自己的拦截样例】记进违规计数 ——
+# 否则"只读守卫违规次数"恒等于自测样例数（7），永远不是 0 ⇒ 零信号
+# （恒红即废：正常值不是 0 的指标不是指标）。
+_self_test_mode = False
 
 
 def _is_readonly(raw: str) -> bool:
@@ -66,7 +88,8 @@ def _guard(conn, cursor, statement, parameters, context, executemany):  # noqa: 
     """SQLAlchemy 事件钩子：拦截一切非只读语句（结构判定）。"""
     raw = (statement or "").strip()
     if not _is_readonly(raw):
-        _write_violations.append(raw.upper()[:200])
+        if not _self_test_mode:
+            _write_violations.append(raw.upper()[:200])
         raise RuntimeError(
             f"只读巡检被中止：检测到非只读语句 -> {raw.upper()[:120]}"
         )
@@ -106,18 +129,23 @@ def _guard_self_test() -> tuple[list[str], list[str]]:
     """
     leaked: list[str] = []
     blocked_ok = []
-    for stmt in _GUARD_BLOCK_CASES:
-        try:
-            _guard(None, None, stmt, None, None, False)
-            leaked.append(stmt)
-        except RuntimeError:
-            blocked_ok.append(stmt)
-    false_positive: list[str] = []
-    for stmt in _GUARD_ALLOW_CASES:
-        try:
-            _guard(None, None, stmt, None, None, False)
-        except RuntimeError:
-            false_positive.append(stmt)
+    global _self_test_mode
+    _self_test_mode = True
+    try:
+        for stmt in _GUARD_BLOCK_CASES:
+            try:
+                _guard(None, None, stmt, None, None, False)
+                leaked.append(stmt)
+            except RuntimeError:
+                blocked_ok.append(stmt)
+        false_positive: list[str] = []
+        for stmt in _GUARD_ALLOW_CASES:
+            try:
+                _guard(None, None, stmt, None, None, False)
+            except RuntimeError:
+                false_positive.append(stmt)
+    finally:
+        _self_test_mode = False
     return leaked, false_positive
 
 
@@ -169,7 +197,11 @@ def _jobs_source() -> dict[str, Any]:
         ).stdout.strip() or None
     except Exception:  # noqa: BLE001
         pass
-    return {"cwd": cwd, "git_head": head}
+    return {
+        "cwd": cwd,
+        "git_head": head,
+        "note": "cwd/git_head 是【声称】不是判据；判据见 identity.code.origin",
+    }
 
 
 def _db_identity(session) -> dict[str, Any]:
@@ -189,6 +221,354 @@ def _db_identity(session) -> dict[str, Any]:
         "datname": row[0], "usename": row[1],
         "server_addr": row[2], "server_port": row[3],
     }
+
+
+# ── 身份断言（2026-11-10）────────────────────────────────────────────
+# 两个真实事故，各对应一个不可替代的判据：
+#
+#   ① 连错库：`docker exec postgres psql -U postgres` 的【默认库就是维护库
+#      postgres】，不是业务库 tts_erp。影子库里 integration.sync_jobs
+#      表存在但 0 行，真库同表 100,057 行 ⇒ 同一句
+#      `select count(*) ... where status='running'` 在两个库分别返 0 和 7
+#      ⇒ 「僵尸 running 已清零」这个错误结论就是这么来的（连错库的人自己
+#      都被骗过）。
+#      ⇒ 判据 = `current_database()`（【事实】），不是 DSN 里写了什么（【声称】）。
+#
+#   ② 跑错树：git HEAD / 目录名 / drop-in 里声明的 commit 都不能作判据
+#      （实测四个服务分属两个代际：主 API 与 publish 跑 11-06 的 84ec0a49，
+#      sync 跑 11-08 的 f88fb713，release HEAD 是 11-09 的 1a319978）。
+#      cwd 决定 sys.path[0]，而 editable finder 排在 PathFinder 之后
+#      ⇒ cwd 先命中 ⇒ 加载哪棵树由 cwd 决定。
+#      ⇒ 判据 = `importlib.util.find_spec('tts_erp_v2').origin`（【事实】）。
+#
+# ⇒ 两条断言都必须在【任何业务查询之前】失败即非零退出。
+#   只打印不退出 = 把「我连错库了」伪装成「巡检没发现问题」——
+#   本脚本早就有 _db_identity()，但它只采集不判定，且采集时机在查完数据之后。
+EXIT_USAGE = 2
+EXIT_GUARD_LEAK = 3
+EXIT_GUARD_FALSE_POSITIVE = 4
+EXIT_IDENTITY = 5
+
+
+def _dsn_dbname() -> str | None:
+    """生效配置里 TTS_ERP_DB_URL 的库名段（只取库名，绝不输出凭据）。
+
+    来源优先级是 dotenv > runtime 文件 > os.environ（runtime_settings.get），
+    所以只读 os.environ 常常拿到 None —— 那不是"没有 DSN"，
+    是"DSN 不在 env 里"。这里按生效顺序取，才对得上"声称"。
+    """
+    raw = None
+    try:
+        from tts_erp_v2.runtime_settings import require_setting
+
+        raw = require_setting("TTS_ERP_DB_URL")
+    except Exception:  # noqa: BLE001
+        raw = os.environ.get("TTS_ERP_DB_URL")
+    if not raw:
+        return None
+    if "://" in raw:
+        from urllib.parse import urlparse
+
+        name = (urlparse(raw).path or "").lstrip("/").split("?")[0]
+        return name or None
+    for token in raw.split():            # libpq 键值形态：... dbname=tts_erp ...
+        if token.startswith("dbname="):
+            return token.split("=", 1)[1] or None
+    return None
+
+
+def _assert_db_identity(session, expected_db: str) -> dict[str, Any]:
+    """连库身份断言：current_database() 必须等于期望库名。
+
+    返回身份字典供报告使用；不匹配 ⇒ 打印可核对的差异并以 EXIT_IDENTITY 退出。
+    """
+    from sqlalchemy import text
+
+    try:
+        row = session.execute(
+            text("SELECT current_database(), current_user, "
+                 "inet_server_addr()::text, inet_server_port()")
+        ).first()
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(
+            f"⛔ 身份断言失败（连库）：读不到 current_database()：{exc}\n"
+            f"   ⇒ 无法证明连的是哪个库 ⇒ 拒绝继续巡检（exit {EXIT_IDENTITY}）\n"
+        )
+        raise SystemExit(EXIT_IDENTITY)
+    if not row:
+        sys.stderr.write(
+            f"⛔ 身份断言失败（连库）：current_database() 没有返回值\n"
+            f"   ⇒ 拒绝继续巡检（exit {EXIT_IDENTITY}）\n"
+        )
+        raise SystemExit(EXIT_IDENTITY)
+
+    actual = row[0]
+    identity = {
+        "datname": actual,
+        "usename": row[1],
+        "server_addr": row[2],
+        "server_port": row[3],
+        "dsn_dbname": _dsn_dbname(),
+        "expected_datname": expected_db,
+        "asserted": True,
+    }
+    if actual != expected_db:
+        sys.stderr.write(
+            "⛔ 身份断言失败（连错库）\n"
+            f"   期望 current_database() = {expected_db!r}\n"
+            f"   实际 current_database() = {actual!r}\n"
+            f"   DSN 声称的库名段       = {identity['dsn_dbname']!r}（声称 ≠ 事实）\n"
+            f"   服务端 {identity['server_addr']}:{identity['server_port']}"
+            f"  user={identity['usename']}\n"
+            f"   ⇒ 拒绝继续巡检（exit {EXIT_IDENTITY}）。"
+            f"若你要巡检的确实是 {actual!r}，用 --expect-db {actual!r} 显式声明。\n"
+        )
+        raise SystemExit(EXIT_IDENTITY)
+    return identity
+
+
+def _systemctl_user_show(unit: str, prop: str) -> str | None:
+    """读 user scope 的 unit 属性；不在 systemd 环境或属性为空时返回 None。"""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "show", unit, "-p", prop, "--value"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    value = (out.stdout or "").strip()
+    return value or None
+
+
+def _extract_interpreter(exec_start: str) -> str | None:
+    """从 ExecStart 里取出 python 解释器路径（systemctl 的两种形态都吃）。"""
+    import re
+
+    if not exec_start:
+        return None
+    match = re.search(r"path=([^ ;}]+)", exec_start)
+    candidate = match.group(1) if match else exec_start.split()[0]
+    if candidate and "python" in os.path.basename(candidate):
+        return candidate
+    return None
+
+
+def _service_code_identity(unit: str) -> dict[str, Any]:
+    """服务实际加载的 tts_erp_v2 来自哪棵树（find_spec 事实）。
+
+    复现服务真实的加载条件：服务自己的 WorkingDirectory + 服务自己的解释器。
+    """
+    import subprocess
+    from pathlib import Path
+
+    wd = _systemctl_user_show(unit, "WorkingDirectory")
+    exec_start = _systemctl_user_show(unit, "ExecStart") or ""
+    interp = _extract_interpreter(exec_start) or sys.executable
+    origin = None
+    error = None
+    if wd and Path(wd).is_dir():
+        try:
+            out = subprocess.run(
+                [
+                    interp, "-c",
+                    "import importlib.util,sys;"
+                    "s=importlib.util.find_spec('tts_erp_v2');"
+                    "sys.stdout.write(s.origin if s else '')",
+                ],
+                capture_output=True, text=True, timeout=30, cwd=wd,
+            )
+            origin = (out.stdout or "").strip() or None
+            if out.returncode != 0:
+                error = (out.stderr or "").strip()[-400:]
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc)
+    else:
+        error = f"unit {unit} 的 WorkingDirectory 不可用: {wd!r}"
+    return {
+        "unit": unit,
+        "working_directory": wd,
+        "interpreter": interp,
+        "exec_start": exec_start,
+        "origin": origin,
+        "error": error,
+    }
+
+
+def _assert_code_identity(expected_root: str | None, unit: str) -> dict[str, Any]:
+    """代码身份断言：服务加载的 tts_erp_v2 必须来自 expected_root。"""
+    info = _service_code_identity(unit)
+    if not expected_root:
+        expected_root = info.get("working_directory")
+    expected_root = os.path.abspath(expected_root) if expected_root else None
+    origin = info.get("origin")
+
+    ok = False
+    if origin and expected_root:
+        try:
+            ok = (
+                os.path.commonpath([os.path.abspath(origin), expected_root])
+                == expected_root
+            )
+        except ValueError:
+            ok = False
+    info["expected_root"] = expected_root
+    info["asserted"] = bool(expected_root and origin)
+    info["ok"] = ok
+
+    # ★ 巡检脚本【自己】加载的是哪棵树 —— 第四个身份，同样必须判。
+    #   实测：把脚本放 /tmp 跑 ⇒ sys.path[0] 是【脚本所在目录】而不是 cwd ⇒
+    #   `import tts_erp_v2` 被 editable 映射接管 ⇒ 加载了主 checkout 那棵
+    #   【残缺的树】（缺 runtime_settings.py）⇒ 连 DB URL 都读不到。
+    #   ⇒ 巡检逻辑和被巡检对象必须是同一棵树，否则巡检结论是另一份代码的结论。
+    local_origin = None
+    try:
+        import importlib.util
+
+        spec = importlib.util.find_spec("tts_erp_v2")
+        local_origin = spec.origin if spec else None
+    except Exception as exc:  # noqa: BLE001
+        local_origin = f"<error: {exc}>"
+    info["local_origin"] = local_origin
+    local_ok = False
+    if local_origin and expected_root:
+        try:
+            local_ok = (
+                os.path.commonpath(
+                    [os.path.abspath(local_origin), expected_root]
+                )
+                == expected_root
+            )
+        except ValueError:
+            local_ok = False
+    info["local_ok"] = local_ok
+
+    if not ok:
+        sys.stderr.write(
+            "⛔ 身份断言失败（跑错树）\n"
+            f"   unit             = {unit}\n"
+            f"   WorkingDirectory = {info.get('working_directory')!r}\n"
+            f"   解释器           = {info.get('interpreter')!r}\n"
+            f"   实际加载 origin  = {origin!r}\n"
+            f"   期望代码根       = {expected_root!r}\n"
+            f"   报错             = {info.get('error')!r}\n"
+            f"   ⇒ 拒绝继续巡检（exit {EXIT_IDENTITY}）。\n"
+            "   判据说明：git HEAD / 目录名 / drop-in 声明的 commit 都不是判据；\n"
+            "   唯一判据是 find_spec('tts_erp_v2').origin（cwd 决定加载哪棵树）。\n"
+        )
+        raise SystemExit(EXIT_IDENTITY)
+    if not local_ok:
+        sys.stderr.write(
+            "⛔ 身份断言失败（巡检脚本自己跑在错误的树上）\n"
+            f"   巡检脚本加载的 origin = {local_origin!r}\n"
+            f"   期望代码根             = {expected_root!r}\n"
+            f"   ⇒ 拒绝继续巡检（exit {EXIT_IDENTITY}）。\n"
+            f"   原因：sys.path[0] 是【脚本所在目录】而不是 cwd —— 脚本放在\n"
+            f"   期望树之外运行时，import 会被 editable 映射接管、加载另一棵树\n"
+            f"   （实测会加载主 checkout 那棵缺 runtime_settings.py 的残缺树）。\n"
+            f"   修法：PYTHONPATH={expected_root} {sys.executable} <脚本路径>\n"
+        )
+        raise SystemExit(EXIT_IDENTITY)
+    return info
+
+
+# ── 身份断言 ③：世代自证 ────────────────────────────────────────────
+# 路径断言抓不到「同一个目录里的不同代际」：发布动作是 mv + cp -a 原地覆盖，
+# 四个 unit 的 WorkingDirectory 是同一条路径，但进程按启动时刻加载了不同内容。
+# 实测四个服务分属两个代际（主 API / publish 跑 11-06 的 84ec0a49，
+# sync 跑 11-08 的 f88fb713，磁盘 HEAD 是 11-09 的 1a319978）。
+# ⇒ 判据 = 三方对照：
+#     进程 /proc/<pid>/environ 里的 TTS_ERP_DEPLOYED_COMMIT（进程自证）
+#     vs 磁盘 HEAD（树上现在是什么）
+#     vs drop-in 文件里声明的值（systemctl --user cat，不受 daemon-reload 缓存影响）
+def _unit_env_from_dropin(unit: str) -> str | None:
+    """从 unit 文件（含 drop-in）里读声明的 TTS_ERP_DEPLOYED_COMMIT。"""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "cat", unit],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    for line in (out.stdout or "").splitlines():
+        line = line.strip()
+        if line.startswith("Environment=TTS_ERP_DEPLOYED_COMMIT="):
+            return line.split("=", 2)[2].strip() or None
+    return None
+
+
+def _pid_env(pid: str | None, key: str) -> str | None:
+    """读进程环境变量（只读 /proc，不回显任何口令类变量）。"""
+    if not pid or pid == "0":
+        return None
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    prefix = key.encode() + b"="
+    for item in raw.split(b"\0"):
+        if item.startswith(prefix):
+            return item.split(b"=", 1)[1].decode("utf-8", "replace")
+    return None
+
+
+def _git_head(path: str | None) -> str | None:
+    """目录对应的 git HEAD（拿不到就返回 None，不猜）。"""
+    if not path:
+        return None
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    return (out.stdout or "").strip() or None
+
+
+def _generation_identity(units: list[str]) -> dict[str, Any]:
+    """进程世代自证：进程实际加载的 commit vs 磁盘 HEAD vs drop-in 声明。"""
+    items: list[dict[str, Any]] = []
+    failures: list[str] = []
+    skipped: list[str] = []
+    for unit in units:
+        state = _systemctl_user_show(unit, "ActiveState") or "unknown"
+        pid = _systemctl_user_show(unit, "MainPID")
+        wd = _systemctl_user_show(unit, "WorkingDirectory")
+        disk_head = _git_head(wd)
+        process_commit = _pid_env(pid, "TTS_ERP_DEPLOYED_COMMIT")
+        declared = _unit_env_from_dropin(unit)
+        item: dict[str, Any] = {
+            "unit": unit,
+            "active_state": state,
+            "pid": pid,
+            "working_directory": wd,
+            "disk_head": disk_head,
+            "process_deployed_commit": process_commit,
+            "dropin_declared_commit": declared,
+        }
+        if state != "active":
+            item["skipped"] = f"unit not active (ActiveState={state})"
+            skipped.append(unit)
+        elif not process_commit:
+            item["mismatch"] = "进程环境里没有 TTS_ERP_DEPLOYED_COMMIT（进程无法自证身份）"
+            failures.append(unit)
+        elif disk_head and process_commit != disk_head:
+            item["mismatch"] = "进程加载的 commit ≠ 磁盘 HEAD（跑的是旧代际）"
+            failures.append(unit)
+        elif declared and disk_head and declared != disk_head:
+            item["mismatch"] = "drop-in 声明的 commit ≠ 磁盘 HEAD（改了没重启）"
+            failures.append(unit)
+        else:
+            item["ok"] = True
+        items.append(item)
+    return {"units": items, "failures": failures, "skipped": skipped}
 
 
 def _datname_by_process_group(session) -> list[dict[str, Any]]:
@@ -386,6 +766,34 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--static-tables", default="", help="静态表豁免文件（每行一个表名）")
     ap.add_argument("--state-file", default="", help="上轮状态文件（用于增删差异）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
+    ap.add_argument(
+        "--expect-db",
+        default=os.environ.get("TTS_ERP_EXPECT_DB", "tts_erp"),
+        help="期望连上的库名；事实判据 current_database() 必须等于它",
+    )
+    ap.add_argument(
+        "--expect-code-root",
+        default=os.environ.get("TTS_ERP_EXPECT_CODE_ROOT", ""),
+        help="期望的代码根目录；留空则从 unit 的 WorkingDirectory 推导",
+    )
+    ap.add_argument(
+        "--unit",
+        default=os.environ.get("TTS_ERP_UNIT", "tts-erp"),
+        help="定义生产代码树的 unit（user scope）",
+    )
+    ap.add_argument(
+        "--units",
+        default=os.environ.get(
+            "TTS_ERP_UNITS",
+            "tts-erp,tts-erp-sync,tts-erp-publish,tts-erp-watchdog",
+        ),
+        help="要做世代自证的 unit 列表（逗号分隔，user scope）",
+    )
+    ap.add_argument(
+        "--skip-generation",
+        action="store_true",
+        help="跳过世代自证（发布窗口中途用）；跳过会记进报告，不是静默跳过",
+    )
     args = ap.parse_args(argv)
 
     if args.days < 1 or args.stale_days < 1 or args.lookback < 1:
@@ -405,6 +813,40 @@ def main(argv: list[str] | None = None) -> int:
             + "\n".join(f"  - {s}" for s in false_positive) + "\n")
         return 4
 
+    # ★ 身份断言 ②：代码树。必须排在任何 DB 连接之前 ——
+    #   连错代码查出来的结论，和连错库一样是假的。
+    code_identity = _assert_code_identity(args.expect_code_root or None, args.unit)
+
+    # ★ 身份断言 ③：世代自证（路径相同但内容不同代 ⇒ 路径断言抓不到）
+    units = [u.strip() for u in args.units.split(",") if u.strip()]
+    if args.skip_generation:
+        generation_identity = {
+            "units": [],
+            "failures": [],
+            "skipped": units,
+            "skipped_reason": "--skip-generation（发布窗口中途显式跳过；正常值 0）",
+        }
+    else:
+        generation_identity = _generation_identity(units)
+    if generation_identity["failures"]:
+        detail = "\n".join(
+            f"   - {i['unit']}: {i.get('mismatch')}"
+            f"（进程自证={i.get('process_deployed_commit')}"
+            f" 磁盘HEAD={i.get('disk_head')}"
+            f" drop-in声明={i.get('dropin_declared_commit')}）"
+            for i in generation_identity["units"]
+            if i.get("mismatch")
+        )
+        sys.stderr.write(
+            "⛔ 身份断言失败（世代不一致）\n"
+            + detail + "\n"
+            f"   ⇒ 拒绝继续巡检（exit {EXIT_IDENTITY}）。\n"
+            "   判据说明：四个 unit 的 WorkingDirectory 是同一条路径（发布用 mv+cp -a\n"
+            "   原地覆盖），路径断言抓不到代际差异；代际只能靠进程自证的 commit 对照\n"
+            "   磁盘 HEAD 来判。\n"
+        )
+        raise SystemExit(EXIT_IDENTITY)
+
     static_tables: set[str] = set()
     if args.static_tables:
         with open(args.static_tables, encoding="utf-8") as fh:
@@ -419,9 +861,12 @@ def main(argv: list[str] | None = None) -> int:
 
     session = factory()
     try:
+        # ★ 身份断言 ①：连库。必须排在【第一条业务查询之前】——
+        #   旧版把 _db_identity() 放在查完数据之后，于是「连错库」时结论
+        #   照样出得来，还带着「僵尸已清零」的假象。
+        db_id = _assert_db_identity(session, args.expect_db)
         windowed = _job_rows(session, now - dt.timedelta(days=args.days))
         everything = _all_job_rows(session)
-        db_id = _db_identity(session)
         groups = _datname_by_process_group(session)
     finally:
         session.close()
@@ -497,6 +942,12 @@ def main(argv: list[str] | None = None) -> int:
         "window_days": args.days, "stale_days": args.stale_days, "lookback": args.lookback,
         "registered_jobs": len(jobs),
         "source": _jobs_source(),
+        "identity": {
+            "db": db_id,
+            "code": code_identity,
+            "generation": generation_identity,
+            "note": "三个身份断言都在业务查询之前失败即非零退出（exit 5）",
+        },
         "db_identity": db_id,
         "datname_by_process_group": groups,
         "list_1_not_run": not_run,
@@ -530,6 +981,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"生成时间(单一时钟): {report['generated_at']}")
         print(f"JOBS 来源: cwd={report['source']['cwd']}  git_head={report['source']['git_head']}")
         print(f"连接库: {db_id.get('datname')} @ {db_id.get('server_addr')}:{db_id.get('server_port')} (user={db_id.get('usename')})")
+        print(f"身份断言① 连库: current_database()={db_id.get('datname')} (期望 {db_id.get('expected_datname')}) ✓")
+        print(f"身份断言② 代码: origin={code_identity.get('origin')} (期望根 {code_identity.get('expected_root')}) ✓")
+        print(f"身份断言③ 世代: 核对 {len(generation_identity['units'])} 个 unit"
+              f"，不一致 {len(generation_identity['failures'])}，跳过 {len(generation_identity['skipped'])}")
+        for i in generation_identity["units"]:
+            print(f"   {i['unit']:<26} 进程={str(i.get('process_deployed_commit'))[:12]}"
+                  f" 磁盘={str(i.get('disk_head'))[:12]}"
+                  f" 声明={str(i.get('dropin_declared_commit'))[:12]}"
+                  f" [{i.get('mismatch') or i.get('skipped') or 'OK'}]")
         print(f"注册表作业数: {report['registered_jobs']}")
         print()
         print(f"① 注册了但窗口内没跑 ({len(not_run)})")
