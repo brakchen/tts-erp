@@ -403,8 +403,8 @@ def test_cost_conversion_is_delegated_to_the_fx_owner(db_session, monkeypatch):
         db_session,
         spu_pk=cp.id,
         currency="VND",
-        quantity=Decimal("2"),
-        unit_price=Decimal("50000"),
+        quantity=Decimal(2),
+        unit_price=Decimal(50000),
         order_id="TEST_FX_LOCATION",
     )
 
@@ -433,14 +433,14 @@ def test_cross_currency_with_rate_writes_exactly_one_valued_row_and_no_issue(db_
     _seed_cost_snapshot(db_session, cp.id, unit_cost=Decimal("10.00"), currency="CNY")
     _seed_fx_snapshot(
         db_session,
-        {"USD": Decimal("1"), "CNY": _CNY_PER_USD, "VND": _VND_PER_USD},
+        {"USD": Decimal(1), "CNY": _CNY_PER_USD, "VND": _VND_PER_USD},
     )
     _seed_order(
         db_session,
         spu_pk=cp.id,
         currency="VND",
-        quantity=Decimal("2"),
-        unit_price=Decimal("50000"),
+        quantity=Decimal(2),
+        unit_price=Decimal(50000),
         order_id="TEST_FX_COUNT_OK",
     )
 
@@ -462,8 +462,8 @@ def test_cross_currency_without_rate_writes_exactly_one_issue_and_no_valued_row(
         db_session,
         spu_pk=cp.id,
         currency="XTS",
-        quantity=Decimal("2"),
-        unit_price=Decimal("50000"),
+        quantity=Decimal(2),
+        unit_price=Decimal(50000),
         order_id="TEST_FX_COUNT_MISSING",
     )
 
@@ -496,7 +496,7 @@ def test_same_currency_branch_never_calls_the_fx_owner(db_session, monkeypatch):
         db_session,
         spu_pk=cp.id,
         currency="USD",
-        quantity=Decimal("2"),
+        quantity=Decimal(2),
         unit_price=Decimal("50.00"),
         order_id="TEST_FX_BRANCH_SAME",
     )
@@ -516,14 +516,14 @@ def test_cross_currency_branch_converts_through_the_cached_rate(db_session):
     _seed_cost_snapshot(db_session, cp.id, unit_cost=Decimal("10.00"), currency="CNY")
     _seed_fx_snapshot(
         db_session,
-        {"USD": Decimal("1"), "CNY": _CNY_PER_USD, "VND": _VND_PER_USD},
+        {"USD": Decimal(1), "CNY": _CNY_PER_USD, "VND": _VND_PER_USD},
     )
     _seed_order(
         db_session,
         spu_pk=cp.id,
         currency="VND",
-        quantity=Decimal("2"),
-        unit_price=Decimal("50000"),
+        quantity=Decimal(2),
+        unit_price=Decimal(50000),
         order_id="TEST_FX_BRANCH_CROSS",
     )
 
@@ -545,13 +545,13 @@ def test_unknown_rate_branch_keeps_null_and_records_issue(db_session):
     """
     _acct, cp = _make_account_and_product(db_session)
     _seed_cost_snapshot(db_session, cp.id, unit_cost=Decimal("10.00"), currency="CNY")
-    _seed_fx_snapshot(db_session, {"USD": Decimal("1"), "CNY": _CNY_PER_USD})
+    _seed_fx_snapshot(db_session, {"USD": Decimal(1), "CNY": _CNY_PER_USD})
     _seed_order(
         db_session,
         spu_pk=cp.id,
         currency="VND",
-        quantity=Decimal("2"),
-        unit_price=Decimal("50000"),
+        quantity=Decimal(2),
+        unit_price=Decimal(50000),
         order_id="TEST_FX_BRANCH_UNKNOWN",
     )
 
@@ -582,8 +582,8 @@ def test_missing_rate_snapshot_branch_keeps_null_and_records_issue(db_session, m
         db_session,
         spu_pk=cp.id,
         currency="VND",
-        quantity=Decimal("2"),
-        unit_price=Decimal("50000"),
+        quantity=Decimal(2),
+        unit_price=Decimal(50000),
         order_id="TEST_FX_BRANCH_NOSNAP",
     )
 
