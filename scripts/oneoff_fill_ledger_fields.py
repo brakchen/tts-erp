@@ -157,10 +157,12 @@ SPEC: dict[str, dict] = {
         symbol="_scheduled_child_command",
         kind="count", scope="file",
         pattern=r"kill|SIGKILL|timeout",
-        expected_count=1,
+        min_count=1,
         method="父进程以独立子进程调度 job（_scheduled_child_command）；"
                "但超时 kill 机制在 owner 树里必须存在（kill/SIGKILL/timeout 至少一处），"
-               "当前 0 处 ⇒ 超时后 running 行不会被终结 ⇒ 判红。",
+               "当前 0 处 ⇒ 超时后 running 行不会被终结 ⇒ 判红。"
+               "★ 用「至少 1 处」而不是「恰好 1 处」：OOM P0 的修复在 master 上带来 3 处命中"
+               "（含 docstring 提及），写死恰好 1 会让修好的代码继续判红。",
     ),
     "AD-JOB-003": dict(
         ref=PROD, path="tts_erp_v2/jobs/miaoshou/sync_source_cost_to_master.py",
@@ -173,9 +175,10 @@ SPEC: dict[str, dict] = {
     "AD-BACKUP-001": dict(
         ref=PROD, path="scripts/backup/pg_dump_hourly.sh", symbol="KEEP_COUNT",
         kind="count", scope="file",
-        pattern=r"gzip -t|pg_restore --list", expected_count=2,
+        pattern=r"gzip -t|pg_restore --list", min_count=2,
         method="每小时 dump 必须过 gzip -t 与 pg_restore --list 两道校验；"
                "当前一个都没有 ⇒ 损坏的备份也会被当成成功 ⇒ 判红。"
+               "★ 用「至少 2 处」：校验可能被写在多处，写死恰好 2 会让正确的实现被判红。"
                "保留份数由 KEEP_COUNT 声明（当前 24 ⇒ RPO=1h）。",
     ),
     "AD-NET-001": dict(
@@ -289,11 +292,21 @@ def main(argv: list[str] | None = None) -> int:
                 reds.append(f"{rid}: 缺期望分支 {missing_anchor}")
         if spec["kind"] == "count":
             scope["pattern"] = spec["pattern"]
-            scope["expected_count"] = spec["expected_count"]
+            for opt in ("expected_count", "min_count", "max_count"):
+                if opt in spec:
+                    scope[opt] = spec[opt]
             found = len(re.findall(spec["pattern"], content))
-            if found != spec["expected_count"]:
+            if "expected_count" in spec and found != spec["expected_count"]:
                 reds.append(
-                    f"{rid}: 数量判据当前 {found}，期望 {spec['expected_count']}（该 rule 判红）"
+                    f"{rid}: 数量判据当前 {found}，期望恰好 {spec['expected_count']}（该 rule 判红）"
+                )
+            if "min_count" in spec and found < spec["min_count"]:
+                reds.append(
+                    f"{rid}: 数量判据当前 {found}，期望至少 {spec['min_count']}（该 rule 判红）"
+                )
+            if "max_count" in spec and found > spec["max_count"]:
+                reds.append(
+                    f"{rid}: 数量判据当前 {found}，期望至多 {spec['max_count']}（该 rule 判红）"
                 )
         for opt in ("absent_in_ref", "absent_path", "equal_blob_ref",
                     "assert_contains", "forbid_contains"):

@@ -900,10 +900,10 @@ entries:
   line_digest: sha256:2138e4b0d08e459b
   scope_assertion:
     kind: count
-    method: 父进程以独立子进程调度 job（_scheduled_child_command）；但超时 kill 机制在 owner 树里必须存在（kill/SIGKILL/timeout 至少一处），当前 0 处 ⇒ 超时后 running 行不会被终结 ⇒ 判红。
+    method: 父进程以独立子进程调度 job（_scheduled_child_command）；但超时 kill 机制在 owner 树里必须存在（kill/SIGKILL/timeout 至少一处），当前 0 处 ⇒ 超时后 running 行不会被终结 ⇒ 判红。★ 用「至少 1 处」而不是「恰好 1 处」：OOM P0 的修复在 master 上带来 3 处命中（含 docstring 提及），写死恰好 1 会让修好的代码继续判红。
     scope: file
     pattern: kill|SIGKILL|timeout
-    expected_count: 1
+    min_count: 1
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
@@ -1002,10 +1002,10 @@ entries:
   line_digest: sha256:f5da5fde465f4e1c
   scope_assertion:
     kind: count
-    method: 每小时 dump 必须过 gzip -t 与 pg_restore --list 两道校验；当前一个都没有 ⇒ 损坏的备份也会被当成成功 ⇒ 判红。保留份数由 KEEP_COUNT 声明（当前 24 ⇒ RPO=1h）。
+    method: 每小时 dump 必须过 gzip -t 与 pg_restore --list 两道校验；当前一个都没有 ⇒ 损坏的备份也会被当成成功 ⇒ 判红。★ 用「至少 2 处」：校验可能被写在多处，写死恰好 2 会让正确的实现被判红。保留份数由 KEEP_COUNT 声明（当前 24 ⇒ RPO=1h）。
     scope: file
     pattern: gzip -t|pg_restore --list
-    expected_count: 2
+    min_count: 2
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null

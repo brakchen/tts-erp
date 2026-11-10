@@ -190,15 +190,28 @@ def _check_entry(repo: Path, row: dict[str, Any]) -> dict[str, Any]:
     elif kind == "count":
         pattern = scope.get("pattern")
         expected = scope.get("expected_count")
+        minimum = scope.get("min_count")
+        maximum = scope.get("max_count")
         if not pattern:
             problems.append("count 判据缺 pattern")
-        elif not isinstance(expected, int):
-            problems.append("count 判据缺 expected_count")
+        elif expected is None and minimum is None and maximum is None:
+            problems.append("count 判据缺 expected_count / min_count / max_count")
         else:
             found = len(re.findall(str(pattern), target))
-            if found != expected:
+            # ★ expected_count 是【恰好】；min_count/max_count 是【区间】。
+            #   写「恰好 1」而修复后出现 3 处 ⇒ 修好了仍然判红 ⇒ 判据本身是坏的。
+            #   「超时 kill 机制必须存在」这类需求要用 min_count。
+            if isinstance(expected, int) and found != expected:
                 problems.append(
-                    f"count 判据不成立：模式 {pattern!r} 实际命中 {found} 次，声明 {expected} 次"
+                    f"count 判据不成立：模式 {pattern!r} 实际命中 {found} 次，声明恰好 {expected} 次"
+                )
+            if isinstance(minimum, int) and found < minimum:
+                problems.append(
+                    f"count 判据不成立：模式 {pattern!r} 实际命中 {found} 次，少于下限 {minimum} 次"
+                )
+            if isinstance(maximum, int) and found > maximum:
+                problems.append(
+                    f"count 判据不成立：模式 {pattern!r} 实际命中 {found} 次，多于上限 {maximum} 次"
                 )
     elif kind == "branch":
         anchors = scope.get("anchors")
