@@ -34,6 +34,9 @@ import sys
 
 BUILTINS = frozenset(dir(builtins))
 
+#: Repository root, so findings are reported with repo-relative paths.
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
 #: Names that are provided by the interpreter, not by a binding.
 IMPLICIT = frozenset({"__file__", "__name__", "__doc__", "__package__", "__spec__",
                       "__loader__", "__builtins__", "__annotations__", "__debug__"})
@@ -83,10 +86,18 @@ def scan(root: pathlib.Path) -> list[tuple[str, int, str]]:
             continue
         try:
             for line, name in undefined_names(source, str(path)):
-                issues.append((str(path), line, name))
+                issues.append((_relative(path), line, name))
         except SyntaxError as exc:
-            issues.append((str(path), exc.lineno or 0, f"SyntaxError: {exc.msg}"))
+            issues.append((_relative(path), exc.lineno or 0, f"SyntaxError: {exc.msg}"))
     return issues
+
+
+def _relative(path: pathlib.Path) -> str:
+    """Repo-relative path, so a finding reads the same on every machine."""
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def _render(item: tuple[str, int, str]) -> str:
