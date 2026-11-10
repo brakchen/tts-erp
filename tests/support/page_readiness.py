@@ -1,61 +1,162 @@
-"""Positive canned-data readiness for layout/font checks, never error scenarios."""
+"""Positive canned-data readiness for layout/font checks, never error scenarios.
+
+The contract table below is the single source of truth: every slug names the
+**structural** anchors the page really renders, so "ready" never depends on
+fixture text. P6 retired the Jinja templates, so anchors that name their DOM
+(``#alert-page`` / ``#alert-status`` / ``#alert-rows``) are permanently false
+and are banned by ``tests/support/test_page_readiness_contract.py``.
+
+Two rules keep the table honest:
+
+* An anchor must be something the **current owner** renders — the React page
+  under ``frontend/src/pages/<slug>/``. HeroUI renders its tables with the
+  accessible role ``grid`` (not ``table``).
+* A fixture value (for example ``TEST_RENDER_COMPARE_0``) is a **data
+  assertion** and belongs in the test that owns the data, never here.
+"""
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from tests.support.test_runtime import record_phase
 
-TABLES = {
-    "ad-daily": "广告日明细", "manual-costs": "SPU 成本工作台", "shops": "店铺接入列表",
-    "enum-map": "枚举映射", "sync-jobs": "定时任务", "users": "用户列表",
-    "intercept-configs": "拦截配置", "intercept-requests": "拦截记录",
+
+@dataclass(frozen=True, slots=True)
+class Anchor:
+    """One anchor a canned page must really render.
+
+    ``kind`` is ``role`` (accessible role + accessible name), ``text`` (visible
+    text, optionally scoped to a role) or ``css`` (a selector).
+    """
+
+    kind: str
+    value: str = ""
+    name: str = ""
+    within: tuple[str, str] | None = None
+
+    def locator(self, page: Any) -> Any:
+        if self.kind == "role":
+            return page.get_by_role(self.value, name=self.name, exact=True)
+        if self.kind == "text":
+            scope = page
+            if self.within is not None:
+                role, name = self.within
+                scope = page.get_by_role(role, name=name, exact=True)
+            return scope.get_by_text(self.value, exact=True).first
+        if self.kind == "css":
+            return page.locator(self.value).first
+        raise AssertionError(f"Unknown anchor kind: {self.kind}")
+
+    @property
+    def source_literal(self) -> str | None:
+        """The string that must exist in the React source, if any.
+
+        Only role anchors have one: the accessible name comes from an
+        ``aria-label`` in ``frontend/src``. Fixture text and library-generated
+        class names have no source literal, so they are not checked here.
+        """
+        if self.kind == "role":
+            return self.name
+        return None
+
+
+def _role(role: str, name: str) -> Anchor:
+    return Anchor(kind="role", value=role, name=name)
+
+
+def _text(value: str, within: tuple[str, str] | None = None) -> Anchor:
+    return Anchor(kind="text", value=value, within=within)
+
+
+def _css(selector: str) -> Anchor:
+    return Anchor(kind="css", value=selector)
+
+
+#: Slug → the anchors that prove the page really rendered.
+CONTRACTS: dict[str, tuple[Anchor, ...]] = {
+    "ad-daily": (_role("grid", "广告日明细"),),
+    "dashboard": (
+        _role("region", "SPU 总数"),
+        _text("1234", within=("region", "SPU 总数")),
+        _role("grid", "已注册店铺"),
+        _role("grid", "数据同步状态"),
+        _text("API 正常"),
+    ),
+    "digital-humans": (_text("当前没有档案。"),),
+    "enum-map": (_role("grid", "枚举映射"),),
+    "focused-spus": (
+        _css(".tabulator-row"),
+        _css('#data-freshness [data-source="ads"]'),
+    ),
+    "intercept-configs": (_role("grid", "拦截配置"),),
+    "intercept-requests": (_role("grid", "拦截记录"),),
+    "intercept-stats": (
+        _role("grid", "每日请求（UTC）"),
+        _css(".uplot canvas"),
+    ),
+    "manual-costs": (_role("grid", "SPU 成本工作台"),),
+    "media-assets": (_text("资产库还没有素材包。"),),
+    "runtime-configs": (
+        _role("grid", "运行配置"),
+        _text("TEST_RENDER_RUNTIME", within=("grid", "运行配置")),
+    ),
+    "shops": (_role("grid", "店铺接入列表"),),
+    "spu-profit-deterioration": (_role("grid", "SPU 两期盈利对比"),),
+    "spu-roi": (
+        _css(".tabulator-row"),
+        _css('#data-freshness [data-source="ads"]'),
+    ),
+    "sync-jobs": (_role("grid", "定时任务"),),
+    "users": (_role("grid", "用户列表"),),
+    "video-publish": (
+        _text("TEST_render_device", within=("region", "发布配置")),
+        _text("当前没有运行中或清理中的发布任务。"),
+        _role("grid", "视频发布任务"),
+    ),
 }
+
+#: The slugs this helper supports — the declaration, kept apart from
+#: ``CONTRACTS`` on purpose: dropping a contract must be detected (guard G1)
+#: instead of silently shrinking the protection. ``runninghub`` is deliberately
+#: absent: the browser suite has its own readiness branch for that page and
+#: the old helper branch was stale text that could never hit.
+SUPPORTED_SLUGS: frozenset[str] = frozenset(
+    {
+        "ad-daily",
+        "dashboard",
+        "digital-humans",
+        "enum-map",
+        "focused-spus",
+        "intercept-configs",
+        "intercept-requests",
+        "intercept-stats",
+        "manual-costs",
+        "media-assets",
+        "runtime-configs",
+        "shops",
+        "spu-profit-deterioration",
+        "spu-roi",
+        "sync-jjobs",
+        "users",
+        "video-publish",
+    }
+)
 
 
 def wait_canned_page(page: Any, slug: str) -> None:
+    """Wait until the canned page for ``slug`` really rendered.
+
+    Raises ``AssertionError`` for a slug without a contract instead of
+    silently waiting for an element that will never appear.
+    """
     started = time.monotonic()
-    if slug == "spu-profit-deterioration" and page.locator("#alert-page").count():
-        page.locator('#alert-status[data-kind="ready"]').wait_for()
-        page.locator('#alert-rows [data-spu-pk]').first.wait_for(state="attached")
-    elif slug == "runninghub":
-        # This page has its own root layout; require its displayed GET facts.
-        page.get_by_text("2111762608670990337 · plus · 并发 5 · 已校验版本", exact=True).wait_for()
-        page.get_by_role("checkbox", name="TEST_RENDER_HUMAN / A · TEST_ren", exact=True).wait_for()
-        page.get_by_text("没有就绪图片。请先到资产管理上传服装图。", exact=True).wait_for()
-        assert page.get_by_role("alert").count() == 0
-    else:
-        page.locator("#frontend-root .erp-page").wait_for()
-        if slug in TABLES:
-            page.get_by_role("grid", name=TABLES[slug], exact=True).wait_for()
-        elif slug in {"spu-roi", "focused-spus"}:
-            page.locator(".tabulator-row").first.wait_for()
-            page.locator('#data-freshness [data-source="ads"]').wait_for()
-        elif slug == "dashboard":
-            page.get_by_role("region", name="SPU 总数", exact=True).get_by_text("1234", exact=True).wait_for()
-            page.get_by_role("grid", name="已注册店铺", exact=True).wait_for()
-            page.get_by_role("grid", name="数据同步状态", exact=True).wait_for()
-            page.get_by_text("API 正常", exact=True).wait_for()
-        elif slug == "intercept-stats":
-            page.get_by_role("grid", name="每日请求（UTC）", exact=True).wait_for()
-            page.locator(".uplot canvas").first.wait_for()
-        elif slug == "runtime-configs":
-            page.get_by_role("grid", name="运行配置", exact=True).get_by_text("TEST_RENDER_RUNTIME", exact=True).first.wait_for()
-        elif slug == "spu-profit-deterioration":
-            page.get_by_text("TEST_RENDER_COMPARE_0", exact=True).wait_for()
-        elif slug == "media-assets":
-            # The React page opens on the 素材包 tab (index.tsx picks it unless
-            # ?view=all|videos), whose empty state is 资产库还没有素材包。
-            # The 全部素材 tab carries 没有符合条件的素材。, so wait for the
-            # tab that is actually on screen.
-            page.get_by_text("资产库还没有素材包。", exact=True).wait_for()
-        elif slug == "digital-humans":
-            page.get_by_text("当前没有档案。", exact=True).wait_for()
-        elif slug == "video-publish":
-            page.get_by_role("region", name="发布配置", exact=True).get_by_text("TEST_render_device", exact=True).wait_for()
-            page.get_by_text("当前没有运行中或清理中的发布任务。", exact=True).wait_for()
-            page.get_by_role("grid", name="视频发布任务", exact=True).wait_for()
-        else:
-            raise AssertionError(f"Missing canned readiness contract: {slug}")
+    anchors = CONTRACTS.get(slug)
+    if anchors is None:
+        raise AssertionError(f"Missing canned readiness contract: {slug}")
+    page.locator("#frontend-root .erp-page").wait_for()
+    for anchor in anchors:
+        anchor.locator(page).wait_for()
     page.evaluate("document.fonts.ready")
     record_phase("browser_ready", time.monotonic() - started)
