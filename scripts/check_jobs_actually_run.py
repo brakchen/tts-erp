@@ -169,6 +169,43 @@ def _utcnow() -> dt.datetime:
     return dt.datetime.now(tz=dt.timezone.utc)
 
 
+def _core_job_failures(
+    rows: list[Any],
+    *,
+    core_jobs: tuple[str, ...],
+    threshold: int,
+) -> list[dict[str, Any]]:
+    """核心作业的**连续失败**（从最新一行往回数）。
+
+    口径与 watchdog 的 ``_trailing_failure_streak`` 一致：``rows`` 必须按
+    ``started_at`` 倒序，最新一行不是失败就返回 0（偶发一次失败不算"坏了"）。
+
+    只看**尾部连续**的失败：中间夹着一次成功，就说明作业已经恢复，不该再报。
+    """
+    out: list[dict[str, Any]] = []
+    for job_name in core_jobs:
+        streak = 0
+        last_error = ""
+        for row in rows:
+            if row.job_name != job_name:
+                continue
+            if row.status != "failed":
+                break
+            streak += 1
+            if not last_error:
+                last_error = row.error_message or ""
+        if streak >= threshold:
+            out.append(
+                {
+                    "job_name": job_name,
+                    "consecutive_failures": streak,
+                    "threshold": threshold,
+                    "last_error_message": last_error[:500],
+                }
+            )
+    return out
+
+
 def _load_jobs() -> dict[str, Any]:
     try:
         from tts_erp_v2.sync_worker.scheduler import JOBS
@@ -248,6 +285,32 @@ EXIT_USAGE = 2
 EXIT_GUARD_LEAK = 3
 EXIT_GUARD_FALSE_POSITIVE = 4
 EXIT_IDENTITY = 5
+#: 核心作业连续失败 ⇒ 非零退出。巡检本身没坏，但查到了必须处理的故障。
+#: 0/2/3/4/5 各有主（完成 / 参数错 / 守卫漏网 / 守卫误伤 / 身份断言失败）
+#: ⇒ 用 6，不与任何一个撞。
+EXIT_CORE_JOB_FAILURES = 6
+
+#: 核心作业清单：这些作业坏了**必须有人看见**。
+#:
+#: 2026-11-10 依据：``miaoshou.purchase_price_clean`` 从 2026-10-09 14:42 起
+#: 连续失败 776 次（31 天）没人发现——watchdog 的 finding 只落本地日志
+#: （用户暂不配置飞书 webhook）。⇒ 清单 ⑤ + 非零退出，是「作业坏了」
+#: 唯一会被人看见的路。
+CORE_JOBS: tuple[str, ...] = (
+    # 财务：越南站最后一次成功是 2026-11-06 04:38，之后每 tick 都失败
+    "tiktok.finance",
+    # 采购价：上游网页版登录态过期（与官方 API 凭据是两套，互不相干）
+    "miaoshou.purchase_price_clean",
+    # 日利润表：下游看板的数据源
+    "reporting.profit_daily",
+)
+
+#: 连续失败多少次算「坏了」。
+#:
+#: N=3 的依据：与 watchdog 规则 (b) 的 ``CONSECUTIVE_FAILURE_THRESHOLD = 3``
+#: 对齐——3 次连续失败跨 3 个调度周期，足以滤掉单次抖动（偶发一次失败不该
+#: 让巡检变红），又不会像 775 次那样拖到 31 天才有人看见。
+CORE_FAILURE_STREAK_THRESHOLD = 3
 
 
 def _dsn_dbname() -> str | None:
@@ -765,6 +828,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lookback", type=int, default=5, help="清单③回看最近 N 次成功")
     ap.add_argument("--static-tables", default="", help="静态表豁免文件（每行一个表名）")
     ap.add_argument("--state-file", default="", help="上轮状态文件（用于增删差异）")
+    ap.add_argument(
+        "--core-fail-streak",
+        type=int,
+        default=CORE_FAILURE_STREAK_THRESHOLD,
+        help="清单⑤：核心作业连续失败多少次算坏了（默认 3）",
+    )
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument(
         "--expect-db",
@@ -798,7 +867,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.days < 1 or args.stale_days < 1 or args.lookback < 1:
         sys.stderr.write("--days / --stale-days / --lookback 必须 >= 1\n")
-        return 2
+        return EXIT_USAGE
+    if args.core_fail_streak < 1:
+        sys.stderr.write("--core-fail-streak 必须 >= 1\n")
+        return EXIT_USAGE
 
     # ★ ② 双向自测：漏网 ⇒ 3，误伤 ⇒ 4
     leaked, false_positive = _guard_self_test()
@@ -875,6 +947,13 @@ def main(argv: list[str] | None = None) -> int:
     for r in everything:
         by_job.setdefault(r.job_name, []).append(r)
     window_since = now - dt.timedelta(days=args.days)
+
+    # ⑤ 核心作业连续失败（清单 ⑤：必须有人看见的那条路）
+    core_failures = _core_job_failures(
+        everything,
+        core_jobs=CORE_JOBS,
+        threshold=args.core_fail_streak,
+    )
 
     not_run = []
     for name in sorted(jobs):
@@ -954,6 +1033,7 @@ def main(argv: list[str] | None = None) -> int:
         "list_2_never_finished": zombies,
         "list_3_read_but_no_write": read_but_no_write,
         "list_4_stale_source_tables": stale,
+        "list_5_core_job_failures": core_failures,
         "skipped": {"count": len(stale_query_failures), "items": stale_query_failures},
         # ★ 脚本本来就知道自己排除了哪些表，却没输出 ⇒ 清单变短时
         #   「排除导致」与「真好转」在输出上不可分辨（@测试质量评审员 §一）
@@ -1022,13 +1102,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"   ⚠⚠ removed ∩ skipped ≠ ∅：{bad} ⇒ 有表是被跳过的，不是好转")
         else:
             print("   removed ∩ skipped = ∅ ✓")
+        print()
+        print(f"⑤ 核心作业连续失败 ≥{args.core_fail_streak} 次 ({len(core_failures)})")
+        for r in core_failures:
+            print(f"   {r['job_name']:<45} streak={r['consecutive_failures']} "
+                  f"last_error={r['last_error_message'][:120]}")
         print(f"只读守卫违规次数: {len(_write_violations)}")
         print(f"守卫自测: 拦截样例 {len(_GUARD_BLOCK_CASES)} 条 / 放行样例 {len(_GUARD_ALLOW_CASES)} 条 "
               f"→ 漏网 {len(leaked)} / 误伤 {len(false_positive)}")
 
     if args.state_file:
         _save_state(args.state_file, report)
-    return 0
+    # 巡检本身没坏，但查到了必须处理的故障 ⇒ 非零退出（6）。
+    return EXIT_CORE_JOB_FAILURES if core_failures else 0
 
 
 if __name__ == "__main__":
