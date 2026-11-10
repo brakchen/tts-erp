@@ -137,7 +137,16 @@ def _extract_sku_image_url(raw_sku: dict) -> str | None:
 
 
 def _walk_pages(proxy_call, *, base_body):
-    collected: list[dict] = []
+    """Walk every page of the product search, yielding items page by page.
+
+    A generator, not a list builder. The caller materialises it with
+    ``list(...)`` because it needs two passes (image fetch first, then
+    persist) — the product catalogue is bounded (hundreds of SKUs), so the
+    materialised list is small; what this shape removes is the *unbounded*
+    part: a runaway upstream pagination can no longer grow the list
+    forever, it now fails the tick loudly (see the repeated-token guard).
+    """
+    seen_tokens: set[str] = set()
     next_token: str | None = None
     body = dict(base_body)
     while True:
@@ -152,11 +161,16 @@ def _walk_pages(proxy_call, *, base_body):
             )
         data = resp.get("data") or {}
         products = data.get("products") or []
-        collected.extend(products)
+        yield from products
         next_token = data.get("next_page_token") or None
         if not next_token:
             break
-    return collected
+        if next_token in seen_tokens:
+            raise UpstreamJobError(
+                "upstream pagination did not advance: next_page_token repeated "
+                "(upstream loop); aborting the walk instead of running forever"
+            )
+        seen_tokens.add(next_token)
 
 
 def _parse_product(raw: dict) -> dict:
@@ -288,7 +302,11 @@ def run(
         if watermark_ms:
             base_body["update_time_ge"] = _safe_int(watermark_ms) // 1000
 
-    products = _walk_pages(proxy_call, base_body=base_body)
+    # Two passes are needed (image fetch, then persist), so the catalogue is
+    # materialised once — it is bounded (hundreds of SKUs). The walk itself
+    # is still bounded: a runaway pagination fails the tick instead of
+    # growing the list forever.
+    products = list(_walk_pages(proxy_call, base_body=base_body))
 
     rows_total = len(products)
     rows_inserted = 0
