@@ -11,19 +11,19 @@ entries:
   owner_path: tts_erp_v2/runtime_settings.py
   owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
   owner_blob: 04405853923a680ad8bbeac686d662a4e3b6ce81
-  summary: 同一份配置在生产分支走 get_setting 链（.env > runtime 文件 > 进程环境）， master 走 os.environ；且 .env 里的 TTS_ERP_RUNTIME_ENV_FILE 可改写
-    "去哪里读凭据"这个来源指示符 ⇒ cwd 下一个 .env 就能接管全部凭据来源。
+  summary: 同一份配置在生产分支走 get_setting 链（.env > runtime 文件 > 进程环境）， master 走 os.environ；且 .env 里的 TTS_ERP_RUNTIME_ENV_FILE 可改写 "去哪里读凭据"这个来源指示符 ⇒ cwd 下一个 .env 就能接管全部凭据来源。
   guard: get_setting 的优先级链 + runtime.env 由受控文件提供
   guard_precondition: 移除 cwd 隐式默认（设 TTS_ERP_DOTENV_FILE 绝对路径）；来源指示符只认进程环境
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-CFG-001
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-CFG-001
   verification_state: green
   negative_fixture: 在 cwd 放一个含同名键的 .env ⇒ source 必须变成 dotenv（当前两个 cwd 无 .env，故需构造夹具）
   owner_ref_note: release 分支（生产）。master 无 runtime_settings.py（见 AD-BASE-001）
@@ -46,8 +46,7 @@ entries:
     in_target_chain: null
     evidence_level: inferred
     measured_at: null
-  fact: 生产 release 分支 runtime_settings.get_setting_facts 实测：优先级为 dotenv > runtime_file > process_env；且 .env 里的 TTS_ERP_RUNTIME_ENV_FILE
-    优先于进程环境
+  fact: 生产 release 分支 runtime_settings.get_setting_facts 实测：优先级为 dotenv > runtime_file > process_env；且 .env 里的 TTS_ERP_RUNTIME_ENV_FILE 优先于进程环境
   supports:
   - 受控文件能覆盖进程环境 ⇒ 轮换必须遍历全部来源层
   does_not_support:
@@ -56,9 +55,14 @@ entries:
   symbol: get_setting_facts
   line_digest: sha256:41822decf73a09b0
   scope_assertion:
-    kind: location
-    note: 配置来源优先级的 owner 暴露点（值+来源）
-    method: git show <owner_ref>:<owner_path> 定位后按符号名核对
+    kind: branch
+    method: owner 的 get_setting_facts 必须同时给出三层来源键 (dotenv/runtime_file/process_env) 与兜底 default 四个分支；少任一分支 ⇒ 轮换验收无法区分『旧值藏在低优先级层』。
+    scope: block
+    anchors:
+    - dotenv
+    - runtime_file
+    - process_env
+    - default
   symbol_line: 226
   unverified_preconditions_status: open
   unverified_preconditions_resolve_by: null
@@ -66,11 +70,12 @@ entries:
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  check_ref: scripts/check_ledger_owners.py --rule AD-CFG-001
 - id: AD-CFG-002
   rule: config-source-precedence
   owner_path: scripts/check_install_parity.sh
-  owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
-  owner_blob: null
+  owner_ref: 5597dcca2139ae210873616b65081246d9b032e3
+  owner_blob: 57fd0162f3dd470a680ca9411d0d4c12624c08e9
   summary: 核对工具曾自己重写一份优先级链（resolved_from/effective）⇒ 真实现改了链 它不会跟着改 ⇒ 核对结论过期而自己不知道。
   guard: 改为向 owner 询问（get_with_source），工具不再复制规则
   guard_precondition: owner 暴露 get_with_source（AD-CFG-001 的 owner 侧增量已完成）
@@ -79,10 +84,11 @@ entries:
   verification:
     kind: executable
     state: unknown
-    command: python scripts/check_convergence_invariants.py --ledger docs/architecture/arch-debt-ledger.yaml --json
+    command: python3 scripts/check_ledger_owners.py --rule AD-CFG-002
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-CFG-002
   verification_state: green
   negative_fixture: 改 owner 的优先级顺序后，核对输出必须跟着变（旧实现不会变）
   authoritative_read_chain: null
@@ -100,35 +106,44 @@ entries:
   - 该缺陷在当前基座成立
   does_not_support: &id002
   - 不能把『实测事实』直接当成『收口已达成』
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: resolved_from
+  line_digest: sha256:d06fb7cebec1bba0
+  scope_assertion:
+    kind: branch
+    method: 核对脚本必须同时向 owner 询问 dotenv/runtime_file/process_env 三层来源；工具不得自己复制一套优先级规则。
+    scope: file
+    anchors:
+    - dotenv
+    - runtime_file
+    - process_env
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 110
+  check_ref: scripts/check_ledger_owners.py --rule AD-CFG-002
 - id: AD-CFG-003
   rule: auth-mode-effective-value
   owner_path: tts_erp_v2/middleware/auth.py
   owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
   owner_blob: a253b4b50393ecfcda6faca75bd1de9fa12948f3
-  summary: AUTH_MODE 默认 off 且走 get_setting 链 ⇒ cwd 下一个 .env 即可热关掉全站鉴权 （runtime_settings 每次 get 都重读文件 ⇒ 无需重启）。生产实测当前 enforce
-    / 来源 runtime_file ⇒ 触发条件缺失但机制齐备。
+  summary: AUTH_MODE 默认 off 且走 get_setting 链 ⇒ cwd 下一个 .env 即可热关掉全站鉴权 （runtime_settings 每次 get 都重读文件 ⇒ 无需重启）。生产实测当前 enforce / 来源 runtime_file ⇒ 触发条件缺失但机制齐备。
   guard: middleware 对非法值 fail-closed；但默认值与来源链未收紧
   guard_precondition: 默认值改 enforce（阶段0/1）；来源只认锚（阶段1）
   guard_phase: 移除
   guard_shares_failure_face_with:
   - AD-SCHEMA-001
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-CFG-003
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-CFG-003
   verification_state: green
   negative_fixture: cwd 放 .env 含 TTS_ERP_AUTH_MODE=off ⇒ source 必须变 dotenv 且生效值变 off
   authoritative_read_chain: null
@@ -144,20 +159,24 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: AuthMode
-  line_digest: sha256:eb7fc319a0265f8d
+  unverified_preconditions: []
+  symbol: _auth_mode
+  line_digest: sha256:045c85ce611ef38d
   scope_assertion:
-    kind: location
-    note: 鉴权模式的生效判定点
-    method: git show <owner_ref>:<owner_path> 定位后按符号名核对
-  symbol_line: 17
+    kind: branch
+    method: 非法 TTS_ERP_AUTH_MODE 必须走 except 分支并回落到 AuthMode.ENFORCE（fail-closed）；回落成 off 即为缺陷。
+    scope: block
+    anchors:
+    - except ValueError
+    - AuthMode.ENFORCE
+  symbol_line: 122
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  check_ref: scripts/check_ledger_owners.py --rule AD-CFG-003
 - id: AD-SCHEMA-001
   rule: schema-version-contract
   owner_path: tts_erp_v2/app.py
@@ -170,12 +189,13 @@ entries:
   guard_shares_failure_face_with:
   - AD-CFG-003
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-SCHEMA-001
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-SCHEMA-001
   verification_state: red
   negative_fixture: 库版本比代码树更老（applied=0030）⇒ 判据①挡不住，必须判据②生效
   owner_ref_note: release 分支（生产）。master 侧 app.py blob=5690736655f51db970176a372fcc75b686174f5b
@@ -191,14 +211,14 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
+  unverified_preconditions: []
   symbol: healthz
-  line_digest: sha256:70c98b8f3f8f996d
+  line_digest: sha256:4c0699be33feaaba
   scope_assertion:
     kind: location
-    note: 对外健康端点（承载 service/auth_mode 字段）
-    method: git show <owner_ref>:<owner_path> 定位后按符号名核对
-  symbol_line: 23
+    method: 版本契约的暴露点必须是 app.py 内一个具名函数 healthz；守卫原型未挂载这件事本身另由 probe 判定。
+    scope: block
+  symbol_line: 341
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: &id003
@@ -210,13 +230,13 @@ entries:
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  check_ref: scripts/check_ledger_owners.py --rule AD-SCHEMA-001
 - id: AD-SCHEMA-002
   rule: schema-version-contract
   owner_path: tts_erp_v2/api/deps.py
   owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
   owner_blob: 58dbc30dacbf02e585e5dd5ea7fc815453d64212
-  summary: is_prod_shaped_db 在 master 与 release 是两个不同 blob（cf968f00 vs 58dbc30d）， 而这两个分支正是将要收敛的两端 ⇒ 直接用 master 覆盖 release
-    会把护栏的 取值来源改掉。
+  summary: is_prod_shaped_db 在 master 与 release 是两个不同 blob（cf968f00 vs 58dbc30d）， 而这两个分支正是将要收敛的两端 ⇒ 直接用 master 覆盖 release 会把护栏的 取值来源改掉。
   guard: 两棵树各自的 fail-closed 文本判定
   guard_precondition: 收敛 PR 必须显式声明：护栏取值来源以 release 版为准
   guard_phase: 移除
@@ -224,10 +244,11 @@ entries:
   verification:
     kind: executable
     state: unknown
-    command: python scripts/check_convergence_invariants.py --ledger docs/architecture/arch-debt-ledger.yaml --json
+    command: python3 scripts/check_ledger_owners.py --rule AD-SCHEMA-002
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-SCHEMA-002
   verification_state: green
   negative_fixture: 收敛后两棵树 blob 必须相同 ⇒ 断言相等
   owner_ref_note: master blob = cf968f00a144f34b8e05d552780d0f243817029c
@@ -263,35 +284,41 @@ entries:
   - 不能推出『收敛后护栏更严』——两边在生产库上的判定结果相同（都 True），只是『严的理由』不同
   unverified_preconditions: 假设把 DB URL 注入进程环境后 master 版仍按库名白名单判定等价于 fail-closed
   symbol: is_prod_shaped_db
-  line_digest: sha256:869937a3a0b7322d
+  line_digest: sha256:66938b765a87c8b6
   scope_assertion:
-    kind: location
-    note: 生产库判定（两分支取值链不同）
-    method: git show <owner_ref>:<owner_path> 定位后按符号名核对
-  symbol_line: 9
+    kind: branch
+    method: prod-shape 判定必须在空值/异常分支 fail-closed（return True），并以 _PROD_SHAPED_DBNAMES 为白名单；两棵树各自一份文本判定。
+    scope: block
+    anchors:
+    - except Exception
+    - return True
+    - _PROD_SHAPED_DBNAMES
+  symbol_line: 119
   unverified_preconditions_status: open
   unverified_preconditions_resolve_by: null
   acceptance: *id003
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  check_ref: scripts/check_ledger_owners.py --rule AD-SCHEMA-002
 - id: AD-DEPLOY-001
   rule: runtime-version-identity
-  owner_path: ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
-  owner_ref: null
-  owner_blob: null
+  owner_path: scripts/infra/runtime-facts.yaml
+  owner_ref: 70091a40983241876182c49f101e5dd64eea5e97
+  owner_blob: 204c2f07b7b19169865ffaf31de72ab757fa9cba
   summary: 运行态没有版本身份：HP desk 此前无 .deployed-commit；已补，但该文件属主 schan 而应用也以 schan 跑 ⇒ 不是锚（应用随时可改）。
   guard: 97-deployed-commit.conf 注入 TTS_ERP_DEPLOYED_COMMIT（待重启生效）
   guard_precondition: 迁 system-level（root 0644）+ LoadCredentialEncrypted=
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-DEPLOY-001
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-DEPLOY-001
   verification_state: red
   negative_fixture: 属主判据：任何属主为 schan 的文件都不算锚（当前全部 schan ⇒ 必红）
   owner_ref_note: unit 文件在 ~/.config/systemd/user/，不在 git 里 ⇒ 无 owner_ref/blob
@@ -307,33 +334,39 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: deployed_commit_drop_in
+  line_digest: sha256:b6d0afe8b095ac75
+  scope_assertion:
+    kind: location
+    method: 运行态身份声明必须固化在仓库内的运行时事实表里；只存在于服务器上 ⇒ 仓库无法判定这条不变量。
+    scope: file
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 36
+  check_ref: scripts/check_ledger_owners.py --rule AD-DEPLOY-001
 - id: AD-DEPLOY-002
   rule: runtime-version-identity
-  owner_path: ~/.config/systemd/user/tts-erp.service.d/96-pgappname.conf
-  owner_ref: null
-  owner_blob: null
+  owner_path: scripts/infra/runtime-facts.yaml
+  owner_ref: 70091a40983241876182c49f101e5dd64eea5e97
+  owner_blob: 204c2f07b7b19169865ffaf31de72ab757fa9cba
   summary: application_name 全为空 ⇒ 双库不变量（写 A 库读 B 库）写不出来； 已注入 PGAPPNAME（待重启生效），psql/pg_dump/克隆库连接将被自动排除。
   guard: PGAPPNAME 按进程身份派生
   guard_precondition: 服务重启使环境变量生效
   guard_phase: 测量
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-DEPLOY-002
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-DEPLOY-002
   verification_state: red
   negative_fixture: 注入后仍有两组不同 datname ⇒ 必红（写 A 库读 B 库仍会发生）
   authoritative_read_chain: null
@@ -349,16 +382,21 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: pgappname_drop_in
+  line_digest: sha256:b913622d581ae5b4
+  scope_assertion:
+    kind: location
+    method: 按进程身份派生 PGAPPNAME 的 drop-in 必须在仓库内可核对；application_name 为空 ⇒ 这条不变量不可判定。
+    scope: file
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 24
+  check_ref: scripts/check_ledger_owners.py --rule AD-DEPLOY-002
 - id: AD-DEPLOY-003
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
@@ -370,12 +408,13 @@ entries:
   guard_phase: 测量
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-DEPLOY-003
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-DEPLOY-003
   verification_state: green
   negative_fixture: 服务停掉（MainPID=0）⇒ 必须报 not_running 而不是静默用 unit 声明兜底
   owner_ref_note: master 侧 install.sh（生产没有这份）
@@ -391,35 +430,40 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: write_unit
+  line_digest: sha256:c4fb358529f5db13
+  scope_assertion:
+    kind: location
+    method: unit 的装配出口必须收敛到 write_unit 一处；散落的装配写法 ⇒ parity 核对必然漏项。
+    scope: block
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 226
+  check_ref: scripts/check_ledger_owners.py --rule AD-DEPLOY-003
 - id: AD-DEPLOY-004
   rule: assembly-parity
   owner_path: scripts/envsetup/install.sh
   owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
   owner_blob: 91cd45aa5c5c992e57c25b3333cbd3034e405d6a
-  summary: install.sh 自带一条失效链：必检清单不含 AUTH_MODE（默认 off）+ WorkingDirectory=$REPO/EnvironmentFile=$REPO/.env（cwd 命中隐式 .env， 且
-    .env 同时是 systemd 注入源 ⇒ 双重最高优先级）+ .env 可改写来源指针。
+  summary: install.sh 自带一条失效链：必检清单不含 AUTH_MODE（默认 off）+ WorkingDirectory=$REPO/EnvironmentFile=$REPO/.env（cwd 命中隐式 .env， 且 .env 同时是 systemd 注入源 ⇒ 双重最高优先级）+ .env 可改写来源指针。
   guard: 无
   guard_precondition: 改 install.sh 模板（.env 移出生产布局）+ 补必检清单；再改 runtime_settings；最后才上『检测到 .env 即拒绝启动』
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-DEPLOY-004
     fixture_exists: true
     assertion_holds: false
-    source: 台账首版人工标注
-  verification_state: absent
+    source: 机器判定（check_ledger_owners.py）；保守记 red
+    check_ref: scripts/check_ledger_owners.py --rule AD-DEPLOY-004
+  verification_state: red
   negative_fixture: N2 凭据来源解析失败 ⇒ 不得静默回落（当前 fail-open）
   authoritative_read_chain: null
   convergence_target_blob: 0124e3636b334f38f8daafeaf4f154d0c14697ef
@@ -434,21 +478,30 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: env_get
+  line_digest: sha256:45d05826af5a22b4
+  scope_assertion:
+    kind: branch
+    method: 凭据来源解析在 env_get 内；`|| true` 是 fail-open 标记 —— 期望是解析失败即中止（die），当前仍静默回落 ⇒ 判红。
+    scope: block
+    anchors:
+    - CONFIG_FILE
+    forbid_contains:
+    - '|| true'
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 115
+  check_ref: scripts/check_ledger_owners.py --rule AD-DEPLOY-004
 - id: AD-CRITERIA-001
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
-  owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
-  owner_blob: null
+  owner_ref: 5597dcca2139ae210873616b65081246d9b032e3
+  owner_blob: a268fbc544a6d70309426ec4ccaa2771c122b00d
   summary: 只读守卫曾有三条绕过（WITH…INSERT / EXPLAIN ANALYZE / 语句含 alembic_version 子串即放行），且我只测了"应拦截"一半 ⇒ security schema 误伤无人能拦。
   guard: 结构判定（首 token）+ 双向自测（7 拦截 / 9 放行）
   guard_precondition: 无（纯工具侧）
@@ -457,10 +510,11 @@ entries:
   verification:
     kind: executable
     state: unknown
-    command: python scripts/check_jobs_actually_run.py --days 7 --stale-days 7 --lookback 5
+    command: python3 scripts/check_ledger_owners.py --rule AD-CRITERIA-001
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-CRITERIA-001
   verification_state: green
   negative_fixture: 9 条放行样例，含 SELECT MAX(...) FROM "SECURITY"."API_KEYS"
   authoritative_read_chain: null
@@ -476,21 +530,30 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: _is_readonly
+  line_digest: sha256:1b4452798caa8c5c
+  scope_assertion:
+    kind: branch
+    method: 只读判据必须是『首 token ∈ {SELECT, SHOW}』这一条结构判定；白名单一旦被改成别的集合 ⇒ 判据口径漂移。
+    scope: file
+    anchors:
+    - _READONLY_HEADS
+    - SELECT
+    - SHOW
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 54
+  check_ref: scripts/check_ledger_owners.py --rule AD-CRITERIA-001
 - id: AD-CRITERIA-002
   rule: readonly-criterion
   owner_path: scripts/check_jobs_actually_run.py
-  owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
-  owner_blob: null
+  owner_ref: 5597dcca2139ae210873616b65081246d9b032e3
+  owner_blob: a268fbc544a6d70309426ec4ccaa2771c122b00d
   summary: 误报 + 宽 except = 静默漏报：守卫误判 → 查询抛错 → 被 except 吞掉 → ④ 清单从 23 张掉到 21 张，零报错（security.* 七张表静默消失）。
   guard: except 不再静默 continue；被跳过项数做成一等指标 + 每轮与上轮的增删差异
   guard_precondition: 无（纯工具侧）
@@ -499,10 +562,11 @@ entries:
   verification:
     kind: executable
     state: unknown
-    command: python scripts/check_jobs_actually_run.py --days 7 --stale-days 7 --lookback 5
+    command: python3 scripts/check_ledger_owners.py --rule AD-CRITERIA-002
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-CRITERIA-002
   verification_state: green
   negative_fixture: 人为让一张表的查询失败 ⇒ skipped.count 必须 >0 且该表出现在 items 里
   authoritative_read_chain: null
@@ -518,33 +582,42 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: _guard
+  line_digest: sha256:a20535cff5961a75
+  scope_assertion:
+    kind: branch
+    method: 被跳过项数必须是一等指标（skipped_count）并与上一轮做增删差异；except 静默 continue ⇒ 这两个锚点会消失。
+    scope: file
+    anchors:
+    - skipped_count
+    - previous_skipped_count
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 65
+  check_ref: scripts/check_ledger_owners.py --rule AD-CRITERIA-002
 - id: AD-CRITERIA-003
   rule: readonly-criterion
   owner_path: scripts/schema_guard_probe.py
-  owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
-  owner_blob: null
+  owner_ref: 5597dcca2139ae210873616b65081246d9b032e3
+  owner_blob: 4614cbc07f0c86951636861715238b7f60206965
   summary: 守卫原型曾自己走 down_revision 链 ⇒ 复制了 alembic 的祖先判定， 而本仓 revision 图有 tuple 分叉 ⇒ 自己走必然写不对。
   guard: 改为问 alembic 拓扑序（ScriptDirectory.walk_revisions()）
   guard_precondition: 无（纯工具侧）
   guard_phase: 测量
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-CRITERIA-003
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-CRITERIA-003
   verification_state: green
   negative_fixture: 夹具必须用真实的 tuple 分叉形态（0037_merge_0036_heads / 0067_merge_price_and_publish）
   authoritative_read_chain: null
@@ -560,16 +633,24 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: _heads_and_ancestors
+  line_digest: sha256:6af74601484ad4ac
+  scope_assertion:
+    kind: branch
+    method: 拓扑必须问 alembic 自己（ScriptDirectory.walk_revisions/get_heads），不能自己拼；两处锚点同时消失 ⇒ 退回手写拓扑。
+    scope: file
+    anchors:
+    - walk_revisions
+    - get_heads
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 69
+  check_ref: scripts/check_ledger_owners.py --rule AD-CRITERIA-003
 - id: AD-ALERT-001
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -581,13 +662,14 @@ entries:
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-ALERT-001
     fixture_exists: true
     assertion_holds: false
-    source: 台账首版人工标注
-  verification_state: absent
+    source: 机器判定（check_ledger_owners.py）；保守记 red
+    check_ref: scripts/check_ledger_owners.py --rule AD-ALERT-001
+  verification_state: red
   negative_fixture: URL 不可达 ⇒ 必须出现 watchdog_webhook_failed（已实现于 owner blob b73ffad1）
   authoritative_read_chain: null
   convergence_target_blob: dbb5067ff6c8f349b500e38b759785398f3f1426
@@ -602,16 +684,21 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: post_webhook
+  line_digest: sha256:4dc4e0d5fcdc45f2
+  scope_assertion:
+    kind: location
+    method: 投递出口必须是 post_webhook 这一个具名函数；URL 不可达时必须产出 watchdog_webhook_failed。
+    scope: block
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 520
+  check_ref: scripts/check_ledger_owners.py --rule AD-ALERT-001
 - id: AD-ALERT-002
   rule: alert-delivery
   owner_path: scripts/watchdog_sync.py
@@ -625,10 +712,11 @@ entries:
   verification:
     kind: executable
     state: unknown
-    command: python scripts/check_convergence_invariants.py --ledger docs/architecture/arch-debt-ledger.yaml --json
+    command: python3 scripts/check_ledger_owners.py --rule AD-ALERT-002
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-ALERT-002
   verification_state: green
   negative_fixture: 构造含店铺标识与上游码的 error_message ⇒ 断言其及 base64/urlencode 变体均不在载荷里
   probe:
@@ -654,13 +742,17 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
+  unverified_preconditions: []
   symbol: to_public
   line_digest: sha256:64809aec9b7cf761
   scope_assertion:
-    kind: location
-    note: 出网投影的唯一 owner
-    method: git show <owner_ref>:<owner_path> 定位后按符号名核对
+    kind: branch
+    method: 对外投影必须经 to_public 且只透出 PUBLIC_DETAIL_FIELDS 白名单里的 details 键；白名单与投影函数任一消失 ⇒ 脱敏边界失守。
+    scope: file
+    anchors:
+    - PUBLIC_DETAIL_FIELDS
+    - to_public
+    - details
   symbol_line: 160
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
@@ -668,23 +760,25 @@ entries:
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  check_ref: scripts/check_ledger_owners.py --rule AD-ALERT-002
 - id: AD-ALERT-003
   rule: alert-delivery
-  owner_path: scripts/watchdog_sync.py
-  owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
-  owner_blob: b73ffad1e15f1f8eed2f795a5ef147bf2c7fc694
+  owner_path: scripts/infra/runtime-facts.yaml
+  owner_ref: 70091a40983241876182c49f101e5dd64eea5e97
+  owner_blob: 204c2f07b7b19169865ffaf31de72ab757fa9cba
   summary: watchdog 以 exit 1 表示"有发现"，systemd 一律标 failed ⇒ 语义反了， 且 exit 1（告警）与 exit 2（看门狗自身故障）无法区分。
   guard: unit 加 SuccessExitStatus=1
   guard_precondition: 无（已在生产生效）
   guard_phase: 测量
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-ALERT-003
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-ALERT-003
   verification_state: green
   negative_fixture: exit 2 仍必须标 failed（不得被 SuccessExitStatus 吞掉）
   authoritative_read_chain: null
@@ -700,34 +794,41 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: alert_unit_success_exit_status
+  line_digest: sha256:b986e9c645db2264
+  scope_assertion:
+    kind: count
+    method: watchdog unit 的 SuccessExitStatus=1 收口形态必须在仓库内可核对；记录为 absent 的事实数必须为 0 —— 当前该 drop-in 尚未写入主机 ⇒ 判红。exit 2 仍必须标 failed，不得被吞掉。
+    scope: file
+    pattern: 'content_sha256: absent'
+    expected_count: 0
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 48
+  check_ref: scripts/check_ledger_owners.py --rule AD-ALERT-003
 - id: AD-JOB-001
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
   owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
   owner_blob: 9845b5decc1018b8e2a8185bf9c87e6bb6b19e4e
-  summary: 子进程被 SIGKILL（OOM）不写 finished_at ⇒ sync_jobs 行永远 running； max_instances=1 又让残骸挡住该 job 的后续所有轮次 ⇒ tiktok.finance 停摆
-    55 小时。
+  summary: 子进程被 SIGKILL（OOM）不写 finished_at ⇒ sync_jobs 行永远 running； max_instances=1 又让残骸挡住该 job 的后续所有轮次 ⇒ tiktok.finance 停摆 55 小时。
   guard: watchdog 规则 (d) 只报不修；清理由手工做过一次（34 行）
   guard_precondition: scheduler.py 的 subprocess.run 加 timeout=；作业启动时清理同 job 旧 running 行
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-JOB-001
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-JOB-001
   verification_state: red
   negative_fixture: 超时后该行必须终结为 failed（测试质量评审员 B 组）
   authoritative_read_chain: null
@@ -743,16 +844,24 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: _record_failed_tick
+  line_digest: sha256:ba67d31d0c90a26f
+  scope_assertion:
+    kind: branch
+    method: 异常路径必须由 _record_failed_tick 写一条 status="failed" 且带 finished_at 的行；行必须终结，不能留 running。
+    scope: block
+    anchors:
+    - status="failed"
+    - finished_at
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 511
+  check_ref: scripts/check_ledger_owners.py --rule AD-JOB-001
 - id: AD-JOB-002
   rule: job-terminal-state
   owner_path: tts_erp_v2/sync_worker/scheduler.py
@@ -764,13 +873,14 @@ entries:
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-JOB-002
     fixture_exists: true
     assertion_holds: false
-    source: 台账首版人工标注
-  verification_state: absent
+    source: 机器判定（check_ledger_owners.py）；保守记 red
+    check_ref: scripts/check_ledger_owners.py --rule AD-JOB-002
+  verification_state: red
   negative_fixture: 超时后子进程被 kill 且该 job 的 running 行被父进程终结为 failed
   authoritative_read_chain: null
   convergence_target_blob: 9845b5decc1018b8e2a8185bf9c87e6bb6b19e4e
@@ -785,34 +895,41 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: _scheduled_child_command
+  line_digest: sha256:2138e4b0d08e459b
+  scope_assertion:
+    kind: count
+    method: 父进程以独立子进程调度 job（_scheduled_child_command）；但超时 kill 机制在 owner 树里必须存在（kill/SIGKILL/timeout 至少一处），当前 0 处 ⇒ 超时后 running 行不会被终结 ⇒ 判红。
+    scope: file
+    pattern: kill|SIGKILL|timeout
+    expected_count: 1
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 539
+  check_ref: scripts/check_ledger_owners.py --rule AD-JOB-002
 - id: AD-JOB-003
   rule: source-freshness
   owner_path: tts_erp_v2/jobs/miaoshou/sync_source_cost_to_master.py
   owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
   owner_blob: 62ad49f7e6273c30c6a864252cbc6894771d292f
-  summary: 作业读 182 行 → IS DISTINCT FROM 守卫全命中 → 0 写 → succeeded； 而 TK 侧行的 synced_at 停在 38 天前 ⇒ 守卫把"源头已停更"折叠成了"已完成"。 且 job.rows_inserted
-    被赋值为 rows_updated，rows_updated 从未赋值 ⇒ 该列恒 0。
+  summary: 作业读 182 行 → IS DISTINCT FROM 守卫全命中 → 0 写 → succeeded； 而 TK 侧行的 synced_at 停在 38 天前 ⇒ 守卫把"源头已停更"折叠成了"已完成"。 且 job.rows_inserted 被赋值为 rows_updated，rows_updated 从未赋值 ⇒ 该列恒 0。
   guard: 巡检清单③ + ④ 能看见它，但无法区分'幂等完成'与'源已陈旧'
   guard_precondition: extra 里加 source_freshness_at；rows_inserted/rows_updated 口径修正
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-JOB-003
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-JOB-003
   verification_state: red
   negative_fixture: 源新鲜度低于阈值 ⇒ 必须报，而不是 succeeded
   authoritative_read_chain: null
@@ -828,34 +945,44 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: sync_source_cost_to_master
+  line_digest: sha256:647be19284a0e671
+  scope_assertion:
+    kind: branch
+    method: 回填必须回报 tk_rows_total / rows_updated / issues 三个计数器；『幂等完成』与『源已陈旧』无法区分正是这里缺第三个计数器。
+    scope: block
+    anchors:
+    - tk_rows_total
+    - rows_updated
+    - issues
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 82
+  check_ref: scripts/check_ledger_owners.py --rule AD-JOB-003
 - id: AD-BACKUP-001
   rule: backup-restore
   owner_path: scripts/backup/pg_dump_hourly.sh
-  owner_ref: null
-  owner_blob: null
+  owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
+  owner_blob: 3b1db18a5a9169921f2e4199a49178fe6c7838dd
   summary: 每小时 pg_dump 正常（24 份 × 847MB），但同盘、无异地、无恢复脚本、 无恢复演练 ⇒ 能写进去 ≠ 能取回来，RTO 未知。
   guard: pg_dump_hourly + KEEP_COUNT=24（仅 RPO=1h）
   guard_precondition: 写 restore.sh 并在临时库演练一次；加异地
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-BACKUP-001
     fixture_exists: true
     assertion_holds: false
-    source: 台账首版人工标注
-  verification_state: absent
+    source: 机器判定（check_ledger_owners.py）；保守记 red
+    check_ref: scripts/check_ledger_owners.py --rule AD-BACKUP-001
+  verification_state: red
   negative_fixture: dump 未经 gzip -t / pg_restore --list 校验也算失败
   authoritative_read_chain: null
   convergence_target_blob: 3b1db18a5a9169921f2e4199a49178fe6c7838dd
@@ -870,33 +997,41 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: KEEP_COUNT
+  line_digest: sha256:f5da5fde465f4e1c
+  scope_assertion:
+    kind: count
+    method: 每小时 dump 必须过 gzip -t 与 pg_restore --list 两道校验；当前一个都没有 ⇒ 损坏的备份也会被当成成功 ⇒ 判红。保留份数由 KEEP_COUNT 声明（当前 24 ⇒ RPO=1h）。
+    scope: file
+    pattern: gzip -t|pg_restore --list
+    expected_count: 2
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 10
+  check_ref: scripts/check_ledger_owners.py --rule AD-BACKUP-001
 - id: AD-NET-001
   rule: network-exposure
-  owner_path: /etc/systemd/system/easytier@default.service.d/rpc-portal-loopback.conf
-  owner_ref: null
-  owner_blob: null
+  owner_path: scripts/infra/runtime-facts.yaml
+  owner_ref: 70091a40983241876182c49f101e5dd64eea5e97
+  owner_blob: 204c2f07b7b19169865ffaf31de72ab757fa9cba
   summary: easytier 的 RPC portal 实际绑 0.0.0.0 且公网可达（207:15888）； 配置文件里的 rpc_portal 键被 2.6.4 忽略，只有环境变量生效。
   guard: ET_RPC_PORTAL=127.0.0.1:15888（207 已生效，实测公网 closed）
   guard_precondition: HP desk / aliyun-50 同型收敛（公网本就不可达，优先级低）
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-NET-001
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-NET-001
   verification_state: green
   negative_fixture: n/a
   authoritative_read_chain: null
@@ -912,35 +1047,40 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: easytier_rpc_portal_loopback
+  line_digest: sha256:5d5f897e9f94bda2
+  scope_assertion:
+    kind: location
+    method: easytier RPC portal 的回环绑定必须在仓库内可核对；配置文件里的 rpc_portal 键被忽略，只有 ET_RPC_PORTAL 生效。
+    scope: file
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 61
+  check_ref: scripts/check_ledger_owners.py --rule AD-NET-001
 - id: AD-NET-002
   rule: network-exposure
-  owner_path: /opt/easytier/config/default.conf
-  owner_ref: null
-  owner_blob: null
-  summary: 207 的 easytier 有一条 0.0.0.0:9877 → 10.144.144.3:9877 的转发， 直达数据库主机、绕过 nginx 的 TLS/归一化/限流；已知消费者=0 （三节点逐一核查：aliyun-50
-    全盘 grep 9877 = 0 命中）。
+  owner_path: scripts/infra/runtime-facts.yaml
+  owner_ref: 70091a40983241876182c49f101e5dd64eea5e97
+  owner_blob: 204c2f07b7b19169865ffaf31de72ab757fa9cba
+  summary: 207 的 easytier 有一条 0.0.0.0:9877 → 10.144.144.3:9877 的转发， 直达数据库主机、绕过 nginx 的 TLS/归一化/限流；已知消费者=0 （三节点逐一核查：aliyun-50 全盘 grep 9877 = 0 命中）。
   guard: 无
   guard_precondition: 删该转发（别动 2222 SSH 跳板）
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-NET-002
     fixture_exists: true
     assertion_holds: false
-    source: 台账首版人工标注
-  verification_state: absent
+    source: 机器判定（check_ledger_owners.py）；保守记 red
+    check_ref: scripts/check_ledger_owners.py --rule AD-NET-002
+  verification_state: red
   negative_fixture: n/a
   authoritative_read_chain: null
   convergence_target_blob: null
@@ -955,16 +1095,23 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: easytier_default_conf_port_forward
+  line_digest: sha256:4cf550545b4de5ee
+  scope_assertion:
+    kind: count
+    method: 207 公网机上还有两个 port_forward 绑 0.0.0.0（2222 / 9877）；本条以『仓库里记录到的通配绑定数必须为 0』来钉住暴露面，收口后该文件不再记录这两条 ⇒ 判绿。
+    scope: file
+    pattern: 'bind_addr = "0\.0\.0\.0:'
+    expected_count: 0
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 72
+  check_ref: scripts/check_ledger_owners.py --rule AD-NET-002
 - id: AD-BASE-001
   rule: base-drift
   owner_path: tts_erp_v2/runtime_settings.py
@@ -976,12 +1123,13 @@ entries:
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-BASE-001
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-BASE-001
   verification_state: red
   negative_fixture: 在 master 上 import tts_erp_v2.runtime_settings ⇒ 必须成功
   owner_ref_note: master 侧该文件不存在（blob null）
@@ -997,16 +1145,23 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: get_setting_facts
+  line_digest: sha256:41822decf73a09b0
+  scope_assertion:
+    kind: location
+    method: 生产树有 runtime_settings.py、目标树必须没有；目标树若出现同名文件 ⇒ base drift 消失，本条判红。
+    scope: block
+    absent_in_ref: 5597dcca2139ae210873616b65081246d9b032e3
+    absent_path: tts_erp_v2/runtime_settings.py
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 226
+  check_ref: scripts/check_ledger_owners.py --rule AD-BASE-001
 - id: AD-BASE-002
   rule: base-drift
   owner_path: scripts/watchdog_sync.py
@@ -1020,10 +1175,11 @@ entries:
   verification:
     kind: executable
     state: unknown
-    command: python scripts/check_convergence_invariants.py --ledger docs/architecture/arch-debt-ledger.yaml --json
+    command: python3 scripts/check_ledger_owners.py --rule AD-BASE-002
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-BASE-002
   verification_state: red
   negative_fixture: 收敛后两棵树该文件 blob 必须相等
   owner_ref_note: master blob=dbb5067f…；生产 blob=b73ffad1…
@@ -1039,34 +1195,40 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: to_public
+  line_digest: sha256:64809aec9b7cf761
+  scope_assertion:
+    kind: location
+    method: 收敛后两棵树的 watchdog_sync.py blob 必须完全相同；owner_blob 与目标树 blob 不等 ⇒ 收敛未完成。
+    scope: block
+    equal_blob_ref: 5597dcca2139ae210873616b65081246d9b032e3
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 160
+  check_ref: scripts/check_ledger_owners.py --rule AD-BASE-002
 - id: AD-BASE-003
   rule: base-drift
-  owner_path: alembic/versions
+  owner_path: alembic/versions/0073_media_assets.py
   owner_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
-  owner_blob: null
-  summary: release 树 75 个 migration（head 0073），master 78 个（head 0076）， 生产库已在 0076 ⇒ 缺 0074_runninghub / 0075_media_card_feeds
-    / 0076_media_packs， 对外 API 缺 runninghub(15 文件 vs 0) 与 media_packs(2 vs 0) 能力。
+  owner_blob: f00cbf2918258ec5b6d95d881c122673b0981ddc
+  summary: release 树 75 个 migration（head 0073），master 78 个（head 0076）， 生产库已在 0076 ⇒ 缺 0074_runninghub / 0075_media_card_feeds / 0076_media_packs， 对外 API 缺 runninghub(15 文件 vs 0) 与 media_packs(2 vs 0) 能力。
   guard: 无
   guard_precondition: 从 master 引入三个 revision + 对应业务代码；migration 文件逐字节比对（当前 release 树根本没有这三个文件 ⇒ 无同 id 不同内容的问题）
   guard_phase: 移除
   guard_shares_failure_face_with: []
   verification:
-    kind: manual_or_script
+    kind: executable
     state: unknown
-    command: null
+    command: python3 scripts/check_ledger_owners.py --rule AD-BASE-003
     fixture_exists: true
     assertion_holds: false
     source: 台账首版人工标注
+    check_ref: scripts/check_ledger_owners.py --rule AD-BASE-003
   verification_state: red
   negative_fixture: 补上后 alembic upgrade head 必须是 no-op（无任何 DDL 输出）
   authoritative_read_chain: null
@@ -1082,16 +1244,22 @@ entries:
   fact: 见 summary 与 owner_ref 所指真件
   supports: *id001
   does_not_support: *id002
-  unverified_preconditions: null
-  symbol: null
-  line_digest: null
-  scope_assertion: null
+  unverified_preconditions: []
+  symbol: revision
+  line_digest: sha256:fa49041d8bfa6ab7
+  scope_assertion:
+    kind: location
+    method: 生产树的 alembic head 必须钉在 0073_media_assets 的 revision 声明行上；head 变了 ⇒ 这条 rule 的 owner 位置漂移，必须重新定位。
+    scope: block
+    assert_contains: 0073_media_assets
   unverified_preconditions_status: not_declared
   unverified_preconditions_resolve_by: null
   acceptance: null
   evidence_level: inferred
   in_target_chain: false
   in_target_chain_note: 未判定 ⇒ 暂按 False（保守）
+  symbol_line: 24
+  check_ref: scripts/check_ledger_owners.py --rule AD-BASE-003
 probes_added: 3
 corrected_conclusions:
 - id: CORRECTION-PG-HBA-MASQUERADE
@@ -1120,6 +1288,8 @@ required_finding_fields:
 - owner_blob
 - symbol
 - scope_assertion
+- line_digest
+- check_ref
 output_contract:
   must_declare:
   - skipped
