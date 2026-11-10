@@ -15,12 +15,18 @@ Usage::
 
     python scripts/check_undefined_names.py [ROOT ...]
 
+With ``--baseline FILE`` the findings listed in that file are accepted as
+known; anything beyond them still fails. The production tree
+(``tts_erp_v2``) must stay at zero — only skipped legacy test modules
+may carry a recorded baseline.
+
 Exit codes: ``0`` clean, ``1`` undefined names found, ``2`` the tree
 could not be parsed at all.
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import builtins
 import pathlib
@@ -83,20 +89,46 @@ def scan(root: pathlib.Path) -> list[tuple[str, int, str]]:
     return issues
 
 
+def _render(item: tuple[str, int, str]) -> str:
+    """The baseline key: path, line and name, so a moved line is a new finding."""
+    path, line, name = item
+    return f"{path}:{line}: {name}"
+
+
 def main(argv: list[str]) -> int:
-    roots = [pathlib.Path(arg) for arg in argv[1:]] or [pathlib.Path("tts_erp_v2")]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("roots", nargs="*", default=["tts_erp_v2"])
+    parser.add_argument(
+        "--baseline",
+        type=pathlib.Path,
+        default=None,
+        help="file listing accepted findings, one 'path:line: name' per line",
+    )
+    args = parser.parse_args(argv[1:])
+
+    known: set[str] = set()
+    if args.baseline and args.baseline.exists():
+        known = {
+            line.strip()
+            for line in args.baseline.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+
     issues: list[tuple[str, int, str]] = []
-    for root in roots:
+    for arg in args.roots:
+        root = pathlib.Path(arg)
         if not root.exists():
             print(f"[undefined-names] path not found: {root}")
             return 2
         issues.extend(scan(root))
-    if not issues:
-        print("[undefined-names] OK — no undefined names")
+
+    reported = [item for item in issues if _render(item) not in known]
+    if not reported:
+        print(f"[undefined-names] OK — no undefined names ({len(known)} known baseline entries)")
         return 0
-    for path, line, name in issues:
+    for path, line, name in reported:
         print(f"{path}:{line}: undefined name {name!r}")
-    print(f"[undefined-names] {len(issues)} undefined name(s) found")
+    print(f"[undefined-names] {len(reported)} undefined name(s) found")
     return 1
 
 
