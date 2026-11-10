@@ -16,8 +16,9 @@
 | ① 成果保全 | **完成**。两个本地分支已推到远端新分支名，worktree 已从 `/tmp` 挪到 `/home/schan` 持久位置，master 未动 |
 | ② 台账六字段 | **完成 24/24**。owner_ref / owner_blob / symbol / line_digest / 可执行检查引用 / 判据类型，全部落到真列并可被机器解析 |
 | ③ 契约检查器去恒绿 | **完成**。旧版无条件 `return 0`；现版缺字段 / 字段形状错 / owner 身份写错 → 退出 1。实测三种破坏均 exit 1 |
-| ④ 进度数字 | **引用了已落地可执行检查的 rule = 24/24 = 1.0**；其中 owner 侧判据成立 **18/24**，6 项判红且**逐条对应真实未收口的债务** |
+| ④ 进度数字 | **引用了已落地可执行检查的 rule = 24/24 = 1.0**；owner 侧判据成立 **19/24**（复跑后），5 项判红且**逐条对应真实未收口的债务**。AD-JOB-002 已随 release 树前进自动转绿，见 §10 |
 | ⑤ postgres infra | 三件（`container-spec.yaml` / `rebuild.sh` / `README.md`）已在本分支；本轮新增 `scripts/infra/runtime-facts.yaml` 与之同线 |
+| 复跑（release 树前进后） | 生产侧 owner 已重指 `1e6c77ee`；AD-JOB-002 判据重写为「锚实现体」并双向验证通过；主机事实表同步了部署 commit。详见 §10 |
 
 **并且纠正了两处既有错误**：
 
@@ -249,7 +250,9 @@ MISSING_ON_MASTER                   # 那三个 target-only 文件在 master 上
 ⇒ 同时得到一条维护规则：**这两条线各自前进时，`base.*_ref` 与相关 `owner_ref` 必须重指**，
 否则检查器会以「owner 身份对不上」判红（契约退出 1）——这正是我们想要的显形。
 
+---
 
+## 4. ③ 契约检查器去恒绿
 
 ### 4.1 改了什么
 
@@ -303,18 +306,16 @@ $ python3 scripts/check_ledger_contract.py
 **进度 = 24/24**：24 条 rule 全部引用了一条**已落地、可执行**的检查
 （`check_ref` = `scripts/check_ledger_owners.py --rule <ID>`，文件存在；`verification.command` 同源可执行）。
 
-**但 24/24 不等于「都绿」。** owner 侧判据成立 **18/24**，6 项判红，逐条依据：
+**但 24/24 不等于「都绿」。** owner 侧判据成立 **19/24**，5 项判红（复跑后的最新状态见 §10.3）：
 
 ```
 $ python3 scripts/check_ledger_owners.py
   检查规则数 = 24
-  通过 = 18   失败 = 6
+  通过 = 19   失败 = 5
   ⚠ AD-DEPLOY-004
       - branch 判据不成立：仍含被禁止的分支 ['|| true']
   ⚠ AD-ALERT-003
       - count 判据不成立：模式 'content_sha256: absent' 实际命中 1 次，声明 0 次
-  ⚠ AD-JOB-002
-      - count 判据不成立：模式 'kill|SIGKILL|timeout' 实际命中 0 次，声明 1 次
   ⚠ AD-BACKUP-001
       - count 判据不成立：模式 'gzip -t|pg_restore --list' 实际命中 0 次，声明 2 次
   ⚠ AD-NET-002
@@ -534,10 +535,180 @@ $ ps -eo pid,etimes,args | grep -E "python.*pytest" | grep -v grep
 - `52929fa0` fix: 台账 24 条 rule 补齐六字段，契约检查改为缺字段即非零退出
 - `c1051075` docs: 新增台账 owner 身份与契约检查的验证记录
 - `cb5eb7b3` fix: count 判据支持下限语义，避免修复落地后仍判红
+- `31da674c` chore: 同步部署 commit 事实（已推进到 1e6c77ee）
+- `058fac73` fix: 生产侧重指到 release 树 1e6c77ee，AD-JOB-002 判据改为锚实现体
 
 远端分支（两个名字都指向同一 commit）：
 
-- `origin/chore/arch-debt-ledger-20261110` = `cb5eb7b3`
-- `origin/chore/arch-debt-ledger-to-master` = `cb5eb7b3`
-- `origin/chore/check-jobs-actually-run-20261110` = `7bab4486`
-- `origin/master` = `e3e85e0e`（**本轮全程未推 master**）
+- `origin/chore/arch-debt-ledger-20261110` = `058fac73`
+- `origin/chore/arch-debt-ledger-to-master` = `058fac73`
+- `origin/chore/check-jobs-actually-run` = `a7726975`（可靠性工程师推进的 tip，本来就在远端）
+- `origin/chore/check-jobs-actually-run-20261110` = `7bab4486`（我推的快照）
+- `origin/master` = `9ecea05f`（**本轮全程未推 master**）
+
+---
+
+## 10. 复跑（2026-11-10 晚）：release 树前进后的台账维护
+
+触发原因：release 树 `/home/schan/tts-erp-releases/erp-runtime-secret-84ec0a49` 的 HEAD 已从 `50978019`
+前进到 **`1e6c77ee`**（新增 `2b918d42` 流式分页 + `1e6c77ee` 父进程结行），
+host 上 `97-deployed-commit.conf` 的部署 commit 也同步推进到了 `1e6c77ee`。
+⇒ 台账的**生产侧整体失效**：19 条以生产树为 owner 的 rule 的 `owner_ref` / `owner_blob` / `line_digest` 都指向旧树。
+
+### 10.1 三处漂移，三种不同处理
+
+| # | 漂移 | 处理 |
+| --- | --- | --- |
+| 1 | 19 条 rule 的生产侧 owner 指向旧树 `50978019` | **重指到 `1e6c77ee`**，owner_blob / symbol_line / line_digest 全部重算（生成器 `--apply`） |
+| 2 | AD-JOB-002 的判据口径不成立 | **重写判据**（见 §10.2） |
+| 3 | `runtime-facts.yaml` 的 `deployed_commit_drop_in` 摘要过期 | 重新采集主机事实并同步（`content_sha256` 与断言值都变了） |
+
+第 3 条的实测证据（其余四条主机事实未漂移）：
+
+```
+$ sha256sum ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
+acccfb7281bc9d048661e0cd859823280a698a6e40c32275cc6d57d9de9be715
+$ grep DEPLOYED_COMMIT ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
+Environment=TTS_ERP_DEPLOYED_COMMIT=1e6c77ee15285d8298cfe890ff774b765f606c88
+```
+
+### 10.2 AD-JOB-002 的判据必须锚在实现体，不能计数散文
+
+**原判据**：`pattern = kill|SIGKILL|timeout`，`min_count ≥ 1`。
+**问题**：这条会被**文档字符串满足**。实测 release 树 `1e6c77ee` 的 3 处命中全部是散文：
+
+```
+553:    """Close the ``sync_jobs`` row a killed child left behind.
+555:    A child that dies on SIGKILL (the cgroup OOM killer) or SIGTERM never
+583:                "sync_jobs row (worker killed — OOM/SIGTERM); closed by the parent"
+```
+
+真正的判定逻辑是 `_close_orphaned_running_row`（L548），它**一个字都不含** `kill`——
+它靠 `returncode` 判定。⇒ 计数口径既可能假绿（docstring 满足），也可能假红。
+
+**新判据**：锚在实现符号的实现体上。
+
+```
+symbol  = _close_orphaned_running_row
+kind    = branch, scope = block
+anchors = ['row.status = "failed"', 'finished_at']
+```
+
+这两个锚点**只出现在实现体里**，docstring 与日志文案都不含 ⇒ 散文满足不了它。
+
+**双向验证**（两个都是真实生产树，不是人造变异）：
+
+```
+正向（owner = 1e6c77ee，有实现）：
+$ python3 scripts/check_ledger_owners.py --rule AD-JOB-002
+  检查规则数 = 1 / 通过 = 1 / 失败 = 0
+EXIT=0
+
+反向（只把 owner_ref/owner_blob 换成 50978019，那棵树没有这个符号）：
+  ⚠ AD-JOB-002
+      - line_digest 对不上: 台账 sha256:4d934989840d1894 vs 实际 sha256:a8dca7e5b074d81f
+      - 第 548 行不含 symbol '_close_orphaned_running_row'（钉住的不是符号定义行）
+      - branch 判据不成立：缺分支锚点 ['row.status = "failed"', 'finished_at']
+EXIT=1
+```
+
+⇒ **三路独立判红**（digest / 符号定位 / 实现体锚点），不是靠某一条凑出来的。
+
+### 10.3 结果：AD-JOB-002 自动转绿
+
+```
+$ python3 scripts/check_ledger_owners.py
+  检查规则数 = 24
+  通过 = 19   失败 = 5
+```
+
+**19/24**（原 18/24）。AD-JOB-002 判红 → 判绿，**全程没有手工改这条 rule 的状态**：
+release 树合入修复 → 重指 owner → 判据自己成立。这正是台账机制该有的样子。
+
+剩余 5 项判红，逐条对应真实未收口的债务：
+
+| rule | 判红依据 | 性质 |
+| --- | --- | --- |
+| AD-DEPLOY-004 | `install.sh` 的 `env_get` 里仍有 `\|\| true`（凭据解析失败仍继续 = fail-open） | 代码未收口 |
+| AD-ALERT-003 | watchdog unit 的 `SuccessExitStatus=1` drop-in 尚未写入主机（事实表记 `absent`） | 环境未收口 |
+| AD-BACKUP-001 | `pg_dump_hourly.sh` 里两道校验命中 0 次 ⇒ 损坏备份会被当成功 | 代码未收口 |
+| AD-NET-002 | 207 公网机上仍有 2 个 `bind_addr = "0.0.0.0:` 绑定 | 环境未收口 |
+| AD-BASE-002 | 生产树 `watchdog_sync.py` blob `b73ffad1` ≠ 目标树 `dbb5067f` ⇒ 收敛未完成 | 收敛未完成 |
+
+### 10.4 ③ 契约检查器复验（仍然非零退出）
+
+```
+真台账                              退出码=0（期望 0）
+missing_field（删 line_digest）      退出码=1（期望 1）
+bad_blob（owner_blob 写错）          退出码=1（期望 1）
+bad_kind（判据类型非法）             退出码=1（期望 1）
+```
+
+进度数字不变：**引用了已落地可执行检查的 rule = 24/24 = 1.0**。
+
+### 10.5 本记录自身的一处缺陷（已修）
+
+写这轮时发现：**上一版文档的 `## 4. ③ 契约检查器去恒绿` 标题行不见了**，
+而 §3.5 / §3.6 的内容落在了另一个副本里。
+根因是我自己：插入 §3.5 时用「`## 4.` 标题」当 old_string 整段替换，new_string 没把它还回去；
+随后又往两个不同副本各写了一半。**代码修复本身在（`cb5eb7b3`），丢的是文档叙述。**
+已补回标题，并把本轮内容一次性写到仓库路径，**提交后从远端 blob 回读校验**，不再只信本地副本。
+
+### 10.6 对照跑（基线现实仍未变）
+
+master 的 `docs/testing/baseline-fast.txt` 仍是空的（`count: 0`，2026-10-15，早于 P6 退役），
+`--scope fast` 的退出码仍不可作判据 ⇒ 仍用对照跑，且基准分两层：
+
+- **merge-base `81bbc240`**（本分支的起点）⇒ 差异全部归因于我这条线
+- **当前 master**（9ecea05f）⇒ 对外口径
+
+#### 10.6.1 三侧实测结果
+
+选择范围 = 承载那批存量失败的 6 个文件（`test_spu_deterioration_alert_page.py` / `test_spu_price_columns.py` /
+`test_frontend_pilots.py` / `test_spu_react_workspace.py` / `test_spu_numeric_sort.py` / `test_spu_projection.py`）。
+
+| 侧 | 命令 | 退出码 | 耗时 | 失败 id 数 |
+| --- | --- | --- | --- | --- |
+| master 侧 | `bash scripts/test_isolated.sh browser <6 files>` | 0 | 241s | **0** |
+| 候选侧（本分支 `058fac73`） | 同上 | 1 | 690s | 59 |
+| merge-base 侧（`81bbc240`，我这条线的起点） | 同上 | 1 | 685s | 59 |
+
+> master 侧用的是 `f1f7cded`（= master `e3e85e0e` + 一个 docs 提交）。
+> 该 docs 提交不动测试；且 `e3e85e0e → 9ecea05f` 改到的 5 个测试文件
+> （`tests/e2e/test_spu_deterioration_alert_smoke.py`、`tests/scripts/test_selected_runner_imports.py`、
+> `tests/scripts/test_test_selection.py`、`tests/support/test_runtime.py`、
+> `tests/sync_worker/test_scheduler_jobs_coverage.py`）**都不在本次比较的 6 个文件里**
+> ⇒ 对这 6 个文件，master 侧与当前 master `9ecea05f` 等价。
+
+#### 10.6.2 失败 id 集合比对
+
+```
+$ comm -13 /tmp/failures-mergebase6.txt /tmp/failures-candidate6.txt | wc -l
+0                                   # 只在我这条线上出现的失败
+$ comm -13 /tmp/failures-candidate6.txt /tmp/failures-mergebase6.txt | wc -l
+0                                   # 反向也是 0 ⇒ 两侧失败集合完全相同
+$ comm -13 /tmp/failures-master6.txt /tmp/failures-candidate6.txt | wc -l
+59                                  # 相对 master 的差异
+```
+
+59 项的分布（候选侧与 merge-base 侧同一份）：
+
+```
+   53 tests/browser/test_spu_deterioration_alert_page.py
+    6 tests/browser/test_frontend_pilots.py
+```
+
+#### 10.6.3 判定
+
+| 结论 | 依据 |
+| --- | --- |
+| **我这条线零新增失败** | merge-base 与候选的失败 id 集合**双向差集都是 0**；而 merge-base 是我这条线的起点 ⇒ 差异全部归因于我这条线 |
+| 相对 master 的 59 项差异**不是我的改动引入** | 同一批 59 项在 merge-base（我这条线的起点）上**一模一样**存在 ⇒ 是「分支落后 master」造成的，不是我的改动 |
+| 那 59 项的成因 | master 上已由 `6e07b394`（告警页断言改写到 React 真实 DOM 契约）等提交修掉；我的分支尚未包含这些修复 ⇒ **合入 master 前需要先同步 master** |
+| 静态论证（不依赖任何一次跑） | 本分支相对 merge-base 改了 11 个文件，`tests/` 与 `frontend/` 下 **0 个** ⇒ 结构上不可能引入测试失败 |
+| 基线驱动的退出码仍不可用 | master 的 `baseline-fast.txt` 仍是空的（`count: 0`）⇒ `--scope fast` 会把存量失败全报成 NEW 并退出 1 |
+
+⚠️ **合入 master 前的动作项**：先 `git merge origin/master`（或 rebase）把 `6e07b394` 等修复带进来，
+再重跑本对照（预期候选侧失败集合归 0）。
+
+
