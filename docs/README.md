@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | [`business/`](business/) | **业务口径与语义（事实层）**：指标怎么算、字段在业务上代表什么 | [`business/spu-profitability.md`](business/spu-profitability.md)（盈利口径唯一事实文档）、[`business/domain-language.md`](business/domain-language.md) |
 | [`api/`](api/) | 端点与协议契约（对外约定，live contract） | [`api/external-api.md`](api/external-api.md)、[`api/dumps-data-contract.md`](api/dumps-data-contract.md) |
-| [`reference/`](reference/) | 事实参考手册：枚举值、接口目录、上游平台资料 | [`reference/enums/`](reference/enums/)、[`reference/tiktok-seller-center-api-catalog.md`](reference/tiktok-seller-center-api-catalog.md) |
+| [`reference/`](reference/) | 事实参考手册：枚举值、接口目录、上游平台资料 | [`reference/enums/`](reference/enums/)、[`reference/tiktok-seller-center-api-catalog.md`](reference/tiktok-seller-center-api-catalog.md)、[`reference/tiktok-open-api-pagination.md`](reference/tiktok-open-api-pagination.md)（TikTok Open API 202309 分页与 page_size 实测） |
 | [`architecture/`](architecture/) | 系统结构、数据模型、ADR、退役记录 | [`architecture/architecture-overview.md`](architecture/architecture-overview.md)、[`architecture/adr/`](architecture/adr/) |
 | [`design/`](design/) | 已落地的技术方案 / 模块设计（含实现决策） | [`design/spu-profitability-technical-design.md`](design/spu-profitability-technical-design.md) |
 | [`plans/`](plans/) | **尚未落地**的方案、草案、待评审提案 | [`plans/plugin-sourced-shop-analytics.md`](plans/plugin-sourced-shop-analytics.md) |
