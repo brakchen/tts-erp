@@ -31,16 +31,20 @@ exists, estimated_cogs is NULL and estimated_gross_profit is NULL.
 Currency safety
 ---------------
 Production orders are denominated in VND (TikTok Shop Vietnam) while
-manual / 妙手 costs are entered in CNY. There is no FX table yet, so
-mixing currencies in ``gross_revenue - estimated_cogs`` produces
-nonsense (different magnitudes — see audit P1-4b). When the snapshot
-currency does NOT match the order currency, the row is still written
-(``gross_revenue`` is honest — that's what TikTok paid us), but
-``estimated_cogs`` and ``estimated_gross_profit`` are forced to NULL
-and a ``SyncIssue`` is recorded. This is a transition strategy:
-once an FX table exists, we can compute a real conversion. Until then
-the rule is "better to admit we don't know than to print a fake profit
-that's off by 3 orders of magnitude".
+manual / 妙手 costs are entered in CNY. ``gross_revenue - estimated_cogs``
+is only meaningful when both sides share a currency, so a snapshot whose
+currency differs from the order currency is **converted** through the FX
+owner (``tts_erp_v2.fx.rates.convert_or_none`` — the cached USD-base
+snapshot; the cross rate is ``rates[to] / rates[from]``). The rate
+arithmetic has exactly one owner and is not re-implemented here.
+
+When no rate can be obtained (no rate snapshot cached yet, or one of the two
+codes has no cached rate), the row is still written (``gross_revenue`` is
+honest — that's what TikTok paid us) but ``estimated_cogs`` and
+``estimated_gross_profit`` stay NULL and a ``SyncIssue`` is recorded. That
+failure mode never degrades into 0 or any other default: a cost we cannot
+convert stays unknown. (Audit P1-4b recorded the original symptom — a
+cross-currency subtraction off by three orders of magnitude.)
 
 This module does NOT compute platform fees / shipping / refunds — that
 arrives with the finance-domain jobs. Columns are NULL until then.
@@ -63,6 +67,7 @@ from tts_erp_v2.db.models import (
     SalesOrderLine,
     SyncIssue,
 )
+from tts_erp_v2.fx.rates import UnknownCurrencyError, convert_or_none
 
 log = logging.getLogger("tts_erp_v2.reporting.profit_daily")
 
@@ -87,17 +92,21 @@ def _next_calculation_version(session: Session) -> int:
     return int(current or 0) + 1
 
 
-def _record_currency_mismatch(
+def _record_currency_conversion_unavailable(
     session: Session,
     *,
     spu_pk: int,
     profit_date: date,
     order_currency: str | None,
     snapshot_currency: str | None,
+    reason: str,
 ) -> None:
-    """Record a SyncIssue for a SPU whose order currency disagrees with
-    its cost snapshot currency. The caller is responsible for writing
-    the row with NULL estimated_cogs / estimated_gross_profit.
+    """Record a SyncIssue for a SPU whose cost snapshot could not be
+    converted into the order currency.
+
+    The caller has already written the row with NULL estimated_cogs /
+    estimated_gross_profit: a cost that cannot be converted is an
+    unknown cost — never 0, never a default price.
 
     ``integration.sync_issues`` is monitored by ops (and surfaced via
     /v2/admin/...), so adding a row is the production-blessed way to
@@ -107,27 +116,63 @@ def _record_currency_mismatch(
     session.add(
         SyncIssue(
             job_name="reporting.profit_daily",
-            issue_type="CURRENCY_MISMATCH",
+            issue_type="CURRENCY_CONVERSION_UNAVAILABLE",
             external_id=str(spu_pk),
             details={
                 "profit_date": profit_date.isoformat(),
                 "order_currency": order_currency,
                 "snapshot_currency": snapshot_currency,
+                "reason": reason,
                 "note": (
-                    "cost snapshot currency != order currency; "
-                    "estimated_cogs / estimated_gross_profit written NULL "
-                    "until FX table exists (audit P1-4b)"
+                    "cost snapshot currency could not be converted to the order "
+                    "currency; estimated_cogs / estimated_gross_profit written "
+                    "NULL (cost stays unknown, never a default)"
                 ),
             },
         )
     )
     log.warning(
-        "profit_daily: cp_id=%s profit_date=%s currency_mismatch order=%s snapshot=%s",
+        "profit_daily: cp_id=%s profit_date=%s currency_conversion_unavailable "
+        "order=%s snapshot=%s reason=%s",
         spu_pk,
         profit_date.isoformat(),
         order_currency,
         snapshot_currency,
+        reason,
     )
+
+
+def _cost_in_order_currency(
+    session: Session,
+    *,
+    snap: ProductCostSnapshot,
+    order_currency: str,
+) -> tuple[Decimal | None, str | None]:
+    """The snapshot's unit cost expressed in the order currency.
+
+    Same currency → the snapshot value as-is. Different currency → the FX
+    owner's ``convert_or_none`` (cached USD-base snapshot; the cross rate
+    ``rates[to] / rates[from]`` lives in ``tts_erp_v2.fx.rates`` and is not
+    re-implemented here).
+
+    Returns ``(unit_cost, None)`` on success, or ``(None, reason)`` when no
+    rate is available. The caller must keep the cost NULL and record an
+    issue in that case — never substitute 0 or a default price.
+    """
+    if snap.currency == order_currency:
+        return snap.unit_cost, None
+    try:
+        conversion = convert_or_none(
+            session,
+            amount=snap.unit_cost,
+            from_code=snap.currency,
+            to_code=order_currency,
+        )
+    except UnknownCurrencyError as exc:
+        return None, "unknown_currency:" + "/".join(exc.codes)
+    if conversion is None:
+        return None, "no_rate_snapshot"
+    return conversion.converted, None
 
 
 def rebuild(
@@ -175,25 +220,27 @@ def rebuild(
         profit: Decimal | None = None
         cost_method: str | None = None
         if snap is not None:
-            # Currency guard: when the cost snapshot is denominated in a
-            # currency that doesn't match the order, refuse to compute
-            # a cross-currency profit. gross_revenue stays honest (it's
-            # what TikTok actually paid us); cogs/profit go NULL. This
-            # is the documented transition strategy until an FX table
-            # lands (see module docstring + audit P1-4b).
-            if snap.currency != currency:
-                _record_currency_mismatch(
+            # Currency: the snapshot currency may differ from the order
+            # currency (costs are CNY, orders are VND). Convert through the
+            # FX owner rather than refusing the math; when no rate is
+            # available the cost stays NULL and a SyncIssue is recorded.
+            unit_cost, conversion_error = _cost_in_order_currency(
+                session, snap=snap, order_currency=currency
+            )
+            if unit_cost is None:
+                _record_currency_conversion_unavailable(
                     session,
                     spu_pk=cp_id,
                     profit_date=profit_date,
                     order_currency=currency,
                     snapshot_currency=snap.currency,
+                    reason=conversion_error or "unknown",
                 )
                 # Do NOT set cost_method here — the snapshot isn't
                 # being used for math, so claiming a method would
                 # mislead the dashboard.
             else:
-                cogs_value = (snap.unit_cost * units).quantize(Decimal("0.0001"))
+                cogs_value = (unit_cost * units).quantize(Decimal("0.0001"))
                 profit = (revenue - cogs_value).quantize(Decimal("0.0001"))
                 cogs = cogs_value
                 cost_method = snap.cost_method
