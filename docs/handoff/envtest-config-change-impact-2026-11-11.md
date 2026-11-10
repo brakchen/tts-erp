@@ -13,11 +13,22 @@
 2. **原因是 base 库名只提供连接身份，不提供被访问的库。** `derive` 只解析 base URL 的 server/user/password/port，克隆源固定是模板库，测试进程连的是一次性克隆库 —— base 指向哪个库名在整条链路上都不影响连到哪个库。
 3. **隔离运行没有写模板库。** 跑前跑后模板库 91 张业务表的行数指纹**逐表一致**（digest `b634b248520a436f278f9fbe2d03410d1d17467bb3103ec7e2ae8f640f13a17c`），alembic 修订停在 `0076_media_packs` 未动；同一套查询打在生产库上有非零行（正对照），排除"查不到所以是 0"。
 4. **`--refresh-template` 分支与模板库之间没有自导入回路。** 刷新源取自 `TTS_ERP_DB_URL_PROD_SOURCE` 或 `.env`，**从不取 `.env.test`**；同库护栏在重建路径（`recreation()`）与 legacy 路径上都会拒绝 SRC==DST。HP desk 上那些源路径全部不存在 ⇒ 该分支本就无法自助执行。
-5. **台账 owner 重指需要做，而且还没做到"要进 master 的那条线"。** `chore/arch-debt-ledger-to-master`（远端 `b92c1e4b`）的 `base.production_ref` 仍是 `50978019`，而它声明的 `production_tree` 实际 HEAD 已经是 `1e6c77ee` ⇒ base 声明与规则侧自相矛盾。已验证的重指版本在**另一条**分支 `chore/arch-debt-ledger-20261110`（`7b32b9af`）上。本次已在 to-master 线上产出一个**单一独立 commit `24477270`**，分支 `chore/arch-debt-ledger-repoint-20261111`，**未推 master**。
+5. **台账 owner 重指不需要再做 —— 它早已落在"要进 master 的那条线"上。** 远端 `chore/arch-debt-ledger-to-master` 的 tip 是 `7b32b9af`，其 `base.production_ref = 1e6c77ee`（= `production_tree` 实际 HEAD），owner 判据实测 **19/24**，契约检查 exit 0。
+   本次额外产出一个**单一独立 commit `24477270`**（分支 `chore/arch-debt-ledger-repoint-20261111`），其三个重指文件与 `7b32b9af` **逐字节一致** —— 即同一份重指的单提交等价形式，**未推 master**。
+   ⚠️ 核实过程中我一度给出过相反结论（"重指没落到 to-master 线上"），那是**本地 remote-tracking ref 陈旧**造成的假象，已更正 —— 详见 §4.5。
 
 ### 一句话
 
-> 这次改指是**连接身份层面的改名**，对测试基线零影响；真正需要跟的是台账 —— 它的重指落在了错误的分支上。
+> 这次改指是**连接身份层面的改名**，对测试基线零影响；台账的重指也已经在正确的线上，本次只补了一份等价的单提交形式作为可复核件。
+
+---
+
+## 0.1 核实过程中我自己踩的两个坑（都已在正文里更正，留档）
+
+| 坑 | 现象 | 真相 | 教训 |
+|---|---|---|---|
+| 改前侧复现用占位凭据 | "改前"侧 1.471 秒就失败，报 `cannot inspect template existence` | 我手写的 `.env.test` 里用户名是字面量 `USER`、密码 3 位，psql 认证失败 | 造"改前"侧要用**真实备份** `env.test.bak`，不要手写占位符 |
+| 本地 remote-tracking ref 陈旧 | `git rev-parse origin/chore/arch-debt-ledger-to-master` 返回 `b92c1e4b`，据此判定"重指没落地" | 远端一直是 `7b32b9af`；我用的 `git fetch origin <branch>` **不带目标 refspec**，只写 FETCH_HEAD，不更新 `refs/remotes/origin/...` | 判断远端真实状态用 `git ls-remote`，或 fetch 时带目标：`+refs/heads/X:refs/remotes/origin/X` |
 
 ---
 
@@ -245,35 +256,60 @@ source_prod_url() {
 
 ## ④ 台账 owner_ref / owner_blob 重指
 
-### 4.1 结论：需要重指，且**没落到要进 master 的那条线上**
+### 4.1 结论：重指**已经在**要进 master 的那条线上，不需要再做
 
-| 远端分支 | tip | `base.production_ref` | 与 `production_tree` 实际 HEAD（`1e6c77ee`）是否一致 |
+| 远端分支（`git ls-remote` 实查） | tip | `base.production_ref` | 与 `production_tree` 实际 HEAD（`1e6c77ee`）是否一致 |
 |---|---|---|---|
-| `chore/arch-debt-ledger-to-master` | `b92c1e4b` | `50978019…` | **不一致 ⇒ 台账自相矛盾** |
-| `chore/arch-debt-ledger-20261110` | `7b32b9af` | `1e6c77ee…` | 一致 |
+| `chore/arch-debt-ledger-to-master` | **`7b32b9af`** | **`1e6c77ee…`** | **一致 ✅** |
+| `chore/arch-debt-ledger-20261110` | `7b32b9af` | `1e6c77ee…` | 一致 ✅ |
 
-`7b32b9af` 已包含重指，但它在**另一条**分支上；`chore/arch-debt-ledger-to-master`（也就是"准备进 master 的那条线"）的远端 tip 仍停在 `b92c1e4b`，**不含**那 4 个提交。`b92c1e4b` 是 `7b32b9af` 的祖先 ⇒ 合入是**快进**，不需要 force。
+两条远端分支指向**同一个 commit** `7b32b9af`，它已含完整重指：`base.production_ref = 1e6c77ee`、15 条规则的 `owner_ref` 直接指向 `1e6c77ee`、5 条指向 `31da674c`、4 条指向 master 侧 `5597dcca`。
 
-### 4.2 逐条 owner 解析（两条线各 24 条）
+对远端 tip 的台账直接跑检查（实测）：
+
+```
+owner: passed=19 failed=5 / 24
+    fail: AD-DEPLOY-004 / AD-ALERT-003 / AD-BACKUP-001 / AD-NET-002 / AD-BASE-002
+契约 EXIT=0
+```
+
+⇒ **④ 的实质结论：台账 owner 已经指对了，19/24 是当前真实状态，剩下 5 条是尚未收口的债务，不是重指没做。**
+
+### 4.2 逐条 owner 解析（重指前 / 重指后各 24 条）
 
 | | entries | owner_blob 在各自 owner_ref 上精确解析 | owner_ref == 所在树 HEAD | owner 代码在 owner_ref 之后变过 |
 |---|---|---|---|---|
-| A `b92c1e4b` | 24 | 24/24 ✅ | 0/24 | 13 条 |
-| B `7b32b9af` | 24 | 24/24 ✅ | 15/24 | 9 条 |
+| 重指前 `b92c1e4b`（`7b32b9af` 的父提交） | 24 | 24/24 ✅ | 0/24 | 13 条 |
+| 重指后 `7b32b9af`（远端 tip） | 24 | 24/24 ✅ | 15/24 | 9 条 |
 
-⇒ 两条线**内部都自洽**（台账没有"写坏"）。差别在**基准指针是否陈旧**：A 线的 `base.production_ref` 指的是一个**已经是祖先**的旧提交（`50978019` 是 `1e6c77ee` 的祖先，中间隔着 `1a319978` / `2b918d42` / `1e6c77ee` 三个提交），而它声明的 `production_tree` 路径实际 HEAD 是 `1e6c77ee`。读者按 `base` 去核对会核到错的树。
+⇒ 两个状态**内部都自洽**（台账没有"写坏"）。差别在**基准指针是否陈旧**：重指前的 `base.production_ref` 指的是一个**已经是祖先**的旧提交（`50978019` 是 `1e6c77ee` 的祖先，中间隔着 `1a319978` / `2b918d42` / `1e6c77ee` 三个提交），而它声明的 `production_tree` 路径实际 HEAD 是 `1e6c77ee`。读者按 `base` 去核对会核到错的树。
 
 其中两处 owner 代码确实变过：`1a319978` 改了 `tts_erp_v2/runtime_settings.py`，`1e6c77ee` 改了 `tts_erp_v2/sync_worker/scheduler.py`。
 
-### 4.3 本次产出的独立 commit
+### 4.3 本次产出的独立 commit（内容上与已落地的重指等价）
 
-分支 **`chore/arch-debt-ledger-repoint-20261111`**，commit **`24477270`**，父提交 `b92c1e4b`（= to-master 远端 tip ⇒ 合入是快进）。
+分支 **`chore/arch-debt-ledger-repoint-20261111`**，commit **`24477270`**，父提交 `b92c1e4b`。
 
-改法不是手改 yaml，而是**用生成器在 to-master 线上重跑**：
+改法不是手改 yaml，而是**用生成器在 to-master 线的父提交上重跑**：
 
 - `scripts/oneoff_fill_ledger_fields.py`：`PROD` 常量 `50978019` → `1e6c77ee`；AD-JOB-002 判据由 `count(kill|SIGKILL|timeout, ≥1)` 改为 `branch`，锚在 `_close_orphaned_running_row` 实现体里的 `row.status = "failed"` 与 `finished_at`（原计数口径会被 docstring 与日志文案满足 —— release 树 `1e6c77ee` 的 3 处命中里没有一处是判定逻辑）；写回时同步 `base.production_ref`。
 - `scripts/infra/runtime-facts.yaml`：部署 commit 事实推进到 `1e6c77ee`。
 - `docs/architecture/arch-debt-ledger.yaml`：由上面的生成器重跑产出。
+
+**与远端已落地状态的关系**（实测）：
+
+```
+$ for f in docs/architecture/arch-debt-ledger.yaml scripts/infra/runtime-facts.yaml scripts/oneoff_fill_ledger_fields.py; do
+    diff -q <(git show origin/chore/arch-debt-ledger-to-master:$f) <(git show 24477270:$f); done
+  一致  docs/architecture/arch-debt-ledger.yaml
+  一致  scripts/infra/runtime-facts.yaml
+  一致  scripts/oneoff_fill_ledger_fields.py
+
+$ git diff --stat origin/chore/arch-debt-ledger-to-master 24477270
+ docs/handoff/arch-debt-ledger-verify-2026-11-10.md | 189 +--------------------
+```
+
+⇒ **三个重指文件与远端 tip 逐字节一致**；`24477270` 与 `7b32b9af` 的唯一差异是**没有带上那份 handoff 文档更新**（`7b32b9af` 有）。两者是从同一个 `b92c1e4b` 分出的两条平行线（互不为祖先），**合入需二选一，不要两个都进 master**。
 
 **验证**（全部在提交内容上跑）：
 
@@ -286,6 +322,8 @@ source_prod_url() {
 | **破坏性负对照**：篡改一条 `owner_blob` | owner 检查 exit 1 ✅、契约检查 exit 1 ✅ |
 
 AD-JOB-002 转绿是重指的**实质效果**：owner 基准前移后，判据才落在真正实现了"把被杀子进程遗留的 running 行结成 failed"的那棵树与那个符号上。
+
+**给 Chief 的处置建议**：`24477270` 相对已落地的 `7b32b9af` 是**冗余**的（内容等价、少一份文档）。可以留着当"单提交等价件"复核用，也可以在确认后删掉这个远端分支 —— 我没有替它做决定。
 
 ### 4.4 顺手查出的护栏缺口（本次未修，建议单独立项）
 
@@ -302,16 +340,45 @@ python3 scripts/check_ledger_contract.py --ledger /tmp/ledger_bad_base.yaml
 
 建议（未实施，涉及检查器契约语义，留给 Chief 定）：在契约检查里加一条 —— `base.production_ref` 必须等于规则侧实际使用的 owner_ref 集合所对应的生产树 HEAD；并按本次同样的破坏性负对照验证它真会红。
 
+### 4.5 我一度给出的错误结论及更正（留档）
+
+核实 ④ 的中途，我给过这样一条结论：
+
+> "台账重指需要做，而且还没落到要进 master 的那条线上" —— 依据是 `git rev-parse origin/chore/arch-debt-ledger-to-master` 返回 `b92c1e4b`。
+
+**这条结论是错的。** 原因：
+
+```bash
+# 我当时用的 fetch —— 不带目标 refspec
+$ git fetch --no-tags origin chore/arch-debt-ledger-to-master
+$ git rev-parse origin/chore/arch-debt-ledger-to-master
+b92c1e4b...          ← 陈旧值（remote-tracking ref 上次更新是 2026-11-10 22:56）
+
+# 权威做法：ls-remote 直问远端
+$ git ls-remote origin refs/heads/chore/arch-debt-ledger-to-master
+7b32b9afa12e2d54b2a8e332c8b66a8edb292502
+
+# 或 fetch 时带目标 refspec
+$ git fetch --no-tags origin +refs/heads/chore/arch-debt-ledger-to-master:refs/remotes/origin/chore/arch-debt-ledger-to-master
+   b92c1e4b..7b32b9af  chore/arch-debt-ledger-to-master -> origin/chore/arch-debt-ledger-to-master
+$ git rev-parse origin/chore/arch-debt-ledger-to-master
+7b32b9af...
+```
+
+不带目标 refspec 的 `git fetch origin <branch>` **只写 FETCH_HEAD，不更新 `refs/remotes/origin/...`** ⇒ `git rev-parse origin/<branch>` 返回的是本地缓存的旧值。**凡是要判断"远端现在到底在哪个 commit"，必须用 `git ls-remote`，不能用未刷新的 remote-tracking ref。**
+
+（另：早先一次 `git log --oneline origin/X..Y` 显示"分叉"，同样是同一原因造成的假象。）
+
 ---
 
 ## 5. 发现的问题与建议（按需要处理程度排序）
 
 | # | 问题 | 证据 | 建议 |
 |---|---|---|---|
-| 1 | 台账重指没落到要进 master 的那条线上 | `origin/chore/arch-debt-ledger-to-master` = `b92c1e4b`，`base.production_ref=50978019` ≠ `production_tree` HEAD `1e6c77ee` | 快进合入（不需要 force）：<br>`git push origin 24477270:chore/arch-debt-ledger-to-master` —— 我没有代劳，因为这是共享分支，动它会影响别人在做的合并 |
-| 2 | 契约检查不覆盖 base 与规则侧的一致性 | 把 `base.production_ref` 退回 `50978019`，契约检查仍 exit 0 | 见 §4.4，建议单独立项 |
-| 3 | `.env.test` 首行注释仍是陈旧的 | 注释写「测试库固定为 tts_erp_v3_test」，而实际值已是 `tts_erp_test_template`，且 `tts_erp_v3_test` 已被删除 | 改注释（`.env.test` 是 gitignored 的，改动落在两台机器的本地副本上） |
-| 4 | `import_prod_to_test.sh:112` 的错误提示会教人写回死库 | `sed -i 's\|/tts_erp\b\|/tts_erp_v3_test\|' .env.test` —— 而 `tts_erp_v3_test` 已被删除 | 提示改成 `tts_erp_test_template` |
+| 1 | 契约检查不覆盖 base 与规则侧的一致性 | 把 `base.production_ref` 退回 `50978019`，契约检查仍 exit 0 | 见 §4.4，建议单独立项 |
+| 2 | `.env.test` 首行注释仍是陈旧的 | 注释写「测试库固定为 tts_erp_v3_test」，而实际值已是 `tts_erp_test_template`，且 `tts_erp_v3_test` 已被删除 | 改注释（`.env.test` 是 gitignored 的，改动落在两台机器的本地副本上） |
+| 3 | `import_prod_to_test.sh:112` 的错误提示会教人写回死库 | `sed -i 's\|/tts_erp\b\|/tts_erp_v3_test\|' .env.test` —— 而 `tts_erp_v3_test` 已被删除 | 提示改成 `tts_erp_test_template` |
+| 4 | 台账重指的**单提交等价件** `24477270` 与已落地的 `7b32b9af` 并存 | 三个重指文件逐字节一致，仅少一份 handoff 文档更新；两者互不为祖先 | 二选一，别两个都进 master。`24477270` 可留作复核件，也可删；我未替 Chief 决定 |
 | 5 | 同上，`install-test-deps.sh` **不会**把改指退回死库（已核实，无需处理） | `:156` 生成的是 `base + '/tts_erp_test_base'`；`:194` 体检查硬编码 `tts_erp_test_template`；`:143` `.env.test` 已存在时只打印不覆盖 | 无需动作，仅记录 |
 
 ---
@@ -359,11 +426,25 @@ comm -13 <(grep -E '^(FAILED|ERROR) ' after.log  | awk '{print $2}' | sort -u) \
 | 双向对比脚本 | `/tmp/compare_failures.sh`（测试机） |
 | 模板库行数指纹 | `/tmp/tpl_fp_T2.json`、`/tmp/tpl_fp_T3.json`（测试机） |
 | owner 解析探针 | `ledger_owner_probe.py`（本次产出目录） |
-| 台账重指 commit | `24477270`，分支 `chore/arch-debt-ledger-repoint-20261111` |
+| 台账重指 commit | `24477270`，分支 `chore/arch-debt-ledger-repoint-20261111`（与已落地的 `7b32b9af` 内容等价） |
 
 ## 附录 B：本次未做/不能做的事
 
 - 未跑 `--refresh-template`（它会重建模板库，属破坏性操作；且 HP desk 上无 `.env`，该分支本就无法自助执行）。
 - 未改生产配置、未重启服务、未删任何库、未推 master。
 - 未修改契约检查器（§4.4 的缺口只报告不修，涉及检查器契约语义）。
-- 未替 Chief 快进共享分支 `chore/arch-debt-ledger-to-master`（共享分支，命令已在 §5 给出）。
+- 未替 Chief 决定 `chore/arch-debt-ledger-repoint-20261111` 这个冗余分支的去留（§4.3）。
+- 未动共享分支 `chore/arch-debt-ledger-to-master`（它已含重指，无需动）。
+
+## 附录 C：顺带观察到的、与本次改动无关的库残留
+
+跑完收尾时数据库清单如下：
+
+```
+tts_erp
+tts_erp_test_feat_single_writer_lock_schan_202611_a6fc4720
+tts_erp_test_feat_single_writer_lock_schan_202611_a8b15c5a
+tts_erp_test_template
+```
+
+前两个是 `feat_single_writer_lock` 相关的克隆库，**不是本次两个对照跑留下的**（本次的临时库 `..._20261110170926_2049307_3270f50e` 与 `..._20261110172142_2076049_5204ada2` 都已 drop），来源是别的会话。只记录，不处理。
