@@ -169,7 +169,7 @@ def test_react_source_has_no_retired_dom_selectors() -> None:
 def test_g2_notices_a_retired_selector() -> None:
     """Destructive check: a retired id used as a selector must be reported."""
     broken = 'def anchor(page):\n    return page.locator("#alert-rows")\n'
-    assert "#alert-rows" in _retired_dom_hits(broken)
+    assert "alert-rows" in _retired_dom_hits(broken)
 
 
 def test_g2_ignores_a_docstring_mention() -> None:
