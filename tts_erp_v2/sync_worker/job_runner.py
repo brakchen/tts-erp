@@ -119,9 +119,38 @@ def run_with_sync_job(
     return sync_row, result
 
 
+def record_lock_refusal(
+    session: Session,
+    *,
+    job_name: str,
+    marker: str,
+) -> SyncJob:
+    """记一笔「被写者锁挡住 ⇒ 拒绝启动」的痕迹。
+
+    状态用 ``skipped``（本仓已有的终态语义：没干活，但不是失败）；
+    ``error_message`` 带稳定标记 ⇒ watchdog 能认出「锁被占 / 锁被绕过」，
+    而不是一条没有上下文的失败行。
+
+    这是「锁与断言同批落地」里断言那一半的落点：只有锁，锁被绕过时无人知道；
+    只有断言，历史上没人能解释这些行。两者一起，痕迹才有意义。
+    """
+    now = datetime.now(UTC)
+    row = SyncJob(
+        job_name=job_name,
+        status="skipped",
+        error_message=marker,
+        started_at=now,
+        finished_at=now,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
 __all__ = [
     "JobResult",
     "finish_sync_job",
+    "record_lock_refusal",
     "run_with_sync_job",
     "start_sync_job",
 ]

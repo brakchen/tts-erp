@@ -25,6 +25,10 @@ from tts_erp_v2.proxy.token_service import (
     resolve_tiktok_app_credentials,
     upsert_credentials,
 )
+from tts_erp_v2.sync_worker.writer_lock import (
+    KIND_OAUTH_STATE,
+    WriterLock,
+)
 
 log = logging.getLogger("tts_erp_v2.proxy.tiktok_oauth")
 
@@ -187,47 +191,65 @@ def complete_tiktok_authorization(
         raise OAuthFlowError("configuration_changed", "The shop App configuration changed; generate a fresh link")
     if callback_app_key and callback_app_key != app_credentials.app_key:
         raise OAuthFlowError("app_key_mismatch", "The callback App Key does not match this shop's App")
-    grant = exchange_auth_code(auth_code=code, app_credentials=app_credentials)
-    if grant.get("user_type") not in ALLOWED_USER_TYPES:
-        raise OAuthFlowError("user_type", "The authorization must belong to a TikTok Shop seller")
-    shops = fetch_authorized_shops(
-        access_token=grant["access_token"], app_credentials=app_credentials,
+    # ★ W4：同一店铺的 OAuth 交换只能有一个在飞。state 的消费已经是原子
+    #   的（pop_state = 一次条件 UPDATE ... RETURNING），剩下的危险是
+    #   【令牌交换本身】：两个回调各拿到一个令牌，而 refresh_token 是轮换
+    #   式的 ⇒ 后写覆盖先写 ⇒ 一方的令牌被孤立。target_configuration(lock=True)
+    #   的行锁会把第二个回调**排队**等行锁；这里用 advisory lock 改成
+    #   **拒绝**（拿不到就报错，不排队）。
+    lock = WriterLock.from_session(
+        session, kind=KIND_OAUTH_STATE, scope=f"tiktok:{expected_shop_id}"
     )
-    if len(shops) != 1 or shops[0].get("shop_id") != expected_shop_id:
-        raise OAuthFlowError("shop_mismatch", "Authorization must return exactly the target shop; no shop was updated")
-    shop = shops[0]
-    if not shop.get("shop_cipher"):
-        raise OAuthFlowError("missing_shop_cipher", "The target shop's authorization is missing its shop cipher")
+    if not lock.acquire():
+        raise OAuthFlowError(
+            "authorization_busy",
+            "Another authorization for this shop is in progress; retry in a moment",
+        )
+    try:
+        grant = exchange_auth_code(auth_code=code, app_credentials=app_credentials)
+        if grant.get("user_type") not in ALLOWED_USER_TYPES:
+            raise OAuthFlowError("user_type", "The authorization must belong to a TikTok Shop seller")
+        shops = fetch_authorized_shops(
+            access_token=grant["access_token"], app_credentials=app_credentials,
+        )
+        if len(shops) != 1 or shops[0].get("shop_id") != expected_shop_id:
+            raise OAuthFlowError("shop_mismatch", "Authorization must return exactly the target shop; no shop was updated")
+        shop = shops[0]
+        if not shop.get("shop_cipher"):
+            raise OAuthFlowError("missing_shop_cipher", "The target shop's authorization is missing its shop cipher")
 
-    account = target_configuration(lock=True)
-    now = datetime.now(UTC)
-    cred = upsert_credentials(
-        session, provider="tiktok", external_account_id=expected_shop_id,
-        plaintext_access_token=grant["access_token"],
-        plaintext_refresh_token=grant.get("refresh_token"),
-        plaintext_shop_cipher=shop["shop_cipher"],
-        account_label=account.account_name or shop.get("account_name"),
-        expires_at=grant.get("expires_at"), granted_scopes=grant.get("granted_scopes"),
-        service_id=service_id, extra={"app_revision": revision},
-    )
-    account.account_name = account.account_name or shop.get("account_name") or grant.get("account_name")
-    account.region = account.region or shop.get("region") or grant.get("region")
-    account.seller_type = account.seller_type or shop.get("seller_type") or grant.get("seller_type")
-    account.credential_id = cred.id
-    account.status = "active"
-    account.source_updated_at = now
-    account.synced_at = now
-    account.updated_at = now
-    summary = {
-        "shop_id": account.shop_id, "credential_id": cred.id, "account_id": account.id,
-        "account_name": account.account_name, "region": account.region,
-        "seller_type": account.seller_type, "granted_scopes": grant.get("granted_scopes"),
-        "expires_at": grant.get("expires_at"),
-    }
-    session.commit()
-    session.expire_all()
-    log.info("tiktok oauth: target shop=%s authorized; awaiting scheduled sync", expected_shop_id)
-    return {"shops": [summary]}
+        account = target_configuration(lock=True)
+        now = datetime.now(UTC)
+        cred = upsert_credentials(
+            session, provider="tiktok", external_account_id=expected_shop_id,
+            plaintext_access_token=grant["access_token"],
+            plaintext_refresh_token=grant.get("refresh_token"),
+            plaintext_shop_cipher=shop["shop_cipher"],
+            account_label=account.account_name or shop.get("account_name"),
+            expires_at=grant.get("expires_at"), granted_scopes=grant.get("granted_scopes"),
+            service_id=service_id, extra={"app_revision": revision},
+        )
+        account.account_name = account.account_name or shop.get("account_name") or grant.get("account_name")
+        account.region = account.region or shop.get("region") or grant.get("region")
+        account.seller_type = account.seller_type or shop.get("seller_type") or grant.get("seller_type")
+        account.credential_id = cred.id
+        account.status = "active"
+        account.source_updated_at = now
+        account.synced_at = now
+        account.updated_at = now
+        summary = {
+            "shop_id": account.shop_id, "credential_id": cred.id, "account_id": account.id,
+            "account_name": account.account_name, "region": account.region,
+            "seller_type": account.seller_type, "granted_scopes": grant.get("granted_scopes"),
+            "expires_at": grant.get("expires_at"),
+        }
+        session.commit()
+        session.expire_all()
+        log.info("tiktok oauth: target shop=%s authorized; awaiting scheduled sync", expected_shop_id)
+        return {"shops": [summary]}
+
+    finally:
+        lock.release()
 
 
 __all__ = [

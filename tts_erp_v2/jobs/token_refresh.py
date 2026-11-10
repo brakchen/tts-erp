@@ -74,6 +74,10 @@ from tts_erp_v2.proxy.token_service import (
     RefresherFn,
     refresh_if_needed,
 )
+from tts_erp_v2.sync_worker.writer_lock import (
+    KIND_TOKEN_REFRESH,
+    WriterLock,
+)
 
 log = logging.getLogger("tts_erp_v2.jobs.token_refresh")
 
@@ -226,87 +230,116 @@ def sync_token_refresh(
         issues = 0
 
         for row in rows:
-            inner_refresher = registry(row.provider, row.external_account_id)
-            # Wrap the inner refresher so we can observe whether
-            # refresh_if_needed actually called it (i.e. the row was
-            # expired) AND whether it produced a usable access_token.
-            # refresh_if_needed is opaque about this distinction — it
-            # silently returns the stale CredentialsView when the
-            # refresher returns ``{"access_token": ""}``, which we
-            # need to count as ``skipped`` rather than ``refreshed``.
-            wrapped, info = _instrument(inner_refresher)
-            # Forward the same window the scan used: ``refresh_if_needed``
-            # defaults to ``DEFAULT_REFRESH_SKEW`` (60s), which would
-            # short-circuit every row that wasn't inside the last
-            # minute — silently skipping everything inside the 24h
-            # window. For NULL-expiry rows the inner check returns
-            # ``False`` regardless of skew (NULL → never expires), so
-            # we must force the refresher instead.
-            refresh_kwargs: dict[str, Any] = {"skew": window}
-            if row.expires_at is None:
-                refresh_kwargs = {"force": True}
-            try:
-                view = refresh_if_needed(
-                    session,
-                    provider=row.provider,
-                    external_account_id=row.external_account_id,
-                    refresher=wrapped,
-                    **refresh_kwargs,
-                )
-            except SQLAlchemyError:
-                raise
-            except Exception as e:  # noqa: BLE001
-                import traceback
-
+            # ★ W3：同一店铺的 refresh_token 只能被一个进程轮换。refresh_token
+            #   是轮换式的 ⇒ 两台机都刷，一台先成功把旧值轮换掉，另一台拿失效的
+            #   refresh_token ⇒ 整店失联（恢复要人工重走 OAuth）。
+            #   粒度取【按店铺】而不是全局：不同店铺的凭据互不相干，全局锁会把
+            #   无关店铺串行化；而「同一店铺被双刷」才是真正的危险边界。
+            scope = f"{row.provider}:{row.external_account_id}"
+            lock = WriterLock.from_session(
+                session, kind=KIND_TOKEN_REFRESH, scope=scope
+            )
+            if not lock.acquire():
+                # 别的进程正在刷这个店铺 ⇒ 本次跳过这个店铺 + 留痕（不排队）
                 with session.begin():
                     record_sync_issue(
                         session,
                         job_name=JOB_NAME,
-                        issue_type="TOKEN_REFRESH_FAILED",
-                        external_id=f"{row.provider}:{row.external_account_id}",
+                        issue_type="TOKEN_REFRESH_LOCKED",
+                        external_id=scope,
                         details={
-                            "error": f"{type(e).__name__}: {e}",
-                            "traceback": traceback.format_exc(),
+                            "reason": "another instance holds the token_refresh writer lock",
+                            "scope": scope,
                         },
                     )
+                skipped += 1
                 issues += 1
-                failed += 1
                 continue
-
-            if view is None:
-                # Row disappeared between SELECT and refresh — skip.
-                skipped += 1
-                continue
-
-            # Classification (driven by the instrumentation above).
-            if not info["called"]:
-                # Row was still fresh — refresh_if_needed short-circuited.
-                # This branch should be unreachable after Fix #1:
-                # with ``skew=window`` and a row that satisfied
-                # ``expires_at <= now + window``, ``is_expired`` must
-                # return True and trigger a refresher call. Reach it
-                # only if the row's expires_at was changed between
-                # SELECT and the refresh call. Count as skipped for
-                # stability; the row is still treated as fresh.
-                skipped += 1
-                continue
-            if not info["got_token"]:
-                # Refresher was called but returned no usable token.
-                # refresh_if_needed left the stale row; count as skipped
-                # and write an advisory issue so ops can see the pattern.
-                with session.begin():
-                    record_sync_issue(
+            try:
+                inner_refresher = registry(row.provider, row.external_account_id)
+                # Wrap the inner refresher so we can observe whether
+                # refresh_if_needed actually called it (i.e. the row was
+                # expired) AND whether it produced a usable access_token.
+                # refresh_if_needed is opaque about this distinction — it
+                # silently returns the stale CredentialsView when the
+                # refresher returns ``{"access_token": ""}``, which we
+                # need to count as ``skipped`` rather than ``refreshed``.
+                wrapped, info = _instrument(inner_refresher)
+                # Forward the same window the scan used: ``refresh_if_needed``
+                # defaults to ``DEFAULT_REFRESH_SKEW`` (60s), which would
+                # short-circuit every row that wasn't inside the last
+                # minute — silently skipping everything inside the 24h
+                # window. For NULL-expiry rows the inner check returns
+                # ``False`` regardless of skew (NULL → never expires), so
+                # we must force the refresher instead.
+                refresh_kwargs: dict[str, Any] = {"skew": window}
+                if row.expires_at is None:
+                    refresh_kwargs = {"force": True}
+                try:
+                    view = refresh_if_needed(
                         session,
-                        job_name=JOB_NAME,
-                        issue_type="TOKEN_REFRESH_NO_TOKEN",
-                        external_id=f"{row.provider}:{row.external_account_id}",
-                        details={"reason": "refresher returned empty access_token"},
+                        provider=row.provider,
+                        external_account_id=row.external_account_id,
+                        refresher=wrapped,
+                        **refresh_kwargs,
                     )
-                issues += 1
-                skipped += 1
-                continue
+                except SQLAlchemyError:
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    import traceback
 
-            refreshed += 1
+                    with session.begin():
+                        record_sync_issue(
+                            session,
+                            job_name=JOB_NAME,
+                            issue_type="TOKEN_REFRESH_FAILED",
+                            external_id=f"{row.provider}:{row.external_account_id}",
+                            details={
+                                "error": f"{type(e).__name__}: {e}",
+                                "traceback": traceback.format_exc(),
+                            },
+                        )
+                    issues += 1
+                    failed += 1
+                    continue
+
+                if view is None:
+                    # Row disappeared between SELECT and refresh — skip.
+                    skipped += 1
+                    continue
+
+                # Classification (driven by the instrumentation above).
+                if not info["called"]:
+                    # Row was still fresh — refresh_if_needed short-circuited.
+                    # This branch should be unreachable after Fix #1:
+                    # with ``skew=window`` and a row that satisfied
+                    # ``expires_at <= now + window``, ``is_expired`` must
+                    # return True and trigger a refresher call. Reach it
+                    # only if the row's expires_at was changed between
+                    # SELECT and the refresh call. Count as skipped for
+                    # stability; the row is still treated as fresh.
+                    skipped += 1
+                    continue
+                if not info["got_token"]:
+                    # Refresher was called but returned no usable token.
+                    # refresh_if_needed left the stale row; count as skipped
+                    # and write an advisory issue so ops can see the pattern.
+                    with session.begin():
+                        record_sync_issue(
+                            session,
+                            job_name=JOB_NAME,
+                            issue_type="TOKEN_REFRESH_NO_TOKEN",
+                            external_id=f"{row.provider}:{row.external_account_id}",
+                            details={"reason": "refresher returned empty access_token"},
+                        )
+                    issues += 1
+                    skipped += 1
+                    continue
+
+                refreshed += 1
+
+            finally:
+                lock.release()
 
         # Anomaly detector: scan picked rows but NOTHING happened
         # (no refresh succeeded, no failure, no per-row issue). After

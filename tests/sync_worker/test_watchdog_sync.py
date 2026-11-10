@@ -928,3 +928,182 @@ def test_evaluate_credential_error_does_not_hit_a_plain_failure(
     findings = wd.evaluate(session_factory, now=now, jobs=jobs)
     creds = [f for f in findings if f.rule == "credential_error"]
     assert creds == []
+
+
+# ─── 规则 (e)：并发写者（2026-11-11，唯一写者锁落地时同批加）────────────
+#
+# 判据的两个关键点（否则这个判据会变成恒红的噪音，然后被忽略）：
+#   ① 报【活着的写者数】，不是【running 行数】——历史遗留的僵尸行永远躺在表里，
+#      按 running 行数计数 ⇒ 恒红 ⇒ 噪音；僵尸行不是写者（它什么都没写）。
+#   ② 判据用【新产生量 == 0】，不是【当前值 == 0】——窗口之外的并发不该让判据
+#      永远红。
+
+
+def _concurrent_jobs() -> dict[str, JobSpec]:
+    """只含一个 TEST_ 作业（interval=600s ⇒ 僵尸阈值 1200s）。"""
+    return {
+        "TEST_tiktok.orders": JobSpec(
+            job_name="TEST_tiktok.orders",
+            module_path="x",
+            interval_seconds=600,
+        ),
+    }
+
+
+def test_no_two_concurrent_writers_for_one_job(
+    session_factory: sessionmaker,
+    _cleanup_test_sync_jobs,
+) -> None:
+    """判据：同一作业**新产生**的并发写事件必须为 0。
+
+    覆盖四种形态：
+    * 两个时间重叠的活写者 ⇒ 命中（1 个事件）；
+    * 一个僵尸 + 一个活写者 ⇒ **不命中**（僵尸不是写者）；
+    * 两个不重叠的写者 ⇒ 不命中；
+    * 窗口之外的并发 ⇒ 不计入「新产生」。
+    """
+    now = _fixed_now()
+    sess = session_factory()
+    try:
+        # ① 两个重叠的活写者（都在跑，都还没到僵尸阈值）
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="running",
+            started_at=now - dt.timedelta(minutes=5),
+        )
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="running",
+            started_at=now - dt.timedelta(minutes=4),
+        )
+        # ② 一个僵尸（running、没终态、年龄 10h > 2×600s）
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="running",
+            started_at=now - dt.timedelta(hours=10),
+        )
+        # ③ 两个不重叠的写者（都早已结束）
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="succeeded",
+            started_at=now - dt.timedelta(minutes=30),
+        )
+        # ④ 窗口之外的并发（3 小时前）
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="running",
+            started_at=now - dt.timedelta(hours=3),
+        )
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="running",
+            started_at=now - dt.timedelta(hours=3, minutes=-1),
+        )
+        sess.commit()
+    finally:
+        sess.close()
+
+    runs = wd._recent_runs(sess, "TEST_tiktok.orders")
+    report = wd.concurrent_writer_report(
+        runs, now=now, interval_seconds=600
+    )
+
+    # 数量枚举：活着的写者 2 个（③ 的两个已结束行不在窗口内，① 的两行在）；
+    # 僵尸 1 个（②）；并发事件 1 个（只有 ① 命中）。
+    # 僵尸：t-10h 那行 + t-3h 的两行（running 且年龄 > 2×600s）= 3
+    assert report["zombie_count"] == 3
+    assert report["live_writer_count"] == 2
+    assert len(report["events"]) == 1
+    assert report["events"][0]["overlap_seconds"] > 0
+
+    # 分支覆盖（不命中孪生）：把僵尸那一行去掉 ⇒ 事件数不变（僵尸本来就不算）；
+    # 把两个重叠的活写者去掉 ⇒ 事件数变 0。
+    live_only = [r for r in runs if getattr(r, "started_at", None) is not None
+                 and r.started_at > now - dt.timedelta(minutes=10)]
+    without_zombie = [
+        r for r in live_only
+        if not (
+            r.status == "running"
+            and r.finished_at is None
+            and (now - r.started_at).total_seconds() > 600 * 2
+        )
+    ]
+    assert len(wd.concurrent_writer_report(
+        without_zombie, now=now, interval_seconds=600
+    )["events"]) == 1
+
+    no_overlap = [
+        r for r in live_only
+        if not (r.status == "running" and (now - r.started_at).total_seconds() <= 300)
+    ]
+    assert len(wd.concurrent_writer_report(
+        no_overlap, now=now, interval_seconds=600
+    )["events"]) == 0
+
+
+def test_concurrent_writer_rule_is_wired_into_evaluate(
+    session_factory: sessionmaker,
+    _cleanup_test_sync_jobs,
+) -> None:
+    """位置断言：规则 (e) 挂在 evaluate() 上，真的会产出 finding。"""
+    now = _fixed_now()
+    jobs = _concurrent_jobs()
+    sess = session_factory()
+    try:
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="running",
+            started_at=now - dt.timedelta(minutes=5),
+        )
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="running",
+            started_at=now - dt.timedelta(minutes=4),
+        )
+        sess.commit()
+    finally:
+        sess.close()
+
+    findings = wd.evaluate(session_factory, now=now, jobs=jobs)
+    conc = [f for f in findings if f.rule == "concurrent_writers"]
+    assert len(conc) == 1
+    assert conc[0].job_name == "TEST_tiktok.orders"
+    assert conc[0].details["live_writer_count"] == 2
+    assert conc[0].details["concurrent_event_count"] == 1
+
+
+def test_concurrent_writer_rule_is_quiet_without_overlap(
+    session_factory: sessionmaker,
+    _cleanup_test_sync_jobs,
+) -> None:
+    """分支覆盖（不命中孪生）：没有重叠 ⇒ 不产出 finding（不制造噪音）。"""
+    now = _fixed_now()
+    jobs = _concurrent_jobs()
+    sess = session_factory()
+    try:
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="succeeded",
+            started_at=now - dt.timedelta(minutes=30),
+        )
+        _make_sync_job(
+            sess,
+            job_name="TEST_tiktok.orders",
+            status="succeeded",
+            started_at=now - dt.timedelta(minutes=20),
+        )
+        sess.commit()
+    finally:
+        sess.close()
+
+    findings = wd.evaluate(session_factory, now=now, jobs=jobs)
+    assert [f for f in findings if f.rule == "concurrent_writers"] == []

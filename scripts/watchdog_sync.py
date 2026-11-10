@@ -426,6 +426,197 @@ def _check_zombie_running(
     )
 
 
+# ─── Rule (e): concurrent writers ─────────────────────────────────────────
+# 同一作业在同一时刻有 ≥2 个**活着的**写者 ⇒ 「同一时刻只有一个写者」失效。
+#
+# 两个关键点（否则这个判据会变成恒红的噪音，然后被忽略）：
+# ① 报【活着的写者数】，不是【running 行数】。历史遗留的僵尸行（running 且没有
+#    finished_at）永远躺在表里；按 running 行数计数 ⇒ 判据恒红 ⇒ 噪音 ⇒ 被忽略
+#    （这个形态本项目已经出现过三次：僵尸行、偏差方向、克隆库再生）。
+#    僵尸行**不是写者**：它什么都没写。
+# ② 判据用【新产生量 == 0】，不是【当前值 == 0】。窗口之外发生的并发不该让判据
+#    永远红；只有**观察窗口内新产生**的并发事件才算数。
+#
+# Marker: RULE_E_CONCURRENT_WRITERS
+
+CONCURRENT_WRITERS_WINDOW_SECONDS = 3600
+
+
+def _is_zombie_row(row: Any, *, now: dt.datetime, interval_seconds: int) -> bool:
+    """这一行是不是僵尸（running、没有终态、且年龄超过 2×interval）。
+
+    僵尸**不是写者**：它被 SIGKILL 了，什么都没写。把它算进并发会把判据变成
+    恒红。
+    """
+    if getattr(row, "status", None) != "running":
+        return False
+    if interval_seconds <= 0:
+        return False
+    started = getattr(row, "started_at", None)
+    if started is None:
+        return False
+    age = (now - started).total_seconds()
+    return age > interval_seconds * ZOMBIE_MULTIPLIER
+
+
+def concurrent_writer_report(
+    runs: Iterable[Any],
+    *,
+    now: dt.datetime,
+    interval_seconds: int,
+    window_seconds: int = CONCURRENT_WRITERS_WINDOW_SECONDS,
+) -> dict[str, Any]:
+    """观察窗口内【新产生】的并发写事件 + 当前**活着的写者数**。
+
+    Args:
+        runs: 该作业最近的 sync_jobs 行（任何顺序）。
+        now: 当前时刻。
+        interval_seconds: 作业的调度间隔（用来判僵尸）。
+        window_seconds: 观察窗口；窗口之外的事件不算「新产生」。
+
+    Returns:
+        ``{"live_writer_count": int, "zombie_count": int,
+        "events": [{"overlap_start": ..., "rows": [...]}, ...]}``
+    """
+    window_start = now - dt.timedelta(seconds=window_seconds)
+    live: list[tuple[Any, dt.datetime, dt.datetime]] = []
+    zombies = 0
+    alive = 0
+    for row in runs:
+        started = getattr(row, "started_at", None)
+        if started is None:
+            continue
+        if _is_zombie_row(row, now=now, interval_seconds=interval_seconds):
+            zombies += 1
+            continue
+        if getattr(row, "status", None) == "running":
+            # 还在飞 ⇒ 写区间是 [started_at, now]（status 才是真相，
+            # finished_at 只是历史遗留的清理痕迹）。
+            alive += 1
+            if started < window_start:
+                continue
+            live.append((row, started, now))
+            continue
+        if started < window_start:
+            # 窗口之外 ⇒ 不是「新产生」的事件。
+            continue
+        finished = getattr(row, "finished_at", None)
+        live.append((row, started, finished or now))
+
+    events: list[dict[str, Any]] = []
+    for i in range(len(live)):
+        for j in range(i + 1, len(live)):
+            row_a, start_a, end_a = live[i]
+            row_b, start_b, end_b = live[j]
+            overlap_start = max(start_a, start_b)
+            overlap_end = min(end_a, end_b)
+            if overlap_start < overlap_end:
+                events.append(
+                    {
+                        "overlap_start": overlap_start.isoformat(),
+                        "overlap_seconds": (overlap_end - overlap_start).total_seconds(),
+                        "rows": [
+                            {
+                                "id": getattr(row_a, "id", None),
+                                "status": getattr(row_a, "status", None),
+                                "started_at": start_a.isoformat(),
+                            },
+                            {
+                                "id": getattr(row_b, "id", None),
+                                "status": getattr(row_b, "status", None),
+                                "started_at": start_b.isoformat(),
+                            },
+                        ],
+                    }
+                )
+    return {
+        "live_writer_count": alive,
+        "zombie_count": zombies,
+        "events": events,
+        "window_seconds": window_seconds,
+    }
+
+
+def _check_concurrent_writers(
+    job_name: str,
+    interval_seconds: int,
+    *,
+    now: dt.datetime,
+    runs: list[Any],
+) -> Finding | None:
+    """Rule (e): 观察窗口内新产生了并发写者。"""
+    report = concurrent_writer_report(
+        runs, now=now, interval_seconds=interval_seconds
+    )
+    if not report["events"]:
+        return None
+    return Finding(
+        job_name=job_name,
+        rule="concurrent_writers",
+        severity="critical",
+        detected_at=now.isoformat(),
+        details={
+            "interval_seconds": interval_seconds,
+            "live_writer_count": report["live_writer_count"],
+            "zombie_count": report["zombie_count"],
+            "window_seconds": report["window_seconds"],
+            "concurrent_events": report["events"][:5],
+            "concurrent_event_count": len(report["events"]),
+        },
+    )
+
+
+# ─── Rule (f): refused by the writer lock ───────────────────────────────
+# 拿不到写者锁 ⇒ 作业**拒绝启动**（不排队），并留下一行 status='skipped' 的痕迹。
+# 用户暂不配置飞书 webhook ⇒ watchdog 日志是唯一的告警通道，所以这条痕迹必须
+# 在 watchdog 里可见，而不是躺在没人看的 sync_jobs 表里。
+#
+# 与规则 (e) 同一个时间维度：只报**观察窗口内新产生**的痕迹，历史行不会让判据
+# 永远红。
+# Marker: RULE_F_WRITER_LOCK_REFUSED
+
+WRITER_LOCK_REFUSED_MARKER = "writer lock held:"
+
+
+def _check_writer_lock_refused(
+    job_name: str,
+    interval_seconds: int,
+    *,
+    now: dt.datetime,
+    session,
+) -> Finding | None:
+    """Rule (f): 最近有作业被写者锁挡住（拒绝启动的留痕）。"""
+    from sqlalchemy import func, select
+
+    from tts_erp_v2.db.models import SyncJob
+
+    window_start = now - dt.timedelta(seconds=CONCURRENT_WRITERS_WINDOW_SECONDS)
+    stmt = (
+        select(func.count())
+        .where(
+            SyncJob.job_name == job_name,
+            SyncJob.status == "skipped",
+            SyncJob.error_message.like(f"{WRITER_LOCK_REFUSED_MARKER}%"),
+            SyncJob.started_at >= window_start,
+        )
+    )
+    refused = int(session.execute(stmt).scalar_one())
+    if refused == 0:
+        return None
+    return Finding(
+        job_name=job_name,
+        rule="writer_lock_refused",
+        severity="critical",
+        detected_at=now.isoformat(),
+        details={
+            "interval_seconds": interval_seconds,
+            "window_seconds": CONCURRENT_WRITERS_WINDOW_SECONDS,
+            "refused_count": refused,
+            "note": "another instance holds the writer lock for this job",
+        },
+    )
+
+
 # ─── Orchestration ─────────────────────────────────────────────────────
 
 
@@ -480,6 +671,12 @@ def evaluate(
                     job_name, interval, now=now, runs=runs
                 ),
                 _check_zombie_running(
+                    job_name, interval, now=now, session=sess
+                ),
+                _check_concurrent_writers(
+                    job_name, interval, now=now, runs=runs
+                ),
+                _check_writer_lock_refused(
                     job_name, interval, now=now, session=sess
                 ),
             ):
@@ -669,6 +866,9 @@ __all__ = [
     "CREDENTIAL_EXPIRED_MARKERS",
     "CONSECUTIVE_FAILURE_THRESHOLD",
     "STALE_MULTIPLIER",
+    "CONCURRENT_WRITERS_WINDOW_SECONDS",
+    "concurrent_writer_report",
+    "WRITER_LOCK_REFUSED_MARKER",
     "RECENT_RUN_WINDOW",
     "evaluate",
     "emit",

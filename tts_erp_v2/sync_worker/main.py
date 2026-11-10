@@ -51,8 +51,19 @@ from tts_erp_v2.runtime_settings import (
     validate_required_settings,
 )
 from tts_erp_v2.sync_worker.scheduler import JOBS, build_scheduler
+from tts_erp_v2.sync_worker.writer_lock import (
+    KIND_TOKEN_REFRESH,
+    WriterLock,
+    job_writer_kind,
+)
 
 log = logging.getLogger("tts_erp_v2.sync_worker.main")
+
+#: ``run <job>`` 的退出码。
+EXIT_RUN_FAILED = 1
+EXIT_UNKNOWN_JOB = 2
+#: 被写者锁挡住 ⇒ **拒绝启动**（不是排队等待）。
+EXIT_WRITER_LOCK_REFUSED = 3
 
 
 # ─── Environment validation ────────────────────────────────────────
@@ -201,6 +212,20 @@ def _run_one_job(name: str) -> int:
 
     session_factory = get_session_factory()
     spec = JOBS[name]
+
+    # ★ 唯一写者锁（W1）。所有调度 tick 都经过这里——scheduler 起的是
+    #   ``python -m tts_erp_v2.sync_worker.main run <job>`` 子进程——所以这
+    #   一个钩子就是全部调度写者的入口。
+    #   拿不到锁 ⇒ 拒绝启动 + 留痕，**绝不排队**（排队 = 僵尸的温床）。
+    kind = job_writer_kind(name)
+    lock: WriterLock | None = None
+    if kind != KIND_TOKEN_REFRESH:
+        # W3（token.refresh）的粒度是【按店铺】，由作业内部逐店铺取锁
+        # （refresh_token 轮换式：全局锁会把无关店铺串行化）⇒ 这里不取作业级锁。
+        lock = WriterLock(session_factory, kind=kind, scope=name)
+        if not lock.acquire():
+            _record_writer_lock_refusal(session_factory, name, lock.info)
+            return EXIT_WRITER_LOCK_REFUSED
     try:
         if spec.is_tiktok:
             from tts_erp_v2.sync_worker.scheduler import _run_tiktok_job
@@ -212,8 +237,22 @@ def _run_one_job(name: str) -> int:
             _run_system_job(spec, session_factory)
     except Exception:
         logging.getLogger(__name__).exception("[%s] one-shot run failed", name)
-        return 1
+        return EXIT_RUN_FAILED
+    finally:
+        if lock is not None:
+            lock.release()
     return 0
+
+
+def _record_writer_lock_refusal(session_factory, job_name: str, info) -> None:
+    """留痕：被写者锁挡住 ⇒ 拒绝启动（写一行 skipped，不排队）。"""
+    from tts_erp_v2.sync_worker.job_runner import record_lock_refusal
+
+    with session_factory() as session, session.begin():
+        record_lock_refusal(session, job_name=job_name, marker=info.marker)
+    logging.getLogger(__name__).error(
+        "[%s] refused to start: %s", job_name, info.marker
+    )
 
 
 # ─── Daemon ────────────────────────────────────────────────────────

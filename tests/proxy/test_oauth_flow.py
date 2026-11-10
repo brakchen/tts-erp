@@ -560,3 +560,83 @@ def test_complete_authorization_shops_failure_consumes_state(
         complete_tiktok_authorization(db_session, code="stale", state=raw)
     status, _, _ = pop_state(db_session, raw)
     assert status == "reused"
+
+
+# ─── W4：state 的原子消费 + 按店铺的交换锁（2026-11-11 唯一写者锁）──────
+
+
+def test_pop_state_is_atomic_under_concurrent_consumers(
+    db_session, fernet_key: str, db_engine
+) -> None:
+    """分支覆盖（改变结果）：两个并发消费者 ⇒ 只有一个拿到 'ok'。
+
+    state 的消费必须是**一次条件 UPDATE ... RETURNING**（不是 SELECT-then-
+    UPDATE）；否则两个回调可以同时"看到"未消费、各自去交换 ⇒ 双消费 + 状态机
+    错乱 + 令牌互相覆盖。
+
+    注：``db_session`` 挂在 fixture 的外层事务里（``commit()`` 不会真正落库），
+    所以这里用**独立连接**注册 state，让并发消费者看得到它。
+    """
+    import threading
+
+    from sqlalchemy.orm import sessionmaker
+
+    from tts_erp_v2.proxy.tiktok_oauth import pop_state, register_state
+
+    factory = sessionmaker(bind=db_engine, expire_on_commit=False, future=True)
+    with factory() as session:
+        raw, _ = register_state(session)
+        session.commit()
+
+    results: list[str] = []
+    barrier = threading.Barrier(2)
+
+    def consume() -> None:
+        with factory() as session:
+            barrier.wait(timeout=15)
+            status, _sid, _extra = pop_state(session, raw)
+            results.append(status)
+
+    threads = [threading.Thread(target=consume) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert results.count("ok") == 1, f"并发消费者必须只有一个拿到 ok：{results!r}"
+    assert results.count("reused") == 1, f"另一个必须看到 reused：{results!r}"
+
+
+def test_oauth_callback_refuses_when_the_shop_lock_is_held(
+    db_session, fernet_key: str, fake_exchange: _FakeCtx, db_engine
+) -> None:
+    """分支覆盖（改变结果）：同一店铺的交换锁被**别的连接**占着 ⇒ 回调**拒绝**（不排队）。
+
+    state 的消费是原子的；剩下的危险是【令牌交换本身】：两个回调各拿一个
+    令牌，而 refresh_token 是轮换式的 ⇒ 后写覆盖先写。
+
+    注：advisory lock 在**同一个连接**上是可重入的 ⇒ 模拟"别的实例"必须用
+    另一条连接。
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    from tts_erp_v2.proxy.tiktok_oauth import (
+        OAuthFlowError,
+        complete_tiktok_authorization,
+    )
+    from tts_erp_v2.sync_worker.writer_lock import KIND_OAUTH_STATE, WriterLock
+
+    raw, _ = _register_target_state(db_session)
+    factory = sessionmaker(bind=db_engine, expire_on_commit=False, future=True)
+    lock = WriterLock(
+        factory, kind=KIND_OAUTH_STATE, scope=f"tiktok:{TEST_SHOP_ID}"
+    )
+    assert lock.acquire() is True
+    try:
+        with pytest.raises(OAuthFlowError) as exc:
+            complete_tiktok_authorization(db_session, code="TTP_code_abc", state=raw)
+        assert exc.value.kind == "authorization_busy"
+        # 被拒绝时**没有**去交换令牌（上游一次都没被调用）。
+        assert fake_exchange.exchange_calls == []
+    finally:
+        lock.release()
