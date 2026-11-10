@@ -155,6 +155,10 @@ def test_real_comparison_journey(comparison_live, chromium, tmp_path, auth, widt
         anchor_input = page.get_by_label("截至日（店铺当地日）", exact=True)
         expect(anchor_input).to_have_value(anchor)
         expect(anchor_input).to_have_attribute("max", anchor)
+        # The readiness contract's anchor must hold on the REAL page — real
+        # API child, real React bundle. The canned fixture path is not
+        # evidence: the old helper passed by matching fixture text.
+        expect(page.get_by_role("grid", name="SPU 两期盈利对比")).to_have_count(1)
         expect(_stat(page, "分析 SPU 数")).to_have_text("4")
         expect(_stat(page, "本期订单数")).to_have_text("1")
         expect(_stat(page, "上期订单数")).to_have_text("1")
