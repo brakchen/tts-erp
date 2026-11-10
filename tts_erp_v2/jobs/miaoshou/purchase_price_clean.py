@@ -38,7 +38,7 @@ from tts_erp_v2.db.models.miaoshou import (
 from tts_erp_v2.db.models.procurement import ProcurementAccount
 from tts_erp_v2.jobs.runner import finish_job, run_job
 from tts_erp_v2.proxy.miaoshou.safe_message import (
-    credential_expiry_marker,
+    classify_failure_marker,
     sanitize_reason,
 )
 from tts_erp_v2.proxy.token_service import CredentialsView, load_credentials
@@ -68,8 +68,10 @@ def _business_failure_message(payload: dict[str, Any]) -> str:
     安全（**不可信上游错误体，可能回显 Cookie/token**）：
     * 只带 ``reason`` 字段，**不带整个 payload**；
     * ``reason`` 先脱敏（:func:`sanitize_reason`）再进消息；
-    * 「登录态过期」另打一个稳定标记 :data:`credential_expired`，供下游
-      （watchdog 规则 c）按**标记**而不是按上游中文措辞识别。
+    * 类别标记由 :func:`classify_failure_marker` 给：**主判据是上游稳定错误码**
+      （``code=50001``），上游中文措辞只作辅助 ⇒ 上游改一次文案不会让我们再次
+      "看不见"（本次事故形态就是那句话不在判据表里 ⇒ 31 天没人发现）；
+    * 分类不出来的失败标 :data:`reason_unclassified`，**不把未知吞进 credential**。
     """
     reason_raw = payload.get("reason")
     parts = [
@@ -77,7 +79,7 @@ def _business_failure_message(payload: dict[str, Any]) -> str:
         f"result={payload.get('result')!r}",
         f"code={payload.get('code')!r}",
     ]
-    marker = credential_expiry_marker(reason_raw)
+    marker = classify_failure_marker(payload.get("code"), reason_raw)
     if marker:
         parts.append(f"{marker}=true")
     reason = sanitize_reason(reason_raw)

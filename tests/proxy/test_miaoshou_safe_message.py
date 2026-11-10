@@ -58,7 +58,7 @@ def test_safe_message_module_lives_in_proxy_miaoshou() -> None:
     assert path.parent.name == "miaoshou"
     assert path.parent.parent.name == "proxy"
     assert callable(safe_message.sanitize_reason)
-    assert callable(safe_message.credential_expiry_marker)
+    assert callable(safe_message.classify_failure_marker)
 
 
 def test_purchase_job_and_client_both_use_the_shared_sanitizer() -> None:
@@ -72,7 +72,7 @@ def test_purchase_job_and_client_both_use_the_shared_sanitizer() -> None:
                 "safe_message"
             ):
                 imported |= {alias.name for alias in node.names}
-        assert {"sanitize_reason", "credential_expiry_marker"} <= imported, (
+        assert {"sanitize_reason", "classify_failure_marker"} <= imported, (
             f"{module.__name__} 没有从 safe_message 导入脱敏/标记函数"
         )
 
@@ -104,27 +104,47 @@ def test_purchase_job_failure_message_has_no_credential_fragments() -> None:
 # ─── 数量枚举：精确数量 ───────────────────────────────────────────────────
 
 
-def test_safe_message_exports_exactly_four_public_names() -> None:
-    """数量枚举：公开面恰好四个名字（两个常量 + 两个函数）。"""
-    assert len(safe_message.__all__) == 4
+def test_safe_message_exports_exactly_six_public_names() -> None:
+    """数量枚举：公开面恰好六个名字（三个常量 + 错误码表 + 两个函数）。"""
+    assert len(safe_message.__all__) == 6
     assert set(safe_message.__all__) == {
+        "CREDENTIAL_EXPIRED_CODES",
         "CREDENTIAL_EXPIRED_MARKER",
         "MAX_REASON_CHARS",
-        "credential_expiry_marker",
+        "REASON_UNCLASSIFIED_MARKER",
+        "classify_failure_marker",
         "sanitize_reason",
     }
 
 
-def test_each_module_sanizes_exactly_once_per_failure_path() -> None:
-    """数量枚举：作业与客户端各自的失败路径恰好各调一次脱敏。"""
-    for module in (job, ms_client):
-        source = Path(module.__file__).read_text(encoding="utf-8")
-        assert source.count("sanitize_reason(") == 1, (
-            f"{module.__name__} 的 sanitize_reason 调用点数量不对"
-        )
-        assert source.count("credential_expiry_marker(") == 1, (
-            f"{module.__name__} 的 credential_expiry_marker 调用点数量不对"
-        )
+def test_each_module_sanitizes_every_failure_path() -> None:
+    """数量枚举：作业与客户端的失败路径都过了脱敏，标记只走一个入口。"""
+    job_source = Path(job.__file__).read_text(encoding="utf-8")
+    assert job_source.count("sanitize_reason(") == 1, (
+        f"{job.__name__} 的 sanitize_reason 调用点数量不对"
+    )
+    assert job_source.count("classify_failure_marker(") == 1, (
+        f"{job.__name__} 的 classify_failure_marker 调用点数量不对"
+    )
+    client_source = Path(ms_client.__file__).read_text(encoding="utf-8")
+    assert client_source.count("classify_failure_marker(") == 1, (
+        f"{ms_client.__name__} 的 classify_failure_marker 调用点数量不对"
+    )
+
+
+def test_client_error_paths_never_echo_the_raw_body() -> None:
+    """位置断言：HTTP 错误路径的 preview 必须先脱敏再进异常消息。
+
+    上游错误体不可信（可能回显 Cookie/token/x-app-zebra），而异常消息会落进
+    ``integration.sync_jobs.error_message`` 与日志 ⇒ 原始 body 不能直接回显。
+    """
+    source = Path(ms_client.__file__).read_text(encoding="utf-8")
+    previews = [
+        line for line in source.splitlines() if line.strip().startswith("preview =")
+    ]
+    assert previews, "client.py 里找不到 preview 赋值，护栏需要跟着改"
+    for line in previews:
+        assert "sanitize_reason(" in line, f"preview 未脱敏：{line.strip()}"
 
 
 # ─── 分支覆盖：每个分支一个用例 ───────────────────────────────────────────
@@ -171,10 +191,33 @@ def test_sanitize_reason_truncates_long_reason() -> None:
     assert cleaned.endswith("…")
 
 
-def test_credential_expiry_marker_hits_the_expiry_reason() -> None:
-    """分支覆盖：登录态过期 ⇒ 打稳定标记。"""
+def test_classify_marker_hits_on_the_stable_code_without_any_wording() -> None:
+    """主判据：只靠上游稳定错误码命中，零中文措辞也能判过期。
+
+    这条是本次事故形态的直接对策：上游改一次文案，判据就瞎一次。
+    """
     assert (
-        safe_message.credential_expiry_marker("您的授权已经过期，请重新登录")
+        safe_message.classify_failure_marker("50001", "上游换了说法，看不懂")
+        == safe_message.CREDENTIAL_EXPIRED_MARKER
+    )
+    assert (
+        safe_message.classify_failure_marker(50001, "")
+        == safe_message.CREDENTIAL_EXPIRED_MARKER
+    )
+
+
+def test_classify_marker_does_not_guess_credential_from_wording_alone() -> None:
+    """负向：不认识的中文措辞不得被当成凭据过期（措辞不能自己凑出结论）。"""
+    assert (
+        safe_message.classify_failure_marker(None, "上游换了说法，看不懂")
+        == safe_message.REASON_UNCLASSIFIED_MARKER
+    )
+
+
+def test_classify_marker_keeps_the_wording_as_a_fallback() -> None:
+    """辅助判据：陌生错误码 + 过期措辞仍判过期（上游还没上稳定错误码时）。"""
+    assert (
+        safe_message.classify_failure_marker("99999", "您的授权已经过期，请重新登录")
         == safe_message.CREDENTIAL_EXPIRED_MARKER
     )
 
@@ -188,9 +231,32 @@ def test_credential_expiry_marker_hits_the_expiry_reason() -> None:
         "采购单状态不允许取消",
     ],
 )
-def test_credential_expiry_marker_does_not_hit_other_reasons(reason: str) -> None:
+def test_classify_marker_does_not_hit_other_reasons(reason: str) -> None:
     """分支覆盖（不命中孪生）：非登录态原因不得被误判成凭据过期。"""
-    assert safe_message.credential_expiry_marker(reason) is None
+    assert (
+        safe_message.classify_failure_marker("99999", reason)
+        == safe_message.REASON_UNCLASSIFIED_MARKER
+    )
+
+
+def test_classify_marker_marks_unknown_failures_unclassified() -> None:
+    """未知失败标成「未分类」，不吞进 credential（否则会把人引向错的方向）。"""
+    assert (
+        safe_message.classify_failure_marker("99999", "参数错误")
+        == safe_message.REASON_UNCLASSIFIED_MARKER
+    )
+    assert safe_message.classify_failure_marker(None, None) is None, (
+        "没有失败信息时不该编一个标记出来"
+    )
+
+
+def test_purchase_job_marks_unknown_failures_unclassified() -> None:
+    """作业消息里未知失败带 reason_unclassified，且不带 credential_expired。"""
+    message = job._business_failure_message(
+        {"result": "fail", "code": 99999, "reason": "参数错误"}
+    )
+    assert safe_message.REASON_UNCLASSIFIED_MARKER in message
+    assert safe_message.CREDENTIAL_EXPIRED_MARKER not in message
 
 
 def test_purchase_job_raises_with_reason_on_upstream_failure(
