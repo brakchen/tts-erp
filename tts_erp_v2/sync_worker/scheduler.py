@@ -545,11 +545,61 @@ def _scheduled_child_command(job_name: str) -> list[str]:
     return [sys.executable, "-m", "tts_erp_v2.sync_worker.main", "run", job_name]
 
 
-def _run_scheduled_job_child(job_name: str) -> None:
+def _close_orphaned_running_row(
+    job_name: str,
+    returncode: int,
+    session_factory: sessionmaker[Session],
+) -> None:
+    """Close the ``sync_jobs`` row a killed child left behind.
+
+    A child that dies on SIGKILL (the cgroup OOM killer) or SIGTERM never
+    reaches ``jobs.runner.run_job``'s failure branch — the signal is not an
+    exception — so its row stays ``status='running'`` forever. Such a row
+    hides the death: the job looks stuck, is never reported as failed, and
+    the watchdog can only emit a finding. The parent knows the child died
+    abnormally, so it writes the verdict the child could not.
+
+    Only a row that is still ``running`` is touched: a child that finished
+    already closed its own row, and ``max_instances=1`` means at most one
+    child per job runs at a time.
+    """
+    try:
+        with session_factory() as session, session.begin():
+            row = session.execute(
+                select(SyncJob)
+                .where(
+                    SyncJob.job_name == job_name,
+                    SyncJob.status == "running",
+                )
+                .order_by(SyncJob.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            row.status = "failed"
+            row.finished_at = datetime.now(UTC)
+            row.error_message = (
+                f"one-shot child exited {returncode} before it could finish its "
+                "sync_jobs row (worker killed — OOM/SIGTERM); closed by the parent"
+            )
+            log.error(
+                "[%s] closed orphaned running sync_jobs row id=%s after child exit %s",
+                job_name,
+                row.id,
+                returncode,
+            )
+    except Exception:  # bookkeeping must never break the tick
+        log.exception("[%s] could not close orphaned running row", job_name)
+
+
+def _run_scheduled_job_child(
+    job_name: str, session_factory: sessionmaker[Session]
+) -> None:
     """Run one tick in a short-lived child and wait for it to exit."""
     completed = subprocess.run(_scheduled_child_command(job_name), check=False)
     if completed.returncode != 0:
         log.error("[%s] one-shot child exited %s", job_name, completed.returncode)
+        _close_orphaned_running_row(job_name, completed.returncode, session_factory)
 
 
 def _make_executor(
@@ -566,7 +616,7 @@ def _make_executor(
         if not _is_job_enabled_in_factory(session_factory, spec.job_name):
             log.info("[%s] disabled by operator — skipping tick", spec.job_name)
             return
-        _run_scheduled_job_child(spec.job_name)
+        _run_scheduled_job_child(spec.job_name, session_factory)
 
     return run
 
