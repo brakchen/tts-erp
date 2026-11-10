@@ -8,7 +8,7 @@ by miaoshou.common_collect_box carry source_unit_cost / source_min / source_max.
 This job bridges the two via source_item_id (1688 offer id) — latest by
 synced_at — so spu_id → source_price becomes a direct lookup on the TK-side
 row instead of needing the offer-bridge at read time (the latter is still
-kept as a secondary fallback in reporting._source_cost_lookup).
+kept as a secondary fallback in reporting.cost_snapshots.source_cost_lookup).
 
 Single SQL pass; idempotent via IS DISTINCT FROM guard; no external API.
 Runs after common_collect_box (6h cadence aligned) so the offer data is fresh.

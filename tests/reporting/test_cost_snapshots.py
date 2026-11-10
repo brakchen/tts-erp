@@ -238,3 +238,132 @@ def test_historical_manual_cost_not_picked_up(db_session):
 
     actual = cost_snapshots.resolve_unit_cost(db_session, spu_pk=cp.id)
     assert actual is None  # only old (closed) manual entry exists
+
+
+# ─── 8. owner ownership of the cost convention ────────────────────────
+# The 货源价 lookup and the batch resolver belong to the owner module
+# (tts_erp_v2.reporting.cost_snapshots). The scheduler job and every other
+# consumer call the owner instead of carrying their own copy of the SQL —
+# otherwise the same cost convention would exist in two places.
+
+
+def test_source_price_lookup_is_owned_by_the_reporting_module():
+    """位置断言：货源价取数归 owner，作业只调用不自带一份。"""
+    import inspect
+
+    from tts_erp_v2.jobs import reporting as job_reporting
+
+    assert hasattr(cost_snapshots, "source_cost_lookup")
+    assert not hasattr(job_reporting, "_source_cost_lookup")
+    assert not hasattr(job_reporting, "_SQL_SOURCE_COST_DIRECT")
+    assert not hasattr(job_reporting, "_SQL_SOURCE_COST_VIA_OFFER")
+
+    job_source = inspect.getsource(job_reporting.run_cost_snapshots)
+    assert "cost_snapshots.source_cost_lookup(session)" in job_source
+
+
+def test_resolve_unit_costs_returns_exactly_the_resolvable_spus(db_session):
+    """数量断言：批量解析只返回有源的 SPU，口径分布数量正确。"""
+    ca = _make_channel_account(db_session)
+    manual_cp = _make_channel_product(db_session, ca, "TEST_BATCH_MANUAL")
+    source_cp = _make_channel_product(db_session, ca, "TEST_BATCH_SOURCE")
+    bare_cp = _make_channel_product(db_session, ca, "TEST_BATCH_BARE")
+
+    db_session.add(
+        ManualProductCost(
+            spu_pk=manual_cp.id,
+            unit_cost=Decimal("5.50"),
+            currency="USD",
+            valid_from=_utc(),
+            valid_to=None,
+            created_by="TEST_user",
+        )
+    )
+    db_session.flush()
+
+    def lookup(cp_id: int):
+        if cp_id == source_cp.id:
+            return Decimal("7.77"), "CNY"
+        return None, None
+
+    resolved = cost_snapshots.resolve_unit_costs(
+        db_session,
+        spu_pks=[manual_cp.id, source_cp.id, bare_cp.id],
+        source_cost_lookup=lookup,
+    )
+
+    assert len(resolved) == 2
+    assert sum(1 for r in resolved.values() if r.method == "MANUAL_ENTRY") == 1
+    assert sum(1 for r in resolved.values() if r.method == "SOURCE_PRICE") == 1
+    assert bare_cp.id not in resolved
+
+
+def test_resolve_unit_costs_agrees_with_single_resolution(db_session):
+    """分支覆盖：批量解析与逐个解析结果完全一致（同一口径规则）。"""
+    ca = _make_channel_account(db_session)
+    manual_cp = _make_channel_product(db_session, ca, "TEST_EQUIV_MANUAL")
+    source_cp = _make_channel_product(db_session, ca, "TEST_EQUIV_SOURCE")
+    bare_cp = _make_channel_product(db_session, ca, "TEST_EQUIV_BARE")
+
+    db_session.add(
+        ManualProductCost(
+            spu_pk=manual_cp.id,
+            unit_cost=Decimal("5.50"),
+            currency="USD",
+            valid_from=_utc(),
+            valid_to=None,
+            created_by="TEST_user",
+        )
+    )
+    db_session.flush()
+
+    def lookup(cp_id: int):
+        if cp_id == source_cp.id:
+            return Decimal("7.77"), "CNY"
+        return None, None
+
+    pks = [manual_cp.id, source_cp.id, bare_cp.id]
+    batch = cost_snapshots.resolve_unit_costs(
+        db_session, spu_pks=pks, source_cost_lookup=lookup
+    )
+
+    for pk in pks:
+        src_cost, src_currency = lookup(pk)
+        single = cost_snapshots.resolve_unit_cost(
+            db_session,
+            spu_pk=pk,
+            source_unit_cost=src_cost,
+            source_currency=src_currency,
+        )
+        assert (single is None) == (pk not in batch)
+        if single is not None:
+            assert batch[pk].method == single.method
+            assert batch[pk].unit_cost == single.unit_cost
+            assert batch[pk].currency == single.currency
+
+
+def test_resolve_unit_costs_without_lookup_leaves_source_only_spus_unresolved(db_session):
+    """分支覆盖：没有货源价取数能力时，只有人工成本的 SPU 能被解析。"""
+    ca = _make_channel_account(db_session)
+    manual_cp = _make_channel_product(db_session, ca, "TEST_NOLK_MANUAL")
+    source_cp = _make_channel_product(db_session, ca, "TEST_NOLK_SOURCE")
+
+    db_session.add(
+        ManualProductCost(
+            spu_pk=manual_cp.id,
+            unit_cost=Decimal("5.50"),
+            currency="USD",
+            valid_from=_utc(),
+            valid_to=None,
+            created_by="TEST_user",
+        )
+    )
+    db_session.flush()
+
+    resolved = cost_snapshots.resolve_unit_costs(
+        db_session, spu_pks=[manual_cp.id, source_cp.id]
+    )
+
+    assert len(resolved) == 1
+    assert manual_cp.id in resolved
+    assert source_cp.id not in resolved
