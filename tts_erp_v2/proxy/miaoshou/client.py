@@ -49,7 +49,7 @@ from tts_erp_v2.proxy.miaoshou.rate_limit import (
     TokenBucket,
 )
 from tts_erp_v2.proxy.miaoshou.safe_message import (
-    credential_expiry_marker,
+    classify_failure_marker,
     sanitize_reason,
 )
 from tts_erp_v2.runtime_settings import get_setting
@@ -145,7 +145,12 @@ def safe_http_post_json(
         resp = conn.getresponse()
         status = getattr(resp, "status", 200)
         if isinstance(status, int) and status >= 400:
-            preview = resp.read().decode("utf-8", errors="replace")[:300]
+            # 上游错误体不可信（可能回显 Cookie/token/x-app-zebra）⇒ 进异常
+            # 消息前先脱敏；**原始 body 绝不进异常消息**（它会落进
+            # integration.sync_jobs.error_message 与日志，是长期留存的地方）。
+            preview = sanitize_reason(
+                resp.read().decode("utf-8", errors="replace")[:300]
+            )
             raise MiaoshouApiError(status, f"HTTP {status}: {preview}", None)
         return resp.read().decode("utf-8")
     finally:
@@ -267,7 +272,8 @@ class MiaoshouClient:
         try:
             raw = safe_http_post_json(url, body_bytes, self.timeout)
         except urllib.error.HTTPError as e:
-            preview = e.read().decode("utf-8", errors="replace")[:300]
+            # 同上：上游错误体不可信 ⇒ 脱敏后再进异常消息。
+            preview = sanitize_reason(e.read().decode("utf-8", errors="replace")[:300])
             raise MiaoshouApiError(e.code, f"HTTP {e.code}: {preview}", None) from e
 
         try:
@@ -299,8 +305,11 @@ def _upstream_failure_message(
     2026-11-10：原来 HTTPError 分支会把**整个响应体**（``preview``）当作
     reason 回显——上游错误体不可信，可能回显 Cookie/token/x-app-zebra。
     ⇒ 现在只取 ``reason`` 字段并脱敏；body 永远不进异常消息。
+
+    类别标记由 :func:`classify_failure_marker` 给：主判据是上游稳定错误码，
+    中文措辞只作辅助；分类不出来的标 ``reason_unclassified``。
     """
-    marker = credential_expiry_marker(payload.get("reason"))
+    marker = classify_failure_marker(payload.get("code"), payload.get("reason"))
     reason = sanitize_reason(payload.get("reason"))
     bits: list[str] = [f"{payload.get('result', 'fail')}: "]
     if reason:

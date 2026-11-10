@@ -15,7 +15,10 @@
 1. **只取 ``reason`` 字段**，绝不把整个 payload 放进异常消息 / 日志 / sync_jobs；
 2. ``reason`` 本身也要先剥离疑似凭据形态的片段，再出去；
 3. 「登录态过期」用**我们自己产生的稳定标记** ``credential_expired`` 表示，
-   不把上游中文措辞当作判据（上游改一次文案，就会再次"看不见"）。
+   **主判据是上游的稳定错误码**（``code=50001``），文案只作辅助判据
+   （上游改一次文案，就会再次"看不见"）；
+4. 分类不出来的失败标成 ``reason_unclassified``，**不把未知吞进 credential**
+   ——否则一次无法解释的失败会以"凭据过期"的面貌进下游告警，把人引向错的方向。
 """
 
 from __future__ import annotations
@@ -31,6 +34,20 @@ from typing import Any
 #: ``import tts_erp_v2`` 会解析到 editable 安装的那棵树，而不是运行态那棵树。
 #: ⇒ 同一份字面量在两处各存一份，改动必须同步（watchdog 侧有交叉引用注释）。
 CREDENTIAL_EXPIRED_MARKER = "credential_expired"
+
+#: 「失败但原因无法分类」的稳定标记。
+#:
+#: 明确写出"未分类"，而不是把未知吞进 credential —— 否则一次无法解释的失败
+#: 会以"凭据过期"的面貌进入 watchdog 规则 c，把人引向错误的方向。
+REASON_UNCLASSIFIED_MARKER = "reason_unclassified"
+
+#: 上游「凭据/授权过期」的**稳定错误码**（主判据）。
+#:
+#: 2026-11-10 生产事实：``result='fail' code=50001`` 就是这一类，
+#: 上游原话是「您的授权已经过期，请重新登录」。用错误码而不是文案当主判据，
+#: 是因为上游改一次文案就会再瞎一次（本次事故形态：那句话不在判据表里，
+#: 规则 c 一次没命中，31 天没人发现）。
+CREDENTIAL_EXPIRED_CODES: tuple[str, ...] = ("50001",)
 
 _REDACTED = "[REDACTED]"
 
@@ -109,27 +126,50 @@ def sanitize_reason(reason: Any, *, limit: int = MAX_REASON_CHARS) -> str:
     return text
 
 
-def credential_expiry_marker(reason: Any) -> str | None:
-    """reason 是否表达「登录态过期」。
+def classify_failure_marker(code: Any, reason: Any) -> str | None:
+    """判定一次失败的类别标记。
 
-    是则返回 :data:`CREDENTIAL_EXPIRED_MARKER`（稳定标记），否则 ``None``。
+    **主判据是上游的稳定错误码**，文案只作辅助：
 
-    >>> credential_expiry_marker("您的授权已经过期，请重新登录")
+    * ``code`` 命中 :data:`CREDENTIAL_EXPIRED_CODES` ⇒ ``credential_expired``
+      （与上游措辞无关：上游改一次文案不会让我们再次"看不见"）。
+    * 否则文案命中过期措辞 ⇒ 同样判 ``credential_expired``（辅助判据）。
+    * 否则 ⇒ ``reason_unclassified``：这次失败的原因我们分类不出来，
+      **明确写成"未分类"，而不是把未知吞进 credential**。
+
+    没有失败信息（code 与 reason 都空）时返回 ``None``。
+
+    >>> classify_failure_marker("50001", "上游换了说法，看不懂")
     'credential_expired'
-    >>> credential_expiry_marker("参数错误") is None
+    >>> classify_failure_marker("99999", "参数错误")
+    'reason_unclassified'
+    >>> classify_failure_marker("50001", "")
+    'credential_expired'
+    >>> classify_failure_marker(None, None) is None
     True
     """
-    if reason is None:
-        return None
-    text = str(reason).lower()
+    if _code_in(code):
+        return CREDENTIAL_EXPIRED_MARKER
+    text = "" if reason is None else str(reason).lower()
     if any(word in text for word in _EXPIRY_SUBSTRINGS):
         return CREDENTIAL_EXPIRED_MARKER
+    if text or str(code or "").strip():
+        return REASON_UNCLASSIFIED_MARKER
     return None
 
 
+def _code_in(code: Any) -> bool:
+    """上游错误码是否属于「凭据/授权过期」这一类。"""
+    if code is None:
+        return False
+    return str(code).strip() in CREDENTIAL_EXPIRED_CODES
+
+
 __all__ = [
+    "CREDENTIAL_EXPIRED_CODES",
     "CREDENTIAL_EXPIRED_MARKER",
     "MAX_REASON_CHARS",
-    "credential_expiry_marker",
+    "REASON_UNCLASSIFIED_MARKER",
+    "classify_failure_marker",
     "sanitize_reason",
 ]
