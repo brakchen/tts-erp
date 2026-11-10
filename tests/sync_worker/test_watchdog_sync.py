@@ -785,3 +785,146 @@ def test_evaluate_emits_multiple_findings_for_same_job_when_both_apply(
     assert rules == {"stale_success", "consecutive_failures", "credential_error"}
     severities = {f.severity for f in products_findings}
     assert severities == {"warning", "credential"}
+# ─── 规则 (c)：妙手网页版登录态过期（2026-11-10）────────────────────────
+#
+# 生产事实：miaoshou.purchase_price_clean 从 2026-10-09 14:42 起连续失败 776 次
+# （31 天），而 watchdog 一次都没报出来——规则 (c) 的关键词表只认
+# "decryptionerror"/"authenticationerror" 两个英文异常类名，上游那句中文
+# 「您的授权已经过期」不在表里。
+#
+# 现在的做法：作业自己打一个**稳定标记** credential_expired，watchdog 按标记
+# 匹配（不绑上游措辞——上游改一次文案就会再次看不见）。
+
+
+def _miaoshou_jobs() -> dict[str, JobSpec]:
+    """只含一个 TEST_ 前缀的妙手作业（不碰生产行）。"""
+    return {
+        "TEST_miaoshou.purchase_price_clean": JobSpec(
+            job_name="TEST_miaoshou.purchase_price_clean",
+            module_path="x",
+            interval_seconds=1800,
+        ),
+    }
+
+
+def test_credential_expiry_marker_table_matches_the_job_side_constant() -> None:
+    """位置断言：watchdog 与作业两侧的标记字面量必须一致（两份副本不许漂移）。"""
+    from tts_erp_v2.proxy.miaoshou.safe_message import CREDENTIAL_EXPIRED_MARKER
+
+    assert wd.CREDENTIAL_EXPIRED_MARKERS == (CREDENTIAL_EXPIRED_MARKER,)
+
+
+def test_credential_expiry_marker_table_has_exactly_one_entry() -> None:
+    """数量枚举：过期标记恰好一个；原关键词表不被这次改动动过。"""
+    assert len(wd.CREDENTIAL_EXPIRED_MARKERS) == 1
+    assert wd.CREDENTIAL_ERROR_SUBSTRINGS == (
+        "decryptionerror",
+        "authenticationerror",
+    )
+
+
+def test_evaluate_credential_error_hits_the_miaoshou_expiry_marker(
+    session_factory: sessionmaker,
+    _cleanup_test_sync_jobs,
+) -> None:
+    """分支覆盖（必须命中）：作业带标记的失败 ⇒ credential 级别 finding。"""
+    now = _fixed_now()
+    jobs = _miaoshou_jobs()
+    sess = session_factory()
+    try:
+        base = now - dt.timedelta(hours=2)
+        for i in range(3):
+            _make_sync_job(
+                sess,
+                job_name="TEST_miaoshou.purchase_price_clean",
+                status="failed",
+                started_at=base + dt.timedelta(minutes=10 * (3 - i)),
+                error_message=(
+                    "RuntimeError: Miaoshou purchase business failure: "
+                    "result='fail' code=50001 credential_expired=true "
+                    "reason='您的授权已经过期，请重新登录'"
+                    if i == 0
+                    else f"TransientError #{i}"
+                ),
+            )
+        sess.commit()
+    finally:
+        sess.close()
+
+    findings = wd.evaluate(session_factory, now=now, jobs=jobs)
+    creds = [f for f in findings if f.rule == "credential_error"]
+    assert len(creds) == 1
+    assert creds[0].severity == "credential"
+    assert creds[0].job_name == "TEST_miaoshou.purchase_price_clean"
+    assert creds[0].details["matched_substring"] == "credential_expired"
+
+
+def test_evaluate_credential_error_does_not_hit_the_pre_fix_message(
+    session_factory: sessionmaker,
+    _cleanup_test_sync_jobs,
+) -> None:
+    """分支覆盖（不命中孪生）：改动前的旧消息**不会**被判成凭据过期。
+
+    诚实的事实：新判据只能识别**改动之后**写入的失败行——历史那 776 条没有
+    标记，回溯识别不了（它们靠规则 (b) 的连续失败 + 巡检脚本的清单⑤暴露）。
+    """
+    now = _fixed_now()
+    jobs = _miaoshou_jobs()
+    sess = session_factory()
+    try:
+        base = now - dt.timedelta(hours=2)
+        for i in range(3):
+            _make_sync_job(
+                sess,
+                job_name="TEST_miaoshou.purchase_price_clean",
+                status="failed",
+                started_at=base + dt.timedelta(minutes=10 * (3 - i)),
+                error_message=(
+                    "RuntimeError: Miaoshou purchase business failure: "
+                    "result='fail' code=50001"
+                    if i == 0
+                    else f"TransientError #{i}"
+                ),
+            )
+        sess.commit()
+    finally:
+        sess.close()
+
+    findings = wd.evaluate(session_factory, now=now, jobs=jobs)
+    creds = [f for f in findings if f.rule == "credential_error"]
+    assert creds == []
+    # 但连续失败仍然会被规则 (b) 抓到——这正是「作业坏了要有人看见」的那条路。
+    streaks = [f for f in findings if f.rule == "consecutive_failures"]
+    assert len(streaks) == 1
+
+
+def test_evaluate_credential_error_does_not_hit_a_plain_failure(
+    session_factory: sessionmaker,
+    _cleanup_test_sync_jobs,
+) -> None:
+    """分支覆盖（不命中孪生）：普通失败不得被误判成凭据过期。"""
+    now = _fixed_now()
+    jobs = _miaoshou_jobs()
+    sess = session_factory()
+    try:
+        base = now - dt.timedelta(hours=2)
+        for i in range(3):
+            _make_sync_job(
+                sess,
+                job_name="TEST_miaoshou.purchase_price_clean",
+                status="failed",
+                started_at=base + dt.timedelta(minutes=10 * (3 - i)),
+                error_message=(
+                    "RuntimeError: TypeError: purchase page missing fields: "
+                    "['purchaseOrderSn']"
+                    if i == 0
+                    else f"TransientError #{i}"
+                ),
+            )
+        sess.commit()
+    finally:
+        sess.close()
+
+    findings = wd.evaluate(session_factory, now=now, jobs=jobs)
+    creds = [f for f in findings if f.rule == "credential_error"]
+    assert creds == []

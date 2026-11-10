@@ -107,6 +107,25 @@ CREDENTIAL_ERROR_SUBSTRINGS: tuple[str, ...] = (
     "authenticationerror",
 )
 
+#: 「上游登录态过期」的稳定标记 —— 由**作业自己**打进错误消息
+#: （``tts_erp_v2/proxy/miaoshou/safe_message.py`` 的
+#: :data:`CREDENTIAL_EXPIRED_MARKER`），watchdog 按标记匹配。
+#:
+#: 为什么不在上面那张表里直接加中文「您的授权已经过期」：
+#: 那样等于把判据**绑在上游的措辞上**。2026-11-10 实测：上游那句中文不在表里
+#: ⇒ 规则 (c) 一次都没命中 ⇒ ``miaoshou.purchase_price_clean`` 从
+#: 2026-10-09 14:42 起连续失败 776 次（31 天）没人发现。上游改一次文案（或换
+#: 语言），同样的盲区会再出现一次。⇒ 我们让作业打稳定标记，这里按标记匹配。
+#:
+#: ⚠️ 这里刻意**不 import** ``tts_erp_v2.proxy.miaoshou.safe_message``：
+#: watchdog 以 ``python scripts/watchdog_sync.py`` 运行，``sys.path[0]`` 是
+#: ``scripts/``，而 ``tts_erp_v2`` 在 venv 里是 **editable 安装**
+#: （``__editable___tts_erp_2_0_0_finder.py`` 把 ``tts_erp_v2`` 映射到
+#: ``/home/schan/tts-erp/tts_erp_v2``）⇒ import 到的是**主 checkout**，不是
+#: 运行态那棵树。⇒ 同一份字面量在两处各存一份，改动必须同步；
+#: ``tests/sync_worker/test_watchdog_sync.py`` 有一条断言专门盯这件事。
+CREDENTIAL_EXPIRED_MARKERS: tuple[str, ...] = ("credential_expired",)
+
 # How many of the most recent sync_jobs rows to load per job. The
 # longest JOBS interval is 6h = 21600s; with 10 rows we cover 10
 # ticks × 21600 = 60h for the slowest job and 10 ticks × 600 = 100
@@ -336,6 +355,9 @@ def _check_credential_error(
         return None
     err = (runs[0].error_message or "").lower()
     matched = next((s for s in CREDENTIAL_ERROR_SUBSTRINGS if s in err), None)
+    if matched is None:
+        # 作业自打的「登录态过期」稳定标记（见 CREDENTIAL_EXPIRED_MARKERS 注释）
+        matched = next((s for s in CREDENTIAL_EXPIRED_MARKERS if s in err), None)
     if matched is None:
         return None
     return Finding(
@@ -644,6 +666,7 @@ if __name__ == "__main__":
 __all__ = [
     "Finding",
     "CREDENTIAL_ERROR_SUBSTRINGS",
+    "CREDENTIAL_EXPIRED_MARKERS",
     "CONSECUTIVE_FAILURE_THRESHOLD",
     "STALE_MULTIPLIER",
     "RECENT_RUN_WINDOW",
