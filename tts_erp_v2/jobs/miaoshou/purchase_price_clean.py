@@ -36,6 +36,16 @@ from tts_erp_v2.db.models.miaoshou import (
     MiaoshouSyncIssue,
 )
 from tts_erp_v2.db.models.procurement import ProcurementAccount
+from tts_erp_v2.jobs.miaoshou._purchase_pairing import (
+    PAIRING_MODE_OFFICIAL_KEYS,
+    PAIRING_MODE_ORDINAL,
+    PAIRING_MODE_SETTING,
+    PAIRING_MODES,
+    cross_check_order,
+    has_conflict,
+    official_item_map,
+    platform_group_order,
+)
 from tts_erp_v2.jobs.runner import finish_job, run_job
 from tts_erp_v2.proxy.miaoshou.safe_message import (
     classify_failure_marker,
@@ -350,9 +360,36 @@ def _ordered_groups(
     return order, grouped
 
 
+def _pairing_mode() -> str:
+    """配对模式（可单独关闭）。
+
+    * ``ordinal``（默认）—— 平台侧分组按「首次出现顺序」，与 2026-11-10 之前
+      的行为逐字节一致；
+    * ``official_keys`` —— 平台侧分组按官方关联键 ``opOrderItemId`` 确定性排序，
+      并与本地官方包裹表逐条交叉校验；官方表没数据或读不到 ⇒ 自动降级回
+      ``ordinal``（新模式永远不能成为 cookie 链的单点故障）。
+
+    读不到设置、或设置成别的值 ⇒ 回落 ``ordinal``。
+    """
+    mode = str(get_setting(PAIRING_MODE_SETTING, PAIRING_MODE_ORDINAL) or "")
+    mode = mode.strip().lower()
+    return mode if mode in PAIRING_MODES else PAIRING_MODE_ORDINAL
+
+
 def _observations_from_order(
     order: dict[str, Any],
+    *,
+    official_map: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[list[PriceObservation], list[dict[str, Any]]]:
+    """从一张采购单算出 SPU 级采购价观测。
+
+    ``official_map`` 非空 ⇒ 官方关联键模式：
+      * 空映射（官方表没数据）⇒ 降级回旧行为；
+      * 平台侧分组按 ``opOrderItemId`` 确定性排序（不再依赖抓取返回顺序）；
+      * cookie 包裹行与官方映射逐条比对：**矛盾**（同一 opOrderItemId 两边说了
+        不同的 platformItemId）⇒ 该采购单显式失败（跳过并记 issue）；
+        **覆盖缺口**（官方表没有这条行）只记 issue，不阻断。
+    """
     source_order, source_groups = _ordered_groups(
         order.get("purchaseItems") or [], "sourceItemId"
     )
@@ -374,17 +411,37 @@ def _observations_from_order(
                 platform_order.append(spu_id)
             platform_groups[spu_id].append((item, shop_id, shop_name))
     order_sn = str(order.get("purchaseOrderSn") or "")
+    key_issues: list[dict[str, Any]] = []
+    # 空映射 = 官方表里没有可用数据（不是"官方说都不匹配"）⇒ 降级回旧行为，
+    # 否则每条包裹行都会被记成覆盖缺口，白噪声。
+    if official_map:
+        key_issues = cross_check_order(order, official_map)
+        if has_conflict(key_issues):
+            # 平台侧映射自相矛盾 ⇒ 不用它算价（显式失败，不是静默跳过）
+            return [], key_issues
+        platform_order = platform_group_order(platform_groups)
     if len(source_order) != len(platform_order):
-        return [], [
+        return [], key_issues + [
             {
                 "issue_type": "GROUP_COUNT_MISMATCH",
                 "purchase_order_sn": order_sn,
                 "source_group_count": len(source_order),
                 "platform_group_count": len(platform_order),
+                # 定位到行：只给两个计数，谁也看不出是哪几组没配上
+                "source_item_ids": source_order,
+                "platform_item_ids": platform_order,
+                "platform_group_keys": {
+                    spu_id: sorted(
+                        str(item.get("opOrderItemId") or "")
+                        for item, _shop_id, _shop_name in platform_groups[spu_id]
+                        if isinstance(item, dict) and item.get("opOrderItemId")
+                    )
+                    for spu_id in platform_order
+                },
             }
         ]
     observations: list[PriceObservation] = []
-    issues: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = list(key_issues)
     purchase_at_raw = str(order.get("gmtPurchaseOrderStart") or "")
     for source_item_id, spu_id in zip(source_order, platform_order, strict=True):
         shops = {
@@ -475,11 +532,15 @@ def _observations_from_order(
 
 def clean_latest_prices(
     orders: list[dict[str, Any]],
+    *,
+    official_map: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[dict[tuple[str, str], PriceObservation], list[dict[str, Any]]]:
     unique: dict[tuple[str, str, str, str], PriceObservation] = {}
     issues: list[dict[str, Any]] = []
     for order in orders:
-        observations, order_issues = _observations_from_order(order)
+        observations, order_issues = _observations_from_order(
+            order, official_map=official_map
+        )
         issues.extend(order_issues)
         for observation in observations:
             key = (
@@ -782,7 +843,30 @@ def sync_purchase_prices(
             credential_id=credential_id,
             orders=orders,
         )
-        latest, cleaning_issues = clean_latest_prices(orders)
+        # 配对模式：默认 ordinal（与之前逐字节一致）。official_keys 模式读本地
+        # 官方包裹表做交叉校验 —— 读不到就降级，绝不让 cookie 链被官方侧拖死。
+        pairing_mode = _pairing_mode()
+        official_map: dict[str, tuple[str, str]] | None = None
+        if pairing_mode == PAIRING_MODE_OFFICIAL_KEYS:
+            try:
+                with session.begin():
+                    official_map = official_item_map(session)
+                if not official_map:
+                    log.warning(
+                        "official package table is empty - falling back to ordinal pairing"
+                    )
+                    official_map = None
+                    pairing_mode = PAIRING_MODE_ORDINAL
+            except Exception:
+                log.warning(
+                    "official package map unavailable - falling back to ordinal pairing",
+                    exc_info=True,
+                )
+                official_map = None
+                pairing_mode = PAIRING_MODE_ORDINAL
+        latest, cleaning_issues = clean_latest_prices(
+            orders, official_map=official_map
+        )
         for issue in cleaning_issues:
             with session.begin():
                 _record_issue(
@@ -852,6 +936,9 @@ def sync_purchase_prices(
             "matched_shops": matched_shops,
             "unmatched_shops": unmatched_shops,
             "calculation_version": _CALCULATION_VERSION,
+            "pairing_mode": pairing_mode,
+            "official_key_checked": official_map is not None,
+            "official_key_rows": len(official_map) if official_map else 0,
             "finished_at_iso": datetime.now(UTC).isoformat(),
         }
         return {
