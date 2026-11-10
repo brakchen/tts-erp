@@ -1,0 +1,85 @@
+# 运行时事实的仓库内固化（2026-11-10）
+#
+# 为什么必须有这个文件：
+#   台账里 AD-DEPLOY-002 / AD-ALERT-003 / AD-NET-001 / AD-NET-002 四条 rule
+#   的 owner 是【仓库外的运行时文件】（systemd drop-in、/opt 下的 easytier 配置）。
+#   它们不在任何 git 树里 ⇒ 写不出 owner_ref / owner_blob / symbol / line_digest
+#   ⇒ 机器检查器无法判定 ⇒ 这四条 rule 的契约守不住。
+#   ⇒ 与 scripts/infra/postgres/container-spec.yaml 同一个道理：
+#     端口绑定的 owner 曾经只存在于服务器的命令历史里，仓库无声明，
+#     收口就只是一次性的。这里把同样的做法用在这四条上。
+#
+# ★ 每条事实都必须带 provenance（谁、在何时、在哪台机器上测的）。
+#   本文件记录的是【实测值】；期望值写在 assert 里，两者不一致就是 finding。
+#   实测值用 content_sha256 钉住：运行时文件改了但没同步这里 ⇒ sha 对不上 ⇒ finding。
+#
+# ★ symbol 取本文件里每个 fact 的键名；owner_path 指向本文件；
+#   line_digest 钉住该键所在的那一行。⇒ 这四条 rule 现在也有 git owner 了。
+
+version: 1
+recorded_at: '2026-11-10T11:05:00+08:00'
+
+facts:
+
+  pgappname_drop_in:
+    host: hp-desk
+    path: ~/.config/systemd/user/tts-erp.service.d/96-pgappname.conf
+    content_sha256: e38874658bb41d2c04fc8914af5f358edae9cfd33b0aff376db57d77f776673c
+    assert:
+      - 'Environment=PGAPPNAME=tts_erp_prod-hpdesk_tts-erp'
+    fact_from: 'ssh hp-desk "cat ~/.config/systemd/user/tts-erp.service.d/96-pgappname.conf"'
+    provenance: '可靠性工程师 2026-11-09 写入；2026-11-10 复核内容与摘要一致'
+    note: >-
+      PGAPPNAME 让 pg_stat_activity.application_name 按进程身份赋值，
+      于是「生产部署单元的进程连同一个库」这条不变量才可判定。
+
+  deployed_commit_drop_in:
+    host: hp-desk
+    path: ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
+    content_sha256: ecaaa7c91a3b143896771bab9d34846a50dce92a7704779a9bb157d0444bb4c9
+    assert:
+      - 'Environment=TTS_ERP_DEPLOYED_COMMIT=1a3199784d2d9001008570fb3619c5a864d56f46'
+    fact_from: 'ssh hp-desk "cat ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf"'
+    provenance: '可靠性工程师 2026-11-08 写入；2026-11-10 复核内容与摘要一致'
+    note: >-
+      部署用 mv + cp -a 覆盖目录，运行时求值 git rev-parse 得到的是「当前磁盘 HEAD」，
+      不等于「进程启动时加载的版本」⇒ 身份必须由部署动作固化。
+
+  alert_unit_success_exit_status:
+    host: hp-desk
+    path: ~/.config/systemd/user/tts-erp-watchdog.service.d/success-exit-status.conf
+    content_sha256: absent
+    assert:
+      - 'SuccessExitStatus=1'
+    fact_from: 'ssh hp-desk "cat ~/.config/systemd/user/tts-erp-watchdog.service.d/success-exit-status.conf"'
+    provenance: '2026-11-10 复核：该 drop-in 尚未写入主机 ⇒ 断言当前【不成立】'
+    note: >-
+      本条记录的是【期望的收口形态】，而主机上还没有这个文件
+      （content_sha256=absent）⇒ 机器检查器据此判红，而不是靠人手记。
+      exit 2 仍必须标 failed，不得被 SuccessExitStatus 吞掉。
+
+  easytier_rpc_portal_loopback:
+    host: tts-erp-prod
+    path: /etc/systemd/system/easytier@default.service.d/rpc-portal-loopback.conf
+    content_sha256: 9986df892ad47964a2dbd3935358782b2d6cc5c252985d135a67bddfa7c51024
+    assert:
+      - 'Environment=ET_RPC_PORTAL=127.0.0.1:15888'
+    fact_from: 'ssh tts-erp-prod "cat /etc/systemd/system/easytier@default.service.d/rpc-portal-loopback.conf"'
+    provenance: '2026-11-08 实测（easytier 2.6.4-8428a89d）：配置里的 rpc_portal 键被忽略、ET_RPC_PORTAL_WHITELIST 无效、ET_RPC_PORTAL 生效'
+    note: >-
+      实测公网 closed。收口手段是环境变量覆盖，不是改配置文件里的 rpc_portal 键。
+
+  easytier_default_conf_port_forward:
+    host: tts-erp-prod
+    path: /opt/easytier/config/default.conf
+    content_sha256: 63836635fb60b9ff1c59691ffe66fa01714b9a1cf6be8a9c5cb5ed9b07f909e5
+    assert:
+      - 'rpc_portal = "127.0.0.1:15888"'
+      - 'bind_addr = "0.0.0.0:2222"'
+      - 'bind_addr = "0.0.0.0:9877"'
+    expect_wildcard_bind_addr_count: 2
+    fact_from: 'ssh tts-erp-prod "grep -nE \"rpc_portal|bind_addr\" /opt/easytier/config/default.conf"'
+    provenance: '2026-11-10 实测：两个 port_forward 仍绑 0.0.0.0（2222 / 9877）'
+    note: >-
+      这两条 0.0.0.0 绑定是这台公网机的实际暴露面；
+      rpc_portal 键虽写 127.0.0.1，但被 systemd 的 ET_RPC_PORTAL 覆盖后才生效。
