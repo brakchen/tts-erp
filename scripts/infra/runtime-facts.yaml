@@ -36,14 +36,16 @@ facts:
   deployed_commit_drop_in:
     host: hp-desk
     path: ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf
-    content_sha256: ecaaa7c91a3b143896771bab9d34846a50dce92a7704779a9bb157d0444bb4c9
+    content_sha256: acccfb7281bc9d048661e0cd859823280a698a6e40c32275cc6d57d9de9be715
     assert:
-      - 'Environment=TTS_ERP_DEPLOYED_COMMIT=1a3199784d2d9001008570fb3619c5a864d56f46'
+      - 'Environment=TTS_ERP_DEPLOYED_COMMIT=1e6c77ee15285d8298cfe890ff774b765f606c88'
     fact_from: 'ssh hp-desk "cat ~/.config/systemd/user/tts-erp.service.d/97-deployed-commit.conf"'
-    provenance: '可靠性工程师 2026-11-08 写入；2026-11-10 复核内容与摘要一致'
+    provenance: '可靠性工程师 2026-11-08 首次写入；2026-11-10 实测复核：部署已推进到 1e6c77ee（= release 树当前 HEAD），摘要随之变化'
     note: >-
       部署用 mv + cp -a 覆盖目录，运行时求值 git rev-parse 得到的是「当前磁盘 HEAD」，
       不等于「进程启动时加载的版本」⇒ 身份必须由部署动作固化。
+      ★ 这条是【会随部署移动】的事实：每次部署后必须重新采集并同步本文件，
+      否则 content_sha256 对不上 ⇒ 台账拿它判定时就会显形（这正是固化它的目的）。
 
   alert_unit_success_exit_status:
     host: hp-desk
