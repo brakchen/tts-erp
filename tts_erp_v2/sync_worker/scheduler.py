@@ -62,7 +62,12 @@ class JobSpec:
         module_path: dotted path to the module exposing ``run(session,
             *, proxy_call, shop_id, page_size, scope) -> JobResult``
             (for tiktok jobs) or ``sync_token_refresh(session, ...)``
-            (for ``token.refresh``).
+            (for ``token.refresh``). The scheduler calls ``run()``
+            **without** ``page_size``, so the value that reaches the
+            upstream is each job's own default — see
+            ``tts_erp_v2/jobs/tiktok/*``; the per-endpoint upstream
+            limits are measured in
+            ``docs/reference/tiktok-open-api-pagination.md``.
         interval_seconds: how often APScheduler should fire this job.
             Aligned with the legacy ``sync_cron.py`` cadence so the v2
             worker is a drop-in replacement.
