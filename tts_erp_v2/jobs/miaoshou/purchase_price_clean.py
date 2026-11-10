@@ -37,6 +37,10 @@ from tts_erp_v2.db.models.miaoshou import (
 )
 from tts_erp_v2.db.models.procurement import ProcurementAccount
 from tts_erp_v2.jobs.runner import finish_job, run_job
+from tts_erp_v2.proxy.miaoshou.safe_message import (
+    credential_expiry_marker,
+    sanitize_reason,
+)
 from tts_erp_v2.proxy.token_service import CredentialsView, load_credentials
 
 log = logging.getLogger("tts_erp_v2.jobs.miaoshou.purchase_price_clean")
@@ -52,6 +56,34 @@ MAX_PAGES = 1000
 _MIAOSHOU_TZ = ZoneInfo("Asia/Shanghai")
 _EXCLUDED_STATUSES = {"cancel", "wait_pay"}
 _CALCULATION_VERSION = "purchase-price-v1"
+
+
+def _business_failure_message(payload: dict[str, Any]) -> str:
+    """上游业务失败的**可自解释**消息。
+
+    2026-11-10 生产事实：上游原话是「您的授权已经过期，请重新登录」，而我们
+    原来只报 ``result='fail' code=50001`` ⇒ 运维看到的是一个无法自解释的
+    code（该作业因此从 2026-10-09 14:42 起连续失败 776 次、31 天没人发现）。
+
+    安全（**不可信上游错误体，可能回显 Cookie/token**）：
+    * 只带 ``reason`` 字段，**不带整个 payload**；
+    * ``reason`` 先脱敏（:func:`sanitize_reason`）再进消息；
+    * 「登录态过期」另打一个稳定标记 :data:`credential_expired`，供下游
+      （watchdog 规则 c）按**标记**而不是按上游中文措辞识别。
+    """
+    reason_raw = payload.get("reason")
+    parts = [
+        "Miaoshou purchase business failure:",
+        f"result={payload.get('result')!r}",
+        f"code={payload.get('code')!r}",
+    ]
+    marker = credential_expiry_marker(reason_raw)
+    if marker:
+        parts.append(f"{marker}=true")
+    reason = sanitize_reason(reason_raw)
+    if reason:
+        parts.append(f"reason={reason!r}")
+    return " ".join(parts)
 
 
 class PurchaseWebClient(Protocol):
@@ -153,10 +185,7 @@ class MiaoshouPurchaseWebClient:
         except json.JSONDecodeError as exc:
             raise RuntimeError("Miaoshou purchase response is not JSON") from exc
         if payload.get("result") != "success":
-            raise RuntimeError(
-                "Miaoshou purchase business failure: "
-                f"result={payload.get('result')!r} code={payload.get('code')!r}"
-            )
+            raise RuntimeError(_business_failure_message(payload))
         return payload
 
 

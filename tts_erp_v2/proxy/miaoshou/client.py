@@ -49,6 +49,10 @@ from tts_erp_v2.proxy.errors import ProxyError, SigningError
 from tts_erp_v2.proxy.miaoshou.rate_limit import (
     TokenBucket,
 )
+from tts_erp_v2.proxy.miaoshou.safe_message import (
+    credential_expiry_marker,
+    sanitize_reason,
+)
 
 # ---- Shared constants -----------------------------------------------
 
@@ -287,6 +291,27 @@ class MiaoshouClient:
         return resp
 
 
+def _upstream_failure_message(
+    payload: dict[str, Any], *, http_status: int | None = None
+) -> str:
+    """上游信封失败的**可自解释**消息（带脱敏后的 reason + 稳定过期标记）。
+
+    2026-11-10：原来 HTTPError 分支会把**整个响应体**（``preview``）当作
+    reason 回显——上游错误体不可信，可能回显 Cookie/token/x-app-zebra。
+    ⇒ 现在只取 ``reason`` 字段并脱敏；body 永远不进异常消息。
+    """
+    marker = credential_expiry_marker(payload.get("reason"))
+    reason = sanitize_reason(payload.get("reason"))
+    bits: list[str] = [f"{payload.get('result', 'fail')}: "]
+    if reason:
+        bits.append(f"{reason} ")
+    if marker:
+        bits.append(f"{marker}=true ")
+    if http_status is not None:
+        bits.append(f"(HTTP {http_status})")
+    return "".join(bits).strip()
+
+
 # ---- ERP client (HMAC-SHA256) --------------------------------------
 
 
@@ -401,33 +426,33 @@ class MiaoshouErpClient:
                 url, body_bytes, self.timeout, headers=auth_headers
             )
         except urllib.error.HTTPError as e:
-            preview = e.read().decode("utf-8", errors="replace")[:300]
+            # 上游错误体不可信（可能回显 Cookie/token/x-app-zebra）⇒ 只取
+            # reason 字段并脱敏；**原始 body 绝不进异常消息**。
             biz_code: int | str = e.code
-            biz_message = f"HTTP {e.code}: {preview}"
+            biz_message = f"HTTP {e.code}"
             try:
-                err_json = json.loads(preview)
+                err_json = json.loads(e.read().decode("utf-8", errors="replace"))
+            except (json.JSONDecodeError, ValueError, OSError):
+                err_json = None
+            if isinstance(err_json, dict):
                 biz_code = err_json.get("code", e.code)
-                biz_message = (
-                    f"{err_json.get('result', 'fail')}: "
-                    f"{err_json.get('reason', preview)} (HTTP {e.code})"
+                biz_message = _upstream_failure_message(
+                    err_json, http_status=e.code
                 )
-            except (json.JSONDecodeError, ValueError):
-                pass
             raise MiaoshouApiError(biz_code, biz_message, None) from e
 
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as e:
-            raise MiaoshouApiError(
-                0, f"无法解析响应: {e} body={raw[:200]}", None
-            ) from e
+            # 不带 body：原始响应体可能回显凭据。
+            raise MiaoshouApiError(0, f"无法解析响应: {e}", None) from e
 
         # ERP envelope: {"result":"success"/"fail", "code":"0"/<errorCode>, "data":..., "reason":...}
         result = payload.get("result")
         if result == "fail":
             raise MiaoshouApiError(
                 payload.get("code", "?"),
-                f"{payload.get('reason', 'fail')}",
+                _upstream_failure_message(payload),
                 payload.get("data"),
             )
         return payload
