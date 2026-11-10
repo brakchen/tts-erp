@@ -233,6 +233,18 @@ def _css_version(filename: str) -> str:
   return _asset_version(_CSS_DIR / filename)
 
 
+class _TrustedHtml(str):
+  """HTML generated only from fixed templates and escaped labels.
+
+  P6 retired the Jinja renderer that owned this class, but the sidebar
+  helpers below are kept as a reuse reference and still name it. Restored
+  here so the module has no unbound names; ``scripts/check_undefined_names.py``
+  guards against losing it again.
+  """
+  def __html__(self) -> str:
+    return self
+
+
 def _sidebar(current_page: str = "") -> _TrustedHtml:
   """Jinja global: sidebar markup + toggle JS, empty without a page slug."""
   if not current_page:

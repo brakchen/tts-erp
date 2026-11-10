@@ -1,0 +1,23 @@
+# Known undefined names in the test tree (2026-11-10).
+#
+# One "path:line: name" per line, matched exactly by
+# scripts/check_undefined_names.py --baseline. A line that moves or a new
+# undefined name turns the gate red — this file records what is already
+# known, it does not excuse it.
+#
+# All of these live in modules that are skipped at collection time
+# (pytestmark -> pytest.mark.skip), so the names are never executed.
+# They are leftovers from the retired tdd/ code base that was kept as a
+# starting point for a rewrite (see the TODO at the top of each file).
+# Fix or delete them when those tests are rewritten.
+
+tests/miaoshou/test_sync_routes.py:82: MagicMock
+tests/miaoshou/test_sync_routes.py:85: patch
+tests/miaoshou/test_sync_routes.py:86: persist_miaoshou_price_template
+tests/miaoshou/test_sync_routes.py:100: persist_miaoshou_collect_box_detail
+tests/miaoshou/test_sync_routes.py:115: persist_miaoshou_move_collect_task
+tests/miaoshou/test_sync_routes.py:146: m_sync
+tests/miaoshou/test_sync_shops.py:149: json
+tests/miaoshou/test_sync_shops.py:162: m_sync
+tests/miaoshou/test_sync_shops.py:164: patch
+tests/miaoshou/test_sync_shops.py:188: MagicMock
