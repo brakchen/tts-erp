@@ -135,6 +135,28 @@ git grep -n "<old-template-name>" -- tests/
 Prefer a shared readiness contract over a hardcoded selector. `tests/support/page_readiness.py`
 (`wait_canned_page`) dispatches per slug to the signal the current owner actually renders.
 
+### 1.6 Names that nothing binds
+
+A deleted import leaves its name behind in the source, so `grep` still finds it and every
+review reads as "defined". Only the syntax tree knows that nothing binds it any more — and
+`from __future__ import annotations` means the annotation is never evaluated at runtime, so
+the module still imports, the app still starts, and the page still opens. Only a direct call
+raises.
+
+```bash
+python scripts/check_undefined_names.py tts_erp_v2        # production tree: must be zero
+python scripts/check_undefined_names.py tests \
+    --baseline docs/testing/undefined-names-baseline.txt    # test tree: no new findings
+```
+
+The production tree is zero-tolerance. The test tree may carry recorded findings (skipped
+legacy modules that name things they never import); those live in
+`docs/testing/undefined-names-baseline.txt`, and a name that moves or appears for the first
+time turns the gate red. The baseline records what is known, it does not excuse it.
+
+Run this after deleting an import, a constant, or a class — a text search will not catch the
+call sites you missed.
+
 
 ## 2. Supported commands
 

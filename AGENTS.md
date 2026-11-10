@@ -124,6 +124,7 @@ Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md
 | DoD validation (select once from the synchronized target SHA) | `bash scripts/test_baseline.sh --scope auto --base "$target_sha"` |
 | Full regression for test infrastructure changes | `bash scripts/test_baseline.sh --scope fast --base "$target_sha"` |
 | Show / refresh the committed master baseline | `bash scripts/test_baseline.sh --show` · `--update` (master only) |
+| Undefined-name gate (AST; production tree must be zero) | `python scripts/check_undefined_names.py tts_erp_v2` |
 | Fast test suite (isolated DB) | `bash scripts/test_isolated.sh fast` |
 | One test domain (isolated DB) | `bash scripts/test_isolated.sh <domain>` |
 | Unit layer (isolated DB) | `bash scripts/test_isolated.sh unit` |
