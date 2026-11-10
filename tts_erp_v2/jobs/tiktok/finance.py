@@ -41,6 +41,25 @@ prod) are surfaced as ``STATEMENT_PAYMENT_ID_MISSING`` and skipped —
 the cursor does NOT advance past them, so a later payload revision
 or a back-fill can still pick them up.
 
+Upstream pagination — why page_size defaults to 100
+--------------------------------------------------
+``GET /finance/202309/payments`` **freezes its cursor** for every
+page_size below 100: the endpoint hands back the *same* 244-char
+``next_page_token`` on every page, and page 2 repeats page 1's rows.
+Measured live on 2026-11-10 (both shops, read-only):
+
+* page_size=50 → page 1: 50 payments + token; page 2 (that token): the same
+  50 payments + the *same* token ⇒ the walk can never advance. The
+  repeated-token guard turns this into one failed tick with the watermark
+  untouched — correct, but the finance job never completes.
+* page_size=100 → all 76 payments in one page, no token ⇒ the walk ends.
+
+The endpoint's own error message gives the legal range:
+``$this>=1 && $this<=100`` (500 / 1000 are rejected). 100 is therefore both
+the workaround and the maximum the endpoint accepts.
+``GET /finance/202309/statements`` paginates normally at any page_size ≥ 1
+(it does not share the payments defect).
+
 The 53 ``_COMPONENT_COLUMNS`` source keys mirror the upstream 202309
 ``statement_transactions`` payload field names (same list as the archived
 ``migrate_finance.py``); each is expanded to a ``settlement_components`` row
@@ -892,7 +911,7 @@ def run(
     *,
     proxy_call: ProxyCall,
     shop_id: str,
-    page_size: int = 50,
+    page_size: int = 100,
     scope: str | None = None,
 ) -> JobResult:
     """Top-level entry. Runs both sub-jobs on a single open session.
@@ -905,6 +924,12 @@ def run(
     Payouts and statements use complete source-fact transactions. Each
     transaction's components are atomic; no write unit includes HTTP calls.
     A sub-job advances its watermark only after all required facts complete.
+
+    ``page_size`` defaults to **100**: it is the upstream maximum for the
+    finance endpoints, and the only value for which
+    ``/finance/202309/payments`` paginates at all — below 100 the endpoint
+    hands back a frozen ``next_page_token`` (see the module docstring for
+    the measured numbers).
     """
     cursor_scope = scope or shop_id
     with session.begin():
