@@ -138,7 +138,7 @@ SUPPORTED_SLUGS: frozenset[str] = frozenset(
         "shops",
         "spu-profit-deterioration",
         "spu-roi",
-        "sync-jjobs",
+        "sync-jobs",
         "users",
         "video-publish",
     }

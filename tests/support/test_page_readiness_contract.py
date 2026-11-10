@@ -22,6 +22,7 @@ only exist under ``tests/browser/``.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from typing import Any
 
@@ -31,19 +32,20 @@ PROJECT = Path(__file__).resolve().parents[2]
 FRONTEND_SRC = PROJECT / "frontend" / "src"
 HELPER = Path(__file__).with_name("page_readiness.py")
 
-#: Ids of the Jinja template P6 retired. React never rendered them, so an
+#: Names of the Jinja template P6 retired. React never rendered them, so an
 #: anchor that names one can never hit — that is what made the old helper's
-#: alert-page branch permanently false.
+#: alert-page branch permanently false. Matched without the ``#`` because the
+#: React source would carry them as ``id="alert-rows"`` or ``"#alert-rows"``.
 RETIRED_DOM_IDS = (
-    "#alert-page",
-    "#alert-status",
-    "#alert-rows",
-    "#alert-cards",
-    "#alert-summary",
-    "#alert-freshness",
-    "#total-spus",
-    "#total-current-orders",
-    "#total-previous-orders",
+    "alert-page",
+    "alert-status",
+    "alert-rows",
+    "alert-cards",
+    "alert-summary",
+    "alert-freshness",
+    "total-spus",
+    "total-current-orders",
+    "total-previous-orders",
 )
 
 
@@ -97,6 +99,23 @@ def _suite_slugs() -> set[str]:
     return slugs
 
 
+def _strip_js_comments(source: str) -> str:
+    """Remove ``//`` line comments and ``/* */`` blocks from JS/TS source.
+
+    TypeScript is not Python, so the Python AST scanner cannot be used here.
+    Comments are the only place the history may be written down, so they are
+    removed first and the remaining code is scanned as text.
+    """
+    without_blocks = re.sub(r"/\*.*?\*/", " ", source, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", " ", without_blocks)
+
+
+def _retired_dom_hits_in_js(source: str) -> set[str]:
+    """Retired DOM names used in code (comments excluded)."""
+    code = _strip_js_comments(source)
+    return {retired for retired in RETIRED_DOM_IDS if retired in code}
+
+
 def _frontend_source() -> str:
     return "\n".join(
         path.read_text(encoding="utf-8")
@@ -143,7 +162,7 @@ def test_helper_has_no_retired_dom_selectors() -> None:
 def test_react_source_has_no_retired_dom_selectors() -> None:
     hits: set[str] = set()
     for path in sorted(FRONTEND_SRC.rglob("*.ts")) + sorted(FRONTEND_SRC.rglob("*.tsx")):
-        hits |= _retired_dom_hits(path.read_text(encoding="utf-8"))
+        hits |= _retired_dom_hits_in_js(path.read_text(encoding="utf-8"))
     assert not hits, f"React 源码里重新出现了已退役的 DOM: {sorted(hits)}"
 
 
