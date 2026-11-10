@@ -11,7 +11,7 @@ Cursor: epoch ms in ``integration.sync_cursors`` (scope=shop_id).
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -156,8 +156,19 @@ def _resolve_case_line_key(raw_line: dict) -> tuple[str | None, str | None]:
     return str(external_id), None
 
 
-def _walk_pages(proxy_call, *, endpoint: str, base_body: dict) -> list[dict]:
-    collected: list[dict] = []
+def _walk_pages(proxy_call, *, endpoint: str, base_body: dict):
+    """Walk every page of an after-sales endpoint, yielding items page by page.
+
+    A generator, not a list builder: the caller consumes one page at a time,
+    so the walk's memory cost is one page instead of the whole result set
+    (the previous ``collected.extend(...)`` kept every item of every page
+    alive until the walk ended).
+
+    Raises :class:`UpstreamJobError` when the upstream keeps handing back a
+    ``next_page_token`` we already walked: a pagination loop is an upstream
+    defect and must fail loudly (one failed tick) instead of running forever.
+    """
+    seen_tokens: set[str] = set()
     next_token: str | None = None
     body = dict(base_body)
     while True:
@@ -191,11 +202,16 @@ def _walk_pages(proxy_call, *, endpoint: str, base_body: dict) -> list[dict]:
                 data.get("total_count"),
                 sorted(data.keys()),
             )
-        collected.extend(items)
+        yield from items
         next_token = data.get("next_page_token") or None
         if not next_token:
             break
-    return collected
+        if next_token in seen_tokens:
+            raise UpstreamJobError(
+                f"{endpoint} pagination did not advance: next_page_token repeated "
+                "(upstream loop); aborting the walk instead of running forever"
+            )
+        seen_tokens.add(next_token)
 
 
 # payload return_type → after_sales.cases.case_type 映射（与 2026-08 迁移数据
@@ -273,26 +289,34 @@ def _process_one_type(
     account_id: int,
     case_type: str,
     endpoint: str,
-    raw_cases: list[dict],
-) -> tuple[list[bool], int, int, int]:
+    raw_cases: Iterable[dict],
+) -> tuple[list[bool], int, int, int, int | None]:
     """Process one case_type batch.
 
-    Returns ``(ok_flags, total, inserted, failed)`` where ``ok_flags[i]``
-    indicates whether ``raw_cases[i]`` was successfully inserted/updated
-    in this run. ``ok_flags`` lets the caller advance the watermark ONLY
-    over successfully-resolved items — failed ones stay inside the
-    watermark window so the next run naturally retries them.
+    ``raw_cases`` is consumed lazily (the caller's page generator): the
+    cases of one page are processed before the next page is fetched, so a
+    long window never has to fit in memory at once. ``total`` is counted
+    while walking because a generator has no ``len()``.
+
+    Returns ``(ok_flags, total, inserted, failed, max_update_ms)`` where
+    ``ok_flags[i]`` indicates whether ``raw_cases[i]`` was successfully
+    inserted/updated in this run. ``max_update_ms`` is the newest
+    ``update_time`` **among the successfully-resolved items only** — it is
+    computed here, while the raw items are still in hand, so the caller
+    never has to walk the (now consumed) generator a second time.
 
     历史教训（2026-09-28）：原版 ``return total, inserted, failed`` 让
     调用方被前置条件 ``max_update_ms`` 推过失败 case → UNKNOWN_ORDER
     case 永远卡在 watermark 后面被丢（典型 case：after_sales 15min/次
     早于 orders 10min/次，case 先到订单未到，订单到后已过水位线）。
     """
-    total = len(raw_cases)
+    total = 0
     ok_flags: list[bool] = []
     inserted = 0
     failed = 0
+    max_update_ms: int | None = None
     for raw in raw_cases:
+        total += 1
         with session.begin():
             ext_case_id = str(
                 raw.get("id")
@@ -444,8 +468,16 @@ def _process_one_type(
                 )
             inserted += 1
             ok_flags.append(True)
+            # Watermark fact: the newest update_time among the items that
+            # actually resolved. Failed items are deliberately excluded — they
+            # stay inside the watermark window so the next run retries them.
+            ts = _epoch_seconds_to_utc(raw.get("update_time"))
+            if ts:
+                ms = _safe_int(ts.timestamp() * 1000)
+                if max_update_ms is None or ms > max_update_ms:
+                    max_update_ms = ms
 
-    return ok_flags, total, inserted, failed
+    return ok_flags, total, inserted, failed, max_update_ms
 
 
 def run(
@@ -482,7 +514,7 @@ def run(
         proxy_call, endpoint=CANCELLATIONS_ENDPOINT, base_body=base_body
     )
 
-    r_ok, r_total, r_ins, r_fail = _process_one_type(
+    _r_ok, r_total, r_ins, r_fail, r_max_ms = _process_one_type(
         session,
         proxy_call=proxy_call,
         account_id=account_id,
@@ -490,7 +522,7 @@ def run(
         endpoint=RETURNS_ENDPOINT,
         raw_cases=returns,
     )
-    c_ok, c_total, c_ins, c_fail = _process_one_type(
+    _c_ok, c_total, c_ins, c_fail, c_max_ms = _process_one_type(
         session,
         proxy_call=proxy_call,
         account_id=account_id,
@@ -510,15 +542,16 @@ def run(
     # 不再 fetch → case 永久丢失。改为只算 ok=True 的 update_time：
     # 失败的留在水位线内，下轮自动重抓（order 同步通常 10min 内到
     # → 重试成功）。永久失败的 case 走 §14.2 的 auto-resolve 兜底。
+    #
+    # 每个 case_type 各自算出自己那批成功项的最新 update_time（见
+    # _process_one_type），这里取两者的较大值 —— 不再回头遍历已消费的
+    # 分页生成器。
     max_update_ms: int | None = None
-    for raw, ok in (*zip(returns, r_ok), *zip(cancellations, c_ok)):
-        if not ok:
-            continue
-        ts = _epoch_seconds_to_utc(raw.get("update_time"))
-        if ts:
-            ms = _safe_int(ts.timestamp() * 1000)
-            if max_update_ms is None or ms > max_update_ms:
-                max_update_ms = ms
+    for candidate_ms in (r_max_ms, c_max_ms):
+        if candidate_ms is not None and (
+            max_update_ms is None or candidate_ms > max_update_ms
+        ):
+            max_update_ms = candidate_ms
 
     new_cursor_ms: int | None = None
     with session.begin():

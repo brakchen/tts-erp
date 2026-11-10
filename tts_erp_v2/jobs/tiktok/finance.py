@@ -64,7 +64,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -239,18 +239,30 @@ def _walk_pages(
     items_key: str,
     method: str = "GET",
 ):
-    """Walk every page of a finance endpoint.
+    """Walk every page of a finance endpoint, **yielding items page by page**.
 
     TikTok 202309 finance endpoints are GETs returning a top-level list
     under ``data.<items_key>`` plus ``data.next_page_token``. sort_field
     is required per endpoint (36009004 otherwise); we inject the default.
 
+    This is a generator, not a list builder: the caller consumes one page
+    at a time, so the walk's memory cost is one page instead of the whole
+    result set. The previous ``collected.extend(...)`` kept every item of
+    every page alive until the walk ended — on a runaway window that is
+    what pushed the worker into the cgroup OOM killer (anon-rss ~1.9 GB
+    against MemoryMax=2G).
+
     Raises :class:`UpstreamJobError` on any non-zero ``code`` — callers
     must NOT swallow this. Per the Lane 2 contract, a failed pull MUST
     propagate to ``run_with_sync_job`` so the tick is marked 'failed'
     and the watermark stays put.
+
+    Raises :class:`UpstreamJobError` when the upstream keeps handing back
+    a ``next_page_token`` we already walked: a pagination loop is an
+    upstream defect, and it must fail loudly (one failed tick) instead of
+    running forever.
     """
-    collected: list[dict] = []
+    seen_tokens: set[str] = set()
     next_token: str | None = None
     body = dict(base_body)
     if "sort_field" not in body:
@@ -269,11 +281,16 @@ def _walk_pages(
                 f"{endpoint} non-zero code={code} message={resp.get('message')!r}"
             )
         data = resp.get("data") or {}
-        collected.extend(data.get(items_key) or [])
+        yield from data.get(items_key) or []
         next_token = data.get("next_page_token") or None
         if not next_token:
             break
-    return collected
+        if next_token in seen_tokens:
+            raise UpstreamJobError(
+                f"{endpoint} pagination did not advance: next_page_token repeated "
+                "(upstream loop); aborting the walk instead of running forever"
+            )
+        seen_tokens.add(next_token)
 
 
 def _parse_payout(raw: dict) -> dict:
@@ -558,6 +575,7 @@ def _sync_payouts(
     # Walk the payouts pages. Upstream failures propagate (no silent
     # swallow) so run_with_sync_job marks the tick 'failed' and the
     # watermark stays put.
+    # Streamed: one page of payouts is alive at a time, never the whole set.
     raw_payouts = _walk_pages(
         proxy_call,
         endpoint=PAYOUTS_ENDPOINT,
@@ -644,13 +662,18 @@ def _sync_payouts(
 def _persist_statement_transactions(
     session: Session,
     *,
-    raw_txns: list[dict],
+    raw_txns: Iterable[dict],
     account_id: int,
     stmt_id: int,
     external_statement_id: str,
     currency: str | None,
     include_components: bool,
 ) -> int:
+    """Persist one statement's transactions.
+
+    ``raw_txns`` is consumed lazily (the caller's page generator), so a
+    statement with many transactions never has to fit in memory at once.
+    """
     failed = 0
     for raw_t in raw_txns:
         with session.begin():
@@ -745,12 +768,16 @@ def _sync_statements(
     body: dict[str, Any] = {"page_size": page_size}
     if watermark_ms:
         body["statement_time_ge"] = watermark_ms // 1000
+    # Streamed: statements are consumed one page at a time, and the total is
+    # counted while walking (the generator has no len()).
     statements = _walk_pages(
         proxy_call, endpoint=STATEMENTS_ENDPOINT, base_body=body, items_key="statements"
     )
     inserted = failed = 0
+    statements_total = 0
     max_statement_ms = watermark_ms
     for raw_s in statements:
+        statements_total += 1
         external_id = str(raw_s.get("id") or raw_s.get("statement_id") or "<unknown>")
         payment_id = raw_s.get("payment_id")
         with session.begin():
@@ -850,7 +877,7 @@ def _sync_statements(
                 cursor_epoch_ms=max_statement_ms,
             )
     return JobResult(
-        rows_total=len(statements),
+        rows_total=statements_total,
         rows_inserted=inserted,
         rows_failed=failed,
         cursor=max_statement_ms,
