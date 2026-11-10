@@ -106,3 +106,57 @@ def test_manual_run_ignores_disabled_control(monkeypatch: pytest.MonkeyPatch) ->
 
     scheduler.run_scheduled_job_once("reporting.profit_daily")
     assert calls == [("reporting.profit_daily", None)]
+
+
+# ─── A killed child must not leave its sync_jobs row 'running' forever ───
+#
+# 2026-11-10: the OOM killer SIGKILLed the one-shot child, so
+# jobs.runner.run_job's failure branch never ran and the row stayed
+# status='running' — the job looked stuck, was never reported as failed and
+# never alerted. The parent knows the child died abnormally, so it writes the
+# verdict the child could not.
+
+
+def test_close_orphaned_running_row_marks_the_stuck_row_failed(db_engine) -> None:
+    """数量断言：恰好一行 running 被结成 failed，并带上退出码。"""
+    from sqlalchemy.orm import sessionmaker
+
+    from tts_erp_v2.db.models.integration import SyncJob
+
+    factory = sessionmaker(bind=db_engine, join_transaction_mode="create_savepoint")
+    with factory() as session, session.begin():
+        row = SyncJob(job_name="TEST_tiktok.finance", status="running")
+        session.add(row)
+        session.flush()
+        row_id = row.id
+
+    scheduler._close_orphaned_running_row("TEST_tiktok.finance", -9, factory)
+
+    with factory() as session:
+        closed = session.get(SyncJob, row_id)
+        assert closed is not None
+        assert closed.status == "failed"
+        assert closed.finished_at is not None
+        assert "-9" in (closed.error_message or "")
+
+
+def test_close_orphaned_running_row_leaves_finished_rows_alone(db_engine) -> None:
+    """数量断言：已结束的行走不到，只有一行 running 会被改。"""
+    from sqlalchemy.orm import sessionmaker
+
+    from tts_erp_v2.db.models.integration import SyncJob
+
+    factory = sessionmaker(bind=db_engine, join_transaction_mode="create_savepoint")
+    with factory() as session, session.begin():
+        succeeded = SyncJob(job_name="TEST_tiktok.finance", status="succeeded")
+        running = SyncJob(job_name="TEST_tiktok.finance", status="running")
+        session.add_all([succeeded, running])
+        session.flush()
+        succeeded_id = succeeded.id
+        running_id = running.id
+
+    scheduler._close_orphaned_running_row("TEST_tiktok.finance", -9, factory)
+
+    with factory() as session:
+        assert session.get(SyncJob, succeeded_id).status == "succeeded"
+        assert session.get(SyncJob, running_id).status == "failed"
