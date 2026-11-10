@@ -129,8 +129,16 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_pric
   `data.goodsPurchaseOrderList[].goodsPurchaseOrderSkuList[].purchasePrice` 才是该接口定义的 SKU
   采购单价。同一账号实测无筛选、1688 来源、已完成状态、已知采购单号均返回 `total=0`。
   文档也没有给出采购明细到 TikTok 店铺和 SPU 的明确关联键。
-- 替换采购价任务的数据源前，需要用实际采购单同时验证成交单价、币种和店铺/SPU 关联。
-  现有包裹同步继续按平台售价保存 `original_price`。
+- 代发采购记录另有两个签名接口。列表（Apifox `api-523326861`）为
+  `POST /open/v1/order/purchase_order/purchase_record/search_list`，详情（`api-523329034`）为
+  `POST /open/v1/order/purchase_order/purchase_record/get_detail`。两者都定义了顶层采购商品的
+  `purchaseItems[].sourceUnitPrice` / `sourceQuantity`，以及关联包裹的
+  `platformOrderSn` / `shopName` / `purchaseItems[].platformItemId`。
+- 现有应用的签名实测中，无筛选列表、按已知采购单号查询列表和该单详情都返回
+  `appNoPermission`。开通「包裹 → 采购记录」的列表和详情权限后，用同一真实采购单核对采购单价、
+  币种、成交状态，以及货源商品到 TikTok 店铺和 SPU 的对应关系。若响应缺少店铺 ID，可核对
+  `platformOrderSn` 和 `platformItemId` 能否在已同步包裹中唯一定位店铺。文档未定义货源行到
+  平台商品行的配对键，实际响应和多商品采购单的对账是切换前的必要证据。
 
 ## 8. 测试
 
