@@ -86,6 +86,15 @@ PAGE_BROWSER = {
         "tests/browser/test_spu_price_columns.py",
         "tests/browser/test_spu_projection.py",
     ),
+    # The deterioration page owns one end-to-end smoke that the mocked-browser
+    # file cannot replace: it boots a real API child against the isolated DB
+    # and asserts the shipped React bundle end to end. It used to sit outside
+    # every page registration, so a React change to this page selected only
+    # the mocked renderer file and the smoke stayed invisible to the gate.
+    "spu-profit-deterioration": (
+        *MOCK_BROWSER["spu-profit-deterioration"],
+        "tests/e2e/test_spu_deterioration_alert_smoke.py",
+    ),
 }
 SHARED_SHELL_BROWSER = "tests/browser/test_frontend_pilots.py"
 

@@ -82,6 +82,42 @@ def _comparison_response(response: Any, window: int | None = None) -> bool:
     )
 
 
+# --- React DOM contract (frontend/src/pages/spu-profit-deterioration/) -------
+# P6 retired the Jinja template that owned this page and React took over, so
+# the legacy ids (``#alert-rows`` / ``#total-spus`` / ``[data-value=...]``)
+# no longer exist. The business facts under test are unchanged — only the
+# selectors now name the DOM the React page actually ships.
+TABLE = 'table[aria-label="SPU 两期盈利对比"]'
+ROWS = f"{TABLE} tbody tr"
+SCOPE = 'section[aria-label="已应用对比范围"]'
+STATS = 'section[aria-label="完整分析范围统计"]'
+
+
+def _stat(page: Any, label: str) -> Any:
+    """One value of the React ``完整分析范围统计`` definition list."""
+    return page.locator(f'{STATS} dl > div').filter(has_text=label).locator("dd")
+
+
+def _metric(row: Any, label: str, period: str) -> Any:
+    """One React metric block's value span.
+
+    React renders ``<div><strong>label</strong><div>上期 <span>…</span></div>
+    <div>本期 <span>…</span></div></div>`` — the retired template's
+    ``[data-value="currentOrderCount"]`` key maps to the label plus the
+    period column that carries the value.
+    """
+    return (
+        row.locator("strong", has_text=label).first.locator("xpath=..")
+        .locator(f"xpath=./div[starts-with(., '{period}')]/span").first
+    )
+
+
+def _choose(page: Any, label: str, option: str) -> None:
+    """Pick one option of a HeroUI select (the draft only changes on apply)."""
+    page.get_by_role("button", name=re.compile(re.escape(label))).click()
+    page.get_by_role("option", name=option, exact=True).click()
+
+
 @pytest.mark.parametrize("auth,width", [("session", 1440), ("api_key", 390)])
 def test_real_comparison_journey(comparison_live, chromium, tmp_path, auth, width):
     """AC-001/009/013/014/022: real values and stale readability."""
@@ -116,46 +152,54 @@ def test_real_comparison_journey(comparison_live, chromium, tmp_path, auth, widt
             "unavailableReason": None,
         }
         anchor = scope["anchor"].isoformat()
-        expect(page.locator("#filter-anchor-date")).to_have_value(anchor)
-        expect(page.locator("#filter-anchor-date")).to_have_attribute("max", anchor)
-        expect(page.locator("#total-spus")).to_have_text("4")
-        expect(page.locator("#total-current-orders")).to_have_text("1")
-        expect(page.locator("#total-previous-orders")).to_have_text("1")
-        expect(page.locator("#alert-freshness")).to_contain_text("数据未更新")
-        container = page.locator("#alert-rows" if width > 1000 else "#alert-cards")
+        anchor_input = page.get_by_label("截至日（店铺当地日）", exact=True)
+        expect(anchor_input).to_have_value(anchor)
+        expect(anchor_input).to_have_attribute("max", anchor)
+        expect(_stat(page, "分析 SPU 数")).to_have_text("4")
+        expect(_stat(page, "本期订单数")).to_have_text("1")
+        expect(_stat(page, "上期订单数")).to_have_text("1")
+        expect(page.locator(f'{SCOPE} p[role="status"]')).to_contain_text("数据未更新")
+        container = page.locator(TABLE)
         expect(container).to_contain_text("TEST_COMPARE_3")
         expect(container).to_contain_text("无单但有广告费")
         # Independent oracle, scoped to the actual ad-only record (not another
         # row that happens to contain the same amount).
-        ad_only = container.locator("tr" if width > 1000 else "article").filter(
-            has_text="TEST_COMPARE_3"
-        )
-        expect(ad_only.locator('[data-value="currentOrderCount"]')).to_have_text("0")
-        expect(ad_only.locator('[data-value="currentSpendCny"]')).to_have_text(
+        ad_only = page.locator(ROWS).filter(has_text="TEST_COMPARE_3")
+        expect(_metric(ad_only, "订单数", "本期")).to_have_text("0")
+        expect(_metric(ad_only, "广告消耗（CNY）", "本期")).to_have_text(
             re.compile(r"49(?:\.0+)?$")
         )
-        expect(ad_only.locator('[data-value="currentNetProfitCny"]')).to_have_text(
+        expect(_metric(ad_only, "净利润（CNY）", "本期")).to_have_text(
             re.compile(r"[-−]49(?:\.0+)?$")
         )
         # Canonical ROI excludes ad spend from its numerator; the net profit
         # above is negative while zero revenue/return loss yields an ROI of 0.
-        expect(ad_only.locator('[data-value="currentRoi"]')).to_have_text(
+        expect(_metric(ad_only, "ROI（比率）", "本期")).to_have_text(
             re.compile(r"0(?:\.0+)?$")
         )
-        assert page.locator("#btn-settings, #filter-severity, #filter-state").count() == 0
+        # The retired threshold-alert filters stay gone in the React page.
+        assert (
+            page.locator(
+                "#btn-settings, #settings-drawer, #filter-severity, #filter-state, #filter-sample"
+            ).count()
+            == 0
+        )
         with page.expect_response(lambda response: _comparison_response(response, 3)) as short:
-            page.locator('[data-window-days="3"]').click()
+            # The window lives in a select whose draft only reaches the server
+            # when the filters are applied.
+            _choose(page, "比较窗口", "3 天近期变化")
+            page.get_by_role("button", name="应用筛选").click()
         assert short.value.status == 200
         assert short.value.json()["meta"]["latestAvailableDate"] == anchor
-        expect(page.locator("#total-spus")).to_have_text("4")
-        expect(page.locator("#total-previous-orders")).to_have_text("0")
-        expect(ad_only.locator('[data-value="currentNetProfitCny"]')).to_have_text(
+        expect(_stat(page, "分析 SPU 数")).to_have_text("4")
+        expect(_stat(page, "上期订单数")).to_have_text("0")
+        expect(_metric(ad_only, "净利润（CNY）", "本期")).to_have_text(
             re.compile(r"[-−]21(?:\.0+)?$")
         )
-        expect(page.locator("#filter-anchor-date")).to_have_value(anchor)
+        expect(page.get_by_label("截至日（店铺当地日）", exact=True)).to_have_value(anchor)
         # Re-reading never invents a later source-data day.
         with page.expect_response(_comparison_response) as refreshed:
-            page.locator("#btn-refresh").click()
+            page.get_by_role("button", name="刷新 / 重试").click()
         assert refreshed.value.status == 200
         assert refreshed.value.json()["meta"]["dataAsOf"] == anchor
         page.screenshot(path=str(tmp_path / f"comparison-{auth}-{width}.png"), full_page=True)
@@ -228,12 +272,15 @@ def test_real_keyboard_drilldown_preserves_business_spu_and_dates(
         source = child.base + PAGE + "?" + urlencode({"shop_pk": scope["shop"]})
         with page.expect_response(_comparison_response):
             page.goto(source)
-        row = page.locator("#alert-rows tr").filter(has_text="TEST_COMPARE_3")
-        button = row.get_by_role("button").first
+        row = page.locator(ROWS).filter(has_text="TEST_COMPARE_3")
+        button = row.get_by_role("button", name="查看对比明细").first
         button.focus()
         button.press("Enter")
-        expect(page.locator("#alert-summary")).to_be_visible()
-        link = page.locator('#alert-summary a[href*="/v2/pages/spu-roi"]').first
+        # The retired ``#alert-summary`` panel is the per-SPU detail region now.
+        detail = page.locator('section[role="region"][aria-labelledby^="detail-title-"]')
+        expect(detail).to_be_visible()
+        expect(detail.get_by_role("heading")).to_contain_text("TEST_COMPARE_3")
+        link = detail.locator('a[href*="/v2/pages/spu-roi"]').first
         expect(link).to_be_visible()
         link.focus()
         with page.expect_response(
@@ -252,7 +299,14 @@ def test_real_keyboard_drilldown_preserves_business_spu_and_dates(
         expect(page.locator("#filter-w-end")).to_have_value(details_query["w_end"][0])
         # Back/forward cache may restore the validated DOM without another GET.
         page.go_back(wait_until="domcontentloaded")
-        expect(page.locator("#filter-shop")).to_have_value(str(scope["shop"]))
-        expect(page.locator("#filter-anchor-date")).to_have_value(scope["anchor"].isoformat())
+        # The retired ``#filter-shop`` input became a select without a value
+        # attribute; the applied scope line states the shop instead.
+        scope_line = page.locator(
+            f'{SCOPE} p', has_text=re.compile(rf"店铺\s*{scope['shop']}\b")
+        ).first
+        expect(scope_line).to_be_visible()
+        expect(page.get_by_label("截至日（店铺当地日）", exact=True)).to_have_value(
+            scope["anchor"].isoformat()
+        )
     finally:
         context.close()

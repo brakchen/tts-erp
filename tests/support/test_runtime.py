@@ -47,7 +47,11 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     needs_build = os.environ.get("TTS_ERP_TEST_SELECTED_NO_BUILD") == "0" or any(
         item.get_closest_marker("requires_frontend_build")
         or "frontend_build" in item.fixturenames
-        or item.nodeid.startswith("tests/browser/")
+        # tests/e2e/ drives the real React bundle through a live API child, so
+        # it needs the frontend build exactly like tests/browser/ does. Without
+        # it the page never boots, no API request is ever sent and the test
+        # can only time out waiting for a response.
+        or item.nodeid.startswith(("tests/browser/", "tests/e2e/"))
         for item in session.items
     )
     prepared = os.environ.get("TTS_ERP_TEST_PREPARED_RELEASE")

@@ -187,6 +187,21 @@ def test_changed_backend_test_is_narrow_but_deleted_and_shared_tests_stay_broad(
     assert select(["tts_erp_v2/db/session.py"]).backend_all
 
 
+def test_spu_deterioration_page_selects_both_its_mock_and_e2e_files():
+    """SPU 对比页的 React 改动必须同时选中 mock browser 与 e2e 冒烟。
+
+    e2e 冒烟起真实 API 子进程、对着隔离库跑真实 React 产物，是 mock browser
+    文件替代不了的覆盖。它原先不在任何页面登记里，于是改这个页面时
+    ``--scope auto`` 选不到它，门禁是瞎的。
+    """
+    plan = select(["frontend/src/pages/spu-profit-deterioration/index.tsx"])
+    assert plan.browser_mock == [
+        "tests/browser/test_spu_deterioration_alert_page.py",
+        "tests/e2e/test_spu_deterioration_alert_smoke.py",
+    ]
+    assert plan.build
+
+
 def test_every_selected_test_path_still_exists_on_disk():
     """选择器引用的测试文件必须真实存在。
 
