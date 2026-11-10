@@ -119,6 +119,19 @@ python3 scripts/configure_miaoshou_web_session.py \
 ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh --confirm
 ```
 
+### 7.1 开放 API 采购价核验
+
+- [批量获取包裹列表](https://qrzmpphmpd.apifox.cn/492780556e0.md) 的
+  `data.orderPackageList[].items[].originalPrice` 是平台商品原始售价，币种随包裹的
+  `orderInfo.currency`。2026-11-11 用现有签名凭据实测，TikTok 样本的订单币种为 VND，
+  单件商品的 `originalPrice` 与订单的 `productAmount` 相等。这个字段不能写入 CNY 采购成本。
+- [获取采购单列表](https://qrzmpphmpd.apifox.cn/492780567e0.md) 的
+  `data.goodsPurchaseOrderList[].goodsPurchaseOrderSkuList[].purchasePrice` 才是该接口定义的 SKU
+  采购单价。同一账号实测无筛选、1688 来源、已完成状态、已知采购单号均返回 `total=0`。
+  文档也没有给出采购明细到 TikTok 店铺和 SPU 的明确关联键。
+- 替换采购价任务的数据源前，需要用实际采购单同时验证成交单价、币种和店铺/SPU 关联。
+  现有包裹同步继续按平台售价保存 `original_price`。
+
 ## 8. 测试
 
 ```bash
