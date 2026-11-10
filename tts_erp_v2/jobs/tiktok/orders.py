@@ -379,12 +379,20 @@ def _walk_pages(
     proxy_call: ProxyCall,
     *,
     base_body: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Return every order across every page (driven by next_page_token).
+):
+    """Yield every order across every page (driven by next_page_token).
 
-    Raises :class:`UpstreamJobError` if any page returns ``code != 0``.
+    A generator, not a list builder: the caller consumes one page at a time,
+    so the walk's memory cost is one page instead of the whole result set
+    (the previous ``collected.extend(...)`` kept every order of every page
+    alive until the walk ended).
+
+    Raises :class:`UpstreamJobError` if any page returns ``code != 0``, and
+    when the upstream keeps handing back a ``next_page_token`` we already
+    walked: a pagination loop is an upstream defect and must fail loudly
+    (one failed tick) instead of running forever.
     """
-    collected: list[dict[str, Any]] = []
+    seen_tokens: set[str] = set()
     next_token: str | None = None
     body = dict(base_body)
     while True:
@@ -399,11 +407,16 @@ def _walk_pages(
             )
         data = resp.get("data") or {}
         orders = data.get("orders") or []
-        collected.extend(orders)
+        yield from orders
         next_token = data.get("next_page_token") or None
         if not next_token:
             break
-    return collected
+        if next_token in seen_tokens:
+            raise UpstreamJobError(
+                "upstream pagination did not advance: next_page_token repeated "
+                "(upstream loop); aborting the walk instead of running forever"
+            )
+        seen_tokens.add(next_token)
 
 
 # ─── Main job entry ───────────────────────────────────────────────
