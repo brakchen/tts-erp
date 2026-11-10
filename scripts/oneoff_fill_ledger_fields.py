@@ -347,6 +347,12 @@ def main(argv: list[str] | None = None) -> int:
             req.append(f)
     data["required_finding_fields"] = req
 
+    # base 块必须与规则侧一致：规则 owner_ref 已重指到当前生产树，
+    # base.production_ref 还留在旧树 ⇒ 台账自相矛盾，读者会按 base 去核对。
+    base = data.setdefault("base", {})
+    base["production_ref"] = PROD
+    base.setdefault("production_tree", "/home/schan/tts-erp-releases/erp-runtime-secret-84ec0a49")
+
     if problems:
         for p in problems:
             sys.stderr.write(f"  ⚠ {p}\n")

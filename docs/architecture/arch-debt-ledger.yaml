@@ -1,7 +1,7 @@
 version: 1
 generated_at: '2026-11-09T01:26:00+08:00'
 base:
-  production_ref: 50978019f39c4e6ea3671872b540c8ea79644b00
+  production_ref: 1e6c77ee15285d8298cfe890ff774b765f606c88
   production_tree: /home/schan/tts-erp-releases/erp-runtime-secret-84ec0a49
   target_ref: 5597dcca2139ae210873616b65081246d9b032e3
   target_tree: /home/schan/tts-erp
