@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>授权结果 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <main class="aux-main stack-lg">
+    <p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+    <section class="alert alert-ok">
+      <h2>授权成功</h2>
+      <p>店铺「示例店铺 A」已完成卖家授权。同步任务将在下次运行时接管（示例）。</p>
+    </section>
+    <section class="erp-card stack">
+      <h2 class="erp-section-heading">授权链接</h2>
+      <p>链接有效至 2026-11-12 23:50:00（Asia/Shanghai），仅可使用一次。</p>
+      <p class="mono" style="overflow-wrap:anywhere;">https://seller.example/oauth/authorize?state=demo-once-token（示例，不可实开）</p>
+      <p><a class="btn" href="oauth-onboard.html">打开授权页面</a></p>
+    </section>
+    <section class="erp-card">
+      <h2 class="erp-section-heading">授权结果</h2>
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="授权结果">
+          <thead><tr><th>项目</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td>店铺</td><td>示例店铺 A</td></tr>
+            <tr><td>店铺 ID</td><td class="id">7490000001</td></tr>
+            <tr><td>Service ID</td><td class="id">svc-10001</td></tr>
+            <tr><td>结果</td><td>成功（示例）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <p class="gap-2">
+      <a class="btn" href="shops.html">前往店铺注册台</a>
+      <a class="btn" href="login.html">返回登录页</a>
+      <a class="btn" href="oauth-onboard.html">重新开始授权</a>
+    </p>
+  </main>
+
+  <script src="proto.js"></script>
+</body>
+</html>

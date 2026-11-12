@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>利润劣化告警 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="spu-profit-deterioration" data-title="利润劣化告警" data-desc="对比 7 天与 3 天窗口的两期盈利表现。本页不做阈值告警或投放建议。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">PERIOD COMPARISON</p>
+    <h2>及时发现利润的变化</h2>
+    <p class="erp-description">选择店铺和分析日期，对比商品表现，查看服务端分析结果。</p>
+  </div>
+</section>
+<form class="erp-filters" aria-label="对比范围" novalidate>
+  <label>店铺
+    <select aria-label="店铺">
+      <option value="">选择店铺</option>
+      <option selected>示例店铺 A</option>
+      <option>示例店铺 B</option>
+    </select>
+  </label>
+  <label>精确 SPU 内部编号
+    <input type="text" placeholder="留空使用活动范围；如 1001,1002" aria-label="精确 SPU 内部编号" id="det-spus">
+  </label>
+  <label>比较窗口
+    <select aria-label="比较窗口">
+      <option selected>7 天主参考</option>
+      <option>3 天近期变化</option>
+    </select>
+  </label>
+  <label>截至日（店铺当地日）
+    <input type="date" value="2026-11-11" max="2026-11-11" aria-label="截至日（店铺当地日）" id="det-anchor">
+  </label>
+  <label>活动范围
+    <select aria-label="活动范围">
+      <option selected>固定近 7 天活动范围（保留无单投放）</option>
+      <option>全部本店 SPU 调查</option>
+    </select>
+  </label>
+  <label>每页条数
+    <select aria-label="每页条数"><option>50</option><option selected>100</option><option>200</option></select>
+  </label>
+  <div class="gap-2">
+    <button class="btn btn-primary" type="button" data-open="dlg-det-validate">应用筛选</button>
+    <button class="btn" type="button">重置筛选</button>
+    <button class="btn" type="button">刷新 / 重试</button>
+  </div>
+</form>
+<p class="meta">最新可用日期：2026-11-11（店铺当地完整日）；可查历史日期，刷新只重新读取，不触发同步。</p>
+<p class="meta">已应用对比范围：示例店铺 A · 7 天主参考 · 截至 2026-11-11。</p>
+<p>3 天用于观察近期变化，易受少量订单和投放节奏影响，有短期波动；不单独代表持续改善或恶化。</p>
+<p>7 天为主参考，覆盖完整星期，但累计订单不等于两期样本充分；3 天与 7 天方向可不同。</p>
+<p role="status">实际数据日期：2026-11-11；计算时间：2026-11-12 22:05:11（不代表数据更新）。</p>
+<div class="demo-states" data-demo-group="det"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button><button class="btn btn-sm" type="button" data-demo="noshop" aria-pressed="false">请选择店铺</button></div>
+<div data-demo-panel="det" data-demo="ok" class="">
+<section class="erp-card">
+  <h2 class="erp-section-heading">完整分析范围统计</h2>
+  <p class="meta">完整范围：SPU 去重，每期订单跨 SPU 全局去重；不是当前页或行级订单相加。</p>
+  <div class="erp-metrics">
+    <article class="erp-metric"><h3>分析 SPU 数</h3><p class="value">2</p></article>
+    <article class="erp-metric"><h3>本期订单数</h3><p class="value">86</p></article>
+    <article class="erp-metric"><h3>上期订单数</h3><p class="value">94</p></article>
+  </div>
+</section>
+<section class="stack">
+  <h2 class="erp-section-heading">SPU 两期盈利对比</h2>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="SPU 两期盈利对比">
+      <thead>
+        <tr>
+          <th>SPU / 查证</th>
+          <th>ROI（比率）本期</th><th>上期</th><th>变化</th>
+          <th>净利润（CNY）本期</th><th>上期</th><th>变化</th>
+          <th>订单数本期</th><th>上期</th><th>变化</th>
+          <th>广告消耗（CNY）本期</th><th>上期</th><th>变化</th>
+          <th>事实与限制</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><button class="btn btn-sm" type="button" data-open="dlg-spu-compare-1001" aria-label="查看对比明细 SPU-1001">SPU-1001 无线吸尘器 Pro</button></td>
+          <td class="num">0.61</td><td class="num">0.80</td>
+          <td><span class="badge badge-danger">↓ 下降</span><p class="meta">差额 −0.19 · 变化率 −23.75%</p></td>
+          <td class="num">745.00</td><td class="num">920.00</td>
+          <td><span class="badge badge-danger">↓ 下降</span><p class="meta">差额 −175.00 CNY · 变化率 −19.02%</p></td>
+          <td class="num">42</td><td class="num">40</td>
+          <td><span class="badge badge-ok">↑ 上升</span><p class="meta">差额 +2 · 变化率 +5.00%</p></td>
+          <td class="num">1,280.00</td><td class="num">1,100.00</td>
+          <td><span class="badge badge-ok">↑ 上升</span><p class="meta">差额 +180.00 CNY · 变化率 +16.36%</p></td>
+          <td class="meta">仅上期大于 0 时计算展示变化率。</td>
+        </tr>
+        <tr>
+          <td><button class="btn btn-sm" type="button" data-open="dlg-spu-compare-1002" aria-label="查看对比明细 SPU-1002">SPU-1002 桌面收纳架</button></td>
+          <td class="num">0.42</td><td class="num">0.42</td>
+          <td><span class="badge">→ 持平</span><p class="meta">差额 0.00 · 变化率 0.00%</p></td>
+          <td class="num">-86.00</td><td class="num">—</td>
+          <td><span class="badge">不可比较</span><p class="meta">上期净利润事实缺失</p></td>
+          <td class="num">0</td><td class="num">8</td>
+          <td><span class="badge badge-danger">↓ 下降</span><p class="meta">差额 −8 · 变化率 −100.00%</p></td>
+          <td class="num">100.00</td><td class="num">—</td>
+          <td><span class="badge">不可比较</span><p class="meta">缺少可比较原值；请查看两期事实。</p></td>
+          <td class="meta">上期净利润、广告消耗事实缺失，不计算变化率。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="erp-pagination" aria-label="对比分页">
+    <p>每页 50 条 · 第 1 页（示例）</p>
+    <div class="erp-pages"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  </div>
+</section>
+
+<section class="erp-panel">
+  <button class="btn" type="button" data-toggle="coverage-details">数据覆盖依据与限制</button>
+  <div id="coverage-details" class="hidden stack" style="margin-top:12px;">
+    <p>覆盖状态：partial；这是观测依据，不是上游完整采集认证。</p>
+    <p>依据方法：job-watermark（示例）</p>
+    <h3 class="erp-section-heading">必要来源</h3>
+    <div class="grid-3">
+      <section class="erp-card" aria-label="来源 tiktok.orders">
+        <h4>tiktok.orders</h4>
+        <dl class="dl-facts">
+          <dt>状态 / 作业编号</dt><dd>succeeded / run-5811</dd>
+          <dt>采集启动时间</dt><dd>2026-11-12 21:40:00</dd>
+          <dt>采集完成时间</dt><dd>2026-11-12 21:46:00</dd>
+          <dt>推断经营截止日（不是已记录的 query-through）</dt><dd>2026-11-11</dd>
+          <dt>已报告失败行数</dt><dd>0</dd>
+        </dl>
+      </section>
+      <section class="erp-card" aria-label="来源 tiktok.ads">
+        <h4>tiktok.ads</h4>
+        <dl class="dl-facts">
+          <dt>状态 / 作业编号</dt><dd>succeeded / run-5818</dd>
+          <dt>采集启动时间</dt><dd>2026-11-12 20:10:00</dd>
+          <dt>采集完成时间</dt><dd>2026-11-12 20:18:00</dd>
+          <dt>推断经营截止日（不是已记录的 query-through）</dt><dd>2026-11-11</dd>
+          <dt>已报告失败行数</dt><dd>2</dd>
+        </dl>
+      </section>
+    </div>
+    <h3 class="erp-section-heading">广告观测范围</h3>
+    <p>接口：/v2/ads/reports/daily（示例）</p>
+    <p>2026-11-05 至 2026-11-11</p>
+    <p>已知缺失日期：2026-11-08（无已知缺失时将显示「无已知缺失（不代表完整采集）」）</p>
+    <ul>
+      <li><strong>ADV-1001 / 1789001001</strong><p>观察日期：2026-11-05、2026-11-06、2026-11-07、2026-11-09、2026-11-10、2026-11-11</p></li>
+    </ul>
+    <h3 class="erp-section-heading">限制说明</h3>
+    <ul>
+      <li>3 天用于观察近期变化，易受少量订单和投放节奏影响，有短期波动；不单独代表持续改善或恶化。</li>
+      <li>7 天为主参考，覆盖完整星期，但累计订单不等于两期样本充分；3 天与 7 天方向可不同。</li>
+      <li>本页不做阈值告警或投放建议。</li>
+    </ul>
+  </div>
+</section>
+</div>
+<div data-demo-panel="det" data-demo="loading" class="hidden"><p role="status">对比结果加载中…</p></div>
+<div data-demo-panel="det" data-demo="error" class="hidden"><div class="alert alert-danger" role="alert"><p>读取失败，请重试</p><p><button class="btn" type="button">刷新 / 重试</button></p></div></div>
+<div data-demo-panel="det" data-demo="noshop" class="hidden"><p role="status">请选择店铺。</p></div>
+<div class="dialog-backdrop" id="dlg-spu-compare-1001" aria-hidden="true" role="dialog" aria-labelledby="dlg-spu-compare-1001-title">
+  <div class="dialog">
+    <h2 id="dlg-spu-compare-1001-title">单 SPU 对比明细 · SPU-1001</h2>
+    
+<h3>两期事实</h3>
+<div class="compare-grid">
+  <section class="erp-card"><h4>本期（7 天窗口）</h4>
+    <dl class="dl-facts"><dt>ROI</dt><dd>0.61</dd><dt>净利润</dt><dd>745.00 CNY</dd><dt>订单数</dt><dd>42</dd><dt>广告消耗</dt><dd>1,280.00 CNY</dd></dl>
+  </section>
+  <section class="erp-card"><h4>上期</h4>
+    <dl class="dl-facts"><dt>ROI</dt><dd>0.80</dd><dt>净利润</dt><dd>920.00 CNY</dd><dt>订单数</dt><dd>40</dd><dt>广告消耗</dt><dd>1,100.00 CNY</dd></dl>
+  </section>
+</div>
+<p>ROI：↓ 下降，差额 −0.19，变化率 −23.75%。净利润：↓ 下降，差额 −175.00 CNY，变化率 −19.02%。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-spu-compare-1001">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-spu-compare-1002" aria-hidden="true" role="dialog" aria-labelledby="dlg-spu-compare-1002-title">
+  <div class="dialog">
+    <h2 id="dlg-spu-compare-1002-title">单 SPU 对比明细 · SPU-1002</h2>
+    
+  <p>本期净利润 −86.00 CNY；上期净利润事实缺失，变化不可比较。</p>
+  <p>本期广告消耗 100.00 CNY；上期广告消耗事实缺失，缺少可比较原值。</p>
+  <p>ROI 本期 0.42、上期 0.42，→ 持平（差额 0.00，变化率 0.00%）。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-spu-compare-1002">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-det-validate" aria-hidden="true" role="dialog" aria-labelledby="dlg-det-validate-title">
+  <div class="dialog">
+    <h2 id="dlg-det-validate-title">校验提示（示例）</h2>
+    
+  <ul class="steps">
+    <li>日期超过最新可用日期 2026-11-11，请修正后重试。（选择越界日期时出现）</li>
+    <li>SPU 输入无效：最多 100 个正整数内部编号，逗号分隔；未查询整店。（输入超过 100 个或非正整数时出现）</li>
+    <li>不支持的查询参数或重复条件，请重置筛选后重试。</li>
+  </ul>
+  <p class="meta">本对话框用示例集中展示校验文案，不会自动改写当前筛选。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-det-validate">关闭</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

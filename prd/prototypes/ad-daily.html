@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>广告日明细 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="ad-daily" data-title="广告日明细" data-desc="按账户、日期与商品筛选广告日数据，结合服务端汇总评估广告表现。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">AD PERFORMANCE</p>
+    <h2>看清每一份广告投入</h2>
+    <p class="erp-description">按账户、日期与商品筛选，结合服务端汇总评估广告表现。</p>
+  </div>
+</section>
+<p>检查插件采集的原始广告事实。金额保持 TikTok 广告源币种 USD，不套用盈利看板汇率。</p>
+<form class="erp-filters" aria-label="广告筛选">
+  <label>数据日期范围
+    <span class="gap-2"><input type="date" value="2026-11-10"><span>至</span><input type="date" value="2026-11-11"></span>
+  </label>
+  <label>店铺 Seller ID
+    <select aria-label="店铺 Seller ID"><option>全部店铺</option><option selected>7490000001 示例店铺 A</option></select>
+  </label>
+  <label>广告账户
+    <select><option>全部账户</option><option selected>ADV-1001</option></select>
+  </label>
+  <label>数据接口
+    <select><option>全部接口</option><option selected>auction</option></select>
+  </label>
+  <label>输入计划 ID 或商品 ID
+    <input type="search" placeholder="输入计划 ID 或商品 ID">
+  </label>
+  <label>每页行数
+    <select aria-label="每页行数"><option>20 条 / 页</option><option selected>50 条 / 页</option><option>100 条 / 页</option></select>
+  </label>
+  <button class="btn btn-primary" type="button">查询</button>
+</form>
+<section class="erp-card">
+  <h2 class="erp-section-heading">全部筛选结果汇总</h2>
+  <p class="meta">服务端汇总全部匹配行，不仅是当前页；源币种 USD。</p>
+  <div class="erp-metrics">
+    <article class="erp-metric"><h3>记录行数</h3><p class="value">2</p></article>
+    <article class="erp-metric"><h3>消耗 USD</h3><p class="value">250.60</p></article>
+    <article class="erp-metric"><h3>归因订单</h3><p class="value">15</p></article>
+    <article class="erp-metric"><h3>归因 GMV USD</h3><p class="value">1,190.00</p></article>
+    <article class="erp-metric"><h3>加权 ROI</h3><p class="value">4.75</p></article>
+  </div>
+</section>
+<div class="demo-states" data-demo-group="ad"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">暂无广告日数据</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+<div data-demo-panel="ad" data-demo="ok" class="">
+<div class="erp-table-wrap">
+  <table class="erp-table" aria-label="广告日明细">
+    <thead><tr><th></th><th>日期</th><th>店铺</th><th>计划</th><th>商品</th><th>消耗 USD</th><th>归因订单</th><th>归因 GMV USD</th><th>源 ROI</th><th>最近更新</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><button class="btn btn-sm" type="button" data-expand-row="ad-more-1" data-expand-more="更多" data-expand-less="收起" aria-expanded="false" aria-label="更多详情 1789001001">更多</button></td>
+        <td>2026-11-11</td><td>示例店铺 A</td><td class="id">1789001001</td><td>SPU-1001 无线吸尘器 Pro</td>
+        <td class="num">186.40</td><td class="num">12</td><td class="num">980.00</td><td class="num">5.26</td><td>2026-11-12 21:40</td>
+      </tr>
+      <tr id="ad-more-1" class="hidden"><td colspan="10">
+<div class="stack">
+  <dl class="dl-facts">
+    <dt>日期</dt><dd>2026-11-11</dd>
+    <dt>店铺</dt><dd>示例店铺 A · 7490000001</dd>
+    <dt>计划 ID</dt><dd class="id">1789001001 <button class="btn btn-sm" type="button" data-copy="1789001001" data-copy-status="copy-camp-1">复制计划 ID</button></dd>
+    <dt>商品</dt><dd>SPU-1001 无线吸尘器 Pro</dd>
+    <dt>广告账户</dt><dd>ADV-1001</dd>
+    <dt>数据接口</dt><dd>auction</dd>
+    <dt>消耗 USD</dt><dd>186.40</dd>
+    <dt>归因订单</dt><dd>12</dd>
+    <dt>归因 GMV USD</dt><dd>980.00</dd>
+    <dt>源 ROI</dt><dd>5.26</dd>
+    <dt>最近更新</dt><dd>2026-11-12 21:40:00</dd>
+  </dl>
+  <p class="meta" id="copy-camp-1"></p>
+</div>
+</td></tr>
+      <tr>
+        <td><button class="btn btn-sm" type="button" data-expand-row="ad-more-2" data-expand-more="更多" data-expand-less="收起" aria-expanded="false" aria-label="更多详情 1789001008">更多</button></td>
+        <td>2026-11-10</td><td>示例店铺 A</td><td class="id">1789001008</td><td>SPU-1002 桌面收纳架</td>
+        <td class="num">64.20</td><td class="num">3</td><td class="num">210.00</td><td class="num">3.27</td><td>2026-11-12 21:40</td>
+      </tr>
+      <tr id="ad-more-2" class="hidden"><td colspan="10"><p class="meta">记录详情结构与上一行相同，字段为该行计划 / 商品 / 账户事实。</p></td></tr>
+    </tbody>
+  </table>
+</div>
+
+  <div class="erp-pagination" aria-label="广告明细分页">
+    <p>共 2 条（示例）</p>
+    <p>50 条 / 页</p>
+    <div class="erp-pages"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  </div></div>
+<div data-demo-panel="ad" data-demo="empty" class="hidden"><p class="erp-empty">暂无广告日数据</p></div>
+<div data-demo-panel="ad" data-demo="loading" class="hidden"><p role="status">广告日明细加载中…</p></div>
+<div data-demo-panel="ad" data-demo="error" class="hidden"><div class="alert alert-danger" role="alert"><p>读取失败（HTTP 500），请手动重试</p><p><button class="btn" type="button">重试</button></p></div></div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

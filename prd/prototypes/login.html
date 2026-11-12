@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="login-page">
+  <div class="login-layout">
+    <section class="login-brand" aria-label="TTS ERP 店铺运营工作台">
+      <div>
+        <div class="login-wordmark"><svg aria-hidden="true" width="34" height="34" viewBox="0 0 34 34" fill="none"><path d="M5 8h24M17 8v21M5 17h7M24 17h5" stroke="currentColor" stroke-width="3.5"/></svg>
+          <span>tts<span class="erp-brand-suffix"> / erp</span></span>
+        </div>
+        <div class="login-brand-story">
+          <p class="login-eyebrow">YOUR BUSINESS, IN FOCUS</p>
+          <h2 class="login-brand-title">把经营，<br>看得更清楚<span>。</span></h2>
+          <p class="login-brand-description">从每一笔订单，到每一次增长。<br>让数据成为日常经营的底气。</p>
+          <div class="login-illustration" aria-hidden="true">
+  <svg viewBox="0 0 480 170" fill="none">
+    <path d="M0 30h480M0 85h480M0 140h480M45 0v170M145 0v170M245 0v170M345 0v170M445 0v170" stroke="currentColor" stroke-opacity=".13"></path>
+    <path d="M5 146 64 126 121 134 179 91 237 107 294 62 353 76 411 33 470 15" stroke="var(--navigation-active)" stroke-width="2.5" stroke-linejoin="round"></path>
+    <path d="m5 159 59-10 57 4 58-30 58 6 57-22 59 5 58-33 59-8" stroke="currentColor" stroke-opacity=".36" stroke-width="1.5" stroke-dasharray="5 6"></path>
+    <circle cx="294" cy="62" r="6" fill="var(--navigation-active)" stroke="var(--navigation-background)" stroke-width="3"></circle>
+    <circle cx="470" cy="15" r="6" fill="var(--navigation-active)" stroke="var(--navigation-background)" stroke-width="3"></circle>
+  </svg>
+</div>
+        </div>
+      </div>
+      <div class="login-brand-bottom">
+        <ul class="login-features" aria-label="工作台功能"><li>订单数据</li><li>广告表现</li><li>商品利润</li></ul>
+        <p>TIKTOK SHOP · 运营分析工作台</p>
+      </div>
+    </section>
+    <section class="login-access" aria-labelledby="login-welcome">
+      <div class="login-access-caption"><span class="login-access-dot" aria-hidden="true"></span>你的店铺，你的工作台</div>
+      <div class="login-form-content">
+        <p class="login-eyebrow">WELCOME BACK</p>
+        <h2 id="login-welcome" class="login-welcome">欢迎回来</h2>
+        <p class="login-intro">登录工作账号，继续今天的经营。</p>
+        <div class="login-form-body">
+          <form id="login-form" class="login-form" aria-label="登录表单" method="get" action="dashboard.html">
+            <label>用户名
+              <input type="text" name="username" id="login-username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="请输入用户名" maxlength="64" required>
+            </label>
+            <label>密码
+              <span class="password-field">
+                <input type="password" name="password" id="login-password" autocomplete="current-password" placeholder="请输入密码" maxlength="128" required>
+                <button class="btn btn-sm" type="button" data-password-toggle="login-password" aria-label="显示密码" aria-pressed="false">显示</button>
+              </span>
+            </label>
+            <button class="btn btn-primary" type="submit" style="height:44px;">登录 ↗</button>
+          </form>
+          <p class="meta">原型可直接提交进入控制台。若要查看「登录结果未确认」核对流程，请先点下面的演示按钮（不会自动提交）。</p>
+          <p><button class="btn btn-sm" type="button" id="demo-login-unverified">演示：登录结果未确认</button></p>
+          <section id="login-recovery" class="erp-card hidden stack" aria-label="登录结果核对" data-retry-allowed="false">
+            <p>原请求用户名：demo.admin（示例）</p>
+            <p>查询仅反映当前 Cookie 对应的会话，不能证明原密码正确、原请求成功或本次签发了会话。输入和原请求仅保留在本页内存；不会自动重试。</p>
+            <p><button class="btn" type="button" id="btn-query-session">查询当前会话</button></p>
+            <p class="hidden" data-recovery-phase="checking" role="status">查询中…</p>
+            <p class="hidden" data-recovery-phase="failed" role="status">查询未完成；请稍后手动查询，不能据此判定登录结果。</p>
+            <div class="hidden stack" data-recovery-phase="checked">
+              <p role="status">查询完成：当前存在已认证会话。</p>
+              <dl class="dl-facts"><dt>当前用户名</dt><dd>demo.admin</dd><dt>当前显示名称</dt><dd>示例管理员</dd></dl>
+              <p>当前用户名与原请求一致，但仍不能证明原登录成功。</p>
+              <p><button class="btn" type="button" id="btn-use-session">使用已查询的当前会话继续</button></p>
+              <p>重新登录将使用当前表单输入，可能再次创建会话；继续使用当前会话不代表验证了原密码。请明确选择。</p>
+              <p><button class="btn" type="button" id="btn-allow-relogin">我已了解，允许手动重新登录</button></p>
+            </div>
+            <div class="hidden" data-recovery-phase="checked-allowed">
+              <p role="status">已允许手动登录；仍需点击登录，不会自动提交。重新查询将撤销此选择。</p>
+            </div>
+            <p class="hidden" data-recovery-phase="unverified" role="status">登录结果未确认。请先查询当前会话，再决定是否手动重新登录。</p>
+          </section>
+        </div>
+        <p class="login-account-help">账号由管理员分配。<br>如需开通账号或重置密码，请联系管理员。登录页不提供自助注册或找回密码。</p>
+      </div>
+      <p class="login-access-footer">TTS ERP<span aria-hidden="true"> / </span>店铺运营工作台</p>
+    </section>
+  </div>
+
+  <script src="proto.js"></script>
+</body>
+</html>

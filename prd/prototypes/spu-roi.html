@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPU ROI · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="spu-roi" data-title="SPU ROI" data-desc="按店铺与经营日期查看全量或指定 SPU 的盈利大盘与明细。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">PROFITABILITY</p>
+    <h2>看清全店盈利结构</h2>
+    <p class="erp-description">按店铺与经营日期查看全量或指定 SPU 的盈利大盘与明细。</p>
+  </div>
+</section>
+<div class="demo-states" data-demo-group="overview"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">经营概览加载失败</button><button class="btn btn-sm" type="button" data-demo="noshop" aria-pressed="false">请选择店铺</button></div>
+<div data-demo-panel="overview" data-demo="ok" class="">
+<section id="summaries" class="erp-overview" aria-label="经营概览" aria-live="polite">
+  <header class="erp-toolbar" style="justify-content:flex-start;gap:12px;">
+    <h2 class="erp-section-heading">经营概览</h2>
+    <span class="erp-table-meta">示例店铺 A · 2026-11-10 ~ 2026-11-11 · CNY</span>
+  </header>
+  <div class="erp-overview-grid">
+    
+      <article class="erp-card" aria-label="销售">
+        <h3 class="erp-section-heading">销售</h3>
+        <div class="erp-overview-primary"><dl class="erp-profit-metrics">
+          <div><dt>GMV<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="GMV口径" data-hint="服务端当前经营范围的 GMV，未扣退款。" aria-label="查看GMV口径">?</button></dt><dd id="sum-gmv">128,640.00</dd></div>
+          <div><dt>有效 GMV<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="有效 GMV口径" data-hint="有效销售订单 GMV 减去退款金额，统一 CNY。" aria-label="查看有效 GMV口径">?</button></dt><dd id="sum-sales">112,380.00</dd></div>
+        </dl></div>
+        <dl class="erp-profit-metrics">
+          <div><dt>总单量<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="总单量口径" data-hint="所选店铺、SPU 范围与经营窗口内按订单去重的总单量。汇总不能由当前页 SPU 行相加。" aria-label="查看总单量口径">?</button></dt><dd id="sum-total-orders">486</dd></div>
+          <div><dt>有效单量<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="有效单量口径" data-hint="有效销售订单数减去其中退款订单数，由服务端去重。" aria-label="查看有效单量口径">?</button></dt><dd id="sum-orders">412</dd></div>
+          <div><dt>退款数<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="退款数口径" data-hint="已完结退款关联的有效订单数，按订单去重。" aria-label="查看退款数口径">?</button></dt><dd id="sum-refund-count">28</dd></div>
+          <div><dt>退款率<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="退款率口径" data-hint="退款订单数占当前范围全部订单的比例；无有效分母显示 —。" aria-label="查看退款率口径">?</button></dt><dd id="sum-refund-rate">5.76%</dd></div>
+          <div><dt>国内取消量<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="国内取消量口径" data-hint="国内取消订单数，排除已归入海外全损的取消订单。" aria-label="查看国内取消量口径">?</button></dt><dd id="sum-cancel-count">18</dd></div>
+          <div><dt>国内取消率<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="国内取消率口径" data-hint="国内取消订单数占全部订单的比例，海外取消不重复进入分子。" aria-label="查看国内取消率口径">?</button></dt><dd id="sum-cancel-rate">3.70%</dd></div>
+        </dl>
+        <section id="price-summary" class="erp-overview-prices" aria-label="销售价格">
+  <div class="gap-2" role="group" aria-label="销售价格口径说明"><button class="btn btn-sm" type="button" data-hint-title="销售价统计口径" data-hint="来源：TikTok line_items.original_price。按件数加权平均值 / 中位数，当前经营窗口，已付款且排除赠品。覆盖：完整 · 1,860 / 1,860 件。币种：CNY。">销售价口径</button><button class="btn btn-sm" type="button" data-hint-title="实付价统计口径" data-hint="来源：TikTok line_items.sale_price。按件数加权平均值 / 中位数，当前经营窗口，已付款且排除赠品。覆盖：完整 · 1,860 / 1,860 件。币种：CNY。">实付价口径</button></div>
+  <div class="erp-table-wrap" style="margin-top:8px;">
+    <table class="erp-table" aria-label="销售价格统计">
+      <thead><tr><th>价格</th><th class="num">均价</th><th class="num">中位数</th><th>覆盖</th></tr></thead>
+      <tbody><tr><td>销售价</td><td class="num">89.90</td><td class="num">79.90</td><td>完整</td></tr><tr><td>实付价</td><td class="num">76.40</td><td class="num">69.90</td><td>完整</td></tr></tbody>
+    </table>
+  </div>
+</section>
+      </article>
+    
+      <article class="erp-card" aria-label="成本">
+        <h3 class="erp-section-heading">成本</h3>
+        <div class="erp-overview-primary"><dl class="erp-profit-metrics">
+          <div><dt>采购成本<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="采购成本口径" data-hint="服务端提供的采购成本汇总；未提供时显示 —，不从分页商品行加总。" aria-label="查看采购成本口径">?</button></dt><dd id="sum-purchase-cost">41,200.00</dd></div>
+          <div><dt>广告成本<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="广告成本口径" data-hint="当前经营窗口的广告消耗，服务端按同一汇率快照换算为 CNY。" aria-label="查看广告成本口径">?</button></dt><dd id="sum-spend">18,640.00</dd></div>
+        </dl></div>
+        <dl class="erp-profit-metrics">
+          <div><dt>全损成本<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="全损成本口径" data-hint="服务端全损成本，为成本拆分信息，不重复加到采购成本。" aria-label="查看全损成本口径">?</button></dt><dd id="sum-full-loss-cost">3,180.00</dd></div>
+          <div><dt>全损量<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="全损量口径" data-hint="服务端当前指标中的全损订单数，保持现有兼容口径；不是独立预测样本的严格全损数。" aria-label="查看全损量口径">?</button></dt><dd id="sum-loss-qty">14</dd></div>
+          <div><dt>全损率<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="全损率口径" data-hint="服务端当前指标的全损率，分母为当前范围全部订单。" aria-label="查看全损率口径">?</button></dt><dd id="sum-loss-rate">2.88%</dd></div>
+        </dl>
+        <section id="fee-card" class="stack" aria-label="本次费率依据" style="margin-top:12px;">
+          <div class="gap-2"><span id="fee-card-rate">佣金率 6.00%</span><strong id="fee-card-source">实测</strong>
+            <button class="btn btn-sm" type="button" data-toggle="fee-card">关闭</button></div>
+          <div>
+            <button class="btn btn-sm" type="button" data-toggle="fee-basis">费率依据</button>
+            <div id="fee-basis" class="hidden meta" style="margin-top:8px;">
+              <p>示例店铺 A · 126 单 · 覆盖 82.00% · 2026-11-09（示例）</p>
+            </div>
+          </div>
+        </section>
+        <section id="price-summary-purchase" class="erp-overview-prices" aria-label="采购价格">
+  <div class="gap-2" role="group" aria-label="采购价格口径说明"><button class="btn btn-sm" type="button" data-hint-title="采购价统计口径" data-hint="来源：ROI 当前有效成本。按件数加权平均值 / 中位数，当前经营窗口，已付款且排除赠品。覆盖：部分覆盖 · 1,640 / 1,860 件。≈ 表示服务端估算成本，非人工登记成本。币种：CNY。">采购价口径</button></div>
+  <div class="erp-table-wrap" style="margin-top:8px;">
+    <table class="erp-table" aria-label="采购价格统计">
+      <thead><tr><th>价格</th><th class="num">均价</th><th class="num">中位数</th><th>覆盖</th></tr></thead>
+      <tbody><tr><td>采购价</td><td class="num">≈32.50</td><td class="num">≈31.00</td><td>部分覆盖</td></tr></tbody>
+    </table>
+  </div>
+</section>
+        <dl class="erp-profit-metrics" style="margin-top:12px;">
+          <div><dt>预计新增全损<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="预计新增全损口径" data-hint="服务端按成熟样本风险率预测未来新增全损件数，不重复计入已经确认的损失。" aria-label="查看预计新增全损口径">?</button></dt><dd id="sum-projected-future-loss-qty">3</dd></div>
+        </dl>
+        <div id="projection-basis-card" style="margin-top:12px;">
+          <button class="btn btn-sm" type="button" data-toggle="projection-basis">预测依据</button>
+          <div id="projection-basis" class="hidden" style="margin-top:8px;">
+            <p class="op-projection-window">样本：<span id="projection-sample-window">2026-08-12 ~ 2026-11-09</span></p>
+            <p class="erp-table-meta">预测可用性由服务端决定，不因切换样本天数自动视为可用。</p>
+            <dl class="erp-profit-metrics">
+              <div><dt>已完结样本单<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="已完结样本单口径" data-hint="独立成熟样本窗口内的已完结订单数，与当前经营日期窗口分开。" aria-label="查看已完结样本单口径">?</button></dt><dd id="sum-projection-completed-basis-orders">1,204</dd></div>
+              <div><dt>已完结全损单<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="已完结全损单口径" data-hint="独立成熟样本中已确认严格全损的订单数。" aria-label="查看已完结全损单口径">?</button></dt><dd id="sum-projection-completed-loss-orders">38</dd></div>
+              <div><dt>已完结订单全损率<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="已完结订单全损率口径" data-hint="成熟样本的严格全损订单数占已完结样本订单数的比例。" aria-label="查看已完结订单全损率口径">?</button></dt><dd id="sum-projection-full-loss-rate">3.16%</dd></div>
+            </dl>
+          </div>
+        </div>
+      </article>
+    
+      <article class="erp-card erp-overview-profit" aria-label="利润">
+        <header class="erp-toolbar" style="justify-content:space-between;width:100%;">
+          <h3 class="erp-section-heading">利润</h3>
+          <div class="gap-2">
+            <span id="sum-projection-status" class="erp-table-meta">可预测</span>
+            <button class="btn btn-sm" type="button" data-open="dlg-profit-help">口径帮助</button>
+          </div>
+        </header>
+        <div class="erp-overview-comparison">
+          <div>
+            <div class="gap-2"><h4>当前</h4><span class="text-accent">盈利</span></div>
+            <div class="erp-overview-primary"><dl class="erp-profit-metrics">
+              <div><dt>净利润</dt><dd id="sum-net-profit" class="text-accent">12,860.00</dd></div>
+            </dl></div>
+            <dl class="erp-profit-metrics"><div><dt>净收入</dt><dd id="sum-net-revenue">72,700.00</dd></div></dl>
+          </div>
+          <div>
+            <h4>预计最终</h4>
+            <div class="erp-overview-primary"><dl class="erp-profit-metrics">
+              <div><dt>预计净利润</dt><dd id="sum-projected-net-profit">11,420.00</dd></div>
+            </dl></div>
+            <dl class="erp-profit-metrics"><div><dt>预计净收入</dt><dd id="sum-projected-net-revenue">70,150.00</dd></div></dl>
+          </div>
+        </div>
+        <div class="erp-table-wrap erp-overview-roi">
+          <table class="erp-table" aria-label="当前与预计 ROI">
+            <thead><tr><th>ROI</th><th>当前</th><th>预计最终</th></tr></thead>
+            <tbody>
+              <tr><td>实际ROI</td><td><span id="sum-roi">0.69</span></td><td><span id="sum-projected-roi">0.61</span></td></tr>
+              <tr><td>实际保本ROI</td><td><span id="sum-roi-breakeven">0.52</span></td><td><span id="sum-projected-breakeven-roi">0.50</span></td></tr>
+              <tr><td>广告系统实际ROI</td><td><span id="sum-roi-ad-actual">1.84</span></td><td><span id="sum-projected-ad-roi">1.76</span></td></tr>
+              <tr><td>广告系统保本ROI</td><td><span id="sum-roi-ad">≈1.20</span></td><td><span id="sum-projected-ad-breakeven-roi">1.15</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <dl class="erp-profit-metrics">
+          <div><dt>未结算</dt><dd id="sum-unresolved-orders">36</dd></div>
+          <div><dt>已送达未结算</dt><dd id="sum-delivered-unsettled-orders">12</dd></div>
+          <div><dt>待完结风险</dt><dd id="sum-full-loss-exposure-unsettled-orders">24</dd></div>
+        </dl>
+      </article>
+  </div>
+</section>
+<div class="dialog-backdrop" id="dlg-profit-help" aria-hidden="true" role="dialog" aria-labelledby="dlg-profit-help-title">
+  <div class="dialog">
+    <h2 id="dlg-profit-help-title">利润口径帮助</h2>
+    
+        <ul class="steps">
+          <li>当前净利润：当前净收入减去货本与广告消耗；已结算使用实际到账，未结算估算由服务端标记。</li>
+          <li>当前净收入：服务端当前净收入汇总；未提供时显示 —，不由其他指标反推。</li>
+          <li>预计净利润：当前经营范围的预计最终净利润；货本与广告不重复扣除。</li>
+          <li>预计净收入：服务端提供的预计最终净收入，已结算实际、已送达未结算估算与待完结风险池分开处理。</li>
+          <li>实际ROI / 预计ROI：仅在经营概览大盘展示，不作为单个 SPU 的预测。</li>
+          <li>未结算、已送达未结算、待完结风险：见各指标口径，不在浏览器端重算。</li>
+        </ul>
+        <p class="meta">预测状态「可预测」由服务端决定，不因切换样本天数自动视为可用。</p>
+        
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-profit-help">关闭</button></div>
+  </div>
+</div>
+</div>
+<div data-demo-panel="overview" data-demo="loading" class="hidden"><section class="erp-overview" aria-label="经营概览"><header class="erp-toolbar"><h2 class="erp-section-heading">经营概览</h2></header><p role="status">加载中…</p></section></div>
+<div data-demo-panel="overview" data-demo="error" class="hidden"><section class="erp-overview" aria-label="经营概览"><header class="erp-toolbar"><h2 class="erp-section-heading">经营概览</h2></header><p role="status">经营概览加载失败</p><p><button class="btn" type="button">重试</button></p></section></div>
+<div data-demo-panel="overview" data-demo="noshop" class="hidden"><section class="erp-overview" aria-label="经营概览"><header class="erp-toolbar"><h2 class="erp-section-heading">经营概览</h2></header><p role="status">请选择店铺</p><p>请先选择当前经营店铺。</p></section></div>
+
+<section class="erp-panel erp-profit-controls" aria-label="店铺与经营范围">
+  <div class="erp-toolbar">
+    <label class="erp-shop-picker">当前店铺
+      <select aria-label="当前店铺">
+        <option value="">请选择店铺</option>
+        <option value="1" selected>示例店铺 A · 7490000001</option>
+        <option value="2">示例店铺 B · 7490000002</option>
+        <option value="3">(未命名) · 7490000003</option>
+      </select>
+    </label>
+    <label>起始日<input type="date" id="filter-w-start" value="2026-11-10" aria-label="销售/退款起始日期（空 = 不限）"></label>
+    <label>截止日<input type="date" id="filter-w-end" value="2026-11-11" aria-label="销售/退款截止日期（空 = 不限）"></label>
+    <div class="gap-2" role="group" aria-label="快捷日期范围">
+      <button class="btn btn-sm" type="button">昨天</button>
+      <button class="btn btn-sm" type="button">近 7 天</button>
+      <button class="btn btn-sm" type="button">近 30 天</button>
+      <button class="btn btn-sm" type="button">本月</button>
+      <button class="btn btn-sm" type="button">不限</button>
+    </div>
+    <label>预测样本
+      <select id="filter-projection-lookback-days" aria-label="预测样本天数">
+        <option selected>30 天</option>
+        <option>90 天</option>
+      </select>
+    </label>
+    <button class="btn btn-sm" type="button" data-toggle="toolbar-more-roi" aria-controls="toolbar-more-roi" aria-expanded="false">更多</button>
+  </div>
+  <div id="toolbar-more-roi" class="hidden erp-toolbar" style="margin-top:12px;">
+    <label>临时佣金费率（%）<input id="filter-fee" inputmode="decimal" placeholder="留空使用实测 / 基线" aria-label="临时覆写平台佣金费率（百分比）"></label>
+    <label class="field inline"><input type="checkbox" id="filter-include-all"> 含无活动 SPU</label>
+  </div>
+  <p class="meta">数据更新：正常 · 全账号 · 2026-11-12 21:50（店铺当地）</p>
+</section>
+
+<section class="erp-panel stack" aria-label="SPU 范围">
+  <h2 class="erp-section-heading">SPU 范围</h2>
+  <p class="meta">精确多选一次上限 100 个 SPU（含已选项）。点「查询」后按所选范围查看大盘。</p>
+  <div class="chip-row" aria-label="已选 SPU 标签">
+    <span class="badge">SPU-1001 无线吸尘器 Pro <button class="btn btn-sm" type="button" data-write aria-label="移除 SPU">移除</button></span>
+    <span class="badge">SPU-1002 桌面收纳架 <button class="btn btn-sm" type="button" data-write aria-label="移除 SPU">移除</button></span>
+  </div>
+  <label>输入 SPU ID 或标题
+    <input type="search" placeholder="输入 SPU ID 或标题" class="erp-field-search">
+  </label>
+  <fieldset aria-label="批量选择 SPU">
+    <legend class="sr-only">搜索结果</legend>
+    <label class="field inline"><input type="checkbox" checked data-write> SPU-1001 无线吸尘器 Pro</label>
+    <label class="field inline"><input type="checkbox" checked data-write> SPU-1002 桌面收纳架</label>
+    <label class="field inline"><input type="checkbox" data-write> SPU-2044 露营灯（示例）</label>
+  </fieldset>
+  <label>批量选择 SPU
+    <textarea rows="3" placeholder="粘贴内部编号，逗号或换行分隔"></textarea>
+  </label>
+  <div class="gap-2"><button class="btn btn-primary" type="button">查询</button><button class="btn" type="button">清除选择</button></div>
+  
+  <p class="meta">服务端冷却尚未结束时需手动重试读取或搜索，不会自动重试。保存未确认时原选择保留，需先重新读取关注事实。</p>
+</section>
+
+<section class="stack">
+  <h2 class="erp-section-heading">商品经营明细</h2>
+  <div class="demo-states" data-demo-group="table"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">暂无商品</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+  <div data-demo-panel="table" data-demo="ok" class=""><div class="erp-table-wrap">
+      <table class="erp-table" aria-label="商品经营明细">
+        <thead><tr>
+      <th>商品</th><th>广告消耗</th><th>广告系统实际ROI</th><th>广告系统保本ROI</th>
+      <th>有效销售</th><th>总单量</th><th>有效单量</th><th>取消率%</th><th>全损率%</th><th>净利润</th><th>采购价平均值</th><th>采购价中位数</th><th>销售价平均值</th><th>销售价中位数</th><th>实付价平均值</th><th>实付价中位数</th>
+    </tr></thead>
+        <tbody><tr>
+          <td>
+            <div class="erp-profit-product">
+              <button class="erp-profit-thumb" type="button" data-open="dlg-zoom" aria-label="放大图片 SPU-1001">主图</button>
+              <div>
+                <div class="id">SPU-1001</div>
+                <button class="btn btn-sm" type="button" data-open="dlg-drill-1001" aria-expanded="false" aria-label="查看商品盈利详情 SPU-1001">无线吸尘器 Pro（示例）</button>
+                <div class="erp-profit-flags"><span class="badge badge-warn">≈ 含未结算</span></div>
+              </div>
+            </div>
+          </td>
+          <td class="num">1,280.00</td><td class="num">1.92</td><td class="num">≈1.18</td>
+          <td class="num">4,860.00</td><td class="num">42</td><td class="num">38</td>
+          <td class="num">2.38%</td><td class="num">2.38%</td><td class="num">745.00</td>
+          <td class="num">≈32.50</td><td class="num">≈31.00</td><td class="num">89.90</td><td class="num">79.90</td><td class="num">76.40</td><td class="num">69.90</td>
+        </tr><tr class="erp-profit-loss">
+          <td>
+            <div class="erp-profit-product">
+              <span class="erp-profit-thumb">无主图</span>
+              <div>
+                <div class="id">SPU-1002</div>
+                <button class="btn btn-sm" type="button" data-open="dlg-drill-1002" aria-expanded="false" aria-label="查看商品盈利详情 SPU-1002">桌面收纳架（示例）</button>
+                <div class="erp-profit-flags"><span class="badge badge-danger">亏损</span><span class="badge">缺成本</span></div>
+              </div>
+            </div>
+          </td>
+          <td class="num">640.00</td><td class="num">1.10</td><td class="num">1.25</td>
+          <td class="num">1,980.00</td><td class="num">28</td><td class="num">22</td>
+          <td class="num">7.14%</td><td class="num">3.57%</td><td class="num">-86.00</td>
+          <td class="num">≈32.50</td><td class="num">≈31.00</td><td class="num">89.90</td><td class="num">79.90</td><td class="num">76.40</td><td class="num">69.90</td>
+        </tr></tbody>
+      </table>
+    </div></div>
+  <div data-demo-panel="table" data-demo="empty" class="hidden"><p class="erp-empty">暂无商品</p></div>
+  <div data-demo-panel="table" data-demo="loading" class="hidden"><p role="status">商品经营明细加载中…</p></div>
+  <div data-demo-panel="table" data-demo="error" class="hidden"><div class="alert alert-danger" role="alert"><p>明细加载失败（示例）</p><p><button class="btn" type="button">重试</button></p></div></div>
+  <div class="erp-pagination" aria-label="SPU ROI分页">
+    <p>共 2 条（示例）</p>
+    <label>每页条数
+      <select><option>20</option><option selected>50</option><option>100</option></select>
+    </label>
+    <div class="erp-pages"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  </div>
+</section>
+
+<section class="erp-panel">
+  <button class="btn" type="button" data-toggle="calc-notes">计算依据与数据说明</button>
+  <div id="calc-notes" class="hidden" style="margin-top:12px;">
+    <dl class="dl-facts">
+      <dt>计算时间</dt><dd>2026-11-12 22:05:11（示例）</dd>
+      <dt>口径版本</dt><dd>v10</dd>
+      <dt>金额单位</dt><dd>CNY</dd>
+      <dt>经营日期</dt><dd>2026-11-10 ~ 2026-11-11（含截止日）</dd>
+      <dt>源数据覆盖</dt><dd>订单、结算、售后、广告日明细（示例）</dd>
+      <dt>汇率快照</dt><dd>fx-2026-11-10-001</dd>
+      <dt>汇率时间</dt><dd>2026-11-10 00:05:00</dd>
+      <dt>成本基准</dt><dd>cost-fingerprint-demo</dd>
+    </dl>
+  </div>
+</section>
+<div class="dialog-backdrop" id="dlg-drill-1001" aria-hidden="true" role="dialog" aria-labelledby="dlg-drill-1001-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-drill-1001-title">商品盈利详情 SPU-1001</h2>
+    
+    <p class="meta">盈利查证明细 · SPU-1001 · 无线吸尘器 Pro（示例）</p>
+    <p class="alert">含未结算订单，使用服务端提供的估算结果。</p>
+    <div class="erp-tabs" data-tabs="dlg-drill-1001-tabs" role="tablist">
+      <button class="btn is-active" type="button" data-tab="profit" aria-pressed="true">利润构成</button>
+      <button class="btn" type="button" data-tab="logistics" aria-pressed="false">订单·物流</button>
+      <button class="btn" type="button" data-tab="settle" aria-pressed="false">结算</button>
+      <button class="btn" type="button" data-tab="aftersale" aria-pressed="false">售后</button>
+      <button class="btn" type="button" data-tab="ads" aria-pressed="false">广告</button>
+    </div>
+    <div data-tab-panel="dlg-drill-1001-tabs" data-panel="profit">
+      <h3 class="erp-section-heading">利润层级</h3>
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="利润构成表格">
+          <thead><tr><th>项目</th><th class="num">金额 CNY</th></tr></thead>
+          <tbody>
+            <tr><td>净收入 · 已结算</td><td class="num">1,280.00</td></tr>
+            <tr><td>净收入 · 未结算</td><td class="num">420.00</td></tr>
+            <tr><td>货本 · 售出件</td><td class="num">610.00</td></tr>
+            <tr><td>货本 · 全损取消件</td><td class="num">85.00</td></tr>
+            <tr><td>广告消耗</td><td class="num">260.00</td></tr>
+            <tr><td>净利润</td><td class="num">745.00</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-drill-1001-tabs" data-panel="logistics">
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="订单·物流表格">
+          <thead><tr><th>订单号</th><th>状态</th><th>件</th><th>已到海外</th><th>全损</th><th>订单状态</th></tr></thead>
+          <tbody>
+            <tr><td class="id">TTS58110001</td><td>已完成</td><td>2</td><td>是</td><td>否</td><td>COMPLETED</td></tr>
+            <tr><td class="id">TTS58110002</td><td>在途</td><td>1</td><td>否</td><td>否</td><td>IN_TRANSIT</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-drill-1001-tabs" data-panel="settle">
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="结算表格">
+          <thead><tr><th>订单号</th><th>已结算</th><th>结算金额 CNY</th><th>本 SPU 占单比</th><th>对账单时间</th></tr></thead>
+          <tbody>
+            <tr><td class="id">TTS58110001</td><td>是</td><td class="num">1,280.00</td><td>100%</td><td>2026-11-11 18:00</td></tr>
+            <tr><td class="id">TTS58110002</td><td>否</td><td class="num">—（无入账）</td><td>100%</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-drill-1001-tabs" data-panel="aftersale">
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="售后表格">
+          <thead><tr><th>售后单号</th><th>订单号</th><th>类型</th><th>退款 CNY</th></tr></thead>
+          <tbody>
+            <tr><td class="id">RF58110001</td><td class="id">TTS58110008</td><td>REFUND（已取消 / 冲销）</td><td class="num">39.90</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-drill-1001-tabs" data-panel="ads">
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="广告表格">
+          <thead><tr><th>计划 ID</th><th>日期范围</th><th>消耗 CNY</th></tr></thead>
+          <tbody>
+            <tr><td class="id">1789001001</td><td>2026-11-10 ~ 2026-11-11</td><td class="num">260.00</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-drill-1001">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-drill-1002" aria-hidden="true" role="dialog" aria-labelledby="dlg-drill-1002-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-drill-1002-title">商品盈利详情 SPU-1002</h2>
+    
+    <p class="meta">盈利查证明细 · SPU-1002 · 桌面收纳架（示例）</p>
+    <p class="alert">含未结算订单，使用服务端提供的估算结果。</p>
+    <div class="erp-tabs" data-tabs="dlg-drill-1002-tabs" role="tablist">
+      <button class="btn is-active" type="button" data-tab="profit" aria-pressed="true">利润构成</button>
+      <button class="btn" type="button" data-tab="logistics" aria-pressed="false">订单·物流</button>
+      <button class="btn" type="button" data-tab="settle" aria-pressed="false">结算</button>
+      <button class="btn" type="button" data-tab="aftersale" aria-pressed="false">售后</button>
+      <button class="btn" type="button" data-tab="ads" aria-pressed="false">广告</button>
+    </div>
+    <div data-tab-panel="dlg-drill-1002-tabs" data-panel="profit">
+      <h3 class="erp-section-heading">利润层级</h3>
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="利润构成表格">
+          <thead><tr><th>项目</th><th class="num">金额 CNY</th></tr></thead>
+          <tbody>
+            <tr><td>净收入 · 已结算</td><td class="num">1,280.00</td></tr>
+            <tr><td>净收入 · 未结算</td><td class="num">420.00</td></tr>
+            <tr><td>货本 · 售出件</td><td class="num">610.00</td></tr>
+            <tr><td>货本 · 全损取消件</td><td class="num">85.00</td></tr>
+            <tr><td>广告消耗</td><td class="num">260.00</td></tr>
+            <tr><td>净利润</td><td class="num">745.00</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-drill-1002-tabs" data-panel="logistics">
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="订单·物流表格">
+          <thead><tr><th>订单号</th><th>状态</th><th>件</th><th>已到海外</th><th>全损</th><th>订单状态</th></tr></thead>
+          <tbody>
+            <tr><td class="id">TTS58110001</td><td>已完成</td><td>2</td><td>是</td><td>否</td><td>COMPLETED</td></tr>
+            <tr><td class="id">TTS58110002</td><td>在途</td><td>1</td><td>否</td><td>否</td><td>IN_TRANSIT</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-drill-1002-tabs" data-panel="settle">
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="结算表格">
+          <thead><tr><th>订单号</th><th>已结算</th><th>结算金额 CNY</th><th>本 SPU 占单比</th><th>对账单时间</th></tr></thead>
+          <tbody>
+            <tr><td class="id">TTS58110001</td><td>是</td><td class="num">1,280.00</td><td>100%</td><td>2026-11-11 18:00</td></tr>
+            <tr><td class="id">TTS58110002</td><td>否</td><td class="num">—（无入账）</td><td>100%</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-drill-1002-tabs" data-panel="aftersale">
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="售后表格">
+          <thead><tr><th>售后单号</th><th>订单号</th><th>类型</th><th>退款 CNY</th></tr></thead>
+          <tbody>
+            <tr><td class="id">RF58110001</td><td class="id">TTS58110008</td><td>REFUND（已取消 / 冲销）</td><td class="num">39.90</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-drill-1002-tabs" data-panel="ads">
+      <div class="erp-table-wrap">
+        <table class="erp-table" aria-label="广告表格">
+          <thead><tr><th>计划 ID</th><th>日期范围</th><th>消耗 CNY</th></tr></thead>
+          <tbody>
+            <tr><td class="id">1789001001</td><td>2026-11-10 ~ 2026-11-11</td><td class="num">260.00</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-drill-1002">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-zoom" aria-hidden="true" role="dialog" aria-labelledby="dlg-zoom-title">
+  <div class="dialog">
+    <h2 id="dlg-zoom-title">商品主图放大</h2>
+    <div class="thumb-lg">示例主图预览（离线占位）</div>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-zoom">关闭图片</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

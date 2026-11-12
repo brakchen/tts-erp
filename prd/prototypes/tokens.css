@@ -1,0 +1,101 @@
+/* 从现网 tts_erp_v2/static/css/tokens.css 复制，供原型离线打开。
+ * 不要外链现网构建产物或 CDN。令牌如有更新，以仓库该文件为准再同步。
+ * 本文件只提供 :root 令牌，不改线上业务代码。
+ */
+
+/* tokens.css — 全站设计令牌（canonical）
+ * 2026-10-30：用户批准统一为墨绿导航、浅色纸面与白色内容面板；
+ * React/HeroUI 与保留的旧看板共同消费本文件。以下保留旧方案的历史背景。
+ *
+ * 全站唯一的 :root 令牌来源。页面模板与页面级 CSS **不得再定义 :root 令牌**；
+ * 需要不同密度/语义时，覆盖使用令牌的具体规则，而不是另起一套令牌名。
+ *
+ * 历史背景：重构前 11 个页面各自维护 :root，衍生出 4 套命名体系
+ *   1. 暖纸编辑体  --paper/--ink/--rule/--accent(陶土橙)   6 页
+ *   2. 灰蓝体系    --bg/--card/--border/--accent(靛蓝)     2 页 (enum-map, users)
+ *   3. rc 命名空间 --rc-*                                  1 页 (runtime-configs)
+ *   4. signal 体系 --signal* / --warning                   1 页 (ad-daily)
+ * 2026-10-03 (feature/ui-style-unification lane) 统一到本文件的暖纸编辑体。
+ *
+ * 取值来源：多数投票 + 暖纸编辑体旗舰页 dashboard.html。字体栈取最完备的一支，
+ * 保证 JetBrains Mono / Noto Sans SC / Noto Serif SC 缺失时仍能平滑回退。
+ */
+
+:root {
+  /* ── 纸面（背景层次） ─────────────────────────────── */
+  --paper: #F5F5F0;
+  --paper-deep: #E9EEE7;
+
+  /* ── 墨（文字层次） ───────────────────────────────── */
+  --ink: #22382F;
+  --ink-soft: #435B4D;
+  --muted: #657368;
+
+  /* ── 界线（分割线/描边） ──────────────────────────── */
+  --rule: #D7E0D6;
+  --rule-soft: #E7ECE4;
+
+  /* ── 语义色 ───────────────────────────────────────── */
+  /* 统一墨绿主色；深色用于导航和强调区域。 */
+  --accent: #214F43;
+  --accent-deep: #173F36;
+  --ok: #2F6B3E;
+  --warn: #8A6D1A;
+  --danger: #8C1A1A;
+
+  /* ── 字体 ─────────────────────────────────────────── */
+  /* ERP 使用同一套中英文字体。保留语义别名供现有样式引用。 */
+  --sans: 'Microsoft YaHei', 'Noto Sans SC', 'PingFang SC', 'Noto Sans CJK SC', 'Source Han Sans SC', sans-serif;
+  --mono: var(--sans);
+  --serif: var(--sans);
+
+  /* ── 形状 ─────────────────────────────────────────── */
+  /* 原生组件保留自身形状规则，共享默认采用克制的小圆角。 */
+  --radius: 0.625rem;
+
+  /* Shared HeroUI / legacy semantic bridge. The palette has one owner. */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --surface: #FFFFFF;
+  --surface-foreground: var(--ink);
+  /* 次级表面：上传区、预览区等需要与主表面区分的底色。
+     此前 frontend/src/pages/media-assets/media-workspace.css 引用了
+     var(--surface-secondary) 但全仓没有声明，浏览器会解析成无效值。 */
+  --surface-secondary: #E9EEE7;
+  --default: #E9EEE7;
+  --default-foreground: var(--ink-soft);
+  --accent-foreground: #FFFFFF;
+  --field-background: #FFFFFF;
+  --field-foreground: var(--ink);
+  --field-border: var(--rule);
+  --field-border-width: 1px;
+  --border-width-field: 1px;
+  --border: var(--rule);
+  --separator: var(--rule-soft);
+  --focus: var(--accent);
+  --navigation-background: var(--accent-deep);
+  --navigation-foreground: #D4E0D5;
+  --navigation-muted: #B5C8BB;
+  --navigation-active: #D8E6A2;
+  --table-heading: #EFF3ED;
+  --table-hover: #F2F6EF;
+  --table-line: #E4EAE0;
+  --paper-danger: color-mix(in srgb, var(--danger) 6%, var(--surface));
+  --paper-soft: var(--table-hover);
+  --bs-body-bg: var(--paper);
+  --bs-body-color: var(--ink);
+  --bs-border-color: var(--rule);
+  --bs-border-radius: var(--radius);
+  --bs-link-color: var(--accent);
+  --bs-link-hover-color: var(--accent-deep);
+  --bs-focus-ring-color: color-mix(in srgb, var(--accent) 22%, transparent);
+
+  /* ── Bootstrap 字体变量桥接 ──────────────────────── */
+  /* vendor reboot 的 `code / kbd / pre` 吃 --bs-font-monospace，不桥接就会命中
+   * Bootstrap 自带的 SFMono-Regular 栈 —— 全站的第 4 套字体（2026-10-04
+   * runtime-configs 的裸 <code> 实测命中）。tokens.css 晚于 bootstrap.min.css
+   * 加载，同名 :root 变量后写覆盖前写。 */
+  --bs-body-font-family: var(--sans);
+  --bs-font-sans-serif: var(--sans);
+  --bs-font-monospace: var(--mono);
+}

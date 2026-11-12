@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>用户管理 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="users" data-title="用户管理" data-desc="管理账号、角色与会话，按实际工作职责分配能力。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">ACCESS MANAGEMENT</p>
+    <h2>为团队配置合适的访问权限</h2>
+    <p class="erp-description">管理账号、角色与会话，按实际工作职责分配能力。</p>
+  </div>
+</section>
+<p>用户与角色权限管理。显示名、角色和启停分别提交；所有授权及自身 / 最后管理员保护由服务端判定。</p>
+<p>当前仅浏览；维护需要 admin 权限，以服务端判定为准。非 admin 进入时本提示可见，写操作禁用。</p>
+<p class="meta">服务端冷却中，请等待指定时间后手动重试，不会自动请求。读取和提交均须等待指定时间。</p>
+<div class="erp-tabs" data-tabs="users-tabs" role="tablist" aria-label="管理页签">
+  <button class="btn is-active" type="button" data-tab="users" aria-pressed="true">用户</button>
+  <button class="btn" type="button" data-tab="roles" aria-pressed="false">角色权限目录</button>
+</div>
+<div data-tab-panel="users-tabs" data-panel="users" class="stack">
+  <div class="erp-toolbar">
+    <label>用户状态
+      <select><option>全部状态</option><option>启用</option><option>停用</option></select>
+    </label>
+    <label>搜索<input type="search" placeholder="用户名或显示名"></label>
+    <button class="btn" type="button">刷新用户</button>
+    <button class="btn btn-primary" type="button" data-admin data-open="dlg-user-new">新建用户</button>
+  </div>
+  <div class="demo-states" data-demo-group="users"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载用户中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+  <div data-demo-panel="users" data-demo="ok" class="">
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="用户列表">
+      <thead><tr><th>用户名</th><th>显示名</th><th>状态</th><th>角色</th><th>最后登录</th><th>活跃会话数</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="id">demo.admin</td><td>示例管理员</td><td><span class="badge badge-ok">启用</span></td>
+          <td>系统管理员</td><td>2026-11-12 21:00</td><td>1</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-user-name">编辑显示名</button>
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-user-roles">分配角色</button>
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-user-password">重置密码</button>
+            <button class="btn btn-sm" type="button" data-open="dlg-user-sessions">会话管理</button>
+            <button class="btn btn-sm" type="button" data-open="dlg-user-detail">用户详情</button>
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-user-status">停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="id">demo.operator</td><td>示例运营</td><td><span class="badge badge-ok">启用</span></td>
+          <td>运营</td><td>2026-11-11 18:20</td><td>0</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-user-name-op">编辑显示名</button>
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-user-roles">分配角色</button>
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-user-password">重置密码</button>
+            <button class="btn btn-sm" type="button" data-open="dlg-user-sessions-op">会话管理</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  </div>
+  <div data-demo-panel="users" data-demo="loading" class="hidden"><p role="status">加载用户中…</p></div>
+  <div data-demo-panel="users" data-demo="error" class="hidden"><div class="alert alert-danger"><p>用户列表读取失败（示例）</p><p><button class="btn" type="button">刷新用户</button></p></div></div>
+</div>
+<div class="hidden stack" data-tab-panel="users-tabs" data-panel="roles">
+  <h2 class="erp-section-heading" tabindex="-1">角色权限目录</h2>
+  <p>内置角色不可删除；内置 admin 不可编辑；其余内置角色不可改 API 档位。</p>
+  <p class="meta">「API 档位」是角色能力等级（readonly / readwrite / admin），不是 API key 签发、轮换或吊销页。</p>
+  <div class="gap-2">
+    <button class="btn" type="button">刷新角色目录</button>
+    <button class="btn btn-primary" type="button" data-admin data-open="dlg-role-new">新建角色</button>
+  </div>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="角色列表">
+      <thead><tr><th>角色代码</th><th>角色名称</th><th>描述</th><th>API 档位</th><th>类型</th><th>权限点</th><th>用户数</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="id">admin</td><td>系统管理员</td><td>—</td><td>admin</td>
+          <td><span class="badge">内置</span></td>
+          <td>全部页面</td>
+          <td class="num">1</td>
+          <td class="meta">不可编辑 / 不可删除</td>
+        </tr>
+        <tr>
+          <td class="id">operator</td><td>运营</td><td>—</td><td>readwrite</td>
+          <td><span class="badge">内置</span></td>
+          <td>除用户管理、视频发布外全部页面</td>
+          <td class="num">1</td>
+          <td><button class="btn btn-sm" type="button" data-admin data-open="dlg-role-edit">编辑角色</button></td>
+        </tr>
+        <tr>
+          <td class="id">viewer</td><td>只读分析</td><td>—</td><td>readonly</td>
+          <td><span class="badge">内置</span></td>
+          <td>控制台、重点关注 SPU、SPU ROI、广告日明细、拦截统计</td>
+          <td class="num">0</td>
+          <td><button class="btn btn-sm" type="button" data-admin data-open="dlg-role-edit-viewer">编辑角色</button></td>
+        </tr>
+        <tr>
+          <td class="id">shop.ops</td><td>店铺运营（自定义）</td><td>—</td><td>readwrite</td>
+          <td><span class="badge badge-accent">自定义</span></td>
+          <td>控制台、采购工作台、店铺注册</td>
+          <td class="num">0</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-role-edit-custom">编辑角色</button>
+            <button class="btn btn-sm btn-danger" type="button" data-admin data-open="dlg-role-del">删除</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p role="status" class="hidden">加载角色目录中…</p>
+</div>
+<div class="dialog-backdrop" id="dlg-user-new" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-new-title">
+  <div class="dialog">
+    <h2 id="dlg-user-new-title">新建用户</h2>
+    
+  <form class="stack" aria-label="账号维护表单">
+    <label>用户名<input data-admin maxlength="32" required></label>
+    <label>显示名<input data-admin maxlength="64"></label>
+    <label>初始密码<input type="password" data-admin maxlength="128" autocomplete="new-password"></label>
+    <p class="meta">用户名创建后不可修改。密码至少 6 位，需包含大小写字母和数字，最终由服务端校验。</p>
+    <fieldset>
+      <legend>角色（可多选）</legend>
+      <label class="field inline"><input type="checkbox" data-admin> 系统管理员（admin）</label>
+      <label class="field inline"><input type="checkbox" checked data-admin> 运营（operator）</label>
+      <label class="field inline"><input type="checkbox" data-admin> 只读分析（viewer）</label>
+    </fieldset>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-new">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-user-new" data-open="dlg-user-verify">创建用户</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-name" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-name-title">
+  <div class="dialog">
+    <h2 id="dlg-user-name-title">编辑显示名</h2>
+    
+  <p>demo.admin · ID 1</p>
+  <form class="stack" aria-label="账号维护表单">
+    <label>显示名<input value="示例管理员" data-admin></label>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-name">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-user-name" data-open="dlg-user-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-name-op" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-name-op-title">
+  <div class="dialog">
+    <h2 id="dlg-user-name-op-title">编辑显示名</h2>
+    
+  <p>demo.operator · ID 2</p>
+  <label>显示名<input value="示例运营" data-admin></label>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-name-op">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-user-name-op" data-open="dlg-user-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-roles" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-roles-title">
+  <div class="dialog">
+    <h2 id="dlg-user-roles-title">分配角色</h2>
+    
+  <fieldset>
+    <legend>角色（可多选）</legend>
+    <label class="field inline"><input type="checkbox" checked data-admin> 系统管理员（admin）</label>
+    <label class="field inline"><input type="checkbox" data-admin> 运营（operator）</label>
+    <label class="field inline"><input type="checkbox" data-admin> 只读分析（viewer）</label>
+    <label class="field inline"><input type="checkbox" data-admin> 店铺运营（shop.ops）</label>
+  </fieldset>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-roles">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-user-roles" data-open="dlg-user-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-password" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-password-title">
+  <div class="dialog">
+    <h2 id="dlg-user-password-title">重置密码</h2>
+    
+  <form class="stack" aria-label="账号维护表单">
+    <label>新密码<input type="password" data-admin maxlength="128" autocomplete="new-password"></label>
+    <p>新密码不会回显或保存到浏览器存储。重置将吊销该用户的全部会话，请线下安全告知用户。</p>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-password">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-user-password" data-open="dlg-user-verify">重置密码并吊销会话</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-sessions" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-sessions-title">
+  <div class="dialog">
+    <h2 id="dlg-user-sessions-title">会话管理</h2>
+    
+  <p>demo.admin · ID 1</p>
+  <p><button class="btn btn-danger" type="button" data-admin data-open="dlg-revoke-all">吊销全部会话</button></p>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="用户会话">
+      <thead><tr><th>会话 ID</th><th>创建时间</th><th>到期时间</th><th>IP</th><th>User-Agent</th><th>最后活跃</th><th>吊销时间</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="id">sess-1001</td>
+          <td>2026-11-12 09:00</td>
+          <td>2026-11-13 09:00</td>
+          <td>203.0.113.10</td>
+          <td>Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0</td>
+          <td>2026-11-12 21:00</td>
+          <td>—</td>
+          <td><span class="badge badge-ok">活跃</span></td>
+          <td><button class="btn btn-sm btn-danger" type="button" data-admin data-open="dlg-revoke-one">吊销此会话</button></td>
+        </tr>
+        <tr>
+          <td class="id">sess-0998</td>
+          <td>2026-11-10 09:00</td>
+          <td>2026-11-11 09:00</td>
+          <td>203.0.113.11</td>
+          <td>Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Safari/605.1.15</td>
+          <td>2026-11-10 18:00</td>
+          <td>—</td>
+          <td><span class="badge">已过期</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td class="id">sess-0990</td>
+          <td>2026-11-08 09:00</td>
+          <td>2026-11-09 09:00</td>
+          <td>203.0.113.12</td>
+          <td>Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/132.0</td>
+          <td>2026-11-08 12:00</td>
+          <td>2026-11-08 12:10:00</td>
+          <td><span class="badge badge-danger">已吊销</span></td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">「吊销会话」只作用于登录会话，不是 API key 签发、轮换或吊销。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-sessions">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-sessions-op" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-sessions-op-title">
+  <div class="dialog">
+    <h2 id="dlg-user-sessions-op-title">会话管理</h2>
+    <p>demo.operator 该用户暂无会话。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-sessions-op">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-revoke-all" aria-hidden="true" role="dialog" aria-labelledby="dlg-revoke-all-title">
+  <div class="dialog">
+    <h2 id="dlg-revoke-all-title">吊销会话确认</h2>
+    <p>确认吊销该用户全部会话？该会话将失效。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-revoke-all">取消</button><button class="btn btn-danger" type="button" data-admin data-close="dlg-revoke-all" data-open="dlg-user-verify">确认操作</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-revoke-one" aria-hidden="true" role="dialog" aria-labelledby="dlg-revoke-one-title">
+  <div class="dialog">
+    <h2 id="dlg-revoke-one-title">吊销会话确认</h2>
+    <p>确认吊销会话 sess-1001？该会话将失效。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-revoke-one">取消</button><button class="btn btn-danger" type="button" data-admin data-close="dlg-revoke-one" data-open="dlg-user-verify">确认操作</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-detail" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-detail-title">
+  <div class="dialog">
+    <h2 id="dlg-user-detail-title">用户详情</h2>
+    
+  <dl class="dl-facts">
+    <dt>显示名</dt><dd>示例管理员</dd>
+    <dt>状态</dt><dd>启用</dd>
+    <dt>角色</dt><dd>系统管理员</dd>
+    <dt>最近登录</dt><dd>2026-11-12 21:00</dd>
+  </dl>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-detail">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-status" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-status-title">
+  <div class="dialog">
+    <h2 id="dlg-user-status-title">确认更改用户状态</h2>
+    <p>确认停用用户？停用将吊销其全部会话。</p><p>若当前为停用用户，文案为「确认启用用户？」。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-status">取消</button><button class="btn btn-danger" type="button" data-admin data-close="dlg-user-status" data-open="dlg-user-verify">确认操作</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-role-new" aria-hidden="true" role="dialog" aria-labelledby="dlg-role-new-title">
+  <div class="dialog">
+    <h2 id="dlg-role-new-title">新建角色</h2>
+    
+  <form class="stack" aria-label="账号维护表单">
+    <label>角色代码<input data-admin maxlength="32"></label>
+    <label>角色名称<input data-admin></label>
+    <label>API 档位
+      <select data-admin><option>readonly</option><option selected>readwrite</option><option>admin</option></select>
+    </label>
+    <fieldset><legend>总览</legend><label class="field inline"><input type="checkbox" checked data-admin> 控制台（page:dashboard）</label></fieldset>
+    <fieldset><legend>经营分析</legend>
+      <label class="field inline"><input type="checkbox" data-admin> 重点关注 SPU（page:focused-spus）</label>
+      <label class="field inline"><input type="checkbox" data-admin> SPU ROI（page:spu-roi）</label>
+    </fieldset>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-role-new">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-role-new" data-open="dlg-user-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-role-edit" aria-hidden="true" role="dialog" aria-labelledby="dlg-role-edit-title">
+  <div class="dialog">
+    <h2 id="dlg-role-edit-title">编辑角色</h2>
+    
+  <p>角色代码：operator（创建后不可修改）</p>
+  <p>内置角色不可更改 API 档位。</p>
+  <label>角色名称<input value="运营" data-admin></label>
+  <label>API 档位<select disabled><option selected>readwrite</option></select></label>
+  <p class="meta">可调整权限点勾选（示例略，与新建角色相同分组）。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-role-edit">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-role-edit" data-open="dlg-user-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-role-edit-viewer" aria-hidden="true" role="dialog" aria-labelledby="dlg-role-edit-viewer-title">
+  <div class="dialog">
+    <h2 id="dlg-role-edit-viewer-title">编辑角色</h2>
+    
+  <p>角色代码：viewer（创建后不可修改）</p>
+  <p>内置角色不可更改 API 档位。</p>
+  <label>角色名称<input value="只读分析" data-admin></label>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-role-edit-viewer">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-role-edit-viewer" data-open="dlg-user-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-role-edit-custom" aria-hidden="true" role="dialog" aria-labelledby="dlg-role-edit-custom-title">
+  <div class="dialog">
+    <h2 id="dlg-role-edit-custom-title">编辑角色</h2>
+    
+  <p>角色代码：shop.ops（创建后不可修改）</p>
+  <label>角色名称<input value="店铺运营（自定义）" data-admin></label>
+  <label>API 档位
+    <select data-admin><option>readonly</option><option selected>readwrite</option><option>admin</option></select>
+  </label>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-role-edit-custom">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-role-edit-custom" data-open="dlg-user-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-role-del" aria-hidden="true" role="dialog" aria-labelledby="dlg-role-del-title">
+  <div class="dialog">
+    <h2 id="dlg-role-del-title">确认删除角色</h2>
+    <p>确认删除角色 shop.ops？仍被用户引用时服务端会拒绝。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-role-del">取消</button><button class="btn btn-danger" type="button" data-admin data-close="dlg-role-del" data-open="dlg-user-verify">确认操作</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-user-verify" aria-hidden="true" role="dialog" aria-labelledby="dlg-user-verify-title">
+  <div class="dialog">
+    <h2 id="dlg-user-verify-title">提交结果核对</h2>
+    
+  <p role="status">公开状态已读取；不证明原提交结果。</p>
+  <p>当前公开用户：demo.admin · ID 1 · active</p>
+  <p>当前公开角色：shop.ops · 店铺运营（自定义） · readwrite · page:dashboard,page:manual-costs,page:shops</p>
+  <p>当前公开列表未找到该用户名或角色代码时，不能据此断定提交未生效。</p>
+  <p>服务端冷却中，读取和提交均须等待指定时间；不会自动重试。核对后需明确再次提交。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-user-verify">关闭用户操作</button><button class="btn btn-primary" type="button" data-admin>明确再次提交</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>资产管理 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="media-assets" data-title="资产管理" data-desc="上传并整理图片与视频，维护公共素材包与标签。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">MEDIA LIBRARY</p>
+    <h2>资产管理</h2>
+    <p class="erp-description">上传并整理图片与视频，维护公共素材包与标签。</p>
+  </div>
+  <div class="erp-intro-actions">
+    <button class="btn btn-primary" type="button" data-write data-open="dlg-asset-upload">上传新素材</button>
+    <button class="btn" type="button" data-write data-open="dlg-pack-new">新建素材包</button>
+  </div>
+</section>
+<form class="erp-filters">
+  <label>资产类型
+    <select aria-label="素材类型">
+      <option>全部素材</option>
+      <option>视频</option>
+      <option>图片</option>
+      <option>素材包</option>
+    </select>
+  </label>
+  <label>名称、说明或标签<input type="search" placeholder="名称、说明或标签"></label>
+  <button class="btn" type="button">查询</button>
+</form>
+<div class="demo-states" data-demo-group="assets"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">暂无素材</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+<div data-demo-panel="assets" data-demo="ok" class="">
+<ul class="media-grid" aria-label="素材列表">
+  <li class="erp-card media-card">
+    <div class="media-thumb">视频预览</div>
+    <div class="primary">室内口播 A（示例）</div>
+    <p class="meta">视频 · 已入库 · 标签：口播、室内</p>
+    <div class="gap-2">
+      <button class="btn btn-sm" type="button" data-open="dlg-asset-view-1">查看 室内口播 A</button>
+      <button class="btn btn-sm" type="button" data-write data-open="dlg-asset-edit-1">编辑 室内口播 A</button>
+      <button class="btn btn-sm btn-danger" type="button" data-write data-open="dlg-asset-del-1">删除 室内口播 A</button>
+    </div>
+  </li>
+  <li class="erp-card media-card">
+    <div class="media-thumb">图片预览</div>
+    <div class="primary">服装图 12（示例）</div>
+    <p class="meta">图片 · 已入库 · 标签：服装</p>
+    <div class="gap-2">
+      <button class="btn btn-sm" type="button" data-open="dlg-asset-view-2">查看 服装图 12</button>
+      <button class="btn btn-sm" type="button" data-write data-open="dlg-asset-edit-2">编辑 服装图 12</button>
+      <button class="btn btn-sm" type="button" data-write data-open="dlg-pack-add">加入已有包</button>
+    </div>
+  </li>
+</ul>
+</div>
+<div data-demo-panel="assets" data-demo="empty" class="hidden"><p class="erp-empty">资产库还没有素材。</p></div>
+<div data-demo-panel="assets" data-demo="loading" class="hidden"><p role="status">素材列表加载中…</p></div>
+<div data-demo-panel="assets" data-demo="error" class="hidden"><div class="alert alert-danger"><p>暂时无法读取，请重试。</p><p><button class="btn" type="button">重试</button></p></div></div>
+
+<section class="erp-card stack">
+  <h2 class="erp-section-heading">公共素材包</h2>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="素材包列表">
+      <thead><tr><th>素材包</th><th>视频数</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="primary">室内带货</td><td>3</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-open="dlg-pack-view">打开素材包 室内带货</button>
+            <button class="btn btn-sm" type="button" data-write data-open="dlg-pack-add-video">添加视频</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="dialog-backdrop" id="dlg-asset-upload" aria-hidden="true" role="dialog" aria-labelledby="dlg-asset-upload-title">
+  <div class="dialog">
+    <h2 id="dlg-asset-upload-title">上传新素材</h2>
+    
+  <p>上传后添加到全局素材库。也可在上传后添加到指定素材包。</p>
+  <label>素材文件
+    <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" data-write>
+  </label>
+  <p class="meta">请选择 JPEG、PNG、WebP、GIF、MP4、WebM 或 MOV 的非空文件。</p>
+  <div class="file-drop">上传前本地预览（选择文件后显示图片或视频预览）</div>
+  <p><button class="btn btn-sm" type="button" data-write>更换文件</button></p>
+  <label>名称<input value="" data-write></label>
+  <label>说明<textarea rows="3" data-write></textarea></label>
+  <section class="stack" aria-label="素材标签">
+    <h3 class="erp-section-heading">素材标签</h3>
+    <p>已有标签</p>
+    <div class="chip-row" aria-label="已选标签">
+      <span class="badge">口播 <button class="btn btn-sm" type="button" data-write aria-label="移除标签">移除</button></span>
+    </div>
+    <label>搜索或新建标签<input type="search" placeholder="输入新标签名称，按回车添加" data-write></label>
+    <p>可选素材标签</p>
+    <div class="chip-row" aria-label="可选标签">
+      <button class="btn btn-sm" type="button" data-write>室内</button>
+      <button class="btn btn-sm" type="button" data-write>服装</button>
+    </div>
+    <p class="meta">新增标签将在确认入库后生效。</p>
+    <p><button class="btn btn-sm" type="button">收起标签</button> <button class="btn btn-sm" type="button">选择标签</button></p>
+  </section>
+  <ol class="steps">
+    <li>准备：选择文件并填写资料。</li>
+    <li>传输进度：<span>正在传输文件</span><div class="progress"><span style="width:70%"></span></div></li>
+    <li>等待存储：文件已发送，等待存储响应…</li>
+    <li>核对入库：检查并确认入库 / 传输完成。</li>
+  </ol>
+  <p class="meta">对象存储中尚未找到此文件、文件大小校验未通过或原上传地址已过期时，需重新上传文件。</p>
+
+    <div class="dialog-actions">
+  <button class="btn" type="button" data-close="dlg-asset-upload" data-open="dlg-asset-upload-leave">取消</button>
+  <button class="btn" type="button" data-write>开始上传</button>
+  <button class="btn btn-primary" type="button" data-write data-close="dlg-asset-upload" data-open="dlg-asset-verify">检查并确认入库</button>
+</div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-asset-upload-leave" aria-hidden="true" role="dialog" aria-labelledby="dlg-asset-upload-leave-title">
+  <div class="dialog">
+    <h2 id="dlg-asset-upload-leave-title">结束上传？</h2>
+    <p>结束后会丢弃本次上传的本地进度。已入库的资产会保留，你可以稍后通过「选择已有资产」添加。所选文件和填写的名称将清除。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-asset-upload-leave">继续</button><button class="btn btn-danger" type="button" data-close="dlg-asset-upload-leave">结束</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-asset-view-1" aria-hidden="true" role="dialog" aria-labelledby="dlg-asset-view-1-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-asset-view-1-title">查看素材</h2>
+    
+  <h2 class="erp-section-heading">素材详情</h2>
+  <div class="thumb-lg">视频预览 室内口播 A</div>
+  <div class="gap-2">
+    <button class="btn" type="button">预览</button>
+    <button class="btn" type="button">重新获取预览</button>
+  </div>
+  <p>入库完成后可以预览文件。暂时无法预览此文件时将显示失败说明。</p>
+  <p>说明：室内带货口播备用视频。若无说明则显示「暂无说明」。</p>
+  <section>
+    <h3 class="erp-section-heading">哪些数字人在用</h3>
+    <p>示例主播阿宁、示例主播北北</p>
+    <p class="meta">还没有数字人引用这份素材。 / 当前无法确认引用情况。</p>
+  </section>
+  <section>
+    <h3 class="erp-section-heading">所在素材包</h3>
+    <p>室内带货</p>
+  </section>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-asset-view-1">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-asset-view-2" aria-hidden="true" role="dialog" aria-labelledby="dlg-asset-view-2-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-asset-view-2-title">查看素材</h2>
+    
+  <div class="thumb-lg">图片预览 服装图 12</div>
+  <p><button class="btn" type="button">重新获取预览</button></p>
+  <section><h3 class="erp-section-heading">哪些数字人在用</h3><p>还没有数字人引用这份素材。</p></section>
+  <section><h3 class="erp-section-heading">所在素材包</h3><p>尚未加入素材包。</p></section>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-asset-view-2">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-asset-edit-1" aria-hidden="true" role="dialog" aria-labelledby="dlg-asset-edit-1-title">
+  <div class="dialog">
+    <h2 id="dlg-asset-edit-1-title">编辑素材</h2>
+    
+  <label>名称<input value="室内口播 A（示例）" data-write></label>
+  <label>说明<textarea rows="3" data-write>室内带货口播备用视频</textarea></label>
+  <section aria-label="素材标签">
+    <p>已有标签：口播、室内</p>
+    <label>搜索或新建标签<input data-write></label>
+  </section>
+  <p class="meta">本次修改尚未保存，放弃后将清除这些输入。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-asset-edit-1">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-asset-edit-1" data-open="dlg-asset-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-asset-edit-2" aria-hidden="true" role="dialog" aria-labelledby="dlg-asset-edit-2-title">
+  <div class="dialog">
+    <h2 id="dlg-asset-edit-2-title">编辑素材</h2>
+    
+  <label>名称<input value="服装图 12（示例）" data-write></label>
+  <label>说明<textarea rows="3" data-write></textarea></label>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-asset-edit-2">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-asset-edit-2" data-open="dlg-asset-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-asset-del-1" aria-hidden="true" role="dialog" aria-labelledby="dlg-asset-del-1-title">
+  <div class="dialog">
+    <h2 id="dlg-asset-del-1-title">删除素材「室内口播 A」</h2>
+    
+  <p>删除后，该素材将从全局素材库移除。</p>
+  <p>此视频仍在素材包内。请解除全部引用后再删除。</p>
+  <p>该素材已添加至数字人档案。请解除关联后再删除。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-asset-del-1">取消</button><button class="btn btn-danger" type="button" data-write data-close="dlg-asset-del-1" data-open="dlg-asset-verify">确认删除</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-pack-new" aria-hidden="true" role="dialog" aria-labelledby="dlg-pack-new-title">
+  <div class="dialog">
+    <h2 id="dlg-pack-new-title">新建素材包</h2>
+    
+  <label>名称<input placeholder="例如：室内带货" data-write></label>
+  <label>搜索视频<input type="search" data-write></label>
+  <h3 class="erp-section-heading">库内视频</h3>
+  <label class="field inline"><input type="checkbox" data-write> 室内口播 A · 已入库</label>
+  <h3 class="erp-section-heading">待上传视频</h3>
+  <label>添加视频<input type="file" accept="video/mp4,video/webm,video/quicktime" data-write></label>
+  <p>正在上传 1 个文件… 正在确认入库… 每次最多添加 20 段视频。</p>
+  <p>未保存的组包选择会清除。已入库的视频仍保留在公共资产库。</p>
+  <p>保存结果尚未确认。重试会继续同一次建包。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-pack-new">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-pack-new" data-open="dlg-asset-verify">创建素材包</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-pack-add" aria-hidden="true" role="dialog" aria-labelledby="dlg-pack-add-title">
+  <div class="dialog">
+    <h2 id="dlg-pack-add-title">加入已有包</h2>
+    
+  <p>为「服装图 12」选择公共素材包。图片通常加入包的方式以服务端规则为准；此处演示加入已有包入口。</p>
+  <label>公共素材包
+    <select data-write><option>室内带货</option></select>
+  </label>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-pack-add">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-pack-add" data-open="dlg-asset-verify">确认加入</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-pack-add-video" aria-hidden="true" role="dialog" aria-labelledby="dlg-pack-add-video-title">
+  <div class="dialog">
+    <h2 id="dlg-pack-add-video-title">添加到素材包</h2>
+    
+  <p>素材包只接收已入库的视频。</p>
+  <label>搜索视频<input data-write></label>
+  <label class="field inline"><input type="checkbox" checked data-write> 室内口播 A · 已入库</label>
+  <p>已选 1 段视频</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-pack-add-video">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-pack-add-video" data-open="dlg-asset-verify">确认关联</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-pack-view" aria-hidden="true" role="dialog" aria-labelledby="dlg-pack-view-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-pack-view-title">素材包详情 · 室内带货</h2>
+    
+  <p>已关联「室内带货」。还没有关联素材包时将显示空态。</p>
+  <h3 class="erp-section-heading">包内视频</h3>
+  <ul>
+    <li>室内口播 A
+      <button class="btn btn-sm" type="button">预览 室内口播 A</button>
+      <button class="btn btn-sm" type="button" data-write data-open="dlg-pack-remove">移出 室内口播 A</button>
+    </li>
+  </ul>
+  <p><button class="btn" type="button" data-write data-open="dlg-pack-add-video">添加视频</button></p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-pack-view">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-pack-remove" aria-hidden="true" role="dialog" aria-labelledby="dlg-pack-remove-title">
+  <div class="dialog">
+    <h2 id="dlg-pack-remove-title">移出「室内口播 A」</h2>
+    
+  <p>原视频仍保留在公共资产库。所有关联此包的档案都会看到更新。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-pack-remove">取消</button><button class="btn btn-danger" type="button" data-write data-close="dlg-pack-remove">移出视频</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-asset-verify" aria-hidden="true" role="dialog" aria-labelledby="dlg-asset-verify-title">
+  <div class="dialog">
+    <h2 id="dlg-asset-verify-title">操作确认</h2>
+    
+  <p>素材资料已保存。已入库「室内口播 A」。素材已从全局库删除。已添加视频。已移出视频。原视频仍在公共资产库。</p>
+  <p>未能确认操作结果。请先核对当前记录，再决定是否重试。保存结果不符时不会自动重试。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-asset-verify">关闭</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

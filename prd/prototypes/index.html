@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>产品原型 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="login-page">
+    <header class="erp-intro" style="max-width:1560px;margin:0 auto 24px;padding:8px 8px 0;">
+      <div>
+        <p class="erp-eyebrow">TTS-ERP · PRODUCT PROTOTYPE</p>
+        <h1 class="login-welcome" style="font-size:36px;">面向 TikTok Shop 的本地分析 ERP</h1>
+        <p class="erp-description">把 TikTok Shop、妙手采购、Chrome 扩展采集和汇率快照汇入本地分析库，提供运营页面和 SPU 盈利分析。这是读侧分析系统：可以写入同步数据、配置和人工成本，但不修改真实 TikTok 店铺订单、退货、取消或发货状态。</p>
+      </div>
+      <div class="erp-intro-actions">
+        <a class="btn btn-primary" href="login.html">从登录页进入</a>
+        <a class="btn" href="dashboard.html">直接进入控制台</a>
+      </div>
+    </header>
+    <main class="sitemap" style="max-width:1560px;margin:0 auto;">
+      <p class="sample-banner">本包按现网功能和布局复刻全部工作台页面，供对照验收。不连接后端，表格中的数字均为示例数据。顶栏可切换「系统管理员 / 运营 / 只读分析」，用于观察权限差异。开发已提交，待产品按 03 第 6 节逐页验收。</p>
+      <section class="sitemap-group">
+        <h2>公共 / 辅助页（无侧栏）</h2>
+        <div class="sitemap-links">
+          <a href="login.html"><strong>登录</strong><span>用户名 + 密码，会话核对，无自助注册</span></a>
+          <a href="oauth-onboard.html"><strong>新店接入授权说明</strong><span>引导前往店铺注册台获取链接</span></a>
+          <a href="message.html"><strong>授权结果页</strong><span>成功结果、授权链接与有效期</span></a>
+        </div>
+      </section>
+      <section class="sitemap-group" id="overview">
+        <h2>总览</h2>
+        <div class="sitemap-links">
+          <a href="dashboard.html"><strong>控制台</strong><span>数据摘要、店铺列表、系统状态与数据同步状态</span></a>
+        </div>
+      </section>
+      <section class="sitemap-group">
+        <h2>经营分析</h2>
+        <div class="sitemap-links">
+          <a href="focused-spus.html"><strong>重点关注 SPU</strong><span>关注清单 + 销售/成本/利润三卡经营概览</span></a>
+          <a href="spu-roi.html"><strong>SPU ROI</strong><span>全量 / 指定范围盈利大盘与明细</span></a>
+          <a href="spu-profit-deterioration.html"><strong>利润劣化告警</strong><span>7 天 / 3 天两期对比，无阈值告警</span></a>
+          <a href="ad-daily.html"><strong>广告日明细</strong><span>按店铺、账户、日期筛选，金额为 USD</span></a>
+        </div>
+      </section>
+      <section class="sitemap-group">
+        <h2>基础设置</h2>
+        <div class="sitemap-links">
+          <a href="manual-costs.html"><strong>采购工作台</strong><span>人工成本草稿、逐行提交与结果核对</span></a>
+          <a href="shops.html"><strong>店铺注册</strong><span>插件发现、App 配置、授权链接与核对</span></a>
+          <a href="enum-map.html"><strong>枚举映射</strong><span>来源字段与中文标签（维护需管理员）</span></a>
+          <a href="runtime-configs.html"><strong>运行配置</strong><span>草稿、发布检查、历史与凭证</span></a>
+          <a href="sync-jobs.html"><strong>定时任务</strong><span>周期调度、立即执行与命令核对</span></a>
+          <a href="users.html"><strong>用户管理</strong><span>账号、角色权限目录、会话（仅管理员可写）</span></a>
+        </div>
+      </section>
+      <section class="sitemap-group">
+        <h2>数据工具</h2>
+        <div class="sitemap-links">
+          <a href="intercept-configs.html"><strong>拦截配置</strong><span>采集规则、启停、导入导出</span></a>
+          <a href="intercept-requests.html"><strong>拦截记录</strong><span>请求明细与响应详情</span></a>
+          <a href="intercept-stats.html"><strong>拦截统计</strong><span>近 7 天 UTC 趋势与分布</span></a>
+          <a href="video-publish.html"><strong>视频发布</strong><span>本地上传、确认入队与任务详情（内置角色仅管理员）</span></a>
+        </div>
+      </section>
+      <section class="sitemap-group">
+        <h2>内容资产</h2>
+        <div class="sitemap-links">
+          <a href="media-assets.html"><strong>资产管理</strong><span>图片 / 视频库、标签与公共素材包</span></a>
+          <a href="digital-humans.html"><strong>数字人</strong><span>档案、形象照片与关联素材</span></a>
+          <a href="runninghub.html"><strong>换装视频</strong><span>按批次生成、核对与成片下载</span></a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="proto.js"></script>
+</body>
+</html>

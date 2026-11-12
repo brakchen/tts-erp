@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>新店接入授权说明 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <main class="aux-main">
+    <section class="erp-card aux-card stack">
+      <h1>新店接入授权</h1>
+      <p class="meta">选择目标店铺，完成卖家授权</p>
+      <p>先在店铺注册台选择店铺、配置 App，再获取该店铺的授权链接。</p>
+      <ol class="steps">
+        <li>在店铺注册台选择目标店铺并配置 App。</li>
+        <li>获取授权链接，使用该店铺的卖家账号打开授权页面。</li>
+        <li>完成 TikTok 授权后，回调页面会显示结果；同步任务在下次运行时接管。</li>
+      </ol>
+      <p class="meta">Partner Center 回调地址：<code>/v2/oauth/tiktok/callback</code>（示例，离线原型不接后端）</p>
+      <p><a class="btn btn-primary" href="shops.html">前往店铺注册台</a></p>
+    </section>
+    <section class="alert" style="margin-top:16px;">
+      <strong>权限与有效期</strong>
+      <p>只读账号可查看说明；生成链接需要 readwrite 及以上权限和店铺页面访问权限。授权链接单次有效，过期或已使用后请重新获取。</p>
+    </section>
+  </main>
+
+  <script src="proto.js"></script>
+</body>
+</html>

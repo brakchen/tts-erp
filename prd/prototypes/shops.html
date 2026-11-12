@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>店铺注册 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="shops" data-title="店铺注册" data-desc="从插件发现到 App 配置与授权，完成每家店铺的接入。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">SHOP ONBOARDING</p>
+    <h2>店铺接入管理</h2>
+    <p class="erp-description">从插件发现到 App 配置与授权，在这里完成每家店铺的接入。</p>
+  </div>
+  <div class="erp-intro-actions">
+    <button class="btn btn-primary" type="button" data-write data-open="dlg-shop-new">手工补录店铺</button>
+  </div>
+</section>
+<p class="meta">只读进入时显示：「当前为只读权限，配置和授权需要写入权限。」可写角色可进行配置和授权。</p>
+<form class="erp-filters" aria-label="店铺筛选">
+  <label>店铺名称 / ID / 编码<input type="search" placeholder="店铺名称 / ID / 编码"></label>
+  <label>发现来源
+    <select><option>全部来源</option><option>Ads 插件</option><option>Monitor 插件</option></select>
+  </label>
+  <label>App 配置
+    <select><option>全部配置</option><option>已配置</option><option>未配置</option></select>
+  </label>
+  <label>OAuth 授权
+    <select><option>全部授权状态</option><option>未授权</option><option>已授权</option><option>需重新授权</option><option>未上报</option></select>
+  </label>
+  <button class="btn" type="button">查询</button>
+</form>
+<div class="demo-states" data-demo-group="shops"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+<div data-demo-panel="shops" data-demo="ok" class="">
+<div class="erp-table-wrap">
+  <table class="erp-table" aria-label="店铺接入列表">
+    <thead><tr><th>店铺</th><th>区域 / 开店日期</th><th>插件资料同步</th><th>App 配置</th><th>OAuth 授权</th><th>操作</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><div class="primary">示例店铺 A</div><div class="id">7490000001</div></td>
+        <td>US · 2025-03-01</td>
+        <td>
+          <div>Ads</div>
+          <div class="erp-table-meta">2026-11-12 21:40:00</div>
+        </td>
+        <td><span class="badge badge-ok">已配置</span><p class="meta">Service ID · svc-10001</p></td>
+        <td><span class="badge badge-ok">已授权</span><p class="erp-table-meta">自动同步已接入</p></td>
+        <td class="gap-2">
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-shop-edit">编辑店铺信息</button>
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-shop-app">配置当前店铺 App</button>
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-shop-auth">获取授权链接</button>
+        </td>
+      </tr>
+      <tr>
+        <td><div class="primary">示例店铺 B</div><div class="id">7490000002</div></td>
+        <td>GB · 未填开店日期</td>
+        <td><span class="erp-table-meta">尚无插件上报</span></td>
+        <td><span class="badge">未配置</span><p class="meta">未填 Service ID</p></td>
+        <td><span class="badge badge-warn">需重新授权</span><p class="erp-table-meta">请重新完成店铺授权</p></td>
+        <td class="gap-2">
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-shop-edit-b">编辑店铺信息</button>
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-shop-app">配置当前店铺 App</button>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<div class="erp-pagination" aria-label="店铺分页"><p>共 2 条（示例）</p></div>
+</div>
+<div data-demo-panel="shops" data-demo="loading" class="hidden"><p role="status">店铺列表加载中…</p></div>
+<div data-demo-panel="shops" data-demo="error" class="hidden"><div class="alert alert-danger"><p>读取店铺失败（HTTP 500）。店铺列表暂不可用，请重试</p><p><button class="btn" type="button">重试</button></p></div></div>
+<div class="dialog-backdrop" id="dlg-shop-new" aria-hidden="true" role="dialog" aria-labelledby="dlg-shop-new-title">
+  <div class="dialog">
+    <h2 id="dlg-shop-new-title">手工补录店铺</h2>
+    
+  <form aria-label="店铺表单" class="stack">
+    <label>店铺 ID<input data-write required></label>
+    <label>店铺名称<input data-write placeholder="未取得店铺名称"></label>
+    <label>区域<input data-write placeholder="区域待同步"></label>
+    <label>开店日期<input type="date" data-write></label>
+    <p class="meta">未填开店日期可以保存，列表中会标明「未填开店日期」。</p>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-shop-new">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-shop-new" data-open="dlg-shop-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-shop-edit" aria-hidden="true" role="dialog" aria-labelledby="dlg-shop-edit-title">
+  <div class="dialog">
+    <h2 id="dlg-shop-edit-title">编辑店铺信息</h2>
+    
+  <form class="stack" aria-label="店铺表单">
+    <label>店铺 ID<input value="7490000001" disabled></label>
+    <label>店铺名称<input value="示例店铺 A" data-write></label>
+    <label>区域<input value="US" data-write></label>
+    <label>开店日期<input type="date" value="2025-03-01" data-write></label>
+  </form>
+  <p class="meta">关闭前若有未保存修改，将弹出确认。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-shop-edit" data-open="dlg-shop-discard">关闭店铺表单</button><button class="btn btn-primary" type="button" data-write data-close="dlg-shop-edit" data-open="dlg-shop-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-shop-edit-b" aria-hidden="true" role="dialog" aria-labelledby="dlg-shop-edit-b-title">
+  <div class="dialog">
+    <h2 id="dlg-shop-edit-b-title">编辑店铺信息</h2>
+    
+  <form class="stack" aria-label="店铺表单">
+    <label>店铺 ID<input value="7490000002" disabled></label>
+    <label>店铺名称<input value="示例店铺 B" data-write></label>
+    <label>区域<input value="GB" data-write></label>
+    <label>开店日期<input type="date" data-write></label>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-shop-edit-b">关闭</button><button class="btn btn-primary" type="button" data-write data-close="dlg-shop-edit-b" data-open="dlg-shop-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-shop-app" aria-hidden="true" role="dialog" aria-labelledby="dlg-shop-app-title">
+  <div class="dialog">
+    <h2 id="dlg-shop-app-title">配置当前店铺 App</h2>
+    
+  <p>首次配置需填写完整 App Key 和 App Secret。</p>
+  <p>密钥留空表示保留；更换时请成对填写。切换 Service ID 时需提供对应配置。</p>
+  <label>Service ID<input value="" placeholder="未填 Service ID 时请先补齐" data-write></label>
+  <label>App Key<input data-write autocomplete="off"></label>
+  <label>App Secret<input type="password" data-write autocomplete="off"></label>
+  <p class="alert alert-warn">请成对填写 App Key 和 App Secret。只填其中一项时不能保存。</p>
+  <p class="meta">读取结果不会显示密钥；再次保存会重新写入配置。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-shop-app">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-shop-app" data-open="dlg-shop-verify">保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-shop-auth" aria-hidden="true" role="dialog" aria-labelledby="dlg-shop-auth-title">
+  <div class="dialog">
+    <h2 id="dlg-shop-auth-title">为当前店铺授权</h2>
+    
+  <p class="primary">示例店铺 A</p>
+  <p class="meta">店铺 7490000001 · Service svc-10001</p>
+  <p>请使用此店铺完成授权。成功后系统会自动开始同步。</p>
+  <p class="meta">链接有效至 2026-11-12 23:50:00，仅可使用一次。</p>
+  <p class="code-block">https://seller.example/oauth/authorize?state=demo-once-token（示例）</p>
+  <div class="gap-2">
+    <a class="btn btn-primary" href="message.html">打开授权页面</a>
+    <button class="btn" type="button" data-copy="https://seller.example/oauth/authorize?state=demo-once-token" data-copy-status="shop-copy" data-copy-ok="授权链接已复制" data-copy-fail="复制失败，请手动选择链接复制">复制链接</button>
+  </div>
+  <p id="shop-copy" role="status"></p>
+  <p class="meta">重新获取会生成新的授权链接。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-shop-auth">关闭授权链接</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-shop-verify" aria-hidden="true" role="dialog" aria-labelledby="dlg-shop-verify-title">
+  <div class="dialog">
+    <h2 id="dlg-shop-verify-title">提交结果核对</h2>
+    
+  <p>已读取当前记录，请核对后再决定是否提交。</p>
+  <p>店铺信息已保存（示例）。当前店铺的 App 配置已保存，可以获取授权链接。</p>
+  <p>未查到记录，不能据此确认原提交未生效。</p>
+  <p>查询当前记录不能证明原请求的提交结果。尚未完成核对，请稍后重试。</p>
+  <p role="status">核对中… 请求冷却中，请稍后再操作当前店铺。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-shop-verify">关闭</button><button class="btn" type="button" data-write>读取当前记录核对</button><button class="btn btn-primary" type="button" data-write>核对后重新保存</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-shop-discard" aria-hidden="true" role="dialog" aria-labelledby="dlg-shop-discard-title">
+  <div class="dialog">
+    <h2 id="dlg-shop-discard-title">放弃本次尚未保存的修改？</h2>
+    
+  <p>放弃后，本次店铺表单中的修改不会保存。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-shop-discard">继续编辑</button><button class="btn btn-danger" type="button" data-close="dlg-shop-discard">放弃修改</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

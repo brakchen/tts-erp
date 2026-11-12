@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>视频发布 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="video-publish" data-title="视频发布" data-desc="查看设备与任务状态，管理发布队列并核对执行结果。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">PUBLISH QUEUE</p>
+    <h2>从视频素材，到发布结果</h2>
+    <p class="erp-description">查看设备与任务状态，管理发布队列并核对执行结果。</p>
+  </div>
+</section>
+<p class="meta">自动刷新：<button class="btn btn-sm" type="button">开（每 5 秒）</button> <button class="btn btn-sm" type="button">关</button></p>
+
+<section class="erp-card stack">
+  <h2 class="erp-section-heading">发布配置</h2>
+  <dl class="dl-facts">
+    <dt>允许内容类型</dt><dd>video/mp4</dd>
+    <dt>允许扩展名</dt><dd>mp4</dd>
+    <dt>视频上限（字节）</dt><dd>104,857,600</dd>
+    <dt>文案上限（字符）</dt><dd>2,200</dd>
+    <dt>上传票据 TTL（秒）</dt><dd>900</dd>
+    <dt>Worker 状态</dt><dd>运行中</dd>
+    <dt>最近心跳</dt><dd>2026-11-12 22:00:01</dd>
+    <dt>设备状态</dt><dd>在线 2 / 忙 1</dd>
+    <dt>设备说明</dt><dd>目标设备需安装指定应用并保持前台可用（示例）</dd>
+    <dt>核验等级</dt><dd>standard</dd>
+    <dt>Worker poll（秒）</dt><dd>5</dd>
+    <dt>Worker lease（秒）</dt><dd>60</dd>
+    <dt>Worker heartbeat（秒）</dt><dd>15</dd>
+    <dt>创建条件 canWrite</dt><dd>是（管理员）。继续上传与确认入队需要 readwrite 能力提示，以服务端校验为准。</dd>
+    <dt>创建阻止原因</dt><dd>无。若能力不足，此处将显示服务端阻止原因，且无法创建任务。</dd>
+    <dt>配置服务器时间</dt><dd>2026-11-12 22:00:05</dd>
+  </dl>
+  <p class="alert">服务端创建条件尚不可用时，不能创建新任务。能力不足时将保留此提示。</p>
+</section>
+
+<section class="erp-card stack">
+  <h2 class="erp-section-heading">新建发布任务</h2>
+  <p>选择并预览本地 MP4。续传必须选择原文件名和原大小的视频；可先放弃续传再创建其他任务。</p>
+  <label>选择 MP4 视频<input type="file" accept="video/mp4" data-write></label>
+  <div class="file-drop">本地视频预览 · 48 秒 · 1080×1920（示例占位，未选择文件时不播放）</div>
+  <label>完整文案<textarea rows="4" maxlength="2200" data-write placeholder="完整文案"></textarea></label>
+  <label>创建目标设备
+    <select data-write>
+      <option selected>默认 · DEV-****18</option>
+      <option>DEV-****22 · 忙</option>
+      <option>DEV-****09（本次列表未返回；提交时由服务端校验）</option>
+    </select>
+  </label>
+  <p class="meta">相册：默认相册。当前选择：DEV-****18。设备列表已更新时原选择保持不变；列表不可用时仍可使用默认设备。</p>
+  <div class="gap-2">
+    <button class="btn btn-primary" type="button" data-write data-open="dlg-vp-create">创建任务</button>
+    <button class="btn" type="button" data-write data-open="dlg-vp-resume">续传已有任务</button>
+    <button class="btn" type="button" data-write data-open="dlg-vp-discard">放弃草稿</button>
+  </div>
+</section>
+
+<section class="erp-card stack">
+  <h2 class="erp-section-heading">上传进度（示例：二进制已完成，尚未发布）</h2>
+  <dl class="dl-facts">
+    <dt>上传任务 ID</dt><dd class="id">task-8801</dd>
+    <dt>上传 rowVersion</dt><dd>3</dd>
+    <dt>当前服务端阶段</dt><dd>WAIT_CONFIRM</dd>
+    <dt>原 clientRequestId</dt><dd class="id">cr-8801</dd>
+  </dl>
+  <p>视频上传进度</p>
+  <div class="progress" aria-label="视频上传进度"><span style="width:100%"></span></div>
+  <p role="status">传输完成。二进制上传已完成。请核对后明确点击「确认上传并入队」；尚未发布。</p>
+  <div class="gap-2">
+    <button class="btn btn-primary" type="button" data-write data-open="dlg-vp-enqueue">确认上传并入队</button>
+    <button class="btn" type="button" data-open="dlg-vp-check">核对任务</button>
+  </div>
+  <p class="meta">上传未确认时文件与文案已保留。先查询当前任务，再明确决定重试上传；不会自动入队。</p>
+</section>
+
+<section class="erp-card">
+  <h2 class="erp-section-heading">示例阶段一览</h2>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="上传阶段示例">
+      <thead><tr><th>阶段</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>上传中</td><td>正在传输文件，可查看进度；中断后对象结果未确认。</td></tr>
+        <tr><td>待确认</td><td>二进制完成，须明确点击「确认上传并入队」，尚未发布。</td></tr>
+        <tr><td>已入队</td><td>服务端已确认上传并入队。草稿仍保留；可明确清除后创建下一任务。</td></tr>
+        <tr><td>失败</td><td>视频上传未完成或中断，可按原文件名和原大小续传。</td></tr>
+        <tr><td>续传</td><td>须使用原文件名和原大小；已选择续传任务后请选择原视频。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="erp-card stack">
+  <h2 class="erp-section-heading">当前发布轨道</h2>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="当前发布轨道">
+      <thead><tr><th>设备</th><th>任务</th><th>状态</th><th>阶段</th><th>运行阶段</th><th>运行阶段开始</th><th>下次清理重试</th><th>版本</th><th></th></tr></thead>
+      <tbody>
+        <tr>
+          <td>DEV-****18</td><td class="id">task-8801</td>
+          <td>待确认</td><td>WAIT_CONFIRM</td><td>—</td><td>—</td><td>—</td><td>3</td>
+          <td><button class="btn btn-sm" type="button" data-open="dlg-vp-detail-8801">轨道详情 task-8801</button></td>
+        </tr>
+        <tr>
+          <td>DEV-****22</td><td class="id">task-8790</td>
+          <td>已入队</td><td>QUEUED</td><td>PUBLISH</td><td>2026-11-12 21:58</td><td>—</td><td>7</td>
+          <td><button class="btn btn-sm" type="button" data-open="dlg-vp-detail-8790">轨道详情 task-8790</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="stack">
+  <h2 class="erp-section-heading">任务记录</h2>
+  <div class="demo-states" data-demo-group="tasks"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">当前筛选下没有任务</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+  <div data-demo-panel="tasks" data-demo="ok" class="">
+  <div class="erp-table-wrap" role="region" aria-label="任务表格滚动区域" tabindex="0">
+    <table class="erp-table" aria-label="视频发布任务">
+      <thead><tr>
+        <th>任务 ID / 版本</th><th>状态 / 阶段 / 队列</th><th>视频 / 大小</th><th>文案</th>
+        <th>发布 / 核验 / 总执行</th><th>创建者 / 时间</th><th>服务端操作</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td class="id">task-8801 / v3</td>
+          <td>待确认 / WAIT_CONFIRM / —</td>
+          <td>demo-origin.mp4 · 12,345,678 字节</td>
+          <td>秋季上新口播（示例）</td>
+          <td>0 / 0 / 0</td>
+          <td>demo.admin · 2026-11-12 21:50</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-open="dlg-vp-detail-8801">查看详情 task-8801</button>
+            <button class="btn btn-sm" type="button" data-write data-open="dlg-vp-enqueue">确认上传并入队</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="id">task-8790 / v7</td>
+          <td>已入队 / QUEUED / 1</td>
+          <td>clip-02.mp4 · 8,200,111 字节</td>
+          <td>好物推荐（示例）</td>
+          <td>1 / 0 / 1</td>
+          <td>demo.admin · 2026-11-12 20:10</td>
+          <td><button class="btn btn-sm" type="button" data-open="dlg-vp-detail-8790">查看详情 task-8790</button></td>
+        </tr>
+        <tr>
+          <td class="id">task-8702 / v4</td>
+          <td>失败 / UPLOAD_FAILED / —</td>
+          <td>retry-me.mp4 · 9,000,001 字节</td>
+          <td>续传示例</td>
+          <td>0 / 0 / 1</td>
+          <td>demo.admin · 2026-11-12 18:00</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-open="dlg-vp-detail-8702">查看详情 task-8702</button>
+            <button class="btn btn-sm" type="button" data-write data-open="dlg-vp-resume">重新选择文件继续</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>后续任务可继续翻页（示例仅一页）。</p>
+  </div>
+  <div data-demo-panel="tasks" data-demo="empty" class="hidden"><p class="erp-empty">当前筛选下没有任务。</p></div>
+  <div data-demo-panel="tasks" data-demo="loading" class="hidden"><p role="status">任务记录加载中…</p></div>
+  <div data-demo-panel="tasks" data-demo="error" class="hidden"><div class="alert alert-danger"><p>任务列表读取失败（示例）</p><p><button class="btn" type="button">重试</button></p></div></div>
+</section>
+
+<div class="dialog-backdrop" id="dlg-vp-create" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-create-title">
+  <div class="dialog">
+    <h2 id="dlg-vp-create-title">创建任务</h2>
+    
+  <p>将按当前文件名、原大小和完整文案创建任务。请使用原文件名和原大小，以便后续续传。</p>
+  <p>请选择符合服务端上限的非空 MP4 视频。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-create">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-vp-create">创建任务</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-vp-resume" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-resume-title">
+  <div class="dialog">
+    <h2 id="dlg-vp-resume-title">续传已有任务</h2>
+    
+  <p>续传必须选择原文件名和原大小的视频；可先放弃续传再创建其他任务。</p>
+  <p>已选择续传任务 task-8702；请选择原视频。原任务身份与完整文案保留。</p>
+  <label>选择原 MP4<input type="file" accept="video/mp4" data-write></label>
+  <p class="meta">续传事实不匹配或加载期间草稿已修改时，不会覆盖输入。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-resume">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-vp-resume">开始续传</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-vp-discard" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-discard-title">
+  <div class="dialog">
+    <h2 id="dlg-vp-discard-title">放弃草稿确认</h2>
+    <p>所选文件和填写的文案将清除。已创建的任务不受影响。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-discard">继续编辑</button><button class="btn btn-danger" type="button" data-close="dlg-vp-discard">放弃草稿</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-vp-enqueue" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-enqueue-title">
+  <div class="dialog">
+    <h2 id="dlg-vp-enqueue-title">队列确认</h2>
+    
+  <section class="stack" aria-label="确认视频预览">
+    <p>文件：demo-origin.mp4</p>
+    <p>大小（字节）：12,345,678</p>
+    <p>完整文案：秋季上新口播（示例）</p>
+    <p>设备：DEV-****18</p>
+    <p>相册：默认相册</p>
+    <p class="alert">二进制上传已完成。请核对后明确点击「确认上传并入队」；尚未发布。</p>
+  </section>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-enqueue">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-vp-enqueue" data-open="dlg-vp-verify">确认上传并入队</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-vp-check" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-check-title">
+  <div class="dialog">
+    <h2 id="dlg-vp-check-title">核对任务</h2>
+    
+  <dl class="dl-facts">
+    <dt>核对状态</dt><dd>WAIT_CONFIRM</dd>
+    <dt>核对阶段</dt><dd>WAIT_CONFIRM</dd>
+    <dt>核对版本</dt><dd>3</dd>
+    <dt>核对允许操作</dt><dd>confirm_enqueue</dd>
+  </dl>
+  <p>已读取当前事实，不代表原提交或对象上传已确认。请自行核对后决定下一步。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-check">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-vp-verify" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-verify-title">
+  <div class="dialog">
+    <h2 id="dlg-vp-verify-title">任务操作与核对</h2>
+    
+  <p>服务端已确认上传并入队。草稿仍保留；可明确清除后创建下一任务。</p>
+  <p>当前事实已读取，仅供核对，不证明原操作是否提交；输入保留。请根据当前版本与允许操作明确决定是否再次操作。不会自动再次提交。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-verify">关闭</button></div>
+  </div>
+</div>
+
+<div class="dialog-backdrop" id="dlg-vp-detail-8801" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-detail-8801-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-vp-detail-8801-title">任务详情 task-8801</h2>
+    
+    <div class="erp-tabs" data-tabs="dlg-vp-detail-8801-tabs">
+      <button class="btn is-active" type="button" data-tab="content" aria-pressed="true">发布内容</button>
+      <button class="btn" type="button" data-tab="target" aria-pressed="false">目标与进度</button>
+      <button class="btn" type="button" data-tab="object" aria-pressed="false">对象信息</button>
+      <button class="btn" type="button" data-tab="audit" aria-pressed="false">人工确认审计</button>
+      <button class="btn" type="button" data-tab="history" aria-pressed="false">执行历史</button>
+      <button class="btn" type="button" data-tab="cleanup" aria-pressed="false">资源清理</button>
+      <button class="btn" type="button" data-tab="diag" aria-pressed="false">脱敏诊断</button>
+    </div>
+    <div data-tab-panel="dlg-vp-detail-8801-tabs" data-panel="content" class="stack">
+      <dl class="dl-facts">
+        <dt>内容类型</dt><dd>video/mp4</dd>
+        <dt>完整文案</dt><dd>秋季上新口播（示例）</dd>
+        <dt>参数锁定时间</dt><dd>2026-11-12 21:52:00</dd>
+        <dt>最近 Artemis ID</dt><dd class="id">art-1001</dd>
+        <dt>文件名</dt><dd>demo-origin.mp4</dd>
+        <dt>对象文件名</dt><dd>demo-origin.mp4</dd>
+        <dt>文件大小（字节）</dt><dd>12,345,678</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8801-tabs" data-panel="target">
+      <dl class="dl-facts">
+        <dt>包名</dt><dd>com.example.publisher</dd>
+        <dt>设备（掩码）</dt><dd>DEV-****18</dd>
+        <dt>相册</dt><dd>默认相册</dd>
+        <dt>业务状态</dt><dd>待确认</dd>
+        <dt>状态代码</dt><dd>WAIT_CONFIRM</dd>
+        <dt>当前阶段</dt><dd>WAIT_CONFIRM</dd>
+        <dt>阶段代码</dt><dd>WAIT_CONFIRM</dd>
+        <dt>运行阶段</dt><dd>PUBLISH</dd>
+        <dt>队列位置（服务端）</dt><dd>1</dd>
+        <dt>入队时间</dt><dd>2026-11-12 21:55:00</dd>
+        <dt>任务 ID</dt><dd class="id">task-8801</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8801-tabs" data-panel="object">
+      <dl class="dl-facts">
+        <dt>对象 Key</dt><dd class="id">vp/2026/demo-origin.mp4</dd>
+        <dt>对象 ETag</dt><dd class="id">etag-demo</dd>
+        <dt>删除时间</dt><dd>—</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8801-tabs" data-panel="audit">
+      <dl class="dl-facts">
+        <dt>确认人</dt><dd>demo.admin</dd>
+        <dt>确认时间</dt><dd>2026-11-12 21:55:10</dd>
+        <dt>来源状态</dt><dd>WAIT_CONFIRM</dd>
+      </dl>
+      <p>历史自动成功：没有人工确认记录。若尚未确认则显示「暂无人工确认记录」。</p>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8801-tabs" data-panel="history">
+      <h3 class="erp-section-heading">执行 1</h3>
+      <dl class="dl-facts">
+        <dt>执行类型</dt><dd>PUBLISH</dd>
+        <dt>执行状态</dt><dd>SUCCEEDED</dd>
+        <dt>步骤数</dt><dd>6</dd>
+        <dt>失败分类</dt><dd>—</dd>
+        <dt>服务端安全重试判定</dt><dd>可安全重试：否</dd>
+        <dt>开始</dt><dd>2026-11-12 21:55:10</dd>
+        <dt>完成</dt><dd>2026-11-12 21:57:00</dd>
+        <dt>关联发布执行</dt><dd class="id">art-1001</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8801-tabs" data-panel="cleanup">
+      <dl class="dl-facts">
+        <dt>设备清理状态</dt><dd>完成</dd>
+        <dt>设备清理错误</dt><dd>—</dd>
+        <dt>spool 清理状态</dt><dd>完成</dd>
+        <dt>spool 清理错误</dt><dd>—</dd>
+        <dt>可重试清理资源</dt><dd>无</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8801-tabs" data-panel="diag">
+      <h3 class="erp-section-heading">脱敏诊断节选</h3>
+      <p>诊断任务 ID：task-8801 · 诊断 rowVersion：3</p>
+      <p><button class="btn btn-sm" type="button">读取脱敏诊断节选</button> <button class="btn btn-sm" type="button">刷新脱敏诊断节选</button></p>
+      <pre class="code-block">执行 1 脱敏诊断
+开始：2026-11-12 21:55:10
+完成：2026-11-12 21:57:00
+执行错误：无
+Prompt 节选：（已脱敏）
+Artemis 输出：（已脱敏）</pre>
+    </div>
+    
+    <h3 class="erp-section-heading">任务操作</h3>
+    <div class="gap-2">
+      <button class="btn btn-sm" type="button" data-write>重试原任务</button>
+      <button class="btn btn-sm" type="button" data-write>取消任务</button>
+      <button class="btn btn-sm" type="button" data-write>再次自动核验</button>
+      <button class="btn btn-sm" type="button" data-write>重试清理</button>
+      <button class="btn btn-sm" type="button" data-write>重新上传</button>
+      <button class="btn btn-sm" type="button" data-write>确认已发布</button>
+      <button class="btn btn-sm" type="button" data-write>编辑发布设置</button>
+      <button class="btn btn-sm" type="button" data-write>打开人工确认</button>
+    </div>
+    <p class="meta">以服务端任务状态与允许操作为准。取消任务将保留审计记录和原视频，不删除对象。</p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-detail-8801">关闭任务详情</button></div>
+  </div>
+</div><div class="dialog-backdrop" id="dlg-vp-detail-8790" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-detail-8790-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-vp-detail-8790-title">任务详情 task-8790</h2>
+    
+    <div class="erp-tabs" data-tabs="dlg-vp-detail-8790-tabs">
+      <button class="btn is-active" type="button" data-tab="content" aria-pressed="true">发布内容</button>
+      <button class="btn" type="button" data-tab="target" aria-pressed="false">目标与进度</button>
+      <button class="btn" type="button" data-tab="object" aria-pressed="false">对象信息</button>
+      <button class="btn" type="button" data-tab="audit" aria-pressed="false">人工确认审计</button>
+      <button class="btn" type="button" data-tab="history" aria-pressed="false">执行历史</button>
+      <button class="btn" type="button" data-tab="cleanup" aria-pressed="false">资源清理</button>
+      <button class="btn" type="button" data-tab="diag" aria-pressed="false">脱敏诊断</button>
+    </div>
+    <div data-tab-panel="dlg-vp-detail-8790-tabs" data-panel="content" class="stack">
+      <dl class="dl-facts">
+        <dt>内容类型</dt><dd>video/mp4</dd>
+        <dt>完整文案</dt><dd>秋季上新口播（示例）</dd>
+        <dt>参数锁定时间</dt><dd>2026-11-12 21:52:00</dd>
+        <dt>最近 Artemis ID</dt><dd class="id">art-1001</dd>
+        <dt>文件名</dt><dd>demo-origin.mp4</dd>
+        <dt>对象文件名</dt><dd>demo-origin.mp4</dd>
+        <dt>文件大小（字节）</dt><dd>12,345,678</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8790-tabs" data-panel="target">
+      <dl class="dl-facts">
+        <dt>包名</dt><dd>com.example.publisher</dd>
+        <dt>设备（掩码）</dt><dd>DEV-****18</dd>
+        <dt>相册</dt><dd>默认相册</dd>
+        <dt>业务状态</dt><dd>已入队</dd>
+        <dt>状态代码</dt><dd>QUEUED</dd>
+        <dt>当前阶段</dt><dd>QUEUED</dd>
+        <dt>阶段代码</dt><dd>QUEUED</dd>
+        <dt>运行阶段</dt><dd>PUBLISH</dd>
+        <dt>队列位置（服务端）</dt><dd>1</dd>
+        <dt>入队时间</dt><dd>2026-11-12 21:55:00</dd>
+        <dt>任务 ID</dt><dd class="id">task-8790</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8790-tabs" data-panel="object">
+      <dl class="dl-facts">
+        <dt>对象 Key</dt><dd class="id">vp/2026/demo-origin.mp4</dd>
+        <dt>对象 ETag</dt><dd class="id">etag-demo</dd>
+        <dt>删除时间</dt><dd>—</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8790-tabs" data-panel="audit">
+      <dl class="dl-facts">
+        <dt>确认人</dt><dd>demo.admin</dd>
+        <dt>确认时间</dt><dd>2026-11-12 21:55:10</dd>
+        <dt>来源状态</dt><dd>WAIT_CONFIRM</dd>
+      </dl>
+      <p>历史自动成功：没有人工确认记录。若尚未确认则显示「暂无人工确认记录」。</p>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8790-tabs" data-panel="history">
+      <h3 class="erp-section-heading">执行 1</h3>
+      <dl class="dl-facts">
+        <dt>执行类型</dt><dd>PUBLISH</dd>
+        <dt>执行状态</dt><dd>SUCCEEDED</dd>
+        <dt>步骤数</dt><dd>6</dd>
+        <dt>失败分类</dt><dd>—</dd>
+        <dt>服务端安全重试判定</dt><dd>可安全重试：否</dd>
+        <dt>开始</dt><dd>2026-11-12 21:55:10</dd>
+        <dt>完成</dt><dd>2026-11-12 21:57:00</dd>
+        <dt>关联发布执行</dt><dd class="id">art-1001</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8790-tabs" data-panel="cleanup">
+      <dl class="dl-facts">
+        <dt>设备清理状态</dt><dd>完成</dd>
+        <dt>设备清理错误</dt><dd>—</dd>
+        <dt>spool 清理状态</dt><dd>完成</dd>
+        <dt>spool 清理错误</dt><dd>—</dd>
+        <dt>可重试清理资源</dt><dd>无</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8790-tabs" data-panel="diag">
+      <h3 class="erp-section-heading">脱敏诊断节选</h3>
+      <p>诊断任务 ID：task-8790 · 诊断 rowVersion：3</p>
+      <p><button class="btn btn-sm" type="button">读取脱敏诊断节选</button> <button class="btn btn-sm" type="button">刷新脱敏诊断节选</button></p>
+      <pre class="code-block">执行 1 脱敏诊断
+开始：2026-11-12 21:55:10
+完成：2026-11-12 21:57:00
+执行错误：无
+Prompt 节选：（已脱敏）
+Artemis 输出：（已脱敏）</pre>
+    </div>
+    
+    <h3 class="erp-section-heading">任务操作</h3>
+    <div class="gap-2">
+      <button class="btn btn-sm" type="button" data-write>重试原任务</button>
+      <button class="btn btn-sm" type="button" data-write>取消任务</button>
+      <button class="btn btn-sm" type="button" data-write>再次自动核验</button>
+      <button class="btn btn-sm" type="button" data-write>重试清理</button>
+      <button class="btn btn-sm" type="button" data-write>重新上传</button>
+      <button class="btn btn-sm" type="button" data-write>确认已发布</button>
+      <button class="btn btn-sm" type="button" data-write>编辑发布设置</button>
+      <button class="btn btn-sm" type="button" data-write>打开人工确认</button>
+    </div>
+    <p class="meta">以服务端任务状态与允许操作为准。取消任务将保留审计记录和原视频，不删除对象。</p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-detail-8790">关闭任务详情</button></div>
+  </div>
+</div><div class="dialog-backdrop" id="dlg-vp-detail-8702" aria-hidden="true" role="dialog" aria-labelledby="dlg-vp-detail-8702-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-vp-detail-8702-title">任务详情 task-8702</h2>
+    
+    <div class="erp-tabs" data-tabs="dlg-vp-detail-8702-tabs">
+      <button class="btn is-active" type="button" data-tab="content" aria-pressed="true">发布内容</button>
+      <button class="btn" type="button" data-tab="target" aria-pressed="false">目标与进度</button>
+      <button class="btn" type="button" data-tab="object" aria-pressed="false">对象信息</button>
+      <button class="btn" type="button" data-tab="audit" aria-pressed="false">人工确认审计</button>
+      <button class="btn" type="button" data-tab="history" aria-pressed="false">执行历史</button>
+      <button class="btn" type="button" data-tab="cleanup" aria-pressed="false">资源清理</button>
+      <button class="btn" type="button" data-tab="diag" aria-pressed="false">脱敏诊断</button>
+    </div>
+    <div data-tab-panel="dlg-vp-detail-8702-tabs" data-panel="content" class="stack">
+      <dl class="dl-facts">
+        <dt>内容类型</dt><dd>video/mp4</dd>
+        <dt>完整文案</dt><dd>秋季上新口播（示例）</dd>
+        <dt>参数锁定时间</dt><dd>2026-11-12 21:52:00</dd>
+        <dt>最近 Artemis ID</dt><dd class="id">art-1001</dd>
+        <dt>文件名</dt><dd>demo-origin.mp4</dd>
+        <dt>对象文件名</dt><dd>demo-origin.mp4</dd>
+        <dt>文件大小（字节）</dt><dd>12,345,678</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8702-tabs" data-panel="target">
+      <dl class="dl-facts">
+        <dt>包名</dt><dd>com.example.publisher</dd>
+        <dt>设备（掩码）</dt><dd>DEV-****18</dd>
+        <dt>相册</dt><dd>默认相册</dd>
+        <dt>业务状态</dt><dd>失败</dd>
+        <dt>状态代码</dt><dd>UPLOAD_FAILED</dd>
+        <dt>当前阶段</dt><dd>UPLOAD_FAILED</dd>
+        <dt>阶段代码</dt><dd>UPLOAD_FAILED</dd>
+        <dt>运行阶段</dt><dd>PUBLISH</dd>
+        <dt>队列位置（服务端）</dt><dd>1</dd>
+        <dt>入队时间</dt><dd>2026-11-12 21:55:00</dd>
+        <dt>任务 ID</dt><dd class="id">task-8702</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8702-tabs" data-panel="object">
+      <dl class="dl-facts">
+        <dt>对象 Key</dt><dd class="id">vp/2026/demo-origin.mp4</dd>
+        <dt>对象 ETag</dt><dd class="id">etag-demo</dd>
+        <dt>删除时间</dt><dd>—</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8702-tabs" data-panel="audit">
+      <dl class="dl-facts">
+        <dt>确认人</dt><dd>demo.admin</dd>
+        <dt>确认时间</dt><dd>2026-11-12 21:55:10</dd>
+        <dt>来源状态</dt><dd>WAIT_CONFIRM</dd>
+      </dl>
+      <p>历史自动成功：没有人工确认记录。若尚未确认则显示「暂无人工确认记录」。</p>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8702-tabs" data-panel="history">
+      <h3 class="erp-section-heading">执行 1</h3>
+      <dl class="dl-facts">
+        <dt>执行类型</dt><dd>PUBLISH</dd>
+        <dt>执行状态</dt><dd>SUCCEEDED</dd>
+        <dt>步骤数</dt><dd>6</dd>
+        <dt>失败分类</dt><dd>—</dd>
+        <dt>服务端安全重试判定</dt><dd>可安全重试：否</dd>
+        <dt>开始</dt><dd>2026-11-12 21:55:10</dd>
+        <dt>完成</dt><dd>2026-11-12 21:57:00</dd>
+        <dt>关联发布执行</dt><dd class="id">art-1001</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8702-tabs" data-panel="cleanup">
+      <dl class="dl-facts">
+        <dt>设备清理状态</dt><dd>完成</dd>
+        <dt>设备清理错误</dt><dd>—</dd>
+        <dt>spool 清理状态</dt><dd>完成</dd>
+        <dt>spool 清理错误</dt><dd>—</dd>
+        <dt>可重试清理资源</dt><dd>无</dd>
+      </dl>
+    </div>
+    <div class="hidden" data-tab-panel="dlg-vp-detail-8702-tabs" data-panel="diag">
+      <h3 class="erp-section-heading">脱敏诊断节选</h3>
+      <p>诊断任务 ID：task-8702 · 诊断 rowVersion：3</p>
+      <p><button class="btn btn-sm" type="button">读取脱敏诊断节选</button> <button class="btn btn-sm" type="button">刷新脱敏诊断节选</button></p>
+      <pre class="code-block">执行 1 脱敏诊断
+开始：2026-11-12 21:55:10
+完成：2026-11-12 21:57:00
+执行错误：无
+Prompt 节选：（已脱敏）
+Artemis 输出：（已脱敏）</pre>
+    </div>
+    
+    <h3 class="erp-section-heading">任务操作</h3>
+    <div class="gap-2">
+      <button class="btn btn-sm" type="button" data-write>重试原任务</button>
+      <button class="btn btn-sm" type="button" data-write>取消任务</button>
+      <button class="btn btn-sm" type="button" data-write>再次自动核验</button>
+      <button class="btn btn-sm" type="button" data-write>重试清理</button>
+      <button class="btn btn-sm" type="button" data-write>重新上传</button>
+      <button class="btn btn-sm" type="button" data-write>确认已发布</button>
+      <button class="btn btn-sm" type="button" data-write>编辑发布设置</button>
+      <button class="btn btn-sm" type="button" data-write>打开人工确认</button>
+    </div>
+    <p class="meta">以服务端任务状态与允许操作为准。取消任务将保留审计记录和原视频，不删除对象。</p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-vp-detail-8702">关闭任务详情</button></div>
+  </div>
+</div>
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拦截配置 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="intercept-configs" data-title="拦截配置" data-desc="集中管理采集规则、启停状态与捕获范围。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">CAPTURE RULES</p>
+    <h2>让数据采集有章可循</h2>
+    <p class="erp-description">集中管理采集规则、启停状态与捕获范围。</p>
+  </div>
+  <div class="erp-intro-actions">
+    <button class="btn" type="button" data-write>导出全部配置</button>
+    <button class="btn" type="button" data-write data-open="dlg-cfg-import">导入拦截配置</button>
+    <button class="btn btn-primary" type="button" data-write data-open="dlg-cfg-new">新增拦截配置</button>
+  </div>
+</section>
+<form class="erp-filters" aria-label="配置筛选">
+  <label>域名<input placeholder="精确域名"></label>
+  <label>筛选状态
+    <select><option>全部</option><option>启用</option><option>禁用</option></select>
+  </label>
+  <label>搜索<input type="search" placeholder="搜索" class="erp-field-search"></label>
+  <button class="btn" type="button">查询配置</button>
+</form>
+<p class="alert">页面上的「搜索」框目前<strong>不会真正过滤</strong>：域名按服务端精确筛选。保留旧版 search 参数；当前接口未实现搜索，不保证搜索条件生效。排序沿用服务端 ID 倒序。不要以为能搜 endpoint、描述或标签。</p>
+<p class="meta">共 2 条</p>
+<div class="gap-2">
+  <button class="btn btn-sm" type="button" data-write data-open="dlg-cfg-batch-enable">批量启用</button>
+  <button class="btn btn-sm" type="button" data-write data-open="dlg-cfg-batch-disable">批量禁用</button>
+  <button class="btn btn-sm btn-danger" type="button" data-write data-open="dlg-cfg-batch-del">批量删除</button>
+</div>
+<div class="demo-states" data-demo-group="cfg"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">暂无配置</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+<div data-demo-panel="cfg" data-demo="ok" class="">
+<div class="erp-table-wrap">
+  <table class="erp-table" aria-label="拦截配置">
+    <thead><tr>
+      <th>选择</th><th>ID</th><th>域名</th><th>Endpoint</th><th>模式</th><th>状态</th>
+      <th>记录头</th><th>记录体</th><th>描述</th><th>标签</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td><label class="sr-only" for="cfg-sel-12">选择配置 12</label><input id="cfg-sel-12" type="checkbox" checked></td>
+        <td class="id">12</td>
+        <td>seller.tiktok.com</td>
+        <td class="id">/api/v1/orders*</td>
+        <td>白名单</td>
+        <td><span class="badge badge-ok">启用</span></td>
+        <td>是</td><td>是</td>
+        <td>订单列表</td>
+        <td>orders, core</td>
+        <td class="gap-2">
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-cfg-detail-12">详情与编辑</button>
+          <button class="btn btn-sm" type="button" data-open="dlg-cfg-public-12">当前公开配置详情</button>
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-cfg-toggle">禁用配置</button>
+        </td>
+      </tr>
+      <tr>
+        <td><label class="sr-only" for="cfg-sel-13">选择配置 13</label><input id="cfg-sel-13" type="checkbox"></td>
+        <td class="id">13</td>
+        <td>ads.tiktok.com</td>
+        <td class="id">/api/v1/reports*</td>
+        <td>黑名单</td>
+        <td><span class="badge">禁用</span></td>
+        <td>否</td><td>否</td>
+        <td>广告噪音</td>
+        <td>ads</td>
+        <td class="gap-2">
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-cfg-detail-13">详情与编辑</button>
+          <button class="btn btn-sm" type="button" data-write data-open="dlg-cfg-toggle">启用配置</button>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<div class="erp-pagination" aria-label="拦截配置分页"><p>共 2 条 · 第 1 页</p></div>
+</div>
+<div data-demo-panel="cfg" data-demo="empty" class="hidden"><p class="erp-empty">暂无配置</p></div>
+<div data-demo-panel="cfg" data-demo="loading" class="hidden"><p role="status">拦截配置加载中…</p></div>
+<div data-demo-panel="cfg" data-demo="error" class="hidden"><div class="alert alert-danger"><p>读取失败，请明确重试</p><p><button class="btn" type="button">重试</button></p></div></div>
+<div class="dialog-backdrop" id="dlg-cfg-new" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-new-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-new-title">新增拦截配置</h2>
+    
+  <form class="stack" aria-label="配置表单">
+    <label>域名<input data-write required></label>
+    <label>Endpoint<input data-write required></label>
+    <p class="meta">输入完整域名；Endpoint 支持 * 通配符，匹配规则以服务端为准。</p>
+    <fieldset>
+      <legend>模式</legend>
+      <label class="field inline"><input type="radio" name="mode-new" checked data-write> 白名单（记录匹配请求）</label>
+      <label class="field inline"><input type="radio" name="mode-new" data-write> 黑名单（完全跳过）</label>
+    </fieldset>
+    <label>描述<textarea rows="3" data-write></textarea></label>
+    <p class="meta">未填写的描述保持 null；编辑后清空则保存为空字符串。</p>
+    <label>标签（逗号分隔）<input data-write></label>
+    <fieldset>
+      <legend>采集与状态</legend>
+      <label class="field inline"><input type="checkbox" checked data-write> 记录请求/响应头</label>
+      <label class="field inline"><input type="checkbox" checked data-write> 记录请求/响应体</label>
+      <label class="field inline"><input type="checkbox" checked data-write> 启用</label>
+    </fieldset>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-new">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-cfg-new" data-open="dlg-cfg-verify">保存配置</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-detail-12" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-detail-12-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-detail-12-title">配置详情</h2>
+    
+  <form class="stack" aria-label="配置表单">
+    <label>域名<input value="seller.tiktok.com" data-write></label>
+    <label>Endpoint<input value="/api/v1/orders*" data-write></label>
+    <fieldset>
+      <legend>模式</legend>
+      <label class="field inline"><input type="radio" name="mode-12" checked data-write> 白名单（记录匹配请求）</label>
+      <label class="field inline"><input type="radio" name="mode-12" data-write> 黑名单（完全跳过）</label>
+    </fieldset>
+    <label>描述<textarea rows="3" data-write>订单列表</textarea></label>
+    <label>标签（逗号分隔）<input value="orders, core" data-write></label>
+    <fieldset>
+      <legend>采集与状态</legend>
+      <label class="field inline"><input type="checkbox" checked data-write> 记录请求/响应头</label>
+      <label class="field inline"><input type="checkbox" checked data-write> 记录请求/响应体</label>
+      <label class="field inline"><input type="checkbox" checked data-write> 启用</label>
+    </fieldset>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-detail-12">关闭配置窗口</button><button class="btn btn-primary" type="button" data-write data-close="dlg-cfg-detail-12" data-open="dlg-cfg-verify">保存配置</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-detail-13" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-detail-13-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-detail-13-title">配置详情</h2>
+    
+  <form class="stack" aria-label="配置表单">
+    <label>域名<input value="ads.tiktok.com" data-write></label>
+    <label>Endpoint<input value="/api/v1/reports*" data-write></label>
+    <fieldset>
+      <legend>模式</legend>
+      <label class="field inline"><input type="radio" name="mode-13" data-write> 白名单（记录匹配请求）</label>
+      <label class="field inline"><input type="radio" name="mode-13" checked data-write> 黑名单（完全跳过）</label>
+    </fieldset>
+    <label>描述<textarea rows="3" data-write>广告噪音</textarea></label>
+    <label>标签（逗号分隔）<input value="ads" data-write></label>
+    <fieldset>
+      <legend>采集与状态</legend>
+      <label class="field inline"><input type="checkbox" data-write> 记录请求/响应头</label>
+      <label class="field inline"><input type="checkbox" data-write> 记录请求/响应体</label>
+      <label class="field inline"><input type="checkbox" data-write> 启用</label>
+    </fieldset>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-detail-13">关闭</button><button class="btn btn-primary" type="button" data-write data-close="dlg-cfg-detail-13" data-open="dlg-cfg-verify">保存配置</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-public-12" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-public-12-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-public-12-title">当前配置 12</h2>
+    
+  <dl class="dl-facts">
+    <dt>域名</dt><dd>seller.tiktok.com</dd>
+    <dt>Endpoint</dt><dd>/api/v1/orders*</dd>
+    <dt>模式</dt><dd>白名单</dd>
+    <dt>记录请求/响应头</dt><dd>是</dd>
+    <dt>记录请求/响应体</dt><dd>是</dd>
+    <dt>描述</dt><dd>订单列表</dd>
+    <dt>标签</dt><dd>orders, core</dd>
+    <dt>创建时间</dt><dd>2026-09-01 10:00:00</dd>
+    <dt>更新时间</dt><dd>2026-11-10 16:20:00</dd>
+  </dl>
+  <p class="meta">查询详情（需 readwrite 授权）</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-public-12">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-import" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-import-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-import-title">导入拦截配置</h2>
+    
+  <form class="stack" aria-label="导入表单">
+    <label>选择 JSON 文件<input type="file" accept="application/json" data-write></label>
+    <p class="meta">需要非空数组或 {{ configs: [...] }}，每项含合法域名、Endpoint、模式和开关。</p>
+  </form>
+  <section class="erp-card">
+    <h3 class="erp-section-heading">导入结果（示例）</h3>
+    <p>导入已确认：成功 3 条，跳过 1 条，错误 1 条。</p>
+  </section>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-import">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-cfg-import" data-open="dlg-cfg-verify">确认导入</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-batch-enable" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-batch-enable-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-batch-enable-title">确认批量启用</h2>
+    <p>批量启用：将影响已选 1 条配置。确认批量启用？不会自动重试。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-batch-enable">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-cfg-batch-enable" data-open="dlg-cfg-verify">确认执行</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-batch-disable" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-batch-disable-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-batch-disable-title">确认批量禁用</h2>
+    <p>批量禁用：将影响已选 1 条配置。确认批量禁用？</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-batch-disable">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-cfg-batch-disable" data-open="dlg-cfg-verify">确认执行</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-batch-del" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-batch-del-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-batch-del-title">确认批量删除</h2>
+    <p>确认永久删除这些配置？影响 1 条。不会自动重试。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-batch-del">取消</button><button class="btn btn-danger" type="button" data-write data-close="dlg-cfg-batch-del" data-open="dlg-cfg-verify">确认执行</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-toggle" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-toggle-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-toggle-title">确认切换状态</h2>
+    <p>确认禁用此配置？（若当前为禁用，则为确认启用此配置？）</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-toggle">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-cfg-toggle" data-open="dlg-cfg-verify">确认执行</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cfg-verify" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-verify-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-verify-title">提交结果核对</h2>
+    
+  <p>配置保存已确认（或配置启停已确认 / 批量操作已确认：影响 1 条 / 导入已确认：成功 3 条，跳过 1 条，错误 1 条）。</p>
+  <p>当前事实已读取。当前存在或缺席均不能证明原提交结果，也不证明回滚；不会自动重试。可保留草稿并明确决定是否再次提交。</p>
+  <p>全部配置已导出（不受当前筛选或分页限制）。导出未完成时请明确重试。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-verify">关闭</button><button class="btn btn-primary" type="button" data-write>核对后明确重新提交</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运行配置 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="runtime-configs" data-title="运行配置" data-desc="查看已发布版本、编辑草稿，并在确认后发布或恢复历史。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">RUNTIME CONFIG</p>
+    <h2>让每次配置变更都有依据</h2>
+    <p class="erp-description">查看已发布版本、编辑草稿，并在确认后发布或恢复历史。</p>
+  </div>
+  <div class="erp-intro-actions">
+    <button class="btn btn-primary" type="button" data-write data-open="dlg-cfg-create">新建配置</button>
+  </div>
+</section>
+<p class="meta">正在读取或检查，请稍候… / 正在提交，请等待结果，不要重复操作… / 请求过于频繁，等待服务端冷却后可手动重试。</p>
+<div class="erp-tabs" data-tabs="rc-tabs">
+  <button class="btn is-active" type="button" data-tab="list" aria-pressed="true">配置列表</button>
+  <button class="btn" type="button" data-tab="workspace" aria-pressed="false">修改配置</button>
+  <button class="btn" type="button" data-tab="publish" aria-pressed="false">检查发布</button>
+  <button class="btn" type="button" data-tab="history" aria-pressed="false">发布历史</button>
+  <button class="btn" type="button" data-tab="secrets" aria-pressed="false">凭证管理</button>
+</div>
+
+<div data-tab-panel="rc-tabs" data-panel="list" class="stack">
+  <div class="demo-states" data-demo-group="rcl"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">暂无配置</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+  <div data-demo-panel="rcl" data-demo="ok" class="">
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="运行配置">
+      <thead><tr><th>配置</th><th>键</th><th>状态</th><th>草稿</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="primary">视频发布策略</td>
+          <td class="id">video.publish.policy.v1</td>
+          <td><span class="badge badge-ok">已发布 v3</span></td>
+          <td>有已保存草稿</td>
+          <td><button class="btn btn-sm" type="button" data-write data-open-tab="rc-tabs:workspace" data-workspace="video.publish.policy.v1" aria-label="查看与修改 视频发布策略">查看与修改</button></td>
+        </tr>
+        <tr>
+          <td class="primary">换装工作流账户</td>
+          <td class="id">runninghub.account.v1</td>
+          <td><span class="badge">尚未发布</span></td>
+          <td>无草稿</td>
+          <td><button class="btn btn-sm" type="button" data-write data-open-tab="rc-tabs:workspace" data-workspace="runninghub.account.v1" aria-label="查看与修改 换装工作流账户">查看与修改</button></td>
+        </tr>
+        <tr>
+          <td class="primary">已退役灰度开关</td>
+          <td class="id">feature.gray.retired.v1</td>
+          <td><span class="badge">已停用</span></td>
+          <td>无草稿</td>
+          <td><button class="btn btn-sm" type="button" data-write data-open-tab="rc-tabs:workspace" data-workspace="feature.gray.retired.v1" aria-label="查看与修改 已退役灰度开关">查看与修改</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  </div>
+  <div data-demo-panel="rcl" data-demo="empty" class="hidden"><p class="erp-empty">暂无配置，可通过“新建配置”创建</p></div>
+  <div data-demo-panel="rcl" data-demo="loading" class="hidden"><p role="status">配置列表加载中…</p></div>
+  <div data-demo-panel="rcl" data-demo="error" class="hidden"><div class="alert alert-danger"><p>配置列表读取失败（示例）</p><p><button class="btn" type="button">重试</button></p></div></div>
+</div>
+
+<div class="hidden stack" data-tab-panel="rc-tabs" data-panel="workspace">
+  <div data-workspace-panel="video.publish.policy.v1" class="stack">
+  <p><button class="btn" type="button" data-open-tab="rc-tabs:list">返回配置列表</button> <button class="btn" type="button">返回配置概览</button></p>
+  <section class="erp-card stack">
+    <h2 class="erp-section-heading">视频发布策略 / 配置概览</h2>
+    <p class="meta"><code>video.publish.policy.v1</code></p>
+    <p>当前已发布 v3。你正在修改配置，确认发布后才会生效。</p>
+    <p>当前正在编辑已保存、尚未发布的草稿。你的修改尚未保存，也未发布。</p>
+    <div class="compare-grid">
+      <section>
+        <h3 class="erp-section-heading">配置内容（草稿）</h3>
+        <div class="gap-2" role="group" aria-label="配置内容视图切换">
+          <button class="btn btn-sm is-active" type="button">JSON</button>
+          <button class="btn btn-sm" type="button">结构化</button>
+        </div>
+        <label class="sr-only" for="draft-json">草稿 JSON</label>
+        <textarea id="draft-json" rows="8" data-write>{
+  "maxBytes": 104857600,
+  "captionLimit": 2200,
+  "allowExt": ["mp4"]
+}</textarea>
+      </section>
+      <section>
+        <h3 class="erp-section-heading">当前生效内容</h3>
+        <pre class="code-block">{ "maxBytes": 83886080, "captionLimit": 2200, "allowExt": ["mp4"] }</pre>
+        <h3 class="erp-section-heading">最新服务端内容</h3>
+        <pre class="code-block">{ "maxBytes": 83886080, "captionLimit": 2200, "allowExt": ["mp4"] }</pre>
+        <p class="meta">无更新冲突时，「最新服务端内容」与当前生效内容一致。</p>
+      </section>
+    </div>
+    <div class="gap-2">
+      <button class="btn" type="button" data-write>继续编辑草稿</button>
+      <button class="btn btn-primary" type="button" data-write data-open="dlg-rc-publish">完成配置并发布</button>
+      <button class="btn" type="button" data-admin data-open="dlg-rc-disable">停用配置</button>
+      <button class="btn" type="button" data-admin data-open="dlg-rc-enable">重新启用配置</button>
+    </div>
+  </section>
+  </div>
+
+  <div class="hidden stack" data-workspace-panel="runninghub.account.v1">
+  <p><button class="btn" type="button" data-open-tab="rc-tabs:list">返回配置列表</button> <button class="btn" type="button">返回配置概览</button></p>
+  <section class="erp-card stack">
+    <h2 class="erp-section-heading">换装工作流账户 / 配置概览</h2>
+    <p class="meta"><code>runninghub.account.v1</code></p>
+    <p>尚未发布。你正在修改配置，确认发布后才会生效。</p>
+    <p>无草稿。尚未发布的配置没有当前生效内容。</p>
+    <div class="compare-grid">
+      <section>
+        <h3 class="erp-section-heading">配置内容（草稿）</h3>
+        <div class="gap-2" role="group" aria-label="配置内容视图切换">
+          <button class="btn btn-sm is-active" type="button">JSON</button>
+          <button class="btn btn-sm" type="button">结构化</button>
+        </div>
+        <label class="sr-only" for="draft-json-runninghub">草稿 JSON</label>
+        <textarea id="draft-json-runninghub" rows="8" data-write>{
+  "account": ""
+}</textarea>
+      </section>
+      <section>
+        <h3 class="erp-section-heading">当前生效内容</h3>
+        <p class="meta">尚未发布的配置没有当前生效内容。</p>
+        <h3 class="erp-section-heading">最新服务端内容</h3>
+        <p class="meta">尚无已发布内容。</p>
+      </section>
+    </div>
+    <div class="gap-2">
+      <button class="btn" type="button" data-write>继续编辑草稿</button>
+      <button class="btn btn-primary" type="button" data-write data-open="dlg-rc-publish">完成配置并发布</button>
+      <button class="btn" type="button" data-admin data-open="dlg-rc-disable">停用配置</button>
+      <button class="btn" type="button" data-admin data-open="dlg-rc-enable">重新启用配置</button>
+    </div>
+  </section>
+  </div>
+
+  <div class="hidden stack" data-workspace-panel="feature.gray.retired.v1">
+  <p><button class="btn" type="button" data-open-tab="rc-tabs:list">返回配置列表</button> <button class="btn" type="button">返回配置概览</button></p>
+  <section class="erp-card stack">
+    <h2 class="erp-section-heading">已退役灰度开关 / 配置概览</h2>
+    <p class="meta"><code>feature.gray.retired.v1</code></p>
+    <p>已停用。已停用配置不再出现在运行快照。</p>
+    <p>无草稿。</p>
+    <div class="compare-grid">
+      <section>
+        <h3 class="erp-section-heading">配置内容</h3>
+        <pre class="code-block">{ "enabled": false }</pre>
+      </section>
+      <section>
+        <h3 class="erp-section-heading">当前生效内容</h3>
+        <p class="meta">已停用配置不再出现在运行快照。</p>
+        <h3 class="erp-section-heading">最新服务端内容</h3>
+        <pre class="code-block">{ "enabled": false }</pre>
+      </section>
+    </div>
+    <div class="gap-2">
+      <button class="btn" type="button" data-admin data-open="dlg-rc-enable">重新启用配置</button>
+    </div>
+  </section>
+  </div>
+</div>
+
+<div class="hidden stack" data-tab-panel="rc-tabs" data-panel="publish">
+  <section class="erp-card stack">
+    <h2 class="erp-section-heading">发布检查</h2>
+    <p>当前发布 v3（首次发布时显示「首次发布」「尚未发布」）。</p>
+    <h3 class="erp-section-heading">本次内容变更</h3>
+    <pre class="code-block">＋ 新增
+maxBytes: 104857600
+
+− 删除
+maxBytes: 83886080
+
+    未变
+captionLimit, allowExt</pre>
+    <div class="compare-grid">
+      <section><h3 class="erp-section-heading">当前生效内容</h3><pre class="code-block">{ "maxBytes": 83886080, "captionLimit": 2200 }</pre></section>
+      <section><h3 class="erp-section-heading">准备发布的内容</h3><pre class="code-block">{ "maxBytes": 104857600, "captionLimit": 2200 }</pre></section>
+      <section><h3 class="erp-section-heading">最新服务端内容</h3><pre class="code-block">{ "maxBytes": 83886080, "captionLimit": 2200 }</pre></section>
+    </div>
+    <label>发布说明<textarea rows="3" placeholder="选填：说明本次修改的目的" data-write></textarea></label>
+    <div class="gap-2">
+      <button class="btn btn-primary" type="button" data-write data-open="dlg-rc-verify">检查并发布</button>
+      <button class="btn" type="button">返回修改</button>
+    </div>
+  </section>
+</div>
+
+<div class="hidden stack" data-tab-panel="rc-tabs" data-panel="history">
+  <section class="erp-card stack">
+    <h2 class="erp-section-heading">发布历史</h2>
+    <div class="erp-table-wrap">
+      <table class="erp-table" aria-label="发布历史">
+        <thead><tr><th>版本</th><th>发布时间</th><th>说明</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>v3</td><td>2026-11-10 18:00</td><td>上调上传上限</td>
+            <td class="gap-2">
+              <button class="btn btn-sm" type="button" data-open="dlg-rc-rev-3">查看某版内容</button>
+              <button class="btn btn-sm" type="button" data-write data-open="dlg-rc-restore">使用某版内容</button>
+            </td>
+          </tr>
+          <tr>
+            <td>v2</td><td>2026-10-01 12:00</td><td>无发布说明</td>
+            <td class="gap-2">
+              <button class="btn btn-sm" type="button" data-open="dlg-rc-rev-2">查看某版内容</button>
+              <button class="btn btn-sm" type="button" data-write data-open="dlg-rc-restore">使用某版内容</button>
+            </td>
+          </tr>
+          <tr>
+            <td>v1（含退役灰度数据）</td><td>2026-08-01 09:00</td><td>初版，含已退役灰度字段</td>
+            <td>
+              <button class="btn btn-sm" type="button" data-open="dlg-rc-rev-1">查看某版内容</button>
+              <p class="meta">带退役灰度数据的版本不可作为恢复来源</p>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div class="hidden stack" data-tab-panel="rc-tabs" data-panel="secrets">
+  <section class="erp-card stack">
+    <h2 class="erp-section-heading">凭证管理</h2>
+    <p>凭证明文不会回读；归档必须通过服务端引用检查，保留加密记录。</p>
+    <form class="stack" aria-label="凭证写入">
+      <label>凭证名称
+        <select data-write>
+          <option value="">新增凭证</option>
+          <option>runninghub.api-token</option>
+        </select>
+      </label>
+      <label>名称（新增时）<input placeholder="例如 runninghub.api-token" data-write></label>
+      <label>明文（1–16384 字符）<textarea rows="3" data-write placeholder="明文不会回读"></textarea></label>
+      <div class="gap-2">
+        <button class="btn btn-primary" type="button" data-write data-open="dlg-rc-secret-verify">加密保存新凭证</button>
+        <button class="btn" type="button" data-write data-open="dlg-rc-secret-verify">更新并加密保存</button>
+      </div>
+      <p class="alert alert-warn">当前凭证输入尚未保存，请先保存或明确放弃输入。离开本页将拦截未保存输入。</p>
+    </form>
+    <h3 class="erp-section-heading">凭证元数据</h3>
+    <div class="erp-table-wrap">
+      <table class="erp-table" aria-label="凭证元数据">
+        <thead><tr><th>名称</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="id">runninghub.api-token</td>
+            <td><span class="badge badge-ok">有效</span></td>
+            <td>2026-11-01 10:00</td>
+            <td><button class="btn btn-sm" type="button" data-write data-open="dlg-rc-archive">归档凭证</button></td>
+          </tr>
+          <tr>
+            <td class="id">legacy.token</td>
+            <td><span class="badge">已归档</span></td>
+            <td>2026-09-01 10:00</td>
+            <td><button class="btn btn-sm" type="button" data-write data-open="dlg-rc-restore-secret">恢复凭证</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="erp-empty hidden">暂无凭证</p>
+    <p class="meta">名称已存在，请从列表选择更新或恢复该凭证。</p>
+  </section>
+</div>
+
+<div class="dialog-backdrop" id="dlg-cfg-create" aria-hidden="true" role="dialog" aria-labelledby="dlg-cfg-create-title">
+  <div class="dialog">
+    <h2 id="dlg-cfg-create-title">新建配置</h2>
+    
+  <form class="stack">
+    <label>配置键<input placeholder="例如 example.notifications.v1" data-write></label>
+    <label>配置名称<input data-write></label>
+    <p>请填写有效配置键和配置名称。初始内容和校验规则必须是有效 JSON 对象。</p>
+    <label>初始内容<textarea rows="6" data-write>{{ }}</textarea></label>
+    <section>
+      <h3 class="erp-section-heading">新配置 Schema</h3>
+      <label>自定义校验规则（JSON Schema）<textarea rows="6" data-write>{{ "type": "object" }}</textarea></label>
+      <p><button class="btn btn-sm" type="button">校验规则预览已更新</button></p>
+      <pre class="code-block">{{ "type": "object", "additionalProperties": true }}</pre>
+    </section>
+  </form>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cfg-create">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-cfg-create" data-open="dlg-rc-verify">创建配置</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-publish" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-publish-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-publish-title">检查并发布</h2>
+    <p>将进入「检查发布」页签对照本次内容变更、当前生效内容、准备发布的内容和最新服务端内容。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-publish">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-disable" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-disable-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-disable-title">停用配置</h2>
+    <p>停用后不再出现在运行快照，历史记录保留。这不会停止正在运行的任务。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-disable">取消</button><button class="btn btn-danger" type="button" data-admin data-close="dlg-rc-disable" data-open="dlg-rc-verify">停用配置</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-enable" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-enable-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-enable-title">重新启用配置</h2>
+    <p>重新启用原发布版本，不会发布草稿。服务器将检查凭证引用。若尚未发布，则没有可恢复的生效版本。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-enable">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-rc-enable" data-open="dlg-rc-verify">重新启用配置</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-rev-3" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-rev-3-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-rev-3-title">查看 v3 内容</h2>
+    <pre class="code-block">{{ "maxBytes": 83886080, "captionLimit": 2200, "allowExt": ["mp4"] }}</pre>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-rev-3">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-rev-2" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-rev-2-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-rev-2-title">查看 v2 内容</h2>
+    <pre class="code-block">{{ "maxBytes": 52428800, "captionLimit": 2000 }}</pre>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-rev-2">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-rev-1" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-rev-1-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-rev-1-title">查看 v1 内容</h2>
+    <pre class="code-block">{{ "maxBytes": 52428800, "grayFlag": true }}</pre><p class="alert alert-warn">该版本带退役灰度数据，不可作为恢复来源。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-rev-1">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-restore" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-restore-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-restore-title">使用某版内容</h2>
+    <p>将把所选历史版本载入草稿，需再次检查并发布后才会生效。带退役灰度数据的版本不可作为恢复来源。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-restore">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-rc-restore" data-open="dlg-rc-verify">使用该版内容</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-archive" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-archive-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-archive-title">归档凭证</h2>
+    <p>凭证明文不会回读；归档必须通过服务端引用检查，保留加密记录。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-archive">取消</button><button class="btn btn-danger" type="button" data-write data-close="dlg-rc-archive" data-open="dlg-rc-secret-verify">归档凭证</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-restore-secret" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-restore-secret-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-restore-secret-title">恢复凭证</h2>
+    <p>恢复已归档凭证。明文不会回读。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-restore-secret">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-rc-restore-secret" data-open="dlg-rc-secret-verify">恢复凭证</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-verify" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-verify-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-verify-title">提交结果核对</h2>
+    
+  <p>草稿已保存，尚未发布。配置已创建，尚未发布。发布为 v4 已确认（示例）。</p>
+  <p>版本已变化时请重试读取最新详情。停用 / 重新启用已确认。不会自动再次提交。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-verify">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rc-secret-verify" aria-hidden="true" role="dialog" aria-labelledby="dlg-rc-secret-verify-title">
+  <div class="dialog">
+    <h2 id="dlg-rc-secret-verify-title">提交结果核对</h2>
+    <p>凭证加密保存已确认。凭证明文不会回读。</p><p>归档或恢复已确认（示例）。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rc-secret-verify">关闭</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

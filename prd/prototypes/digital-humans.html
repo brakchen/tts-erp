@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>数字人 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="digital-humans" data-title="数字人" data-desc="维护数字人档案、形象照片，并关联素材包或单条素材。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">DIGITAL TALENT</p>
+    <h2>档案 <span class="meta">2 个（示例）</span></h2>
+    <p class="erp-description">维护数字人档案、形象照片，并关联素材包或单条素材。</p>
+  </div>
+  <div class="erp-intro-actions">
+    <label>状态
+      <select aria-label="状态">
+        <option>启用中</option>
+        <option>已归档</option>
+        <option>全部状态</option>
+      </select>
+    </label>
+    <button class="btn btn-primary" type="button" data-write data-open="dlg-human-new">新建数字人</button>
+  </div>
+</section>
+<div class="demo-states" data-demo-group="humans"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">启用中</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">当前没有档案</button><button class="btn btn-sm" type="button" data-demo="archived" aria-pressed="false">暂无已归档的档案</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+<div data-demo-panel="humans" data-demo="ok" class="">
+<ul class="media-grid media-people-grid" aria-label="数字人档案">
+  <li class="erp-card media-card">
+    <div class="person-photo" aria-label="示例主播阿宁的形象照片">照</div>
+    <div class="primary">示例主播阿宁</div>
+    <p class="meta">人设说明：室内带货口播（示例）</p>
+    <div class="gap-2">
+      <button class="btn" type="button" data-open="dlg-human-view-aning">查看档案 示例主播阿宁</button>
+      <button class="btn btn-ghost" type="button" data-write data-open="dlg-human-edit-aning">编辑</button>
+      <button class="btn btn-ghost" type="button" data-write data-open="dlg-human-archive-aning">归档</button>
+      <button class="btn btn-ghost btn-danger" type="button" data-write data-open="dlg-human-del-aning">删除</button>
+    </div>
+  </li>
+  <li class="erp-card media-card">
+    <div class="person-photo" aria-label="示例主播北北的形象照片">照</div>
+    <div class="primary">示例主播北北</div>
+    <p class="meta">已挂载素材包「室内带货」</p>
+    <div class="gap-2">
+      <button class="btn" type="button" data-open="dlg-human-view-beibei">查看档案 示例主播北北</button>
+      <button class="btn btn-ghost" type="button" data-write data-open="dlg-human-edit-beibei">编辑</button>
+      <button class="btn btn-ghost" type="button" data-write data-open="dlg-human-archive-beibei">归档</button>
+      <button class="btn btn-ghost btn-danger" type="button" data-write data-open="dlg-human-del-beibei">删除</button>
+    </div>
+  </li>
+</ul>
+</div>
+<div data-demo-panel="humans" data-demo="empty" class="hidden"><p class="erp-empty">当前没有档案。</p></div>
+<div data-demo-panel="humans" data-demo="archived" class="hidden"><p class="erp-empty">暂无已归档的档案。</p></div>
+<div data-demo-panel="humans" data-demo="loading" class="hidden"><p role="status">档案列表加载中…</p></div>
+<div data-demo-panel="humans" data-demo="error" class="hidden"><div class="alert alert-danger"><p>档案状态结果不符</p><p><button class="btn" type="button">重试</button></p></div></div>
+
+<div class="dialog-backdrop" id="dlg-human-new" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-new-title">
+  <div class="dialog">
+    <h2 id="dlg-human-new-title">新建数字人</h2>
+    <form class="media-form" aria-label="档案资料">
+      <label class="field">数字人名称<input data-write maxlength="64"></label>
+      <div class="media-portrait-editor">
+        <div class="person-photo" aria-label="形象照片预览">照</div>
+        <div class="media-stack">
+          <label class="field">选择照片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-write></label>
+          <button class="btn" type="button" data-write>上传形象照片</button>
+          <span class="meta">形象照片 · 选填</span>
+          <p class="meta">请选择 20 MiB 以内的 JPG、PNG、WebP 或 GIF 图片。可随后上传或更换形象照片。</p>
+        </div>
+      </div>
+      <label class="field">人设说明<textarea rows="3" maxlength="2000" data-write></textarea></label>
+      <p class="meta">尚未保存的档案资料关闭后将清除。档案已创建后，打开档案即可添加素材包。</p>
+      <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-new">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-new" data-open="dlg-human-saved">创建档案</button></div>
+    </form>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-edit-aning" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-edit-aning-title">
+  <div class="dialog">
+    <h2 id="dlg-human-edit-aning-title">编辑档案 · 示例主播阿宁</h2>
+    <form class="media-form" aria-label="档案资料">
+      <label class="field">数字人名称<input value="示例主播阿宁" data-write maxlength="64"></label>
+      <label class="field">人设说明<textarea rows="3" maxlength="2000" data-write>室内带货口播（示例）</textarea></label>
+      <div class="media-portrait-editor">
+        <div class="person-photo" aria-label="形象照片预览">照</div>
+        <div class="media-stack">
+          <p class="meta">请选择 20 MiB 以内的 JPG、PNG、WebP 或 GIF 图片。</p>
+          <p class="meta">无法打开这张图片，请重新选择。（仅在预览失败时出现）</p>
+          <label class="field">选择照片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-write></label>
+          <div class="gap-2">
+            <button class="btn" type="button" data-write>更换照片</button>
+            <button class="btn" type="button" data-write>上传形象照片</button>
+            <button class="btn" type="button" data-write>保存照片</button>
+          </div>
+          <p class="meta">正在准备上传… / 正在上传形象照片… / 正在确认形象照片… / 正在保存档案…</p>
+          <p class="meta">保存后更新档案卡片。</p>
+        </div>
+      </div>
+      <p class="meta">尚未保存的档案资料将清除。</p>
+      <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-edit-aning">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-edit-aning" data-open="dlg-human-saved">保存资料</button></div>
+    </form>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-edit-beibei" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-edit-beibei-title">
+  <div class="dialog">
+    <h2 id="dlg-human-edit-beibei-title">编辑档案 · 示例主播北北</h2>
+    <form class="media-form" aria-label="档案资料">
+      <label class="field">数字人名称<input value="示例主播北北" data-write maxlength="64"></label>
+      <label class="field">人设说明<textarea rows="3" maxlength="2000" data-write>甜美开箱口播（示例）</textarea></label>
+      <div class="media-portrait-editor">
+        <div class="person-photo" aria-label="形象照片预览">照</div>
+        <div class="media-stack">
+          <p class="meta">请选择 20 MiB 以内的 JPG、PNG、WebP 或 GIF 图片。</p>
+          <p class="meta">无法打开这张图片，请重新选择。（仅在预览失败时出现）</p>
+          <label class="field">选择照片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-write></label>
+          <div class="gap-2">
+            <button class="btn" type="button" data-write>更换照片</button>
+            <button class="btn" type="button" data-write>上传形象照片</button>
+            <button class="btn" type="button" data-write>保存照片</button>
+          </div>
+          <p class="meta">正在准备上传… / 正在上传形象照片… / 正在确认形象照片… / 正在保存档案…</p>
+          <p class="meta">保存后更新档案卡片。</p>
+        </div>
+      </div>
+      <p class="meta">尚未保存的档案资料将清除。</p>
+      <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-edit-beibei">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-edit-beibei" data-open="dlg-human-saved">保存资料</button></div>
+    </form>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-view-aning" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-view-aning-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-human-view-aning-title">数字人档案 · 示例主播阿宁</h2>
+    
+  <p>← 返回列表</p>
+  <p class="primary">示例主播阿宁</p>
+  <p class="meta">人设说明：室内带货口播（示例）</p>
+  <div class="person-photo" aria-label="示例主播阿宁的形象照片">照</div>
+  <h3 class="erp-section-heading">素材包</h3>
+  <p>可关联已有公共素材包，也可新建后立即关联。两处看到同一份包。</p>
+  <p>尚未挂载素材包。</p>
+  <div class="gap-2">
+    <button class="btn" type="button" data-write data-open="dlg-human-mount">挂载已有包</button>
+    <button class="btn" type="button" data-write data-open="dlg-human-pack-new">新建并关联</button>
+  </div>
+  <h3 class="erp-section-heading">素材管理</h3>
+  <p>当前没有关联素材。</p>
+  <div class="gap-2">
+    <button class="btn" type="button" data-write data-open="dlg-human-pick-aning">＋ 添加素材</button>
+    <button class="btn" type="button" data-write data-open="dlg-human-upload">从本页上传新素材</button>
+  </div>
+  <h3 class="erp-section-heading">关联素材（较旧入口仍可用）</h3>
+  <p class="meta">仅解除与当前档案的关联，素材和其他档案的关联会保留。</p>
+  <p>当前关联见上方素材管理。较旧入口仍可用于添加或移除单条素材。</p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-view-aning">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-view-beibei" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-view-beibei-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-human-view-beibei-title">数字人档案 · 示例主播北北</h2>
+    
+  <p>← 返回列表</p>
+  <p class="primary">示例主播北北</p>
+  <p class="meta">人设说明：甜美开箱口播（示例）</p>
+  <div class="person-photo" aria-label="示例主播北北的形象照片">照</div>
+  <h3 class="erp-section-heading">素材包</h3>
+  <p>可关联已有公共素材包，也可新建后立即关联。两处看到同一份包。</p>
+  <p>已挂载素材包「室内带货」。</p>
+  <div class="gap-2">
+    <button class="btn" type="button" data-write data-open="dlg-human-mount">挂载已有包</button>
+    <button class="btn" type="button" data-write data-open="dlg-human-pack-new">新建并关联</button>
+  </div>
+  <h3 class="erp-section-heading">素材管理</h3>
+  <p>已关联 2 项素材。</p>
+  <div class="gap-2">
+    <button class="btn" type="button" data-write data-open="dlg-human-pick-beibei">＋ 添加素材</button>
+    <button class="btn" type="button" data-write data-open="dlg-human-upload">从本页上传新素材</button>
+  </div>
+  <h3 class="erp-section-heading">关联素材（较旧入口仍可用）</h3>
+  <p class="meta">仅解除与当前档案的关联，素材和其他档案的关联会保留。</p>
+  <p>当前关联见上方素材管理。较旧入口仍可用于添加或移除单条素材。</p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-view-beibei">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-pick-aning" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-pick-aning-title">
+  <div class="dialog">
+    <h2 id="dlg-human-pick-aning-title">为「示例主播阿宁」添加素材</h2>
+    
+  <p>目标档案：示例主播阿宁</p>
+  <label>名称、说明或标签<input type="search" data-write></label>
+  <label>素材类型
+    <select data-write><option>全部</option><option>视频</option><option>图片</option></select>
+  </label>
+  <label class="field inline"><input type="checkbox" checked data-write> 隐藏已选内容</label>
+  <section aria-label="可选素材">
+    <h3 class="erp-section-heading">可选素材结果</h3>
+    <label class="field inline"><input type="checkbox" data-write> 室内口播 A</label>
+    <label class="field inline"><input type="checkbox" data-write> 服装图 12</label>
+    <p class="meta">符合条件的素材均已添加。取消勾选“隐藏已选内容”可查看。</p>
+    <p class="meta">当前没有可新增的匹配素材。 / 没有符合条件的素材。</p>
+  </section>
+  <p>本次勾选素材：0。已添加素材数量将在确认后更新。</p>
+  <p class="meta">本次勾选的素材尚未添加，关闭后将清除这些选择。提交未完成，待添加的勾选已保留。</p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-pick-aning">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-pick-aning" data-open="dlg-human-add-ok">确认添加</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-pick-beibei" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-pick-beibei-title">
+  <div class="dialog">
+    <h2 id="dlg-human-pick-beibei-title">为「示例主播北北」添加素材</h2>
+    
+  <p>目标档案：示例主播北北</p>
+  <label>名称、说明或标签<input type="search" data-write></label>
+  <label>素材类型
+    <select data-write><option>全部</option><option>视频</option><option>图片</option></select>
+  </label>
+  <label class="field inline"><input type="checkbox" checked data-write> 隐藏已选内容</label>
+  <section aria-label="可选素材">
+    <h3 class="erp-section-heading">可选素材结果</h3>
+    <label class="field inline"><input type="checkbox" data-write> 室内口播 A</label>
+    <label class="field inline"><input type="checkbox" data-write> 服装图 12</label>
+    <p class="meta">符合条件的素材均已添加。取消勾选“隐藏已选内容”可查看。</p>
+    <p class="meta">当前没有可新增的匹配素材。 / 没有符合条件的素材。</p>
+  </section>
+  <p>本次勾选素材：0。已添加素材数量将在确认后更新。</p>
+  <p class="meta">本次勾选的素材尚未添加，关闭后将清除这些选择。提交未完成，待添加的勾选已保留。</p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-pick-beibei">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-pick-beibei" data-open="dlg-human-add-ok">确认添加</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-upload" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-upload-title">
+  <div class="dialog">
+    <h2 id="dlg-human-upload-title">从本页上传新素材</h2>
+    
+  <p>素材已入库后，可在列表中勾选添加。</p>
+  <label>素材文件<input type="file" data-write></label>
+  <label>名称<input data-write></label>
+  <label>说明<textarea rows="3" data-write></textarea></label>
+  <p>上传各阶段：准备、传输进度、等待存储、核对入库，与资产管理页相同。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-upload">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-upload" data-open="dlg-human-saved">开始上传</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-mount" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-mount-title">
+  <div class="dialog">
+    <h2 id="dlg-human-mount-title">挂载已有包</h2>
+    
+  <label>公共素材包
+    <select data-write><option>室内带货</option></select>
+  </label>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-mount">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-mount" data-open="dlg-human-saved">确认关联</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-pack-new" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-pack-new-title">
+  <div class="dialog">
+    <h2 id="dlg-human-pack-new-title">新建并关联</h2>
+    
+  <label>名称<input placeholder="例如：室内带货" data-write></label>
+  <label>说明<textarea rows="3" data-write></textarea></label>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-pack-new">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-pack-new" data-open="dlg-human-saved">创建并关联</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-archive-aning" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-archive-aning-title">
+  <div class="dialog">
+    <h2 id="dlg-human-archive-aning-title">归档「示例主播阿宁」</h2>
+    <p>档案会移到已归档，保留关联素材，可随时恢复。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-archive-aning">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-archive-aning" data-open="dlg-human-saved">确认归档</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-archive-beibei" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-archive-beibei-title">
+  <div class="dialog">
+    <h2 id="dlg-human-archive-beibei-title">归档「示例主播北北」</h2>
+    <p>档案会移到已归档，保留关联素材，可随时恢复。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-archive-beibei">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-human-archive-beibei" data-open="dlg-human-saved">确认归档</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-del-aning" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-del-aning-title">
+  <div class="dialog">
+    <h2 id="dlg-human-del-aning-title">删除档案「示例主播阿宁」</h2>
+    <p>该档案及其关联会被移除，全局素材库中的文件会保留。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-del-aning">取消</button><button class="btn btn-danger" type="button" data-write data-close="dlg-human-del-aning" data-open="dlg-human-saved">确认删除</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-del-beibei" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-del-beibei-title">
+  <div class="dialog">
+    <h2 id="dlg-human-del-beibei-title">删除档案「示例主播北北」</h2>
+    <p>该档案及其关联会被移除，全局素材库中的文件会保留。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-del-beibei">取消</button><button class="btn btn-danger" type="button" data-write data-close="dlg-human-del-beibei" data-open="dlg-human-saved">确认删除</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-add-ok" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-add-ok-title">
+  <div class="dialog">
+    <h2 id="dlg-human-add-ok-title">添加结果</h2>
+    <p>已添加素材。已为当前档案添加所选素材。素材已入库，可在列表中勾选添加。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-add-ok">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-human-saved" aria-hidden="true" role="dialog" aria-labelledby="dlg-human-saved-title">
+  <div class="dialog">
+    <h2 id="dlg-human-saved-title">档案已更新</h2>
+    
+  <p>档案已创建。打开档案即可添加素材包。</p>
+  <p>形象照片已更新。档案资料已保存。档案已移到「已归档」。档案已删除。素材仍在全局库。</p>
+  <p>保存结果不符时请重新查看后再操作。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-human-saved">关闭</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

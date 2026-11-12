@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>采购工作台 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="manual-costs" data-title="采购工作台" data-desc="按店铺核对货源价与人工成本，编辑草稿后确认提交。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">COST WORKBENCH</p>
+    <h2>把商品成本，管理清楚</h2>
+    <p class="erp-description">按店铺核对货源价与人工成本，编辑草稿后确认提交。</p>
+  </div>
+</section>
+<p class="meta">切换店铺、视图、分页或关闭编辑不会丢失草稿。</p>
+<section class="erp-card stack" aria-label="采购范围与筛选">
+  <h2 class="erp-section-heading">店铺与视图</h2>
+  <div class="demo-states" data-demo-group="shoppick"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载店铺</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">店铺加载中</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">暂无可选店铺</button></div>
+  <div data-demo-panel="shoppick" data-demo="ok" class="">
+    <div class="erp-toolbar">
+      <label>店铺
+        <select><option selected>示例店铺 A</option><option>示例店铺 B</option></select>
+      </label>
+      <label>工作台视图
+        <select aria-label="工作台视图">
+          <option>全部 SPU</option>
+          <option selected>缺成本候选</option>
+          <option>最近提交</option>
+        </select>
+      </label>
+    </div></div>
+  <div data-demo-panel="shoppick" data-demo="loading" class="hidden"><p role="status">店铺加载中…</p></div>
+  <div data-demo-panel="shoppick" data-demo="empty" class="hidden"><p>暂无可选店铺</p></div>
+  <div class="erp-toolbar">
+    <label>搜索商品
+      <input type="search" placeholder="按 SPU 或标题搜索" aria-label="SPU ID 或商品标题">
+    </label>
+    <label>商品状态筛选
+      <select><option>全部状态</option><option>在售</option><option>下架</option><option>停售</option></select>
+    </label>
+    <label>排序字段
+      <select><option>状态</option><option>成本</option><option>创建时间</option><option selected>更新时间</option></select>
+    </label>
+    <label>排序方向
+      <select><option>升序</option><option selected>降序</option></select>
+    </label>
+    <button class="btn" type="button">查询</button>
+  </div>
+</section>
+<section class="stack">
+  <h2 class="erp-section-heading">待补全成本的商品</h2>
+  <p class="meta">逐行提交不是原子批次：每行独立事务。只读被拒绝时草稿保留。</p>
+  <div class="demo-states" data-demo-group="costs"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">当前页暂无候选</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button></div>
+  <div data-demo-panel="costs" data-demo="ok" class="">
+<div class="erp-table-wrap">
+  <table class="erp-table" aria-label="SPU 成本工作台">
+    <thead><tr>
+      <th>内部 PK / SPU</th><th>标题 / 状态</th><th>当前人工成本 / 货源价</th>
+      <th>创建 / 更新</th><th>图片 / 缺图事实</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="id">PK-881 / SPU-1001</span></td>
+        <td><div class="primary">无线吸尘器 Pro（示例）</div><span class="badge badge-ok">在售</span></td>
+        <td>人工价 32.5000 CNY<br><span class="meta">货源价 31.0000 CNY</span></td>
+        <td class="meta">2026-10-01<br>2026-11-11</td>
+        <td><button class="btn btn-sm" type="button" data-open="dlg-cost-zoom" aria-label="放大图片 PK 881">主图</button></td>
+        <td><button class="btn btn-sm" type="button" data-write data-open="dlg-cost-edit">编辑</button></td>
+      </tr>
+      <tr>
+        <td><span class="id">PK-882 / SPU-1002</span></td>
+        <td><div class="primary">桌面收纳架（示例）</div><span class="badge badge-warn">下架</span></td>
+        <td>人工价 — <br><span class="meta">货源价 9.8000 CNY</span></td>
+        <td class="meta">2026-10-08<br>2026-11-10</td>
+        <td class="meta">缺图</td>
+        <td><button class="btn btn-sm" type="button" data-write data-open="dlg-cost-edit-1002">编辑</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</div>
+  <div data-demo-panel="costs" data-demo="empty" class="hidden"><p class="erp-empty">当前页暂无候选</p></div>
+  <div data-demo-panel="costs" data-demo="loading" class="hidden"><p role="status">商品成本明细加载中…</p></div>
+  <div data-demo-panel="costs" data-demo="error" class="hidden"><div class="alert alert-danger" role="alert"><p>读取失败：网络不可用或返回数据格式不兼容，请重试</p><p><button class="btn" type="button">重试</button></p></div></div>
+  <div class="erp-pagination" aria-label="采购工作台分页">
+    <p>共 2 条（示例）</p>
+    <div class="erp-pages"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  </div>
+</section>
+<section class="stack">
+  <h2 class="erp-section-heading">最近提交记录</h2>
+  
+<div class="erp-table-wrap">
+  <table class="erp-table" aria-label="最近提交记录">
+    <thead><tr>
+      <th>记录 / 内部 PK / SPU</th><th>标题</th><th>变更前</th><th>变更后</th>
+      <th>备注</th><th>生效 / 结束</th><th>提交时间</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="id">H-2001 / PK-881 / SPU-1001</td>
+        <td>无线吸尘器 Pro</td>
+        <td>30.0000 CNY</td><td>32.5000 CNY</td>
+        <td>供应商调价（示例）</td>
+        <td>2026-11-11 00:00 · 当前有效</td>
+        <td>2026-11-11 15:02:00</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+  <p class="erp-empty hidden">暂无提交记录</p>
+</section>
+<div class="dialog-backdrop" id="dlg-cost-edit" aria-hidden="true" role="dialog" aria-labelledby="dlg-cost-edit-title">
+  <div class="dialog">
+    <h2 id="dlg-cost-edit-title">当前编辑商品 · SPU-1001</h2>
+    
+  <p class="primary">无线吸尘器 Pro（示例） · PK-881</p>
+  <p class="meta">人工价与货源价并排展示。关闭编辑并保留草稿。</p>
+  <div class="grid-2">
+    <label>人工成本<input value="32.5000" placeholder="例如 25.0000" data-write></label>
+    <label>币种<input value="CNY" placeholder="例如 CNY" data-write></label>
+  </div>
+  <p class="meta">货源价：31.0000 CNY（只读对照）</p>
+  <label>备注<textarea rows="3" placeholder="选填，记录成本调整的原因" data-write></textarea></label>
+  <label>生效时间<input type="datetime-local" data-write><span class="meta">留空即使用保存时的服务端时间。服务端当前 UTC 以提交时为准。</span></label>
+  <p class="meta">只读被拒绝时草稿保留，不会被清空。</p>
+
+    <div class="dialog-actions">
+  <button class="btn" type="button" data-close="dlg-cost-edit">关闭编辑并保留草稿</button>
+  <button class="btn btn-primary" type="button" data-write data-close="dlg-cost-edit" data-open="dlg-cost-verify">确认提交</button>
+</div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cost-edit-1002" aria-hidden="true" role="dialog" aria-labelledby="dlg-cost-edit-1002-title">
+  <div class="dialog">
+    <h2 id="dlg-cost-edit-1002-title">当前编辑商品 · SPU-1002</h2>
+    
+  <p class="primary">桌面收纳架（示例） · PK-882</p>
+  <div class="grid-2">
+    <label>人工成本<input placeholder="例如 25.0000" data-write></label>
+    <label>币种<input value="CNY" data-write></label>
+  </div>
+  <p class="meta">货源价：9.8000 CNY（只读对照）</p>
+  <label>备注<textarea rows="3" data-write></textarea></label>
+
+    <div class="dialog-actions">
+  <button class="btn" type="button" data-close="dlg-cost-edit-1002">关闭编辑并保留草稿</button>
+  <button class="btn btn-primary" type="button" data-write data-close="dlg-cost-edit-1002" data-open="dlg-cost-verify">确认提交</button>
+</div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cost-verify" aria-hidden="true" role="dialog" aria-labelledby="dlg-cost-verify-title">
+  <div class="dialog">
+    <h2 id="dlg-cost-verify-title">提交结果核对</h2>
+    
+  <p role="status">逐行提交中；每行独立事务，不是原子批次。</p>
+  <p>本次已确认 1 行 · 未完成 0 行 · 未发送 1 行。各行独立生效，不会回滚已确认行。</p>
+  <p>已读取当前公开记录；GET 不能证明原提交是否生效，也不会自动重试。</p>
+  <p>已请求停止后续行；正在发送的行仍需等待结果，不能假定已撤销。</p>
+  <ul class="steps">
+    <li>SPU-1001：已确认成功</li>
+    <li>SPU-1002：未发送（已请求停止后续行）</li>
+  </ul>
+  <p class="meta">核对未完成时草稿和目标仍保留。提交中请等待该行结果。</p>
+
+    <div class="dialog-actions">
+  <button class="btn" type="button" data-close="dlg-cost-verify">关闭</button>
+  <button class="btn" type="button" data-write>读取当前公开记录核对</button>
+</div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-cost-zoom" aria-hidden="true" role="dialog" aria-labelledby="dlg-cost-zoom-title">
+  <div class="dialog">
+    <h2 id="dlg-cost-zoom-title">商品主图放大</h2>
+    <div class="thumb-lg">SPU-1001 主图（示例占位）</div>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-cost-zoom">关闭图片</button></div>
+  </div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

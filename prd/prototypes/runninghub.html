@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>换装视频 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="runninghub" data-title="换装视频" data-desc="选好服装与人物模板，按批次生成并查看每段成片。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">WARDROBE STUDIO</p>
+    <h2>换装视频</h2>
+    <p class="erp-description">选好服装与人物模板，按批次生成并查看每段成片。</p>
+  </div>
+</section>
+
+<section class="erp-card stack">
+  <h2 class="erp-section-heading">工作流配置</h2>
+  <p>已校验版本。若尚未检查则显示「待管理员检查工作流」。</p>
+  <dl class="dl-facts">
+    <dt>凭据引用</dt><dd>runninghub.api-token · <span class="badge badge-ok">已配置</span></dd>
+    <dt>显存档位</dt><dd>default</dd>
+    <dt>云端并发上限</dt><dd>2</dd>
+    <dt>账户信息：</dt><dd>余额可用（示例）。留空从 RunningHub 读取</dd>
+  </dl>
+  <p class="meta">工作流配置暂不可用时需先修复。正在读取工作流…</p>
+  <p><button class="btn" type="button" data-admin data-open="dlg-rh-workflow">更新工作流版本</button></p>
+</section>
+
+<section class="erp-card stack">
+  <h2 class="erp-section-heading">创建批次与生成计划</h2>
+  <p>由有操作权限的人员创建并启动批次。预览后保存批次，启动时确认付费。</p>
+  <label>默认款式编号<input value="STYLE-1001" data-write></label>
+  <label>SKU<input value="SKU-8801" data-write></label>
+  <label>搜索服装图片<input type="search" data-write></label>
+  <p class="meta">正在读取图片… 图片读取失败。没有匹配的就绪图片。</p>
+  <div class="media-grid">
+    <label class="erp-card media-card"><input type="checkbox" checked data-write> 服装图 12<p class="meta">款式 STYLE-1001</p></label>
+    <label class="erp-card media-card"><input type="checkbox" data-write> 服装图 15<p class="meta">款式 STYLE-1008</p></label>
+  </div>
+  <div class="erp-pagination" aria-label="图片分页"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  <h3 class="erp-section-heading">人物模板</h3>
+  <p class="meta">正在读取模板… 模板读取失败。暂无人物模板。可使用数字人素材库中已挂载的参考视频新建模板。</p>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="人物模板">
+      <thead><tr><th>模板</th><th>参考视频与生成顺序</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>示例主播北北 · 模板 室内口播 · v2</td>
+          <td>
+            <ol class="steps">
+              <li>室内口播 A <button class="btn btn-sm" type="button" data-write>上移</button> <button class="btn btn-sm" type="button" data-write>下移</button> <button class="btn btn-sm" type="button" data-write>移除</button></li>
+              <li>室内口播 B <button class="btn btn-sm" type="button" data-write>上移</button> <button class="btn btn-sm" type="button" data-write>下移</button></li>
+            </ol>
+            <p>已加入 2 段。成片段数以模板实际选入的参考视频为准。</p>
+          </td>
+          <td><button class="btn btn-sm" type="button" data-write data-open="dlg-rh-template">编辑模板</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p><button class="btn" type="button" data-write data-open="dlg-rh-template">新建人物模板</button></p>
+  <label class="field inline"><input type="checkbox" data-write> 仅跑首段</label>
+  <p>计划成片数 2 · 并发 2。本次只跑首段时，看完效果后可在原批次继续生成剩余段。此模板只有 1 段时，首段完成即整批完成。</p>
+  <div class="gap-2">
+    <button class="btn" type="button" data-write data-open="dlg-rh-plan">确认生成计划</button>
+    <button class="btn btn-primary" type="button" data-write data-open="dlg-rh-save">保存批次</button>
+  </div>
+</section>
+
+<section class="stack">
+  <h2 class="erp-section-heading">批次记录</h2>
+  <div class="erp-toolbar">
+    <label>筛选当前页批次
+      <select><option>全部</option><option>进行中</option><option>已完成</option></select>
+    </label>
+  </div>
+  <div class="demo-states" data-demo-group="batches"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">当前页暂无批次</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">正在读取批次</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">批次读取失败</button></div>
+  <div data-demo-panel="batches" data-demo="ok" class="">
+  <div class="erp-table-wrap" role="region" aria-label="批次记录表格滚动区域" tabindex="0">
+    <table class="erp-table" aria-label="批次记录">
+      <thead><tr><th>批次</th><th>状态</th><th>成片进度</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="id">batch-301</td>
+          <td><span class="badge badge-ok">派发中</span></td>
+          <td>成片进度 1 / 2</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-open="dlg-rh-batch-301">批次详情 batch-301</button>
+            <button class="btn btn-sm" type="button" data-open="dlg-rh-clip">查看首段</button>
+            <button class="btn btn-sm" type="button" data-write data-open="dlg-rh-stop">确认终止</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="id">batch-288</td>
+          <td><span class="badge">待续跑</span></td>
+          <td>成片进度 1 / 3</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-open="dlg-rh-batch-288">批次详情 batch-288</button>
+            <button class="btn btn-sm" type="button" data-write data-open="dlg-rh-continue">继续生成剩余段</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="id">batch-270</td>
+          <td><span class="badge badge-warn">待管理员核对</span></td>
+          <td>成片进度 0 / 2</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-open="dlg-rh-batch-270">详情</button>
+            <button class="btn btn-sm" type="button" data-admin data-open="dlg-rh-admin">管理员核对</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="id">batch-260</td>
+          <td><span class="badge">已终止</span></td>
+          <td>成片进度 1 / 2</td>
+          <td>
+            <button class="btn btn-sm" type="button" data-open="dlg-rh-batch-260">详情</button>
+            <p class="meta">批次已终止。已完成的片段和费用记录保留。</p>
+          </td>
+        </tr>
+        <tr>
+          <td class="id">batch-201</td>
+          <td><span class="badge badge-ok">已完成</span></td>
+          <td>成片进度 2 / 2</td>
+          <td class="gap-2">
+            <button class="btn btn-sm" type="button" data-open="dlg-rh-batch-201">详情</button>
+            <button class="btn btn-sm" type="button" data-write data-open="dlg-rh-zip">下载批次成片 ZIP</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="erp-pagination" aria-label="批次分页"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  </div>
+  <div data-demo-panel="batches" data-demo="empty" class="hidden"><p class="erp-empty">当前页暂无批次</p></div>
+  <div data-demo-panel="batches" data-demo="loading" class="hidden"><p role="status">正在读取批次…</p></div>
+  <div data-demo-panel="batches" data-demo="error" class="hidden"><div class="alert alert-danger"><p>批次读取失败</p><p><button class="btn" type="button">重试</button></p></div></div>
+</section>
+
+<section class="erp-card">
+  <h2 class="erp-section-heading">任务 / 批次状态一览</h2>
+  <div class="chip-row">
+    <span class="badge">待启动</span>
+    <span class="badge badge-accent">派发中</span>
+    <span class="badge">已暂停</span>
+    <span class="badge">准备素材</span>
+    <span class="badge">提交中</span>
+    <span class="badge">云端排队</span>
+    <span class="badge">云端生成</span>
+    <span class="badge">下载中</span>
+    <span class="badge">成片处理中</span>
+    <span class="badge badge-ok">已完成</span>
+    <span class="badge badge-danger">生成失败</span>
+    <span class="badge badge-warn">待管理员核对</span>
+    <span class="badge">跟踪中断</span>
+    <span class="badge badge-danger">下载失败</span>
+    <span class="badge badge-danger">成片处理失败</span>
+    <span class="badge badge-danger">素材准备失败</span>
+    <span class="badge">终止中</span>
+    <span class="badge">已终止</span>
+    <span class="badge badge-ok">首段已完成</span>
+    <span class="badge">待续跑</span>
+  </div>
+</section>
+
+<div class="dialog-backdrop" id="dlg-rh-template" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-template-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-template-title">人物模板</h2>
+    
+  <label>模板名称<input value="室内口播" data-write></label>
+  <label>选择人物
+    <select data-write>
+      <option>请选择</option>
+      <option selected>示例主播北北</option>
+      <option>示例主播阿宁（已不可用）</option>
+    </select>
+  </label>
+  <p class="meta">正在读取人物… 正在读取参考视频…</p>
+  <h3 class="erp-section-heading">参考视频多选与生成顺序</h3>
+  <label class="field inline"><input type="checkbox" checked data-write> 室内口播 A · 已加入</label>
+  <label class="field inline"><input type="checkbox" data-write> 室内口播 B · 加入</label>
+  <p>已加入 1 段。可用上移 / 下移调整生成顺序。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-template">关闭弹窗</button><button class="btn btn-primary" type="button" data-write data-close="dlg-rh-template">保存模板</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-plan" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-plan-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-plan-title">确认生成计划</h2>
+    
+  <p>账户与运行配置：runninghub.api-token 已配置 · 并发 2 · 已校验工作流版本。</p>
+  <p>计划成片 2 段。仅跑首段时，请选择一张图和一个人物模板。请选择服装图和人物模板。请填写款式编号和 SKU。</p>
+  <p>成片段数以模板实际选入的参考视频为准。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-plan">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-rh-plan">确认计划</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-save" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-save-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-save-title">保存并启动批次</h2>
+    
+  <p>批次已保存，可在批次记录中启动。</p>
+  <label class="field inline"><input type="checkbox" data-write> 我了解实际生成会产生 RunningHub 费用。</label>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-save">取消</button><button class="btn" type="button" data-write>保存批次</button><button class="btn btn-primary" type="button" data-write data-close="dlg-rh-save" data-open="dlg-rh-started">启动批次</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-started" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-started-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-started-title">操作已保存</h2>
+    <p>批次已保存，可在批次记录中启动。已安排生成。</p>
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-started">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-stop" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-stop-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-stop-title">确认终止</h2>
+    
+  <p>终止将停止尚未提交的任务。云端进行中的任务可能仍继续计费，结果待确认。</p>
+  <p>影响：已完成 1 · 未提交 1 · 云端进行中 0 · 待确认 0（示例）。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-stop">取消</button><button class="btn btn-danger" type="button" data-write data-close="dlg-rh-stop">确认终止</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-continue" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-continue-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-continue-title">继续生成剩余段</h2>
+    
+  <p>首段完成后，可在原批次继续生成剩余 2 段。</p>
+  <label class="field inline"><input type="checkbox" data-write> 我了解继续生成会产生 RunningHub 费用。</label>
+  <p>已安排剩余片段继续生成。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-continue">取消</button><button class="btn btn-primary" type="button" data-write data-close="dlg-rh-continue">首段续跑</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-admin" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-admin-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-admin-title">管理员核对</h2>
+    
+  <p>此操作将为明确失败的任务安排新的 Attempt。真实模式可能再次计费，是否继续？</p>
+  <label>核实的云端 taskId<input data-admin></label>
+  <label>核对说明<textarea rows="3" data-admin></textarea></label>
+  <label class="field inline"><input type="checkbox" data-admin> 我已核实云端未创建任务</label>
+  <p><button class="btn" type="button" data-admin>校验成片</button></p>
+  <p class="meta">校验成片：原始生成视频 / 原始视频。尚未受理或无云端 ID 时不能视为已创建。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-admin">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-rh-admin">继续核对终止</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-clip" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-clip-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-clip-title">首段成片预览</h2>
+    
+  <div class="thumb-lg">成片预览（示例占位）</div>
+  <p>成片暂时无法预览。时可在任务详情下载已完成的单段成片。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-clip">关闭</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-zip" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-zip-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-zip-title">批次成片 ZIP</h2>
+    
+  <p>全部 2 段完成后可下载 ZIP。整批完成后才能下载 ZIP。</p>
+  <p>已请求服务器打包，可在浏览器下载列表查看进度。服务器从 MinIO 取文件并打包。</p>
+  <p>可在任务详情下载已完成的单段成片。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-zip">关闭</button><button class="btn btn-primary" type="button">下载 ZIP</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-workflow" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-workflow-title">
+  <div class="dialog">
+    <h2 id="dlg-rh-workflow-title">更新工作流版本</h2>
+    
+  <p>待管理员检查工作流。账户、凭据或工作流配置异常时需先修复。恢复后，已启动的批次可能继续付费生成。</p>
+  <label>工作流 JSON<textarea rows="6" data-admin>{{ "workflowId": "wf-demo" }}</textarea></label>
+  <p class="meta">工作流 JSON 无法解析时请先修正。</p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-workflow">取消</button><button class="btn btn-primary" type="button" data-admin data-close="dlg-rh-workflow">保存工作流版本</button></div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="dlg-rh-batch-301" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-batch-301-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-rh-batch-301-title">批次详情 batch-301</h2>
+    
+  <p>状态：派发中 · 工作流已校验版本 · 历史演练批次仅作示例。</p>
+  <h3 class="erp-section-heading">单任务详情</h3>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="任务分页">
+      <thead><tr><th>任务</th><th>片段</th><th>人物 / 模板</th><th>状态</th><th>成片</th></tr></thead>
+      <tbody>
+<tr><td class="id">job-901</td><td>1 / 2</td><td>示例主播北北 · 室内口播</td><td>云端生成</td><td><button class="btn btn-sm" type="button" data-open="dlg-rh-job">成片预览</button></td></tr>
+<tr><td class="id">job-902</td><td>2 / 2</td><td>示例主播北北 · 室内口播</td><td>云端排队</td><td>—</td></tr>
+</tbody>
+    </table>
+  </div>
+  <div class="erp-pagination" aria-label="任务分页"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  <p><button class="btn" type="button" data-open="dlg-rh-job">打开单任务详情</button></p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-batch-301">关闭批次详情</button></div>
+  </div>
+</div><div class="dialog-backdrop" id="dlg-rh-batch-288" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-batch-288-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-rh-batch-288-title">批次详情 batch-288</h2>
+    
+  <p>状态：待续跑 · 工作流已校验版本 · 历史演练批次仅作示例。</p>
+  <h3 class="erp-section-heading">单任务详情</h3>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="任务分页">
+      <thead><tr><th>任务</th><th>片段</th><th>人物 / 模板</th><th>状态</th><th>成片</th></tr></thead>
+      <tbody>
+<tr><td class="id">job-501</td><td>1 / 3</td><td>示例主播北北 · 室内口播</td><td>首段已完成</td><td><button class="btn btn-sm" type="button" data-open="dlg-rh-clip">查看首段</button></td></tr>
+<tr><td class="id">job-502</td><td>2 / 3</td><td>示例主播北北 · 室内口播</td><td>待续跑</td><td>—</td></tr>
+</tbody>
+    </table>
+  </div>
+  <div class="erp-pagination" aria-label="任务分页"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  <p><button class="btn" type="button" data-open="dlg-rh-job">打开单任务详情</button></p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-batch-288">关闭批次详情</button></div>
+  </div>
+</div><div class="dialog-backdrop" id="dlg-rh-batch-270" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-batch-270-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-rh-batch-270-title">批次详情 batch-270</h2>
+    
+  <p>状态：待管理员核对 · 工作流已校验版本 · 历史演练批次仅作示例。</p>
+  <h3 class="erp-section-heading">单任务详情</h3>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="任务分页">
+      <thead><tr><th>任务</th><th>片段</th><th>人物 / 模板</th><th>状态</th><th>成片</th></tr></thead>
+      <tbody>
+<tr><td class="id">job-701</td><td>1 / 2</td><td>示例主播北北 · 室内口播</td><td>待管理员核对</td><td>—</td></tr>
+</tbody>
+    </table>
+  </div>
+  <div class="erp-pagination" aria-label="任务分页"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  <p><button class="btn" type="button" data-open="dlg-rh-job">打开单任务详情</button></p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-batch-270">关闭批次详情</button></div>
+  </div>
+</div><div class="dialog-backdrop" id="dlg-rh-batch-260" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-batch-260-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-rh-batch-260-title">批次详情 batch-260</h2>
+    
+  <p>状态：已终止 · 工作流已校验版本 · 历史演练批次仅作示例。</p>
+  <h3 class="erp-section-heading">单任务详情</h3>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="任务分页">
+      <thead><tr><th>任务</th><th>片段</th><th>人物 / 模板</th><th>状态</th><th>成片</th></tr></thead>
+      <tbody>
+<tr><td class="id">job-601</td><td>1 / 2</td><td>示例主播北北 · 室内口播</td><td>已完成</td><td><button class="btn btn-sm" type="button" data-open="dlg-rh-job">成片预览</button></td></tr>
+<tr><td class="id">job-602</td><td>2 / 2</td><td>示例主播北北 · 室内口播</td><td>已终止</td><td>—</td></tr>
+</tbody>
+    </table>
+  </div>
+  <div class="erp-pagination" aria-label="任务分页"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  <p><button class="btn" type="button" data-open="dlg-rh-job">打开单任务详情</button></p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-batch-260">关闭批次详情</button></div>
+  </div>
+</div><div class="dialog-backdrop" id="dlg-rh-batch-201" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-batch-201-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-rh-batch-201-title">批次详情 batch-201</h2>
+    
+  <p>状态：已完成 · 工作流已校验版本 · 历史演练批次仅作示例。</p>
+  <h3 class="erp-section-heading">单任务详情</h3>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="任务分页">
+      <thead><tr><th>任务</th><th>片段</th><th>人物 / 模板</th><th>状态</th><th>成片</th></tr></thead>
+      <tbody>
+<tr><td class="id">job-801</td><td>1 / 2</td><td>示例主播北北 · 室内口播</td><td>已完成</td><td><button class="btn btn-sm" type="button" data-open="dlg-rh-job">成片预览</button></td></tr>
+<tr><td class="id">job-802</td><td>2 / 2</td><td>示例主播北北 · 室内口播</td><td>已完成</td><td><button class="btn btn-sm" type="button" data-open="dlg-rh-job">成片预览</button></td></tr>
+</tbody>
+    </table>
+  </div>
+  <div class="erp-pagination" aria-label="任务分页"><button class="btn btn-sm" type="button" aria-current="page">1</button></div>
+  <p><button class="btn" type="button" data-open="dlg-rh-job">打开单任务详情</button></p>
+    
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-batch-201">关闭批次详情</button></div>
+  </div>
+</div><div class="dialog-backdrop" id="dlg-rh-job" aria-hidden="true" role="dialog" aria-labelledby="dlg-rh-job-title">
+  <div class="dialog drawer">
+    <h2 id="dlg-rh-job-title">单任务详情</h2>
+    
+  <dl class="dl-facts">
+    <dt>任务 ID</dt><dd class="id">job-901</dd>
+    <dt>状态</dt><dd>云端生成</dd>
+    <dt>云端 taskId</dt><dd class="id">rh-445566</dd>
+    <dt>云端状态</dt><dd>RUNNING</dd>
+    <dt>种子</dt><dd>42</dd>
+    <dt>SKU / 款式</dt><dd>SKU-8801 / STYLE-1001</dd>
+    <dt>人物 / 模板</dt><dd>示例主播北北 · 室内口播</dd>
+    <dt>片段</dt><dd>1 / 2</dd>
+    <dt>归档路径</dt><dd class="id">STYLE-1001/SKU-8801/clip-01.mp4</dd>
+    <dt>尝试</dt><dd>#1 · 已保留 · 无错误</dd>
+  </dl>
+  <h3 class="erp-section-heading">成片预览</h3>
+  <div class="thumb-lg">成片预览</div>
+  <p><button class="btn" type="button">下载单段成片</button></p>
+
+    <div class="dialog-actions"><button class="btn" type="button" data-close="dlg-rh-job">关闭</button></div>
+  </div>
+</div>
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

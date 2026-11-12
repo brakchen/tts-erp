@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拦截统计 · tts-erp 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div hidden data-page="intercept-stats" data-title="拦截统计" data-desc="查看请求趋势与分布，识别错误和异常变化。">
+
+<p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
+
+<section class="erp-intro">
+  <div>
+    <p class="erp-eyebrow">CAPTURE HEALTH</p>
+    <h2>了解采集链路的运行状况</h2>
+    <p class="erp-description">查看请求趋势与分布，识别错误和异常变化。</p>
+  </div>
+</section>
+<div class="demo-states" data-demo-group="stats"><span>以下切换仅用于原型演示空态、加载与失败，不请求后端。</span> <button class="btn btn-sm is-active" type="button" data-demo="ok" aria-pressed="true">已加载</button><button class="btn btn-sm" type="button" data-demo="loading" aria-pressed="false">加载中</button><button class="btn btn-sm" type="button" data-demo="error" aria-pressed="false">失败可重试</button><button class="btn btn-sm" type="button" data-demo="empty" aria-pressed="false">分布与每日空态</button></div>
+<div data-demo-panel="stats" data-demo="ok" class="">
+<div class="erp-metrics">
+  <article class="erp-metric"><h3>总请求数</h3><p class="value">1,376</p></article>
+  <article class="erp-metric"><h3>白名单命中</h3><p class="value">1,250</p></article>
+  <article class="erp-metric"><h3>今日请求（UTC）</h3><p class="value">214</p></article>
+  <article class="erp-metric"><h3>错误请求</h3><p class="value">18</p></article>
+</div>
+<section class="erp-card">
+  <h2 class="erp-section-heading">每日请求（UTC）</h2>
+  <div class="erp-table-wrap">
+    <table class="erp-table" aria-label="每日请求（UTC）">
+      <thead><tr><th>日期（UTC）</th><th class="num">请求数</th><th class="num">错误</th></tr></thead>
+      <tbody>
+        <tr><td>2026-11-11</td><td class="num">190</td><td class="num">2</td></tr>
+        <tr><td>2026-11-12</td><td class="num">214</td><td class="num">4</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<div class="grid-3">
+    <section class="erp-card">
+      <h2 class="erp-section-heading">域名分布</h2>
+      <div class="erp-table-wrap" role="region" aria-label="数据表格横向滚动区域" tabindex="0">
+        <table class="erp-table" aria-label="域名分布">
+          <thead><tr><th>域名</th><th class="num">请求数</th><th class="num">占比（服务端）</th></tr></thead>
+          <tbody><tr><td>seller.tiktok.com</td><td class="num">1,280</td><td class="num">93.02%</td></tr><tr><td>ads.tiktok.com</td><td class="num">96</td><td class="num">6.98%</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="erp-card">
+      <h2 class="erp-section-heading">方法分布</h2>
+      <div class="erp-table-wrap" role="region" aria-label="数据表格横向滚动区域" tabindex="0">
+        <table class="erp-table" aria-label="方法分布">
+          <thead><tr><th>方法</th><th class="num">请求数</th><th class="num">占比（服务端）</th></tr></thead>
+          <tbody><tr><td>GET</td><td class="num">1,102</td><td class="num">80.09%</td></tr><tr><td>POST</td><td class="num">274</td><td class="num">19.91%</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="erp-card">
+      <h2 class="erp-section-heading">状态码分布</h2>
+      <div class="erp-table-wrap" role="region" aria-label="数据表格横向滚动区域" tabindex="0">
+        <table class="erp-table" aria-label="状态码分布">
+          <thead><tr><th>状态码</th><th class="num">请求数</th><th class="num">占比（服务端）</th></tr></thead>
+          <tbody><tr><td>200</td><td class="num">1,250</td><td class="num">90.84%</td></tr><tr><td>500</td><td class="num">18</td><td class="num">1.31%</td></tr></tbody>
+        </table>
+      </div>
+    </section></div>
+</div>
+<div data-demo-panel="stats" data-demo="loading" class="hidden"><p role="status">拦截统计加载中…</p></div>
+<div data-demo-panel="stats" data-demo="error" class="hidden"><div class="alert alert-danger"><p>统计加载失败（HTTP 500）</p><p>加载失败，请检查网络</p><p><button class="btn" type="button">重试</button></p></div></div>
+<div data-demo-panel="stats" data-demo="empty" class="hidden">
+<div class="erp-metrics">
+  <article class="erp-metric"><h3>总请求数</h3><p class="value">0</p></article>
+  <article class="erp-metric"><h3>白名单命中</h3><p class="value">0</p></article>
+  <article class="erp-metric"><h3>今日请求（UTC）</h3><p class="value">0</p></article>
+  <article class="erp-metric"><h3>错误请求</h3><p class="value">0</p></article>
+</div>
+<section class="erp-card"><h2 class="erp-section-heading">每日请求（UTC）</h2><p class="erp-empty">暂无每日记录</p></section>
+<div class="grid-3"><section class="erp-card"><h2 class="erp-section-heading">域名分布</h2><p class="erp-empty">暂无域名数据</p></section><section class="erp-card"><h2 class="erp-section-heading">方法分布</h2><p class="erp-empty">暂无方法数据</p></section><section class="erp-card"><h2 class="erp-section-heading">状态码分布</h2><p class="erp-empty">暂无状态码数据</p></section></div>
+</div>
+
+
+  </div>
+  <script src="shell.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>
