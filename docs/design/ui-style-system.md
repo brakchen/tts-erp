@@ -1,8 +1,8 @@
 # UI 设计体系（暖纸编辑体）
 
-> 本页是 `tts-erp` 前端样式的**唯一契约**。改样式前先读这里。
-> 相关实现：`tts_erp_v2/static/css/tokens.css`、`tts_erp_v2/static/css/common.css`。
-> 最近一次统整：2026-10-03（lane `feature/ui-style-unification`）。
+> 本页记录共享样式令牌。页面与组件接入见 [前端开发规范](../guides/frontend-development.md)。
+> React 样式入口是 [frontend/src/styles.css](../../frontend/src/styles.css)。
+> 旧模板的组件类和映射保留在本文供维护历史资源时参考。
 
 ## 1. 背景：重构前有 4 套并行的令牌体系
 
@@ -120,21 +120,14 @@
 
 ## 4. 页面接入方式
 
-```html
-<head>
-  <link rel="stylesheet" href="../../static/vendor/bootstrap.min.css">
-  <!-- ↓ 顺序不能反：tokens → common → 页面专属 -->
-  <link rel="stylesheet" href="../../static/css/tokens.css?v={{ css_version('tokens.css') }}">
-  <link rel="stylesheet" href="../../static/css/common.css?v={{ css_version('common.css') }}">
-  <link rel="stylesheet" href="../../static/css/<page>.css?v={{ css_version('<page>.css') }}">
-</head>
-```
+生产前端使用 React、TypeScript、Vite 和 HeroUI。服务端由
+[`render_frontend_page`](../../tts_erp_v2/api/v2/frontend_pages.py) 注入 bootstrap 并按 manifest
+加载产物。React 入口 [main.tsx](../../frontend/src/main.tsx) 将业务页面渲染到
+[AppShell](../../frontend/src/app/AppShell.tsx)，复用导航、页头和页面容器。
 
-- 链接必须是**相对路径**（`../../static/…`），否则在 NGINX `/tts` 前缀下 404。
-- 版本戳用 `css_version()`（SHA-256 内容哈希），CSS 与 JS 不共享版本令牌。
-- `ad-daily` 页面的 HTML 内嵌在 `tts_erp_v2/api/v2/ad_daily.py`，用
-  `__TOKENS_VERSION__` / `__COMMON_VERSION__` / `__CSS_VERSION__` 占位符，
-  由 `_asset_version()` 填充。
+全局样式从 `frontend/src/styles.css` 引入 Tailwind、HeroUI、共享令牌及导航样式。
+页面模块可以引入局部 CSS，复用同一套令牌。Vite 构建处理静态资产版本，页面 URL
+用共享 `pathFor` 从 bootstrap 的 `rootPath` 生成。
 
 ## 5. 重构前的令牌映射表
 
@@ -168,22 +161,15 @@ surface 色（淡强调底、亮/暗纸面）在 `tokens.css` 里**没有对应�
 | `.wrap` / `.header` | enum-map 与 users 的布局容器，宽度与用途都不同 | 页面私有 |
 | `.actions` | intercept-configs 是 `nowrap` 表格单元格，其余是 flex 容器 | 语义不同 |
 
-## 7. 新增页面 checklist
+## 7. 新增页面检查
 
-- [ ] `<head>` 按 `tokens.css → common.css → 页面专属 css` 的顺序链接
-- [ ] 页面模板**不写** `:root` 令牌
-- [ ] 页头用 `.op-header` / `.op-header-row` / `.op-header-titles` / `.op-eyebrow` / `.op-title`
-- [ ] 表格用 `.op-table` / `.op-th` / `.op-empty`
-- [ ] 按钮用 `.btn-primary` / `.btn-secondary`（暖纸编辑体：主按钮墨底纸字）
-- [ ] 圆角写 `var(--radius)`；只有圆形/胶囊用 `50%` / `999px`
-- [ ] 颜色只用 `tokens.css` 令牌；确实特有的值加注释说明为何不能令牌化
-- [ ] 接入侧边栏：`{{ sidebar(current_page) }}` + `{{ sidebar_css(current_page) }}`
-- [ ] 资产用 `css_version()` / `js_version()` 做缓存戳
+- [ ] 在页面模块和加载器注册入口，复用 AppShell 和 HeroUI 组件。
+- [ ] 使用共享令牌与组件样式。页面样式限于该页的布局和业务状态。
+- [ ] 验证 `rootPath` 下的页面、资源加载、键盘操作和窄屏布局。
 
-## 8. 共享侧边栏的令牌回退链
+## 8. 旧侧边栏令牌回退
 
-`tts_erp_v2/api/v2/pages.py` 的 `_SIDEBAR_CSS` 使用
-`var(--paper, var(--bg, #F4EFE4))` 这样的**回退链**。统一词表后这条链不再被
-任何页面触发，但**保留**它：新页面若暂未接入 `tokens.css`，侧边栏仍能渲染。
+`tts_erp_v2/api/v2/pages.py` 中的旧侧边栏 CSS 保留兼容回退链。
+新增 React 页面按 §4 使用 AppShell。
 `tests/api/test_pages.py::test_sidebar_tokens_fall_back_on_pages_with_a_different_theme_vocabulary`
 锁定了这条性质。

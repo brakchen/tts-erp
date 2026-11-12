@@ -1,6 +1,9 @@
 # SPU 盈利表现对比：技术设计
 
-> 2026-10-24 修订，开发目标契约，未声称已实现/上线。[PRD v3](01-product-proposal.md) 是功能权威；[盈利计算契约](../business/spu-profitability.md) 是业务口径。旧阈值、严重程度、历史确认设计不再适用于本页。
+> 主线实现使用 [两期对比路由](../../tts_erp_v2/api/v2/spu_deterioration_alert.py) 和
+> [React 页面](../../frontend/src/pages/spu-profit-deterioration/index.tsx)。
+> [PRD v3](01-product-proposal.md) 定义功能，[盈利计算契约](../business/spu-profitability.md) 定义业务口径。
+> 生产部署版本见 [运维手册](../ops/tts-erp.md)。
 
 ## 1. 所有权与最小边界
 
@@ -8,9 +11,9 @@
 - 本页范围、日期校验、对比编排、事实标记：`analytics.spu_deterioration_alert` 内的独立比较读取 seam；不再经过旧 evaluator/config/sample gate。
 - HTTP：现有 `/v2/analytics/spu-profit-deterioration`，只读授权、严格参数和序列化。
 - 浏览器：原值与事实显示、请求生命周期、展示性的 `displayChange`，不拥有范围、盈利公式、订单总数、事实标记或日期上限。
-- 保留页面 URL、权限点及全站导航 owner。此次修复不承担整页 React 迁移、全站 shell 改造、生产发布或删除旧物化表/配置。
+- 页面保留既有 URL 和权限点，导航由共享 AppShell 渲染。
 
-ArchitectureReviewRequired=yes：producer/consumer 契约改变、只读一致性和日期来源需要跨边界验证。新逻辑不追加到四千行 canonical implementation；只暴露既有 snapshot-aware 读取的最小公共组合出口。旧 job/配置若有独立消费者则保留，不再决定本页可读性。
+对比读取复用盈利模块的快照接口。主线调度器已撤销旧 evaluator 注册，旧快照表及配置保留。
 
 ## 2. 数据流与一致性
 

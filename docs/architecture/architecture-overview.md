@@ -5,8 +5,9 @@
 
 ## 1. 技术栈
 
-Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · PostgreSQL 容器（`:5432`，
-14 个非 public 业务 schema / 73 张业务表（v1 `public.*` 业务表 2026-09-05 归档删除；analytics 4 张僵尸表 migration 0007 drop；2026-09-11 `chrome_sync`→`plugin`、`analytics` 并入 `plugin`；2026-09-30 migration 0044 删除未接通的 `linkage` schema，migration 0045 新增 source-owned `miaoshou` schema）· APScheduler（独立 sync-worker 进程）· MinIO · Fernet 加密 · systemd user units。
+Python 3.13+、FastAPI/uvicorn、SQLAlchemy 2、psycopg3、PostgreSQL、APScheduler、
+MinIO 和 Fernet。生产 API 与 Sync Worker 由系统级 systemd 单元运行。
+数据库结构以 [schema 索引及 DDL 快照](../schema/README.md) 为准。
 
 ## 2. 业务架构
 
@@ -19,21 +20,15 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 - TikTok Shop Open API (`open-api.tiktokglobalshop.com`)
 - 妙手开放平台 (`openapi.wanshifu.com`)
 
-**打上游 TikTok 的唯一路径**：sync-worker jobs（经 `tts_erp_v2/proxy/tts_shop`，内部处理 HMAC 签名 /
-`x-tts-access-token` / shop_cipher 位置 / 翻页 / 过期 token 续期）。**不要自己拼上游请求**。
+**TikTok Open API 调用**由同步 job、只读透传 API 和 OAuth 流程发起。签名和客户端实现位于
+`tts_erp_v2/proxy/tts_shop`，凭证由 `tts_erp_v2/proxy/token_service.py` 管理。
 
 ### 2.2 访问方式
 
-**本地直连**：`curl http://127.0.0.1:9877/v2/...`（带端口）
-
-**公网域名**：`daqiang.nat100.top`（NAT **已 strip 9877 端口**）
-
-- nginx 只把 `/tts/*` 转发给 API
-- 无前缀的 `daqiang.nat100.top/v2/...` 落在 ProfitLens 前端 404
-- 给用户的 URL / TikTok 填的 redirect URL / 纯公网 curl 一律 `http://daqiang.nat100.top/tts/<path>`
-- 本地直连 `127.0.0.1:9877/v2/...` 才不带 `/tts`
-- 前缀取自 `TTS_ERP_EXTERNAL_PREFIX`，当前 `/tts`（仅在 `app.py` 构建时读一次 → `FastAPI(root_path=...)`；middleware/handlers 一律从 `scope["root_path"]` 派生）
-- **nginx 契约（2026-09-28 起）**：`/tts/` location 的 `proxy_pass` **不带尾斜杠**，完整前缀透传；app 侧 AuthMiddleware 会把不带前缀的请求归一化为带前缀（对两种转发模式都鲁棒），路由分类/匹配统一在 route-relative 路径上进行
+- 生产公网入口为 `https://chen.daqiangplatform.com/tts`。207 的 Nginx 将 `/tts/*`
+  转给本机 `127.0.0.1:9878`，`proxy_pass` 保留完整前缀。
+- `TTS_ERP_EXTERNAL_PREFIX` 在构建 FastAPI 应用时进入 `root_path`。鉴权和路由使用统一归一化结果。
+- 开发机在回环地址上运行验证实例。部署与本地启动见 [部署手册](../ops/tts-erp.md)。
 
 ## 3. 测试 DB 隔离（2026-10-05）
 
@@ -50,7 +45,7 @@ Python 3.14 · FastAPI + uvicorn（`:9877`）· SQLAlchemy 2 + psycopg3 · Postg
 
 ## 5. 凭证管理
 
-### 4.1 凭证单源：`integration.credentials` + `proxy/token_service.py`
+### 5.1 凭证单源：`integration.credentials` + `proxy/token_service.py`
 
 ```python
 # ✓ 正确
@@ -70,7 +65,7 @@ shop_cipher = cred.shop_cipher
 
 **token 续期**：由 sync-worker 的 `token.refresh` job 每 6h 进程内完成，不需要也不要有 HTTP 续期端点。
 
-## 5. 认证与鉴权（enforce 模式）
+## 6. 认证与鉴权（enforce 模式）
 
 **设计文档**：API key 部分 `docs/design/api-key-auth-design.md`；用户账号 / 会话 /
 页面权限部分 `docs/design/user-account-authz-design.md`（已实现，迁移
@@ -93,7 +88,7 @@ shop_cipher = cred.shop_cipher
   （含 `api_tier`）、`permissions`（页面权限点 `page:<id>`）、
   `role_permissions`、`user_roles`、`user_sessions`（服务端会话）
 - **页面级权限**：权限点 `page:<page_id>` 与侧边栏页面一一对应，单一清单在
-  `tts_erp_v2/accounts/pages.py`（14 个页面，含 `page:users` 用户管理与 `page:video-publish` 视频发布）；
+  `tts_erp_v2/accounts/pages.py`（含 `page:users` 用户管理与 `page:video-publish` 视频发布）；
   `GET /v2/pages/<id>` 要求会话权限集含 `page:<id>`，缺失 → 403 页面
   （已登录但无权限 ≠ 未登录）；`/v2/users*` / `/v2/roles*` 归属 `page:users`
 - **侧边栏按权限过滤**：服务端渲染时按会话 `pages` 过滤入口，无权限页面不出现在
@@ -112,7 +107,7 @@ shop_cipher = cred.shop_cipher
 - deployment path 由 `tts_erp_v2.access.canonicalize_path()` 统一解释，Auth 与 DocsAuth
   共用 route-relative 结果；不得在其他 middleware 重新读取 external-prefix env
 
-## 6. External API（外部契约）
+## 7. External API（外部契约）
 
 **完整活契约**（auth / 限流 / CORS / 分页 / 每端点 schema + curl + Stability matrix）= `docs/api/external-api.md`——加/改任何外部端点前先读它。
 
@@ -127,22 +122,22 @@ shop_cipher = cred.shop_cipher
 **过滤用内部主键**（`shop_pk` / `spu_pk`），不是 `shop_id`——传 `?shop_id=` 不报错但被 FastAPI **静默忽略**（返回全量不过滤）。先查再过滤：
 
 ```bash
-curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" "http://127.0.0.1:9877/v2/commerce/channel-accounts"
+curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" "https://chen.daqiangplatform.com/tts/v2/commerce/channel-accounts"
 # → external_account_id 即 TikTok shop_id；返回里的 shop_pk 即内部主键（以实际结果为准）
 curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
-  "http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=<内部 id>&limit=5"
+  "https://chen.daqiangplatform.com/tts/v2/commerce/sales-orders?shop_pk=<内部 id>&limit=5"
 ```
 
-### 6.1 不稳定端点（可随时 break，外部 client 勿依赖）
+### 7.1 不稳定端点（可随时 break，外部 client 勿依赖）
 
-`GET /v2/analytics/sync/*`（Chrome 扩展 ingest 契约，随扩展发布节奏演进）、`GET /v2/llm-context`
+`/v2/analytics/sync/*`（Chrome 扩展 ingest 契约，随扩展发布节奏演进）、`GET /v2/llm-context`
 （experimental）等端点。Miaoshou 已无任何 HTTP 面，不要等它回来。
 
-### 6.2 改 app.py / middleware 后验证
+### 7.2 改 app.py / middleware 后验证
 
-`bash prod-switch/postswitch-smoke.sh`（7 步冒烟）+ `bash scripts/test_isolated.sh fast`（含 middleware/ + api/ 契约测试；测试仍只通过隔离入口）。
+使用 [测试指南](../guides/agent-testing.md) 选择隔离的鉴权、API 契约和浏览器回归。生产只读检查由运维按 [部署手册](../ops/tts-erp.md#运行状态与日志) 执行。
 
-### 6.3 已拆除、不要再找
+### 7.3 已拆除、不要再找
 
 - 没有 `POST /v2/sync/*` —— 同步全部由 `tts-erp-sync.service` 调度（`sync_worker/scheduler.py` 的 `JOBS`）
 - 没有任何 `/v2/linkage/*` —— 未接通的映射层与 DB schema 已由 migration 0044 删除

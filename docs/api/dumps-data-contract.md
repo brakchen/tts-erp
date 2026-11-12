@@ -493,86 +493,44 @@ SQLAlchemy/数据库异常向上抛出，由 adapter 映射为 `500 INTERNAL_ERR
 | `plugin.ad_raw_log` | 原始 dump（含 monthly）| 完整 request+response | dump 协议 |
 | `plugin.plugin_logs` | 扩展运行日志 | — | 内部 |
 
-**ads-data-sync 抓的 3 个 ad 端点**（见 `docs/reference/tiktok-seller-center-api-catalog.md` §1.7）：
+coverage 支持商品分析和变更日志端点：
 
 ```
-POST /oec_ads/shopping/v1/oec/ads/stat/post_product_list   ← 商品分析
-POST /oec_ads/shopping/v1/oec/ads/stat/post_session_list   ← 会话分析
-POST /oec_ads/shopping/v1/oec/ads/stat/campaign_opt_log_list ← 变更日志
+POST /oec_ads/shopping/v1/oec/stat/post_product_list
+POST /oec_ads/shopping/v1/oec/stat/campaign_opt_log_list
 ```
+
+历史会话分析 dump 的读取兼容与现行采集范围以代码和
+[daily + coverage 方案](../design/daily-sync-with-coverage.md) 为准。
 
 变更日志转储同时持久化 `plugin.campaign_opt_logs` 和 `plugin.ad_raw_log`。两处写入在同一事务内提交后才返回 2xx。任一写入失败时返回可重试的 500，并回滚本次转储。显式提供的 `logs` 结构无效或日志 ID 与其他店铺作用域冲突时，返回不可自动重试的 422。已有原始存档若含 `logs`，覆盖查询会核对每条日志是否存在于同一作用域。旧版 `data.table` 存档沿用原覆盖规则。
 
-### 6.2 v4 协议关键设计决策（D1-D5，详见 `docs/archive/dump-architecture.md` §2）
+### 6.2 现行端点
 
-| 决策 | 含义 |
+| 路径 | 处理方式 |
 | --- | --- |
-| **D1** | `ad_raw` 是 source-of-truth（不可变原始 dump，jsonb 直存）|
-| **D2** | `/dumps` 协议替换 `/batches`（**单 dump object** body，不是 array）|
-| **D3** | `/cursor` 只剩 has-data 模式（plugin 用它做防风控预检）|
-| **D4** | schema 5 → 3 张表（去掉 page bitmap 和 work-list 状态机）|
-| **D5** | schema 3 → 1 张表（2026-09-05 reorg，ad_raw 是唯一保留）|
+| `GET /v2/analytics/sync/coverage` | 只接受 `kind=daily`，按作用域和 endpoint 查询。支持日期范围、重复的 `campaignId` 参数及 `page` / `pageSize`。用响应的 `pagination.hasMore` 继续查询。 |
+| `POST /v2/analytics/sync/dumps` | 每个请求一个 v4 dump。解析和契约要求的持久化完成后返回 2xx。 |
+| `POST /v2/analytics/sync/plugin-logs` | 接收扩展运行日志。 |
 
-### 6.3 v4 dumps 请求 schema（示例）
+### 6.3 v4 dumps 请求与持久化
 
-```jsonc
-// POST /v2/analytics/sync/dumps body 示例
-{
-  "protocolVersion": 4,
-  "requestId": "client-uuid",                     // 幂等键
-  "scope": {
-    "sellerId":     "7494763368967603447",
-    "advertiserId": "7661087232599212040"
-  },
-  "dump": {                                        // 单 dump object（不是 array）
-    "endpoint":   "post_product_list",
-    "method":     "POST",
-    "request":    { /* 完整 HTTP request body */ },
-    "response":   { /* 完整 HTTP response body */ },
-    "capturedAt": 1789293724140                    // unix ms
-  }
-}
-```
+请求顶层包含 `protocolVersion: 4`、`requestId`、`scope` 和 `dump`。
+`scope` 包含 `sellerId`、`advertiserId`。dump 包含 endpoint、抓取时间、原始
+请求和响应，以及 v4 的 `kind`；日级和实时数据按 endpoint 契约携带结构化 `rows`。
+可对照 [v4 样例](../../tests/api/_fixtures/cross-repo-analytics-v4-dump.json) 和
+[服务端路由](../../tts_erp_v2/api/v2/analytics.py)。
 
-**v4 协议详见** `.agents/ao/handoff/2026-09-13-intercept-standard-protocol.md`
+- `today` 和 `daily` 写入相应结构化表，`monthly` 只写 `plugin.ad_raw_log`。
+- 变更日志转储和覆盖核对遵循 §6.1 的事务及兼容约束。
+- 用 HTTP 状态判断结果，错误响应带 `requestId`。部署地址和排查命令见
+  [广告同步运维](../ops/analytics-sync.md)。
 
-### 6.4 ad 域解析流程（server 端 `/v2/analytics/sync/dumps`）
+### 6.4 历史端点
 
-```
-接收 dump
-  ↓
-1. 解析 scope (seller_id, advertiser_id)
-2. 提取 endpoint + day + campaign_id (从 dump.request/response)
-3. INSERT INTO plugin.ad_raw
-   ON CONFLICT (seller_id, advertiser_id, endpoint, day, campaign_id)
-   DO UPDATE SET response = EXCLUDED.response, captured_at = EXCLUDED.captured_at
-   RETURNING xmax = 0 -- 判 inserted/duplicate
-4. COMMIT
-```
-
-**5 元组唯一键**：`(seller_id, advertiser_id, endpoint, day, campaign_id)` —— 不可变原始 dump 天然幂等
-
-**v3 → v4 关键变化**（详见 `docs/archive/dump-architecture.md` §3）：
-
-| 维度 | v3（已废）| v4（现行）|
-| --- | --- | --- |
-| 请求体 | `array` of dump objects | `object`（单 dump）|
-| 写入表 | 3 张（ad_raw + ad_records + ad_daily_completeness）| 1 张（ad_raw）|
-| /cursor 协议 | work-list（items / nextRequiredDay）| has-data 单查询 |
-| plugin 状态 | lease + epoch + page bitmap | "dumb dump"（无状态）|
-
-### 6.5 ad 域代码定位
-
-| 模块 | 路径 |
-| --- | --- |
-| dumps 端点 + v4 协议 | `tts_erp_v2/api/v2/analytics.py` |
-| analytics v2 repository | `tts_erp_v2/analytics/repository.py` |
-| has-data 缓存 | `tts_erp_v2/analytics/has_data_cache.py` |
-| AdDaily / AdToday / AdMonthly 模型 | `tts_erp_v2/db/models/plugin.py`（已合并入 plugin schema）|
-| Chrome 端 v4 dumps | `chrome-plugins/ads-data-sync/src/core/analytics-sync-v2.ts` |
-| Chrome 端 Zod schema | `chrome-plugins/ads-data-sync/src/core/order-sync-schemas.ts` |
-
----
+`/batches`、work-list 和 `/cursor` 单日预检属于早期协议。当前扩展通过 `/coverage`
+判断日级覆盖。迁移背景见 [dump 架构记录](../archive/dump-architecture.md) 和
+[daily + coverage 方案](../design/daily-sync-with-coverage.md)。
 
 ## §7 4 域 ID 映射（核心连接键）
 

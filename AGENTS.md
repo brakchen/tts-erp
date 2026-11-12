@@ -13,7 +13,7 @@
 
 ## 2. Project overview
 
-- Stack: Python 3.14, FastAPI/uvicorn, SQLAlchemy 2, psycopg3, PostgreSQL, APScheduler, MinIO, Fernet, systemd user units.
+- Stack: Python 3.13+, FastAPI/uvicorn, SQLAlchemy 2, psycopg3, PostgreSQL, APScheduler, MinIO, Fernet, systemd.
 - Purpose: ingest TikTok Shop and Miaoshou data into a local analytics database, expose read-oriented APIs, and run scheduled synchronization.
 - Main code: `tts_erp_v2/`.
 - Tests: `tests/`.
@@ -22,14 +22,8 @@
 - Sole live task/lane registry for non-Codex sessions: tower-do (`tower_do`, `tower_do_talk`, `tower_do_status`; see §8).
 - Stable lane lifecycle and board record format: `docs/guides/agent-git-workflow.md`. `docs/handoff/ACTIVE.md` is only a relocation notice; do not maintain live rows there.
 
-- 测试服务器：**`schan@192.168.1.2`（HP desk，`schan-HP-ProDesk-400-G2-MINI`，Ubuntu 24.04 LTS）**。代码在 `/home/schan/tts-erp`，测试环境、venv（Python 3.13）、docker `postgres:18` / `minio` 都在这台机器上；隔离测试只走 `bash scripts/test_isolated.sh ...`（§3 不变）。SSH 连接方式与适用边界见 `docs/ops/tts-erp.md` 的「本机虚拟机测试服务器（项目记忆）」。
-
-### 运行环境拓扑（2026-11-03 起）
-
-- **生产应用服务：`207.57.126.199`（SSH alias `tts-erp-prod`，Debian 13，HK）**。代码在 `/opt/tts-erp`，系统级 `tts-erp.service`（uvicorn `127.0.0.1:9878`，Python 3.13 venv）；日志 `/opt/tts-erp/logs/{stdout,stderr}.log`；重启 `ssh tts-erp-prod 'systemctl restart tts-erp'`。
-- **生产 nginx 也在 207**：`chen.daqiangplatform.com` 的 `/tts/*`（含 `/tts/static/`）回源本机 `127.0.0.1:9878`，经 `snippets/proxy-to-local-tts.conf`（`proxy_pass` 无尾斜杠契约不变）；`/minio/`、`/pi-web`、`/css|/js|/assets` 等其余 location 仍走 frp `:6008` 回 HP desk 网关。
-- **数据库与 MinIO 仍在 HP desk**（`schan-HP-ProDesk-400-G2-MINI`，192.168.1.2）：docker `postgres:18`（`tts_erp` 库）与 docker `minio`。207 应用经 frp 隧道回连：PG `127.0.0.1:6009`、MinIO `127.0.0.1:6005`，隧道定义在 HP desk `~/.config/frp/frpc-artemis.toml`（用户级 `frpc-artemis.service`）。
-- **HP desk 同时是测试机**：隔离测试仍只走 `bash scripts/test_isolated.sh ...`（§3 不变）。本机原有 systemd --user 服务（`tts-erp.service` :9877、`tts-erp-sync`、publish、pgbackup）暂未下线；Chrome 插件入口 `http://207.57.126.199:6007` 经 frp 仍指向 HP desk :9877，后续切换需另行登记 lane。
+- **207 是生产应用机**，运行 ERP API、Sync Worker 和 Nginx。**HP desk 承载生产 PostgreSQL 和 MinIO**。服务路径、公开入口、发布和回退见 [部署手册](docs/ops/tts-erp.md)。
+- 当前无专用测试机。手动页面验证在开发机绑定 `127.0.0.1`，加载独立测试配置。自动化测试使用 §3 的隔离入口。见 [测试指南](docs/guides/agent-testing.md)。
 
 ## 3. Non-negotiable safety boundaries
 
@@ -58,7 +52,7 @@
   | `plugins/tts-request-intercept` | `git@github.com:brakchen/tts-request-intercept.git` |
 
   They are submodules of this repo directly — not of a `chrome-plugins` superproject.
-- `tts-request-intercept` was extracted from `chrome-plugins` (2026-10-10) with `git subtree split`, so its 13 prior commits are preserved as real history rather than one squashed initial commit. It is the only plugin that talks to `/api/v2/intercept`.
+- `tts-request-intercept` was extracted from `chrome-plugins` (2026-10-10) with `git subtree split`, so its 13 prior commits are preserved as real history rather than one squashed initial commit. It is the only plugin that talks to `/v2/intercept`.
 - **The §3 production-safety rules do not apply inside `plugins/`.** Those extensions run in the user's browser, hold shop sessions, and have no database session. Do not run migrations, `alembic upgrade`, the isolated test runner, or any destructive SQL against that subtree.
 - `plugins/` has its own TypeScript/WXT toolchain (`vitest`, `wxt`) and its own `.gitignore`. Run `bash scripts/test_isolated.sh ...` only from the repository root, against `tests/`.
 - Python tooling is explicitly scoped away from it: `pyproject.toml` `[tool.ruff] exclude`, `pyrightconfig.json` `exclude`. pytest's `testpaths` and setuptools' package `include` are already explicit lists, so they never collect it. If you add a tool that scans the whole tree, exclude `plugins/` too.
@@ -115,7 +109,7 @@ The purpose of this boundary is not “the frontend may never calculate”. It i
 
 ### Frontend engineering and component reuse
 
-Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md) before frontend work. It records the user-approved standard: free/open-source HeroUI first; one shared navigation/Header/Footer/application shell; page-specific content may be customized; minimal styling instead of deep component overrides. The React/TypeScript/Vite rollout is in [`docs/plans/frontend-progressive-migration.md`](docs/plans/frontend-progressive-migration.md); P0–P5 are implemented and verified, and the P6 retirement (legacy templates, page scripts, orphaned CSS and vendored copies) is merged. Production deployment remains outside that completed slice. Merging these documents does not authorize runtime changes.
+Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md) before frontend work. It records the user-approved standard: free/open-source HeroUI first; one shared navigation/Header/Footer/application shell; page-specific content may be customized; minimal styling instead of deep component overrides. The React/TypeScript/Vite rollout is in [`docs/plans/frontend-progressive-migration.md`](docs/plans/frontend-progressive-migration.md); P0–P6 are implemented and merged. See the [deployment runbook](docs/ops/tts-erp.md) for observed production versions.
 
 ## 5. Canonical commands
 
@@ -131,17 +125,14 @@ Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md
 | Refresh isolated test template | `bash scripts/test_isolated.sh --refresh-template fast` |
 | 测试前置依赖体检 / 安装 | `bash scripts/envsetup/install-test-deps.sh --check` / `sudo bash scripts/envsetup/install-test-deps.sh` |
 | 新 worktree 测试环境准备 | `bash scripts/envsetup/prepare-worktree.sh` |
-| API restart | `bash restart.sh` |
-| 部署 HP desk 测试环境（前端构建 + release worktree checkout + 重启校验） | `bash scripts/test_deploy.sh [ref]` |
-| 部署 207 生产环境（tar 同步 + 原子替换 + 重启校验，需逐字确认） | `bash scripts/prod_deploy.sh [--yes] [origin/master]` |
-| Sync-worker restart after `tts_erp_v2/jobs/`, `tts_erp_v2/sync_worker/`, or `tts_erp_v2/analytics/` changes (the worker imports job modules and their analytics deps at load time; without a restart the running process keeps the old code) | `systemctl --user restart tts-erp-sync.service` |
-| Service status | `systemctl --user status tts-erp{,-sync}.service` |
-| API logs | `journalctl --user -u tts-erp -n 50` |
+| 生产 API 发布或回退（人工） | `bash scripts/prod_deploy.sh <sha>` |
+| 生产 Sync Worker 发布或回退（人工） | `bash scripts/prod_sync_deploy.sh <sha>` · `--rollback <installed-sha>` |
+| 生产服务与版本检查 | [部署手册](docs/ops/tts-erp.md#运行状态与日志) |
 
 - `scripts/test_isolated.sh` is the sole agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, injects `TTS_ERP_DB_URL_TEST`, runs the selected scope, then drops the clone.
 - Refresh the template with `bash scripts/test_isolated.sh --refresh-template fast` when migrations/schema change or the template is missing/stale.
 - If template cloning or its prerequisites fail, stop and repair them with `bash scripts/envsetup/install-test-deps.sh --check`; do not substitute another runner or database.
-- **New worktrees need environment preparation before any test run.** `.venv`, `.env.test` and `frontend/node_modules` are gitignored, so a freshly created worktree has none of them and `test_isolated.sh` fails with `missing project Python`, `TTS_ERP_DB_URL_TEST is unset` or `Frontend dependencies missing`. Run `bash scripts/envsetup/prepare-worktree.sh` once per worktree; it links them from the main checkout (`/home/schan/tts-erp`) and changes nothing there.
+- Run `bash scripts/envsetup/prepare-worktree.sh` for a new local worktree. It reuses `.venv` and `.env.test` from the main checkout and installs frontend dependencies from the worktree's lockfile.
 - Full command reference: `docs/guides/commands-reference.md`.
 
 ### 5.1 Reuse-first implementation policy
@@ -278,7 +269,7 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/gui
 | Dumps endpoints and HTTP envelopes | `docs/api/dumps-data-contract.md` |
 | TikTok signing | `docs/reference/tiktok-hmac-signing.md` |
 | External endpoints, roles, pagination, schemas | `docs/api/external-api.md` |
-| ERP frontend components, navigation/layout, styling, or migration (not `plugins/`) | `docs/guides/frontend-development.md`; migration design: `docs/plans/frontend-progressive-migration.md` (P0–P6 implemented and merged; production deployment still pending) |
+| ERP frontend components, navigation/layout, styling, or migration (not `plugins/`) | `docs/guides/frontend-development.md`; migration design: `docs/plans/frontend-progressive-migration.md` (P0–P6 implemented and merged) |
 | SPU profit-deterioration product, design, implementation, or tests | `docs/spu-profit-deterioration/01-product-proposal.md`, then the matching numbered document in that directory |
 | Process/service architecture | `docs/architecture/process-architecture.md` |
 | Miaoshou integration | `docs/reference/miaoshou-platform.md` |

@@ -37,16 +37,8 @@ Chrome extensions ─────> analytics/order/intercept ingest ────
                                                      · access policy
 ```
 
-运行时由三个 systemd user 单元组成：
-
-| 单元 | 责任 |
-| --- | --- |
-| `tts-erp.service` | FastAPI/uvicorn API，监听地址由 `TTS_ERP_HOST` / `TTS_ERP_PORT` 配置（当前端口 9877） |
-| `tts-erp-sync.service` | APScheduler worker，运行 `scheduler.JOBS` 注册表 |
-| `tts-erp-watchdog.timer` | 周期巡检同步状态 |
-
-API 和 worker 共享代码与 PostgreSQL，但进程相互独立。修改 `jobs/` 或 `sync_worker/` 后必须单独
-重启 worker。
+生产 API 和 Sync Worker 在 207 使用独立的系统级 systemd 单元，分别发布和回退。
+PostgreSQL、MinIO 由 HP desk 承载。部署、日志和开机自启见 [运维手册](docs/ops/tts-erp.md)。
 
 ## 核心数据流
 
@@ -57,8 +49,8 @@ API 和 worker 共享代码与 PostgreSQL，但进程相互独立。修改 `jobs
 - TikTok：订单、订单详情、商品、物流、售后、财务；
 - 凭证：`token.refresh`；
 - 汇率：`fx.sync`，按上游 `next_update_at` 跳过无效请求；
-- 妙手：店铺、采集箱、搬家任务、公共采集箱、货源成本回填；
-- 报表：成本快照、旧版利润日报；
+- 妙手：店铺、采集箱、搬家任务、公共采集箱、货源成本回填、包裹、采购价清洗；
+- 报表：成本快照、利润日报和店铺平台费率估算；
 - 媒体：SPU 图片镜像。
 
 TikTok job 按已授权店铺扇出；进入 job runner 的每店运行状态记录到
@@ -199,9 +191,8 @@ X-API-Key: <key>
 readonly < readwrite < admin
 ```
 
-未匹配路径默认要求 `admin`。浏览器可在 `/v2/auth/login` 用 API key 换取 HttpOnly HMAC
-cookie；cookie role 不是授权真相，实际 role 每次通过数据库/cache 复查。cookie mutation 还必须
-携带 `X-Requested-With: tts-erp`。
+未匹配路径默认要求 `admin`。浏览器使用用户名和密码登录，服务端会话通过
+HttpOnly cookie 识别。浏览器写请求还须携带 `X-Requested-With: tts-erp`。
 
 API-key 豁免路径为 `/healthz`、`/endpoints`、`/openapi.json`、`/docs`、`/redoc`、
 `/docs/oauth2-redirect`、`/v2/auth/login`、`/v2/auth/logout`、`/v2/auth/me`、
@@ -209,8 +200,7 @@ API-key 豁免路径为 `/healthz`、`/endpoints`、`/openapi.json`、`/docs`、
 `TTS_ERP_DOCS_USER` / `TTS_ERP_DOCS_PASSWORD` 后仍受独立 Basic Auth 保护。
 
 `TTS_ERP_EXTERNAL_PREFIX` 是外部部署前缀的单一真相源，当前生产值为 `/tts`。
-本机直连使用 `http://127.0.0.1:9877/v2/...`；当前公网使用
-`https://chen.daqiangplatform.com/tts/v2/...`，不带端口且不能省略 `/tts`。
+公网使用 `https://chen.daqiangplatform.com/tts/v2/...`。本地验证实例使用回环地址。
 access module 同时兼容代理保留或剥离前缀的请求，并让 Auth 与 Docs Basic Auth
 使用相同 route-relative path。
 
@@ -222,29 +212,9 @@ access module 同时兼容代理保留或剥离前缀的请求，并让 Auth 与
 
 ## 本地环境与启动
 
-运行环境：Python 3.14（包声明支持 Python 3.13+）、PostgreSQL、MinIO 和 systemd user units。
-
-```bash
-cd /home/schan/tts-erp
-python3.14 -m venv .venv
-.venv/bin/pip install -e .
-```
-
-环境变量保存在本地 `.env`，权限必须为 `0600`。仓库不提供含凭证的模板；从运维人员处取得
-所需配置，不要提交数据库 URL、Fernet key、API key、cookie、token 或 MinIO 凭证。
-
-推荐通过 systemd 启动：
-
-```bash
-systemctl --user start tts-erp.service
-systemctl --user start tts-erp-sync.service
-
-curl -sS http://127.0.0.1:9877/healthz | jq
-# {"status":"ok","service":"tts-erp-v2","auth_mode":"enforce"}
-```
-
-完整部署说明见 [`docs/ops/tts-erp.md`](docs/ops/tts-erp.md)。数据库 migration 的生产执行由人工运维
-完成；agent 只能通过隔离测试入口在 `tts_erp_test_template` 的一次性 ephemeral clone 上验证 migration。
+开发机使用 Python 3.13+。目前无专用测试机，临时验证实例绑定 `127.0.0.1`。
+[本地启动步骤](docs/guides/agent-testing.md#本地启动与手动验证)说明如何准备测试配置、
+构建前端和运行回环实例。
 
 ## 测试
 
@@ -280,23 +250,9 @@ bash scripts/test_baseline.sh --scope auto --base "$target_sha" --refresh-templa
 
 ## 运维
 
-```bash
-# API
-bash restart.sh
-systemctl --user status tts-erp.service
-journalctl --user -u tts-erp -n 50
-
-# sync-worker；修改 jobs/ 或 sync_worker/ 后单独重启
-systemctl --user restart tts-erp-sync.service
-systemctl --user status tts-erp-sync.service
-
-# 当前调度状态
-curl -sS -H "Authorization: Bearer $TTS_ERP_KEY" \
-  http://127.0.0.1:9877/v2/sync/status | jq
-```
-
-API 日志由 access log middleware 记录最终状态、耗时、认证方式和代理信息。sync-worker 测试日志
-写入测试专用文件，不应污染生产 `logs/sync_worker.log`。
+在 207 使用 `systemctl status tts-erp.service tts-erp-sync.service` 检查进程，
+用 `journalctl -u tts-erp-sync.service -n 50` 查看同步日志。
+两个服务的版本检查、发布、回退和日志轮转见 [部署手册](docs/ops/tts-erp.md)。
 
 ## 仓库结构
 

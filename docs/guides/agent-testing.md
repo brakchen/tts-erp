@@ -36,23 +36,16 @@ Rules for any cleanup of leftover `tts_erp_test_*` databases:
 
 Evidence and incident analysis: `docs/handoff/test-baseline-verify-2026-11-08.md` §7.1.
 
-### 1.2 Shared-host capacity
+### 1.2 Local capacity and prerequisites
 
-The test host runs browser tests (Playwright/Chromium) and is memory-bound. Concurrency has a real cost:
+Run validation on the development machine. Browser tests (Playwright/Chromium) and frontend
+builds can exhaust local resources when several suites run at once. Prefer the narrowest
+selection and rerun a failing case alone when there is evidence of resource contention.
 
-- **Run one suite at a time.** Two concurrent pytest runs push the 4-core host's load past 7 and produce
-  **false failures** — `tests/frontend/test_components.py::test_frontend_components` fails under contention
-  and passes alone (`[100%]`). Measured 2026-11-08.
-- **Check before starting**: `pgrep -fc "pytest -q"`. If another lane is running, wait.
-- Prefer the narrowest selection that covers the change; `unit` is ~3.5 min, the full `fast` suite is
-  20–40 min depending on host load.
-- If a browser test fails, **re-run it alone** before treating it as a real failure.
-
-The hard exit is the final safety net, not the normal workflow. Always use `scripts/test_isolated.sh`.
-
-Test prerequisites (PostgreSQL client tools, pytest, `.env.test`) are checked and
-installed by `bash scripts/envsetup/install-test-deps.sh` — run `--check` first, then
-`sudo bash scripts/envsetup/install-test-deps.sh` for the root-owned part.
+Check the local PostgreSQL client, pytest, and test configuration with
+`bash scripts/envsetup/install-test-deps.sh --check`. Use the install script for missing
+prerequisites where applicable. Run Bash-based validation in an environment that supplies
+the required tools, such as Linux or WSL.
 
 ### 1.3 New worktrees need environment preparation
 
@@ -62,7 +55,8 @@ worktree has none of them and `scripts/test_isolated.sh` fails with
 `Frontend dependencies missing`.
 
 Run `bash scripts/envsetup/prepare-worktree.sh` once per worktree. It links the venv and
-`.env.test` from the main checkout and installs frontend dependencies **for that worktree**.
+`.env.test` from the Git main checkout and installs frontend dependencies from the current
+worktree's lockfile. Set `TTS_ERP_MAIN_CHECKOUT` when reusing a different prepared checkout.
 
 > **Do not symlink `frontend/node_modules` across worktrees.** Node's ESM resolution follows
 > the real path of the link, so a shared `node_modules` resolves against the *other*
@@ -257,21 +251,34 @@ paths and Markdown in addition to the diff check.
 
 Agents must not invoke the underlying test framework or low-level wrapper directly, and must not select `all`, `coverage`, or archived migration domains. Those paths can include production-touching historical behavior.
 
+## 本地启动与手动验证
+
+当前无专用测试机。手动验收在开发机运行回环实例。使用本地测试配置和独立测试库，
+通过已生成的前端产物验证页面时先执行前端构建：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
+npm ci --prefix frontend
+PATH="$PWD/.venv/bin:$PATH" bash scripts/build_frontend.sh
+```
+
+在 Git 忽略的 `.env.local` 设置本地测试数据库 URL、测试用 Fernet key，以及页面需要的
+本地存储配置。启动前核对当前 shell 未继承生产数据库连接或其他生产环境变量。
+
+```bash
+.venv/bin/python -m uvicorn tts_erp_v2.app:app --env-file .env.local --host 127.0.0.1 --port 9877
+# 从另一个终端检查本地实例
+curl --fail --silent --show-error http://127.0.0.1:9877/healthz
+```
+
+自动化用例继续通过 `scripts/test_isolated.sh` 运行。用于手动验证的应用连接与隔离
+runner 每次创建的数据库属于不同的生命周期。用完关闭本地进程。
+
 ## 3. Worktree prerequisites
 
-A worktree needs access to the shared virtual environment and test configuration:
-
-```bash
-ln -s ../../.venv .venv
-ln -s ../../.env.test .env.test
-```
-
-Do not link the main repository's writable `.env` into a worktree by default. If non-test code requires settings that are not in `.env.test`, create an independent local copy and make it read-only:
-
-```bash
-cp ../../.env .env
-chmod u-w .env
-```
+Use `bash scripts/envsetup/prepare-worktree.sh` to prepare the local worktree.
+Use worktree-local test settings for services outside the isolated runner.
 
 Rules:
 
@@ -285,7 +292,7 @@ Creating the worktree `.venv` link is required for the isolated runner, pi-lens,
 Frontend selections also need Node within `frontend/package.json`'s engine range
 and a worktree-local `npm ci --prefix frontend` installation. Do not share writable
 `node_modules` or Vite caches between lanes. Component tests use two jsdom workers
-to fit the validation VM's memory budget. The component adapter and local Vite
+to limit memory use during local validation. The component adapter and local Vite
 fixtures own their npm process groups and reclaim descendants on success, failure,
 or timeout; increasing test deadlines is not a substitute for process cleanup.
 The shared `frontend/scripts/check-runtime.mjs` uses npm/node-semver 7.8.6 (ISC,

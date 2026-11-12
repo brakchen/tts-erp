@@ -1,6 +1,6 @@
 # SPU 利润劣化告警：技术设计与回测结论
 
-> 状态：设计/回测完成，未实现产品页、API、迁移或调度器。所有回测阈值均标记为 **回测暂定**，不得在实现前当作生产阈值。
+> 历史方案与回测记录。现行功能和主线、生产的任务状态见 [SPU 盈利表现对比](../spu-profit-deterioration/01-product-proposal.md)。回测阈值保留为暂定证据。
 >
 > 业务口径权威仍为 [`../business/spu-profitability.md`](../business/spu-profitability.md)；本设计只定义告警的比较、配置、展示和运维边界。
 

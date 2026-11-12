@@ -3,30 +3,28 @@
 > 本文档包含 tts-erp 项目的进程托管和目录结构信息。
 > 通用约束和边界规则见 `AGENTS.md`。
 
-## 1. systemd user units
+## 1. 进程托管
 
-`Linger=yes` 开机自启，无需登录：
+- **生产 API `tts-erp.service`** 在 207 使用系统级 systemd，从 `/opt/tts-erp` 运行。
+- **生产 Sync Worker `tts-erp-sync.service`** 在 207 使用独立系统级单元，从
+  `/opt/tts-erp-sync/releases/<sha>` 运行 APScheduler。它与 API 共享数据存储，分别发布和回退。
+- **HP desk** 运行生产 PostgreSQL、MinIO、frpc 和备份定时器。旧 API 与视频发布 Worker 已停止。
+  旧 Sync Worker 保留代码、配置和单元，供回退时手动启动。
+- **RunningHub Worker** 由 `tts_erp_v2.runninghub.worker` 提供，按实际部署独立安装。
+  它复用 PostgreSQL 和 MinIO，按凭据限制在途任务，优先恢复已受理的任务。见 [RunningHub](../api/runninghub.md)。
 
-- **`tts-erp.service`**：uvicorn API，cwd=仓库根，`EnvironmentFile=.env`
-- **`tts-erp-sync.service`**：APScheduler worker，安装脚本 `prod-switch/install-sync-worker.sh`
-- **`tts-erp-publish.service`**：单设备 TikTok 发布 Worker；主循环保持 recovery/device-cleanup/publish 顺序，独立有界后台 coroutine 用短 DB session/cleanup lease 推进 spool 与 MinIO cleanup，慢对象删除不阻塞发布；user unit 为 `scripts/systemd/tts-erp-publish.service`
-- **`tts-erp-runninghub.service`**：独立换装生成 Worker（`tts_erp_v2.runninghub.worker`），复用 PostgreSQL/MinIO；数据库凭据级配额控制云端最多5个在途，已受理任务恢复优先。部署需人工安装并按实际目录覆盖 unit；接口开发不自动启动进程，见 [RunningHub](../api/runninghub.md)。
-- **`tts-erp-watchdog.timer`**：每 10min 巡检 → `logs/watchdog.log`
-- **`tts-erp-logrotate.timer`**：每 6h 检查 `logs/{stdout,stderr,watchdog}.log`，
-  > 20MB 则滚动（`scripts/logrotate/tts-erp.conf`，copytruncate 适配 systemd
-  `append:` 长开 FD，无需 root；`scripts/systemd/tts-erp-logrotate.*`）。`sync_worker.log`
-  由 RotatingFileHandler 自转，不在此列
+日志、轮转、开机自启与服务检查见 [部署手册](../ops/tts-erp.md#运行状态与日志)。
 
 ## 2. 目录结构
 
 ```text
 tts_erp_v2/
-├── app.py               # FastAPI build_app() 工厂（中间件顺序见 §6）
+├── app.py               # FastAPI build_app() 工厂（中间件顺序见 §3.1）
 ├── api/v2/              # 路由：commerce / reporting / pages / spu_images / auth /
 │                        #   llm_context / admin（rate-limit / purge-plugin-data / shops 注册：插件店铺人工登记进
 │                        #   commerce.shops，data_source='plugin'（枚举 api|plugin），仅服务查询关联，readwrite 角色） /
 │                        #   analytics（插件广告 dump ingest：/v2/analytics/sync/* → 落 plugin.* schema）
-├── middleware/          # auth.py（角色矩阵）、session_auth.py、rate_limit.py、access_log.py
+├── middleware/          # auth.py、session_auth.py、rate_limit.py、access_log.py
 ├── proxy/               # 出站层：tts_shop/（TikTok 签名+客户端）、miaoshou/、token_service.py
 ├── jobs/                # 同步 job 实现：tiktok/*、miaoshou/*、
 │                        #   reporting（cost_snapshots 6h / profit_daily 1h）、token_refresh（6h）、runner
@@ -67,7 +65,8 @@ CHANGELOG.md · pyproject.toml（ruff/pytest 配置）
 FastAPI `build_app()` 工厂，中间件顺序：
 
 - RateLimit 最内
-- Auth
+- Auth（角色策略在 `access/_policy.py`）
+- DocsAuth
 - CORS
 - AccessLog 最外
 - Auth 必须在 RateLimit 之前才能按 key 分桶
