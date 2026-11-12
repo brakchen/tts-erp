@@ -11,19 +11,19 @@
 #   - 缺 .env.test             -> "TTS_ERP_DB_URL_TEST is unset; create .env.test"
 #   - 缺 frontend/node_modules -> "Frontend dependencies missing"
 #
-# 本脚本在测试机 HP desk (schan@192.168.1.2) 上运行，
-# 从主 checkout (/home/schan/tts-erp) 复用 venv 和测试连接串，
-# 并按本 worktree 自己的 package.json 安装前端依赖。
+# 在开发机运行，从 Git 主 checkout 复用 venv 和测试连接串。
+# TTS_ERP_MAIN_CHECKOUT 可指定已有环境的 checkout。前端依赖按当前 worktree 安装。
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-MAIN_CHECKOUT="${TTS_ERP_MAIN_CHECKOUT:-/home/schan/tts-erp}"
+COMMON_DIR="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)"
+MAIN_CHECKOUT="${TTS_ERP_MAIN_CHECKOUT:-$(dirname "$COMMON_DIR")}"
 
 note() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*" >&2; }
 
-if [[ "$ROOT" == "$MAIN_CHECKOUT" ]]; then
+if [[ "$ROOT" -ef "$MAIN_CHECKOUT" ]]; then
   echo "[SKIP] 当前就是主 checkout ($ROOT)。"
   echo "       若主 checkout 落后 origin/master，先同步并执行 npm ci --prefix frontend。"
   exit 0

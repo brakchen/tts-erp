@@ -1,7 +1,7 @@
 # tts-erp External API Guide
 
 This document is the **stable public API contract** for the tts-erp FastAPI
-service (port 9877). The authoritative live route list is `GET /endpoints`;
+service. The live route list is available at `GET /endpoints`;
 this document explains semantics, auth, and conventions.
 
 > **2026-08-29 hard switch**: all legacy v1 endpoints — `/db/*`, `/orders/*`,
@@ -11,9 +11,11 @@ this document explains semantics, auth, and conventions.
 
 ## TL;DR — quick reference for agents
 
-All endpoints are served at `http://127.0.0.1:9877` (or
-`https://daqiang.nat100.top` from outside — TLS terminates at the public gateway and the NAT layer strips the port;
-browser traffic may additionally sit under a `/tts` prefix handled by nginx).
+Use `https://chen.daqiangplatform.com/tts` as the production base URL. Nginx
+preserves the `/tts` prefix when forwarding to `127.0.0.1:9878` on 207.
+For a developer's local instance, use its configured loopback base URL.
+See the [deployment runbook](../ops/tts-erp.md#部署拓扑) for environment details.
+
 Every endpoint other than the explicitly-public ones requires one of two
 credential kinds:
 

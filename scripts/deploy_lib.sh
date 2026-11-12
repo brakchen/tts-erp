@@ -2,10 +2,7 @@
 # scripts/deploy_lib.sh — test_deploy.sh / prod_deploy.sh 的公共函数库。
 # 只用于被 source，不单独执行。调用方须先设置 DL_REPO_ROOT（仓库根目录）。
 #
-# 部署拓扑（2026-11-03 起，详见 AGENTS.md §2）：
-#   - HP desk（本机）= 测试/数据机：API 用户级服务从 release worktree 运行，
-#     sync/publish worker 从主 worktree 运行；
-#   - 207.57.126.199（ssh alias tts-erp-prod）= 生产应用机，系统级 tts-erp.service。
+# 生产发布入口见 docs/ops/tts-erp.md。本库同时保留历史测试部署脚本使用的函数。
 #
 # 安全约定：部署脚本永不执行 alembic upgrade（迁移一律人工）、不覆盖目标机
 # .env/.venv/logs、不打印任何密钥。
@@ -97,16 +94,16 @@ dl_tar_stream() {
 }
 
 # 只读校验：健康检查 + 登录页可达 + 线上 releaseId（可选与期望值比对）。
-# 用法: dl_verify <名称> <origin> [期望releaseId]
+# 用法: dl_verify <名称> <origin> [期望releaseId] [健康检查路径]
 #   origin 不带 /tts 后缀，例如 http://127.0.0.1:9877 或 https://chen.daqiangplatform.com
 dl_verify() {
-  local name="$1" origin="$2" expect="${3:-}" rc=0
+  local name="$1" origin="$2" expect="${3:-}" health_path="${4:-/healthz}" rc=0
   local body rel status
 
-  if body="$(curl -fsS --max-time 15 "$origin/healthz" 2>/dev/null)"; then
-    dl_log "$name 健康检查通过：$origin/healthz → $body"
+  if body="$(curl -fsS --max-time 15 "$origin$health_path" 2>/dev/null)"; then
+    dl_log "$name 健康检查通过：$origin$health_path → $body"
   else
-    dl_warn "$name 健康检查失败：$origin/healthz"
+    dl_warn "$name 健康检查失败：$origin$health_path"
     rc=1
   fi
 

@@ -1,5 +1,8 @@
 # TikTok 视频发布运维手册
 
+> HP desk 的视频发布 Worker 已下线。现行生产进程清单见 [部署手册](tts-erp.md#部署拓扑)。
+> 以下保留视频发布功能的安装和故障处理说明。
+
 ## 边界
 
 浏览器只访问 ttsERP；视频通过短期预签名 PUT 直传私有 MinIO。Worker 是唯一可访问 ADB/Artemis 的进程，数据库保留 bucket/key/ETag 和每个 Artemis session。禁止用真实任务做健康检查。

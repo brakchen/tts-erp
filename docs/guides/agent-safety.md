@@ -106,7 +106,7 @@ Forbidden:
 - Production uses `TTS_ERP_AUTH_MODE=enforce`.
 - Except for documented exemptions, endpoints accept `Authorization: Bearer <key>` or `X-API-Key: <key>`.
 - Role ordering is `readonly < readwrite < admin`.
-- The role matrix lives in `docs/api/external-api.md` and `tts_erp_v2/middleware/auth.py::required_role()`.
+- The role matrix lives in `docs/api/external-api.md` and `tts_erp_v2/access/_policy.py::required_role()`.
 - New endpoints must have an explicit role or an intentional documented exemption.
 
 Do not add or reconnect endpoints that mutate the real TikTok Shop, including:
@@ -126,22 +126,19 @@ Do not change middleware registration order in `tts_erp_v2/app.py`.
 Registration order:
 
 ```text
-RateLimit → Auth → CORS → AccessLog
+RateLimit → Auth → DocsAuth → CORS → AccessLog
 ```
 
 Effective request order:
 
 ```text
-AccessLog → CORS → Auth → RateLimit
+AccessLog → CORS → DocsAuth → Auth → RateLimit
 ```
 
 Auth must run before rate limiting can bucket requests by API key.
 
-Changes under `jobs/` or `tts_erp_v2/sync_worker/` require a separate sync-worker restart:
-
-```bash
-systemctl --user restart tts-erp-sync.service
-```
+Changes to `tts_erp_v2/jobs/`, `tts_erp_v2/sync_worker/`, or analytics consumed by the worker
+require publishing the affected worker release. See the [production deployment runbook](../ops/tts-erp.md#发布与回退).
 
 ## 7. Production-adjacent review checklist
 

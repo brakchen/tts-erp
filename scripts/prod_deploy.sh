@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/prod_deploy.sh — 一键部署生产环境 207.57.126.199（ssh alias tts-erp-prod）。
+# scripts/prod_deploy.sh — 部署 207 的生产 ERP API。Sync Worker 使用 prod_sync_deploy.sh。
 #
 # 部署内容：
 #   1. git fetch 后在临时 worktree 按指定 commit 构建前端产物；
@@ -69,8 +69,11 @@ rel="$(curl -fsS --max-time 15 "http://127.0.0.1:$PORT/tts/static/frontend/relea
 if [ -n "$EXPECT" ]; then
   [ "$rel" = "$EXPECT" ] && echo "[207] 前端版本一致：$rel" \
     || { echo "[207][警告] 前端版本不符：期望 $EXPECT，实际 ${rel:-未知}"; rc=1; }
+elif [ -n "$rel" ]; then
+  echo "[207] 当前前端版本：$rel"
 else
-  echo "[207] 当前前端版本：${rel:-未知}"
+  echo "[207][警告] 无法读取前端版本" >&2
+  rc=1
 fi
 exit "$rc"
 REMOTE_VERIFY
@@ -79,7 +82,7 @@ REMOTE_VERIFY
 if [ "$VERIFY_ONLY" = "1" ]; then
   dl_log "207 已部署 commit：$(ssh "${SSH_OPTS[@]}" "$PROD_HOST" "cat '$PROD_DIR/.deployed-commit' 2>/dev/null" || echo 未知)"
   remote_verify ""
-  dl_verify "公网" "$PUBLIC_ORIGIN"
+  dl_verify "公网" "$PUBLIC_ORIGIN" "" /tts/healthz
   exit $?
 fi
 
@@ -133,6 +136,7 @@ fi
 
 trap dl_cleanup EXIT
 WT="$(dl_prepare_build_worktree "$COMMIT")"
+DL_BUILD_WORKTREE="$WT"
 RELEASE_ID="$(dl_build_frontend "$WT")"
 
 dl_log "同步代码与前端产物到 $PROD_HOST:$PROD_DIR …"
@@ -174,6 +178,6 @@ exit 1
 REMOTE_RESTART
 
 remote_verify "$RELEASE_ID" || dl_die "207 本机校验未通过"
-dl_verify "公网" "$PUBLIC_ORIGIN" "$RELEASE_ID" || dl_die "公网校验未通过（nginx 回源或缓存问题）"
+dl_verify "公网" "$PUBLIC_ORIGIN" "$RELEASE_ID" /tts/healthz || dl_die "公网校验未通过（nginx 回源或缓存问题）"
 
 dl_log "完成：生产 $CONFIRM_WORD 已部署 ${COMMIT:0:12}，前端 $RELEASE_ID"

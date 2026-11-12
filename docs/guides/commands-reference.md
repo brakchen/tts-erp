@@ -49,36 +49,30 @@ bash scripts/import_prod_to_test.sh --exclude-credentials --yes
 
 ## 3. 服务管理
 
-```bash
-# 重启 API = systemctl --user restart tts-erp.service
-bash restart.sh
-
-# 改了 jobs/ 或 sync_worker/ 后必须单独跑
-systemctl --user restart tts-erp-sync.service
-```
-
-## 4. 部署（一键脚本）
+在 207 上查看系统级单元：
 
 ```bash
-# HP desk 测试环境：构建前端 → release worktree checkout → 重启 API
-# （主 worktree HEAD 一致时连带重启 sync/publish worker）→ 本机校验
-bash scripts/test_deploy.sh            # 部署当前 HEAD
-bash scripts/test_deploy.sh <ref>      # 部署指定分支/tag/commit
-bash scripts/test_deploy.sh --dry-run  # 只看计划不改动
-
-# 207 生产环境（207.57.126.199）：构建 → tar 管道同步（tts_erp_v2 原子替换、
-# 留 tts_erp_v2.prev 回滚副本）→ 重启系统服务 → 207 本机 + 公网校验
-bash scripts/prod_deploy.sh                  # 部署 origin/master（先 fetch），需逐字输入 207.57.126.199 确认
-bash scripts/prod_deploy.sh --yes <ref>      # 跳过交互确认（脚本/CI）
-bash scripts/prod_deploy.sh --dry-run        # 只看计划不改动
-bash scripts/prod_deploy.sh --verify-only    # 只读校验当前线上状态
-
-# 依赖清单（pyproject.toml 等）有变化时默认只警告，确认后加 --sync-deps 安装
+systemctl status tts-erp.service tts-erp-sync.service
+journalctl -u tts-erp-sync.service -n 50 --no-pager
 ```
 
-> 两个脚本都只部署**已提交**的 commit（在临时 worktree 里构建前端），永不执行数据库迁移
-> （检测到新 alembic 迁移只警告，迁移一律人工），不覆盖目标机的 `.env` / `.venv` / `logs`。
-> 目标目录/主机可用环境变量覆盖，详见脚本头部注释。
+本地手动启动见 [测试指南](agent-testing.md#本地启动与手动验证)。生产服务变更由人工执行。
+
+## 4. 发布与回退
+
+按照 [部署手册](../ops/tts-erp.md#发布与回退) 选定已验收的完整 SHA。
+API 与 Sync Worker 分别发布，涉及两个服务时传入相同的 `target_sha`。
+
+```bash
+bash scripts/prod_deploy.sh --verify-only
+bash scripts/prod_sync_deploy.sh --verify-only
+bash scripts/prod_deploy.sh "$target_sha"
+bash scripts/prod_sync_deploy.sh "$target_sha"
+bash scripts/prod_deploy.sh "$previous_api_sha"
+bash scripts/prod_sync_deploy.sh --rollback "$previous_worker_sha"
+```
+
+两个入口都支持 `--dry-run`。依赖和数据库迁移安排见部署手册。
 
 ## 5. 浏览器渲染回归与端到端测试
 
@@ -88,7 +82,7 @@ bash scripts/prod_deploy.sh --verify-only    # 只读校验当前线上状态
 #  断言：13 页 @1440 横向溢出、ad-daily 多视口、computed 字体栈 ⊆ tokens 三套栈
 bash scripts/test_isolated.sh browser
 
-# live 端到端冒烟（需 :9877 在跑；用例在 tests/e2e/，默认被 fast 排除）
+# 本地端到端冒烟（默认回环 :9877；用例在 tests/e2e/，fast 默认排除）
 bash scripts/test_isolated.sh e2e
 # 只读：/healthz、/endpoints、/v2/fx/latest、/v2/reporting/*；
 # 基址/密钥可用 TTS_ERP_E2E_BASE、TTS_ERP_SERVICE_KEY 覆盖
@@ -99,16 +93,9 @@ bash prod-switch/postswitch-smoke.sh
 
 ## 6. 监控和日志
 
-```bash
-# 进程状态
-systemctl --user status tts-erp{,-sync}.service
-
-# systemd 日志
-journalctl --user -u tts-erp -n 50
-
-# 业务日志：logs/stderr.log 抓 traceback
-# watchdog 巡检发现看 logs/watchdog.log（约定 agent 定时扫，代告警）
-```
+生产 API 业务日志在 207 的 `/opt/tts-erp/logs/{stdout,stderr}.log`。
+Worker 日志使用 `journalctl -u tts-erp-sync.service`。
+轮转配置和版本检查见 [部署手册](../ops/tts-erp.md#运行状态与日志)。
 
 ## 7. Schema 变更
 

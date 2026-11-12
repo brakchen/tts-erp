@@ -41,21 +41,24 @@
 
 对象字节流**从不经过 API 服务器**：浏览器直传 MinIO，服务端只保存元数据。
 
-## 3. 数据模型（`media` schema，migration 0073）
+## 3. 数据模型（`media` schema，截至 migration 0076）
 
 | 表 | 含义 |
 | --- | --- |
 | `media.media_assets` | 一个上传的图片或视频。`kind`、`filename`、`content_type`、`size_bytes`、`bucket`、`object_key`、`status`、`tags[]`、软删 `deleted_at` |
 | `media.digital_humans` | 一个人设档案。`name`、`description`、`status`（active/archived）、`deleted_at` |
 | `media.digital_human_assets` | 数字人 ↔ 资产多对多链接。`UNIQUE(digital_human_id, asset_id)` |
+| `media.media_packs` | 具名素材包，以唯一 `creation_token` 保证创建幂等。 |
+| `media.media_pack_videos` | 素材包 ↔ 视频资产，联合主键为 `(pack_id, asset_id)`。 |
+| `media.digital_human_packs` | 数字人 ↔ 素材包，联合主键为 `(digital_human_id, pack_id)`。 |
 
 约束与约定：
 
 - `media_asset_status_check`：状态只有 `awaiting_upload` / `ready` / `failed`。
 - `media_asset_size_check`：`size_bytes > 0`。
-- 三张表都挂 `public.fn_touch_updated_at()` BEFORE UPDATE 触发器（仓库既有约定）。
-- 资产仅在没有未删除数字人引用（含归档）时可删除；资产排他行锁下检查引用，仍被引用则返回 `409 ASSET_IN_USE`，不软删也不删除存储对象。允许删除时采用**软删**（`deleted_at`）+ 对象存储 best-effort 删除。历史已删除资产仍从数字人的资产列表和计数中排除。
-- 删除数字人只软删数字人并解绑链接，**资产本身保留在全局池**。
+- 上述表都挂 `public.fn_touch_updated_at()` BEFORE UPDATE 触发器（仓库既有约定）。
+- 删除资产时在资产行锁内检查素材包引用和未删除数字人的直接引用（含归档）。仍被引用则返回 `409 ASSET_IN_USE`，不软删也不删除存储对象。允许删除时采用**软删**（`deleted_at`）+ 对象存储 best-effort 删除。历史已删除资产仍从数字人的资产列表和计数中排除。
+- 删除数字人软删档案并解绑直接资产和素材包。视频资产和共享素材包保留；移出包内视频只移除关联。
 
 ## 4. 对象键布局
 

@@ -96,7 +96,7 @@
 由人工在 Partner Center 配置应用和授权范围，并在店铺管理保存该店的 Service/App。
 App Secret 只进入 Fernet 加密列，不回显。
 Redirect URL 应使用部署实际公网前缀；当前配置示例为
-`https://daqiang.nat100.top/tts/v2/oauth/tiktok/callback`，前缀由实际 `TTS_ERP_EXTERNAL_PREFIX` 决定。
+`https://chen.daqiangplatform.com/tts/v2/oauth/tiktok/callback`。由运维在 Partner Center 核对登记值，路径前缀以 `TTS_ERP_EXTERNAL_PREFIX` 为准。
 部署、生产迁移及服务重启由人工执行，本文不提供自动迁移入口。
 
 | 变量 | 作用 |
