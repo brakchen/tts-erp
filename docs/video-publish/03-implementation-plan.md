@@ -392,7 +392,7 @@ Luna 开始开发前必须按顺序阅读：
 2. `docs/guides/agent-safety.md`；
 3. `docs/architecture/architecture-overview.md`；
 4. `docs/architecture/process-architecture.md`；
-5. `docs/design/ui-style-system.md`；
+5. `tts_erp_v2/static/css/tokens.css`（现行色板；旧版 `docs/design/ui-style-system.md` 已归档至 `docs/archive/ui-style-system.md`）；
 6. 本方案全文；
 7. 现有 `tts_erp_v2/storage/minio_client.py` 与 `api/v2/spu_images.py`；
 8. Artemis client 的 `submit/get_task/wait_for_task` 契约。

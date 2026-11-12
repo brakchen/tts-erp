@@ -146,7 +146,7 @@
   `runtime-configs.css` 的 `--rc-*` 命名空间、`sync-jobs.css` 的重复 `:root` 一并去掉；
   `spu-roi.css` 的 `--bs-*` Bootstrap 桥接保留（功能性）。
 - surface 色用 `color-mix()` 从规范令牌派生，不再新增并行色板。
-- 详见 `docs/design/ui-style-system.md`（令牌表、组件规范值取舍、页面接入 checklist）。
+- 详见当时的 `docs/design/ui-style-system.md`（令牌表、组件规范值取舍、页面接入 checklist；该文档已于 2026-11-12 归档至 `docs/archive/ui-style-system.md`，现行色板以 `tts_erp_v2/static/css/tokens.css` 为准）。
 ## 2026-10-02 — 广告日明细页接入全局侧边栏
 
 - 广告日明细页此前用独立 HTML 壳渲染，是全站唯一没有共享侧边栏（主导航）

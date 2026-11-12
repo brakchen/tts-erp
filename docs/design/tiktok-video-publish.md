@@ -6,7 +6,7 @@
 >
 > 目标系统：ttsERP → MinIO → Android/ADB → Artemis → TikTok
 >
-> UI 规范：[`ui-style-system.md`](./ui-style-system.md)
+> UI 规范：现行色板与令牌以 `tts_erp_v2/static/css/tokens.css` 为准。旧版「暖纸编辑体」说明已归档至 [`../archive/ui-style-system.md`](../archive/ui-style-system.md)。
 
 ## 1. 背景与目标
 
@@ -689,7 +689,7 @@ POST /v2/video-publish/tasks/{task_id}/cleanup/retry
 - 主要用户：负责 TikTok 内容投放的运营人员
 - 页面唯一工作：**安全地投递一个视频，并看清它是否真正完成发布。**
 
-视觉继续使用全站“暖纸编辑体”，不新建颜色或字体体系：
+视觉继续使用全站共享令牌（现行色板见 `tts_erp_v2/static/css/tokens.css`），不新建颜色或字体体系：
 
 ```text
 tokens.css → common.css → video-publish.css
@@ -2720,7 +2720,7 @@ Luna 开始开发前必须按顺序阅读：
 2. `docs/guides/agent-safety.md`；
 3. `docs/architecture/architecture-overview.md`；
 4. `docs/architecture/process-architecture.md`；
-5. `docs/design/ui-style-system.md`；
+5. `tts_erp_v2/static/css/tokens.css`（现行色板；旧版 `docs/design/ui-style-system.md` 已归档至 `docs/archive/ui-style-system.md`）；
 6. 本方案全文；
 7. 现有 `tts_erp_v2/storage/minio_client.py` 与 `api/v2/spu_images.py`；
 8. Artemis client 的 `submit/get_task/wait_for_task` 契约。

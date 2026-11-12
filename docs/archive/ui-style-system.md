@@ -1,3 +1,5 @@
+> 归档说明：本文仍描述 2026-10-03 暖纸编辑体色板。现行色板以 	ts_erp_v2/static/css/tokens.css 为准。本文第 4、7、8 节含 2026-11-12 对 React/Vite 接入方式的更新，一并归档。
+
 # UI 设计体系（暖纸编辑体）
 
 > 本页记录共享样式令牌。页面与组件接入见 [前端开发规范](../guides/frontend-development.md)。

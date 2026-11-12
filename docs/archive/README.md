@@ -37,3 +37,8 @@
 `analytics-v2-migration-plan.md`、`after-sales-migration-v1.md`、`plugin-integration.md`、
 `m3-parallel-dev-prompt.md`、`review-remediation-2026-08.md`、`openapi.yaml` 等）按原样平铺迁入，
 归档事由沿用各自文档自带的声明。
+## 2026-11-12 归档清单
+
+| 文件 | 原位置 | 归档原因 |
+| --- | --- | --- |
+| `ui-style-system.md` | `design/` | 仍描述 2026-10-03「暖纸编辑体」（米色纸底、陶土橙 `#B8390E`、直角）。现行色板已于 2026-10-30 在 `tts_erp_v2/static/css/tokens.css` 改为墨绿导航、浅色纸面与白色内容面板；本文不再作为当前 UI 契约。 |
