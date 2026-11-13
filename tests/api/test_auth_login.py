@@ -114,9 +114,14 @@ def test_api_accept_keeps_json_401(api_client):
 def test_login_page_redirects_with_external_prefix(prefixed_client, ua_user_factory):
     user = ua_user_factory("test_ua_login_page_prefix", roles=("viewer",))
     r = prefixed_client.post(
-        "/v2/auth/login", json={"username": user.username, "password": user.password}
+        "/tts/v2/auth/login", json={"username": user.username, "password": user.password}
     )
     assert r.status_code == 200, r.text
-    response = prefixed_client.get("/v2/auth/login", follow_redirects=False)
+    assert any(
+        cookie.name == "tts_erp_session" and cookie.path == "/tts"
+        for cookie in prefixed_client.cookies.jar
+    )
+    # Use the external URL so the client sends the Path=/tts session cookie.
+    response = prefixed_client.get("/tts/v2/auth/login", follow_redirects=False)
     assert response.status_code == 302, response.text
     assert response.headers["location"] == "/tts/v2/pages/dashboard"

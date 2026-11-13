@@ -195,7 +195,7 @@ HTML page route (api/v2/pages.py)
 browser kernel
   -> GET /v2/analytics/spu-roi (legacy wire adapter: tts_erp_v2.analytics.spu_roi)
   -> GET /v2/analytics/spu-roi/{spu_pk}/{orders|settlements|cases|ads}
-  -> tts_erp_v2.analytics.spu_profitability.read_overview/explain_spu
+  -> tts_erp_v2.analytics.spu_profitability.read_overview/read_evidence
   -> _snapshot + _implementation + _selection + _formula_v10
   -> SQLAlchemy Session -> PostgreSQL schemas
 ```
@@ -206,7 +206,7 @@ HTTP adapter负责鉴权矩阵外的参数校验、异常到 HTTP mapping、Deci
 
 当前 route 是同步 `def`，通过同步 SQLAlchemy Session 读取 PostgreSQL，不可在 async handler 中直接调用同步 DB。若未来 route 改 async，必须把整段同步领域调用放在线程池/同步 worker 边界，不能在事件循环中做 psycopg 查询。
 
-`consistent_read_snapshot()` 在首次查询前建立只读 `REPEATABLE READ`；若 caller 已有事务，则必须已是 `read_only=on` 且 `repeatable read`，否则抛 `SnapshotIsolationUnavailable`。`calculated_at=datetime.now(UTC)` 在快照入口产生并向下传递。目标 `explain_spu()` 的 evidence reader 必须复用同一 basis 时间，不在 `_detail_*` 自己调用当前时间。
+`consistent_read_snapshot()` 在首次查询前建立只读 `REPEATABLE READ`；若 caller 已有事务，则必须已是 `read_only=on` 且 `repeatable read`，否则抛 `SnapshotIsolationUnavailable`。`calculated_at=datetime.now(UTC)` 在快照入口产生并向下传递。`explain_spu()` 与 `read_evidence()` 均使用外层快照时间生成返回 metadata，不透传 `_detail_*` 的历史内部 metadata。
 
 ### 5.3 查询流程
 
@@ -219,6 +219,18 @@ HTTP adapter负责鉴权矩阵外的参数校验、异常到 HTTP mapping、Deci
 7. 计算当前值和 projection 分开：独立 30/90 天成熟样本得到风险率；同一 `w_start/w_end` 约束当前事实和待预测风险池，预计最终值按“当前值 + 未来损益调整”计算。
 8. 领域返回 Decimal、date、datetime、Enum；adapter 产生 `{items,total,totals,meta}`，前端只渲染。
 9. `explain_spu` 在一个新快照中重算目标 SPU 与所选 evidence，结果和 evidence 共用 `calculated_at`、FX basis 和 rubric version。
+10. 四个 HTTP 钻取端点使用 `read_evidence(session, spu_pk, evidence, start_date, end_date)`，返回独立的 `SpuEvidenceRead`。它在同一只读快照中校验 FX、有日期时的店铺时区和授权目录，再读取所需 evidence；目录按内部 SPU 主键限定。无活动或非 active 商品仍可钻取，不读取成本、费率、价格统计或重算当前/预测 ROI。完整 `explain_spu` 的金融结果契约保留。
+
+钻取日期允许仅提供开始或结束；逆序日期先返回 422。FX 缺失先于目录和时区错误返回 503；有效 FX 下未知/未授权 SPU 返回 404，未知地区在有日期时返回 422（含广告钻取），无日期可读取。返回字段、金额精度、`v10`、快照时间、币种、订单 window/截断标记和广告 note 均沿用原 HTTP 契约。`tests/api/test_spu_roi_evidence.py` 通过完整 explanation 对照、异常组合和 SQL/计算预算验证这些边界。
+
+请求内复用与批量读取约束：
+
+- 广告、销售、全损、状态、退款五组当前事实各读取一次；每个 selected SPU 的当前公式只计算一次，行结果和预测聚合复用该结果。无当前活动的 SPU 仍参与完整选择范围的成熟样本。
+- 大盘预测只计算一次并直接构造 totals；保留历史兼容行级预测。预测全局计数使用完整 selected SPU，当前全局订单/退款计数仍独立去重。非空常规选择的九类核心事实 SQL 共执行九次（不含权限、目录、成本、费率、汇率、价格统计等辅助读取）。
+- 订单与结算 evidence 各保留原主查询，再按唯一订单 PK 批量聚合整单/目标 SPU GMV；物流按 shipment PK、结算组件按 transaction PK 批量读取。每类 evidence 最多两条附加批量查询，空 ID 集不发查询。
+- 分母包含整单其他 SPU 与未归属商品行。订单行 × 包裹粒度、订单 500 行截断、结算交易粒度、组内时间/组件排序、Decimal 精度、NULL/零值和返回字段保持原契约。
+
+上述查询预算与兼容边界由 `tests/api/test_spu_roi_query_efficiency.py` 验证；业务公式仍以现有 API 和纯公式回归测试为准。
 
 ### 5.4 范围、排序和分页
 

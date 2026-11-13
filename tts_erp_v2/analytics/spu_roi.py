@@ -35,10 +35,11 @@ from tts_erp_v2.analytics.spu_profitability import (
     RowView,
     SortDirection,
     SortField,
+    SpuEvidenceRead,
     SpuNotFound,
     SpuPriceStats,
-    explain_spu,
     is_price_sort_field,
+    read_evidence,
 )
 from tts_erp_v2.analytics.spu_profitability._compat import read_legacy_overview
 from tts_erp_v2.api.deps import get_session
@@ -692,16 +693,18 @@ def list_spu_roi(
 drilldown_router = APIRouter(prefix="/v2/analytics/spu-roi", tags=["analytics"])
 
 
-def _evidence_payload(explanation, kind: EvidenceKind, scope: ProfitScope) -> dict:
-    rows = explanation.evidence.rows.get(kind, ())
+def _evidence_payload(
+    result: SpuEvidenceRead, kind: EvidenceKind, scope: ProfitScope
+) -> dict:
+    rows = result.evidence.rows.get(kind, ())
     payload = {
-        "spu_pk": explanation.result.spu_pk,
+        "spu_pk": result.spu_pk,
         kind.value: [_wire_value(kind.value, dict(row)) for row in rows],
         "meta": {
-            "rubric_version": explanation.basis.rubric_version,
-            "computed_at": explanation.basis.calculated_at.isoformat(),
+            "rubric_version": result.rubric_version,
+            "computed_at": result.calculated_at.isoformat(),
             "currency": {
-                "display": explanation.basis.display_currency,
+                "display": result.display_currency,
                 "native": {"ad": "USD", "sales_refund": "VND", "cost": "CNY"},
             },
         },
@@ -709,7 +712,7 @@ def _evidence_payload(explanation, kind: EvidenceKind, scope: ProfitScope) -> di
     if kind is EvidenceKind.ORDERS:
         payload.update(
             {
-                "spu_id": explanation.result.spu_id,
+                "spu_id": result.spu_id,
                 "window": {
                     "w_start": scope.start_date.isoformat()
                     if scope.start_date
@@ -734,11 +737,12 @@ def _read_evidence(
 ) -> dict | JSONResponse:
     scope = _scope(None, True, w_start, w_end)
     try:
-        explanation = explain_spu(
+        result = read_evidence(
             sess,
-            scope=scope,
             spu_pk=spu_pk,
             evidence=EvidenceRequest(frozenset({kind})),
+            start_date=scope.start_date,
+            end_date=scope.end_date,
         )
     except FxRateUnavailable:
         return _fx_error(request)
@@ -746,7 +750,7 @@ def _read_evidence(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SpuNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _evidence_payload(explanation, kind, scope)
+    return _evidence_payload(result, kind, scope)
 
 
 @drilldown_router.get("/{spu_pk:int}/orders")

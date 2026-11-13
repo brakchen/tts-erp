@@ -3,6 +3,7 @@
 Public interface:
 
 * :func:`read_overview` returns SPU rows and globally deduplicated overview totals.
+* :func:`read_evidence` reads drilldown rows without computing financial results.
 * :func:`explain_spu` recomputes one SPU and its evidence in one new consistent
   snapshot.
 
@@ -20,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.analytics.spu_profitability import _implementation
+from tts_erp_v2.analytics.spu_profitability._evidence import read_evidence
 from tts_erp_v2.analytics.spu_profitability._price_stats import (
     PriceCoverage,
     PriceCoverageStatus,
@@ -54,6 +56,7 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     SnapshotIsolationUnavailable,
     SortDirection,
     SortField,
+    SpuEvidenceRead,
     SpuNotFound,
     SpuProfitability,
     SpuProfitExplanation,
@@ -97,6 +100,7 @@ __all__ = [
     "SnapshotIsolationUnavailable",
     "SortDirection",
     "SortField",
+    "SpuEvidenceRead",
     "SpuNotFound",
     "SpuPriceStats",
     "SpuProfitExplanation",
@@ -107,6 +111,7 @@ __all__ = [
     "explain_spu",
     "is_price_sort_field",
     "missing_completed_refund_amounts_in_snapshot",
+    "read_evidence",
     "read_overview",
     "read_overview_in_snapshot",
     "reporting_timezone",

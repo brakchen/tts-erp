@@ -947,7 +947,9 @@ def test_registry_and_docs_cover_v14_contracts() -> None:
     assert "cleanup_lease_owner" in design
     assert "stage_started_at" in design
     assert "device_status" in design
-    assert "14 个非 public 业务 schema / 73 张业务表" in architecture
+    # The architecture points to the canonical schema inventory; v18 checks
+    # that inventory against the current DDL and migration head.
+    assert "../schema/README.md" in architecture
     assert (
         "bash scripts/test_isolated.sh --refresh-template fast tests/publishing"
         in runbook
