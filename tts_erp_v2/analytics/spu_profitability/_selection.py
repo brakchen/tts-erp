@@ -6,12 +6,15 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
 
 from tts_erp_v2.analytics.spu_profitability._types import (
     ExactIdsSelection,
     FocusedSelection,
     SpuSelection,
+)
+from tts_erp_v2.commerce.shop_access import (
+    authorized_shop_clause,
+    require_authorized_shop,
 )
 
 _SQL_SELECTED_CATALOG = text(
@@ -23,6 +26,8 @@ _SQL_SELECTED_CATALOG = text(
     WHERE """ + authorized_shop_clause("s") + """
       AND (CAST(:shop_pk AS bigint) IS NULL
            OR cp.shop_pk = CAST(:shop_pk AS bigint))
+      AND (CAST(:only_spu_pk AS bigint) IS NULL
+           OR cp.id = CAST(:only_spu_pk AS bigint))
       AND (CAST(:q AS text) IS NULL OR cp.spu_id ILIKE '%' || :q || '%')
       AND (CAST(:spu_ids AS text[]) IS NULL
            OR cp.spu_id = ANY(CAST(:spu_ids AS text[])))
@@ -47,6 +52,7 @@ def resolve_selected_spus(
     shop_pk: int | None,
     catalog_search: str | None,
     active_only: bool,
+    only_spu_pk: int | None = None,
 ) -> list[Any]:
     """Resolve one selection into catalog rows inside the caller's snapshot."""
 
@@ -58,6 +64,7 @@ def resolve_selected_spus(
             _SQL_SELECTED_CATALOG,
             {
                 "shop_pk": shop_pk,
+                "only_spu_pk": only_spu_pk,
                 "q": catalog_search,
                 "spu_ids": list(spu_ids) if spu_ids is not None else None,
                 "focused_scope": isinstance(selection, FocusedSelection),

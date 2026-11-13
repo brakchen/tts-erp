@@ -592,6 +592,19 @@ class ProfitabilityEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class SpuEvidenceRead:
+    """Evidence identity and provenance without an unused financial result."""
+
+    spu_pk: int
+    spu_id: str
+    evidence: ProfitabilityEvidence
+    calculated_at: datetime
+    fx: FxBasis
+    rubric_version: str = "v10"
+    display_currency: str = "CNY"
+
+
+@dataclass(frozen=True, slots=True)
 class SpuProfitExplanation:
     result: SpuProfitability
     evidence: ProfitabilityEvidence
