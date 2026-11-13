@@ -1,6 +1,7 @@
 import { Button } from '@heroui/react';
 import { useEffect, useState } from 'react';
 import { requestJson } from '../shared/api/client';
+import { commandFailure } from '../shared/api/command-errors';
 import { pathFor } from '../shared/api/paths';
 
 interface SessionInfo { authenticated: boolean; displayName?: string; username?: string }
@@ -25,8 +26,8 @@ export default function SessionActions({ rootPath, onSignedOut }: {rootPath: str
       await requestJson<void>(rootPath, '/v2/auth/logout', { method: 'POST' });
       if (onSignedOut) onSignedOut();
       else window.location.assign(pathFor(rootPath, '/v2/auth/login'));
-    } catch {
-      setError('退出结果未确认，请重试或重新登录');
+    } catch (error: unknown) {
+      setError(commandFailure(error, {}).message);
       setBusy(false);
     }
   }

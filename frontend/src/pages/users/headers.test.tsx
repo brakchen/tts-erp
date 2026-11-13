@@ -55,8 +55,8 @@ it('retains a password draft and captured mutation target throughout the full st
   });
   vi.stubGlobal('fetch', fetcher); render(<Users bootstrap={bootstrap} />); const dialog = await passwordDialog();
   await submit(dialog);
-  expect(within(dialog).getByText(/HTTP 429/)).toBeVisible();
-  expect(within(dialog).queryByText(/提交结果未确认/)).toBeNull();
+  expect(within(dialog).getByText(/操作太频繁/)).toBeVisible();
+  expect(within(dialog).queryByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/)).toBeNull();
   expect(limited.text).not.toHaveBeenCalled(); expect(limited.cancel).toHaveBeenCalledOnce();
   const input = within(dialog).getByLabelText('新密码');
   fireEvent.change(input, { target: { value: 'TESTEdited123' } }); expect(input).toHaveValue('TESTEdited123');
@@ -73,32 +73,19 @@ it('retains a password draft and captured mutation target throughout the full st
   ]);
 }, 15000);
 
-it('preserves the full received 429 cooldown during uncertain-password re-verification without replay or losing the draft', async () => {
-  const limited = stalledError(429); let checks = 0;
+it('keeps a password draft after a determined network failure and allows an explicit retry without a check flow', async () => {
   const fetcher = vi.fn(async (url: string, init: RequestInit) => {
     if (init.method !== 'GET') throw new TypeError('TEST transport failure');
-    if (url.endsWith('/roles')) return json({ roles: [], allPermissions: [] });
-    if (url.endsWith('/users')) return json({ users: [person] });
-    checks++; return checks === 1 ? limited.response : json(detail);
+    return json(url.endsWith('/roles') ? { roles: [], allPermissions: [] } : { users: [person] });
   });
   vi.stubGlobal('fetch', fetcher); render(<Users bootstrap={bootstrap} />); const dialog = await passwordDialog();
-  await submit(dialog); await click(dialog, '查询公开状态');
-  expect(within(dialog).getByText(/查询未完成/)).toBeVisible();
-  expect(limited.text).not.toHaveBeenCalled(); expect(limited.cancel).toHaveBeenCalledOnce();
-  fireEvent.change(within(dialog).getByLabelText('新密码'), { target: { value: 'TESTEdited123' } });
-  const calls = fetcher.mock.calls.length;
-  await advance(30_000); await click(dialog, '查询公开状态'); await submit(dialog);
-  expect(within(dialog).getByRole('button', { name: '查询公开状态' })).toBeDisabled(); expect(fetcher.mock.calls).toHaveLength(calls);
-  await advance(29_999); expect(within(dialog).getByRole('button', { name: '查询公开状态' })).toBeDisabled();
-  await advance(1); expect(within(dialog).getByRole('button', { name: '查询公开状态' })).toBeEnabled(); expect(fetcher.mock.calls).toHaveLength(calls);
-  await click(dialog, '查询公开状态'); expect(checks).toBe(2);
-  expect(within(dialog).getByText(/公开状态已读取/)).toBeVisible();
-  expect(within(dialog).getByLabelText('新密码')).toHaveValue('TESTEdited123');
-  expect(within(dialog).getByText(/不能验证密码/)).toBeVisible();
-  await submit(dialog); expect(writes(fetcher)).toHaveLength(1);
-  await click(dialog, '我已核对，允许手动重试'); expect(writes(fetcher)).toHaveLength(1);
   await submit(dialog);
-  expect(writes(fetcher).map(([url]) => url)).toEqual(['/tts/v2/users/9007199254740993/password', '/tts/v2/users/9007199254740993/password']);
+  expect(within(dialog).getByText('网络已断开，请检查网络后重试')).toBeVisible();
+  expect(within(dialog).queryByRole('button', { name: '查询公开状态' })).toBeNull();
+  fireEvent.change(within(dialog).getByLabelText('新密码'), { target: { value: 'TESTEdited123' } });
+  expect(within(dialog).getByLabelText('新密码')).toHaveValue('TESTEdited123');
+  expect(within(dialog).getByRole('button', { name: '重置密码并吊销会话' })).toBeEnabled();
+  expect(writes(fetcher)).toHaveLength(1);
 }, 15000);
 
 it('reports received mutation 403 immediately rather than treating its stalled body as an uncertain write', async () => {
@@ -106,8 +93,8 @@ it('reports received mutation 403 immediately rather than treating its stalled b
   const fetcher = vi.fn(async (url: string, init: RequestInit) => init.method !== 'GET' ? forbidden.response : json(url.endsWith('/roles') ? { roles: [], allPermissions: [] } : { users: [person] }));
   vi.stubGlobal('fetch', fetcher); render(<Users bootstrap={bootstrap} />); const dialog = await passwordDialog();
   await submit(dialog);
-  expect(within(dialog).getByText(/HTTP 403/)).toBeVisible();
-  expect(within(dialog).queryByText(/提交结果未确认/)).toBeNull();
+  expect(within(dialog).getByText('没有权限执行此操作')).toBeVisible();
+  expect(within(dialog).queryByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/)).toBeNull();
   expect(within(dialog).queryByRole('button', { name: '查询公开状态' })).toBeNull();
   expect(within(dialog).getByLabelText('新密码')).toHaveValue('TESTPass123');
   expect(forbidden.text).not.toHaveBeenCalled(); expect(forbidden.cancel).toHaveBeenCalledOnce();

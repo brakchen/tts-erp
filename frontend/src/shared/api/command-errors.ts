@@ -1,4 +1,5 @@
 import { ApiError } from './client';
+import { errorCopy, type ErrorCopySurface } from './error-copy';
 
 export interface CommandFailure {
   message: string;
@@ -14,7 +15,7 @@ const safeTypes: Record<string, string> = {
 };
 
 /** Transport detail is never a display string. Select only known fields and static local messages. */
-export function commandFailure(error: unknown, labels: Record<string, string>): CommandFailure {
+export function commandFailure(error: unknown, labels: Record<string, string>, surface: ErrorCopySurface = 'default'): CommandFailure {
   const fieldErrors: Record<string, string> = {};
   const status = error instanceof ApiError ? error.status : undefined;
   const retryAfter = error instanceof ApiError ? (error.retryAfter ?? 0) : 0;
@@ -35,17 +36,16 @@ export function commandFailure(error: unknown, labels: Record<string, string>): 
   } else if (status === 422 && detail === 'app_secret length is invalid') {
     put('app_secret', '长度不符合要求');
   }
-  const known = status !== undefined && [400, 401, 403, 404, 409, 422, 429].includes(status);
   if (missingShopApp) {
     put('app_key', '此 Service ID 尚未配置，请填写');
     put('app_secret', '请与 App Key 成对填写');
   }
-  const descriptions: Record<number, string> = {
-    400: '请求未通过检查，请核对输入', 401: '登录已失效，请重新登录',
-    403: '权限不足或安全检查未通过', 404: '记录不存在，请刷新核对',
-    409: '数据冲突，请查询核对后再提交', 422: '校验未通过，请检查输入',
-    429: '请求过于频繁，请稍后手动重试',
+  return {
+    message: missingShopApp
+      ? '当前店铺的此 Service ID 尚未配置，请填写 App Key 和 App Secret 后保存'
+      : errorCopy(error, surface),
+    fieldErrors,
+    uncertain: false,
+    retryAfter,
   };
-  return { message: missingShopApp ? '当前店铺的此 Service ID 尚未配置，请填写 App Key 和 App Secret 后保存'
-    : status !== undefined && known ? `${descriptions[status]}（HTTP ${status}）` : '提交结果未确认，请先查询核对；不要重复提交', fieldErrors, uncertain: !known, retryAfter };
 }

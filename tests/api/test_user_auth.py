@@ -433,3 +433,88 @@ def test_missing_or_invalid_credentials_get_401(api_client, bad_key):
     r = api_client.get("/v2/users", headers={"X-API-Key": bad_key})
     assert r.status_code == 401
     assert "location" not in r.headers  # API 形态不走浏览器 302
+
+# ----------------------------------------------------- login page / me store
+
+
+def test_login_page_redirects_when_session_is_valid(api_client, ua_user_factory):
+    user = ua_user_factory("test_ua_login_page_ok", roles=("viewer",))
+    _login(api_client, user.username, user.password)
+
+    r = api_client.get("/v2/auth/login", follow_redirects=False)
+
+    assert r.status_code == 302
+    assert r.headers["location"] == "/v2/pages/dashboard"
+
+
+def test_login_page_redirects_to_validated_next(api_client, ua_user_factory):
+    user = ua_user_factory("test_ua_login_page_next", roles=("viewer",))
+    _login(api_client, user.username, user.password)
+
+    r = api_client.get(
+        "/v2/auth/login",
+        params={"next": "/v2/pages/manual-costs?shop_id=749"},
+        follow_redirects=False,
+    )
+
+    assert r.status_code == 302
+    assert r.headers["location"] == "/v2/pages/manual-costs?shop_id=749"
+
+
+def test_login_page_authenticated_open_redirect_falls_back(api_client, ua_user_factory):
+    user = ua_user_factory("test_ua_login_page_evil", roles=("viewer",))
+    _login(api_client, user.username, user.password)
+
+    r = api_client.get(
+        "/v2/auth/login",
+        params={"next": "https://evil.example/x"},
+        follow_redirects=False,
+    )
+
+    assert r.status_code == 302
+    assert r.headers["location"] == "/v2/pages/dashboard"
+    assert "evil.example" not in r.headers["location"]
+
+
+def test_login_page_renders_when_store_unavailable(api_client, monkeypatch):
+    from tests.api.test_frontend_pages import _bootstrap
+
+    api_client.cookies.set("tts_erp_session", "v2.TEST_store_down")
+
+    def boom():
+        raise RuntimeError("OperationalError")
+
+    monkeypatch.setattr("tts_erp_v2.db.base.get_session_factory", boom)
+
+    r = api_client.get("/v2/auth/login", follow_redirects=False)
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert _bootstrap(r.text)["pageId"] == "login"
+    assert "OperationalError" not in r.text
+    assert "location" not in r.headers
+
+
+def test_me_returns_503_when_store_unavailable(api_client, monkeypatch):
+    api_client.cookies.set("tts_erp_session", "v2.TEST_store_down")
+
+    def boom():
+        raise RuntimeError("OperationalError")
+
+    monkeypatch.setattr("tts_erp_v2.db.base.get_session_factory", boom)
+
+    r = api_client.get("/v2/auth/me")
+
+    assert r.status_code == 503
+    assert r.json() == {"detail": "服务暂不可用"}
+    assert "OperationalError" not in r.text
+
+
+def test_me_without_cookie_stays_200_when_store_unavailable(api_client, monkeypatch):
+    def boom():
+        raise RuntimeError("OperationalError")
+
+    monkeypatch.setattr("tts_erp_v2.db.base.get_session_factory", boom)
+
+    assert _me(api_client) == {"authenticated": False}
+

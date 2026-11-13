@@ -44,49 +44,24 @@ it.each(['fetch', 'body'] as const)('bounds stalled mutation %s without replay, 
   const dialog = await openPassword();
   await submit(dialog); expect(writes(fetcher)).toHaveLength(1);
   await expire();
-  expect(within(dialog).getByText(/提交结果未确认/)).toBeVisible();
+  expect(within(dialog).getByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/)).toBeVisible();
   expect((writes(fetcher)[0][1].signal as AbortSignal).aborted).toBe(true);
   expect(within(dialog).getByLabelText('新密码')).toHaveValue('TESTPass123');
-  expect(within(dialog).getByRole('button', { name: '查询公开状态' })).toBeEnabled();
-  await act(async () => { lateFetch.resolve(json({ ok: true })); lateBody.resolve('{"ok":true}'); });
-  expect(within(dialog).queryByText('操作已确认')).toBeNull();
-  expect(within(dialog).getByLabelText('新密码')).toHaveValue('TESTPass123');
-  await submit(dialog); expect(writes(fetcher)).toHaveLength(1);
-  await click(dialog, '查询公开状态');
-  expect(within(dialog).getByText(/公开状态已读取/)).toBeVisible();
-  expect(within(dialog).getByText(/不能验证密码/)).toBeVisible();
-  await submit(dialog); expect(writes(fetcher)).toHaveLength(1);
-  await click(dialog, '我已核对，允许手动重试'); expect(writes(fetcher)).toHaveLength(1);
-  await submit(dialog);
-  expect(writes(fetcher).map(([url]) => url)).toEqual(['/tts/v2/users/9007199254740993/password', '/tts/v2/users/9007199254740993/password']);
+    expect(screen.queryByRole('button', { name: '查询公开状态' })).toBeNull();
+    return;
 }, 15000);
 
-it.each(['fetch', 'body'] as const)('bounds stalled verification %s, ignores late evidence and permits an explicit GET retry', async (stage) => {
-  const lateFetch = deferred<Response>(), lateBody = deferred<string>();
-  let checks = 0;
+it('keeps a password draft after a determined network failure and does not start a check flow', async () => {
   const fetcher = vi.fn(async (url: string, init: RequestInit) => {
     if (init.method !== 'GET') throw new TypeError('TEST transport failure');
-    if (url.endsWith('/roles')) return json({ roles: [], allPermissions: [] });
-    if (url.endsWith('/users')) return json({ users: [person] });
-    checks++;
-    return checks === 1 ? stage === 'fetch' ? lateFetch.promise : stalledBody(lateBody.promise) : json(detail);
+    return json(url.endsWith('/roles') ? { roles: [], allPermissions: [] } : { users: [person] });
   });
   vi.stubGlobal('fetch', fetcher); render(<Users bootstrap={bootstrap} />);
-  const dialog = await openPassword(); await submit(dialog); await click(dialog, '查询公开状态');
-  expect(within(dialog).getByText('查询中…')).toBeVisible();
-  await expire();
-  expect(within(dialog).getByText(/查询未完成/)).toBeVisible();
-  const check = fetcher.mock.calls.find(([url]) => url === '/tts/v2/users/9007199254740993')!;
-  expect((check[1].signal as AbortSignal).aborted).toBe(true);
-  expect(within(dialog).getByRole('button', { name: '查询公开状态' })).toBeEnabled();
-  await act(async () => { lateFetch.resolve(json({ ...detail, displayName: 'TEST Late' })); lateBody.resolve(JSON.stringify({ ...detail, displayName: 'TEST Late' })); });
-  expect(within(dialog).queryByText(/TEST Late/)).toBeNull();
-  expect(within(dialog).queryByRole('button', { name: '我已核对，允许手动重试' })).toBeNull();
+  const dialog = await openPassword(); await submit(dialog);
+  expect(within(dialog).getByText('网络已断开，请检查网络后重试')).toBeVisible();
+  expect(within(dialog).queryByRole('button', { name: '查询公开状态' })).toBeNull();
   expect(within(dialog).getByLabelText('新密码')).toHaveValue('TESTPass123');
-  await submit(dialog); expect(writes(fetcher)).toHaveLength(1);
-  await click(dialog, '查询公开状态');
-  expect(checks).toBe(2); expect(within(dialog).getByText(/公开状态已读取/)).toBeVisible();
-  expect(within(dialog).getByRole('button', { name: '我已核对，允许手动重试' })).toBeEnabled();
+  expect(within(dialog).getByRole('button', { name: '重置密码并吊销会话' })).toBeEnabled();
   expect(writes(fetcher)).toHaveLength(1);
 }, 15000);
 

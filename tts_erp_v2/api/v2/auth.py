@@ -27,8 +27,8 @@ import re
 import sys
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Request, Response, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from tts_erp_v2.accounts import service
@@ -110,7 +110,7 @@ def _client_bucket(request: Request) -> str:
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request) -> HTMLResponse:
+def login_page(request: Request) -> Response:
   """Render the login form (public). Injects the validated ``next``
   (prepended with the NGINX prefix so the post-login redirect lands
   on a path NGINX actually serves)."""
@@ -127,6 +127,17 @@ def login_page(request: Request) -> HTMLResponse:
     raw_next == prefix or raw_next.startswith(f"{prefix}/")
   )
   next_url = raw_next if already_prefixed else f"{prefix}{raw_next}"
+  raw_cookie = request.cookies.get(session_auth.SESSION_COOKIE_NAME)
+  if raw_cookie:
+    try:
+      from tts_erp_v2.db.base import get_session_factory
+
+      with get_session_factory()() as db:
+        credential = service.authenticate_session_token(db, raw_cookie)
+      if credential is not None:
+        return RedirectResponse(url=next_url, status_code=status.HTTP_302_FOUND)
+    except Exception:  # noqa: BLE001 — public page stays renderable
+      login_logger.warning("result=login_page_store_unavailable")
   if "login" in frontend_pages.MIGRATED_PAGE_IDS:
     return frontend_pages.render_frontend_page(request, "login", login_next_path=next_url)
   return HTMLResponse(_LOGIN_HTML.replace("__NEXT__", _html.escape(next_url)))
@@ -239,8 +250,12 @@ def me(request: Request) -> dict:
 
     with get_session_factory()() as db:
       credential = service.authenticate_session_token(db, raw)
-  except Exception:  # noqa: BLE001 — auth store unreachable; report unauthenticated
-    credential = None
+  except Exception as exc:  # noqa: BLE001 — auth store unreachable
+    login_logger.warning("result=me_store_unavailable error=%s", type(exc).__name__)
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="服务暂不可用",
+    ) from exc
   if credential is None:
     return {"authenticated": False}
   return {

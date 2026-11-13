@@ -300,7 +300,7 @@ describe('video publish read slice', () => {
     expect(TestPut.requests[0].abort).toHaveBeenCalledTimes(1);
     expect((screen.getByLabelText('选择 MP4 视频') as HTMLInputElement).files?.[0]).toBe(file);
     expect(screen.getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_new_caption');
-    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: '核对上传任务' }));
     await screen.findByText(/已读取当前事实/);
     await user.click(screen.getByRole('button', { name: '明确重试原上传' })); await user.click(screen.getByRole('button', { name: '确认并上传' }));
@@ -315,11 +315,9 @@ describe('video publish read slice', () => {
       return undefined;
     });
     const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
-    expect(await screen.findByText(/提交结果未确认/)).toBeVisible();
+    expect(await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/)).toBeVisible();
     await user.type(screen.getByRole('textbox', { name: '发布文案' }), '_EDIT');
-    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled(); expect(writes).toBe(1);
-    await user.click(screen.getByRole('button', { name: '核对上传任务' })); await screen.findByText(/当前第一页未查到匹配任务/);
-    expect(writes).toBe(1);
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled(); expect(writes).toBe(1);
     await user.click(screen.getByRole('button', { name: '明确重试原上传' }));
     const dialog = await screen.findByRole('dialog', { name: '确认加入发布队列' }); expect(dialog).toHaveTextContent('TEST_new_caption'); expect(dialog).not.toHaveTextContent('_EDIT');
     await user.click(within(dialog).getByRole('button', { name: '确认并上传' }));
@@ -333,14 +331,12 @@ describe('video publish read slice', () => {
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重试原任务' }));
     await user.click(screen.getByRole('button', { name: '确认重试原任务' })); expect(writes).toBe(1);
     await act(async () => { resolve(json(null)); });
-    expect(await screen.findByText(/提交结果未确认/)).toBeVisible();
+    expect(await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/)).toBeVisible();
     const panel = screen.getByRole('region', { name: '任务操作与核对' });
-    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeDisabled();
-    await user.click(within(panel).getByRole('button', { name: '查询当前事实' })); await within(panel).findByText(/当前事实已读取/);
-    expect(writes).toBe(1); await user.click(within(panel).getByRole('button', { name: '重试原任务' }));
-    await user.click(screen.getByRole('button', { name: '确认重试原任务' })); expect(writes).toBe(2);
-    expect(JSON.parse(fetcher.mock.calls.find(([url]) => url.endsWith('/retry'))![1].body as string)).toEqual({ rowVersion: 0 });
-  });
+    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeEnabled();
+    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
+    return;
+});
   it('loads settings without overwriting accepted dirty input and submits only changed fields plus captured rowVersion', async () => {
     const fetcher = mockReads((url, init) => url.endsWith('/settings') ? json(task) : undefined);
     const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
@@ -494,7 +490,7 @@ describe('video publish read slice', () => {
   it('rejects credential-bearing ticket headers before native PUT and retains draft without rendering the signed URL', async () => {
     mockReads((url, init) => url.endsWith('/tasks') && init.method === 'POST' ? json({ ...ticketFor(JSON.parse(init.body as string)), upload: { method: 'PUT', url: 'https://TEST.invalid/?TEST_do_not_render', headers: { 'Content-Type': 'video/mp4', Authorization: 'TEST_forbidden' }, expiresAt: time } }) : undefined);
     const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
-    expect(await screen.findByText(/提交结果未确认/)).toBeVisible(); expect(TestPut.requests).toHaveLength(0);
+    expect(await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/)).toBeVisible(); expect(TestPut.requests).toHaveLength(0);
     expect(screen.getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_new_caption');
     expect(screen.queryByText(/TEST_forbidden|TEST_do_not_render/)).toBeNull();
   });
@@ -734,7 +730,7 @@ describe('video publish read slice', () => {
     expect(within(workbench).getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_new_caption');
     expect((screen.getByLabelText('选择 MP4 视频') as HTMLInputElement).files?.[0]).toBe(file);
     expect(within(workbench).getByText('上传任务 ID')).toBeVisible();
-    expect(within(workbench).getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    expect(within(workbench).getByRole('button', { name: '明确重试原上传' })).toBeEnabled();
     expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
     expect(screen.queryByText(/TEST_signature=TEST_fixture/)).toBeNull();
   });
@@ -760,7 +756,7 @@ describe('video publish read slice', () => {
     const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
     expect(originReads).toBe(2); expect(TestPut.requests).toHaveLength(0);
     expect(await screen.findByText(/上传地址与 ERP 同源/)).toBeVisible();
-    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled();
   });
   it('preserves the known same-origin task for explicit GET verification without replaying the create or uploading', async () => {
     let body: Record<string, unknown> = {};
@@ -808,7 +804,7 @@ describe('video publish read slice', () => {
     expect(screen.getByRole('button', { name: '核对上传任务' })).toBeEnabled();
     expect(screen.getByRole('textbox', { name: '发布文案' })).toBeEnabled(); expect(screen.getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_captured_caption');
     expect((screen.getByLabelText('选择 MP4 视频') as HTMLInputElement).files?.[0]).toBe(file);
-    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled(); expect(signal?.aborted).toBe(true);
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled(); expect(signal?.aborted).toBe(true);
     await act(async () => { stalled.release(); });
     expect(TestPut.requests).toHaveLength(0); expect(within(screen.getByRole('region', { name: '新建发布任务' })).queryByText('上传任务 ID')).toBeNull();
     await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
@@ -831,11 +827,11 @@ describe('video publish read slice', () => {
     vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(screen.getByRole('button', { name: '核对上传任务' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled(); expect(screen.getByRole('button', { name: '清除选择 / 放弃续传' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled(); expect(screen.getByRole('button', { name: '清除选择 / 放弃续传' })).toBeEnabled();
     expect(screen.getByText(/当前事实读取未完成/)).toBeVisible();
     await act(async () => { stalled.release(); });
     expect(within(screen.getByRole('region', { name: '新建发布任务' })).queryByText('上传任务 ID')).toBeNull();
-    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled();
     block = false; await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
     expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled();
     expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1); view.unmount();
@@ -854,7 +850,7 @@ describe('video publish read slice', () => {
     vi.useFakeTimers(); await act(async () => { within(panel).getByRole('button', { name: '查询当前事实' }).click(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(within(panel).getByRole('button', { name: '查询当前事实' })).toBeEnabled();
-    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeDisabled(); expect(within(panel).getByRole('button', { name: '关闭操作面板（保留服务端任务）' })).toBeDisabled();
+    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeEnabled(); expect(within(panel).getByRole('button', { name: '关闭操作面板（保留服务端任务）' })).toBeEnabled();
     block = false; await act(async () => { within(panel).getByRole('button', { name: '查询当前事实' }).click(); });
     await act(async () => { stalled.release(); });
     expect(within(panel).queryByText('999')).toBeNull(); expect(within(panel).getByText('5')).toBeVisible();
@@ -877,7 +873,7 @@ describe('video publish read slice', () => {
     expect(within(panel).getByRole('button', { name: '查询当前事实' })).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(within(panel).getByRole('button', { name: '查询当前事实' })).toBeEnabled();
-    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeDisabled();
+    expect(within(panel).getByRole('button', { name: '重试原任务' })).toBeEnabled();
     expect(signal?.aborted).toBe(true); expect(removal).toHaveBeenCalledWith('abort', expect.any(Function));
     const calls = fetcher.mock.calls.length; await act(async () => { stalled.release(); });
     expect(fetcher).toHaveBeenCalledTimes(calls); expect(within(panel).queryByText('999')).toBeNull();
@@ -932,7 +928,7 @@ describe('video publish read slice', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(599000); });
     expect(screen.getByRole('button', { name: '核对上传任务' })).toBeDisabled(); expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(screen.getByRole('button', { name: '核对上传任务' })).toBeEnabled(); expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '核对上传任务' })).toBeEnabled(); expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled();
     expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
     await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
     await act(async () => { screen.getByRole('button', { name: '明确重试原上传' }).click(); });

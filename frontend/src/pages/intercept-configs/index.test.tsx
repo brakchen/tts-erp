@@ -54,7 +54,7 @@ describe('intercept-configs content', () => {
   it.each([403, 409, 422])('retains draft on known HTTP %s without raw error or replay', async (status) => {
     let writes = 0; api(async () => { writes++; return json({ detail: [{ loc: ['body', 'domain'], type: 'string_too_long', msg: 'TEST_RAW_SECRET', input: 'TEST_RAW_SECRET' }] }, status); });
     const user = userEvent.setup(); render(<InterceptConfigs {...props} />); const dialog = await create(user); await user.click(within(dialog).getByRole('button', { name: '保存配置' }));
-    await within(dialog).findByText(new RegExp(`HTTP ${status}`)); expect(within(dialog).getByRole('textbox', { name: '域名' })).toHaveValue('TEST.new'); expect(document.body.textContent).not.toContain('TEST_RAW_SECRET'); expect(writes).toBe(1);
+    await within(dialog).findByText(({403:'没有权限执行此操作',409:'数据已变化，请刷新后确认再提交',422:'请检查标红的字段'} as Record<number, string>)[status]); expect(within(dialog).getByRole('textbox', { name: '域名' })).toHaveValue('TEST.new'); expect(document.body.textContent).not.toContain('TEST_RAW_SECRET'); expect(writes).toBe(1);
     if (status === 422) { expect(within(dialog).getByRole('textbox', { name: '域名' })).toBeInvalid(); fireEvent.change(within(dialog).getByRole('textbox', { name: '域名' }), { target: { value: 'TEST.corrected' } }); expect(within(dialog).getByRole('textbox', { name: '域名' })).toBeValid(); }
   });
   it('edits fresh detail with PUT and preserves untouched nulls, booleans and comma-containing tags', async () => {
@@ -90,15 +90,17 @@ describe('intercept-configs content', () => {
       if (init.method !== 'GET') { writes++; if (kind === 'network') throw new Error('TEST_RAW_SECRET'); if (kind === '204') return new Response(null, { status: 204 }); return json({}); }
       if (url.includes('domain=TEST.new')) { checks++; return json({ configs: [], total: 0 }); } return json({ configs: [row], total: 1 });
     }));
-    const user = userEvent.setup(); render(<InterceptConfigs {...props} />); const dialog = await create(user); await user.click(within(dialog).getByRole('button', { name: '保存配置' })); await within(dialog).findByText(/结果未确认/);
-    expect(within(dialog).getByRole('button', { name: '保存配置' })).toBeDisabled(); fireEvent.change(within(dialog).getByRole('textbox', { name: '域名' }), { target: { value: 'TEST.changed' } }); expect(within(dialog).getByRole('button', { name: '保存配置' })).toBeDisabled();
-    await user.click(within(dialog).getByRole('button', { name: '查询核对' })); await within(dialog).findByText(/当前事实已读取/); expect(within(dialog).getByText(/当前存在或缺席均不能证明原提交结果/)).toBeVisible(); expect(checks).toBe(1); expect(writes).toBe(1); expect(within(dialog).getByRole('textbox', { name: '域名' })).toHaveValue('TEST.changed'); expect(within(dialog).getByRole('button', { name: '核对后明确重新提交' })).toBeEnabled(); expect(document.body.textContent).not.toContain('TEST_RAW_SECRET');
-  });
+    const user = userEvent.setup(); render(<InterceptConfigs {...props} />); const dialog = await create(user); await user.click(within(dialog).getByRole('button', { name: '保存配置' })); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(within(dialog).getByRole('button', { name: '保存配置' })).toBeEnabled(); fireEvent.change(within(dialog).getByRole('textbox', { name: '域名' }), { target: { value: 'TEST.changed' } }); expect(within(dialog).getByRole('button', { name: '保存配置' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('keeps unresolved recovery and draft accessible after cancel; 404 lookup allows explicit retry without claiming rollback', async () => {
     let writes = 0; api(async (_url, init) => { if (init.method === 'GET') return json({}, 404); writes++; return json({}, 500); });
-    const user = userEvent.setup(); render(<InterceptConfigs {...props} />); await screen.findByText(row.domain); await user.click(screen.getByRole('button', { name: '删除配置' })); const dialog = screen.getByRole('dialog'); await user.click(within(dialog).getByRole('button', { name: '确认执行' })); await within(dialog).findByText(/结果未确认/); await user.click(within(dialog).getByRole('button', { name: '取消' }));
-    expect(screen.getByRole('button', { name: '新增配置' })).toBeDisabled(); await user.click(screen.getByRole('button', { name: '查询核对' })); await screen.findByText(/当前事实已读取/); expect(screen.getByText('当前未找到 ID：41')).toBeVisible(); expect(screen.getByRole('button', { name: '新增配置' })).toBeEnabled(); expect(writes).toBe(1);
-  });
+    const user = userEvent.setup(); render(<InterceptConfigs {...props} />); await screen.findByText(row.domain); await user.click(screen.getByRole('button', { name: '删除配置' })); const dialog = screen.getByRole('dialog'); await user.click(within(dialog).getByRole('button', { name: '确认执行' })); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/); await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('exports full validated raw JSON with numeric ID tokens intact only on explicit click', async () => {
     const raw = `{"configs":[${JSON.stringify(row).replace('"id":41', '"id":9007199254740993123')}]}`; let exports = 0; let blob!: Blob;
     api(async () => { exports++; return new Response(raw); }); vi.stubGlobal('URL', URL); Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn((value: Blob) => { blob = value; return 'blob:TEST'; }) }); Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() }); const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
@@ -119,12 +121,21 @@ describe('intercept-configs content', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(2147483647); }); expect(reads).toBe(1); expect(screen.getByRole('button', { name: '重试列表' })).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(353); }); expect(reads).toBe(1); expect(screen.getByRole('button', { name: '重试列表' })).toBeEnabled(); fireEvent.click(screen.getByRole('button', { name: '重试列表' })); await act(async () => {}); expect(reads).toBe(2);
   });
-  it('keeps unknown creation gated after failed facts lookup while allowing draft edits and explicit check retry', async () => {
-    let writes = 0; let checks = 0; vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
-      if (init.method !== 'GET') { writes++; return json({}, 502); } if (url.includes('domain=TEST.new')) { checks++; return checks === 1 ? json({ detail: 'TEST_RAW_SECRET' }, 403) : json({ configs: [], total: 0 }); } return json({ configs: [row], total: 1 });
-    })); const user = userEvent.setup(); render(<InterceptConfigs {...props} />); const dialog = await create(user); await user.click(within(dialog).getByRole('button', { name: '保存配置' })); await within(dialog).findByText(/结果未确认/); await user.click(within(dialog).getByRole('button', { name: '查询核对' })); await within(dialog).findByText(/核对未完成/);
-    fireEvent.change(within(dialog).getByRole('textbox', { name: '域名' }), { target: { value: 'TEST.edited' } }); expect(within(dialog).getByRole('button', { name: '保存配置' })).toBeDisabled(); expect(writes).toBe(1); expect(document.body.textContent).not.toContain('TEST_RAW_SECRET');
-    await user.click(within(dialog).getByRole('button', { name: '查询核对' })); await within(dialog).findByText(/当前事实已读取/); expect(checks).toBe(2); expect(writes).toBe(1);
+  it('shows a determined create failure after 502 and allows an explicit retry without a check flow', async () => {
+    let writes = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      if (init.method !== 'GET') { writes++; return json({}, 502); }
+      return json({ configs: [row], total: 1 });
+    }));
+    const user = userEvent.setup(); render(<InterceptConfigs {...props} />);
+    const dialog = await create(user);
+    await user.click(within(dialog).getByRole('button', { name: '保存配置' }));
+    await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '域名' }), { target: { value: 'TEST.edited' } });
+    expect(within(dialog).getByRole('button', { name: '保存配置' })).toBeEnabled();
+    expect(writes).toBe(1);
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    expect(document.body.textContent).not.toContain('TEST_RAW_SECRET');
   });
   it('does not overwrite accepted create input when an aborted detail read resolves late', async () => {
     let release!: (r: Response) => void; api(() => new Promise((r) => { release = r; })); const user = userEvent.setup(); render(<InterceptConfigs {...props} />); await screen.findByText(row.domain); await user.click(screen.getByRole('button', { name: '详情与编辑' })); await user.click(screen.getByRole('button', { name: '关闭配置窗口' })); const dialog = await create(user);

@@ -9,8 +9,14 @@ function identity(value: Record<string, unknown>): CurrentIdentity {
   // Project only display facts. Role/pages are validated, never cached as authority.
   return { username: value.username, displayName: value.displayName };
 }
+export class LoginContractError extends Error {
+  constructor() {
+    super('登录响应不符合约定');
+    this.name = 'LoginContractError';
+  }
+}
 export function confirmLogin(value: unknown, requestedUsername: string): void {
-  if (!record(value) || value.ok !== true || identity(value).username !== requestedUsername.trim().toLowerCase()) throw new Error('登录结果未确认');
+  if (!record(value) || value.ok !== true || identity(value).username !== requestedUsername.trim().toLowerCase()) throw new LoginContractError();
 }
 export function decodeCurrentIdentity(value: unknown): CurrentIdentity | null {
   if (!record(value)) throw new Error('会话响应不可用');

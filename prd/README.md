@@ -14,7 +14,8 @@
 | [prototypes/](prototypes/) | 可离线点击的原型（开发已按第 9 节返工提交，待测试回归、产品复验） |
 | [appendix-feature-inventory.md](appendix-feature-inventory.md) | 架构师功能盘点原文（模块、权限、流程、十四条缺口） |
 | [02-prototype-alignment.md](02-prototype-alignment.md) | 补需求：原型对齐现网逻辑与视觉（壳层/角色部分仍有效；第 9 节验收已被 03 取代） |
-| [03-prototype-full-replica.md](03-prototype-full-replica.md) | 补需求：原型按现网逐页复刻全部页面功能与布局（开发已按第 9 节返工提交，待测试回归、产品复验） |
+| [03-prototype-full-replica.md](03-prototype-full-replica.md) | 补需求：原型按现网逐页复刻全部页面功能与布局（2026-11-13 按第 6 / 9 节验收通过） |
+| [04-error-feedback.md](04-error-feedback.md) | 补需求：登录交互优化（含全站错误映射；登录方案已确认，写操作超时不加「可能已生效」；页面级 403 文案仍待明示） |
 
 ## 如何本地打开原型
 

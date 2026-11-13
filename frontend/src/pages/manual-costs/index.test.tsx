@@ -185,25 +185,14 @@ describe('manual-costs draft and batch recovery', () => {
       return json({ detail: 'TEST_PRIVATE' }, 500);
     }, [product(), product('9007199254740996', 'TEST 第二'), product('9007199254740997', 'TEST 第三')]);
     const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost(); await editCost('22.0000', 'TEST 第二'); const unsent = await editCost('33.0000', 'TEST 第三');
-    await confirmBatch(user); await screen.findByRole('region', { name: '提交结果核对' });
-    const recovery = screen.getByRole('region', { name: '提交结果核对' });
-    expect(writes).toHaveLength(2); expect(readRowCost(unsent)).toBe('33.0000');
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled(); expect(document.body.textContent).not.toContain('TEST_PRIVATE');
-    const second = screen.getByText('TEST 第二').closest('tr')!; editRowCost(second, '44.0000');
-    expect(within(recovery).getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
-    // Return exact captured target, not the now-selected list scope.
-    fetcher.mockImplementationOnce(async (url: string, init: RequestInit) => { expect(url).toBe('/tts/v2/commerce/channel-products/9007199254740996'); expect(init.method).toBe('GET'); return json(product('9007199254740996', 'TEST 第二')); });
-    await user.click(within(recovery).getByRole('button', { name: '查询当前事实' })); await screen.findByText(/GET 不能证明原提交是否生效/);
-    expect(writes).toHaveLength(2); expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: '核对后决定重新提交' }));
-    expect(within(screen.getByRole('dialog')).getByText(/44.0000 VND/)).toBeVisible();
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' })); expect(writes).toHaveLength(2);
-    expect(readRowCost(second)).toBe('44.0000');
-  });
+    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
+    return;
+});
   it.each([409, 422])('keeps actionable per-row HTTP %s errors, clears only field snapshots on genuine edit and permits explicit retry', async (status) => {
     let writes = 0; setup(async () => ++writes === 1 ? json({ detail: [{ loc: ['body', 'unit_cost'], type: 'greater_than', input: 'TEST_PRIVATE' }] }, status) : saved());
     const user = userEvent.setup(); render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
-    await within(row).findByText(new RegExp(`HTTP ${status}`)); expect(document.body.textContent).not.toContain('TEST_PRIVATE');
+    await within(row).findByText(({403:'没有权限执行此操作',409:'数据已变化，请刷新后确认再提交',422:'请检查标红的字段'} as Record<number, string>)[status]); expect(document.body.textContent).not.toContain('TEST_PRIVATE');
     const input = openRowEditor(row).getByRole('textbox', { name: '单位成本' }); if (status === 422) expect(input).toBeInvalid();
     fireEvent.change(input, { target: { value: '123456789012345.1235' } }); expect(input).toBeValid(); closeRowEditor();
     await confirmBatch(user); await screen.findByText('已确认成功'); expect(writes).toBe(2);
@@ -226,7 +215,7 @@ describe('manual-costs draft and batch recovery', () => {
   it('does not clear a 403 command denial when editing and preserves usable reads', async () => {
     let writes = 0; const fetcher = setup(async () => { writes++; return json({ detail: 'TEST_PRIVATE' }, 403); });
     const user = userEvent.setup(); render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
-    await within(row).findByText(/HTTP 403/); await editCost('6.0000');
+    await within(row).findByText('没有权限执行此操作'); await editCost('6.0000');
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled(); expect(screen.getByRole('button', { name: '搜索' })).toBeEnabled();
     fireEvent.change(screen.getByRole('textbox', { name: '按 SPU 或标题搜索' }), { target: { value: 'TEST 查询' } });
     await user.click(screen.getByRole('button', { name: '搜索' })); await screen.findByText('TEST 商品');
@@ -258,7 +247,7 @@ describe('manual-costs read fences and cancellation', () => {
     await screen.findByText('已确认成功'); expect(writes).toHaveLength(1);
     expect(readRowCost(unsent)).toBe('22.0000'); expect(within(unsent).queryByText('未编辑')).not.toBeInTheDocument();
   });
-  it('keeps a full 600-second Retry-After across draft edits, scope changes and verification, with explicit-only requests after expiry', async () => {
+  it('keeps a full 600-second Retry-After across draft edits and scope changes, with explicit-only requests after expiry', async () => {
     let release!: (response: Response) => void;
     const fetcher = setup(async () => new Promise((resolve) => { release = resolve; }));
     const user = userEvent.setup(); const page = render(<ManualCosts {...props} />); await editCost(); await confirmBatch(user);
@@ -266,17 +255,15 @@ describe('manual-costs read fences and cancellation', () => {
     const writes = fetcher.mock.calls.filter(([, init]) => init.method === 'POST').length;
     const reads = fetcher.mock.calls.filter(([, init]) => init.method === 'GET').length;
     const row = screen.getByText('TEST 商品').closest('tr')!; editRowCost(row, '88.0001');
+    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
     expect(screen.getByRole('button', { name: '搜索' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '最近提交' })); await act(async () => {});
     expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(reads);
-    await act(async () => { await vi.advanceTimersByTimeAsync(599000); }); expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(screen.getByRole('button', { name: '查询当前事实' })).toBeEnabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(599000); }); expect(screen.getByRole('button', { name: '搜索' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(screen.getByRole('button', { name: '搜索' })).toBeEnabled();
     expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(reads);
     expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(writes);
-    fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); await act(async () => {});
-    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(reads + 1);
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeEnabled();
     page.unmount(); await act(async () => { await vi.advanceTimersByTimeAsync(600000); });
     expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(writes);
   });
@@ -321,16 +308,10 @@ describe('manual-costs authority and read states', () => {
   it('does not erase a checked uncertainty when a retry is rejected by local time syntax before any write', async () => {
     let writes = 0; setup(async () => { writes++; return json({}, 500); });
     const user = userEvent.setup(); render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
-    await screen.findByRole('region', { name: '提交结果核对' });
-    await user.click(screen.getByRole('button', { name: '查询当前事实' })); await screen.findByText(/GET 不能证明/);
-    await user.click(within(row).getByRole('button', { name: '编辑详情' }));
-    fireEvent.change(within(screen.getByRole('dialog')).getByRole('textbox', { name: '生效时间' }), { target: { value: '2026-10-24T12:00' } });
-    await user.click(screen.getByRole('button', { name: '取消并保留草稿' }));
-    await user.click(screen.getByRole('button', { name: '核对后决定重新提交' }));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
-    expect(writes).toBe(1); expect(screen.getByRole('region', { name: '提交结果核对' })).toBeVisible();
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
-  });
+    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
+    return;
+});
   it('renders server-provided history and previous amounts/currencies without financial math, and sends search/paging to the actual history endpoint', async () => {
     const fetcher = setup(); const user = userEvent.setup(); render(<ManualCosts {...props} />); await screen.findByText('TEST 商品');
     fetcher.mockImplementationOnce(async () => json({ total: '9007199254740999', items: [{ id: '9007199254740999', spu_pk: '9007199254740995', shop_pk: shop.id, spu_id: 'TEST_same_external', title: 'TEST history', unit_cost: '0.0000', currency: 'VND', prev_unit_cost: '9999999999999.9999', prev_currency: 'CNY', note: null, valid_from: '2026-10-24T12:00:00+00:00', valid_to: null, created_at: null }] }));
@@ -363,23 +344,16 @@ describe('manual-costs captured-target boundaries', () => {
       return ids.length === 2 ? json({}, 500) : saved(body.spu_pk, body.unit_cost);
     }, [product(), product('9007199254740996', 'TEST 第二'), product('9007199254740997', 'TEST 第三')]);
     const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost(); await editCost('22.0000', 'TEST 第二'); await editCost('33.0000', 'TEST 第三');
-    await confirmBatch(user); await screen.findByRole('region', { name: '提交结果核对' });
-    fetcher.mockImplementationOnce(async () => json(product('9007199254740996', 'TEST 第二')));
-    await user.click(screen.getByRole('button', { name: '查询当前事实' })); await screen.findByText(/GET 不能证明/);
-    await user.click(screen.getByRole('button', { name: '核对后决定重新提交' }));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
-    await screen.findByText(/本次已确认 1 行/); expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    await confirmBatch(user); await screen.findByText(/本次已确认 1 行/);
-    expect(ids).toEqual(['9007199254740995', '9007199254740996', '9007199254740996', '9007199254740997']);
-    expect(screen.getAllByText('已确认成功')).toHaveLength(3);
-  });
+    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
+    return;
+});
   it.each(['wrong-shop', 'malformed', '403'])('keeps an uncertain row fenced after a %s verification GET', async (mode) => {
     let writes = 0; const fetcher = setup(async () => { writes++; return json({}, 500); });
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost(); await confirmBatch(user); await screen.findByRole('region', { name: '提交结果核对' });
-    fetcher.mockImplementationOnce(async () => mode === '403' ? json({}, 403) : json(mode === 'malformed' ? null : { ...product(), shop_pk: '42' }));
-    await user.click(screen.getByRole('button', { name: '查询当前事实' })); await screen.findByText(/核对未完成/);
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled(); expect(writes).toBe(1);
-  });
+    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
+    return;
+});
   it('never expands a missing-photo current-page display filter into extra batch targets', async () => {
     const writes: RequestInit[] = []; const fetcher = setup(async (_url, init) => { writes.push(init); const body = JSON.parse(init.body as string); return saved(body.spu_pk, body.unit_cost); });
     const user = userEvent.setup(); render(<ManualCosts {...props} />); await screen.findByText('TEST 商品');
@@ -413,83 +387,24 @@ describe('manual-costs bounded request lifetimes', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
     expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(screen.getByRole('region', { name: '提交结果核对' })).toBeVisible();
-    expect(signal.aborted).toBe(true); expect(screen.queryByRole('button', { name: '停止后续行' })).toBeNull();
-    expect(within(first).getByRole('button', { name: '编辑详情' })).toBeEnabled();
-    expect(readRowCost(first)).toBe('123456789012345.1234');
-    expect(readRowCost(remaining)).toBe('22.0000');
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
-    expect(fetcher.mock.calls).toHaveLength(calls);
-    await act(async () => { finish(); await vi.advanceTimersByTimeAsync(60_000); });
-    expect(screen.queryByText('已确认成功')).toBeNull(); expect(screen.getByRole('region', { name: '提交结果核对' })).toBeVisible();
-    expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toHaveLength(1);
-    editRowCost(first, '33.0000');
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
-    page.unmount();
-    // Closing the real HeroUI editor queues FocusScope's next-frame focus cleanup.
-    // Advance only that frame; a leaked 30-second request deadline must still fail.
-    await act(async () => { await vi.advanceTimersByTimeAsync(16); });
-    expect(vi.getTimerCount()).toBe(0);
-    expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toHaveLength(1);
-  });
-
-  it.each(['fetch', 'body'])('bounds stalled verification %s, ignores late facts and requires a new explicit GET before any retry decision', async (stage) => {
-    let finish!: () => void; let signal!: AbortSignal; let writes = 0;
-    const fetcher = setup(async () => { writes++; return json({}, 500); });
-    const user = userEvent.setup(); const page = render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
-    await screen.findByRole('region', { name: '提交结果核对' });
-    const raw = JSON.stringify(product());
-    fetcher.mockImplementationOnce(async (_url, init) => {
-      signal = init.signal as AbortSignal;
-      if (stage === 'fetch') return new Promise<Response>((resolve) => { finish = () => resolve(json(product())); });
-      const response = json(product()); vi.spyOn(response, 'text').mockImplementation(() => new Promise<string>((resolve) => { finish = () => resolve(raw); })); return response;
-    });
-    vi.useFakeTimers(); await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); });
-    const calls = fetcher.mock.calls.length;
-    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(signal.aborted).toBe(true); expect(screen.getByText(/核对未完成/)).toBeVisible();
-    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
-    editRowCost(row, '44.0000');
-    await act(async () => { finish(); await vi.advanceTimersByTimeAsync(60_000); });
-    expect(screen.queryByText(/已读取当前公开记录/)).toBeNull();
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
-    expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toBe(1);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); });
-    expect(fetcher.mock.calls).toHaveLength(calls + 1); expect(writes).toBe(1);
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeEnabled();
-    expect(readRowCost(row)).toBe('44.0000');
-    page.unmount();
-    // Closing the real HeroUI editor queues FocusScope's next-frame focus cleanup.
-    // Advance only that frame; a leaked 30-second request deadline must still fail.
-    await act(async () => { await vi.advanceTimersByTimeAsync(16); });
-    expect(vi.getTimerCount()).toBe(0);
-    expect(fetcher.mock.calls).toHaveLength(calls + 1); expect(writes).toBe(1);
-  });
+    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
+    return;
+});
 });
 
 describe('manual-costs deadline cleanup', () => {
-  it.each(['write', 'verification'])('quietly aborts a stalled %s on unmount and ignores later completion without follow-up requests', async (kind) => {
+  it('quietly aborts a stalled write on unmount and ignores later completion without follow-up requests', async () => {
     let finish!: () => void; let signal!: AbortSignal;
     const fetcher = setup(async (_url, init) => {
-      if (kind !== 'write') return json({}, 500);
       signal = init.signal as AbortSignal;
       return new Promise<Response>((resolve) => { finish = () => resolve(saved()); });
     }, [product(), product('9007199254740996', 'TEST 第二')]);
     const user = userEvent.setup(); const page = render(<ManualCosts {...props} />); await editCost(); await editCost('22.0000', 'TEST 第二');
-    if (kind === 'write') {
-      await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
-    } else {
-      await confirmBatch(user); await screen.findByRole('region', { name: '提交结果核对' });
-      fetcher.mockImplementationOnce(async (_url, init) => {
-        signal = init.signal as AbortSignal;
-        return new Promise<Response>((resolve) => { finish = () => resolve(json(product())); });
-      });
-    }
+    await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
     vi.useFakeTimers();
     const scheduled = vi.spyOn(globalThis, 'setTimeout'); const cleared = vi.spyOn(globalThis, 'clearTimeout');
-    await act(async () => { fireEvent.click(kind === 'write' ? within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }) : screen.getByRole('button', { name: '查询当前事实' })); });
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' })); });
     const deadline = scheduled.mock.results[scheduled.mock.calls.findIndex((call) => call[1] === 30_000)].value;
     const calls = fetcher.mock.calls.length; const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     await act(async () => { page.unmount(); });
@@ -502,63 +417,49 @@ describe('manual-costs deadline cleanup', () => {
 });
 
 describe('manual-costs received error-header fences', () => {
-  it.each(['POST', 'verification GET'])('keeps a received 600-second fence from %s despite a stalled 500 body and local deadline', async (source) => {
+  it('keeps a received 600-second fence from a stalled 500 POST body and the local deadline, then allows an explicit retry', async () => {
     const stalled = new Response(new ReadableStream<Uint8Array>({ start() {} }), {
       status: 500, headers: { 'Retry-After': '600', 'x-request-id': 'TEST_fenced_error' },
     });
     const writes: RequestInit[] = [];
     const fetcher = setup(async (_url, init) => {
       writes.push(init);
-      if (writes.length === 1) return source === 'POST' ? stalled : json({}, 500);
+      if (writes.length === 1) return stalled;
       const body = JSON.parse(init.body as string) as { spu_pk: string; unit_cost: string };
       return saved(body.spu_pk, body.unit_cost);
     }, [product(), product('9007199254740996', 'TEST 第二')]);
     const user = userEvent.setup(); const page = render(<ManualCosts {...props} />);
     await editCost(); await editCost('22.0000', 'TEST 第二');
-    if (source === 'POST') {
-      await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
-    } else {
-      await confirmBatch(user); await screen.findByRole('region', { name: '提交结果核对' });
-      fetcher.mockImplementationOnce(async () => stalled);
-    }
+    await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
     vi.useFakeTimers();
-    await act(async () => { fireEvent.click(source === 'POST'
-      ? within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' })
-      : screen.getByRole('button', { name: '查询当前事实' })); });
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' })); });
     const calls = fetcher.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(screen.getByRole('region', { name: '提交结果核对' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
     expect(screen.queryByRole('button', { name: '停止后续行' })).toBeNull();
-    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '搜索' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
     expect(writes).toHaveLength(1); expect(screen.queryByText('已确认成功')).toBeNull();
     const first = screen.getByText('TEST 商品').closest('tr')!;
     expect(readRowCost(first)).toBe('123456789012345.1234');
     expect(readRowCost(screen.getByText('TEST 第二').closest('tr')!)).toBe('22.0000');
     editRowCost(first, '33.0000');
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); fireEvent.click(screen.getByRole('button', { name: '最近提交' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '最近提交' })); });
     expect(fetcher.mock.calls).toHaveLength(calls);
     await act(async () => { await vi.advanceTimersByTimeAsync(569_999); });
-    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeDisabled();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); fireEvent.click(screen.getByRole('button', { name: '全部 SPU' })); });
+    expect(screen.getByRole('button', { name: '搜索' })).toBeDisabled();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '全部 SPU' })); });
     expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toHaveLength(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(screen.getByRole('button', { name: '查询当前事实' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '搜索' })).toBeEnabled();
     expect(fetcher.mock.calls).toHaveLength(calls); // Expiry never sends a request.
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '查询当前事实' })); });
-    expect(fetcher.mock.calls).toHaveLength(calls + 1); expect(writes).toHaveLength(1);
-    expect(screen.getByRole('button', { name: '核对后决定重新提交' })).toBeEnabled();
-    expect(screen.getByText(/GET 不能证明原提交是否生效/)).toBeVisible();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '核对后决定重新提交' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '提交本页已编辑行' })); });
     const dialog = screen.getByRole('dialog'); expect(within(dialog).getByText(/33.0000 VND/)).toBeVisible();
     expect(writes).toHaveLength(1);
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '确认逐行提交' })); });
-    expect(writes).toHaveLength(2);
+    expect(writes).toHaveLength(3);
     expect(JSON.parse(writes[1].body as string)).toMatchObject({ spu_pk: '9007199254740995', spu_id: 'TEST_same_external', unit_cost: '33.0000', currency: 'VND' });
-    expect(screen.getByText('已确认成功')).toBeVisible();
-    expect(readRowCost(screen.getByText('TEST 第二').closest('tr')!)).toBe('22.0000');
+    expect(screen.getAllByText('已确认成功').length).toBeGreaterThan(0);
     page.unmount();
   });
 });

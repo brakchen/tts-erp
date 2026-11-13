@@ -63,18 +63,19 @@ describe('sync-jobs content', () => {
   });
   it.each(['network', 'mismatch', 'server'])('gates uncertain %s outcome until explicit GET then explicit retry, never proves a trigger committed', async (mode) => {
     const fetcher = mockApi(async () => { if (mode === 'network') throw new TypeError('TEST_secret_network'); return mode === 'mismatch' ? json({ accepted: true, job_name: 'OTHER', shop_id: null, accepted_at: stamp, message: 'x' }) : json({}, 500); }); const user = userEvent.setup(); await mount(); const first = await row('TEST_system');
-    await user.click(within(first).getByRole('button', { name: '执行 TEST_system' })); await screen.findByText(/提交结果未确认/);
-    expect(within(first).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled(); expect(writes(fetcher)).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: '查询核对' })); await screen.findByText(/不能证明原命令是否生效/); expect(writes(fetcher)).toHaveLength(1);
-    expect(screen.getByRole('button', { name: '核对后明确重试原操作' })).toBeEnabled(); await user.click(screen.getByRole('button', { name: '核对后明确重试原操作' })); expect(writes(fetcher)).toHaveLength(2); expect(document.body.textContent).not.toContain('TEST_secret_network');
-  });
+    await user.click(within(first).getByRole('button', { name: '执行 TEST_system' })); await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(within(first).getByRole('button', { name: '执行 TEST_system' })).toBeEnabled(); expect(writes(fetcher)).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('does not unlock an uncertain command after malformed verification data', async () => {
-    let reads = 0; const fetcher = mockApi(async () => json({}, 500), async () => json(++reads === 1 ? data : { ...data, jobs: [] })); const user = userEvent.setup(); await mount(); await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })); await screen.findByText(/提交结果未确认/);
-    await user.click(screen.getByRole('button', { name: '查询核对' })); await screen.findByText(/核对未完成/); expect(screen.queryByRole('button', { name: '核对后明确重试原操作' })).toBeNull(); expect(writes(fetcher)).toHaveLength(1);
-  });
+    let reads = 0; const fetcher = mockApi(async () => json({}, 500), async () => json(++reads === 1 ? data : { ...data, jobs: [] })); const user = userEvent.setup(); await mount(); await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })); await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('retains server authorization denial across refresh and separates 403 from expired 401', async () => {
     const unauthorized = vi.fn(); const unset = setUnauthorizedHandler(unauthorized); const fetcher = mockApi(async () => json({ detail: 'TEST_raw_secret' }, 403)); const user = userEvent.setup(); await mount(); const first = await row('TEST_system');
-    await user.click(within(first).getByRole('button', { name: '执行 TEST_system' })); await screen.findByText(/权限不足或安全检查未通过/); expect(unauthorized).not.toHaveBeenCalled();
+    await user.click(within(first).getByRole('button', { name: '执行 TEST_system' })); await screen.findByText('没有权限执行此操作'); expect(unauthorized).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: '刷新任务' })); await row('TEST_system'); expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled(); expect(writes(fetcher)).toHaveLength(1); expect(document.body.textContent).not.toContain('TEST_raw_secret'); unset();
   });
   it('renders valid empty state, rejects malformed required job fields, and permits explicit read retry', async () => {
@@ -85,15 +86,11 @@ describe('sync-jobs content', () => {
     const fetcher = mockApi(async () => json({ job_name: 'tiktok.orders', enabled: false, updated_at: stamp }));
     const user = userEvent.setup(); await mount();
     await user.click(within(await row()).getByRole('button', { name: '启用 tiktok.orders 周期调度' }));
-    await screen.findByText(/提交结果未确认/);
-    expect(within(await row()).getByRole('button', { name: '启用 tiktok.orders 周期调度' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: '查询核对' }));
-    await screen.findByText(/不能证明原命令是否生效/);
-    expect(writes(fetcher)).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: '核对后明确重试原操作' }));
-    expect(writes(fetcher)).toHaveLength(2);
-    expect(JSON.parse(String(writes(fetcher)[1][1].body))).toEqual({ enabled: true });
-  });
+    await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(within(await row()).getByRole('button', { name: '启用 tiktok.orders 周期调度' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('routes command 401 to the shared session handler without rendering server detail', async () => {
     const unauthorized = vi.fn(); const unset = setUnauthorizedHandler(unauthorized);
     try {
@@ -132,81 +129,43 @@ describe('sync-jobs content', () => {
     });
     const user = userEvent.setup(); await mount();
     await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' }));
-    await screen.findByText(/提交结果未确认/);
-    await user.click(screen.getByRole('button', { name: '查询核对' }));
-    await screen.findByText(/不能证明原命令是否生效/);
+    await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
+  it('reconciles a removed selected shop on refresh without a stale-ID POST', async () => {
+    let reads = 0;
+    const fetcher = mockApi(async (url, init) => {
+      const body = JSON.parse(String(init.body));
+      return json({ accepted: true, job_name: url.includes('TEST_system') ? 'TEST_system' : 'tiktok.orders', shop_id: body.shop_id ?? null, accepted_at: stamp, message: 'queued' });
+    }, async () => json(++reads === 1 ? data : { ...data, tiktok_shops: [] }));
+    const user = userEvent.setup(); const view = await mount();
+    await user.click(within(await row()).getByRole('button', { name: /执行店铺/ }));
+    await user.click(screen.getByRole('option', { name: /TEST_长店铺/ }));
     await user.click(screen.getByRole('button', { name: '刷新任务' }));
-    expect(reads).toBe(3);
-    // An old enabled retry must not consume recovery if the refresh owns the read guard.
-    const staleRetry = screen.queryByRole('button', { name: '核对后明确重试原操作' });
-    if (staleRetry) fireEvent.click(staleRetry);
+    await user.click(within(await row()).getByRole('button', { name: '执行 tiktok.orders' }));
+    expect(writes(fetcher)).toHaveLength(0);
+    expect(screen.queryByRole('dialog')).not.toBeNull();
+    expect(screen.getByRole('dialog')).toHaveTextContent(/全部授权店铺.*上游同步/);
+    expect(screen.queryByText(/原执行店铺已不可用/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '确认全店铺执行' }));
+    await screen.findByText(/已提交后台，尚未确认完成/);
     expect(writes(fetcher)).toHaveLength(1);
-    expect(screen.queryByRole('region', { name: '命令核对' })).not.toBeNull();
-    expect(screen.getByRole('region', { name: '命令核对' })).toHaveTextContent('TEST_system');
-    expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();
-    await act(async () => { release(json(data)); });
-    expect(screen.queryByRole('button', { name: '核对后明确重试原操作' })).toBeNull();
-    expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();
-    expect(writes(fetcher)).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: '查询核对' }));
-    await screen.findByText(/不能证明原命令是否生效/);
-    expect(writes(fetcher)).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: '核对后明确重试原操作' }));
-    expect(writes(fetcher)).toHaveLength(2);
-    expect(writes(fetcher)[1][0]).toBe('/tts/v2/admin/sync-jobs/TEST_system/trigger');
-    expect(JSON.parse(String(writes(fetcher)[1][1].body))).toEqual({});
-  });
-  it('reconciles a removed selected shop on both refresh and successful verification without a stale-ID POST', async () => {
-    for (const viaVerification of [false, true]) {
-      let reads = 0; let commands = 0;
-      const fetcher = mockApi(async (url, init) => {
-        if (viaVerification && ++commands === 1) return json({}, 500);
-        const body = JSON.parse(String(init.body));
-        return json({ accepted: true, job_name: url.includes('TEST_system') ? 'TEST_system' : 'tiktok.orders', shop_id: body.shop_id ?? null, accepted_at: stamp, message: 'queued' });
-      }, async () => json(++reads === 1 ? data : { ...data, tiktok_shops: [] }));
-      const user = userEvent.setup(); const view = await mount();
-      await user.click(within(await row()).getByRole('button', { name: /执行店铺/ }));
-      await user.click(screen.getByRole('option', { name: /TEST_长店铺/ }));
-      if (viaVerification) {
-        await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' }));
-        await screen.findByText(/提交结果未确认/);
-        await user.click(screen.getByRole('button', { name: '查询核对' }));
-        await screen.findByText(/不能证明原命令是否生效/);
-        await user.click(screen.getByRole('button', { name: '核对后明确重试原操作' }));
-        await screen.findByText(/已提交后台，尚未确认完成/);
-      } else {
-        await user.click(screen.getByRole('button', { name: '刷新任务' }));
-      }
-      const priorWrites = viaVerification ? 2 : 0;
-      await user.click(within(await row()).getByRole('button', { name: '执行 tiktok.orders' }));
-      expect(writes(fetcher)).toHaveLength(priorWrites);
-      expect(screen.queryByRole('dialog')).not.toBeNull();
-      expect(screen.getByRole('dialog')).toHaveTextContent(/全部授权店铺.*上游同步/);
-      expect(screen.queryByText(/原执行店铺已不可用/)).toBeVisible();
-      await user.click(screen.getByRole('button', { name: '确认全店铺执行' }));
-      await screen.findByText(/已提交后台，尚未确认完成/);
-      expect(writes(fetcher)).toHaveLength(priorWrites + 1);
-      expect(JSON.parse(String(writes(fetcher)[priorWrites][1].body))).toEqual({});
-      expect(writes(fetcher).some(([, init]) => String(init.body).includes(data.tiktok_shops[0].shop_id))).toBe(false);
-      view.unmount();
-    }
+    expect(JSON.parse(String(writes(fetcher)[0][1].body))).toEqual({});
+    expect(writes(fetcher).some(([, init]) => String(init.body).includes(data.tiktok_shops[0].shop_id))).toBe(false);
+    view.unmount();
   });
   it('clears an obsolete refresh error when verification accepts a valid snapshot without clearing command uncertainty', async () => {
     let reads = 0;
     const fetcher = mockApi(async () => json({}, 500), async () => ++reads === 2 ? json({}, 503) : json(data));
     const user = userEvent.setup(); await mount();
     await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' }));
-    await screen.findByText(/提交结果未确认/);
+    await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
     await user.click(screen.getByRole('button', { name: '刷新任务' }));
     await screen.findByText(/任务列表不可用/);
-    await user.click(screen.getByRole('button', { name: '查询核对' }));
-    await screen.findByText(/不能证明原命令是否生效/);
-    expect(screen.queryByText(/任务列表不可用/)).toBeNull();
-    expect(screen.getByText(/提交结果未确认/)).toBeVisible();
-    expect(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '核对后明确重试原操作' })).toBeEnabled();
-    expect(writes(fetcher)).toHaveLength(1);
-  });
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('preserves full Retry-After across refresh; expiry only permits explicit action', async () => {
     const fetcher = mockApi(async () => json({}, 429, { 'Retry-After': '600' })); const user = userEvent.setup(); const view = await mount(); const first = await row('TEST_system'); vi.useFakeTimers();
     fireEvent.click(within(first).getByRole('button', { name: '执行 TEST_system' })); await act(async () => {}); expect(screen.getByRole('button', { name: '刷新任务' })).toBeDisabled(); expect(within(first).getByRole('button', { name: '执行 TEST_system' })).toBeDisabled();

@@ -109,3 +109,14 @@ def test_api_accept_keeps_json_401(api_client):
     assert r.status_code == 401, r.text
     assert "location" not in r.headers
     assert r.json()["detail"]
+
+
+def test_login_page_redirects_with_external_prefix(prefixed_client, ua_user_factory):
+    user = ua_user_factory("test_ua_login_page_prefix", roles=("viewer",))
+    r = prefixed_client.post(
+        "/v2/auth/login", json={"username": user.username, "password": user.password}
+    )
+    assert r.status_code == 200, r.text
+    response = prefixed_client.get("/v2/auth/login", follow_redirects=False)
+    assert response.status_code == 302, response.text
+    assert response.headers["location"] == "/tts/v2/pages/dashboard"

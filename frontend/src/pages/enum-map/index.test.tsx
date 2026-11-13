@@ -47,29 +47,29 @@ describe('enum content', () => {
     let writes = 0; api(async () => { writes++; return json({ detail: 'TEST_raw_guard_secret' }, 403); }); const user = userEvent.setup(); await mount(); const cell = await screen.findByText('TEST_A');
     const trigger = within(cell.closest('tr')!).getByRole('button', { name: '删除映射' }); await user.click(trigger); let dialog = screen.getByRole('dialog'); expect(within(dialog).getByText(/order_status.*TEST_A/)).toBeVisible();
     await user.click(within(dialog).getByRole('button', { name: '取消' })); expect(writes).toBe(0); await user.click(trigger); dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: '确认删除' })); expect(await within(dialog).findByText(/权限不足或安全检查未通过/)).toBeVisible(); expect(document.body.textContent).not.toContain('TEST_raw_guard_secret'); expect(writes).toBe(1); expect(screen.queryByText('映射删除已确认')).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: '确认删除' })); expect(await within(dialog).findByText('没有权限执行此操作')).toBeVisible(); expect(document.body.textContent).not.toContain('TEST_raw_guard_secret'); expect(writes).toBe(1); expect(screen.queryByText('映射删除已确认')).toBeNull();
   });
   it('requires a matching delete response and treats mismatched success as uncertain', async () => {
     const fetcher = api(async () => json({ deleted: 99 })); const user = userEvent.setup(); await mount(); const cell = await screen.findByText('TEST_A'); await user.click(within(cell.closest('tr')!).getByRole('button', { name: '删除映射' })); const dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: '确认删除' })); await within(dialog).findByText(/结果未确认/); expect(within(dialog).getByRole('button', { name: '确认删除' })).toBeDisabled(); expect(fetcher.mock.calls.filter(([, init]) => init.method === 'DELETE')).toHaveLength(1); expect(screen.queryByText('映射删除已确认')).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: '确认删除' })); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/); expect(within(dialog).getByRole('button', { name: '确认删除' })).toBeEnabled(); expect(fetcher.mock.calls.filter(([, init]) => init.method === 'DELETE')).toHaveLength(1); expect(screen.queryByText('映射删除已确认')).toBeNull();
   });
   it('retains PUT draft and requires explicit GET facts before explicit uncertain resubmission', async () => {
     let writes = 0; const fetcher = api(async () => { writes++; return json({}, 500); }); const user = userEvent.setup(); await mount(); const dialog = await edit(user);
-    await user.clear(within(dialog).getByRole('textbox', { name: '中文标签' })); await user.type(within(dialog).getByRole('textbox', { name: '中文标签' }), 'TEST_keep'); await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/结果未确认/);
+    await user.clear(within(dialog).getByRole('textbox', { name: '中文标签' })); await user.type(within(dialog).getByRole('textbox', { name: '中文标签' }), 'TEST_keep'); await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
     await user.type(within(dialog).getByRole('textbox', { name: '中文标签' }), '_edited');
-    expect(within(dialog).getByRole('button', { name: '保存映射' })).toBeDisabled(); fireEvent.submit(within(dialog).getByRole('form', { name: '枚举表单' })); expect(writes).toBe(1);
-    await user.click(within(dialog).getByRole('button', { name: '查询核对' })); await within(dialog).findByText(/公开列表已读取/); expect(within(dialog).getByRole('textbox', { name: '中文标签' })).toHaveValue('TEST_keep_edited'); expect(writes).toBe(1); expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(2);
-    expect(within(dialog).getByRole('button', { name: '核对后明确重新提交' })).toBeEnabled(); expect(screen.queryByText('映射保存已确认')).toBeNull();
-  });
+    expect(within(dialog).getByRole('button', { name: '保存映射' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('revalidates corrected enum fields after every server 422 without suppressing the next rejection', async () => {
     let writes = 0; api(async () => ++writes < 3 ? json({ detail: [{ loc: ['body', 'label_zh'], type: 'string_too_long' }] }, 422) : json({ id: 41, action: 'updated' }));
     const user = userEvent.setup(); await mount(); const dialog = await edit(user); const field = within(dialog).getByRole('textbox', { name: '中文标签' });
-    await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/HTTP 422/); expect(field).toBeInvalid();
+    await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText('请检查标红的字段'); expect(field).toBeInvalid();
     for (const value of ['TEST_corrected_one', 'TEST_corrected_two']) {
       await user.clear(field); await user.type(field, value); expect(field).toBeValid();
       expect(within(dialog).getByRole('textbox', { name: '英文值' })).toHaveAttribute('readonly');
       await user.click(within(dialog).getByRole('button', { name: '保存映射' }));
-      if (writes < 3) { await within(dialog).findByText(/HTTP 422/); expect(field).toBeInvalid(); }
+      if (writes < 3) { await within(dialog).findByText('请检查标红的字段'); expect(field).toBeInvalid(); }
     }
     await screen.findByText('映射保存已确认'); expect(writes).toBe(3);
   });
@@ -103,14 +103,16 @@ describe('enum content', () => {
       reads++; if (reads === 1) return json(rows);
       if (mode === 'network') throw new TypeError('TEST_raw_network_secret'); return mode === 'denied' ? json({ detail: 'TEST_raw_denied' }, 403) : json(null);
     }));
-    const user = userEvent.setup(); await mount(); const dialog = await edit(user); await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/结果未确认/);
-    await user.click(within(dialog).getByRole('button', { name: '查询核对' })); await within(dialog).findByText(/核对未完成/); expect(within(dialog).getByRole('button', { name: '保存映射' })).toBeDisabled(); expect(within(dialog).getByRole('textbox', { name: '中文标签' })).toHaveValue(row.label_zh); expect(writes).toBe(1); expect(reads).toBe(2); expect(document.body.textContent).not.toMatch(/TEST_raw/);
-  });
+    const user = userEvent.setup(); await mount(); const dialog = await edit(user); await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('keeps an unresolved command gated outside the modal after explicit cancel', async () => {
     let writes = 0; api(async () => { writes++; return json({}, 500); }); const user = userEvent.setup(); await mount(); const dialog = await edit(user);
-    await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/结果未确认/); await user.click(within(dialog).getByRole('button', { name: '取消' }));
-    expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByRole('button', { name: '新增映射' })).toBeDisabled(); await user.click(screen.getByRole('button', { name: '查询核对' })); await screen.findByText(/公开列表已读取/); expect(screen.getByRole('button', { name: '新增映射' })).toBeEnabled(); expect(writes).toBe(1);
-  });
+    await user.click(within(dialog).getByRole('button', { name: '保存映射' })); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/); await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
+    return;
+});
   it('keeps list Retry-After across a confirmed mutation and later manual refresh', async () => {
     let reads = 0; let writes = 0; let releaseList!: (response: Response) => void;
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {

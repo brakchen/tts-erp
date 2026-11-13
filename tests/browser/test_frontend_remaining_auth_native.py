@@ -155,12 +155,12 @@ def lost_login(page: Page, gate: BrowserFence, clone: OwnedClone) -> tuple[str, 
     session_before = sessions(clone)
     gate.drop_next = ("POST", "/v2/auth/login")
     repeat_enter(page)
-    recovery = page.get_by_role("region", name="登录结果核对", exact=True)
-    expect(recovery).to_be_visible()
-    expect(page.get_by_role("button", name="登录", exact=True)).to_be_disabled()
-    expect(
-        recovery.get_by_role("button", name="查询当前会话", exact=True)
-    ).to_be_enabled()
+    expect(page.get_by_text("网络已断开，请检查网络后重试", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="登录", exact=True)).to_be_enabled()
+    expect(page.get_by_role("button", name="查询当前会话")).to_have_count(0)
+    expect(page.get_by_role("button", name="我已了解，允许手动重新登录")).to_have_count(0)
+    expect(page.get_by_text("结果未确认")).to_have_count(0)
+    expect(page.get_by_text("可能已生效")).to_have_count(0)
     page.wait_for_load_state("networkidle")
     assert gate.lost == lost_before + 1 and gate.drop_next is None
     assert ("POST", "/v2/auth/login", 200) in gate.responses
@@ -169,36 +169,9 @@ def lost_login(page: Page, gate: BrowserFence, clone: OwnedClone) -> tuple[str, 
     login_url_matches = page.url == url
     assert login_url_matches
     assert_draft_preserved(page, clone)
-    # The owned API really created a session before its 200 was lost. This is
-    # separate from the GET/UI statement, which is deliberately not that proof.
+    # The owned API really created a session before its 200 was lost.
     created = sessions(clone) - session_before
     assert len(created) == 1 and all(not revoked for _pk, revoked in created)
-    repeat_enter(page)
-    page.wait_for_load_state("networkidle")
-    assert count(gate, "POST", "/v2/auth/login") == before + 1
-    recovery.get_by_role("button", name="查询当前会话", exact=True).click()
-    expect(
-        recovery.get_by_text("查询完成：当前存在已认证会话。", exact=True)
-    ).to_be_visible()
-    expect(
-        recovery.get_by_text(
-            "当前用户名与原请求一致，但仍不能证明原登录成功。", exact=True
-        )
-    ).to_be_visible()
-    expect(
-        recovery.get_by_text(
-            "查询仅反映当前 Cookie 对应的会话，不能证明原密码正确、原请求成功或本次签发了会话。输入和原请求仅保留在本页内存；不会自动重试。",
-            exact=True,
-        )
-    ).to_be_visible()
-    expect(page.get_by_role("button", name="登录", exact=True)).to_be_disabled()
-    page.wait_for_load_state("networkidle")
-    assert count(gate, "GET", "/v2/auth/me") == 1
-    assert count(gate, "POST", "/v2/auth/login") == before + 1
-    assert sessions(clone) == session_before | created
-    assert_draft_preserved(page, clone)
-    login_url_matches = page.url == url
-    assert login_url_matches
     return url, before + 1
 
 
@@ -256,7 +229,7 @@ def test_native_enter_cookie_next_logout_and_blank_login_capture(
         assert not gate.violations
 
 
-def test_native_401_reauthentication_and_committed_loss_explicit_choices(
+def test_native_401_reauthentication_and_committed_loss_manual_retry(
     frontend_build,
     clone: OwnedClone,
 ) -> None:
@@ -299,47 +272,32 @@ def test_native_401_reauthentication_and_committed_loss_explicit_choices(
         assert count(gate, "POST", "/v2/auth/login") == 3
         logout(page, gate, clone)
 
-        # Fresh page/context for each loss branch: no prior Cookie or GET state
-        # is carried into the UNKNOWN protocol, but the same owned child stays.
+        # Fresh page/context for the lost-response retry: no prior Cookie state
+        # is carried in, but the same owned child stays.
         assert not gate.violations
-    for choice in ("current", "retry"):
-        with live_browser(
-            clone.probe,
-            clone.accounts["admin"],
-            shop_id="99" + str(secrets.randbelow(10**14)).zfill(14),
-            service_id="TEST_auth_loss_" + secrets.token_hex(8),
-            enum_value="TEST_auth_loss_" + secrets.token_hex(8),
-            width=1440,
-        ) as (page, gate):
-            url, submitted = lost_login(page, gate, clone)
-            if choice == "current":
-                page.get_by_role(
-                    "button", name="使用已查询的当前会话继续", exact=True
-                ).click()
-            else:
-                before_choice = sessions(clone)
-                page.get_by_role(
-                    "button", name="我已了解，允许手动重新登录", exact=True
-                ).click()
-                expect(
-                    page.get_by_text(
-                        "已允许手动登录；仍需点击登录，不会自动提交。重新查询将撤销此选择。",
-                        exact=True,
-                    )
-                ).to_be_visible()
-                page.wait_for_load_state("networkidle")
-                login_url_matches = page.url == url
-                assert login_url_matches
-                assert count(gate, "POST", "/v2/auth/login") == submitted
-                assert sessions(clone) == before_choice
-                assert_draft_preserved(page, clone)
-                page.get_by_role("button", name="登录", exact=True).click()
-                submitted += 1
-            arrived(page, clone, "/v2/pages/shops")
-            assert count(gate, "POST", "/v2/auth/login") == submitted
-            assert cookie_facts(page) == [(clone.prefix or "/", True, "Lax")]
-            logout(page, gate, clone)
-            assert count(gate, "POST", "/v2/auth/login") == submitted
-            assert gate.lost == 1 and gate.drop_next is None
-            assert all(csrf for method, _path, csrf in gate.calls if method == "POST")
-            assert not gate.violations
+    with live_browser(
+        clone.probe,
+        clone.accounts["admin"],
+        shop_id="99" + str(secrets.randbelow(10**14)).zfill(14),
+        service_id="TEST_auth_loss_" + secrets.token_hex(8),
+        enum_value="TEST_auth_loss_" + secrets.token_hex(8),
+        width=1440,
+    ) as (page, gate):
+        url, submitted = lost_login(page, gate, clone)
+        before_choice = sessions(clone)
+        login_url_matches = page.url == url
+        assert login_url_matches
+        assert count(gate, "POST", "/v2/auth/login") == submitted
+        assert sessions(clone) == before_choice
+        assert_draft_preserved(page, clone)
+        expect(page.get_by_role("button", name="登录", exact=True)).to_be_enabled()
+        page.get_by_role("button", name="登录", exact=True).click()
+        submitted += 1
+        arrived(page, clone, "/v2/pages/shops")
+        assert count(gate, "POST", "/v2/auth/login") == submitted
+        assert cookie_facts(page) == [(clone.prefix or "/", True, "Lax")]
+        logout(page, gate, clone)
+        assert count(gate, "POST", "/v2/auth/login") == submitted
+        assert gate.lost == 1 and gate.drop_next is None
+        assert all(csrf for method, _path, csrf in gate.calls if method == "POST")
+        assert not gate.violations

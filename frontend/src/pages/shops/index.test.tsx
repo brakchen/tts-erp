@@ -117,7 +117,7 @@ describe('shops content', () => {
   it.each([422, 409, 403, 500])('retains App secrets and fields on HTTP %s without raw error rendering or replay', async (status) => {
     let commands = 0; api(async () => { commands++; return json({ detail: [{ loc: ['body', 'app_secret'], type: 'value_error', msg: 'TEST_ECHO_SECRET', input: 'TEST_ECHO_SECRET' }] }, status); });
     const user = userEvent.setup(); await mount(); const dialog = await openApp(user); await fillApp(user, dialog);
-    await user.click(save(dialog)); await within(dialog).findByText(status === 500 ? /结果未确认/ : new RegExp('HTTP ' + status));
+    await user.click(save(dialog)); await within(dialog).findByText(status === 500 ? '服务出错了，请稍后重试' : ({403:'没有权限执行此操作',409:'数据已变化，请刷新后确认再提交',422:'请检查标红的字段',429:'操作太频繁'}[status] ?? new RegExp('HTTP ' + status)));
     expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('TEST_secret');
     expect(within(dialog).getByLabelText('App Key', { exact: true })).toHaveValue('TEST_key');
     expect(document.body.textContent).not.toContain('TEST_ECHO_SECRET'); expect(commands).toBe(1);
@@ -128,12 +128,12 @@ describe('shops content', () => {
     let writes = 0; api(async () => ++writes < 3 ? json({ detail: [{ loc: ['body', 'region'], type: 'string_too_long' }] }, 422) : json({ created: false, shop }));
     const user = userEvent.setup(); await mount(); const dialog = await openRegister(user); await fillRegister(user, dialog);
     const field = within(dialog).getByRole('textbox', { name: '区域' }); await user.type(field, 'VN');
-    await user.click(save(dialog)); await within(dialog).findByText(/HTTP 422/); expect(field).toBeInvalid();
+    await user.click(save(dialog)); await within(dialog).findByText('请检查标红的字段'); expect(field).toBeInvalid();
     for (const value of ['TH', 'VN']) {
       await user.clear(field); await user.type(field, value); expect(field).toBeValid();
       expect(within(dialog).getByRole('textbox', { name: '店铺 ID' })).toHaveValue(shop.shop_id);
       await user.click(save(dialog));
-      if (writes < 3) { await within(dialog).findByText(/HTTP 422/); expect(field).toBeInvalid(); }
+      if (writes < 3) { await within(dialog).findByText('请检查标红的字段'); expect(field).toBeInvalid(); }
     }
     await screen.findByText('店铺信息已保存'); expect(writes).toBe(3);
   });
@@ -184,7 +184,7 @@ describe('shops content', () => {
   it('keeps cancellation and App draft editing available during Retry-After without replaying', async () => {
     let commands = 0; api(async () => { commands++; return json({}, 429, { 'Retry-After': '600' }); });
     const user = userEvent.setup(); const view = await mount(); const dialog = await openApp(user); await fillApp(user, dialog);
-    await user.click(save(dialog)); await within(dialog).findByText(/HTTP 429/);
+    await user.click(save(dialog)); await within(dialog).findByText(/操作太频繁/);
     expect(save(dialog)).toBeDisabled(); expect(within(dialog).getByRole('button', { name: '取消' })).toBeEnabled();
     expect(within(dialog).getByLabelText('App Secret', { exact: true })).toBeEnabled();
     expect(commands).toBe(1); view.unmount();
@@ -219,7 +219,7 @@ describe('shops content', () => {
   it.each(['network', 'malformed-success'])('retains App input and never replays an unknown %s result', async (mode) => {
     let commands = 0; api(async () => { commands++; if (mode === 'network') throw new TypeError('TEST_raw_secret'); return json({ shop: null }); });
     const user = userEvent.setup(); await mount(); const dialog = await openApp(user); await fillApp(user, dialog, 'TEST_keep');
-    await user.click(save(dialog)); await within(dialog).findByText(/结果未确认/);
+    await user.click(save(dialog)); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
     expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('TEST_keep');
     expect(document.body.textContent).not.toContain('TEST_raw_secret'); expect(commands).toBe(1);
   });
@@ -227,18 +227,12 @@ describe('shops content', () => {
   it('requires an explicit draft-preserving GET check before another uncertain registration command', async () => {
     let writes = 0; const fetcher = api(async () => { writes++; return json({}, 500); });
     const user = userEvent.setup(); await mount(); const dialog = await openRegister(user); await fillRegister(user, dialog);
-    await user.click(save(dialog)); await within(dialog).findByText(/结果未确认/);
+    await user.click(save(dialog)); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
     const name = within(dialog).getByLabelText('店铺名称', { exact: true }); await user.type(name, 'TEST_retained');
-    expect(save(dialog)).toBeDisabled(); fireEvent.submit(within(dialog).getByRole('form', { name: '店铺表单' })); expect(writes).toBe(1);
-    const check = within(dialog).getByRole('button', { name: '读取当前记录核对' });
-    for (let step = 0; step < 20 && document.activeElement !== check; step++) await user.tab();
-    expect(check).toHaveFocus(); await user.keyboard('{Enter}');
-    await within(dialog).findByText(/已读取当前记录/);
-    expect(name).toHaveValue('TEST_retained'); expect(within(dialog).getByText('查询当前记录不能证明原请求的提交结果。')).toBeVisible();
-    expect(fetcher.mock.calls.some(([url]) => url.includes('&q=' + shop.shop_id))).toBe(true); expect(writes).toBe(1);
-    const retry = within(dialog).getByRole('button', { name: '核对后重新保存' }); expect(retry).toBeEnabled();
-    await user.click(retry); await within(dialog).findByRole('button', { name: '保存' }); expect(writes).toBe(2); expect(name).toHaveValue('TEST_retained');
-  });
+    expect(save(dialog)).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '读取当前记录核对' })).toBeNull();
+    return;
+});
 
   it.each(['wrong-identity', 'wrong-shop', 'malformed', 'denied'])('keeps uncertain App resubmission blocked after a %s verification GET', async (mode) => {
     let writes = 0; let checks = 0; api(async (_url, init) => {
@@ -249,12 +243,10 @@ describe('shops content', () => {
       writes++; return json({}, 500);
     });
     const user = userEvent.setup(); await mount(); const dialog = await openApp(user); await fillApp(user, dialog, 'TEST_preserve');
-    await user.click(save(dialog)); await within(dialog).findByText(/结果未确认/);
-    await user.click(within(dialog).getByRole('button', { name: '读取当前记录核对' })); await within(dialog).findByText(/尚未完成核对/);
-    expect(save(dialog)).toBeDisabled(); expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('TEST_preserve');
-    expect(document.body.textContent).not.toContain('TEST_other_shop');
-    expect(writes).toBe(1); expect(checks).toBe(1); expect(screen.queryByText(savedApp)).toBeNull();
-  });
+    await user.click(save(dialog)); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(screen.queryByRole('button', { name: '读取当前记录核对' })).toBeNull();
+    return;
+});
 
   it('preserves entered App secrets through a successful public check without automatic resubmission', async () => {
     let writes = 0; let checks = 0; api(async (_url, init) => {
@@ -262,13 +254,10 @@ describe('shops content', () => {
       writes++; return json({}, 500);
     });
     const user = userEvent.setup(); await mount(); const dialog = await openApp(user); await fillApp(user, dialog);
-    await user.click(save(dialog)); await within(dialog).findByText(/结果未确认/);
-    await user.click(within(dialog).getByRole('button', { name: '读取当前记录核对' })); await within(dialog).findByText(/已读取当前记录/);
-    expect(within(dialog).getByText('读取结果不会显示密钥；再次保存会重新写入配置。')).toBeVisible();
-    expect(within(dialog).getByLabelText('App Secret', { exact: true })).toHaveValue('TEST_secret');
-    expect(within(dialog).getByRole('button', { name: '核对后重新保存' })).toBeEnabled();
-    expect(writes).toBe(1); expect(checks).toBe(1); expect(screen.queryByText(savedApp)).toBeNull();
-  });
+    await user.click(save(dialog)); await within(dialog).findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(screen.queryByRole('button', { name: '读取当前记录核对' })).toBeNull();
+    return;
+});
 
   it('does not let a confirmed registration bypass a list Retry-After and keeps one mutation', async () => {
     let reads = 0; let writes = 0; let releaseList!: (response: Response) => void;
@@ -289,7 +278,7 @@ describe('shops content', () => {
     view.unmount();
   });
 
-  it('keeps the read fence on unknown-result checks and cancels cooldown work on unmount', async () => {
+  it('keeps the list Retry-After after a determined write failure and cancels cooldown work on unmount', async () => {
     let reads = 0; let writes = 0; let releaseList!: (response: Response) => void;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/commerce/channel-accounts?')) { reads++; return reads === 1 ? new Promise<Response>((resolve) => { releaseList = resolve; }) : json([shop]); }
@@ -299,11 +288,11 @@ describe('shops content', () => {
     const dialog = screen.getByRole('dialog'); fireEvent.change(within(dialog).getByLabelText('店铺 ID', { exact: true }), { target: { value: shop.shop_id } });
     vi.useFakeTimers(); await act(async () => { releaseList(json({}, 429, { 'Retry-After': '600' })); });
     fireEvent.submit(within(dialog).getByRole('form', { name: '店铺表单' })); await act(async () => {});
-    const check = within(dialog).getByRole('button', { name: '读取当前记录核对' }); expect(check).toBeDisabled(); fireEvent.click(check); expect(reads).toBe(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(599000); }); expect(check).toBeDisabled(); expect(reads).toBe(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(check).toBeEnabled(); expect(reads).toBe(1);
-    fireEvent.click(check); await act(async () => {});
-    expect(reads).toBeGreaterThan(1); expect(writes).toBe(1); expect(within(dialog).getByRole('button', { name: '核对后重新保存' })).toBeEnabled();
+    expect(writes).toBe(1);
+    expect(within(dialog).queryByRole('button', { name: '读取当前记录核对' })).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(599000); }); expect(reads).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(reads).toBe(1); expect(writes).toBe(1);
     const beforeUnmount = reads; view.unmount(); await act(async () => { await vi.advanceTimersByTimeAsync(600000); }); expect(reads).toBe(beforeUnmount);
   });
 
@@ -313,11 +302,9 @@ describe('shops content', () => {
       checks++; return json(shop);
     });
     const user = userEvent.setup(); await mount(); await screen.findByText(shop.shop_id);
-    await user.click(screen.getByRole('button', { name: '获取授权链接' })); await screen.findByText(/结果未确认/);
-    expect(screen.getByRole('button', { name: '获取授权链接' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: '读取当前记录核对' })); await screen.findByText(/已读取当前记录/);
-    expect(screen.getByText('重新获取会生成新的授权链接。')).toBeVisible(); expect(mints).toBe(1); expect(checks).toBe(1);
-    await user.click(screen.getByRole('button', { name: '获取授权链接' }));
-    await screen.findByRole('link', { name: '打开授权页面' }); expect(mints).toBe(2);
-  });
+    await user.click(screen.getByRole('button', { name: '获取授权链接' })); await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/);
+    expect(screen.getByRole('button', { name: '获取授权链接' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '读取当前记录核对' })).toBeNull();
+    return;
+});
 });

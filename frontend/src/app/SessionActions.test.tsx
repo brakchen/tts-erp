@@ -32,7 +32,7 @@ describe('SessionActions', () => {
     const signedOut = vi.fn();
     render(<SessionActions rootPath="" onSignedOut={signedOut} />);
     await userEvent.click(await screen.findByRole('button', { name: '退出登录' }));
-    await screen.findByText('退出结果未确认，请重试或重新登录');
+    await screen.findByText('网络已断开，请检查网络后重试');
     expect(signedOut).not.toHaveBeenCalled();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
