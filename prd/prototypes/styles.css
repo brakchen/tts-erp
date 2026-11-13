@@ -522,22 +522,57 @@ table.erp-table { width: 100%; border-collapse: separate; border-spacing: 0; fon
 }
 
 /* ── 本轮页面级布局（贴近现网工作台，不另起皮肤，不改令牌与壳层） ── */
-.erp-overview { display: grid; gap: 16px; min-width: 0; max-width: 100%; }
+/* 经营概览所在页：内容列不得被卡片或下方明细表 min-content 撑出横向滚动 */
+.erp-page:has(.erp-overview) { width: 100%; max-width: 100%; }
+.erp-page:has(.erp-overview) > * { min-width: 0; max-width: 100%; }
+.erp-page:has(.erp-overview) .stack,
+.erp-page:has(.erp-overview) .erp-panel,
+.erp-page:has(.erp-overview) .erp-intro,
+.erp-page:has(.erp-overview) .demo-states,
+.erp-page:has(.erp-overview) .erp-pagination,
+.erp-page:has(.erp-overview) .sample-banner,
+.erp-page:has(.erp-overview) [data-demo-panel] {
+  min-width: 0;
+  max-width: 100%;
+}
+.erp-page:has(.erp-overview) .stack > *,
+.erp-page:has(.erp-overview) .erp-panel > *,
+.erp-page:has(.erp-overview) [data-demo-panel] > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.erp-page:has(.erp-overview) .erp-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+.erp-overview { display: grid; gap: 16px; min-width: 0; max-width: 100%; width: 100%; }
 .erp-overview-grid {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   min-width: 0;
+  max-width: 100%;
+  width: 100%;
 }
-.erp-overview-grid > * { min-width: 0; }
-.erp-overview-profit { grid-column: 1 / -1; min-width: 0; }
+.erp-overview-grid > * { min-width: 0; max-width: 100%; }
+.erp-overview-profit { grid-column: 1 / -1; min-width: 0; max-width: 100%; }
+.erp-overview-profit > * { min-width: 0; max-width: 100%; }
 .erp-profit-metrics {
   display: grid;
   gap: 10px 16px;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
   margin: 0;
 }
+.erp-profit-metrics > div { min-width: 0; }
+.erp-overview .erp-profit-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+}
+.erp-overview .erp-profit-metrics dd { overflow-wrap: anywhere; }
+.erp-overview .erp-profit-metrics dt { flex-wrap: wrap; }
 .erp-profit-metrics dt {
   display: flex; align-items: center; gap: 4px;
   margin: 0; color: var(--muted); font-size: 12px; font-weight: 500;
@@ -551,10 +586,24 @@ table.erp-table { width: 100%; border-collapse: separate; border-spacing: 0; fon
   display: grid; gap: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 16px;
+  min-width: 0;
+  max-width: 100%;
 }
+.erp-overview-comparison > div { min-width: 0; }
+.erp-overview-comparison .erp-profit-metrics { grid-template-columns: minmax(0, 1fr); }
 .erp-overview-comparison h4 { margin: 0 0 8px; font-size: 14px; }
-.erp-overview-prices { margin-top: 16px; }
-.erp-overview-roi { margin: 16px 0; }
+.erp-overview-prices { margin-top: 16px; min-width: 0; max-width: 100%; }
+.erp-overview-roi { margin: 16px 0; width: 100%; min-width: 0; max-width: 100%; }
+.erp-overview .erp-table-wrap { width: 100%; max-width: 100%; min-width: 0; }
+.erp-overview table.erp-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.erp-overview .erp-table th,
+.erp-overview .erp-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .erp-metric-hint {
   width: 20px; height: 20px; min-height: 20px; padding: 0;
   border-radius: 50%; font-size: 11px; line-height: 1;
