@@ -537,7 +537,11 @@ _SQL_PRICE_OBSERVATION_TABLE_EXISTS = text(
 # pi-lens-ignore: python-sql-injection
 _SQL_PRICE_STATS = text(
     _POPULATION_CTE
-    + ", coverage AS (" + _COVERAGE_SELECT + "), buckets AS (" + _BUCKET_SELECT + ")"
+    + ", coverage AS ("
+    + _COVERAGE_SELECT
+    + "), buckets AS ("
+    + _BUCKET_SELECT
+    + ")"
     + """
 SELECT 'coverage'::text AS row_kind, spu_pk,
        selected_line_count,
@@ -588,7 +592,6 @@ SELECT 'bucket'::text AS row_kind, spu_pk,
 FROM buckets
 """
 )
-
 
 
 # ─── aggregation ─────────────────────────────────────────────────────
