@@ -124,6 +124,13 @@ def _fetch_all_pages(
         batch = data.get("list")
         advertised = data.get("total")
         if (
+            isinstance(advertised, str)
+            and len(advertised) <= 20
+            and advertised.isascii()
+            and advertised.isdecimal()
+        ):
+            advertised = int(advertised)
+        if (
             type(advertised) is not int
             or advertised < 0
             or not isinstance(batch, list)

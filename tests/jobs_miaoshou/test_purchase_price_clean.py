@@ -26,7 +26,7 @@ pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
 class FakePurchaseClient:
-    def __init__(self, rows: list[dict], *, advertised_total: int | None = None):
+    def __init__(self, rows: list[dict], *, advertised_total: int | str | None = None):
         self.rows = rows
         self.advertised_total = advertised_total
         self.calls: list[dict] = []
@@ -333,10 +333,12 @@ def test_pagination_count_mismatch_fails_without_writes(
     assert db_session.scalars(select(MiaoshouPurchaseOrderRawRecord)).first() is None
 
 
+@pytest.mark.parametrize("advertised_total", [3, "3"])
 def test_pagination_follows_data_total_and_keeps_a_fixed_upper_bound(
     db_session,
     fernet_key: str,
     monkeypatch,
+    advertised_total: int | str,
 ) -> None:
     _seed_credential(db_session)
     monkeypatch.setattr(job, "PAGE_SIZE", 2)
@@ -344,7 +346,7 @@ def test_pagination_follows_data_total_and_keeps_a_fixed_upper_bound(
         _purchase_order() | {"purchaseOrderSn": f"TEST_PO_{index}"}
         for index in range(3)
     ]
-    client = FakePurchaseClient(rows)
+    client = FakePurchaseClient(rows, advertised_total=advertised_total)
     result = _run(db_session, client)
     assert result["pages_walked"] == 2
     assert result["orders_seen"] == 3

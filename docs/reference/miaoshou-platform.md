@@ -96,7 +96,8 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schem
 配置入口与妙手包裹同步相同。
 
 - 分页使用 `purchaseOrderStatus=finished`，在一次同步内固定查询截止时间。校验分页的
-  `data.total` 和每页记录数，按响应内容去重，保留同一采购单号下不同的记录。
+  `data.total`（生产接口可能返回十进制字符串）和每页记录数，按响应内容去重，
+  保留同一采购单号下不同的记录。
 - 对采购平台为 `1688` 或 `1688妙手` 的记录，要求实付金额、采购行单价和数量均为正，
   并且单内货源标题唯一、有效关联指向同一个 TikTok SPU。同一货源的多个规格按
   `Σ(sourceUnitPrice×sourceQuantity)/Σ(sourceQuantity)` 算出 CNY 单位成本。
