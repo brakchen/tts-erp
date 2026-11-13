@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-import os
 from copy import deepcopy
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from tests._job_invocation import invoke_seeded_job
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.miaoshou import (
+    MiaoshouPackage,
+    MiaoshouPackageItem,
+    MiaoshouPackageRawRecord,
     MiaoshouPurchaseOrderRawRecord,
     MiaoshouPurchasePrice,
     MiaoshouSyncIssue,
@@ -27,296 +29,307 @@ class FakePurchaseClient:
     def __init__(self, rows: list[dict], *, advertised_total: int | None = None):
         self.rows = rows
         self.advertised_total = advertised_total
-        self.calls: list[tuple[int, int]] = []
+        self.calls: list[dict] = []
 
-    def search_page(self, *, page: int, page_size: int = 100) -> dict:
-        self.calls.append((page, page_size))
-        start = (page - 1) * page_size
-        batch = self.rows[start : start + page_size]
+    def _call_erp(self, *, path: str, body: dict) -> dict:
+        assert path == "/open/v1/order/purchase_order/purchase_record/search_list"
+        assert body["purchaseOrderStatus"] == "finished"
+        self.calls.append(body)
+        start = (body["page"] - 1) * body["pageSize"]
         return {
             "result": "success",
-            "list": batch,
-            "total": str(
-                self.advertised_total
-                if self.advertised_total is not None
-                else len(self.rows)
-            ),
-            "page": page,
-            "pageSize": page_size,
+            "data": {
+                "list": self.rows[start : start + body["pageSize"]],
+                "total": len(self.rows)
+                if self.advertised_total is None
+                else self.advertised_total,
+            },
         }
 
 
-def _seed_web_credential(db_session, fernet_key: str):
-    cookie = os.environ.setdefault("TEST_MIAOSHOU_WEB_COOKIE", "TEST_cookie")
-    zebra = os.environ.setdefault("TEST_MIAOSHOU_WEB_ZEBRA", "TEST_zebra")
-    row = upsert_credentials(
+def _seed_credential(db_session):
+    return upsert_credentials(
         db_session,
-        provider=job.WEB_PROVIDER,
-        external_account_id="TEST_WEB_ACCOUNT",
-        account_label="TEST web session",
-        plaintext_access_token=cookie,
-        plaintext_refresh_token=zebra,
-        extra={"front_version": "TEST_front"},
+        provider="miaoshou",
+        external_account_id="TEST_PURCHASE_APP",
+        plaintext_access_token="TEST_APP_KEY",
+        plaintext_refresh_token="TEST_APP_SECRET",
     )
+
+
+def _seed_package(
+    db_session, credential_id: int, *, shop_id: str = "TEST_MS_SHOP"
+) -> None:
+    raw = MiaoshouPackageRawRecord(
+        credential_id=credential_id,
+        endpoint="TEST_package",
+        payload={},
+        payload_hash="TEST_hash",
+    )
+    db_session.add(raw)
     db_session.flush()
-    return row
-
-
-def _seed_store_match(
-    db_session,
-    *,
-    miaoshou_shop_id: str = "TEST_MS_SHOP",
-    name: str = "TEST store",
-) -> int:
-    shop = ChannelAccount(
+    package = MiaoshouPackage(
+        credential_id=credential_id,
+        external_package_id=f"TEST_PACKAGE_{shop_id}",
+        raw_record_id=raw.id,
+        source_endpoint="TEST_package",
         platform="tiktok",
-        shop_id="TEST_TIKTOK_SHOP",
-        account_name=name,
-        status="active",
+        shop_id=shop_id,
+        platform_order_sn="TEST_TIKTOK_ORDER",
+        raw_payload={},
+    )
+    db_session.add(package)
+    db_session.flush()
+    db_session.add(
+        MiaoshouPackageItem(
+            package_id=package.id,
+            external_package_item_id="TEST_ITEM",
+            platform_product_id="TEST_SPU",
+            raw_payload={},
+        )
+    )
+
+
+def _seed_store_match(db_session) -> int:
+    shop = ChannelAccount(
+        platform="tiktok", shop_id="TEST_TIKTOK_SHOP", account_name="TEST store"
     )
     db_session.add(shop)
-    db_session.flush()
     db_session.add(
         ProcurementAccount(
             provider="miaoshou",
-            external_account_id=miaoshou_shop_id,
-            account_name=name,
-            status="normal",
+            external_account_id="TEST_MS_SHOP",
+            account_name="TEST store",
         )
     )
     db_session.flush()
     return shop.id
 
 
-def _purchase_order(*, miaoshou_shop_id: str = "TEST_MS_SHOP") -> dict:
-    source_items = [
-        {
-            "sourceItemId": "OFFER_A",
-            "sourceSkuId": "A_XXL",
-            "sourceQuantity": "1",
-            "sourceUnitPrice": "26.00",
-        },
-        {
-            "sourceItemId": "OFFER_B",
-            "sourceSkuId": "B_L",
-            "sourceQuantity": "1",
-            "sourceUnitPrice": "29.00",
-        },
-        {
-            "sourceItemId": "OFFER_B",
-            "sourceSkuId": "B_XL",
-            "sourceQuantity": "1",
-            "sourceUnitPrice": "29.00",
-        },
-        {
-            "sourceItemId": "OFFER_B",
-            "sourceSkuId": "B_2XL",
-            "sourceQuantity": "1",
-            "sourceUnitPrice": "29.00",
-        },
-    ]
-    platform_spus = ["TEST_SPU_A", "TEST_SPU_B", "TEST_SPU_B", "TEST_SPU_B"]
+def _purchase_order() -> dict:
     return {
-        "purchaseOrderFilterId": "TEST_FILTER_1",
-        "purchaseOrderSn": "TEST_PO_1",
-        "purchaseOrderStatus": "finished",
+        "purchaseOrderSn": "TEST_PO",
+        "purchasePlatformName": "1688",
+        "purchaseOrderPayment": "102.00",
         "gmtPurchaseOrderStart": "2026-09-29 12:04:23",
-        "purchaseItems": source_items,
+        "purchaseItems": [
+            {
+                "sourceTitle": "TEST OFFER",
+                "sourceSkuSubName": "TEST M",
+                "sourceQuantity": "1",
+                "sourceUnitPrice": "26.00",
+            },
+            {
+                "sourceTitle": "TEST OFFER",
+                "sourceSkuSubName": "TEST L",
+                "sourceQuantity": "2",
+                "sourceUnitPrice": "36.00",
+            },
+        ],
         "opOrderPackageList": [
             {
-                "shopId": miaoshou_shop_id,
+                "platform": "tiktok",
+                "relateStatus": "normal",
+                "platformOrderSn": "TEST_TIKTOK_ORDER",
                 "shopName": "TEST store",
-                "purchaseItems": [{"platformItemId": spu}],
+                "purchaseItems": [
+                    {"platformItemId": "TEST_SPU", "unitPrice": "100000"}
+                ],
             }
-            for spu in platform_spus
         ],
     }
 
 
-def test_clean_groups_by_offer_spu_and_store() -> None:
-    prices, issues = job.clean_latest_prices([_purchase_order()])
-    assert issues == []
-    assert {(shop, spu): row.unit_cost for (shop, spu), row in prices.items()} == {
-        ("TEST_MS_SHOP", "TEST_SPU_A"): Decimal("26.0000"),
-        ("TEST_MS_SHOP", "TEST_SPU_B"): Decimal("29.0000"),
-    }
-
-
-def test_group_count_mismatch_is_not_guessed() -> None:
-    order = _purchase_order()
-    order["opOrderPackageList"] = order["opOrderPackageList"][:1]
-    prices, issues = job.clean_latest_prices([order])
-    assert prices == {}
-    assert issues[0]["issue_type"] == "GROUP_COUNT_MISMATCH"
-
-
-def test_shop_ambiguous_in_order_is_not_written() -> None:
-    order = _purchase_order()
-    order["opOrderPackageList"][1]["shopId"] = "TEST_OTHER_SHOP"
-    prices, issues = job.clean_latest_prices([order])
-    assert ("TEST_MS_SHOP", "TEST_SPU_A") in prices
-    assert ("TEST_MS_SHOP", "TEST_SPU_B") not in prices
-    assert any(
-        issue["issue_type"] == "SHOP_UNRESOLVED_IN_PURCHASE_ORDER" for issue in issues
+def _run(db_session, client):
+    return invoke_seeded_job(
+        job.sync_purchase_prices,
+        db_session,
+        client=client,
+        external_account_id="TEST_PURCHASE_APP",
+        max_retries=0,
     )
 
 
-def test_non_positive_or_non_finite_prices_are_rejected() -> None:
-    order = _purchase_order()
-    order["purchaseItems"][0]["sourceUnitPrice"] = "-1"
-    prices, issues = job.clean_latest_prices([order])
-    assert ("TEST_MS_SHOP", "TEST_SPU_A") not in prices
-    assert any(issue["issue_type"] == "INVALID_SOURCE_LINE" for issue in issues)
-
-
-def test_matched_store_writes_independent_purchase_price(
-    db_session, fernet_key: str
+def test_writes_weighted_cost_without_a_product_master_and_redacts_raw_payload(
+    db_session,
+    fernet_key: str,
 ) -> None:
-    credential = _seed_web_credential(db_session, fernet_key)
+    credential = _seed_credential(db_session)
+    _seed_package(db_session, credential.id)
     shop_pk = _seed_store_match(db_session)
     order = _purchase_order()
-    order["autoLoginToken"] = "TEST_secret_token"
-    result = invoke_seeded_job(job.sync_purchase_prices,
-        db_session,
-        client=FakePurchaseClient([order]),
-        external_account_id=credential.external_account_id,
-    )
-    db_session.commit()
+    order["autoLoginToken"] = "TEST_SECRET"
+    client = FakePurchaseClient([order, deepcopy(order)])
 
-    assert result["purchase_prices"] == 2
-    assert result["matched_shops"] == 2
-    assert result["unmatched_shops"] == 0
-    rows = db_session.execute(select(MiaoshouPurchasePrice)).scalars().all()
-    assert {row.spu_id: row.unit_cost for row in rows} == {
-        "TEST_SPU_A": Decimal("26.0000"),
-        "TEST_SPU_B": Decimal("29.0000"),
-    }
-    assert {row.shop_pk for row in rows} == {shop_pk}
-    assert {row.miaoshou_shop_id for row in rows} == {"TEST_MS_SHOP"}
-    raw = db_session.execute(select(MiaoshouPurchaseOrderRawRecord)).scalar_one()
-    assert raw.payload["autoLoginToken"] == "***REDACTED***"
-
-
-def test_price_is_written_when_product_master_is_absent(
-    db_session, fernet_key: str
-) -> None:
-    credential = _seed_web_credential(db_session, fernet_key)
-    shop_pk = _seed_store_match(db_session)
-    result = invoke_seeded_job(job.sync_purchase_prices,
-        db_session,
-        client=FakePurchaseClient([_purchase_order()]),
-        external_account_id=credential.external_account_id,
-    )
-    db_session.commit()
-
-    assert result["matched_shops"] == 2
-    price = db_session.execute(
-        select(MiaoshouPurchasePrice).where(
-            MiaoshouPurchasePrice.spu_id == "TEST_SPU_A"
-        )
-    ).scalar_one()
-    assert price.shop_pk == shop_pk
-    assert price.resolution_status == "matched_shop"
-
-
-def test_unmatched_store_is_not_written_and_is_flagged(
-    db_session, fernet_key: str
-) -> None:
-    credential = _seed_web_credential(db_session, fernet_key)
-    result = invoke_seeded_job(job.sync_purchase_prices,
-        db_session,
-        client=FakePurchaseClient([_purchase_order()]),
-        external_account_id=credential.external_account_id,
-    )
-    db_session.commit()
-
-    assert result["unmatched_shops"] == 2
-    assert (
-        db_session.scalar(
-            select(func.count())
-            .select_from(MiaoshouPurchasePrice)
-            .where(MiaoshouPurchasePrice.spu_id == "TEST_SPU_A")
-        )
-        == 0
-    )
-    issue = db_session.execute(
-        select(MiaoshouSyncIssue).where(
-            MiaoshouSyncIssue.external_id == "TEST_MS_SHOP:TEST_SPU_A"
-        )
-    ).scalar_one()
-    assert issue.issue_type == "UNMATCHED_MIAOSHOU_SHOP"
-
-
-def test_identical_duplicate_purchase_rows_are_deduplicated(
-    db_session, fernet_key: str
-) -> None:
-    credential = _seed_web_credential(db_session, fernet_key)
-    _seed_store_match(db_session)
-    result = invoke_seeded_job(job.sync_purchase_prices,
-        db_session,
-        client=FakePurchaseClient([_purchase_order(), deepcopy(_purchase_order())]),
-        external_account_id=credential.external_account_id,
-    )
+    result = _run(db_session, client)
     assert result["orders_seen"] == 1
+    assert result["purchase_prices"] == 1
+    assert client.calls[0]["gmtRangeType"] == "gmtPurchaseOrderStart"
+    price = db_session.scalars(select(MiaoshouPurchasePrice)).one()
+    assert (price.shop_pk, price.miaoshou_shop_id, price.spu_id) == (
+        shop_pk,
+        "TEST_MS_SHOP",
+        "TEST_SPU",
+    )
+    assert price.unit_cost == Decimal("32.6667")
+    assert price.currency == "CNY"
+    raw = db_session.scalars(select(MiaoshouPurchaseOrderRawRecord)).one()
+    assert raw.payload["autoLoginToken"] == "***REDACTED***"
+    assert raw.endpoint == "miaoshou.purchase_record.search_list"
 
 
-def test_conflicting_duplicate_purchase_row_ids_are_rejected(
+@pytest.mark.parametrize(
+    ("case", "issue_type"),
+    [
+        ("multiple_spus", "PURCHASE_ITEM_MAPPING_UNVERIFIED"),
+        ("multiple_titles", "PURCHASE_ITEM_MAPPING_UNVERIFIED"),
+        ("missing_package", "SHOP_UNRESOLVED_IN_PURCHASE_ORDER"),
+        ("ambiguous_package", "SHOP_UNRESOLVED_IN_PURCHASE_ORDER"),
+        ("unmatched_store", "UNMATCHED_MIAOSHOU_SHOP"),
+        ("invalid_price", "INVALID_SOURCE_LINE"),
+        ("unknown_currency", "PURCHASE_CURRENCY_UNVERIFIED"),
+        ("cancelled", "PURCHASE_STATUS_UNVERIFIED"),
+    ],
+)
+def test_skips_unverified_orders(
+    db_session, fernet_key: str, case: str, issue_type: str
+) -> None:
+    credential = _seed_credential(db_session)
+    order = _purchase_order()
+    if case != "missing_package":
+        _seed_package(db_session, credential.id)
+    if case != "unmatched_store":
+        _seed_store_match(db_session)
+    if case == "multiple_spus":
+        order["opOrderPackageList"][0]["purchaseItems"].append(
+            {"platformItemId": "TEST_OTHER_SPU"}
+        )
+    elif case == "multiple_titles":
+        order["purchaseItems"][1]["sourceTitle"] = "TEST OTHER OFFER"
+    elif case == "ambiguous_package":
+        _seed_package(db_session, credential.id, shop_id="TEST_OTHER_SHOP")
+    elif case == "invalid_price":
+        order["purchaseItems"][1]["sourceUnitPrice"] = "NaN"
+    elif case == "unknown_currency":
+        order["purchasePlatformName"] = "TEST UNKNOWN PLATFORM"
+    elif case == "cancelled":
+        order["purchaseOrderStatus"] = "cancel"
+
+    assert _run(db_session, FakePurchaseClient([order]))["purchase_prices"] == 0
+    assert db_session.scalars(select(MiaoshouPurchasePrice)).first() is None
+    assert db_session.scalars(select(MiaoshouSyncIssue)).one().issue_type == issue_type
+
+
+def test_distinct_records_with_the_same_order_number_expose_a_price_conflict(
+    db_session,
+    fernet_key: str,
+) -> None:
+    credential = _seed_credential(db_session)
+    _seed_package(db_session, credential.id)
+    _seed_store_match(db_session)
+    order = _purchase_order()
+    duplicate = deepcopy(order)
+    duplicate["purchaseItems"][0]["sourceUnitPrice"] = "27"
+
+    result = _run(db_session, FakePurchaseClient([order, duplicate]))
+    assert result["orders_seen"] == 2
+    assert result["purchase_prices"] == 0
+    assert (
+        db_session.scalars(select(MiaoshouSyncIssue)).one().issue_type
+        == "LATEST_PRICE_AMBIGUOUS"
+    )
+
+
+def test_older_observation_does_not_replace_a_newer_stored_price(
     db_session, fernet_key: str
 ) -> None:
-    credential = _seed_web_credential(db_session, fernet_key)
-    duplicate = deepcopy(_purchase_order())
-    duplicate["purchaseOrderSn"] = "TEST_PO_DUPLICATE"
-    with pytest.raises(RuntimeError, match="conflicting row ids"):
-        invoke_seeded_job(job.sync_purchase_prices,
-            db_session,
-            client=FakePurchaseClient([_purchase_order(), duplicate]),
-            external_account_id=credential.external_account_id,
-            max_retries=0,
-        )
+    credential = _seed_credential(db_session)
+    _seed_package(db_session, credential.id)
+    _seed_store_match(db_session)
+    newer = _purchase_order()
+    newer["gmtPurchaseOrderStart"] = "2026-10-01 00:00:00"
+    assert _run(db_session, FakePurchaseClient([newer]))["purchase_prices"] == 1
+
+    older = _purchase_order()
+    older["purchaseItems"][0]["sourceUnitPrice"] = "99"
+    assert _run(db_session, FakePurchaseClient([older]))["purchase_prices"] == 0
+    assert db_session.scalars(select(MiaoshouPurchasePrice)).one().unit_cost == Decimal(
+        "32.6667"
+    )
 
 
 def test_missing_credentials_skips_without_network(db_session) -> None:
     client = FakePurchaseClient([_purchase_order()])
-    result = invoke_seeded_job(job.sync_purchase_prices,
-        db_session,
-        client=client,
-        external_account_id="TEST_NOT_CONFIGURED",
-    )
-    assert result["skipped"] is True
+    assert _run(db_session, client)["skipped"]
     assert client.calls == []
 
 
-def test_pagination_missing_metadata_is_rejected(db_session, fernet_key: str) -> None:
-    credential = _seed_web_credential(db_session, fernet_key)
+def test_api_updates_the_existing_price_without_creating_a_duplicate(
+    db_session, fernet_key: str,
+) -> None:
+    credential = _seed_credential(db_session)
+    _seed_package(db_session, credential.id)
+    shop_pk = _seed_store_match(db_session)
+    previous = upsert_credentials(
+        db_session, provider="miaoshou_web", external_account_id="TEST_RETIRED_SOURCE",
+        plaintext_access_token="TEST_RETIRED",
+    )
+    db_session.add(MiaoshouPurchasePrice(
+        credential_id=previous.id, miaoshou_shop_id="TEST_MS_SHOP", shop_pk=shop_pk,
+        spu_id="TEST_SPU", unit_cost=Decimal("10"), currency="CNY",
+        source_purchase_order_sn="TEST_OLD", source_item_id="TEST_OLD_ITEM",
+        resolution_status="matched_shop", evidence={},
+    ))
+    db_session.flush()
+    price_id = db_session.scalars(select(MiaoshouPurchasePrice.id)).one()
 
-    class MissingMetadataClient:
-        def search_page(self, *, page: int, page_size: int = 100) -> dict:
-            return {"result": "success"}
+    assert _run(db_session, FakePurchaseClient([_purchase_order()]))["purchase_prices"] == 1
+    price = db_session.scalars(select(MiaoshouPurchasePrice)).one()
+    assert price.id == price_id
+    assert price.credential_id == credential.id
+    assert price.unit_cost == Decimal("32.6667")
 
-    with pytest.raises(RuntimeError, match="missing fields"):
-        invoke_seeded_job(job.sync_purchase_prices,
-            db_session,
-            client=MissingMetadataClient(),
-            external_account_id=credential.external_account_id,
-            max_retries=0,
-        )
+
+def test_newer_unverified_record_does_not_publish_an_older_price(
+    db_session, fernet_key: str,
+) -> None:
+    credential = _seed_credential(db_session)
+    _seed_package(db_session, credential.id)
+    _seed_store_match(db_session)
+    older = _purchase_order()
+    newer = _purchase_order() | {
+        "purchaseOrderSn": "TEST_NEWER_PO",
+        "gmtPurchaseOrderStart": "2026-10-01 00:00:00",
+    }
+    newer["opOrderPackageList"][0]["purchaseItems"].append({"platformItemId": "TEST_OTHER_SPU"})
+    assert _run(db_session, FakePurchaseClient([older, newer]))["purchase_prices"] == 0
+    assert db_session.scalars(select(MiaoshouPurchasePrice)).first() is None
 
 
 def test_pagination_count_mismatch_fails_without_writes(
     db_session, fernet_key: str
 ) -> None:
-    credential = _seed_web_credential(db_session, fernet_key)
+    _seed_credential(db_session)
     client = FakePurchaseClient([_purchase_order()], advertised_total=2)
     with pytest.raises(RuntimeError, match="pagination incomplete"):
-        invoke_seeded_job(job.sync_purchase_prices,
-            db_session,
-            client=client,
-            external_account_id=credential.external_account_id,
-            max_retries=0,
-        )
-    assert (
-        db_session.scalar(
-            select(func.count()).select_from(MiaoshouPurchaseOrderRawRecord)
-        )
-        == 0
-    )
+        _run(db_session, client)
+    assert db_session.scalars(select(MiaoshouPurchaseOrderRawRecord)).first() is None
+
+
+def test_pagination_follows_data_total_and_keeps_a_fixed_upper_bound(
+    db_session,
+    fernet_key: str,
+    monkeypatch,
+) -> None:
+    _seed_credential(db_session)
+    monkeypatch.setattr(job, "PAGE_SIZE", 2)
+    rows = [
+        _purchase_order() | {"purchaseOrderSn": f"TEST_PO_{index}"}
+        for index in range(3)
+    ]
+    client = FakePurchaseClient(rows)
+    result = _run(db_session, client)
+    assert result["pages_walked"] == 2
+    assert result["orders_seen"] == 3
+    assert [body["page"] for body in client.calls] == [1, 2]
+    assert len({body["gmtRangeTo"] for body in client.calls}) == 1

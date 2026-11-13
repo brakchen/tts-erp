@@ -381,16 +381,16 @@ def test_miaoshou_purchase_http_has_no_active_transaction(db_engine):
         with session.begin():
             upsert_credentials(
                 session,
-                provider="miaoshou_web",
+                provider="miaoshou",
                 external_account_id=name,
-                plaintext_access_token="TEST_COOKIE",
-                plaintext_refresh_token="TEST_HEADER",
+                plaintext_access_token="TEST_APP_KEY",
+                plaintext_refresh_token="TEST_APP_SECRET",
             )
 
         class Client:
-            def search_page(self, *, page, page_size):
+            def _call_erp(self, *, path, body):
                 assert not session.in_transaction()
-                return {"list": [], "total": 0, "page": page, "pageSize": page_size}
+                return {"result": "success", "data": {"list": [], "total": 0}}
 
         result = sync_purchase_prices(
             session, client=Client(), external_account_id=name

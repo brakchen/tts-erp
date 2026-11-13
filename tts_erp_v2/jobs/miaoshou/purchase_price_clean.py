@@ -1,63 +1,58 @@
-"""Fetch, clean, and publish Miaoshou browser-ERP purchase prices.
-
-The private ERP response is the only source observed to contain both 1688
-``sourceUnitPrice`` rows and linked TikTok ``platformItemId`` rows. Browser
-session secrets are loaded from encrypted ``integration.credentials`` via
-``token_service``; they are never logged or stored in ``miaoshou`` payloads.
-"""
+"""Synchronize store-level TikTok purchase costs from the Miaoshou Open Platform."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import math
-import os
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
+from urllib.error import URLError
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, inspect, select
+from sqlalchemy import and_, func, inspect, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
-from tenacity import Retrying, stop_after_attempt, wait_incrementing
 
 from tts_erp_v2.db.models.commerce import ChannelAccount
 from tts_erp_v2.db.models.integration import Credentials
 from tts_erp_v2.db.models.miaoshou import (
+    MiaoshouPackage,
+    MiaoshouPackageItem,
     MiaoshouPurchaseOrderRawRecord,
     MiaoshouPurchasePrice,
     MiaoshouSyncIssue,
 )
 from tts_erp_v2.db.models.procurement import ProcurementAccount
+from tts_erp_v2.jobs.miaoshou._common import (
+    miaoshou_client_factory,
+    resolve_miaoshou_context,
+)
 from tts_erp_v2.jobs.runner import finish_job, run_job
-from tts_erp_v2.proxy.token_service import CredentialsView, load_credentials
-
-log = logging.getLogger("tts_erp_v2.jobs.miaoshou.purchase_price_clean")
+from tts_erp_v2.proxy.miaoshou.client import MiaoshouApiError
+from tts_erp_v2.proxy.miaoshou.retry import (
+    MiaoshouRetryExhausted,
+    call_with_retry,
+    is_retryable_miaoshou_error,
+)
 
 JOB_NAME = "miaoshou.purchase_price_clean"
 RESOURCE = "purchase_prices"
-WEB_PROVIDER = "miaoshou_web"
-ENDPOINT = "miaoshou.purchase_order.search_list"
-DEFAULT_BASE_URL = "https://erp.91miaoshou.com"
-SEARCH_PATH = "/api/order/purchase/purchase_order/searchList"
-PAGE_SIZE = 100
+SEARCH_PATH = "/open/v1/order/purchase_order/purchase_record/search_list"
+ENDPOINT = "miaoshou.purchase_record.search_list"
+PAGE_SIZE = 20
 MAX_PAGES = 1000
 _MIAOSHOU_TZ = ZoneInfo("Asia/Shanghai")
-_EXCLUDED_STATUSES = {"cancel", "wait_pay"}
-_CALCULATION_VERSION = "purchase-price-v1"
+_COMPLETED_STATUS = "finished"
+_CNY_PURCHASE_PLATFORMS = {"1688", "1688妙手"}
+_CALCULATION_VERSION = "purchase-price-open-api-v1"
+_PREVIOUS_CALCULATION_VERSION = "purchase-price-v1"
 
 
-class PurchaseWebClient(Protocol):
-    def search_page(
-        self, *, page: int, page_size: int = PAGE_SIZE
-    ) -> dict[str, Any]: ...
+class PurchaseApiClient(Protocol):
+    def _call_erp(self, *, path: str, body: dict[str, Any]) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -68,221 +63,93 @@ class PriceObservation:
     source_item_id: str
     unit_cost: Decimal
     purchase_order_sn: str
-    purchase_at: datetime | None
+    purchase_at: datetime
     purchase_at_raw: str
-    status: str
-    filter_id: str
+    platform_order_sns: tuple[str, ...]
     source_lines: tuple[dict[str, str], ...]
-
-
-class MiaoshouPurchaseWebClient:
-    """Minimal client for the browser ERP purchase-order list."""
-
-    def __init__(
-        self,
-        *,
-        cookie: str,
-        x_app_zebra: str,
-        base_url: str = DEFAULT_BASE_URL,
-        front_version: str = "",
-        referer: str = "/order/purchase_record",
-        timeout: int = 30,
-    ) -> None:
-        if not cookie.strip():
-            raise ValueError("Miaoshou web cookie is empty")
-        if not x_app_zebra.strip():
-            raise ValueError("Miaoshou x-app-zebra is empty")
-        self._cookie = cookie.strip()
-        self._x_app_zebra = x_app_zebra.strip()
-        self._base_url = base_url.rstrip("/")
-        self._front_version = front_version.strip()
-        self._referer = referer if referer.startswith("/") else f"/{referer}"
-        self._timeout = timeout
-        self._range_to = datetime.now(_MIAOSHOU_TZ).strftime("%Y-%m-%d %H:%M:%S")
-
-    def search_page(self, *, page: int, page_size: int = PAGE_SIZE) -> dict[str, Any]:
-        body = urllib.parse.urlencode(
-            {
-                "pageSize": str(page_size),
-                "page": str(page),
-                "snValue": "",
-                "snRp": "eq",
-                "purchasePlatform": "",
-                "gmtRangeType": "gmtPurchaseOrderStart",
-                "forwarderId": "",
-                "gmtRangeFrom": "",
-                "gmtRangeTo": self._range_to,
-                "relateStatus": "",
-                "appPackageStatus": "",
-                "purchaseOrderSeller": "",
-                "purchaseOrderSellerRp": "ss",
-                "warningType": "",
-                "warningTimeout": "",
-                "buyerPhone": "",
-                "purchaseOrderStatus": "all",
-                "sortType": "gmtPurchaseOrderStartDesc",
-                "snType": "purchaseOrderSn",
-                "isFilterAbnormal": "",
-            }
-        ).encode()
-        url = f"{self._base_url}{SEARCH_PATH}"
-        origin = self._base_url
-        headers = {
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Cookie": self._cookie,
-            "Origin": origin,
-            "Referer": f"{origin}{self._referer}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/153 Safari/537.36",
-            "X-App-Zebra": self._x_app_zebra,
-            "X-Referer": f"{origin}{self._referer}",
-            "X-Timestamp": f"{time.time():.0f}",
-        }
-        if self._front_version:
-            headers["X-Front-Version"] = self._front_version
-        request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            # Authenticated error bodies are untrusted and may echo Cookie/token
-            # material. Never include them in exceptions, logs, or sync_jobs.
-            raise RuntimeError(f"Miaoshou purchase HTTP {exc.code}") from exc
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("Miaoshou purchase response is not JSON") from exc
-        if payload.get("result") != "success":
-            raise RuntimeError(
-                "Miaoshou purchase business failure: "
-                f"result={payload.get('result')!r} code={payload.get('code')!r}"
-            )
-        return payload
 
 
 def _schema_ready(session: Session) -> bool:
     return inspect(session.get_bind()).has_table("purchase_prices", schema="miaoshou")
 
 
-def _resolve_credentials(
-    session: Session, *, external_account_id: str | None = None
-) -> CredentialsView | None:
-    account_id = (
-        external_account_id or os.environ.get("MIAOSHOU_WEB_ACCOUNT_ID", "").strip()
-    )
-    if account_id:
-        return load_credentials(session, WEB_PROVIDER, account_id)
-    rows = (
-        session.execute(
-            select(Credentials.external_account_id)
-            .where(Credentials.provider == WEB_PROVIDER)
-            .order_by(Credentials.id)
-        )
-        .scalars()
-        .all()
-    )
-    if not rows:
-        return None
-    if len(rows) > 1:
-        raise RuntimeError(
-            "multiple miaoshou_web credentials; set MIAOSHOU_WEB_ACCOUNT_ID"
-        )
-    return load_credentials(session, WEB_PROVIDER, rows[0])
-
-
-def _build_client(credentials: CredentialsView) -> MiaoshouPurchaseWebClient:
-    if not credentials.refresh_token:
-        raise RuntimeError("miaoshou_web credential missing encrypted x-app-zebra")
-    extra = credentials.extra or {}
-    return MiaoshouPurchaseWebClient(
-        cookie=credentials.access_token,
-        x_app_zebra=credentials.refresh_token,
-        base_url=str(extra.get("base_url") or DEFAULT_BASE_URL),
-        front_version=str(extra.get("front_version") or ""),
-        referer=str(extra.get("referer") or "/order/purchase_record"),
+def _retryable(error: BaseException) -> bool:
+    return (
+        is_retryable_miaoshou_error(error)
+        or isinstance(error, (URLError, TimeoutError))
+        or isinstance(error, MiaoshouApiError)
+        and error.code in (429, 500, 502, 503, 504)
     )
 
 
 def _fetch_all_pages(
-    client: PurchaseWebClient,
-    *,
-    max_retries: int,
+    client: PurchaseApiClient, *, max_retries: int
 ) -> tuple[list[dict[str, Any]], int, int]:
-    def fetch(page: int) -> dict[str, Any]:
-        # tenacity drives the retry loop; linear backoff 1s, 2s, 3s …
-        # matches the previous hand-rolled `time.sleep(attempt + 1)`.
-        retrying: Retrying = Retrying(
-            stop=stop_after_attempt(max_retries + 1),
-            wait=wait_incrementing(start=1, increment=1),
-            reraise=True,
-        )
-        return retrying(client.search_page, page=page, page_size=PAGE_SIZE)
-
-    def validate_page(
-        payload: dict[str, Any],
-        *,
-        expected_page: int,
-        expected_total: int | None = None,
-        expected_page_size: int | None = None,
-    ) -> tuple[list[dict[str, Any]], int, int]:
-        required = {"list", "total", "page", "pageSize"}
-        missing = required - payload.keys()
-        if missing:
-            raise RuntimeError(f"purchase page missing fields: {sorted(missing)}")
-        if not isinstance(payload["list"], list):
-            raise TypeError("purchase page list is not an array")
+    end = datetime.now(_MIAOSHOU_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    rows: dict[str, dict[str, Any]] = {}
+    seen_pages: set[tuple[str, ...]] = set()
+    total = None
+    page_count = 1
+    for page in range(1, MAX_PAGES + 1):
+        body = {
+            "page": page,
+            "pageSize": PAGE_SIZE,
+            "purchaseOrderStatus": _COMPLETED_STATUS,
+            "gmtRangeType": "gmtPurchaseOrderStart",
+            "gmtRangeTo": end,
+            "sortType": "gmtPurchaseOrderStartDesc",
+        }
         try:
-            total_value = int(payload["total"])
-            page_value = int(payload["page"])
-            page_size_value = int(payload["pageSize"])
-        except (TypeError, ValueError) as exc:
-            raise RuntimeError("invalid purchase pagination metadata") from exc
-        if total_value < 0 or page_size_value < 1 or page_size_value > PAGE_SIZE:
-            raise RuntimeError("purchase pagination metadata out of range")
-        if page_value != expected_page:
-            raise RuntimeError(
-                f"purchase page mismatch: got={page_value} expected={expected_page}"
+            payload = call_with_retry(
+                lambda: client._call_erp(path=SEARCH_PATH, body=body),
+                is_retryable=_retryable,
+                max_retries=max_retries,
             )
-        if expected_total is not None and total_value != expected_total:
+        except (
+            MiaoshouApiError,
+            MiaoshouRetryExhausted,
+            URLError,
+            TimeoutError,
+        ) as exc:
+            error = exc.last_error if isinstance(exc, MiaoshouRetryExhausted) else exc
+            code = getattr(error, "code", None)
+            safe_code = code if isinstance(code, int) else type(error).__name__
+            raise RuntimeError(
+                f"Miaoshou purchase API failed on page {page}: {safe_code}"
+            ) from None
+        data = payload.get("data")
+        if payload.get("result") != "success" or not isinstance(data, dict):
+            raise RuntimeError("invalid Miaoshou purchase API response")
+        batch = data.get("list")
+        advertised = data.get("total")
+        if (
+            type(advertised) is not int
+            or advertised < 0
+            or not isinstance(batch, list)
+            or any(not isinstance(row, dict) for row in batch)
+        ):
+            raise RuntimeError("invalid purchase pagination metadata")
+        if total is None:
+            total = advertised
+            page_count = max(1, math.ceil(total / PAGE_SIZE))
+            if page_count > MAX_PAGES:
+                raise RuntimeError("purchase pagination exceeds safety cap")
+        if total != advertised:
             raise RuntimeError("purchase total changed during pagination")
-        if expected_page_size is not None and page_size_value != expected_page_size:
-            raise RuntimeError("purchase pageSize changed during pagination")
-        if any(not isinstance(row, dict) for row in payload["list"]):
-            raise RuntimeError("purchase page contains non-object row")
-        return list(payload["list"]), total_value, page_size_value
-
-    first_rows, total, page_size = validate_page(fetch(1), expected_page=1)
-    total_pages = max(1, math.ceil(total / page_size))
-    if total_pages > MAX_PAGES:
-        raise RuntimeError(
-            f"purchase pagination exceeds safety cap: {total_pages}>{MAX_PAGES}"
-        )
-    rows = first_rows
-    for page in range(2, total_pages + 1):
-        page_rows, _, _ = validate_page(
-            fetch(page),
-            expected_page=page,
-            expected_total=total,
-            expected_page_size=page_size,
-        )
-        rows.extend(page_rows)
-    if len(rows) != total:
-        raise RuntimeError(
-            f"purchase pagination incomplete: fetched={len(rows)} advertised={total}"
-        )
-    deduped: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        row_id = str(row.get("purchaseOrderFilterId") or "")
-        if not row_id:
-            raise RuntimeError("purchase row missing purchaseOrderFilterId")
-        prior = deduped.get(row_id)
-        if prior is not None and prior != row:
-            raise RuntimeError("purchase pagination contains conflicting row ids")
-        deduped[row_id] = row
-    # The live endpoint sometimes repeats bit-for-bit-identical rows across
-    # pages. Collapse only those exact duplicates; a conflicting repeated row
-    # is rejected above rather than silently choosing one.
-    return list(deduped.values()), total_pages, total
+        if len(batch) != min(PAGE_SIZE, total - (page - 1) * PAGE_SIZE):
+            raise RuntimeError("purchase pagination incomplete")
+        for row in batch:
+            _validate_order(row)
+        fingerprints = tuple(_fingerprint(_redact_secrets(row)) for row in batch)
+        page_signature = tuple(sorted(fingerprints))
+        if page_signature in seen_pages:
+            raise RuntimeError("purchase pagination repeated a page")
+        seen_pages.add(page_signature)
+        for fingerprint, row in zip(fingerprints, batch, strict=True):
+            rows[fingerprint] = row
+        if page == page_count:
+            return list(rows.values()), page_count, total
+    raise RuntimeError("purchase pagination exceeds safety cap")
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -301,184 +168,194 @@ def _parse_time(value: Any) -> datetime | None:
     return None
 
 
-def _ordered_groups(
-    items: list[Any], key: str
-) -> tuple[list[str], dict[str, list[dict[str, Any]]]]:
-    order: list[str] = []
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        value = str(item.get(key) or "")
-        if not value:
-            continue
-        if value not in grouped:
-            grouped[value] = []
-            order.append(value)
-        grouped[value].append(item)
-    return order, grouped
+def _validate_order(row: dict[str, Any]) -> None:
+    for key in ("purchaseItems", "opOrderPackageList"):
+        entries = row.get(key)
+        if not isinstance(entries, list) or any(
+            not isinstance(entry, dict) for entry in entries
+        ):
+            raise RuntimeError(f"invalid purchase record {key}")
+    for package in row["opOrderPackageList"]:
+        items = package.get("purchaseItems")
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict) for item in items
+        ):
+            raise RuntimeError("invalid linked package purchaseItems")
+
+
+def _package_links(order: dict[str, Any]) -> set[tuple[str, str]]:
+    return {
+        (
+            str(package.get("platformOrderSn") or ""),
+            str(item.get("platformItemId") or ""),
+        )
+        for package in order.get("opOrderPackageList") or []
+        if package.get("platform") == "tiktok"
+        and package.get("relateStatus") == "normal"
+        for item in package.get("purchaseItems") or []
+    }
+
+
+def _load_package_shops(
+    session: Session,
+    credential_id: int,
+    orders: list[dict[str, Any]],
+) -> dict[tuple[str, str], set[str]]:
+    refs = sorted({link for order in orders for link in _package_links(order)})
+    shops: dict[tuple[str, str], set[str]] = {}
+    for offset in range(0, len(refs), 500):
+        stmt = (
+            select(
+                MiaoshouPackage.platform_order_sn,
+                MiaoshouPackageItem.platform_product_id,
+                MiaoshouPackage.shop_id,
+            )
+            .join(
+                MiaoshouPackageItem,
+                MiaoshouPackageItem.package_id == MiaoshouPackage.id,
+            )
+            .where(
+                MiaoshouPackage.credential_id == credential_id,
+                MiaoshouPackage.platform == "tiktok",
+                MiaoshouPackageItem.active.is_(True),
+                tuple_(
+                    MiaoshouPackage.platform_order_sn,
+                    MiaoshouPackageItem.platform_product_id,
+                ).in_(refs[offset : offset + 500]),
+            )
+        )
+        for order_sn, spu_id, shop_id in session.execute(stmt):
+            shops.setdefault((order_sn, spu_id), set()).add(shop_id or "")
+    return shops
+
+
+def _positive_decimal(value: Any) -> Decimal:
+    amount = Decimal(str(value))
+    if not amount.is_finite() or amount <= 0:
+        raise InvalidOperation
+    return amount
 
 
 def _observations_from_order(
     order: dict[str, Any],
-) -> tuple[list[PriceObservation], list[dict[str, Any]]]:
-    source_order, source_groups = _ordered_groups(
-        order.get("purchaseItems") or [], "sourceItemId"
-    )
-    platform_order: list[str] = []
-    platform_groups: dict[str, list[tuple[dict[str, Any], str, str | None]]] = {}
-    for package in order.get("opOrderPackageList") or []:
-        if not isinstance(package, dict):
-            continue
-        shop_id = str(package.get("shopId") or "")
-        shop_name = str(package.get("shopName")) if package.get("shopName") else None
-        for item in package.get("purchaseItems") or []:
-            if not isinstance(item, dict):
-                continue
-            spu_id = str(item.get("platformItemId") or "")
-            if not spu_id:
-                continue
-            if spu_id not in platform_groups:
-                platform_groups[spu_id] = []
-                platform_order.append(spu_id)
-            platform_groups[spu_id].append((item, shop_id, shop_name))
-    order_sn = str(order.get("purchaseOrderSn") or "")
-    if len(source_order) != len(platform_order):
-        return [], [
-            {
-                "issue_type": "GROUP_COUNT_MISMATCH",
-                "purchase_order_sn": order_sn,
-                "source_group_count": len(source_order),
-                "platform_group_count": len(platform_order),
-            }
-        ]
-    observations: list[PriceObservation] = []
-    issues: list[dict[str, Any]] = []
+    package_shops: dict[tuple[str, str], set[str]],
+) -> tuple[PriceObservation | None, str | None]:
+    if order.get("purchaseOrderStatus", _COMPLETED_STATUS) != _COMPLETED_STATUS:
+        return None, "PURCHASE_STATUS_UNVERIFIED"
+    packages = order.get("opOrderPackageList") or []
+    links = _package_links(order)
+    if not links:
+        return None, "NO_ACTIVE_TIKTOK_LINK"
+    if any(
+        package.get("platform") != "tiktok"
+        or package.get("relateStatus") != "normal"
+        or not package.get("purchaseItems")
+        for package in packages
+    ):
+        return None, "MIXED_PURCHASE_LINKS"
+    spu_ids = {spu for _, spu in links}
+    source = order.get("purchaseItems") or []
+    titles = {str(line.get("sourceTitle") or "").strip() for line in source}
+    if len(spu_ids) != 1 or len(titles) != 1 or "" in titles:
+        return None, "PURCHASE_ITEM_MAPPING_UNVERIFIED"
+
+    shop_candidates = [package_shops.get(link, set()) for link in links]
+    shops = set().union(*shop_candidates)
+    if (
+        any(not order_sn or not spu for order_sn, spu in links)
+        or any(len(shop) != 1 for shop in shop_candidates)
+        or len(shops) != 1
+        or "" in shops
+    ):
+        return None, "SHOP_UNRESOLVED_IN_PURCHASE_ORDER"
+    if order.get("purchasePlatformName") not in _CNY_PURCHASE_PLATFORMS:
+        return None, "PURCHASE_CURRENCY_UNVERIFIED"
+
+    order_sn = str(order.get("purchaseOrderSn") or "").strip()
     purchase_at_raw = str(order.get("gmtPurchaseOrderStart") or "")
-    for source_item_id, spu_id in zip(source_order, platform_order, strict=True):
-        shops = {
-            (shop_id, shop_name)
-            for _item, shop_id, shop_name in platform_groups[spu_id]
-            if shop_id
-        }
-        if len(shops) != 1:
-            issues.append(
-                {
-                    "issue_type": "SHOP_UNRESOLVED_IN_PURCHASE_ORDER",
-                    "purchase_order_sn": order_sn,
-                    "source_item_id": source_item_id,
-                    "spu_id": spu_id,
-                    "shop_count": len(shops),
-                }
+    purchase_at = _parse_time(purchase_at_raw)
+    if not order_sn or purchase_at is None:
+        return None, "INVALID_PURCHASE_IDENTITY"
+
+    title = next(iter(titles))
+    try:
+        _positive_decimal(order.get("purchaseOrderPayment"))
+        lines = [
+            (
+                _positive_decimal(line.get("sourceUnitPrice")),
+                _positive_decimal(line.get("sourceQuantity")),
+                str(line.get("sourceSkuSubName") or ""),
             )
-            continue
-        miaoshou_shop_id, shop_name = next(iter(shops))
-        numerator = Decimal(0)
-        denominator = Decimal(0)
-        evidence: list[dict[str, str]] = []
-        for line in source_groups[source_item_id]:
-            try:
-                price = Decimal(str(line.get("sourceUnitPrice")))
-                quantity = Decimal(str(line.get("sourceQuantity") or "0"))
-            except (InvalidOperation, TypeError):
-                issues.append(
-                    {
-                        "issue_type": "INVALID_SOURCE_LINE",
-                        "purchase_order_sn": order_sn,
-                        "source_item_id": source_item_id,
-                    }
-                )
-                continue
-            if (
-                not price.is_finite()
-                or not quantity.is_finite()
-                or price <= 0
-                or quantity <= 0
-            ):
-                issues.append(
-                    {
-                        "issue_type": "INVALID_SOURCE_LINE",
-                        "purchase_order_sn": order_sn,
-                        "source_item_id": source_item_id,
-                        "unit_price": str(price),
-                        "quantity": str(quantity),
-                    }
-                )
-                continue
-            numerator += price * quantity
-            denominator += quantity
-            evidence.append(
-                {
-                    "source_sku_id": str(line.get("sourceSkuId") or ""),
-                    "unit_price": str(price),
-                    "quantity": str(quantity),
-                }
-            )
-        if denominator <= 0:
-            issues.append(
-                {
-                    "issue_type": "SOURCE_GROUP_NO_VALID_PRICE",
-                    "purchase_order_sn": order_sn,
-                    "source_item_id": source_item_id,
-                    "spu_id": spu_id,
-                }
-            )
-            continue
-        observations.append(
-            PriceObservation(
-                miaoshou_shop_id=miaoshou_shop_id,
-                shop_name=shop_name,
-                spu_id=spu_id,
-                source_item_id=source_item_id,
-                unit_cost=(numerator / denominator).quantize(Decimal("0.0001")),
-                purchase_order_sn=order_sn,
-                purchase_at=_parse_time(purchase_at_raw),
-                purchase_at_raw=purchase_at_raw,
-                status=str(order.get("purchaseOrderStatus") or ""),
-                filter_id=str(order.get("purchaseOrderFilterId") or ""),
-                source_lines=tuple(evidence),
-            )
+            for line in source
+        ]
+        quantity = sum((units for _, units, _ in lines), Decimal(0))
+        cost = (sum(price * units for price, units, _ in lines) / quantity).quantize(
+            Decimal("0.0001")
         )
-    return observations, issues
+        if not Decimal(0) < cost < Decimal("1e16"):
+            raise InvalidOperation
+    except (InvalidOperation, ZeroDivisionError):
+        return None, "INVALID_SOURCE_LINE"
+
+    return PriceObservation(
+        miaoshou_shop_id=next(iter(shops)),
+        shop_name=packages[0].get("shopName"),
+        spu_id=next(iter(spu_ids)),
+        source_item_id=f"title:{hashlib.sha256(title.encode('utf-8')).hexdigest()}",
+        unit_cost=cost,
+        purchase_order_sn=order_sn,
+        purchase_at=purchase_at,
+        purchase_at_raw=purchase_at_raw,
+        platform_order_sns=tuple(sorted({order_sn for order_sn, _ in links})),
+        source_lines=tuple(
+            {
+                "source_title": title,
+                "source_sku_name": sku,
+                "unit_price": str(price),
+                "quantity": str(units),
+            }
+            for price, units, sku in lines
+        ),
+    ), None
 
 
 def clean_latest_prices(
     orders: list[dict[str, Any]],
+    package_shops: dict[tuple[str, str], set[str]],
 ) -> tuple[dict[tuple[str, str], PriceObservation], list[dict[str, Any]]]:
-    unique: dict[tuple[str, str, str, str], PriceObservation] = {}
+    by_shop_spu: dict[tuple[str, str], list[PriceObservation]] = {}
+    unresolved: dict[tuple[str, str], datetime] = {}
     issues: list[dict[str, Any]] = []
     for order in orders:
-        observations, order_issues = _observations_from_order(order)
-        issues.extend(order_issues)
-        for observation in observations:
-            key = (
-                observation.purchase_order_sn,
-                observation.source_item_id,
-                observation.miaoshou_shop_id,
-                observation.spu_id,
+        observation, issue_type = _observations_from_order(order, package_shops)
+        if issue_type is not None:
+            issues.append(
+                {
+                    "issue_type": issue_type,
+                    "purchase_order_sn": order.get("purchaseOrderSn"),
+                }
             )
-            previous = unique.get(key)
-            if previous is None or observation.filter_id > previous.filter_id:
-                unique[key] = observation
-
-    by_shop_spu: dict[tuple[str, str], list[PriceObservation]] = {}
-    for observation in unique.values():
-        if observation.status in _EXCLUDED_STATUSES:
-            continue
-        by_shop_spu.setdefault(
-            (observation.miaoshou_shop_id, observation.spu_id), []
-        ).append(observation)
+            bound = _parse_time(
+                order.get("gmtPurchaseOrderStart")
+            ) or datetime.max.replace(tzinfo=UTC)
+            for link in _package_links(order):
+                for shop in package_shops.get(link, set()):
+                    key = (shop, link[1])
+                    unresolved[key] = max(unresolved.get(key, bound), bound)
+        if observation is not None:
+            by_shop_spu.setdefault(
+                (observation.miaoshou_shop_id, observation.spu_id), []
+            ).append(observation)
 
     latest: dict[tuple[str, str], PriceObservation] = {}
     for shop_spu, observations in by_shop_spu.items():
-        newest = max(
-            observation.purchase_at or datetime.min.replace(tzinfo=UTC)
-            for observation in observations
-        )
+        newest = max(observation.purchase_at for observation in observations)
+        if shop_spu in unresolved and unresolved[shop_spu] >= newest:
+            continue
         candidates = [
             observation
             for observation in observations
-            if (observation.purchase_at or datetime.min.replace(tzinfo=UTC)) == newest
+            if observation.purchase_at == newest
         ]
         prices = {observation.unit_cost for observation in candidates}
         if len(prices) != 1:
@@ -495,12 +372,7 @@ def clean_latest_prices(
             )
             continue
         latest[shop_spu] = max(
-            candidates,
-            key=lambda observation: (
-                observation.purchase_order_sn,
-                observation.filter_id,
-                observation.source_item_id,
-            ),
+            candidates, key=lambda row: (row.purchase_order_sn, row.source_item_id)
         )
     return latest, issues
 
@@ -530,6 +402,12 @@ def _redact_secrets(value: Any) -> Any:
     return value
 
 
+def _fingerprint(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
 def _record_raw_orders(
     session: Session,
     *,
@@ -544,14 +422,12 @@ def _record_raw_orders(
             if not order_sn:
                 continue
             safe_order = _redact_secrets(order)
-            canonical = json.dumps(safe_order, ensure_ascii=False, sort_keys=True)
-            payload_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
             stmt = pg_insert(MiaoshouPurchaseOrderRawRecord).values(
                 credential_id=credential_id,
                 external_purchase_order_id=order_sn,
                 endpoint=ENDPOINT,
                 payload=safe_order,
-                payload_hash=payload_hash,
+                payload_hash=_fingerprint(safe_order),
                 captured_at=now,
             )
             inserted_id = session.execute(
@@ -641,7 +517,8 @@ def _resolve_database_shop(
     shops = (
         session.execute(
             select(ChannelAccount.id).where(
-                func.lower(ChannelAccount.account_name) == account.account_name.lower()
+                ChannelAccount.platform == "tiktok",
+                func.lower(ChannelAccount.account_name) == account.account_name.lower(),
             )
         )
         .scalars()
@@ -659,14 +536,15 @@ def _upsert_purchase_price(
     *,
     credential_id: int,
     observation: PriceObservation,
-    shop_pk: int | None,
-    resolution_status: str,
-) -> None:
+    shop_pk: int,
+) -> bool:
     now = datetime.now(UTC)
     evidence = {
         "source_lines": list(observation.source_lines),
         "purchase_at_raw": observation.purchase_at_raw,
-        "filter_id": observation.filter_id,
+        "platform_order_sns": list(observation.platform_order_sns),
+        "endpoint": ENDPOINT,
+        "requested_status": _COMPLETED_STATUS,
         "miaoshou_shop_id": observation.miaoshou_shop_id,
     }
     values = {
@@ -680,25 +558,66 @@ def _upsert_purchase_price(
         "source_purchase_order_sn": observation.purchase_order_sn,
         "source_item_id": observation.source_item_id,
         "source_purchase_at": observation.purchase_at,
-        "source_status": observation.status,
+        "source_status": None,
         "calculation_method": "quantity_weighted_mean",
         "calculation_version": _CALCULATION_VERSION,
-        "resolution_status": resolution_status,
+        "resolution_status": "matched_shop",
         "evidence": evidence,
         "last_seen_at": now,
         "synced_at": now,
     }
-    stmt = pg_insert(MiaoshouPurchasePrice).values(**values)
+    # Reuse a matching pre-cutover price row when the API has an equally recent
+    # or newer observation. Historical raw records keep their source credential.
+    lock_key = f"{JOB_NAME}:{observation.miaoshou_shop_id}:{observation.spu_id}"
     session.execute(
-        stmt.on_conflict_do_update(
-            index_elements=["credential_id", "miaoshou_shop_id", "spu_id"],
-            set_={
-                key: value
-                for key, value in values.items()
-                if key not in ("credential_id", "miaoshou_shop_id", "spu_id")
-            },
-        )
+        select(func.pg_advisory_xact_lock(func.hashtextextended(lock_key, 0)))
     )
+    stored = session.scalars(
+        select(MiaoshouPurchasePrice)
+        .join(Credentials, Credentials.id == MiaoshouPurchasePrice.credential_id)
+        .where(
+            MiaoshouPurchasePrice.miaoshou_shop_id == observation.miaoshou_shop_id,
+            MiaoshouPurchasePrice.spu_id == observation.spu_id,
+            or_(
+                MiaoshouPurchasePrice.credential_id == credential_id,
+                and_(
+                    MiaoshouPurchasePrice.calculation_version == _PREVIOUS_CALCULATION_VERSION,
+                    Credentials.provider == "miaoshou_web",
+                    MiaoshouPurchasePrice.shop_pk == shop_pk,
+                ),
+            ),
+        )
+    ).all()
+    if len(stored) > 1:
+        _record_issue(
+            session,
+            credential_id=credential_id,
+            issue_type="AMBIGUOUS_STORED_PURCHASE_PRICE",
+            external_id=f"{observation.miaoshou_shop_id}:{observation.spu_id}",
+            details={"purchase_order_sn": observation.purchase_order_sn},
+        )
+        return False
+    if stored:
+        row = stored[0]
+        if row.source_purchase_at and row.source_purchase_at > observation.purchase_at:
+            return False
+        if (
+            row.source_purchase_at == observation.purchase_at
+            and row.unit_cost != observation.unit_cost
+        ):
+            _record_issue(
+                session,
+                credential_id=credential_id,
+                issue_type="STORED_PURCHASE_PRICE_CONFLICT",
+                external_id=f"{observation.miaoshou_shop_id}:{observation.spu_id}",
+                details={"purchase_order_sn": observation.purchase_order_sn},
+            )
+            return False
+        for key, value in values.items():
+            setattr(row, key, value)
+    else:
+        session.add(MiaoshouPurchasePrice(**values))
+    return True
 
 
 def _skipped_result(reason: str) -> dict[str, Any]:
@@ -717,7 +636,7 @@ def _skipped_result(reason: str) -> dict[str, Any]:
 def sync_purchase_prices(
     session: Session,
     *,
-    client: PurchaseWebClient | None = None,
+    client: PurchaseApiClient | None = None,
     external_account_id: str | None = None,
     max_retries: int = 3,
 ) -> dict[str, Any]:
@@ -730,18 +649,18 @@ def sync_purchase_prices(
                     session, job, status="skipped", extra={"reason": result["reason"]}
                 )
                 return result
-            credentials = _resolve_credentials(
-                session, external_account_id=external_account_id
+        context = resolve_miaoshou_context(session, license_id=external_account_id)
+        if context is None:
+            result = _skipped_result(
+                "Miaoshou Open Platform credentials not configured"
             )
-            if credentials is None:
-                result = _skipped_result("miaoshou_web credentials not configured")
-                finish_job(
-                    session, job, status="skipped", extra={"reason": result["reason"]}
-                )
-                return result
-        credential_id = credentials.id
+            finish_job(
+                session, job, status="skipped", extra={"reason": result["reason"]}
+            )
+            return result
+        credential_id = context.credentials.id
         if client is None:
-            client = _build_client(credentials)
+            client = miaoshou_client_factory(context)
 
         orders, pages_walked, advertised_total = _fetch_all_pages(
             client, max_retries=max_retries
@@ -751,7 +670,9 @@ def sync_purchase_prices(
             credential_id=credential_id,
             orders=orders,
         )
-        latest, cleaning_issues = clean_latest_prices(orders)
+        with session.begin():
+            package_shops = _load_package_shops(session, credential_id, orders)
+        latest, cleaning_issues = clean_latest_prices(orders, package_shops)
         for issue in cleaning_issues:
             with session.begin():
                 _record_issue(
@@ -765,6 +686,7 @@ def sync_purchase_prices(
                     details=issue,
                 )
 
+        written = 0
         matched_shops = 0
         unmatched_shops = 0
         shop_issues = 0
@@ -775,48 +697,43 @@ def sync_purchase_prices(
                 )
                 if shop_pk is not None:
                     matched_shops += 1
-                    _resolve_shop_issues(
-                        session,
-                        credential_id=credential_id,
-                        miaoshou_shop_id=observation.miaoshou_shop_id,
-                        spu_id=observation.spu_id,
-                    )
-                else:
-                    unmatched_shops += 1
-                    shop_issues += 1
-                    _record_issue(
-                        session,
-                        credential_id=credential_id,
-                        issue_type=resolution_status.upper(),
-                        external_id=(
-                            f"{observation.miaoshou_shop_id}:{observation.spu_id}"
-                        ),
-                        details={
-                            "miaoshou_shop_id": observation.miaoshou_shop_id,
-                            "shop_name": observation.shop_name,
-                            "spu_id": observation.spu_id,
-                            "unit_cost": str(observation.unit_cost),
-                            "purchase_order_sn": observation.purchase_order_sn,
-                        },
-                    )
-                if shop_pk is not None:
-                    _upsert_purchase_price(
+                    if _upsert_purchase_price(
                         session,
                         credential_id=credential_id,
                         observation=observation,
                         shop_pk=shop_pk,
-                        resolution_status=resolution_status,
-                    )
+                    ):
+                        written += 1
+                        _resolve_shop_issues(
+                            session,
+                            credential_id=credential_id,
+                            miaoshou_shop_id=observation.miaoshou_shop_id,
+                            spu_id=observation.spu_id,
+                        )
+                    continue
+                unmatched_shops += 1
+                shop_issues += 1
+                _record_issue(
+                    session,
+                    credential_id=credential_id,
+                    issue_type=resolution_status.upper(),
+                    external_id=f"{observation.miaoshou_shop_id}:{observation.spu_id}",
+                    details={
+                        "miaoshou_shop_id": observation.miaoshou_shop_id,
+                        "spu_id": observation.spu_id,
+                        "purchase_order_sn": observation.purchase_order_sn,
+                    },
+                )
 
         issues = len(cleaning_issues) + shop_issues
         job.rows_total = len(orders)
-        job.rows_inserted = raw_inserted + matched_shops
+        job.rows_inserted = raw_inserted + written
         job.rows_updated = 0
         job.rows_failed = issues
         job.extra = {
             "pages_walked": pages_walked,
             "advertised_total": advertised_total,
-            "purchase_prices": matched_shops,
+            "purchase_prices": written,
             "raw_inserted": raw_inserted,
             "matched_shops": matched_shops,
             "unmatched_shops": unmatched_shops,
@@ -828,7 +745,7 @@ def sync_purchase_prices(
             "reason": None,
             "pages_walked": pages_walked,
             "orders_seen": len(orders),
-            "purchase_prices": matched_shops,
+            "purchase_prices": written,
             "matched_shops": matched_shops,
             "unmatched_shops": unmatched_shops,
             "issues": issues,
@@ -837,7 +754,6 @@ def sync_purchase_prices(
 
 __all__ = [
     "JOB_NAME",
-    "MiaoshouPurchaseWebClient",
     "PriceObservation",
     "clean_latest_prices",
     "sync_purchase_prices",

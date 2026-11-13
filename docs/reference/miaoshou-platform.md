@@ -89,35 +89,23 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schem
 备份默认写入 `$HOME/backups/tts_erp_manual/miaoshou_package_0045_*.jsonl.gz`，并生成带行数和 ID
 清单的 `.meta.json`。脚本自身不会设置生产 destructive override；缺少环境变量或 `--confirm` 会拒绝执行。
 
-## 7. 采购价清洗与人工成本同步
+## 7. 采购价同步
 
-- Job：`miaoshou.purchase_price_clean`，每小时执行一次。
-- 数据源：浏览器 ERP `POST /api/order/purchase/purchase_order/searchList`；该接口同时返回
-  1688 `purchaseItems[].sourceUnitPrice` 与 TikTok `platformItemId` 关联，是当前唯一验证过的 SPU 成交采购价来源。
-- 凭证：`integration.credentials(provider='miaoshou_web')`，Cookie 和 `x-app-zebra` 均由
-  `token_service` Fernet 加密；日志、任务结果和 `miaoshou` payload 表不保存明文凭证。浏览器会话过期时 job
-  会失败并保留上一版有效成本，不会清空或覆盖；重新运行配置脚本轮换凭证即可。
-- 原文：变化后的采购单 payload 去重写入 `miaoshou.purchase_order_raw_records`。
-- 清洗：按采购单内唯一 `sourceItemId` 与唯一 `platformItemId` 的首次出现顺序配对；组数不一致不猜测；
-  同一货源商品多 SKU 按 `Σ(sourceUnitPrice×sourceQuantity)/Σ(sourceQuantity)` 计算 CNY 单价；
-  排除 `cancel` / `wait_pay`，每个 SPU 取最新采购事实，并拒绝最新时间同价冲突。
-- 结果：清洗价格写独立表 `miaoshou.purchase_prices`，唯一键为
-  `(credential_id, miaoshou_shop_id, spu_id)`。只要妙手 `shopId` 能经
-  `procurement.procurement_accounts` 唯一映射到 `commerce.shops`，就写入价格并保存 `shop_pk`；
-  **不要求 `products_spu` 存在，也不写入/覆盖 `manual_product_costs`**。
-  未匹配或歧义店铺只记录 `miaoshou.sync_issues`，不写采购价格表，也不伪造店铺。
-- 首次配置（交互输入，secret 不进 shell history）：
+`miaoshou.purchase_price_clean` 每小时使用现有妙手开放平台应用凭据调用采购记录列表。
+应用需具备「包裹 → 采购记录 → 采购记录列表」权限。凭据由 `token_service` 加载，
+配置入口与妙手包裹同步相同。
 
-```bash
-python3 scripts/configure_miaoshou_web_session.py \
-  --account-id 12629145 --front-version 1790677442555 --confirm
-```
-
-- 生产 migration 0047 + 首次同步：
-
-```bash
-ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_prices.sh --confirm
-```
+- 分页使用 `purchaseOrderStatus=finished`，在一次同步内固定查询截止时间。校验分页的
+  `data.total` 和每页记录数，按响应内容去重，保留同一采购单号下不同的记录。
+- 对采购平台为 `1688` 或 `1688妙手` 的记录，要求实付金额、采购行单价和数量均为正，
+  并且单内货源标题唯一、有效关联指向同一个 TikTok SPU。同一货源的多个规格按
+  `Σ(sourceUnitPrice×sourceQuantity)/Σ(sourceQuantity)` 算出 CNY 单位成本。
+- 用 TikTok 订单号和 SPU 在同应用已同步的包裹中确定妙手店铺 ID，再匹配 ERP 店铺。
+  多商品单、跨店、无法匹配、同时间不同价等情况写入 `miaoshou.sync_issues`。
+  如果更新的采购记录无法确认价格，保留该店铺和 SPU 的已有价格。
+- 原始采购记录写入 `miaoshou.purchase_order_raw_records`，结果写入
+  `miaoshou.purchase_prices`。开放平台凭据接管有同等或更新证据的历史价格行，
+  历史采购原文仍保留在原凭据名下。采购价同步独立于人工成本。
 
 ### 7.1 开放 API 采购价核验
 
@@ -145,8 +133,7 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_pric
   关联包裹的情况，因此不能仅按采购单号去重或以正金额推断成交。
 - 对 857 张历史采购单复核，853 张货源组数与 SPU 数相等，用货源标题在单内分组的结果
   与存档中的 `sourceItemId` 分组一致，其中 97 张含多个 SPU。这个核对覆盖历史样本，
-  官方接口仍缺少货源行到 TikTok 商品行的直接关联键。整批切换前需要明确成交记录筛选、
-  同单号多记录的标识，以及多商品采购单的配对依据。
+  官方接口仍缺少货源行到 TikTok 商品行的直接关联键，当前按 §7 的条件产出价格。
 
 ## 8. 测试
 
