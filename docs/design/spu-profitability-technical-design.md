@@ -220,6 +220,15 @@ HTTP adapter负责鉴权矩阵外的参数校验、异常到 HTTP mapping、Deci
 8. 领域返回 Decimal、date、datetime、Enum；adapter 产生 `{items,total,totals,meta}`，前端只渲染。
 9. `explain_spu` 在一个新快照中重算目标 SPU 与所选 evidence，结果和 evidence 共用 `calculated_at`、FX basis 和 rubric version。
 
+请求内复用与批量读取约束：
+
+- 广告、销售、全损、状态、退款五组当前事实各读取一次；每个 selected SPU 的当前公式只计算一次，行结果和预测聚合复用该结果。无当前活动的 SPU 仍参与完整选择范围的成熟样本。
+- 大盘预测只计算一次并直接构造 totals；保留历史兼容行级预测。预测全局计数使用完整 selected SPU，当前全局订单/退款计数仍独立去重。非空常规选择的九类核心事实 SQL 共执行九次（不含权限、目录、成本、费率、汇率、价格统计等辅助读取）。
+- 订单与结算 evidence 各保留原主查询，再按唯一订单 PK 批量聚合整单/目标 SPU GMV；物流按 shipment PK、结算组件按 transaction PK 批量读取。每类 evidence 最多两条附加批量查询，空 ID 集不发查询。
+- 分母包含整单其他 SPU 与未归属商品行。订单行 × 包裹粒度、订单 500 行截断、结算交易粒度、组内时间/组件排序、Decimal 精度、NULL/零值和返回字段保持原契约。
+
+上述查询预算与兼容边界由 `tests/api/test_spu_roi_query_efficiency.py` 验证；业务公式仍以现有 API 和纯公式回归测试为准。
+
 ### 5.4 范围、排序和分页
 
 - `shop_pk` 是内部 `commerce.shops.id`，不接受 `shop_id` 作为盈利过滤。

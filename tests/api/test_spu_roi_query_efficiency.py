@@ -402,3 +402,104 @@ def test_orders_keep_500_row_limit_and_missing_evidence_values(
         assert row["tracking"] == []
         assert row["is_settled"] is False
         assert row["settled_net_share"] is None
+
+
+@pytest.mark.parametrize(
+    ("target_price", "other_price", "expected_share"),
+    [("0", "0", None), ("-26330", "0", None), ("0", "26330", "0.0000")],
+)
+def test_detail_shares_preserve_nonpositive_and_zero_numerators(
+    api_client, readonly_key, db_engine, target_price, other_price, expected_share
+):
+    with Session(db_engine) as session:
+        shop = seeds._seed_shop(session, "TEST_SELLER_BATCH_ZERO")
+        spu = seeds._seed_spu(session, shop, "TEST_ROI_SPU_BATCH_ZERO")
+        other = seeds._seed_spu(session, shop, "TEST_ROI_SPU_BATCH_OTHER")
+        order = seeds._seed_order_line(
+            session,
+            shop_pk=shop,
+            spu_pk=spu,
+            order_id="TEST_ORDER_BATCH_ZERO",
+            status="DELIVERED",
+            line_ext="TEST_LINE_BATCH_ZERO",
+            qty="1",
+            unit_price=target_price,
+            paid=True,
+        )
+        seeds._seed_extra_order_line(
+            session,
+            order_id="TEST_ORDER_BATCH_ZERO",
+            spu_pk=other,
+            line_ext="TEST_LINE_BATCH_OTHER",
+            qty="1",
+            unit_price=other_price,
+        )
+        seeds._seed_settlement(
+            session,
+            order_pk=order,
+            external_id="TEST_TXN_BATCH_ZERO",
+            amount_vnd="0",
+        )
+        session.commit()
+    for kind, field in (
+        ("orders", "settled_net_share"),
+        ("settlements", "share_ratio"),
+    ):
+        response = api_client.get(
+            f"/v2/analytics/spu-roi/{spu}/{kind}",
+            headers={"Authorization": f"Bearer {readonly_key}"},
+        )
+        assert response.status_code == 200, response.text
+        rows = response.json()[kind]
+        assert len(rows) == 1
+        assert rows[0][field] == expected_share
+        if kind == "orders":
+            assert rows[0]["is_settled"] is True
+
+
+def test_details_preserve_empty_evidence(api_client, readonly_key, db_engine):
+    with Session(db_engine) as session:
+        shop = seeds._seed_shop(session, "TEST_SELLER_BATCH_EMPTY")
+        spu = seeds._seed_spu(session, shop, "TEST_ROI_SPU_BATCH_EMPTY")
+        session.commit()
+    for kind in ("orders", "settlements"):
+        response = api_client.get(
+            f"/v2/analytics/spu-roi/{spu}/{kind}",
+            headers={"Authorization": f"Bearer {readonly_key}"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()[kind] == []
+
+    with Session(db_engine) as session:
+        order = seeds._seed_order_line(
+            session,
+            shop_pk=shop,
+            spu_pk=spu,
+            order_id="TEST_ORDER_BATCH_EMPTY",
+            status="DELIVERED",
+            line_ext="TEST_LINE_BATCH_EMPTY",
+            qty="1",
+            unit_price="26330",
+            paid=True,
+        )
+        session.execute(
+            text(
+                "WITH statement AS (INSERT INTO finance.settlement_statements "
+                "(external_statement_id, statement_time, currency) "
+                "VALUES ('TEST_STATEMENT_BATCH_EMPTY', "
+                "'2026-09-01T08:00:00+00:00', 'VND') RETURNING id) "
+                "INSERT INTO finance.settlement_transactions "
+                "(settlement_statement_id, order_pk, external_transaction_id, transaction_time) "
+                "SELECT id, :order, 'TEST_TXN_BATCH_EMPTY', "
+                "'2026-09-01T08:00:00+00:00' FROM statement"
+            ),
+            {"order": order},
+        )
+        session.commit()
+    response = api_client.get(
+        f"/v2/analytics/spu-roi/{spu}/settlements",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert response.status_code == 200, response.text
+    assert len(response.json()["settlements"]) == 1
+    assert response.json()["settlements"][0]["components"] == []

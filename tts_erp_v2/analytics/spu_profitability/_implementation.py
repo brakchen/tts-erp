@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import fields, replace
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, cast
@@ -22,10 +21,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
 
 from tts_erp_v2.analytics.spu_profitability._formula_v10 import (
     FormulaInput,
+    FormulaOutput,
     ProjectionInput,
     calculate,
     calculate_order_metrics,
@@ -58,6 +57,10 @@ from tts_erp_v2.analytics.spu_profitability._types import (
     ShopFeeRateEstimate,
     SpuProfitability,
     SpuSelection,
+)
+from tts_erp_v2.commerce.shop_access import (
+    authorized_shop_clause,
+    require_authorized_shop,
 )
 from tts_erp_v2.db.constants import (
     PAID_SALES_ORDER_STATUSES,
@@ -1199,13 +1202,12 @@ _SQL_DETAIL_ORDERS = text(
 
 _SQL_DETAIL_TRACKING = text(
     """
-    SELECT te.action_code,
+    SELECT te.shipment_id, te.action_code,
            te.event_at,
            te.description
     FROM fulfillment.tracking_events te
-    JOIN fulfillment.shipments sh ON sh.id = te.shipment_id
-    WHERE sh.id = :shipment_pk
-    ORDER BY te.event_at ASC NULLS LAST, te.id ASC
+    WHERE te.shipment_id = ANY(CAST(:shipment_pks AS bigint[]))
+    ORDER BY te.shipment_id, te.event_at ASC NULLS LAST, te.id ASC
     """
 )
 
@@ -1231,22 +1233,25 @@ _SQL_DETAIL_SETTLEMENTS = text(
     """
 )
 
-_SQL_DETAIL_SETTLE_LINE_GMV = text(
+# Shared by orders and settlements; the denominator includes unmapped/other SPUs.
+_SQL_DETAIL_ORDER_GMV = text(
     """
-    SELECT so.id AS order_pk, sum(sl.quantity * sl.unit_price) AS order_gmv_vnd
-    FROM commerce.sales_orders so
-    JOIN commerce.sales_order_lines sl ON sl.order_pk = so.id
-    WHERE so.id = :order_pk
-    GROUP BY so.id
+    SELECT sl.order_pk,
+           COALESCE(SUM(sl.quantity * sl.unit_price), 0) AS order_gmv_vnd,
+           COALESCE(SUM(sl.quantity * sl.unit_price)
+               FILTER (WHERE sl.spu_pk = CAST(:spu_pk AS bigint)), 0) AS spu_gmv_vnd
+    FROM commerce.sales_order_lines sl
+    WHERE sl.order_pk = ANY(CAST(:order_pks AS bigint[]))
+    GROUP BY sl.order_pk
     """
 )
 
 _SQL_DETAIL_SETTLE_COMPONENTS = text(
     """
-    SELECT sc.component_code, sc.amount, sc.currency
+    SELECT sc.transaction_id, sc.component_code, sc.amount, sc.currency
     FROM finance.settlement_components sc
-    WHERE sc.transaction_id = :txn_pk
-    ORDER BY sc.component_code
+    WHERE sc.transaction_id = ANY(CAST(:txn_pks AS bigint[]))
+    ORDER BY sc.transaction_id, sc.component_code
     """
 )
 
@@ -1560,78 +1565,21 @@ def _resolve_costs_batch(
 
 
 def _projection_scope_aggregate(
-    sess: Session,
     *,
     cats: list[dict[str, Any]],
-    selected_pks: list[int],
-    selected_seller_ids: list[str],
+    current_by_spu: dict[int, FormulaOutput],
+    full_loss_map: Mapping[int, Mapping[str, Any]],
     shop_fee: dict[int, ShopFeeRateEntry],
-    cost_map: dict[int, tuple[Decimal, str]],
-    fx_usd_cny: Decimal,
-    fx_usd_vnd: Decimal,
     vnd_per_cny: Decimal,
-    paid_statuses: list[str],
-    st0: str,
-    st1: str,
-    window_start: datetime | None,
-    window_end: datetime | None,
-    ad_start: date | None,
-    ad_end: date | None,
-    projection_map: dict[int, Mapping[str, Any]],
+    projection_map: Mapping[int, Mapping[str, Any]],
     projection_counts_row: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Aggregate projection facts for the selected reporting window.
+    """Aggregate the full selection using already-read facts and current formulas.
 
     Mature sample facts stay independent in ``projection_map`` while current
-    facts and unsettled forecast targets follow the reporting dates. The helper
-    avoids recursively rebuilding a second profitability overview.
+    facts and unsettled forecast targets follow the reporting dates. SPUs with
+    no current activity still contribute to the mature sample.
     """
-    common = {
-        "selected_pks": selected_pks,
-        "selected_seller_ids": selected_seller_ids,
-        "ws": window_start,
-        "we": window_end,
-    }
-
-    def grouped(sql, extra: dict[str, Any]) -> dict[int, Mapping[str, Any]]:
-        rows = (
-            sess.execute(sql, {**common, **extra}).mappings().all()
-            if selected_pks
-            else []
-        )
-        return {
-            int(row["spu_pk"]): cast(Mapping[str, Any], row)
-            for row in rows
-            if row["spu_pk"] is not None
-        }
-
-    ad_map = grouped(_SQL_ROI_AD, {"ad_start": ad_start, "ad_end": ad_end})
-    sales_map = grouped(
-        _SQL_ROI_SALES,
-        {"paid_statuses": paid_statuses, "st0": st0, "st1": st1},
-    )
-    full_loss_map = grouped(
-        _SQL_ROI_FULL_LOSS,
-        {
-            "paid_statuses": paid_statuses,
-            "ac": _TRACK_ACTION_CODE_OVERSEAS,
-            "st_return": _CASE_COMPLETED_STATUSES[1],
-        },
-    )
-    status_map = grouped(
-        _SQL_ROI_ROW_STATUS,
-        {
-            "paid_statuses": paid_statuses,
-            "st0": st0,
-            "st1": st1,
-            "ac": _TRACK_ACTION_CODE_OVERSEAS,
-        },
-    )
-    refund_map = grouped(
-        _SQL_ROI_REFUNDS,
-        {"paid_statuses": paid_statuses, "st0": st0, "st1": st1},
-    )
-
     int_fields = {
         "projection_basis_order_count",
         "projection_basis_qty",
@@ -1686,55 +1634,11 @@ def _projection_scope_aggregate(
 
     for cat in cats:
         pk = int(cat["spu_pk"])
-        ad = ad_map.get(pk)
-        sales = sales_map.get(pk)
+        formula = current_by_spu[pk]
         full_loss = full_loss_map.get(pk)
-        status = status_map.get(pk)
-        refunds = refund_map.get(pk)
         facts = projection_map.get(pk)
         fee = shop_fee[int(cat["shop_pk"])].fee_rate
-        unit_cost = cost_map.get(pk, (K1_DEFAULT_CNY, "DEFAULT_K1"))[0]
-
-        formula = calculate(
-            FormulaInput(
-                spend_usd=row_decimal(ad, "spend"),
-                ad_gmv_usd=row_decimal(ad, "gmv_ad"),
-                ad_orders=row_int(ad, "ad_orders"),
-                order_count=row_int(sales, "order_count"),
-                cancelled_orders=row_int(status, "cancelled_order_count"),
-                domestic_cancelled_orders=row_int(
-                    status, "domestic_cancelled_order_count"
-                ),
-                overseas_cancelled_orders=row_int(
-                    status, "overseas_cancelled_order_count"
-                ),
-                units_sold=row_int(sales, "units_sold"),
-                full_loss_cancelled_qty=row_int(
-                    full_loss, "full_loss_cancelled_qty"
-                ),
-                full_loss_qty=row_int(full_loss, "full_loss_qty"),
-                refund_order_count=row_int(status, "refund_order_count"),
-                refund_only_qty=row_int(refunds, "refund_only_qty"),
-                refund_return_qty=row_int(refunds, "refund_return_qty"),
-                sales_vnd=row_decimal(sales, "sales_vnd"),
-                settled_net_vnd=row_decimal(sales, "settled_net_vnd"),
-                settled_sales_vnd=row_decimal(sales, "settled_sales_vnd"),
-                unsettled_sales_vnd=row_decimal(sales, "unsettled_sales_vnd"),
-                confirmed_unsettled_refund_vnd=row_decimal(
-                    sales, "confirmed_unsettled_refund_vnd"
-                ),
-                refund_only_vnd=row_decimal(refunds, "refund_only_amount"),
-                refund_return_vnd=row_decimal(refunds, "refund_return_amount"),
-                refund_cancelled_vnd=row_decimal(
-                    refunds, "refund_cancelled_amount"
-                ),
-                cancelled_sales_vnd=row_decimal(status, "cancelled_sales"),
-                unit_cost_cny=unit_cost,
-                usd_cny=fx_usd_cny,
-                usd_vnd=fx_usd_vnd,
-                unsettled_fee_rate=fee,
-            )
-        )
+        unit_cost = formula.unit_cost_cny
         one_minus_fee = Decimal(1) - fee
         p = facts
         values: dict[str, Any] = {
@@ -2231,6 +2135,7 @@ def _query_spu_roi(
     )
 
     plain: list[dict] = []
+    current_by_spu: dict[int, FormulaOutput] = {}
     total_spend = Decimal(0)
     total_net_revenue_cny = Decimal(0)
     total_return_loss = Decimal(0)
@@ -2240,14 +2145,6 @@ def _query_spu_roi(
         ad = ad_map.get(pk)
         sales = sales_map.get(pk)
         fl = fl_map.get(pk)
-        if (
-            not include_without_activity
-            and ad is None
-            and sales is None
-            and refund_map.get(pk) is None
-        ):
-            continue
-
         spend_usd = Decimal(ad["spend"]) if ad else Decimal(0)
         gmv_ad_usd = Decimal(ad["gmv_ad"]) if ad else Decimal(0)
         ad_orders = _row_int(ad["ad_orders"]) if ad else 0
@@ -2304,6 +2201,49 @@ def _query_spu_roi(
         refund_cancelled_vnd = (
             Decimal(refund["refund_cancelled_amount"]) if refund else Decimal(0)
         )
+
+        # 成本解析（D1 全链）与纯 v10 公式。
+        unit_cost_cny, cost_source = cost_map.get(pk, (K1_DEFAULT_CNY, "DEFAULT_K1"))
+        fee_entry = shop_fee[int(cat["shop_pk"])]
+        row_rate, row_fee_source = fee_entry.fee_rate, fee_entry.source
+        formula = calculate(
+            FormulaInput(
+                spend_usd=spend_usd,
+                ad_gmv_usd=gmv_ad_usd,
+                ad_orders=ad_orders,
+                order_count=order_count,
+                cancelled_orders=cancelled_orders,
+                domestic_cancelled_orders=domestic_cancelled_orders,
+                overseas_cancelled_orders=overseas_cancelled_orders,
+                units_sold=units_sold,
+                full_loss_cancelled_qty=flc_qty,
+                full_loss_qty=full_loss_qty,
+                refund_order_count=refund_order_count,
+                refund_only_qty=refund_only_qty,
+                refund_return_qty=refund_return_qty,
+                sales_vnd=sales_vnd,
+                settled_net_vnd=settled_net_vnd,
+                settled_sales_vnd=settled_sales_vnd,
+                unsettled_sales_vnd=unsettled_sales_vnd,
+                confirmed_unsettled_refund_vnd=confirmed_unsettled_refund_vnd,
+                refund_only_vnd=refund_only_vnd,
+                refund_return_vnd=refund_return_vnd,
+                refund_cancelled_vnd=refund_cancelled_vnd,
+                cancelled_sales_vnd=cancelled_sales_vnd,
+                unit_cost_cny=unit_cost_cny,
+                usd_cny=fx_usd_cny,
+                usd_vnd=fx_usd_vnd,
+                unsettled_fee_rate=row_rate,
+            )
+        )
+        current_by_spu[pk] = formula
+        if (
+            not include_without_activity
+            and ad is None
+            and sales is None
+            and refund_map.get(pk) is None
+        ):
+            continue
 
         projection_facts = projection_map.get(pk)
         projection_basis_order_count = (
@@ -2474,40 +2414,6 @@ def _query_spu_roi(
             / vnd_per_cny
             if projection_facts
             else Decimal(0)
-        )
-        # 成本解析（D1 全链）与纯 v10 公式。
-        unit_cost_cny, cost_source = cost_map.get(pk, (K1_DEFAULT_CNY, "DEFAULT_K1"))
-        fee_entry = shop_fee[int(cat["shop_pk"])]
-        row_rate, row_fee_source = fee_entry.fee_rate, fee_entry.source
-        formula = calculate(
-            FormulaInput(
-                spend_usd=spend_usd,
-                ad_gmv_usd=gmv_ad_usd,
-                ad_orders=ad_orders,
-                order_count=order_count,
-                cancelled_orders=cancelled_orders,
-                domestic_cancelled_orders=domestic_cancelled_orders,
-                overseas_cancelled_orders=overseas_cancelled_orders,
-                units_sold=units_sold,
-                full_loss_cancelled_qty=flc_qty,
-                full_loss_qty=full_loss_qty,
-                refund_order_count=refund_order_count,
-                refund_only_qty=refund_only_qty,
-                refund_return_qty=refund_return_qty,
-                sales_vnd=sales_vnd,
-                settled_net_vnd=settled_net_vnd,
-                settled_sales_vnd=settled_sales_vnd,
-                unsettled_sales_vnd=unsettled_sales_vnd,
-                confirmed_unsettled_refund_vnd=confirmed_unsettled_refund_vnd,
-                refund_only_vnd=refund_only_vnd,
-                refund_return_vnd=refund_return_vnd,
-                refund_cancelled_vnd=refund_cancelled_vnd,
-                cancelled_sales_vnd=cancelled_sales_vnd,
-                unit_cost_cny=unit_cost_cny,
-                usd_cny=fx_usd_cny,
-                usd_vnd=fx_usd_vnd,
-                unsettled_fee_rate=row_rate,
-            )
         )
         spend_cny = formula.spend_cny
         gmv_ad_cny = formula.ad_gmv_cny
@@ -2952,238 +2858,15 @@ def _query_spu_roi(
         _row_int(refund_scope_row["refund_order_count"]) if refund_scope_row else 0
     )
 
-    projection_counts_row = None
-    if spu_pks_in_scope:
-        projection_counts_row = (
-            sess.execute(
-                _SQL_ROI_PROJECTION_SCOPE_COUNTS,
-                {
-                    "selected_pks": spu_pks_in_scope,
-                    "ws": None,
-                    "we": projection_as_of_end,
-                    "projection_sample_start": projection_sample_start,
-                    "projection_sample_end": projection_sample_end,
-                    "projection_as_of_end": projection_as_of_end,
-                    "projection_target_start": ws_dt,
-                    "projection_target_end": we_dt,
-                    "paid_statuses": paid_statuses,
-                    "st0": st0,
-                    "st1": st1,
-                    "delivery_terminal_order_statuses": list(
-                        _DELIVERY_TERMINAL_ORDER_STATUSES
-                    ),
-                    "delivery_terminal_shipment_statuses": list(
-                        _DELIVERY_TERMINAL_SHIPMENT_STATUSES
-                    ),
-                    "delivered_action_code": _TRACK_ACTION_CODE_DELIVERED,
-                    "overseas_action_code": _TRACK_ACTION_CODE_OVERSEAS,
-                    "returned_to_seller_action_code": (
-                        _TRACK_ACTION_CODE_RETURNED_TO_SELLER
-                    ),
-                },
-            )
-            .mappings()
-            .first()
-        )
-    total_projection_basis_order_count = (
-        _row_int(projection_counts_row["projection_basis_order_count"])
-        if projection_counts_row
-        else 0
-    )
-    total_projection_terminal_basis_order_count = (
-        _row_int(projection_counts_row["projection_terminal_basis_order_count"])
-        if projection_counts_row
-        else 0
-    )
-    total_projection_terminal_full_loss_order_count = (
-        _row_int(
-            projection_counts_row["projection_terminal_full_loss_order_count"]
-        )
-        if projection_counts_row
-        else 0
-    )
-    total_projection_completed_basis_order_count = (
-        _row_int(projection_counts_row["projection_completed_basis_order_count"])
-        if projection_counts_row
-        else 0
-    )
-    total_projection_completed_full_loss_order_count = (
-        _row_int(
-            projection_counts_row["projection_completed_full_loss_order_count"]
-        )
-        if projection_counts_row
-        else 0
-    )
-    total_projection_full_loss_basis_order_count = (
-        _row_int(projection_counts_row["projection_full_loss_basis_order_count"])
-        if projection_counts_row
-        else 0
-    )
-    total_projection_basis_full_loss_order_count = (
-        _row_int(projection_counts_row["projection_basis_full_loss_order_count"])
-        if projection_counts_row
-        else 0
-    )
-    total_unsettled_order_count = (
-        _row_int(projection_counts_row["unsettled_order_count"])
-        if projection_counts_row
-        else 0
-    )
-    total_full_loss_exposure_unsettled_order_count = (
-        _row_int(
-            projection_counts_row["full_loss_exposure_unsettled_order_count"]
-        )
-        if projection_counts_row
-        else 0
-    )
-    total_confirmed_unsettled_full_loss_order_count = (
-        _row_int(
-            projection_counts_row["confirmed_unsettled_full_loss_order_count"]
-        )
-        if projection_counts_row
-        else 0
-    )
-    total_confirmed_full_loss_exposure_order_count = (
-        _row_int(
-            projection_counts_row["confirmed_full_loss_exposure_order_count"]
-        )
-        if projection_counts_row
-        else 0
-    )
-    total_unresolved_unsettled_order_count = (
-        _row_int(projection_counts_row["unresolved_unsettled_order_count"])
-        if projection_counts_row
-        else 0
-    )
-    total_unresolved_full_loss_exposure_order_count = (
-        _row_int(
-            projection_counts_row["unresolved_full_loss_exposure_order_count"]
-        )
-        if projection_counts_row
-        else 0
-    )
-
     # 从行级数据聚合：全损件数、COGS_kept（件数口径，用于 return_loss/roi）
     total_full_loss_qty = sum((r["full_loss_qty"] for r in scope_plain), 0)
     total_full_loss_cancelled_qty = sum(
         (r["full_loss_cancelled_qty"] for r in scope_plain), 0
     )
-    total_cogs_kept = Decimal(0)
-    for r in scope_plain:
-        unit_cost = r["unit_cost_used"] or Decimal(0)
-        total_cogs_kept += max(
-            Decimal(0),
-            (
-                Decimal(r["units_sold"])
-                - Decimal(r["refund_only_qty"])
-                - Decimal(r["refund_return_qty"])
-            )
-            * unit_cost,
-        )
+    total_cogs_kept = sum(
+        (current_by_spu[r["spu_pk"]].cogs_kept_cny for r in scope_plain), Decimal(0)
+    )
 
-    total_projection_basis_qty = sum(
-        (r["projection_basis_qty"] for r in scope_plain), 0
-    )
-    total_projection_basis_sales = sum(
-        (r["projection_basis_sales"] for r in scope_plain), Decimal(0)
-    )
-    total_projection_basis_refund_amount = sum(
-        (r["projection_basis_refund_amount"] for r in scope_plain), Decimal(0)
-    )
-    total_projection_terminal_basis_sales = sum(
-        (r["projection_terminal_basis_sales"] for r in scope_plain), Decimal(0)
-    )
-    total_projection_terminal_full_loss_sales = sum(
-        (r["projection_terminal_full_loss_sales"] for r in scope_plain),
-        Decimal(0),
-    )
-    total_projection_terminal_full_loss_qty = sum(
-        (r["projection_terminal_full_loss_qty"] for r in scope_plain), 0
-    )
-    total_projection_basis_full_loss_qty = sum(
-        (r["projection_basis_full_loss_qty"] for r in scope_plain), 0
-    )
-    total_unresolved_unsettled_qty = sum(
-        (r["unresolved_unsettled_qty"] for r in scope_plain), 0
-    )
-    total_unresolved_full_loss_exposure_qty = sum(
-        (r["unresolved_full_loss_exposure_qty"] for r in scope_plain), 0
-    )
-    total_unresolved_unsettled_sales = sum(
-        (r["unresolved_unsettled_sales"] for r in scope_plain), Decimal(0)
-    )
-    total_full_loss_exposure_unsettled_sales = sum(
-        (r["full_loss_exposure_unsettled_sales"] for r in scope_plain),
-        Decimal(0),
-    )
-    total_confirmed_unsettled_refund_amount = sum(
-        (r["confirmed_unsettled_refund_amount"] for r in scope_plain),
-        Decimal(0),
-    )
-    total_confirmed_full_loss_exposure_refund_amount = sum(
-        (r["confirmed_full_loss_exposure_refund_amount"] for r in scope_plain),
-        Decimal(0),
-    )
-    total_confirmed_unsettled_full_loss_qty = sum(
-        (r["confirmed_unsettled_full_loss_qty"] for r in scope_plain), 0
-    )
-    total_confirmed_full_loss_exposure_qty = sum(
-        (r["confirmed_full_loss_exposure_qty"] for r in scope_plain), 0
-    )
-    total_unsettled_sales_after_fee = sum(
-        (
-            r["unsettled_sales"] * (Decimal(1) - r["fee_rate_used"])
-            for r in scope_plain
-        ),
-        Decimal(0),
-    )
-    total_confirmed_refund_after_fee = sum(
-        (
-            r["confirmed_unsettled_refund_amount"]
-            * (Decimal(1) - r["fee_rate_used"])
-            for r in scope_plain
-        ),
-        Decimal(0),
-    )
-    total_full_loss_exposure_sales_after_fee = sum(
-        (
-            r["full_loss_exposure_unsettled_sales"]
-            * (Decimal(1) - r["fee_rate_used"])
-            for r in scope_plain
-        ),
-        Decimal(0),
-    )
-    total_confirmed_full_loss_exposure_refund_after_fee = sum(
-        (
-            r["confirmed_full_loss_exposure_refund_amount"]
-            * (Decimal(1) - r["fee_rate_used"])
-            for r in scope_plain
-        ),
-        Decimal(0),
-    )
-    total_unresolved_sales_after_fee = sum(
-        (
-            r["unresolved_unsettled_sales"]
-            * (Decimal(1) - r["fee_rate_used"])
-            for r in scope_plain
-        ),
-        Decimal(0),
-    )
-    total_unresolved_cogs = sum(
-        (
-            Decimal(r["unresolved_unsettled_qty"]) * r["unit_cost_used"]
-            for r in scope_plain
-        ),
-        Decimal(0),
-    )
-    total_unresolved_full_loss_exposure_cogs = sum(
-        (
-            Decimal(r["unresolved_full_loss_exposure_qty"])
-            * r["unit_cost_used"]
-            for r in scope_plain
-        ),
-        Decimal(0),
-    )
     projection_scope_counts_row = None
     if selected_pks:
         projection_scope_counts_row = (
@@ -3217,125 +2900,14 @@ def _query_spu_roi(
             .mappings()
             .first()
         )
-    projection_totals_source: dict[str, Any] | None = _projection_scope_aggregate(
-            sess,
-            cats=cats,
-            selected_pks=selected_pks,
-            selected_seller_ids=selected_seller_ids,
-            shop_fee=shop_fee,
-            cost_map=cost_map,
-            fx_usd_cny=fx_usd_cny,
-            fx_usd_vnd=fx_usd_vnd,
-            vnd_per_cny=vnd_per_cny,
-            paid_statuses=paid_statuses,
-            st0=st0,
-            st1=st1,
-            window_start=ws_dt,
-            window_end=we_dt,
-            ad_start=ad_start,
-            ad_end=ad_end,
-            projection_map=cast(dict[int, Mapping[str, Any]], projection_map),
-            projection_counts_row=cast(
-                Mapping[str, Any] | None, projection_scope_counts_row
-            ),
-        )
-
-    dashboard_projection = calculate_projection(
-        ProjectionInput(
-            projection_basis_order_count=total_projection_basis_order_count,
-            projection_basis_qty=Decimal(total_projection_basis_qty),
-            projection_basis_sales_cny=total_projection_basis_sales,
-            projection_basis_refund_amount_cny=(
-                total_projection_basis_refund_amount
-            ),
-            projection_terminal_basis_order_count=(
-                total_projection_terminal_basis_order_count
-            ),
-            projection_terminal_basis_sales_cny=(
-                total_projection_terminal_basis_sales
-            ),
-            projection_terminal_full_loss_sales_cny=(
-                total_projection_terminal_full_loss_sales
-            ),
-            projection_terminal_full_loss_order_count=(
-                total_projection_terminal_full_loss_order_count
-            ),
-            projection_terminal_full_loss_qty=Decimal(
-                total_projection_terminal_full_loss_qty
-            ),
-            projection_completed_basis_order_count=(
-                total_projection_completed_basis_order_count
-            ),
-            projection_completed_full_loss_order_count=(
-                total_projection_completed_full_loss_order_count
-            ),
-            projection_full_loss_basis_order_count=(
-                total_projection_full_loss_basis_order_count
-            ),
-            projection_basis_full_loss_order_count=(
-                total_projection_basis_full_loss_order_count
-            ),
-            projection_basis_full_loss_qty=Decimal(
-                total_projection_basis_full_loss_qty
-            ),
-            unsettled_order_count=total_unsettled_order_count,
-            confirmed_unsettled_full_loss_order_count=(
-                total_confirmed_unsettled_full_loss_order_count
-            ),
-            confirmed_unsettled_full_loss_qty=Decimal(
-                total_confirmed_unsettled_full_loss_qty
-            ),
-            unresolved_unsettled_order_count=(
-                total_unresolved_unsettled_order_count
-            ),
-            full_loss_exposure_unsettled_order_count=(
-                total_full_loss_exposure_unsettled_order_count
-            ),
-            confirmed_full_loss_exposure_order_count=(
-                total_confirmed_full_loss_exposure_order_count
-            ),
-            confirmed_full_loss_exposure_qty=Decimal(
-                total_confirmed_full_loss_exposure_qty
-            ),
-            unresolved_full_loss_exposure_order_count=(
-                total_unresolved_full_loss_exposure_order_count
-            ),
-            unresolved_full_loss_exposure_qty=Decimal(
-                total_unresolved_full_loss_exposure_qty
-            ),
-            unresolved_full_loss_exposure_cogs_cny=(
-                total_unresolved_full_loss_exposure_cogs
-            ),
-            unsettled_sales_after_fee_cny=total_unsettled_sales_after_fee,
-            full_loss_exposure_unsettled_sales_after_fee_cny=(
-                total_full_loss_exposure_sales_after_fee
-            ),
-            confirmed_unsettled_refund_after_fee_cny=(
-                total_confirmed_refund_after_fee
-            ),
-            confirmed_full_loss_exposure_refund_after_fee_cny=(
-                total_confirmed_full_loss_exposure_refund_after_fee
-            ),
-            unresolved_unsettled_qty=Decimal(total_unresolved_unsettled_qty),
-            unresolved_unsettled_sales_after_fee_cny=(
-                total_unresolved_sales_after_fee
-            ),
-            unresolved_unsettled_cogs_cny=total_unresolved_cogs,
-            settled_net_cny=sum(
-                (r["settled_net"] for r in scope_plain), Decimal(0)
-            ),
-            observed_full_loss_qty=Decimal(total_full_loss_qty),
-            observed_full_loss_cost_cny=money_total["return_loss"],
-            current_unsettled_net_cny=sum(
-                (r["unsettled_net"] for r in scope_plain), Decimal(0)
-            ),
-            current_cogs_kept_cny=total_cogs_kept,
-            cogs_total_cny=money_total["cogs_total"],
-            spend_cny=money_total["spend"],
-            ad_gmv_cny=money_total["gmv_ad"],
-            current_net_revenue_cny=money_total["net_revenue"],
-            current_net_profit_cny=money_total["net_profit"],
-        )
+    projection_totals_source = _projection_scope_aggregate(
+        cats=cats,
+        current_by_spu=current_by_spu,
+        full_loss_map=fl_map,
+        shop_fee=shop_fee,
+        vnd_per_cny=vnd_per_cny,
+        projection_map=projection_map,
+        projection_counts_row=projection_scope_counts_row,
     )
 
     # 行级和大盘共用同一个 v10 订单漏斗公式；大盘只替换为全局去重事实。
@@ -3386,129 +2958,8 @@ def _query_spu_roi(
         ad_system_max_ad_spend=ad_system_max_ad_spend,
         ad_system_remaining_ad_spend_capacity=(ad_system_remaining_ad_spend_capacity),
         ad_system_breakeven_roi_status=(FormulaStatus.ESTIMATED_KNOWN_COSTS),
-        projection_status=dashboard_projection.status,
-        projection_basis_order_count=total_projection_basis_order_count,
-        projection_basis_qty=total_projection_basis_qty,
-        projection_basis_sales=total_projection_basis_sales,
-        projection_basis_refund_amount=total_projection_basis_refund_amount,
-        projection_terminal_basis_order_count=(
-            total_projection_terminal_basis_order_count
-        ),
-        projection_terminal_basis_sales=total_projection_terminal_basis_sales,
-        projection_terminal_full_loss_sales=(
-            total_projection_terminal_full_loss_sales
-        ),
-        projection_terminal_full_loss_order_count=(
-            total_projection_terminal_full_loss_order_count
-        ),
-        projection_terminal_full_loss_qty=(
-            total_projection_terminal_full_loss_qty
-        ),
-        projection_completed_basis_order_count=(
-            total_projection_completed_basis_order_count
-        ),
-        projection_completed_full_loss_order_count=(
-            total_projection_completed_full_loss_order_count
-        ),
-        projection_full_loss_basis_order_count=(
-            total_projection_full_loss_basis_order_count
-        ),
-        projection_basis_full_loss_order_count=(
-            total_projection_basis_full_loss_order_count
-        ),
-        projection_basis_full_loss_qty=total_projection_basis_full_loss_qty,
-        projection_refund_amount_rate=dashboard_projection.refund_amount_rate,
-        pre_delivery_full_loss_rate=(
-            dashboard_projection.pre_delivery_full_loss_rate
-        ),
-        completed_full_loss_rate=dashboard_projection.completed_full_loss_rate,
-        delivered_full_loss_rate=dashboard_projection.delivered_full_loss_rate,
-        settled_full_loss_rate=dashboard_projection.settled_full_loss_rate,
-        projection_full_loss_qty_rate=dashboard_projection.full_loss_qty_rate,
-        unsettled_order_count=total_unsettled_order_count,
-        delivered_unsettled_order_count=max(
-            0,
-            total_unsettled_order_count
-            - total_full_loss_exposure_unsettled_order_count,
-        ),
-        full_loss_exposure_unsettled_order_count=(
-            total_full_loss_exposure_unsettled_order_count
-        ),
-        full_loss_exposure_unsettled_sales=(
-            total_full_loss_exposure_unsettled_sales
-        ),
-        confirmed_full_loss_exposure_order_count=(
-            total_confirmed_full_loss_exposure_order_count
-        ),
-        confirmed_full_loss_exposure_qty=(
-            total_confirmed_full_loss_exposure_qty
-        ),
-        confirmed_full_loss_exposure_refund_amount=(
-            total_confirmed_full_loss_exposure_refund_amount
-        ),
-        unresolved_unsettled_order_count=(
-            total_unresolved_unsettled_order_count
-        ),
-        unresolved_full_loss_exposure_order_count=(
-            total_unresolved_full_loss_exposure_order_count
-        ),
-        unresolved_unsettled_qty=total_unresolved_unsettled_qty,
-        unresolved_full_loss_exposure_qty=(
-            total_unresolved_full_loss_exposure_qty
-        ),
-        unresolved_unsettled_sales=total_unresolved_unsettled_sales,
-        confirmed_unsettled_refund_amount=(
-            total_confirmed_unsettled_refund_amount
-        ),
-        confirmed_unsettled_full_loss_order_count=(
-            total_confirmed_unsettled_full_loss_order_count
-        ),
-        confirmed_unsettled_full_loss_qty=(
-            total_confirmed_unsettled_full_loss_qty
-        ),
-        projected_future_refund_amount=(
-            dashboard_projection.projected_future_refund_amount_cny
-        ),
-        projected_terminal_refund_amount=(
-            dashboard_projection.projected_terminal_refund_amount_cny
-        ),
-        projected_future_full_loss_order_count=(
-            dashboard_projection.projected_future_full_loss_order_count
-        ),
-        projected_future_full_loss_qty=(
-            dashboard_projection.projected_future_full_loss_qty
-        ),
-        projected_terminal_full_loss_qty=(
-            dashboard_projection.projected_terminal_full_loss_qty
-        ),
-        projected_full_loss_cost=(
-            dashboard_projection.projected_full_loss_cost_cny
-        ),
-        projected_unsettled_net=(
-            dashboard_projection.projected_unsettled_net_cny
-        ),
-        projected_net_revenue=dashboard_projection.projected_net_revenue_cny,
-        projected_net_profit=dashboard_projection.projected_net_profit_cny,
-        projected_roi_real=dashboard_projection.projected_roi_real,
-        projected_roi_breakeven=(
-            dashboard_projection.projected_roi_breakeven
-        ),
-        projected_nc_prime=dashboard_projection.projected_nc_prime_cny,
-        projected_cogs_kept=dashboard_projection.projected_cogs_kept_cny,
-        projected_ad_gmv=dashboard_projection.projected_ad_gmv_cny,
-        projected_ad_system_actual_roi=(
-            dashboard_projection.projected_ad_system_actual_roi
-        ),
-        projected_ad_system_max_ad_spend=(
-            dashboard_projection.projected_ad_system_max_ad_spend_cny
-        ),
-        projected_ad_system_breakeven_roi=(
-            dashboard_projection.projected_ad_system_breakeven_roi
-        ),
+        **projection_totals_source,
     )
-
-    if projection_totals_source is not None:
-        totals = replace(totals, **projection_totals_source)
 
     # meta（§4 v7）
     window_row = sess.execute(_SQL_ROI_WINDOW).mappings().first()
@@ -3569,9 +3020,7 @@ def _query_spu_roi(
         else:
             meta_fee_source, meta_fee_rate = "mixed", FEE_RATE_BASELINE
 
-    projection_totals = projection_totals_source or {
-        field.name: getattr(totals, field.name) for field in fields(ProfitabilityTotals)
-    }
+    projection_totals = projection_totals_source
     projection_warnings = list(
         projection_warning_codes(
             projection_totals["projection_status"],
@@ -3639,6 +3088,23 @@ def _query_spu_roi(
 # ═════════════════════════════════════════════════════════════════════
 
 
+def _detail_order_gmvs(
+    sess: Session, order_pks: list[int], spu_pk: int
+) -> dict[int, tuple[Decimal, Decimal]]:
+    if not order_pks:
+        return {}
+    rows = sess.execute(
+        _SQL_DETAIL_ORDER_GMV, {"order_pks": order_pks, "spu_pk": spu_pk}
+    ).mappings()
+    return {
+        int(row["order_pk"]): (
+            Decimal(row["order_gmv_vnd"]),
+            Decimal(row["spu_gmv_vnd"]),
+        )
+        for row in rows
+    }
+
+
 def _detail_orders(
     sess: Session, spu_pk: int, w_start: date | None, w_end: date | None
 ) -> dict:
@@ -3665,6 +3131,25 @@ def _detail_orders(
     )
     truncated = len(rows) >= _ORDERS_MAX
     _, vnd_per_cny = _resolve_conversion_rates(sess)
+    order_gmvs = _detail_order_gmvs(
+        sess, sorted({int(row["order_pk"]) for row in rows}), spu_pk
+    )
+    shipment_pks = sorted(
+        {int(row["shipment_pk"]) for row in rows if row["shipment_pk"]}
+    )
+    tracking_by_shipment: dict[int, list[dict]] = {}
+    if shipment_pks:
+        tracking_rows = sess.execute(
+            _SQL_DETAIL_TRACKING, {"shipment_pks": shipment_pks}
+        ).mappings()
+        for tracking_row in tracking_rows:
+            tracking_by_shipment.setdefault(int(tracking_row["shipment_id"]), []).append(
+                {
+                    "action_code": _row_int(tracking_row["action_code"]),
+                    "desc": tracking_row["description"],
+                    "event_at": tracking_row["event_at"],
+                }
+            )
     orders: list[dict] = []
     for r in rows:
         order_pk = int(r["order_pk"])
@@ -3674,15 +3159,7 @@ def _detail_orders(
         )
         # share_ratio = line_gmv / order_gmv（占整单 GMV 比例）
         share_ratio: Decimal | None = None
-        # 取整单 GMV（仅这一行的 order_gmv）
-        order_gmv_row = sess.execute(
-            text(
-                "SELECT coalesce(sum(quantity * unit_price), 0) AS g "
-                "FROM commerce.sales_order_lines WHERE order_pk = :op"
-            ),
-            {"op": order_pk},
-        ).scalar()
-        order_gmv_vnd = Decimal(order_gmv_row or 0)
+        order_gmv_vnd, _ = order_gmvs.get(order_pk, (Decimal(0), Decimal(0)))
         if order_gmv_vnd > 0:
             share_ratio = Decimal(r["line_gmv_vnd"]) / order_gmv_vnd
         # settled_net_share = SETTLEMENT × share_ratio（未结算 → null）
@@ -3696,24 +3173,8 @@ def _detail_orders(
         # v9 全损旗标：完结退货(不论物流) ∨ 海外取消(CANCELLED∧38301)
         full_loss = has_completed_return_case or (is_cancelled and arrived_overseas)
 
-        # tracking 时间线（按 event_at 升序）
-        tracking: list[dict] = []
-        if r["shipment_pk"]:
-            tk_rows = (
-                sess.execute(
-                    _SQL_DETAIL_TRACKING, {"shipment_pk": int(r["shipment_pk"])}
-                )
-                .mappings()
-                .all()
-            )
-            for tk in tk_rows:
-                tracking.append(
-                    {
-                        "action_code": _row_int(tk["action_code"]),
-                        "desc": tk["description"],
-                        "event_at": tk["event_at"],
-                    }
-                )
+        # The batch preserves each shipment's event_at / id timeline order.
+        tracking = tracking_by_shipment.get(r["shipment_pk"], [])
 
         orders.append(
             {
@@ -3773,43 +3234,36 @@ def _detail_settlements(
         .all()
     )
     _, vnd_per_cny = _resolve_conversion_rates(sess)
+    order_gmvs = _detail_order_gmvs(
+        sess, sorted({int(row["order_pk"]) for row in rows}), spu_pk
+    )
+    txn_pks = sorted({int(row["txn_pk"]) for row in rows})
+    components_by_transaction: dict[int, list[dict]] = {}
+    if txn_pks:
+        component_rows = sess.execute(
+            _SQL_DETAIL_SETTLE_COMPONENTS, {"txn_pks": txn_pks}
+        ).mappings()
+        for component in component_rows:
+            components_by_transaction.setdefault(
+                int(component["transaction_id"]), []
+            ).append(
+                {
+                    "code": component["component_code"],
+                    "amount_vnd": Decimal(component["amount"]),
+                    "amount": Decimal(component["amount"]) / vnd_per_cny,
+                }
+            )
     settlements: list[dict] = []
     for r in rows:
         order_pk = int(r["order_pk"])
         # share_ratio（SPU 行占整单 GMV 比例）
-        order_gmv_row = sess.execute(
-            text(
-                "SELECT coalesce(sum(quantity * unit_price), 0) AS g "
-                "FROM commerce.sales_order_lines WHERE order_pk = :op"
-            ),
-            {"op": order_pk},
-        ).scalar()
-        order_gmv_vnd = Decimal(order_gmv_row or 0)
-        # 该 SPU 行 GMV
-        spu_line_gmv_row = sess.execute(
-            text(
-                "SELECT coalesce(sum(quantity * unit_price), 0) AS g "
-                "FROM commerce.sales_order_lines WHERE order_pk = :op AND spu_pk = :sp"
-            ),
-            {"op": order_pk, "sp": spu_pk},
-        ).scalar()
-        spu_line_gmv_vnd = Decimal(spu_line_gmv_row or 0)
+        order_gmv_vnd, spu_line_gmv_vnd = order_gmvs.get(
+            order_pk, (Decimal(0), Decimal(0))
+        )
         share_ratio: Decimal | None = None
         if order_gmv_vnd > 0:
             share_ratio = spu_line_gmv_vnd / order_gmv_vnd
-        comps = (
-            sess.execute(_SQL_DETAIL_SETTLE_COMPONENTS, {"txn_pk": int(r["txn_pk"])})
-            .mappings()
-            .all()
-        )
-        components = [
-            {
-                "code": c["component_code"],
-                "amount_vnd": Decimal(c["amount"]),
-                "amount": Decimal(c["amount"]) / vnd_per_cny,
-            }
-            for c in comps
-        ]
+        components = components_by_transaction.get(int(r["txn_pk"]), [])
         settlements.append(
             {
                 "order_id": r["order_id"],
