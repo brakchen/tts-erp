@@ -165,19 +165,10 @@ miaoshou.purchase_prices
 这是一次性导入历史结论。定时清洗改为以店铺匹配为前提：只要对应妙手店铺能映射数据库店铺，
 即使商品主档不存在也会写入独立采购价格表；店铺未匹配只保留为异常，不写入表。
 
-## 6. 定时化（2026-09-30）
+## 6. 定时同步
 
-一次性导入已固化为 `miaoshou.purchase_price_clean`（每小时）：
-
-1. 用 `token_service` 解密 `miaoshou_web` browser session；
-2. 完整分页并校验累计数等于 `total`；
-3. 变化后的原始采购单去重写 `miaoshou.purchase_order_raw_records`；
-4. 复用本文 §4 的组序配对、数量加权、状态排除和最新事实规则；
-5. 清洗结果写独立表 `miaoshou.purchase_prices`，以 `(miaoshou_shop_id, spu_id)` 区分；
-6. 妙手店铺可唯一映射数据库店铺时写入 `shop_pk`；商品主档不存在不阻断；
-7. 店铺未匹配/歧义、组数不一致、最新价冲突写 `miaoshou.sync_issues`，不猜测，也不触碰人工采购价表。
-
-首次配置和 migration 命令见 `docs/reference/miaoshou-platform.md` §7。
+每小时运行的 `miaoshou.purchase_price_clean` 使用妙手开放平台采购记录列表。
+签名鉴权、状态筛选和写入条件见[妙手开放平台](miaoshou-platform.md#7-采购价同步)。
 
 ## 7. 安全与复核要求
 
