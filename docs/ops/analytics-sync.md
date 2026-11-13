@@ -33,7 +33,7 @@ curl --fail-with-body --get "$BASE_URL/v2/analytics/sync/coverage" \
 
 - coverage 以天级范围和计划为维度分页返回，按 `pagination.hasMore` 继续翻页。
 - POST dump 的 JSON 结构、允许的 endpoint 和错误语义见 [广告域契约](../api/dumps-data-contract.md#6-广告消耗ad-域)。
-- API 在 207 的 `tts-erp.service` 中处理写入。用请求 ID 查 `/opt/tts-erp/logs/{stdout,stderr}.log`，
+- API 在生产机的 `tts-erp.service` 中处理写入。用请求 ID 查 `/opt/tts-erp/logs/{stdout,stderr}.log`，
   服务和日志轮转见 [部署手册](tts-erp.md#运行状态与日志)。
 - 源码入口为 [路由](../../tts_erp_v2/api/v2/analytics.py) 和
   [插件广告持久化](../../tts_erp_v2/plugin/ads/repository.py)。测试通过隔离入口执行，

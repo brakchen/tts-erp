@@ -4,9 +4,11 @@
 
 | 位置 | 生产职责 |
 | --- | --- |
-| 207（`207.57.126.199`，SSH 别名 `tts-erp-prod`） | Nginx 接收 `https://chen.daqiangplatform.com/tts`，保留 `/tts` 前缀转给本机 `127.0.0.1:9878`。系统级 `tts-erp.service` 从 `/opt/tts-erp` 运行。系统级 `tts-erp-sync.service` 从 `/opt/tts-erp-sync/releases/<sha>` 运行。Nginx、frps、API、Sync Worker 均配置开机自启。 |
-| HP desk（`schan@192.168.1.2`，SSH 别名 `hp-desk`） | 运行 PostgreSQL、MinIO、frpc 和 PostgreSQL 备份。207 经 frp 的 `127.0.0.1:6009` 和 `127.0.0.1:6005` 访问存储；`/minio/` 仍经 `:6008` 转到 HP desk 网关。 |
+| 生产机（`85.189.59.112`，SSH 别名 `tts-erp-prod`；原 IP `207.57.126.199`，因供应商原因更换） | Nginx 接收 `https://chen.daqiangplatform.com/tts`，保留 `/tts` 前缀转给本机 `127.0.0.1:9878`。系统级 `tts-erp.service` 从 `/opt/tts-erp` 运行。系统级 `tts-erp-sync.service` 从 `/opt/tts-erp-sync/releases/<sha>` 运行。Nginx、frps、API、Sync Worker 均配置开机自启。 |
+| HP desk（`schan@192.168.1.2`，SSH 别名 `hp-desk`） | 运行 PostgreSQL、MinIO、frpc 和 PostgreSQL 备份。生产机经 frp 的 `127.0.0.1:6009` 和 `127.0.0.1:6005` 访问存储；`/minio/` 仍经 `:6008` 转到 HP desk 网关。 |
 | 开发机 | 目前无专用测试机。手动验证时启动绑定 `127.0.0.1` 的临时实例。自动化测试使用 [隔离测试入口](../guides/agent-testing.md)。 |
+
+发布前请确认本机和 HP desk 的 SSH 配置里，别名 	ts-erp-prod 的 HostName 已指向当前生产 IP 85.189.59.112。
 
 HP desk 上的旧 API、Sync Worker、Publish Worker 均已停止并关闭开机自启。
 旧 Sync Worker 的单元、代码和配置保留供回退。旧插件地址 `http://207.57.126.199:6007`
@@ -18,7 +20,7 @@ HP desk 上的旧 API、Sync Worker、Publish Worker 均已停止并关闭开机
 ## 发布与回退
 
 生产发布、服务重启和迁移由人工执行。执行前核对目标主机、当前运行版本、数据库 schema
-及依赖兼容性。API 和 Worker 使用独立发布目录及 systemd 单元，共用 207 的
+及依赖兼容性。API 和 Worker 使用独立发布目录及 systemd 单元，共用生产机的
 `/opt/tts-erp/.env` 和 Python 虚拟环境。
 
 - 仅页面或 API 变化时，发布 API。仅同步实现变化时，发布 Sync Worker。
@@ -49,7 +51,7 @@ bash scripts/prod_sync_deploy.sh --verify-only
 - **Sync Worker** 由 [prod_sync_deploy.sh](../../scripts/prod_sync_deploy.sh) 从已提交的
   Git 对象打包到 `/opt/tts-erp-sync/releases/<sha>`。它预检 job 导入和 PostgreSQL
   连接，使用 systemd drop-in 切换工作目录，只重启 Worker，并检查本次启动的调度器日志。
-  发布启动失败时尝试恢复此前配置。该脚本需要 207 已有系统级 `tts-erp-sync.service`。
+  发布启动失败时尝试恢复此前配置。该脚本需要生产机已有系统级 `tts-erp-sync.service`。
 - 两个发布入口均保留生产确认，人工确认后才允许用 `--yes` 运行非交互发布。
   数据库迁移按 [生产安全规则](../guides/agent-safety.md) 单独处理。
 
@@ -58,13 +60,13 @@ bash scripts/prod_deploy.sh "$previous_api_sha"
 bash scripts/prod_sync_deploy.sh --rollback "$previous_worker_sha"
 ```
 
-Worker 回退使用 207 上保留的完整 SHA 目录。若要退回 HP desk，先在 207
+Worker 回退使用生产机上保留的完整 SHA 目录。若要退回 HP desk，先在生产机
 停用 Worker 并确认进程退出，再在 HP desk 执行
-`systemctl --user start tts-erp-sync.service`。恢复到 207 前同样先停旧实例，保证任一时刻只有一个调度实例。
+`systemctl --user start tts-erp-sync.service`。恢复到生产机前同样先停旧实例，保证任一时刻只有一个调度实例。
 
 ## 运行状态与日志
 
-在 207 执行：
+在生产机执行：
 
 ```bash
 systemctl is-enabled tts-erp.service tts-erp-sync.service nginx.service frps.service
@@ -89,9 +91,9 @@ systemctl list-timers '*logrotate*'
 
 ### 生产 MinIO 预签名
 
-207 的 `MINIO_ENDPOINT=127.0.0.1:6005` 用于应用经 frp 访问 MinIO。
+生产机的 `MINIO_ENDPOINT=127.0.0.1:6005` 用于应用经 frp 访问 MinIO。
 浏览器经 `MINIO_PUBLIC_HOST` 的 `/minio` 路径访问时，HP desk 网关向 MinIO
-转发 `Host: 127.0.0.1:9000`。207 的 `MINIO_PRESIGN_ENDPOINT=127.0.0.1:9000`
+转发 `Host: 127.0.0.1:9000`。生产机的 `MINIO_PRESIGN_ENDPOINT=127.0.0.1:9000`
 用于匹配该请求头。改动后在资产管理中核对上传、播放和拖动进度。
 
 ## 本地验证
@@ -108,8 +110,8 @@ systemctl list-timers '*logrotate*'
 | TikTok `105005 Access denied` | 在 Partner Center 检查 app scope 和店铺授权。 |
 | TikTok `36009004 PageSize is required` | 核对 Request Body 字段和 [分页实测](../reference/tiktok-open-api-pagination.md)。 |
 | `?shop_id=` 没有过滤 | 从 `GET /v2/commerce/channel-accounts` 查内部 `shop_pk`。 |
-| PostgreSQL 连接失败 | 先确认 HP desk 的 PostgreSQL 容器和 frpc，再核对 207 的 frps 与数据库隧道。 |
-| 同步数据未更新 | 查看 207 的 Worker journal 和 `integration.sync_jobs` 的近期结果。 |
+| PostgreSQL 连接失败 | 先确认 HP desk 的 PostgreSQL 容器和 frpc，再核对生产机的 frps 与数据库隧道。 |
+| 同步数据未更新 | 查看生产机的 Worker journal 和 `integration.sync_jobs` 的近期结果。 |
 
 当前端点见 [外部 API](../api/external-api.md)，数据库结构见 [schema 索引](../schema/README.md)。
 历史切流材料见 [文档归档](../archive/README.md)。

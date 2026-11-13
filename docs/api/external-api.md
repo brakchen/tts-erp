@@ -12,7 +12,7 @@ this document explains semantics, auth, and conventions.
 ## TL;DR — quick reference for agents
 
 Use `https://chen.daqiangplatform.com/tts` as the production base URL. Nginx
-preserves the `/tts` prefix when forwarding to `127.0.0.1:9878` on 207.
+preserves the `/tts` prefix when forwarding to `127.0.0.1:9878` on the production host (`85.189.59.112`).
 For a developer's local instance, use its configured loopback base URL.
 See the [deployment runbook](../ops/tts-erp.md#部署拓扑) for environment details.
 

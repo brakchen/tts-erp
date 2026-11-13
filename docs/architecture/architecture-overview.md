@@ -25,7 +25,7 @@ MinIO 和 Fernet。生产 API 与 Sync Worker 由系统级 systemd 单元运行�
 
 ### 2.2 访问方式
 
-- 生产公网入口为 `https://chen.daqiangplatform.com/tts`。207 的 Nginx 将 `/tts/*`
+- 生产公网入口为 `https://chen.daqiangplatform.com/tts`。生产机的 Nginx 将 `/tts/*`
   转给本机 `127.0.0.1:9878`，`proxy_pass` 保留完整前缀。
 - `TTS_ERP_EXTERNAL_PREFIX` 在构建 FastAPI 应用时进入 `root_path`。鉴权和路由使用统一归一化结果。
 - 开发机在回环地址上运行验证实例。部署与本地启动见 [部署手册](../ops/tts-erp.md)。

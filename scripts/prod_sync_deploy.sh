@@ -63,8 +63,8 @@ if [ "$mode" != verify-only ]; then
   [ "$dry_run" = 0 ] || exit 0
   if [ "$assume_yes" = 0 ]; then
     [ -t 0 ] || dl_die "非交互执行必须显式传 --yes"
-    read -r -p "请输入 207.57.126.199 以确认: " answer
-    [ "$answer" = 207.57.126.199 ] || dl_die "确认字符串不匹配，已中止"
+    read -r -p "请输入 85.189.59.112 以确认: " answer
+    [ "$answer" = 85.189.59.112 ] || dl_die "确认字符串不匹配，已中止"
   fi
 fi
 

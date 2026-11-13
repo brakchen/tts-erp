@@ -7,7 +7,7 @@
 > 本次只修改产品方案，不修改现有页面名称、访问地址或应用实现。
 > [技术设计](02-technical-design.md)、[实施计划](03-implementation-plan.md)、[测试计划](04-test-plan-and-results.md)已按本版（PRD v3，2026-10-24 修订）重写并对齐：旧阈值、严重程度、历史确认设计不再适用于这三份文件；[历史回测](02a-backtest-report.md)是旧 evaluator 的历史证据，不是产品契约。
 > 主线实现已切换到两期对比，并撤销旧阈值 evaluator 的 scheduler 注册。迁移时核实的
-> 生产 Worker `723779dd` 仍注册旧任务，实际停写取决于 207 的运行版本。旧快照表、
+> 生产 Worker `723779dd` 仍注册旧任务，实际停写取决于生产机的运行版本。旧快照表、
 > evaluator 代码和配置仍保留，后续数据处置另行确认。见 [部署手册](../ops/tts-erp.md)。
 
 ## 1. 决策摘要

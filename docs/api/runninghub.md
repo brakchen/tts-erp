@@ -8,7 +8,7 @@
 2. 在服务端私有环境中配置 [.env.example](../../.env.example) 的 RunningHub 项、已有 PostgreSQL 和 MinIO 配置。Key 不经过前端。`credentialRef` 默认 `env:RUNNINGHUB_API_KEY`，也支持 `env:RUNNINGHUB_<NAME>_API_KEY` 或 `integration:<external_account_id>`；后者通过既有 token_service 加载 provider=runninghub 的 access_token。不要修改或查询旧 oauth_tokens。
 3. 安装 FFmpeg/FFprobe（须支持 libx264、AAC），确认 Worker 可执行二者；必要时填写绝对路径。准备私有临时目录和磁盘空间。原素材快照、raw、final 存入独立 MinIO bucket `tts-erp-runninghub`。
 4. admin 检查账户、读取并校验官方完整工作流，或离线导入完整 API 图。启用的是不可变版本，旧批次保持原版本。当前只接受已映射的 `2111762608670990337`，plus=48GB 显存；不推断 GPU 型号，不开放任意帧率。
-5. 人工安装/启动 [Worker unit](../../scripts/systemd/tts-erp-runninghub.service)，按实际部署覆盖 WorkingDirectory、EnvironmentFile、ExecStart；207 生产代码在 `/opt/tts-erp`，不能原样套用 HP desk 的用户目录。Worker 入口 `python -m tts_erp_v2.runninghub.worker`，`--once` 处理一个阶段后退出。API 不在 lifespan 启动队列，也不改变中间件顺序。
+5. 人工安装/启动 [Worker unit](../../scripts/systemd/tts-erp-runninghub.service)，按实际部署覆盖 WorkingDirectory、EnvironmentFile、ExecStart；生产代码在 `/opt/tts-erp`，不能原样套用 HP desk 的用户目录。Worker 入口 `python -m tts_erp_v2.runninghub.worker`，`--once` 处理一个阶段后退出。API 不在 lifespan 启动队列，也不改变中间件顺序。
 
 本次开发不执行生产迁移、生产服务重启或付费联调。真实模式只能由操作者创建 live 批次，再提交 `confirmPaid=true` 主动启动。
 

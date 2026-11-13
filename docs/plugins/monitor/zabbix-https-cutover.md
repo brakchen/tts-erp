@@ -10,7 +10,7 @@ git fetch origin master
 bash scripts/prod_deploy.sh b263acfa1cdd1b79c63dc6db561826b4d22dec0f
 ```
 
-生产脚本交互式要求输入目标主机 IP `207.57.126.199`。发布成功后，用以下命令发布 HP Desk 并重启同步 worker。当前 HP Desk release 目录中的 `logs` 是指向主仓日志目录的符号链接。下面的 Git 排除设置只作用于此部署进程，脚本仍会因其他未跟踪或已修改文件而停止。
+生产脚本交互式要求输入目标主机 IP `85.189.59.112`。发布成功后，用以下命令发布 HP Desk 并重启同步 worker。当前 HP Desk release 目录中的 `logs` 是指向主仓日志目录的符号链接。下面的 Git 排除设置只作用于此部署进程，脚本仍会因其他未跟踪或已修改文件而停止。
 
 ```bash
 (
@@ -35,7 +35,7 @@ bash scripts/prod_deploy.sh b263acfa1cdd1b79c63dc6db561826b4d22dec0f
 
 ## Zabbix 上报入口
 
-ERP 完成退役后，在 207 的现有 TLS 虚拟主机配置精确路径 `https://chen.daqiangplatform.com/monitor-zabbix/api_jsonrpc.php`。入口只接受当前 Monitor 的 `history.push` 批次，Zabbix 继续校验 Token 和店铺授权。Nginx 使用已有的 FRP 入口 `127.0.0.1:6002` 转发。通过 Debian 软件包 `libnginx-mod-http-js` 提供 njs 模块，并确认模块已加载。
+ERP 完成退役后，在生产机的现有 TLS 虚拟主机配置精确路径 `https://chen.daqiangplatform.com/monitor-zabbix/api_jsonrpc.php`。入口只接受当前 Monitor 的 `history.push` 批次，Zabbix 继续校验 Token 和店铺授权。Nginx 使用已有的 FRP 入口 `127.0.0.1:6002` 转发。通过 Debian 软件包 `libnginx-mod-http-js` 提供 njs 模块，并确认模块已加载。
 
 将下段加入 `http` 上下文。
 
@@ -127,6 +127,6 @@ export default { push };
 
 由网关维护者执行 `nginx -t`，通过后 reload。验证无 Token 返回 401、GET 返回 405、使用 Token 的非 `history.push` 请求返回 400，内部路径无法直接访问。用受限 Token 上报一个测试店铺，确认 Zabbix 返回逐项成功，再按 [Zabbix 接入指南](zabbix-monitor.md) 配置主机与飞书告警。回退时移除这两处配置引用，执行 `nginx -t` 后 reload。
 
-2026-11-05 在隔离容器中用 Debian 13、Nginx 1.26.3 和 njs 0.8.9 验证了配置语法、TLS、路由与大小限制、仅转发预期请求及保留上游错误状态。另从 207 的回环 FRP 端口只读确认上游 Zabbix 版本为 7.4.15。上线仍需用正式域名和受限 Token 验证。
+2026-11-05 在隔离容器中用 Debian 13、Nginx 1.26.3 和 njs 0.8.9 验证了配置语法、TLS、路由与大小限制、仅转发预期请求及保留上游错误状态。另从当时生产机的回环 FRP 端口只读确认上游 Zabbix 版本为 7.4.15。上线仍需用正式域名和受限 Token 验证。
 
 参考 [NGINX njs HTTP 模块](https://nginx.org/en/docs/http/ngx_http_js_module.html)、[njs 请求对象](https://nginx.org/en/docs/njs/reference.html) 和 [Debian njs 模块包](https://packages.debian.org/trixie/libnginx-mod-http-js)。

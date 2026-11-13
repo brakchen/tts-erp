@@ -49,7 +49,7 @@ bash scripts/import_prod_to_test.sh --exclude-credentials --yes
 
 ## 3. 服务管理
 
-在 207 上查看系统级单元：
+在生产机上查看系统级单元：
 
 ```bash
 systemctl status tts-erp.service tts-erp-sync.service
@@ -93,7 +93,7 @@ bash prod-switch/postswitch-smoke.sh
 
 ## 6. 监控和日志
 
-生产 API 业务日志在 207 的 `/opt/tts-erp/logs/{stdout,stderr}.log`。
+生产 API 业务日志在生产机的 `/opt/tts-erp/logs/{stdout,stderr}.log`。
 Worker 日志使用 `journalctl -u tts-erp-sync.service`。
 轮转配置和版本检查见 [部署手册](../ops/tts-erp.md#运行状态与日志)。
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/deploy_remote_apply.sh — prod_deploy.sh 在目标机（207）上执行的应用步骤。
+# scripts/deploy_remote_apply.sh — prod_deploy.sh 在目标生产机上执行的应用步骤。
 # 用法：ssh <host> bash -s -- <commit> <target_dir> < scripts/deploy_remote_apply.sh
 # 前置：目标目录下已存在 .deploy-staging/（完整新代码树的 tar 解包结果）。
 # 行为：

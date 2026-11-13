@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# scripts/prod_deploy.sh — 部署 207 的生产 ERP API。Sync Worker 使用 prod_sync_deploy.sh。
+# scripts/prod_deploy.sh — 部署生产 ERP API。Sync Worker 使用 prod_sync_deploy.sh。
 #
 # 部署内容：
 #   1. git fetch 后在临时 worktree 按指定 commit 构建前端产物；
-#   2. tar 管道同步代码与前端产物到 207:/opt/tts-erp（代码目录 tts_erp_v2 原子替换，
+#   2. tar 管道同步代码与前端产物到生产机:/opt/tts-erp（代码目录 tts_erp_v2 原子替换，
 #      保留 tts_erp_v2.prev 作回滚副本；.env / .venv / logs 永不在包内）；
 #   3. systemctl restart tts-erp.service（系统级服务）；
 #   4. 本机+公网只读校验：healthz / 登录页 / releaseId。
@@ -11,14 +11,14 @@
 # 用法：
 #   bash scripts/prod_deploy.sh [选项] [ref]
 #     ref           要部署的 git 引用，默认 origin/master（部署前自动 fetch）
-#     --yes         跳过交互确认（默认需逐字输入 207.57.126.199）
+#     --yes         跳过交互确认（默认需逐字输入 85.189.59.112）
 #     --dry-run     只打印计划，不做任何改动
-#     --verify-only 只做部署后的只读校验（207 本机 + 公网）
-#     --sync-deps   pyproject 变化时在 207 执行 pip install -e .（默认只警告）
+#     --verify-only 只做部署后的只读校验（生产机本机 + 公网）
+#     --sync-deps   pyproject 变化时在生产机执行 pip install -e .（默认只警告）
 #     -h, --help    显示帮助
 #
 # 边界：不执行数据库迁移（生产迁移一律人工操作，检测到新迁移只警告）；
-# 不覆盖 207 的 .env / .venv / logs；不在输出中打印任何密钥。
+# 不覆盖生产机的 .env / .venv / logs；不在输出中打印任何密钥。
 set -euo pipefail
 
 DL_REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,7 +29,7 @@ PROD_HOST="${TTS_ERP_PROD_HOST:-tts-erp-prod}"
 PROD_DIR="${TTS_ERP_PROD_DIR:-/opt/tts-erp}"
 PUBLIC_ORIGIN="${TTS_ERP_PROD_PUBLIC_ORIGIN:-https://chen.daqiangplatform.com}"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15)
-CONFIRM_WORD="207.57.126.199"
+CONFIRM_WORD="85.189.59.112"
 
 REF="origin/master"
 DRY_RUN=0
@@ -52,7 +52,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# 207 本机只读校验（经 ssh 在 207 上 curl 本机服务）
+# 生产机本机只读校验（经 ssh 在生产机上 curl 本机服务）
 remote_verify() {  # $1=期望 releaseId（可空）
   local expect="$1" port
   port="$(ssh "${SSH_OPTS[@]}" "$PROD_HOST" \
@@ -63,16 +63,16 @@ remote_verify() {  # $1=期望 releaseId（可空）
 set -u
 rc=0
 body="$(curl -fsS --max-time 15 "http://127.0.0.1:$PORT/healthz" 2>/dev/null)" \
-  && echo "[207] 健康检查通过：$body" || { echo "[207][警告] 健康检查失败"; rc=1; }
+  && echo "[prod] 健康检查通过：$body" || { echo "[prod][警告] 健康检查失败"; rc=1; }
 rel="$(curl -fsS --max-time 15 "http://127.0.0.1:$PORT/tts/static/frontend/release.json" 2>/dev/null \
   | python3 -c 'import json,sys; print(json.load(sys.stdin).get("releaseId",""))' 2>/dev/null)"
 if [ -n "$EXPECT" ]; then
-  [ "$rel" = "$EXPECT" ] && echo "[207] 前端版本一致：$rel" \
-    || { echo "[207][警告] 前端版本不符：期望 $EXPECT，实际 ${rel:-未知}"; rc=1; }
+  [ "$rel" = "$EXPECT" ] && echo "[prod] 前端版本一致：$rel" \
+    || { echo "[prod][警告] 前端版本不符：期望 $EXPECT，实际 ${rel:-未知}"; rc=1; }
 elif [ -n "$rel" ]; then
-  echo "[207] 当前前端版本：$rel"
+  echo "[prod] 当前前端版本：$rel"
 else
-  echo "[207][警告] 无法读取前端版本" >&2
+  echo "[prod][警告] 无法读取前端版本" >&2
   rc=1
 fi
 exit "$rc"
@@ -80,7 +80,7 @@ REMOTE_VERIFY
 }
 
 if [ "$VERIFY_ONLY" = "1" ]; then
-  dl_log "207 已部署 commit：$(ssh "${SSH_OPTS[@]}" "$PROD_HOST" "cat '$PROD_DIR/.deployed-commit' 2>/dev/null" || echo 未知)"
+  dl_log "生产机已部署 commit：$(ssh "${SSH_OPTS[@]}" "$PROD_HOST" "cat '$PROD_DIR/.deployed-commit' 2>/dev/null" || echo 未知)"
   remote_verify ""
   dl_verify "公网" "$PUBLIC_ORIGIN" "" /tts/healthz
   exit $?
@@ -105,7 +105,7 @@ if [ -n "$OLD_COMMIT" ] && git -C "$DL_REPO_ROOT" cat-file -e "$OLD_COMMIT" 2>/d
   git -C "$DL_REPO_ROOT" diff --name-only "$OLD_COMMIT" "$COMMIT" -- \
     pyproject.toml uv.lock requirements.txt 2>/dev/null | grep -q . && DEPS_CHANGED=1 || true
 else
-  dl_warn "207 上无已知部署基线（.deployed-commit），跳过迁移/依赖差异检查"
+  dl_warn "生产机上无已知部署基线（.deployed-commit），跳过迁移/依赖差异检查"
   DEPS_CHANGED=0
 fi
 
@@ -120,7 +120,7 @@ if [ "$DRY_RUN" = "1" ]; then
   1. 临时 worktree 构建前端产物
   2. tar 管道同步到 $PROD_DIR（tts_erp_v2 原子替换，留 .prev 回滚副本）
   3. systemctl restart tts-erp.service
-  4. 207 本机 + 公网 $PUBLIC_ORIGIN 只读校验
+  4. 生产机本机 + 公网 $PUBLIC_ORIGIN 只读校验
   不执行：数据库迁移、.env/.venv/logs 修改
 EOF
   exit 0
@@ -142,42 +142,42 @@ RELEASE_ID="$(dl_build_frontend "$WT")"
 dl_log "同步代码与前端产物到 $PROD_HOST:$PROD_DIR …"
 dl_tar_stream "$WT" | ssh "${SSH_OPTS[@]}" "$PROD_HOST" \
   "set -euo pipefail; cd '$PROD_DIR'; rm -rf .deploy-staging; mkdir .deploy-staging; tar -xf - -C .deploy-staging" \
-  || dl_die "传输到 207 失败"
+  || dl_die "传输到生产机失败"
 
 ssh "${SSH_OPTS[@]}" "$PROD_HOST" bash -s -- "$COMMIT" "$PROD_DIR" \
   < "$DL_REPO_ROOT/scripts/deploy_remote_apply.sh" \
-  || dl_die "207 端替换失败（若代码目录损坏，可用 $PROD_DIR/tts_erp_v2.prev 人工回滚）"
+  || dl_die "生产端替换失败（若代码目录损坏，可用 $PROD_DIR/tts_erp_v2.prev 人工回滚）"
 
 if [ "${DEPS_CHANGED:-0}" = "1" ]; then
   if [ "$SYNC_DEPS" = "1" ]; then
-    dl_log "同步 207 Python 依赖（pip install -e）…"
+    dl_log "同步生产机 Python 依赖（pip install -e）…"
     ssh "${SSH_OPTS[@]}" "$PROD_HOST" "'$PROD_DIR/.venv/bin/pip' install -e '$PROD_DIR'" >&2 \
-      || dl_die "207 依赖安装失败"
+      || dl_die "生产机依赖安装失败"
   else
     dl_warn "pyproject/依赖清单有变化；如需安装新依赖请加 --sync-deps 重跑"
   fi
 fi
 
-dl_log "重启 207 tts-erp.service 并等待就绪 …"
+dl_log "重启生产 tts-erp.service 并等待就绪 …"
 ssh "${SSH_OPTS[@]}" "$PROD_HOST" "PROD_DIR='$PROD_DIR' bash -s" <<'REMOTE_RESTART' \
-  || dl_die "207 服务重启后未就绪，请查 ssh $PROD_HOST journalctl -u tts-erp -n 50"
+  || dl_die "生产服务重启后未就绪，请查 ssh $PROD_HOST journalctl -u tts-erp -n 50"
 set -u
 cd "$PROD_DIR"
 port="$(grep -E '^TTS_ERP_PORT=' .env 2>/dev/null | cut -d= -f2)"; port="${port:-9878}"
 systemctl restart tts-erp.service
 sleep 2
-systemctl is-active tts-erp.service | grep -q '^active$' || { echo "[207][错误] 重启后未 active" >&2; exit 1; }
+systemctl is-active tts-erp.service | grep -q '^active$' || { echo "[prod][错误] 重启后未 active" >&2; exit 1; }
 # uvicorn 启动需要时间，持续探活 60 秒、每 10 秒一次
 waited=0
 while [ "$waited" -lt 60 ]; do
-  curl -fsS --max-time 5 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1 && { echo "[207] 服务已就绪（等待 ${waited}s）"; exit 0; }
+  curl -fsS --max-time 5 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1 && { echo "[prod] 服务已就绪（等待 ${waited}s）"; exit 0; }
   sleep 10; waited=$((waited + 10))
 done
-echo "[207][错误] 60 秒内 healthz 未就绪" >&2
+echo "[prod][错误] 60 秒内 healthz 未就绪" >&2
 exit 1
 REMOTE_RESTART
 
-remote_verify "$RELEASE_ID" || dl_die "207 本机校验未通过"
+remote_verify "$RELEASE_ID" || dl_die "生产机本机校验未通过"
 dl_verify "公网" "$PUBLIC_ORIGIN" "$RELEASE_ID" /tts/healthz || dl_die "公网校验未通过（nginx 回源或缓存问题）"
 
 dl_log "完成：生产 $CONFIRM_WORD 已部署 ${COMMIT:0:12}，前端 $RELEASE_ID"
