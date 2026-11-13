@@ -134,11 +134,19 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0047_miaoshou_purchase_pric
   `POST /open/v1/order/purchase_order/purchase_record/get_detail`。两者都定义了顶层采购商品的
   `purchaseItems[].sourceUnitPrice` / `sourceQuantity`，以及关联包裹的
   `platformOrderSn` / `shopName` / `purchaseItems[].platformItemId`。
-- 现有应用的签名实测中，无筛选列表、按已知采购单号查询列表和该单详情都返回
-  `appNoPermission`。开通「包裹 → 采购记录」的列表和详情权限后，用同一真实采购单核对采购单价、
-  币种、成交状态，以及货源商品到 TikTok 店铺和 SPU 的对应关系。若响应缺少店铺 ID，可核对
-  `platformOrderSn` 和 `platformItemId` 能否在已同步包裹中唯一定位店铺。文档未定义货源行到
-  平台商品行的配对键，实际响应和多商品采购单的对账是切换前的必要证据。
+- 2026-11-13 权限生效后，现有应用用签名成功查询列表和详情。按日期筛选后与 100 张历史
+  采购单的 Cookie 存档逐单核对，采购行的标题、规格、单价和数量，以及关联的 TikTok 订单
+  与 SPU 全部一致。180 组 `platformOrderSn` 和 `platformItemId` 均在已同步的
+  `miaoshou.packages` 与 `miaoshou.package_items` 中唯一定位到店铺。
+- 列表和详情实测都省略了采购状态、币种、`shopId`、`sourceItemId` 和 `sourceSkuId`。
+  已取消的采购单仍会出现在无状态筛选的列表里，且可能保留实付金额和有效关联。
+  一段完整日期范围内，`finished` 与 `cancel` 无共同单号，但与 `has_send`、
+  `wait_send` 共享部分单号，对应响应内容也不同。无筛选结果中有同一单号对应不同采购行和
+  关联包裹的情况，因此不能仅按采购单号去重或以正金额推断成交。
+- 对 857 张历史采购单复核，853 张货源组数与 SPU 数相等，用货源标题在单内分组的结果
+  与存档中的 `sourceItemId` 分组一致，其中 97 张含多个 SPU。这个核对覆盖历史样本，
+  官方接口仍缺少货源行到 TikTok 商品行的直接关联键。整批切换前需要明确成交记录筛选、
+  同单号多记录的标识，以及多商品采购单的配对依据。
 
 ## 8. 测试
 
