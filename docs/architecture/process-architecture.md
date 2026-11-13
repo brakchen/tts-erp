@@ -8,7 +8,7 @@
 - **生产 API `tts-erp.service`** 在生产机（`85.189.59.112`）使用系统级 systemd，从 `/opt/tts-erp` 运行。
 - **生产 Sync Worker `tts-erp-sync.service`** 在生产机使用独立系统级单元，从
   `/opt/tts-erp-sync/releases/<sha>` 运行 APScheduler。它与 API 共享数据存储，分别发布和回退。
-- **HP desk** 运行生产 PostgreSQL、MinIO、frpc 和备份定时器。旧 API 与视频发布 Worker 已停止。
+- **HP desk** 运行生产 PostgreSQL、MinIO、frpc 和备份定时器。旧 API 与视频发布 Worker（`tts-erp-publish.service`）已停止。
   旧 Sync Worker 保留代码、配置和单元，供回退时手动启动。
 - **RunningHub Worker** 由 `tts_erp_v2.runninghub.worker` 提供，按实际部署独立安装。
   它复用 PostgreSQL 和 MinIO，按凭据限制在途任务，优先恢复已受理的任务。见 [RunningHub](../api/runninghub.md)。
