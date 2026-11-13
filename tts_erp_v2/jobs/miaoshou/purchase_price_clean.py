@@ -8,6 +8,7 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from typing import Any, Protocol
 from urllib.error import URLError
 from zoneinfo import ZoneInfo
@@ -101,7 +102,7 @@ def _fetch_all_pages(
         }
         try:
             payload = call_with_retry(
-                lambda: client._call_erp(path=SEARCH_PATH, body=body),
+                partial(client._call_erp, path=SEARCH_PATH, body=body),
                 is_retryable=_retryable,
                 max_retries=max_retries,
             )
@@ -581,7 +582,8 @@ def _upsert_purchase_price(
             or_(
                 MiaoshouPurchasePrice.credential_id == credential_id,
                 and_(
-                    MiaoshouPurchasePrice.calculation_version == _PREVIOUS_CALCULATION_VERSION,
+                    MiaoshouPurchasePrice.calculation_version
+                    == _PREVIOUS_CALCULATION_VERSION,
                     Credentials.provider == "miaoshou_web",
                     MiaoshouPurchasePrice.shop_pk == shop_pk,
                 ),

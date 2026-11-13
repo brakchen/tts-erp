@@ -265,25 +265,39 @@ def test_missing_credentials_skips_without_network(db_session) -> None:
 
 
 def test_api_updates_the_existing_price_without_creating_a_duplicate(
-    db_session, fernet_key: str,
+    db_session,
+    fernet_key: str,
 ) -> None:
     credential = _seed_credential(db_session)
     _seed_package(db_session, credential.id)
     shop_pk = _seed_store_match(db_session)
     previous = upsert_credentials(
-        db_session, provider="miaoshou_web", external_account_id="TEST_RETIRED_SOURCE",
+        db_session,
+        provider="miaoshou_web",
+        external_account_id="TEST_RETIRED_SOURCE",
         plaintext_access_token="TEST_RETIRED",
     )
-    db_session.add(MiaoshouPurchasePrice(
-        credential_id=previous.id, miaoshou_shop_id="TEST_MS_SHOP", shop_pk=shop_pk,
-        spu_id="TEST_SPU", unit_cost=Decimal("10"), currency="CNY",
-        source_purchase_order_sn="TEST_OLD", source_item_id="TEST_OLD_ITEM",
-        resolution_status="matched_shop", evidence={},
-    ))
+    db_session.add(
+        MiaoshouPurchasePrice(
+            credential_id=previous.id,
+            miaoshou_shop_id="TEST_MS_SHOP",
+            shop_pk=shop_pk,
+            spu_id="TEST_SPU",
+            unit_cost=Decimal(10),
+            currency="CNY",
+            source_purchase_order_sn="TEST_OLD",
+            source_item_id="TEST_OLD_ITEM",
+            resolution_status="matched_shop",
+            evidence={},
+        )
+    )
     db_session.flush()
     price_id = db_session.scalars(select(MiaoshouPurchasePrice.id)).one()
 
-    assert _run(db_session, FakePurchaseClient([_purchase_order()]))["purchase_prices"] == 1
+    assert (
+        _run(db_session, FakePurchaseClient([_purchase_order()]))["purchase_prices"]
+        == 1
+    )
     price = db_session.scalars(select(MiaoshouPurchasePrice)).one()
     assert price.id == price_id
     assert price.credential_id == credential.id
@@ -291,7 +305,8 @@ def test_api_updates_the_existing_price_without_creating_a_duplicate(
 
 
 def test_newer_unverified_record_does_not_publish_an_older_price(
-    db_session, fernet_key: str,
+    db_session,
+    fernet_key: str,
 ) -> None:
     credential = _seed_credential(db_session)
     _seed_package(db_session, credential.id)
@@ -301,7 +316,9 @@ def test_newer_unverified_record_does_not_publish_an_older_price(
         "purchaseOrderSn": "TEST_NEWER_PO",
         "gmtPurchaseOrderStart": "2026-10-01 00:00:00",
     }
-    newer["opOrderPackageList"][0]["purchaseItems"].append({"platformItemId": "TEST_OTHER_SPU"})
+    newer["opOrderPackageList"][0]["purchaseItems"].append(
+        {"platformItemId": "TEST_OTHER_SPU"}
+    )
     assert _run(db_session, FakePurchaseClient([older, newer]))["purchase_prices"] == 0
     assert db_session.scalars(select(MiaoshouPurchasePrice)).first() is None
 
