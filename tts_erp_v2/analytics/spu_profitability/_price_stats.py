@@ -323,10 +323,25 @@ def _cost_basis_fingerprint(
 
 # Canonical observation selection plus the mutually-exclusive population
 # classification (docs/design/spu-price-statistics.md §2.2/§4.2).  The prefix is
-# shared by both statements below so eligibility is defined exactly once, and
-# every statement is a module-level static literal with bound parameters only.
+# shared by both aggregates below. Restrict observation keys before ranking,
+# but retain every version of each selected line, including missing prices.
 _POPULATION_CTE = """
-WITH ranked_price_observations AS (
+WITH selected_lines AS (
+    SELECT o.shop_pk,
+           l.spu_pk,
+           l.order_pk,
+           l.external_line_id,
+           o.status AS order_status
+    FROM commerce.sales_order_lines AS l
+    JOIN commerce.sales_orders AS o ON o.id = l.order_pk
+    WHERE o.shop_pk = CAST(:shop_pk AS bigint)
+      AND l.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+      AND (CAST(:ws AS timestamptz) IS NULL
+           OR coalesce(o.order_time, o.paid_at) >= CAST(:ws AS timestamptz))
+      AND (CAST(:we AS timestamptz) IS NULL
+           OR coalesce(o.order_time, o.paid_at) < CAST(:we AS timestamptz))
+),
+ranked_price_observations AS (
     SELECT p.id,
            p.order_pk,
            p.external_line_id,
@@ -345,26 +360,16 @@ WITH ranked_price_observations AS (
                         p.semantic_observation_hash ASC
            ) AS canonical_rank
     FROM commerce.sales_order_line_price_observations AS p
+    JOIN selected_lines AS s
+      ON p.shop_pk = s.shop_pk
+     AND p.order_pk = s.order_pk
+     AND p.external_line_id = s.external_line_id
     WHERE p.shop_pk = CAST(:shop_pk AS bigint)
 ),
 canonical_price_observations AS (
     SELECT * FROM ranked_price_observations WHERE canonical_rank = 1
 ),
-selected_lines AS (
-    SELECT l.spu_pk,
-           l.order_pk,
-           l.external_line_id,
-           o.status AS order_status
-    FROM commerce.sales_order_lines AS l
-    JOIN commerce.sales_orders AS o ON o.id = l.order_pk
-    WHERE o.shop_pk = CAST(:shop_pk AS bigint)
-      AND l.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
-      AND (CAST(:ws AS timestamptz) IS NULL
-           OR coalesce(o.order_time, o.paid_at) >= CAST(:ws AS timestamptz))
-      AND (CAST(:we AS timestamptz) IS NULL
-           OR coalesce(o.order_time, o.paid_at) < CAST(:we AS timestamptz))
-),
-population_lines AS (
+population_lines AS MATERIALIZED (
     SELECT s.spu_pk,
            p.id AS observation_id,
            p.original_price_native,
@@ -527,10 +532,63 @@ _SQL_PRICE_OBSERVATION_TABLE_EXISTS = text(
     "SELECT to_regclass('commerce.sales_order_line_price_observations') IS NOT NULL"
 )
 
+# Keep both original aggregates over one bounded, materialized population.
+# UNION ALL preserves numeric/Decimal prices and the empty coverage total row.
 # pi-lens-ignore: python-sql-injection
-_SQL_PRICE_COVERAGE = text(_POPULATION_CTE + _COVERAGE_SELECT)
-# pi-lens-ignore: python-sql-injection
-_SQL_PRICE_BUCKETS = text(_POPULATION_CTE + _BUCKET_SELECT)
+_SQL_PRICE_STATS = text(
+    _POPULATION_CTE
+    + ", coverage AS (" + _COVERAGE_SELECT + "), buckets AS (" + _BUCKET_SELECT + ")"
+    + """
+SELECT 'coverage'::text AS row_kind, spu_pk,
+       selected_line_count,
+       eligible_line_count,
+       excluded_unpaid_line_count,
+       excluded_on_hold_line_count,
+       excluded_cancelled_line_count,
+       excluded_gift_line_count,
+       unknown_gift_line_count,
+       unknown_status_line_count,
+       invalid_quantity_line_count,
+       missing_observation_line_count,
+       eligible_quantity,
+       excluded_unpaid_quantity,
+       excluded_on_hold_quantity,
+       excluded_cancelled_quantity,
+       excluded_gift_quantity,
+       unknown_gift_quantity,
+       unknown_status_quantity,
+       excluded_valid_quantity,
+       missing_currency_quantity,
+       NULL::text AS metric, NULL::text AS klass,
+       NULL::numeric AS native_price, NULL::text AS currency,
+       NULL::bigint AS quantity, NULL::integer AS line_count
+FROM coverage
+UNION ALL
+SELECT 'bucket'::text AS row_kind, spu_pk,
+       NULL::bigint AS selected_line_count,
+       NULL::bigint AS eligible_line_count,
+       NULL::bigint AS excluded_unpaid_line_count,
+       NULL::bigint AS excluded_on_hold_line_count,
+       NULL::bigint AS excluded_cancelled_line_count,
+       NULL::bigint AS excluded_gift_line_count,
+       NULL::bigint AS unknown_gift_line_count,
+       NULL::bigint AS unknown_status_line_count,
+       NULL::bigint AS invalid_quantity_line_count,
+       NULL::bigint AS missing_observation_line_count,
+       NULL::bigint AS eligible_quantity,
+       NULL::bigint AS excluded_unpaid_quantity,
+       NULL::bigint AS excluded_on_hold_quantity,
+       NULL::bigint AS excluded_cancelled_quantity,
+       NULL::bigint AS excluded_gift_quantity,
+       NULL::bigint AS unknown_gift_quantity,
+       NULL::bigint AS unknown_status_quantity,
+       NULL::bigint AS excluded_valid_quantity,
+       NULL::bigint AS missing_currency_quantity,
+       metric, klass, native_price, currency, quantity, line_count
+FROM buckets
+"""
+)
+
 
 
 # ─── aggregation ─────────────────────────────────────────────────────
@@ -622,6 +680,19 @@ def _purchase_metric(
     )
 
 
+def _read_price_rows(
+    session: Session, params: Mapping[str, Any]
+) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
+    coverage_rows: list[Mapping[str, Any]] = []
+    bucket_rows: list[Mapping[str, Any]] = []
+    for row in session.execute(_SQL_PRICE_STATS, params).mappings():
+        if row["row_kind"] == "coverage":
+            coverage_rows.append(row)
+        else:
+            bucket_rows.append(row)
+    return coverage_rows, bucket_rows
+
+
 def read_price_stats(
     session: Session,
     *,
@@ -646,8 +717,7 @@ def read_price_stats(
         "we": request.window_end_exclusive_utc,
         "paid_statuses": list(PAID_SALES_ORDER_STATUSES),
     }
-    coverage_rows = session.execute(_SQL_PRICE_COVERAGE, params).mappings().all()
-    bucket_rows = session.execute(_SQL_PRICE_BUCKETS, params).mappings().all()
+    coverage_rows, bucket_rows = _read_price_rows(session, params)
 
     coverage_by_spu: dict[int, PriceCoverage] = {}
     totals_coverage = PriceCoverage()

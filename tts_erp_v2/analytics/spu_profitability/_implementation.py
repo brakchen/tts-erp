@@ -163,9 +163,15 @@ _SQL_ROI_AD = text(
 _SQL_ROI_SALES = text(
     """
     WITH selected_orders AS (
-        SELECT DISTINCT order_pk
-        FROM commerce.sales_order_lines
-        WHERE spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+        SELECT DISTINCT sl.order_pk
+        FROM commerce.sales_order_lines sl
+        JOIN commerce.sales_orders so ON so.id = sl.order_pk
+        WHERE sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
+          AND so.status = ANY(CAST(:paid_statuses AS text[]))
+          AND (CAST(:ws AS timestamptz) IS NULL
+               OR coalesce(so.order_time, so.paid_at) >= CAST(:ws AS timestamptz))
+          AND (CAST(:we AS timestamptz) IS NULL
+               OR coalesce(so.order_time, so.paid_at) < CAST(:we AS timestamptz))
     ),
     order_settlement AS (
         SELECT st.order_pk, SUM(sc.amount) AS settlement_vnd
@@ -187,6 +193,7 @@ _SQL_ROI_SALES = text(
         FROM after_sales.cases c
         JOIN after_sales.case_lines cl ON cl.case_id = c.id
         JOIN commerce.sales_order_lines sl ON sl.id = cl.sales_order_line_id
+        JOIN selected_orders selected ON selected.order_pk = sl.order_pk
         WHERE c.status IN (:st0, :st1)
           AND c.case_type IN ('REFUND_ONLY', 'RETURN_AND_REFUND')
           AND sl.spu_pk = ANY(CAST(:selected_pks AS bigint[]))
