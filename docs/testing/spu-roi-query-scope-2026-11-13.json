@@ -1,0 +1,313 @@
+{
+  "baseline_commit": "ce7a92e85207f74644c4b0e60eaed3343767b056",
+  "population": {
+    "historical_orders": 10000,
+    "current_orders": 200,
+    "spus": 20,
+    "observation_versions_per_line": 3
+  },
+  "scenarios": {
+    "one_spu_7_days": {
+      "median_ms": {
+        "sales_before": 5.69,
+        "sales_after": 3.099,
+        "prices_before": 69.39,
+        "prices_after": 2.946
+      },
+      "samples_ms": {
+        "sales_before": [
+          5.386450000514742,
+          5.690435998985777,
+          6.525641001644544,
+          5.238841000391403,
+          7.475426000382868
+        ],
+        "sales_after": [
+          4.369399999632151,
+          2.97902499914926,
+          3.098700999544235,
+          2.5558609995641746,
+          4.268265000064275
+        ],
+        "prices_before": [
+          65.53422599972691,
+          76.76343200000701,
+          69.3900450005458,
+          66.09303599907435,
+          72.09209700158681
+        ],
+        "prices_after": [
+          3.8039610008127056,
+          2.9455549993144814,
+          2.821780000886065,
+          2.5843599996733246,
+          3.0804350008111214
+        ]
+      },
+      "sales_rows": 1,
+      "coverage_rows": 2,
+      "bucket_rows": 4,
+      "results_equal": true,
+      "plan_summary": {
+        "sales_before": {
+          "execution_ms": 3.605,
+          "shared_hit_blocks": 2136,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": []
+        },
+        "sales_after": {
+          "execution_ms": 1.071,
+          "shared_hit_blocks": 675,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": []
+        },
+        "price_coverage_before": {
+          "execution_ms": 34.152,
+          "shared_hit_blocks": 3394,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": [
+            {
+              "rows": 10200.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        },
+        "price_buckets_before": {
+          "execution_ms": 36.426,
+          "shared_hit_blocks": 3394,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": [
+            {
+              "rows": 10200.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        },
+        "prices_after": {
+          "execution_ms": 1.151,
+          "shared_hit_blocks": 619,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": [
+            {
+              "rows": 10.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        }
+      }
+    },
+    "whole_shop_30_days": {
+      "median_ms": {
+        "sales_before": 22.513,
+        "sales_after": 4.766,
+        "prices_before": 60.9,
+        "prices_after": 4.75
+      },
+      "samples_ms": {
+        "sales_before": [
+          21.13777299928188,
+          29.463819000739022,
+          22.512707000714727,
+          23.673851999774342,
+          20.90653300001577
+        ],
+        "sales_after": [
+          3.737699998964672,
+          5.182090000744211,
+          4.7661399985372555,
+          4.360705001090537,
+          5.673481000485481
+        ],
+        "prices_before": [
+          61.308186001042486,
+          60.89964599959785,
+          58.25993500002369,
+          60.917902999790385,
+          54.42653499994776
+        ],
+        "prices_after": [
+          6.145280000055209,
+          4.555560000881087,
+          4.750450998471933,
+          5.669586000294657,
+          4.661364999265061
+        ]
+      },
+      "sales_rows": 20,
+      "coverage_rows": 21,
+      "bucket_rows": 42,
+      "results_equal": true,
+      "plan_summary": {
+        "sales_before": {
+          "execution_ms": 18.125,
+          "shared_hit_blocks": 4202,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": []
+        },
+        "sales_after": {
+          "execution_ms": 2.273,
+          "shared_hit_blocks": 2625,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": []
+        },
+        "price_coverage_before": {
+          "execution_ms": 28.307,
+          "shared_hit_blocks": 3584,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": [
+            {
+              "rows": 10200.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        },
+        "price_buckets_before": {
+          "execution_ms": 30.134,
+          "shared_hit_blocks": 3584,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": [
+            {
+              "rows": 10200.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        },
+        "prices_after": {
+          "execution_ms": 3.196,
+          "shared_hit_blocks": 1582,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": [
+            {
+              "rows": 200.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        }
+      }
+    },
+    "whole_shop_unbounded": {
+      "median_ms": {
+        "sales_before": 36.902,
+        "sales_after": 35.198,
+        "prices_before": 122.842,
+        "prices_after": 76.626
+      },
+      "samples_ms": {
+        "sales_before": [
+          36.90159799953108,
+          35.710453001229325,
+          35.361442000066745,
+          37.35126399988076,
+          39.80510999826947
+        ],
+        "sales_after": [
+          35.19780299939157,
+          34.78700899904652,
+          33.310290998997516,
+          35.29656299906492,
+          73.78330300161906
+        ],
+        "prices_before": [
+          124.18321199947968,
+          122.842392000166,
+          119.65673800114018,
+          127.98571600069408,
+          119.99094100065122
+        ],
+        "prices_after": [
+          82.69367799948668,
+          72.55171099859581,
+          79.19926300019142,
+          75.12746800057357,
+          76.62628200159816
+        ]
+      },
+      "sales_rows": 20,
+      "coverage_rows": 21,
+      "bucket_rows": 42,
+      "results_equal": true,
+      "plan_summary": {
+        "sales_before": {
+          "execution_ms": 36.044,
+          "shared_hit_blocks": 6810,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": []
+        },
+        "sales_after": {
+          "execution_ms": 35.007,
+          "shared_hit_blocks": 6810,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": []
+        },
+        "price_coverage_before": {
+          "execution_ms": 48.563,
+          "shared_hit_blocks": 6156,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": [
+            {
+              "rows": 10200.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        },
+        "price_buckets_before": {
+          "execution_ms": 73.745,
+          "shared_hit_blocks": 6156,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 0,
+          "window_nodes": [
+            {
+              "rows": 10200.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        },
+        "prices_after": {
+          "execution_ms": 80.086,
+          "shared_hit_blocks": 4432,
+          "shared_read_blocks": 0,
+          "temp_written_blocks": 668,
+          "window_nodes": [
+            {
+              "rows": 10200.0,
+              "loops": 1,
+              "rows_removed": 0
+            }
+          ]
+        }
+      }
+    }
+  },
+  "candidate_commit": "220cb7457e62606290fa6768824bf1dfa78e3dd7",
+  "environment": {
+    "postgresql": "18.4",
+    "python": "3.14.4",
+    "node": "22.22.2",
+    "data": "synthetic, ephemeral test clone",
+    "rounds": 5,
+    "warmup": "one old/new equality call per query and scenario",
+    "metric": "client execute + materialize rows, milliseconds; old price metric sums both statements"
+  },
+  "full_plans_file": "spu-roi-query-scope-2026-11-13.plans.json.gz"
+}
