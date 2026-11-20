@@ -41,6 +41,8 @@ credential kinds:
 | Per-shop order aggregate | `GET /v2/commerce/channel-accounts/{id}/order-stats` | readonly |
 | Cost snapshots | `GET /v2/reporting/cost-snapshots` | readonly |
 | Daily profit | `GET /v2/reporting/profit-daily` | readonly |
+| Advertising daily facts | `GET /v2/reporting/ad-daily` | readonly; includes persisted plugin facts regardless of shop OAuth authorization |
+| Advertising filter metadata | `GET /v2/reporting/ad-daily/options` | readonly; registered TikTok shops (including zero-row shops) plus observed Sellers |
 | Coverage / health snapshot | `GET /v2/reporting/coverage` | readonly |
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
 | Search recent manual costs | `GET /v2/reporting/manual-costs` | readonly |
