@@ -20,15 +20,17 @@ _SELLER = "TEST_AD_DAILY_BROWSER"
 _ENDPOINT = "/oec_ads/shopping/v1/oec/stat/post_product_list"
 
 
-def _seed_rows(db_engine) -> None:
-    with Session(db_engine) as session:
-        shop = ChannelAccount(
-            platform="tiktok", shop_id=_SELLER, account_name="TEST ad daily shop"
-        )
-        session.add(shop)
-        session.flush()
-        authorize_test_shop(session, shop.id, _SELLER)
-        session.commit()
+def _seed_rows(db_engine, *, authorized: bool = True, registered: bool = True) -> None:
+    if registered:
+        with Session(db_engine) as session:
+            shop = ChannelAccount(
+                platform="tiktok", shop_id=_SELLER, account_name="TEST ad daily shop"
+            )
+            session.add(shop)
+            session.flush()
+            if authorized:
+                authorize_test_shop(session, shop.id, _SELLER)
+            session.commit()
     rows = [
         {
             "advertiser_id": "TEST_ADV_A",
@@ -219,6 +221,104 @@ def test_ad_daily_options_describe_observed_source(api_client, readonly_key, db_
     assert payload["min_day"] <= "2026-09-02"
     assert payload["max_day"] >= "2026-09-04"
     assert any(item["endpoint"] == _ENDPOINT for item in payload["endpoints"])
+
+
+@pytest.mark.parametrize("registered", [True, False])
+def test_ad_daily_reads_unauthorized_shop_facts_and_metadata(
+    api_client, readonly_key, db_engine, registered
+):
+    """OAuth/registration must not hide persisted plugin facts or filter choices."""
+    _seed_rows(db_engine, authorized=False, registered=registered)
+    headers = _auth(readonly_key)
+    params = {"seller_id": _SELLER, "advertiser_id": "TEST_ADV_A", "limit": 1}
+
+    response = api_client.get("/v2/reporting/ad-daily", headers=headers, params=params)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["total"] == 2
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["seller_id"] == _SELLER
+    assert (payload["items"][0]["shop_pk"] is not None) == registered
+    assert Decimal(payload["summary"]["spend"]) == Decimal("15.5000")
+    assert Decimal(payload["summary"]["attributed_gmv"]) == Decimal("47.0000")
+
+    # Omitting Seller must include these rows too, not just bypass a 404 guard.
+    response = api_client.get(
+        "/v2/reporting/ad-daily", headers=headers, params={"q": "TEST_CAMP_"}
+    )
+    assert response.status_code == 200, response.text
+    assert {item["campaign_id"] for item in response.json()["items"]} >= {
+        "TEST_CAMP_100",
+        "TEST_CAMP_200",
+        "TEST_CAMP_300",
+    }
+
+    response = api_client.get("/v2/reporting/ad-daily/options", headers=headers)
+    assert response.status_code == 200, response.text
+    options = response.json()
+    seller = next(
+        item for item in options["sellers"] if item["seller_id"] == _SELLER
+    )
+    assert seller["row_count"] == 3
+    assert seller["shop_name"] == ("TEST ad daily shop" if registered else None)
+    assert {
+        item["advertiser_id"]
+        for item in options["advertisers"]
+        if item["seller_id"] == _SELLER
+    } == {"TEST_ADV_A", "TEST_ADV_B"}
+    assert any(item["endpoint"] == _ENDPOINT for item in options["endpoints"])
+    assert options["min_day"] <= "2026-09-02"
+    assert options["max_day"] >= "2026-09-04"
+
+
+def test_ad_daily_options_include_registered_shops_without_ad_rows(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as session:
+        session.add_all(
+            [
+                ChannelAccount(
+                    platform="tiktok", shop_id="TEST_AD_DAILY_EMPTY",
+                    account_name="TEST empty shop",
+                ),
+                ChannelAccount(
+                    platform="miaoshou", shop_id="TEST_AD_DAILY_OTHER",
+                    account_name="TEST other platform",
+                ),
+            ]
+        )
+        session.commit()
+
+    response = api_client.get(
+        "/v2/reporting/ad-daily/options", headers=_auth(readonly_key)
+    )
+    assert response.status_code == 200, response.text
+    options = response.json()
+    assert {
+        "seller_id": "TEST_AD_DAILY_EMPTY",
+        "shop_name": "TEST empty shop",
+        "row_count": 0,
+    } in options["sellers"]
+    assert not any(
+        item["seller_id"] == "TEST_AD_DAILY_OTHER" for item in options["sellers"]
+    )
+
+    response = api_client.get(
+        "/v2/reporting/ad-daily",
+        headers=_auth(readonly_key),
+        params={"seller_id": "TEST_AD_DAILY_EMPTY"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == []
+    assert response.json()["total"] == 0
+
+
+@pytest.mark.parametrize(
+    "path", ["/v2/reporting/ad-daily", "/v2/reporting/ad-daily/options"]
+)
+def test_ad_daily_queries_still_require_authentication(api_client, path):
+    assert api_client.get(path).status_code == 401
 
 
 def test_ad_daily_rejects_reversed_date_range(api_client, readonly_key):
