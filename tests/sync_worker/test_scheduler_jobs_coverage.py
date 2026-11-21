@@ -728,6 +728,28 @@ def test_run_tiktok_job_retries_once_then_gives_up(
     assert factory.call_count == 2
 
 
+def test_run_tiktok_job_waits_one_minute_only_on_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tts_erp_v2.proxy.errors import RateLimitedError
+
+    factory = MagicMock()
+    factory.return_value = MagicMock()
+    mod = MagicMock()
+    mod.run.side_effect = [RateLimitedError("upstream 429"), MagicMock(
+        rows_total=1, rows_inserted=1, rows_failed=0
+    )]
+    monkeypatch.setattr(scheduler, "build_proxy_call", lambda *a, **k: MagicMock())
+    waits = []
+    monkeypatch.setattr(scheduler.time, "sleep", waits.append)
+    spec = JobSpec("tiktok.orders", "tts_erp_v2.jobs.tiktok.orders", 600)
+
+    scheduler._run_tiktok_job_for_shop(spec, factory, shop_id="S1", mod=mod)
+
+    assert waits == [60]
+    assert mod.run.call_count == 2
+
+
 # ─── _run_system_job — additional branches ─────────────────────────
 
 

@@ -26,9 +26,8 @@ from typing import Any
 
 import pytest
 
-from tts_erp_v2.proxy.miaoshou.retry import (
-    paginate_with_retry,
-)
+from tts_erp_v2.proxy.miaoshou import retry as retry_module
+from tts_erp_v2.proxy.miaoshou.retry import paginate_with_retry
 
 pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
@@ -83,7 +82,7 @@ class _FakeUpstream:
         setattr(self, f"_rl_attempts_left_{page}", current - 1)
 
 
-def test_pagination_continues_past_rate_limit_empty_page() -> None:
+def test_pagination_continues_past_rate_limit_empty_page(monkeypatch) -> None:
     """★ The bug-fix regression test.
 
     Page 2 returns a rate-limit-shaped empty response on its first
@@ -91,6 +90,8 @@ def test_pagination_continues_past_rate_limit_empty_page() -> None:
     to page 12 and collect all 237 records.
     """
     fake = _FakeUpstream(rate_limit_pages={2}, rate_limit_attempts=1)
+    sleeps = []
+    monkeypatch.setattr(retry_module.time, "sleep", sleeps.append)
 
     # Speed up the test by capping retries at 2.
     items, last_page = paginate_with_retry(
@@ -106,6 +107,7 @@ def test_pagination_continues_past_rate_limit_empty_page() -> None:
     # Page 2 was hit twice (once for the rate-limit response, once for
     # the retry that succeeded).
     assert fake.fetch_calls.count(2) == 2
+    assert sleeps == [60.0]
 
 
 def test_pagination_terminates_on_genuine_empty_page() -> None:
@@ -130,10 +132,12 @@ def test_pagination_terminates_on_genuine_empty_page() -> None:
     assert fake.fetch_calls == [1, 1]
 
 
-def test_pagination_retries_raised_rate_limit_error() -> None:
+def test_pagination_retries_raised_rate_limit_error(monkeypatch) -> None:
     """When the SDK raises MiaoshouApiError with a rate-limit code,
     paginate_with_retry must retry the same page."""
     from tts_erp_v2.proxy.miaoshou.client import MiaoshouApiError
+    sleeps = []
+    monkeypatch.setattr(retry_module.time, "sleep", sleeps.append)
 
     call_count = {"n": 0}
 
@@ -155,3 +159,24 @@ def test_pagination_retries_raised_rate_limit_error() -> None:
     assert items == [{"id": "x-1"}, {"id": "x-2"}]
     assert last_page == 1
     assert call_count["n"] == 2  # one failure + one success
+    assert sleeps == [60.0]
+
+
+def test_non_rate_network_error_keeps_short_backoff(monkeypatch) -> None:
+    from tts_erp_v2.proxy.miaoshou.client import MiaoshouApiError
+
+    sleeps = []
+    monkeypatch.setattr(retry_module.time, "sleep", sleeps.append)
+    attempts = 0
+
+    def fetch(_page):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise MiaoshouApiError(0, "network error")
+        return {"data": [{"id": "ok"}], "totalPage": 1}
+
+    items, _ = paginate_with_retry(fetch, max_retries=1)
+    assert items == [{"id": "ok"}]
+    assert len(sleeps) == 1
+    assert sleeps[0] < 1

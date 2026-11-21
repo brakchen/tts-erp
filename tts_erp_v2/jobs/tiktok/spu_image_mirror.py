@@ -30,7 +30,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+import tempfile
 from collections.abc import Callable
+from contextlib import closing
+from typing import BinaryIO
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -54,9 +57,11 @@ _CT_BY_EXT = {
 }
 _DEFAULT_CT = "image/jpeg"
 
-# Downloader returns (bytes, content_type). Callable-typed so tests can
-# inject a fake; production default is an httpx GET.
-Downloader = Callable[[str], tuple[bytes, str]]
+# Injected test downloaders may return bytes. Production returns a spooled
+# stream, its length and content type so MinIO can upload without a copy.
+Downloader = Callable[[str], tuple[bytes, str] | tuple[BinaryIO, int, str]]
+IMAGE_LIMIT_BYTES = 8 * 1024 * 1024
+SCAN_BATCH_SIZE = 100
 
 
 def _content_type_for(url: str | None) -> str:
@@ -89,41 +94,50 @@ def _default_downloader() -> Downloader:
     """Production downloader: httpx GET with a size cap."""
     import httpx
 
-    def _dl(url: str) -> tuple[bytes, str]:
+    def _dl(url: str) -> tuple[BinaryIO, int, str]:
         # 8 MiB cap mirrors the spu_images CHECK constraint and the
         # 8 MiB upload cap the page used to enforce for manual uploads.
-        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            data = resp.content
-            if len(data) > 8 * 1024 * 1024:
-                raise RuntimeError(f"image too large: {len(data)} bytes")
-            ct = resp.headers.get("content-type") or _content_type_for(url)
-            return data, ct
+        spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b")
+        try:
+            with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+                with client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    length = 0
+                    for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+                        length += len(chunk)
+                        if length > IMAGE_LIMIT_BYTES:
+                            raise RuntimeError(f"image too large: {length} bytes")
+                        spool.write(chunk)
+                    ct = resp.headers.get("content-type") or _content_type_for(url)
+            spool.seek(0)
+            return spool, length, ct
+        except BaseException:
+            spool.close()
+            raise
 
     return _dl
 
 
-def _iter_spus_with_main_image(session: Session, spu_pks: list[int] | None = None):
+def _next_spu_batch(
+    session: Session, last_id: int, spu_pks: list[int] | None = None
+):
     # is_not(None) alone would let an empty-string main_image_url through
     # (sha1("") download failure every tick); exclude empty strings too.
-    stmt = select(ChannelProduct).where(
+    stmt = select(
+        ChannelProduct.id,
+        ChannelProduct.spu_id,
+        ChannelProduct.main_image_url,
+        ChannelProduct.mirror_object_key,
+    ).where(
         ChannelProduct.main_image_url.is_not(None),
         ChannelProduct.main_image_url != "",
+        ChannelProduct.id > last_id,
     )
     if spu_pks is not None:
         stmt = stmt.where(ChannelProduct.id.in_(spu_pks))
-    return session.execute(stmt).scalars()
-
-
-def _current_object_keys(session: Session) -> dict[int, str]:
-    """Map spu_pk → mirror_object_key for rows that already have one."""
-    rows = session.execute(
-        select(ChannelProduct.id, ChannelProduct.mirror_object_key).where(
-            ChannelProduct.mirror_object_key.is_not(None)
-        )
+    return session.execute(
+        stmt.order_by(ChannelProduct.id).limit(SCAN_BATCH_SIZE)
     ).all()
-    return {r.id: r.mirror_object_key for r in rows}
 
 
 def run(
@@ -152,43 +166,51 @@ def run(
     rows_total = 0
     rows_inserted = 0  # mirrored (or confirmed current)
     rows_failed = 0
-    with session.begin():
-        candidates = [
-            (spu.id, str(spu.spu_id), spu.main_image_url or "", spu.mirror_object_key)
-            for spu in _iter_spus_with_main_image(session, spu_pks)
-        ]
-    for spu_pk, spu_id, url, existing_key in candidates:
-        rows_total += 1
-        key = _object_key_for(spu_pk, url)
-        if existing_key == key:
-            continue
-        try:
-            data, content_type = downloader(url)
-            minio.put_bytes(key, data, content_type)
-        except Exception as exc:
-            rows_failed += 1
-            with session.begin():
-                record_sync_issue(
-                    session,
-                    job_name=JOB_NAME,
-                    issue_type="MIRROR_DOWNLOAD_FAILED",
-                    external_id=spu_id,
-                    details={"url": url, "error": str(exc)},
-                )
-            continue
+    last_id = 0
+    while True:
         with session.begin():
-            # Product sync may have replaced the source URL during download.
-            # Never advertise the old mirror as the new product image.
-            updated = session.execute(
-                update(ChannelProduct)
-                .where(
-                    ChannelProduct.id == spu_pk, ChannelProduct.main_image_url == url
-                )
-                .values(mirror_object_key=key)
-            ).rowcount
-            if updated:
-                _resolve_open_issues(session, spu_id)
-                rows_inserted += 1
+            candidates = _next_spu_batch(session, last_id, spu_pks)
+        if not candidates:
+            break
+        last_id = candidates[-1].id
+        for spu_pk, spu_id, url, existing_key in candidates:
+            rows_total += 1
+            key = _object_key_for(spu_pk, url)
+            if existing_key == key:
+                continue
+            try:
+                downloaded = downloader(url)
+                if len(downloaded) == 2:
+                    data, content_type = downloaded
+                    minio.put_bytes(key, data, content_type)
+                else:
+                    stream, length, content_type = downloaded
+                    with closing(stream):
+                        minio.put_stream(key, stream, length, content_type)
+            except Exception as exc:
+                rows_failed += 1
+                with session.begin():
+                    record_sync_issue(
+                        session,
+                        job_name=JOB_NAME,
+                        issue_type="MIRROR_DOWNLOAD_FAILED",
+                        external_id=str(spu_id),
+                        details={"url": url, "error": str(exc)},
+                    )
+                continue
+            with session.begin():
+                # Product sync may have replaced the source URL during download.
+                updated = session.execute(
+                    update(ChannelProduct)
+                    .where(
+                        ChannelProduct.id == spu_pk,
+                        ChannelProduct.main_image_url == url,
+                    )
+                    .values(mirror_object_key=key)
+                ).rowcount
+                if updated:
+                    _resolve_open_issues(session, str(spu_id))
+                    rows_inserted += 1
 
     return JobResult(
         rows_total=rows_total,

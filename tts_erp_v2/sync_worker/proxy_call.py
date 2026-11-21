@@ -9,7 +9,8 @@ Why this adapter exists
 -----------------------
 * :class:`tts_erp_v2.proxy.tts_shop.client.TiktokShopClient` is the
   only HTTP caller we ship — it owns HMAC signing + ``shop_cipher``
-  injection + 429/5xx retry. Jobs must NOT re-implement that.
+  injection + 5xx retry. The scheduler retries 429 after 60 seconds.
+  Jobs must NOT re-implement that.
 * Jobs receive an open SQLAlchemy ``Session`` (not a request-scoped
   state), so the adapter resolves the long-lived
   ``Credentials`` row + ``TiktokShopClient`` once per call.

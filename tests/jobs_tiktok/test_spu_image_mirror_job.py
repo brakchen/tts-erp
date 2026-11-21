@@ -12,6 +12,8 @@ Design (user-approved, minimal):
 
 from __future__ import annotations
 
+import io
+
 import pytest
 from sqlalchemy import select
 
@@ -106,6 +108,93 @@ def test_object_key_embeds_url_hash() -> None:
     assert k1 != k2, "URL change must change the key (that IS the dedupe)"
     assert k1 != k3, "different SPU must not collide"
     assert mirror._object_key_for(spu_pk=42, url=URL_A) == k1, "deterministic"
+
+
+def test_default_downloader_streams_without_accessing_response_content(monkeypatch) -> None:
+    import httpx
+
+    class Response:
+        headers = {"content-type": "image/jpeg"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self, *, chunk_size):
+            assert chunk_size <= 64 * 1024
+            yield b"a" * chunk_size
+            yield b"b" * 3
+
+        @property
+        def content(self):
+            raise AssertionError("response.content would buffer the whole image")
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def stream(self, method, url):
+            assert (method, url) == ("GET", URL_A)
+            return Response()
+
+    monkeypatch.setattr(httpx, "Client", Client)
+    stream, length, content_type = mirror._default_downloader()(URL_A)
+    try:
+        assert length == 64 * 1024 + 3
+        assert content_type == "image/jpeg"
+        assert stream.read() == b"a" * (64 * 1024) + b"b" * 3
+    finally:
+        stream.close()
+
+
+def test_spu_scan_uses_bounded_keyset_pages(db_session) -> None:
+    account = _make_account(db_session)
+    for index in range(mirror.SCAN_BATCH_SIZE + 1):
+        _make_spu(
+            db_session, account=account, spu_id=f"TEST_PAGE_{index}", url=URL_A
+        )
+    db_session.flush()
+
+    first = mirror._next_spu_batch(db_session, 0)
+    second = mirror._next_spu_batch(db_session, first[-1].id)
+    assert len(first) == mirror.SCAN_BATCH_SIZE
+    assert len(second) == 1
+    assert first[-1].id < second[0].id
+
+
+def test_stream_upload_closes_downloaded_file(db_session) -> None:
+    account = _make_account(db_session)
+    spu_pk = _make_spu(db_session, account=account, spu_id="STREAM", url=URL_A)
+    stream = io.BytesIO(b"image")
+
+    class StreamMinio(FakeMinio):
+        def put_stream(self, key, body, length, content_type):
+            assert length == 5
+            assert body.read() == b"image"
+            self.puts.append((key, b"image", content_type))
+
+    minio = StreamMinio()
+    _, result = invoke_seeded_job(
+        mirror.run,
+        db_session,
+        downloader=lambda _url: (stream, 5, "image/jpeg"),
+        minio=minio,
+        spu_pks=[spu_pk],
+    )
+    assert result.rows_inserted == 1
+    assert stream.closed
+    assert len(minio.puts) == 1
 
 
 def test_first_mirror_sets_column_and_puts(db_session) -> None:

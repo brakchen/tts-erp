@@ -116,7 +116,9 @@ def sync_collect_box(
         Dict with ``pages_walked`` / ``items_seen`` / ``products_upserted`` /
         ``rate_limit_retries`` / ``issues``.
     """
-    from tts_erp_v2.proxy.miaoshou.retry import PageResult, paginate_with_retry
+    from tts_erp_v2.proxy.miaoshou.retry import (
+        PageResult, paginate_with_retry, raise_if_rate_limited_response,
+    )
 
     with run_job(session, job_name=JOB_NAME) as job:
         # Always resolve ctx so we can attribute upserts to the right
@@ -153,7 +155,9 @@ def sync_collect_box(
             )
 
         def wrapped_fetch(page: int) -> PageResult:
-            return unwrap_page(fetch_page(page))
+            payload = fetch_page(page)
+            raise_if_rate_limited_response(payload)
+            return unwrap_page(payload)
 
         items, last_page = paginate_with_retry(
             wrapped_fetch,

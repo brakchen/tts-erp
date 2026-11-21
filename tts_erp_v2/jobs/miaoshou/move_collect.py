@@ -90,6 +90,7 @@ def sync_move_collect(
     from tts_erp_v2.proxy.miaoshou.retry import (
         PageResult,
         paginate_with_retry,
+        raise_if_rate_limited_response,
     )
 
     with run_job(session, job_name=JOB_NAME) as job:
@@ -148,6 +149,7 @@ def sync_move_collect(
         # Re-wrap fetch_page so the paginator receives PageResult.
         def wrapped_fetch(page: int) -> PageResult:
             payload = fetch_page(page)
+            raise_if_rate_limited_response(payload)
             result = unwrap_page(payload)
             return result
 

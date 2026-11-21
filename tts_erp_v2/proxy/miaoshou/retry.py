@@ -4,7 +4,8 @@ Three retry primitives, used together:
 
 * :func:`call_with_retry` — generic wrapper for one HTTP call. Handles
   transient network errors + transient upstream status codes with
-  exponential backoff + jitter. Caps at ``max_retries``.
+  exponential backoff + jitter for transient errors, a fixed 60 seconds
+  for upstream rate limits. Caps at ``max_retries``.
 * :func:`paginate_with_retry` — paginated list fetcher that **does
   not terminate on an empty page** when (a) the empty page is shaped
   like a rate-limit response, or (b) we already know more pages are
@@ -13,7 +14,8 @@ Three retry primitives, used together:
 
 Backoff strategy
 ----------------
-Exponential with jitter, base = 0.5s, factor = 2, capped at 30s.
+Rate limits: 60 seconds before each retry. Other transient failures:
+exponential with jitter, base = 0.5s, factor = 2, capped at 30s.
 
 Why we expose ``is_rate_limited_response`` here too
 ----------------------------------------------------
@@ -48,6 +50,7 @@ T = TypeVar("T")
 MAX_RETRIES_DEFAULT = 6
 BACKOFF_BASE_SEC = 0.5
 BACKOFF_CAP_SEC = 30.0
+RATE_LIMIT_RETRY_SEC = 60.0
 
 
 # ---- Errors raised by the SDK layer ---------------------------------
@@ -75,6 +78,23 @@ def _sleep_backoff(attempt: int) -> None:
     raw = BACKOFF_BASE_SEC * (2 ** (attempt - 1))
     capped = min(raw, BACKOFF_CAP_SEC)
     time.sleep(random.uniform(0.5, 1.0) * capped)
+
+
+def _is_rate_limit_error(error: BaseException) -> bool:
+    if isinstance(error, RateLimitedError):
+        return True
+    from tts_erp_v2.proxy.miaoshou.client import MiaoshouApiError
+
+    return isinstance(error, MiaoshouApiError) and (
+        error.code == 429
+        or is_rate_limited_response({"code": error.code, "message": error.message})
+    )
+
+
+def raise_if_rate_limited_response(payload: dict[str, Any]) -> None:
+    """Preserve a 200+QPS error before a job unwraps its page envelope."""
+    if is_rate_limited_response(payload):
+        raise RateLimitedError("Miaoshou account QPS rate limit")
 
 
 def _safe_on_retry(
@@ -125,7 +145,10 @@ def call_with_retry(
             if attempt >= attempts:
                 raise MiaoshouRetryExhausted(attempt, e) from e
             _safe_on_retry(on_retry, attempt, e)
-            _sleep_backoff(attempt)
+            if _is_rate_limit_error(e):
+                time.sleep(RATE_LIMIT_RETRY_SEC)
+            else:
+                _sleep_backoff(attempt)
     # Unreachable: loop either returns or raises. Keep for mypy.
     raise MiaoshouRetryExhausted(  # pragma: no cover
         attempts, last_err if last_err is not None else RuntimeError("no attempt")
@@ -143,10 +166,10 @@ def is_retryable_miaoshou_error(e: BaseException) -> bool:
         # MiaoshouApiError carries an HTTP status / biz code.
         code = getattr(e, "code", None)
         # Network errors come through as code=0; retry those.
-        if code == 0:
+        if code in (0, 429):
             return True
         # String code that LOOKS like a rate limit.
-        return isinstance(code, str) and is_rate_limited_response({"code": code})
+        return is_rate_limited_response({"code": code, "message": e.message})
     return False
 
 
@@ -247,29 +270,20 @@ def paginate_with_retry(
     for page in range(start_page, start_page + max_pages):
         last_page = page
 
-        # Step 1: fetch + handle raised retryable errors.
-        try:
-            result = fetch_page(page)
-        except BaseException as e:  # noqa: BLE001
-            if not is_retryable_miaoshou_error(e):
-                raise
-            _safe_on_retry(on_retry, page, e)
-            result = _retry_fetch_page(
-                fetch_page, page,
-                is_retryable=is_retryable_miaoshou_error,
-                max_retries=max_retries,
-                on_retry=on_retry,
-            )
+        # A 200 response can still carry Miaoshou's account QPS error.
+        # Turn it into the same typed retry path as a raised API error.
+        def fetch_checked(p: int = page) -> PageResult | dict[str, Any]:
+            response = fetch_page(p)
+            if isinstance(response, dict):
+                raise_if_rate_limited_response(response)
+            return response
 
-        # Step 2: detect upstream-shown rate-limit (200 OK + fail-shaped body).
-        if isinstance(result, dict) and is_rate_limited_response(result):
-            _safe_on_retry(on_retry, page, RuntimeError(f"rate-limit shape: {result}"))
-            result = _retry_fetch_page(
-                fetch_page, page,
-                is_retryable=is_retryable_miaoshou_error,
-                max_retries=max_retries,
-                on_retry=on_retry,
-            )
+        result = call_with_retry(
+            fetch_checked,
+            is_retryable=is_retryable_miaoshou_error,
+            max_retries=max_retries,
+            on_retry=on_retry,
+        )
 
         # Step 3: normalise into items + totals.
         items, tp, tc = _coerce_page_payload(result)
@@ -328,6 +342,7 @@ __all__ = [
     "call_with_retry",
     "paginate_with_retry",
     "paginate",
+    "raise_if_rate_limited_response",
     "is_retryable_miaoshou_error",
     "MiaoshouRetryExhausted",
     "PageResult",
