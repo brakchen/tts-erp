@@ -23,9 +23,9 @@ each search hit we additionally call
 ``GET /product/202309/products/{product_id}`` (one round-trip per SPU),
 which returns ``main_images[].urls[]`` for the SPU and
 ``skus[].sales_attributes[].sku_img.urls[]`` for each variant.
-A failed detail fetch does NOT abort the run — we still insert the SPU
-row with core fields from search and write an ``IMAGE_FETCH_ERROR``
-``SyncIssue`` for operator triage.
+A failed detail fetch normally leaves the SPU's core fields intact and
+writes an ``IMAGE_FETCH_ERROR``. A 429 aborts the tick so the scheduler
+can retry the shop after one minute.
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ from tts_erp_v2.db.models import (
     SyncIssue,
 )
 from tts_erp_v2.jobs.tiktok import spu_link
+from tts_erp_v2.proxy.errors import RateLimitedError
 from tts_erp_v2.sync_worker.job_runner import JobResult
 
 ENDPOINT = "/product/202309/products/search"
@@ -323,6 +324,8 @@ def run(
                 shop_pk=account_id, product_id=product_id
             )
         except SQLAlchemyError:
+            raise
+        except RateLimitedError:
             raise
         except Exception as exc:
             image_errors[product_id] = exc

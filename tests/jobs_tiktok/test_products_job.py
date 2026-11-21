@@ -25,6 +25,7 @@ from tts_erp_v2.db.models import (
     SyncIssue,
 )
 from tts_erp_v2.jobs.tiktok import products as products_job
+from tts_erp_v2.proxy.errors import RateLimitedError
 from tts_erp_v2.sync_worker import watermarks
 from tts_erp_v2.sync_worker.job_runner import run_with_sync_job
 
@@ -458,6 +459,34 @@ def test_products_run_logs_sync_issue_when_get_product_fails(
     )
     assert len(issues) == 1
     assert issues[0].external_id == "P_FAIL"
+
+
+def test_products_detail_rate_limit_bubbles_to_scheduler(db_session) -> None:
+    account = _make_account(db_session)
+    proxy = FakeProxy(pages=[{
+        "code": 0,
+        "data": {
+            "products": [_product_payload("P_LIMIT", update_time=1_700_000_100)],
+            "next_page_token": "",
+        },
+    }])
+
+    def limited_fetcher(*, shop_pk: int, product_id: str) -> dict:
+        raise RateLimitedError("upstream 429")
+
+    with pytest.raises(RateLimitedError):
+        invoke_seeded_job(
+            run_with_sync_job,
+            db_session,
+            job_name="tiktok.products",
+            credential_id=account.credential_id,
+            inner=products_job.run,
+            inner_kwargs={
+                "proxy_call": proxy,
+                "shop_id": account.shop_id,
+                "image_fetcher": limited_fetcher,
+            },
+        )
 
 
 def test_products_sync_backfills_pre_existing_null_spu_lines(db_session) -> None:
