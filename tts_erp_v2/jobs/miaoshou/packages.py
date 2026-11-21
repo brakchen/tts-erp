@@ -650,7 +650,9 @@ def sync_packages(
     max_retries: int = 3,
 ) -> dict[str, Any]:
     """Incrementally synchronize package list data into ``miaoshou.*``."""
-    from tts_erp_v2.proxy.miaoshou.retry import PageResult, paginate_with_retry
+    from tts_erp_v2.proxy.miaoshou.retry import (
+        PageResult, paginate_with_retry, raise_if_rate_limited_response,
+    )
 
     with run_job(session, job_name=JOB_NAME) as job:
         with session.begin():
@@ -693,6 +695,7 @@ def sync_packages(
                 page=page,
                 gmt_modified_from=modified_from,
             )
+            raise_if_rate_limited_response(payload)
             data = payload.get("data") or {}
             if isinstance(data, list):
                 pages = [row for row in data if isinstance(row, dict)]

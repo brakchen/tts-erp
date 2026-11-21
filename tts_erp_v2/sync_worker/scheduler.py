@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from tts_erp_v2.commerce.shop_access import authorized_shop_clause
 from tts_erp_v2.db.models import ChannelAccount
 from tts_erp_v2.db.models.integration import SyncCursor, SyncJob
+from tts_erp_v2.proxy.errors import RateLimitedError
 from tts_erp_v2.sync_worker.job_runner import (
     run_with_sync_job,
 )
@@ -459,17 +460,19 @@ def _run_tiktok_job_for_shop(
                 result.rows_failed,
             )
             return
-        except Exception:
+        except Exception as exc:
             if attempt:
                 log.exception(
                     "[%s] shop=%s giving up after 2 attempts", spec.job_name, shop_id
                 )
                 raise
+            delay = 60 if isinstance(exc, RateLimitedError) else 5
             log.warning(
-                "[%s] shop=%s retrying in 5s", spec.job_name, shop_id, exc_info=True
+                "[%s] shop=%s retrying in %ds", spec.job_name, shop_id, delay,
+                exc_info=True,
             )
         # The failed session/transaction is closed BEFORE backoff.
-        time.sleep(5)
+        time.sleep(delay)
 
 
 def _run_system_job(

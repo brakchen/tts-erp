@@ -174,7 +174,9 @@ def sync_common_collect_box(
         Dict with ``pages_walked`` / ``items_seen`` / ``products_upserted`` /
         ``rate_limit_retries`` / ``issues``.
     """
-    from tts_erp_v2.proxy.miaoshou.retry import PageResult, paginate_with_retry
+    from tts_erp_v2.proxy.miaoshou.retry import (
+        PageResult, paginate_with_retry, raise_if_rate_limited_response,
+    )
 
     with run_job(session, job_name=JOB_NAME) as job:
         ctx = resolve_miaoshou_context(session, license_id=license_id)
@@ -198,6 +200,7 @@ def sync_common_collect_box(
 
         def fetch_page(page: int) -> PageResult:
             payload = _fetch_page(client, page_no=page)  # type: ignore[arg-type]
+            raise_if_rate_limited_response(payload)
             data = (payload.get("data") or {}) if isinstance(payload, dict) else {}
             items = data.get("detailList") or []
             # NOTE: 上游无 totalPage，total=行数；一律不传，空页即自然终止

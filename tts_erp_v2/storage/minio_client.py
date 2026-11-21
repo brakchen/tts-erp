@@ -20,6 +20,7 @@ import re
 import sys
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from typing import BinaryIO
 from urllib.parse import urlparse, urlunparse
 
 from minio import Minio
@@ -348,11 +349,21 @@ class MinioClient:
         """
         import io
 
+        self.put_stream(object_key, io.BytesIO(data), len(data), content_type)
+
+    def put_stream(
+        self,
+        object_key: str,
+        stream: BinaryIO,
+        length: int,
+        content_type: str,
+    ) -> None:
+        """Upload a sized file-like object without loading it into RAM."""
         self._sdk.put_object(
             self._config.bucket,
             object_key,
-            io.BytesIO(data),
-            length=len(data),
+            stream,
+            length=length,
             content_type=content_type,
         )
 

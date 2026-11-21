@@ -328,7 +328,7 @@ class TiktokShopClient:
             )
         if status == 429:
             raise RateLimitedError(
-                f"upstream 429 after retries: "
+                f"upstream 429: "
                 f"{parsed_body.get('message', '?')}",
                 body_preview=raw[:300],
             )

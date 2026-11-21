@@ -103,7 +103,7 @@ def _build_paginated_side_effect(
 
 
 def test_move_collect_walks_all_pages_through_rate_limit_retrys(
-    db_session, fake_client, miaoshou_credentials_row
+    db_session, fake_client, miaoshou_credentials_row, monkeypatch
 ) -> None:
     """★ Acceptance criterion: ``accountApiQpsRateLimit`` alternating
     responses must NOT cause silent truncation. The job must walk
@@ -115,6 +115,10 @@ def test_move_collect_walks_all_pages_through_rate_limit_retrys(
         rate_limit_pages=(2, 5, 9),
     )
     fake_client.install(side_effect)
+    from tts_erp_v2.proxy.miaoshou import retry as retry_module
+
+    sleeps = []
+    monkeypatch.setattr(retry_module.time, "sleep", sleeps.append)
 
     result = invoke_seeded_job(sync_move_collect,
         db_session,
@@ -131,6 +135,7 @@ def test_move_collect_walks_all_pages_through_rate_limit_retrys(
     assert result["tasks_recorded"] == 240
     # 3 pages were rate-limited once each → 3 retries observed.
     assert result["rate_limit_retries"] >= 3
+    assert sleeps == [60.0, 60.0, 60.0]
     assert result["issues"] == 0
 
     # Rate-limited pages were each called twice (first fail + retry).
