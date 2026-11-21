@@ -33,11 +33,13 @@
 .erp-overview .erp-profit-metrics dt { flex-wrap: wrap; }
 .erp-overview .erp-metric-hint { width: 24px; min-width: 24px; height: 24px; padding: 0; }
 .erp-overview .erp-profit-metrics dd { margin-top: 2px; font-size: 18px; font-weight: 500; line-height: 1.4; }
+.erp-overview-missing { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.4; }
 .erp-overview-primary .erp-profit-metrics dd { font-size: 30px; font-weight: 600; }
 .erp-overview-primary { border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
 .erp-overview-prices { border-top: 1px solid var(--rule); padding-top: 6px; }
-.erp-overview .erp-price-summary-table { min-width: 0; width: 100%; font-size: 12px; }
-.erp-overview .erp-price-summary-table th, .erp-overview .erp-price-summary-table td { padding: 4px; overflow-wrap: anywhere; }
+.erp-overview .erp-price-summary-table { min-width: 0; width: 100%; table-layout: fixed; font-size: 12px; }
+.erp-overview .erp-price-summary-table th, .erp-overview .erp-price-summary-table td { padding: 4px 10px; overflow-wrap: anywhere; }
+.erp-overview .erp-price-summary-table th:nth-child(2), .erp-overview .erp-price-summary-table th:nth-child(3) { text-align: end; }
 .erp-overview-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .erp-overview-comparison > div { min-width: 0; }
 .erp-overview-comparison > div + div { border-left: 1px solid var(--rule); padding-left: 24px; }

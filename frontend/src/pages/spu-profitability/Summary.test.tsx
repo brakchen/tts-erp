@@ -34,7 +34,9 @@ it('groups the original server values into sales, costs and profit without deriv
   expect(within(sales).getByText('661.98')).toBeInTheDocument();
   expect(within(costs).getByText('270.30')).toBeInTheDocument();
   expect(costs.querySelector('#sum-purchase-cost')).toHaveTextContent('—');
+  expect(within(costs).getByText('未提供汇总；采购价为单件口径')).toBeInTheDocument();
   expect(profit.querySelector('#sum-net-revenue')).toHaveTextContent('—');
+  expect(within(profit).getByText('未提供汇总；净利润为服务端结果')).toBeInTheDocument();
   expect(within(profit).getByText('412.51')).toBeInTheDocument();
   expect(within(profit).getByText('-33.79')).toBeInTheDocument();
   expect(within(profit).getByRole('grid', { name: '当前与预计 ROI' })).toHaveTextContent('1.71');
@@ -42,4 +44,6 @@ it('groups the original server values into sales, costs and profit without deriv
   expect(within(profit).getByRole('grid', { name: '当前与预计 ROI' })).toHaveTextContent('≈2.86');
   expect(within(sales).queryByText('预计净收入')).toBeNull();
   expect(within(costs).queryByText('预计净收入')).toBeNull();
+  expect(within(costs).queryByText('预计新增全损')).toBeNull();
+  expect(within(profit).getByText('预计新增全损')).toBeInTheDocument();
 });
