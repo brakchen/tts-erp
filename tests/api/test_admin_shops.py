@@ -334,6 +334,45 @@ def test_update_shop_partial_keeps_existing(api_client, admin_key):
     assert cleared.json()["shop"]["opened_date"] is None
 
 
+def test_update_shop_alias_is_separate_from_synced_name_and_searchable(
+    api_client, admin_key, readwrite_key,
+):
+    created = _register(api_client, admin_key, account_name="TEST_official_name")
+    pk = created.json()["shop"]["id"]
+
+    updated = _patch(api_client, readwrite_key, pk, shop_alias="  TEST_local_alias  ")
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["shop"]["shop_alias"] == "TEST_local_alias"
+    assert updated.json()["shop"]["account_name"] == "TEST_official_name"
+
+    detail = api_client.get(f"/v2/commerce/channel-accounts/{pk}?view=management")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["shop_alias"] == "TEST_local_alias"
+    listed = api_client.get(
+        "/v2/commerce/channel-accounts?view=management&q=TEST_local_alias"
+    )
+    assert listed.status_code == 200, listed.text
+    assert any(
+        row["id"] == pk and row["shop_alias"] == "TEST_local_alias"
+        for row in listed.json()
+    )
+
+    unchanged = _patch(api_client, readwrite_key, pk, opened_date="2026-09-01")
+    assert unchanged.json()["shop"]["shop_alias"] == "TEST_local_alias"
+    cleared = _patch(api_client, readwrite_key, pk, shop_alias="   ")
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["shop"]["shop_alias"] is None
+    assert cleared.json()["shop"]["account_name"] == "TEST_official_name"
+
+
+def test_update_shop_alias_rejects_too_long_value(api_client, admin_key):
+    pk = _register(api_client, admin_key).json()["shop"]["id"]
+    rejected = _patch(api_client, admin_key, pk, shop_alias="x" * 201)
+    assert rejected.status_code == 422, rejected.text
+    detail = api_client.get(f"/v2/commerce/channel-accounts/{pk}?view=management")
+    assert detail.json()["shop_alias"] is None
+
+
 def test_update_shop_never_touches_credential_or_status(api_client, admin_key):
     """PATCH 只动元信息；credential_id / status 不在可改面内。"""
     r = _register(api_client, admin_key)

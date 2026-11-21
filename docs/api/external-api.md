@@ -259,7 +259,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 
 | Endpoint | Extra query params | Returns |
 | --- | --- | --- |
-| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, region, seller_type, status, opened_date, credential_id, service_id, app_credentials_configured, synced_at}`；响应头 `X-Total-Count` 是同一过滤条件下、分页前的店铺总数。`credential_id` 非空 = 已 OAuth 授权走 API 同步；`app_credentials_configured` 只表示 service_id 有可解析 App pair，不泄露 Secret |
+| `GET /v2/commerce/channel-accounts` | `platform` (e.g. `tiktok`) | list of `{id, platform, shop_id, account_name, shop_alias, region, seller_type, status, opened_date, credential_id, service_id, app_credentials_configured, synced_at}`；`shop_alias` 是人工维护的可空店铺别名，管理列表的 `q` 可搜索别名；响应头 `X-Total-Count` 是同一过滤条件下、分页前的店铺总数。`credential_id` 非空 = 已 OAuth 授权走 API 同步；`app_credentials_configured` 只表示 service_id 有可解析 App pair，不泄露 Secret |
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
@@ -430,7 +430,7 @@ page:users"}`。API key 凭证（admin 档）也可调用，不受页面权限�
 | `POST /v2/admin/shops/register` | **readwrite** | 手工补录元数据；可配置本店 Service ID、App Key/Secret，秘密加密保存。未授权店铺仅在管理视图出现。 |
 | `POST /v2/plugin/shops/discover` | **readwrite** | 登记当前绑定店铺；`sellerId` 即 `shop_id`，唯一键 upsert，仅补齐空名称/区域；需对应 seller scope。 |
 | `GET /v2/plugin/shops/{shop_id}` | **readwrite** | 返回本店插件采集所需元数据；允许未授权店铺，需对应 seller scope。 |
-| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 修改开店日期或本店 App 配置；名称和区域只读。App Key/Secret 成对更新；空白保留，Service 变更需有本店完整配置。 |
+| `PATCH /v2/admin/shops/{shop_pk}` | **readwrite** | 修改店铺别名（`shop_alias`，最多 200 字符，空白或 `null` 清除）、开店日期或本店 App 配置；平台名称和区域只读。App Key/Secret 成对更新，留空时保留旧值；Service 变更需有本店完整配置。 |
 
 ### TikTok video publishing (`/v2/video-publish/*`)
 

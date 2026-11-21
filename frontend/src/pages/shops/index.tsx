@@ -137,7 +137,10 @@ export default function Shops({ bootstrap }: PageProps) {
     if (register) for (const field of ['account_name', 'region', 'opened_date'] as const) {
       if (draft[field].trim()) body[field] = draft[field].trim();
     }
-    if (target.kind === 'edit') body.opened_date = draft.opened_date || null;
+    if (target.kind === 'edit') {
+      body.shop_alias = draft.shop_alias.trim() || null;
+      body.opened_date = draft.opened_date || null;
+    }
     if (target.kind === 'app') {
       body.service_id = draft.service_id.trim();
       if (appKey && secret) { body.app_key = appKey; body.app_secret = secret; }
@@ -228,7 +231,7 @@ export default function Shops({ bootstrap }: PageProps) {
     {list.shops && <Table variant="secondary" className="erp-table shops-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="店铺表格"><Table.Content aria-label="店铺接入列表" className="erp-table-content shops-table-content"><Table.Header className="erp-table-head">
       {['店铺', '区域 / 开店日期', '插件资料同步', 'App 配置', 'OAuth 授权', '操作'].map((name, index) => <Table.Column className={`erp-table-column shops-column-${index}`} key={name} isRowHeader={index === 0}>{name}</Table.Column>)}
     </Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">没有符合条件的店铺。绑定插件后会自动登记，也可以手工补录。</div>}>{list.shops.map((shop) => <Table.Row className="erp-table-row" key={shop.id} id={shop.id}>
-      <Table.Cell className="erp-table-cell"><p className="erp-table-primary shops-name">{shop.account_name ?? '名称待同步'}</p><p className="erp-table-id mt-1">{shop.shop_id}</p>{shop.shop_code && <p className="erp-table-meta">编码 {shop.shop_code}</p>}{shop.discovered_at && <p className="erp-table-meta">首次发现 {localTime(shop.discovered_at)}</p>}</Table.Cell>
+      <Table.Cell className="erp-table-cell"><p className="erp-table-primary shops-name">{shop.shop_alias || shop.account_name || '名称待同步'}</p>{shop.shop_alias && <p className="erp-table-meta">店铺名称：{shop.account_name ?? '待同步'}</p>}<p className="erp-table-id mt-1">{shop.shop_id}</p>{shop.shop_code && <p className="erp-table-meta">编码 {shop.shop_code}</p>}{shop.discovered_at && <p className="erp-table-meta">首次发现 {localTime(shop.discovered_at)}</p>}</Table.Cell>
       <Table.Cell className="erp-table-cell"><p className="font-medium">{shop.region ?? '区域待同步'}</p><p className="erp-table-meta">{shop.opened_date ?? '未填开店日期'}</p></Table.Cell>
       <Table.Cell className="erp-table-cell">{shop.plugin_sources?.length ? shop.plugin_sources.map((source) => <div key={source.source} className="mb-2 last:mb-0"><p>{sourceLabels[source.source] ?? source.source}</p><p className="erp-table-meta">{localTime(source.last_received_at)}</p></div>) : <span className="erp-table-meta">尚无插件上报</span>}</Table.Cell>
       <Table.Cell className="erp-table-cell"><Chip size="sm" variant="soft" color={shop.app_credentials_configured ? 'success' : 'default'}>{shop.app_credentials_configured ? '已配置' : '未配置'}</Chip><p className="erp-table-meta">Service ID</p><p className="erp-table-id">{shop.service_id ?? '未填 Service ID'}</p></Table.Cell>

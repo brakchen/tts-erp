@@ -45,6 +45,7 @@ A single `ChannelAccountOut` (see `tts_erp_v2/api/schemas.py`):
   "platform": "tiktok",
   "shop_id": "7494763368967603447",
   "account_name": "Bridge nook",
+  "shop_alias": null,
   "region": "VN",
   "seller_type": "CROSS_BORDER",
   "status": "active",

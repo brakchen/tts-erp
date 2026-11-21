@@ -1,6 +1,6 @@
 export interface Shop {
   id: number; platform: string; shop_id: string;
-  account_name: string | null; region: string | null; seller_type: string | null; status: string | null;
+  account_name: string | null; shop_alias: string | null; region: string | null; seller_type: string | null; status: string | null;
   opened_date: string | null; credential_id: number | null; service_id: string | null; app_credentials_configured: boolean;
   shop_code?: string | null; discovered_at?: string | null;
   plugin_sources?: { source: string; last_received_at: string | null; observed_at: string | null; plugin_version: string | null }[];
@@ -19,11 +19,11 @@ function dateOnly(value: unknown): value is string | null {
 }
 export function decodeShop(value: unknown): Shop {
   if (!record(value) || !positiveId(value.id) || typeof value.platform !== 'string' || typeof value.shop_id !== 'string' ||
-      !['account_name', 'region', 'seller_type', 'status', 'service_id'].every((key) => nullableString(value[key])) ||
+      !['account_name', 'shop_alias', 'region', 'seller_type', 'status', 'service_id'].every((key) => nullableString(value[key])) ||
       !dateOnly(value.opened_date) || !(value.credential_id === null || positiveId(value.credential_id)) || typeof value.app_credentials_configured !== 'boolean') throw bad();
   // Explicit projection keeps unknown/secret response fields out of UI state.
   return { id: value.id, platform: value.platform, shop_id: value.shop_id,
-    account_name: value.account_name as string | null, region: value.region as string | null,
+    account_name: value.account_name as string | null, shop_alias: value.shop_alias as string | null, region: value.region as string | null,
     seller_type: value.seller_type as string | null, status: value.status as string | null,
     service_id: value.service_id as string | null, opened_date: value.opened_date,
     credential_id: value.credential_id, app_credentials_configured: value.app_credentials_configured,

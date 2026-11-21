@@ -5,7 +5,7 @@ import type { PageProps } from '../../shared/contracts';
 
 const modulePath = './index';
 const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'shops', navigation: [], releaseId: 'TEST', roleCapabilities: { readwrite: true, admin: false } } };
-const shop = { id: 41, platform: 'tiktok', shop_id: '90071992547409931234567', account_name: 'TEST_name', region: null, seller_type: null, status: 'active', opened_date: null, credential_id: null, service_id: 'TEST_svc', app_credentials_configured: true };
+const shop = { id: 41, platform: 'tiktok', shop_id: '90071992547409931234567', account_name: 'TEST_name', shop_alias: null, region: null, seller_type: null, status: 'active', opened_date: null, credential_id: null, service_id: 'TEST_svc', app_credentials_configured: true };
 const savedApp = '当前店铺的 App 配置已保存，可以获取授权链接。';
 const json = (value: unknown, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers });
 type Command = { url: string; init: RequestInit };
@@ -138,17 +138,43 @@ describe('shops content', () => {
     await screen.findByText('店铺信息已保存'); expect(writes).toBe(3);
   });
 
-  it.each(['2026-10-24', ''])('edits only the opening date by internal PK, including explicit clear-to-null %s', async (openedDate) => {
+  it.each(['2026-10-24', ''])('edits alias and opening date by internal PK, including explicit clear-to-null %s', async (openedDate) => {
     const commands: Command[] = []; api(async (url, init) => { commands.push({ url, init }); return json({ shop: { ...shop, opened_date: openedDate || null } }); });
     const user = userEvent.setup(); await mount(); await screen.findByText(shop.shop_id); await user.click(screen.getByRole('button', { name: '编辑信息' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).queryByRole('textbox', { name: '店铺名称' })).toBeNull();
     expect(within(dialog).queryByRole('textbox', { name: '区域' })).toBeNull();
+    const alias = within(dialog).getByRole('textbox', { name: '店铺别名' });
+    await user.type(alias, '  TEST_alias  ');
     fireEvent.change(within(dialog).getByLabelText('开店日期', { exact: true }), { target: { value: openedDate } });
     await user.click(save(dialog)); await screen.findByText('店铺信息已保存');
     expect(commands).toHaveLength(1); expect(commands[0].url).toBe('/tts/v2/admin/shops/41');
     expect(commands[0].init.method).toBe('PATCH');
-    expect(JSON.parse(commands[0].init.body as string)).toEqual({ opened_date: openedDate || null });
+    expect(JSON.parse(commands[0].init.body as string)).toEqual({ shop_alias: 'TEST_alias', opened_date: openedDate || null });
+  });
+
+  it('shows a saved alias while retaining the synced shop name and clears it from edit', async () => {
+    const aliased = { ...shop, shop_alias: 'TEST_alias' };
+    let current: typeof aliased | typeof shop = aliased;
+    const fetcher = vi.fn((url: string, init: RequestInit) => {
+      if (url.includes('/v2/commerce/channel-accounts?')) return Promise.resolve(json([current], 200, { 'X-Total-Count': '1' }));
+      current = { ...aliased, shop_alias: null };
+      return Promise.resolve(json({ shop: current }));
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const user = userEvent.setup(); await mount();
+    expect(await screen.findByText('TEST_alias')).toBeVisible();
+    expect(screen.getByText('店铺名称：TEST_name')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '编辑信息' }));
+    const dialog = screen.getByRole('dialog');
+    const alias = within(dialog).getByRole('textbox', { name: '店铺别名' });
+    expect(alias).toHaveValue('TEST_alias');
+    await user.clear(alias); await user.click(save(dialog));
+    await screen.findByText('店铺信息已保存');
+    await waitFor(() => expect(screen.getByText('TEST_name', { exact: true })).toBeVisible());
+    expect(screen.queryByText('店铺名称：TEST_name')).toBeNull();
+    const patch = fetcher.mock.calls.find(([url, init]) => url.includes('/v2/admin/shops/') && init.method === 'PATCH');
+    expect(JSON.parse(patch![1].body as string)).toMatchObject({ shop_alias: null });
   });
 
   it('mints OAuth only for an explicit target shop and copies only on a separate user action', async () => {

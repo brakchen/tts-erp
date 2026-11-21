@@ -586,7 +586,8 @@ def _shop_out(session: Session, shop: ChannelAccount) -> ShopOut:
             auth_state = "unknown"
     return ShopOut(
         id=shop.id, platform=shop.platform, shop_id=shop.shop_id,
-        account_name=shop.account_name, region=shop.region, shop_code=shop.shop_code,
+        account_name=shop.account_name, shop_alias=shop.shop_alias,
+        region=shop.region, shop_code=shop.shop_code,
         discovered_at=shop.discovered_at, plugin_sources=plugin_sources(shop.plugin_metadata),
         seller_type=shop.seller_type, status=shop.status,
         credential_id=shop.credential_id, service_id=shop.service_id,
@@ -619,6 +620,7 @@ def register_shop(request: Request, body: ShopRegisterBody) -> ShopRegisterRespo
 class ShopUpdateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     opened_date: date | None = None
+    shop_alias: str | None = Field(default=None, max_length=200)
     service_id: str | None = Field(default=None, min_length=1, max_length=64)
     app_key: str | None = Field(default=None, min_length=1, max_length=128, repr=False)
     app_secret: SecretStr | None = Field(default=None, repr=False)
@@ -628,6 +630,11 @@ class ShopUpdateBody(BaseModel):
     def strip_value(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
 
+    @field_validator("shop_alias")
+    @classmethod
+    def strip_shop_alias(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
 
 class ShopUpdateResponse(BaseModel):
     shop: ShopOut
@@ -635,7 +642,7 @@ class ShopUpdateResponse(BaseModel):
 
 @router.patch("/shops/{shop_pk}", response_model=ShopUpdateResponse)
 def update_shop(request: Request, shop_pk: int, body: ShopUpdateBody) -> ShopUpdateResponse:
-    """Edit opening date or this shop's App; shop name and region are immutable."""
+    """Edit alias, opening date or this shop's App; shop name and region are immutable."""
     require_role_at_least(request, "readwrite")
     require_cookie_csrf(request)
     from tts_erp_v2.db.base import get_engine
@@ -648,6 +655,8 @@ def update_shop(request: Request, shop_pk: int, body: ShopUpdateBody) -> ShopUpd
             app_key=body.app_key, app_secret=body.app_secret)
         if "opened_date" in body.model_fields_set:
             shop.opened_date = body.opened_date
+        if "shop_alias" in body.model_fields_set:
+            shop.shop_alias = body.shop_alias
         if body.service_id is not None or body.app_key is not None:
             _configure_or_validate_app_credentials(session, shop_pk=shop.id,
                 service_id=service_id, app_key=body.app_key, app_secret=plaintext)

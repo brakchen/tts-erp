@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 const modulePath = './contracts';
-const shop = { id: 41, platform: 'tiktok', shop_id: '90071992547409931234567', account_name: 'TEST_name', region: null, seller_type: null, status: 'active', opened_date: null, credential_id: null, service_id: 'TEST_svc', app_credentials_configured: true };
+const shop = { id: 41, platform: 'tiktok', shop_id: '90071992547409931234567', account_name: 'TEST_name', shop_alias: null, region: null, seller_type: null, status: 'active', opened_date: null, credential_id: null, service_id: 'TEST_svc', app_credentials_configured: true };
 const normalizedShop = { ...shop, shop_code: null, discovered_at: null, plugin_sources: [], auth_state: 'unauthorized' as const };
 
 describe('shop wire decoding', () => {
@@ -9,7 +9,7 @@ describe('shop wire decoding', () => {
     expect(decodeShop(shop)).toEqual(normalizedShop); expect(decodeShopList([shop])).toEqual([normalizedShop]);
     expect(decodeShop({ ...shop, app_secret: 'TEST_SECRET' })).not.toHaveProperty('app_secret');
   });
-  it.each([null, {}, { ...shop, id: '41' }, { ...shop, shop_id: Number.MAX_SAFE_INTEGER + 1 }, { ...shop, credential_id: '3' }, { ...shop, app_credentials_configured: 'true' }, { ...shop, opened_date: '2026-02-31' }])('rejects malformed required shape %#', async (value) => {
+  it.each([null, {}, { ...shop, id: '41' }, { ...shop, shop_id: Number.MAX_SAFE_INTEGER + 1 }, { ...shop, shop_alias: 1 }, { ...shop, credential_id: '3' }, { ...shop, app_credentials_configured: 'true' }, { ...shop, opened_date: '2026-02-31' }])('rejects malformed required shape %#', async (value) => {
     const { decodeShop } = await import(modulePath); expect(() => decodeShop(value)).toThrow();
   });
   it('does not fabricate totals from the page when the count header is absent or malformed', async () => {

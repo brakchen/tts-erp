@@ -14,6 +14,7 @@ from tts_erp_v2.api.v2 import frontend_pages
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 ROOT = Path(__file__).resolve().parents[2]
 SHOP = {"id": 41, "platform": "tiktok", "shop_id": "90071992547409931234567", "account_name": "TEST_long_name_" * 10,
+        "shop_alias": None,
         "region": None, "seller_type": None, "status": "active", "opened_date": None, "credential_id": None,
         "service_id": "TEST_service", "app_credentials_configured": True}
 

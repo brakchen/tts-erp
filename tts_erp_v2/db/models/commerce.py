@@ -51,6 +51,7 @@ class ChannelAccount(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     account_name: Mapped[str | None] = mapped_column(Text)
+    shop_alias: Mapped[str | None] = mapped_column(Text)
     region: Mapped[str | None] = mapped_column(Text)
     seller_type: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text)

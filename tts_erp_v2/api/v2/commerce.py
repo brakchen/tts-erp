@@ -78,7 +78,8 @@ _AUTH_STATE = (
     "THEN 'reauthorize' ELSE 'unknown' END"
 )
 _CHANNEL_FIELDS = (
-    "id, platform, shop_id, account_name, region, shop_code, discovered_at, plugin_metadata, "
+    "id, platform, shop_id, account_name, shop_alias, region, shop_code, "
+    "discovered_at, plugin_metadata, "
     "seller_type, status, synced_at, opened_date, credential_id, service_id, "
     + _APP_CONFIGURED + " AS app_credentials_configured, " + _AUTH_STATE + " AS auth_state "
 )
@@ -87,6 +88,7 @@ _CHANNEL_FILTERS = (
     "AND (CAST(:management AS boolean) OR " + authorized_shop_clause() + ") "
     "AND (CAST(:q AS text) IS NULL OR shop_id ILIKE '%' || :q || '%' "
     "OR COALESCE(account_name, '') ILIKE '%' || :q || '%' "
+    "OR COALESCE(shop_alias, '') ILIKE '%' || :q || '%' "
     "OR COALESCE(shop_code, '') ILIKE '%' || :q || '%') "
     "AND (CAST(:source AS text) IS NULL OR (plugin_metadata -> 'plugins') ? CAST(:source AS text)) "
     "AND (CAST(:app_state AS text) IS NULL OR "
@@ -319,7 +321,8 @@ _STMT_ACCOUNT_ORDER_STATS = text(SQL_ACCOUNT_ORDER_STATS)
 def _row_to_channel_account(row: Any) -> ChannelAccountOut:
     return ChannelAccountOut(
         id=row.id, platform=row.platform, shop_id=row.shop_id,
-        account_name=row.account_name, region=row.region, seller_type=row.seller_type,
+        account_name=row.account_name, shop_alias=row.shop_alias,
+        region=row.region, seller_type=row.seller_type,
         status=row.status, synced_at=row.synced_at, opened_date=row.opened_date,
         credential_id=row.credential_id, service_id=row.service_id,
         app_credentials_configured=bool(row.app_credentials_configured),

@@ -31,6 +31,7 @@ class ChannelAccountOut(BaseModel):
     plugin_sources: list[ShopPluginSourceOut] = Field(default_factory=list)
     auth_state: str = "unauthorized"
     account_name: str | None = None
+    shop_alias: str | None = None
     region: str | None = None
     seller_type: str | None = None
     status: str | None = None

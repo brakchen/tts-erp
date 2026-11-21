@@ -267,7 +267,7 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
         return _alert_payload()
     if path.endswith("/v2/commerce/channel-accounts"):
         return [{"id": 7, "platform": "tiktok", "shop_id": "749486486860415",
-                 "account_name": "QA 店 7", "region": "VN", "status": "active",
+                 "account_name": "QA 店 7", "shop_alias": None, "region": "VN", "status": "active",
                  "seller_type": None, "opened_date": None, "credential_id": None,
                  "service_id": None, "app_credentials_configured": False}]
     if path.endswith("/v2/reporting/ad-daily/options"):
