@@ -499,8 +499,6 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 
 **当前 stable wire 的全损字段必须按 v9 兼容口径解读，不得称为严格全损。** 源码 `_formula_v10.calculate_order_metrics()` 明确为 `full_loss_order_count = refund_order_count + overseas_cancelled_order_count`，其中 `refund_order_count` 是已完成退款订单（可包含部分退款），`full_loss_rate = full_loss_order_count / total_orders`。源码 `_SQL_ROI_FULL_LOSS` 的 `full_loss_qty` 是已完成 `REFUND_ONLY`/`RETURN_AND_REFUND` case lines 的 `quantity` 加上海外取消（`CANCELLED` 且命中 action `38301`）订单行的 `quantity`，因此也可能包含部分退款件数；`full_loss_qty_rate` 继续使用当前代码的件数分母。该兼容语义对应 [business §11.4（第 4 项）](../business/spu-profitability.md#11-当前实现与目标契约的已知差异)，stable wire 不能解释为严格全损。带 `projection_` 的当前预测字段若明确标注“严格全损”，则遵循已交付的严格预测契约，不回写当前兼容字段。
 
-经营概览与商品钻取把 `full_loss_order_count` 标为“已完结退款及海外取消单数”，把 `full_loss_rate` 标为“对应订单占比”；两者都不代表退货退款件数。售后行 `quantity` 完整性核实前，不把当前 `full_loss_qty` 切为看板主指标。
-
 序列化规则：Decimal 全部是 JSON string；`_MONEY_FIELDS` 为 4 位，`_RATIO_FIELDS` 为 2 位，`_FOUR_DECIMAL_RATIO_FIELDS` 为 4 位，totals 的 `refund_rate`/`full_loss_rate`/`cancel_rate` 也为 4 位；未进入这些集合的 Decimal（当前为预测数量）由 adapter `str()` 原样输出。date/datetime 为 ISO 字符串，int/bool 为 JSON 原生类型，Enum 为其 code string。
 
 #### 6.7.1 仅 `items[]` 的 row-only 字段

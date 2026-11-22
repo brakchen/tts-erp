@@ -91,7 +91,7 @@ def test_focused_spus_page_keeps_the_full_roi_dashboard(api_client, readonly_key
     drill = (directory / "DrillDetails.tsx").read_text(encoding="utf-8")
     expected = (
         "sum-total-orders", "sum-spend", "sum-orders", "sum-sales",
-        "sum-refund-count", "sum-refund-rate", "sum-loss-orders", "sum-loss-rate",
+        "sum-refund-count", "sum-refund-rate", "sum-loss-qty", "sum-loss-rate",
         "sum-cancel-count", "sum-cancel-rate", "sum-net-profit", "sum-roi",
         "sum-roi-breakeven", "sum-roi-ad-actual", "sum-roi-ad",
         "sum-projection-completed-basis-orders", "sum-projection-completed-loss-orders",

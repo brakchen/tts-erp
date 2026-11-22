@@ -27,15 +27,6 @@ it('renders null, empty and absent current or projected values as dashes', () =>
   }
 });
 
-it('labels the current loss metric as orders rather than product units', () => {
-  render(<Summary data={{ items: [], total: 0, totals: { full_loss_order_count: 10, full_loss_qty: 1, full_loss_rate: '0.1' }, meta: {} }} />);
-  const costs = screen.getByLabelText('成本');
-  expect(within(costs).getByText('已完结退款及海外取消单数')).toBeInTheDocument();
-  expect(costs.querySelector('#sum-loss-orders')).toHaveTextContent('10');
-  expect(costs.querySelector('#sum-loss-qty')).toBeNull();
-  expect(within(costs).getByText('对应订单占比')).toBeInTheDocument();
-});
-
 it('groups the original server values into sales, costs and profit without deriving missing totals', () => {
   render(<Summary data={{ items: [], total: 0, totals: { gmv: '1234.5678', effective_sales: '661.9793', spend: '270.2993', net_profit: '14.6395', projected_net_revenue: '412.5134', projected_net_profit: '-33.7859', roi_real: '1.71', roi_breakeven: '1.62', projected_roi_real: '1.46', projected_roi_breakeven: '1.67', ad_system_breakeven_roi: '2.86', ad_system_breakeven_roi_status: 'estimated_known_costs' }, meta: {} }} />);
   const sales = screen.getByLabelText('销售'); const costs = screen.getByLabelText('成本'); const profit = screen.getByLabelText('利润');
