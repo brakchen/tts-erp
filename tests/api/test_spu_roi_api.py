@@ -4109,7 +4109,7 @@ def test_spu_roi_dashboard_metrics_are_never_truncated():
 
 def test_spu_roi_drill_summary_matches_actual_dashboard_metrics():
     """Totals and row details share current-metric definitions and explanations."""
-    expected = {"总单量": "total_orders", "广告消耗": "spend", "有效单量": "effective_order_count", "有效销售": "effective_sales", "退款数": "refund_order_count", "退款率": "refund_rate", "全损量": "full_loss_order_count", "全损率": "full_loss_rate", "国内取消量": "domestic_cancelled_order_count", "国内取消率": "cancel_rate", "净利润": "net_profit", "实际ROI": "roi_real", "实际保本ROI": "roi_breakeven", "广告系统实际ROI": "ad_system_actual_roi", "广告系统保本ROI": "ad_system_breakeven_roi"}
+    expected = {"总单量": "total_orders", "广告消耗": "spend", "有效单量": "effective_order_count", "有效销售": "effective_sales", "退款数": "refund_order_count", "退款率": "refund_rate", "已完结退款及海外取消单数": "full_loss_order_count", "对应订单占比": "full_loss_rate", "国内取消量": "domestic_cancelled_order_count", "国内取消率": "cancel_rate", "净利润": "net_profit", "实际ROI": "roi_real", "实际保本ROI": "roi_breakeven", "广告系统实际ROI": "ad_system_actual_roi", "广告系统保本ROI": "ad_system_breakeven_roi"}
     assert {label: field for label, field, _ in _react_profitability_metrics("currentMetrics")} == expected
     summary = _react_profitability_source("Summary.tsx")
     details = _react_profitability_source("DrillDetails.tsx")
@@ -4283,7 +4283,7 @@ def test_spu_roi_page_header_summary_extended_band(api_client, readonly_key):
     projected = _react_profitability_metrics("projectedMetrics")
     assert [hook for _, _, hook in current] == [
         "sum-total-orders", "sum-spend", "sum-orders", "sum-sales",
-        "sum-refund-count", "sum-refund-rate", "sum-loss-qty", "sum-loss-rate",
+        "sum-refund-count", "sum-refund-rate", "sum-loss-orders", "sum-loss-rate",
         "sum-cancel-count", "sum-cancel-rate", "sum-net-profit", "sum-roi",
         "sum-roi-breakeven", "sum-roi-ad-actual", "sum-roi-ad",
     ]
