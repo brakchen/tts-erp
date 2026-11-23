@@ -31,8 +31,9 @@ class DailyFact:
     cancelled_orders: int = 0
     domestic_cancelled_orders: int = 0
     overseas_cancelled_orders: int = 0
-    full_loss_cancelled_qty: int = 0
-    full_loss_qty: int = 0
+    strict_full_loss_cancelled_qty: int = 0
+    strict_full_loss_qty: int = 0
+    strict_full_loss_order_count: int = 0
     refund_order_count: int = 0
     refund_only_qty: int = 0
     refund_return_qty: int = 0
@@ -75,8 +76,9 @@ def aggregate_facts(facts: Iterable[DailyFact], *, calculate=None) -> WindowMetr
         "cancelled_orders",
         "domestic_cancelled_orders",
         "overseas_cancelled_orders",
-        "full_loss_cancelled_qty",
-        "full_loss_qty",
+        "strict_full_loss_cancelled_qty",
+        "strict_full_loss_qty",
+        "strict_full_loss_order_count",
         "refund_order_count",
         "refund_only_qty",
         "refund_return_qty",
@@ -108,8 +110,9 @@ def aggregate_facts(facts: Iterable[DailyFact], *, calculate=None) -> WindowMetr
         domestic_cancelled_orders=int(sums["domestic_cancelled_orders"]),
         overseas_cancelled_orders=int(sums["overseas_cancelled_orders"]),
         units_sold=int(sums["units_sold"]),
-        full_loss_cancelled_qty=int(sums["full_loss_cancelled_qty"]),
-        full_loss_qty=int(sums["full_loss_qty"]),
+        strict_full_loss_cancelled_qty=int(sums["strict_full_loss_cancelled_qty"]),
+        strict_full_loss_qty=int(sums["strict_full_loss_qty"]),
+        strict_full_loss_order_count=int(sums["strict_full_loss_order_count"]),
         refund_order_count=int(sums["refund_order_count"]),
         refund_only_qty=int(sums["refund_only_qty"]),
         refund_return_qty=int(sums["refund_return_qty"]),

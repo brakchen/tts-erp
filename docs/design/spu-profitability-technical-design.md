@@ -4,7 +4,7 @@
 >
 > **2026-11-01 页面所有者更新：** 两页现已迁移到 `frontend/src/pages/spu-profitability/`，共用 React、HeroUI 与 AppShell。本文旧模板、Bootstrap/Tom Select、全局 kernel 的实现描述由 [React 迁移记录](../plans/spu-react-migration-2026-11-01.md) 的页面所有权和布局章节取代；HTTP/领域/业务契约不变。维护页面请从该 React 目录开始，不能恢复旧整页 mount。
 >
-> 本文是页面、HTTP adapter、领域 module、查询和部署的技术事实；业务口径、公式、日期边界、字段业务含义和验收口径的唯一权威仍是 [`../business/spu-profitability.md`](../business/spu-profitability.md)。本文只引用该文，不复制公式。30/90 独立预测、basis metadata 和竞态保护是当前代码行为；v9 兼容字段仍单独标注。
+> 本文是页面、HTTP adapter、领域 module、查询和部署的技术事实；业务口径、公式、日期边界、字段业务含义和验收口径的唯一权威仍是 [`../business/spu-profitability.md`](../business/spu-profitability.md)。本文只引用该文，不复制公式。30/90 独立预测、basis metadata 和竞态保护是当前代码行为；当前全损字段统一采用严格口径。
 >
 > 代码基线：`tts_erp_v2.analytics.spu_profitability`、`tts_erp_v2.analytics.spu_roi`、`frontend/src/pages/spu-profitability/`，以及当前测试。所有路径均相对仓库根。
 
@@ -15,7 +15,7 @@
 | 内容 | 唯一来源 | 本文处理方式 |
 | --- | --- | --- |
 | 指标概念、计算公式、退款/全损/预测口径、日期业务边界 | `docs/business/spu-profitability.md` | 只引用章节，不重新定义 |
-| HTTP 参数、响应字段、状态码和 wire 精度 | 本文当前契约；兼容细节以 `tts_erp_v2/api/v2` 实现为准 | 逐项列出当前兼容 wire 与产品读取规则 |
+| HTTP 参数、响应字段、状态码和 wire 精度 | 本文当前契约；实现以 `tts_erp_v2/api/v2` 为准 | 逐项列出当前 wire 与产品读取规则 |
 | 页面结构、控件和交互 | `frontend/src/pages/spu-profitability/` | React 拥有筛选/请求/汇总/明细，Tabulator 仅拥有空 ref 中表体 |
 | 深模块接口、查询流程和依赖方向 | `analytics/spu_profitability/` | 约束实现位置 |
 | 历史公式、旧页面设计和迁移记录 | `docs/archive/` | 不作为现行依据 |
@@ -24,7 +24,7 @@
 
 1. 在同一个只读 `REPEATABLE READ` 快照中产生明细行、大盘、费率、成本、汇率和证据基准。
 2. 将页面经营窗口与预测样本窗口彻底分离：经营日期约束当前事实、预测对象和预计最终指标；`projection_lookback_days=30|90` 仅控制独立成熟样本和风险率。
-3. 保留 `/v2/analytics/spu-roi`、四个钻取 URL 和历史字段的兼容 adapter；新领域代码不依赖 HTTP 字符串。
+3. 提供 `/v2/analytics/spu-roi`、四个钻取 URL 和严格全损字段的 adapter；新领域代码不依赖 HTTP 字符串。
 4. 前端只请求、格式化和呈现服务端结果，不复制阈值、状态判定或业务公式。
 5. 保持订单级全局去重、分页稳定、选择范围一致和可观测的降级说明。
 
@@ -44,13 +44,13 @@
 | 深模块 | `read_overview()`、`explain_spu()`；SQL 在 `_implementation.py`，纯公式在 `_formula_v10.py` | 保持公开 seam，补齐投影 policy 和 basis 传递 |
 | 经营窗口 | `w_start/w_end` 进入主表、广告和证据查询 | 店铺本地日半开区间；主表和证据保持此行为 |
 | 预测窗口 | 店铺本地 `A=T-1`、7 天成熟等待期和 `projection_lookback_days=30|90` 形成独立成熟样本 | 已交付；样本 basis 独立于 `w_start/w_end`，风险池、当前基线和预计最终 totals 跟随经营窗口 |
-| 预测行字段 | `SpuProfitability` 与 wire row 仍包含大量 projection 字段 | 兼容字段可保留但页面不展示；目标新客户端只读取 `totals`/`meta.projection` |
+| 预测行字段 | `SpuProfitability` 与 wire row 仍包含大量 projection 字段 | 页面预测展示只读取 `totals`/`meta.projection` |
 | 当前未结算收入 | 已按经营窗口聚合未结算销售与已确认退款 | 已交付：只扣同一经营窗口内未结算订单的已确认退款；未来损失仅进 projection |
-| 全损判定 | v9 兼容字段和历史诊断继续输出；预测严格分子要求 paid/payment evidence + terminal 80101 或其他业务规定的严格证据 | 已交付；UNPAID/ON_HOLD 取消单不得因 80101 stray event 进入严格样本，paid-then-cancelled 可进入 |
+| 全损判定 | 当前与预测均要求 paid/payment evidence，且有终局 80101 或海外暴露后的最终全额退款 | 已交付；UNPAID/ON_HOLD 取消单不得因 80101 stray event 进入严格样本，paid-then-cancelled 可进入 |
 | 快照时间 | overview 共享 `basis.calculated_at`；detail payload 当前自行取 `datetime.now(UTC)` | `explain_spu()` 的结果、四路 evidence 和 basis 共享同一 `calculated_at` |
 | API 文档 | external-api 混有详细盈利契约及 archive 引用 | external-api 仅保留导航、鉴权和稳定性索引，详细契约集中到本文 |
 
-v9 兼容字段不得被新客户端当作 SPU 预测产品语义；projection 样本 rates/basis 与经营窗口目标在同一快照内聚合，预计最终 totals 使用当前窗口基线。
+projection 样本 rates/basis 与经营窗口目标在同一快照内聚合，预计最终 totals 使用当前窗口基线。
 
 ## 2. 用户旅程和页面信息架构
 
@@ -117,7 +117,7 @@ Bootstrap `container-fluid`、`row-cols-*` 和 `table-responsive` 负责断点�
 | 总览 | 总单量、广告消耗 | `total_orders`, `spend` | 空范围显示 0 或 `—`，不展示旧请求值 |
 | 有效 | 有效单量、有效销售 | `effective_order_count`, `effective_sales` | 估算收入带 `≈`/提示；金额仍来自服务端 |
 | 退款 | 退款数、退款率 | `refund_order_count`, `refund_rate` | 分母为 0 显示 `—` |
-| 当前兼容全损 | v9 兼容全损量、兼容全损率 | `full_loss_qty`, `full_loss_rate` | 不是目标严格全损；后端决定分类，前端不从 case 数推导 |
+| 当前严格全损 | 严格全损订单数、件数和比率 | `strict_full_loss_order_count`, `strict_full_loss_qty`, `strict_full_loss_rate` | 服务端按订单级付款、物流和最终退款事实判定 |
 | 国内取消 | 国内取消量、国内取消率 | `domestic_cancelled_order_count`, `cancel_rate` | 海外取消不重复进入取消率 |
 | 利润 | 净利润、实际 ROI | `net_profit`, `roi_real` | `profit_status=loss` 红色；ROI null 显示 `—` |
 | ROI | 实际保本 ROI、广告系统实际 ROI、广告系统保本 ROI | `roi_breakeven`, `ad_system_actual_roi`, `ad_system_breakeven_roi` | `estimated_known_costs` 前缀 `≈`；无解显示 `—` |
@@ -228,11 +228,11 @@ HTTP adapter负责鉴权矩阵外的参数校验、异常到 HTTP mapping、Deci
 - 广告、销售、全损、状态、退款五组当前事实各读取一次；每个 selected SPU 的当前公式只计算一次，行结果和预测聚合复用该结果。无当前活动的 SPU 仍参与完整选择范围的成熟样本。
 - 销售查询先按所选 SPU、已付款状态与订单经营窗口限定订单集合，再读取结算、整单 GMV 和确认退款。整单 GMV 仍包含其他 SPU 与未归属商品行；结算、退款不按自身发生日期裁剪。
 - 价格统计先按店铺、所选 SPU 与订单经营窗口限定当前订单行，再以 `(shop_pk, order_pk, external_line_id)` 获取其全部观察版本，沿用版本时间、采集时间、语义 hash 的 canonical 排序。观察自身的 SPU 归属、采集日期和价格有效性均不用于提前过滤；无观察及非已付款订单行仍保留在 coverage 中。覆盖率与价格分桶在一条 SQL 内复用同一物化 population，原生 numeric/Decimal 与全范围聚合口径不变。
-- 大盘预测只计算一次并直接构造 totals；保留历史兼容行级预测。预测全局计数使用完整 selected SPU，当前全局订单/退款计数仍独立去重。非空常规选择的九类核心事实 SQL 共执行九次（不含权限、目录、成本、费率、汇率、价格统计等辅助读取）。
+- 大盘预测只计算一次并直接构造 totals；保留行级预测诊断。预测全局计数使用完整 selected SPU，当前全局订单/退款计数仍独立去重。非空常规选择的核心事实 SQL 按批执行固定次数（不含权限、目录、成本、费率、汇率、价格统计等辅助读取）。
 - 订单与结算 evidence 各保留原主查询，再按唯一订单 PK 批量聚合整单/目标 SPU GMV；物流按 shipment PK、结算组件按 transaction PK 批量读取。每类 evidence 最多两条附加批量查询，空 ID 集不发查询。
 - 分母包含整单其他 SPU 与未归属商品行。订单行 × 包裹粒度、订单 500 行截断、结算交易粒度、组内时间/组件排序、Decimal 精度、NULL/零值和返回字段保持原契约。
 
-上述查询预算与兼容边界由 `tests/api/test_spu_roi_query_efficiency.py` 验证；业务公式仍以现有 API 和纯公式回归测试为准。
+上述查询预算和范围边界由 `tests/api/test_spu_roi_query_efficiency.py` 验证；业务公式仍以现有 API 和纯公式回归测试为准。
 
 ### 5.4 范围、排序和分页
 
@@ -286,9 +286,9 @@ GET /v2/analytics/spu-roi?shop_pk=314&w_start=2026-09-01&w_end=2026-09-30&projec
 X-API-Key: ttserp_ro_...
 ```
 
-### 6.3 主端点响应：当前兼容 wire
+### 6.3 主端点响应：当前 wire
 
-当前 adapter 的成功 envelope 是 `{items, total, totals, meta}`。当前 `items[]` 仍序列化完整 `SpuProfitability` dataclass 加 computed properties，因此保留历史 SPU 行级 projection 兼容字段；新客户端不得把这些行字段当作产品预测。当前 adapter 已接受 `projection_lookback_days`，并返回 `meta.projection` 的 status、warning、as-of、30/90 sample window、maturity、basis counts 和 strict rate。下面示意兼容 wire：
+当前 adapter 的成功 envelope 是 `{items, total, totals, meta}`。当前 `items[]` 仍序列化完整 `SpuProfitability` dataclass 加 computed properties，并输出行级 projection 诊断；页面预测使用大盘结果。当前 adapter 已接受 `projection_lookback_days`，并返回 `meta.projection` 的 status、warning、as-of、30/90 sample window、maturity、basis counts 和 strict rate。下面示意当前 wire：
 
 ```json
 {
@@ -316,11 +316,11 @@ X-API-Key: ttserp_ro_...
 }
 ```
 
-兼容字段只为已部署 consumer 和旧页面保留。新客户端不得读取 `items[].projection_*`、`items[].projected_*`；预测展示读取 `totals` 与 `meta.projection` 的当前 30/90 basis。示例中的 `meta.projection.full_loss_rate_source` 描述当前预测使用的已完结严格全损率，不会重新定义 stable wire 的兼容 `full_loss_rate`。
+预测展示读取 `totals` 与 `meta.projection` 的当前 30/90 basis。
 
 ### 6.4 主端点响应：产品读取 wire 约束
 
-当前主端点仍使用 `{items,total,totals,meta}`；`items[]` 的 projection 字段仅作为 v9 兼容 wire 保留，产品展示和新客户端不得读取。预测权威值只在 `totals` 和 `meta.projection` 出现；样本 basis/rate 独立于经营窗口，风险池与预计最终 totals 跟随经营窗口。以下字段约束是当前客户端应遵守的 wire 形状：
+当前主端点使用 `{items,total,totals,meta}`；产品预测展示读取 `totals` 和 `meta.projection`；样本 basis/rate 独立于经营窗口，风险池与预计最终 totals 跟随经营窗口。以下字段约束是当前客户端应遵守的 wire 形状：
 
 ```json
 {
@@ -353,7 +353,7 @@ X-API-Key: ttserp_ro_...
 }
 ```
 
-`projection_lookback_days=30|90` 只改变成熟样本、风险率和由此产生的未来损益调整；`w_start/w_end` 同时约束当前事实、evidence、预测对象和预计最终 totals。当前兼容 wire 与产品展示并存期间，adapter 保持旧 row fields，但不得把它们当作新的 SPU 预测语义。
+`projection_lookback_days=30|90` 只改变成熟样本、风险率和由此产生的未来损益调整；`w_start/w_end` 同时约束当前事实、evidence、预测对象和预计最终 totals。adapter 返回行级诊断字段，产品预测展示读取 totals。
 
 ### 6.5 四个钻取端点
 
@@ -371,15 +371,15 @@ X-API-Key: ttserp_ro_...
     "order_id": "5800001", "status": "DELIVERED", "qty": 2,
     "line_gmv": "160.0000", "paid_at": "2026-09-03T08:00:00+00:00",
     "is_settled": true, "settled_net_share": "145.0000",
-    "arrived_overseas": true, "full_loss": false,
+    "arrived_overseas": true, "strict_full_loss": false,
     "shipment": {"status": "DELIVERED", "tracking_number": "TN1"},
     "tracking": [{"action_code": 50101, "desc": "Delivered", "event_at": "2026-09-05T08:00:00+00:00"}]
   }],
-  "meta": {"orders_truncated": false, "rubric_version": "v9", "computed_at": "2026-10-08T10:00:00+00:00", "currency": {"display": "CNY"}}
+  "meta": {"orders_truncated": false, "rubric_version": "v10", "computed_at": "2026-10-08T10:00:00+00:00", "currency": {"display": "CNY"}}
 }
 ```
 
-`spu_pk` 为 JSON int、非 null、正数；`spu_id` 为 string/null；`window.w_start/w_end` 为 date string/null；`order_id`、`status` 为 string/null；`qty` 为 JSON int、非负；`line_gmv` 与 `settled_net_share` 为 CNY money string/null；`paid_at` 为 datetime string/null；`is_settled`、`arrived_overseas`、`full_loss` 为 JSON bool、非 null；`shipment` 为 object/null，`shipment.status` 和 `tracking_number` 为 string/null；`tracking[]` 的 `action_code` 为 int/null，`desc` 为 string/null，`event_at` 为 datetime/null。上限 500，达到上限 `meta.orders_truncated=true`。
+`spu_pk` 为 JSON int、非 null、正数；`spu_id` 为 string/null；`window.w_start/w_end` 为 date string/null；`order_id`、`status` 为 string/null；`qty` 为 JSON int、非负；`line_gmv` 与 `settled_net_share` 为 CNY money string/null；`paid_at` 为 datetime string/null；`is_settled`、`arrived_overseas`、`strict_full_loss` 为 JSON bool、非 null；`shipment` 为 object/null，`shipment.status` 和 `tracking_number` 为 string/null；`tracking[]` 的 `action_code` 为 int/null，`desc` 为 string/null，`event_at` 为 datetime/null。上限 500，达到上限 `meta.orders_truncated=true`。
 
 #### 6.5.2 settlements
 
@@ -396,7 +396,7 @@ X-API-Key: ttserp_ro_...
       {"code": "PLATFORM_COMMISSION", "amount_vnd": "-12000.0000", "amount": "-3.0400"}
     ]
   }],
-  "meta": {"rubric_version": "v9", "computed_at": "2026-10-08T10:00:00+00:00", "currency": {"display": "CNY", "settlement_component_native": "VND"}}
+  "meta": {"rubric_version": "v10", "computed_at": "2026-10-08T10:00:00+00:00", "currency": {"display": "CNY", "settlement_component_native": "VND"}}
 }
 ```
 
@@ -414,7 +414,7 @@ X-API-Key: ttserp_ro_...
     "status": "RETURN_OR_REFUND_REQUEST_COMPLETE", "refund_amount": "20.0000",
     "reason": "DAMAGED: 商品破损", "updated_at": "2026-09-10T08:00:00+00:00"
   }],
-  "meta": {"rubric_version": "v9", "computed_at": "2026-10-08T10:00:00+00:00", "currency": {"display": "CNY"}}
+  "meta": {"rubric_version": "v10", "computed_at": "2026-10-08T10:00:00+00:00", "currency": {"display": "CNY"}}
 }
 ```
 
@@ -428,7 +428,7 @@ X-API-Key: ttserp_ro_...
 {
   "spu_pk": 912,
   "ads": [{"campaign_id": "CAM-1", "spend": "10.0000", "orders": 3, "first_day": "2026-09-01", "last_day": "2026-09-30"}],
-  "meta": {"rubric_version": "v9", "computed_at": "2026-10-08T10:00:00+00:00", "note": "广告域与日期窗口同语义裁剪（v8）", "currency": {"display": "CNY", "native": "USD"}}
+  "meta": {"rubric_version": "v10", "computed_at": "2026-10-08T10:00:00+00:00", "note": "广告域与日期窗口同语义裁剪（v8）", "currency": {"display": "CNY", "native": "USD"}}
 }
 ```
 
@@ -497,9 +497,9 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 
 字段矩阵直接按 `SpuProfitability`、`ProfitabilityTotals` dataclass 和 adapter 的 `_row_payload()`/`_totals_payload()` 生成规则整理。`SpuProfitability` 字段只出现在 `items[]`；`ProfitabilityTotals` 字段只出现在 `totals`；两者交集才同时出现。computed properties 不属于 dataclass 字段，单独列出。不得把 row-only 字段写成 totals，也不得把 totals-only 字段写成 row。业务含义/公式仍以 business 文档为准。
 
-**当前 stable wire 的全损字段必须按 v9 兼容口径解读，不得称为严格全损。** 源码 `_formula_v10.calculate_order_metrics()` 明确为 `full_loss_order_count = refund_order_count + overseas_cancelled_order_count`，其中 `refund_order_count` 是已完成退款订单（可包含部分退款），`full_loss_rate = full_loss_order_count / total_orders`。源码 `_SQL_ROI_FULL_LOSS` 的 `full_loss_qty` 是已完成 `REFUND_ONLY`/`RETURN_AND_REFUND` case lines 的 `quantity` 加上海外取消（`CANCELLED` 且命中 action `38301`）订单行的 `quantity`，因此也可能包含部分退款件数；`full_loss_qty_rate` 继续使用当前代码的件数分母。该兼容语义对应 [business §11.4（第 4 项）](../business/spu-profitability.md#11-当前实现与目标契约的已知差异)，stable wire 不能解释为严格全损。带 `projection_` 的当前预测字段若明确标注“严格全损”，则遵循已交付的严格预测契约，不回写当前兼容字段。
+当前全损字段统一采用 [业务 §4.3](../business/spu-profitability.md) 的严格订单级判定；部分退款和仅有海外到达事件的取消单不计入全损。旧全损字段已从接口删除。
 
-序列化规则：Decimal 全部是 JSON string；`_MONEY_FIELDS` 为 4 位，`_RATIO_FIELDS` 为 2 位，`_FOUR_DECIMAL_RATIO_FIELDS` 为 4 位，totals 的 `refund_rate`/`full_loss_rate`/`cancel_rate` 也为 4 位；未进入这些集合的 Decimal（当前为预测数量）由 adapter `str()` 原样输出。date/datetime 为 ISO 字符串，int/bool 为 JSON 原生类型，Enum 为其 code string。
+序列化规则：Decimal 全部是 JSON string；`_MONEY_FIELDS` 为 4 位，`_RATIO_FIELDS` 为 2 位，`_FOUR_DECIMAL_RATIO_FIELDS` 为 4 位，totals 的 `refund_rate`/`strict_full_loss_rate`/`cancel_rate` 也为 4 位；未进入这些集合的 Decimal（当前为预测数量）由 adapter `str()` 原样输出。date/datetime 为 ISO 字符串，int/bool 为 JSON 原生类型，Enum 为其 code string。
 
 #### 6.7.1 仅 `items[]` 的 row-only 字段
 
@@ -526,7 +526,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `refund_return_qty` | `items[]` | JSON int | 退货退款件数 | 非 null |
 | `refund_return_amount` | `items[]` | JSON string（money，4 位） | 退货退款金额 | 非 null |
 | `refund_net_qty` | `items[]` | JSON int | 净退款件数 | 非 null |
-| `refund_amount_rate` | `items[]` | JSON string（ratio，2 位） | 兼容退款金额率 | 可 null |
+| `refund_amount_rate` | `items[]` | JSON string（ratio，2 位） | 退款金额率 | 可 null |
 | `refund_cancelled_qty` | `items[]` | JSON int | 已付款被取消件数 | 非 null |
 | `refund_cancelled_amount` | `items[]` | JSON string（money，4 位） | 已付款被取消金额 | 非 null |
 | `refund_cancelled_missing_lines` | `items[]` | JSON int | 无法归属商品行的取消 case 行数 | 非 null |
@@ -540,10 +540,10 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `settled_sales` | `items[]` | JSON string（money，4 位） | 已结算销售额 | 非 null |
 | `unsettled_sales` | `items[]` | JSON string（money，4 位） | 未结算销售额 | 非 null |
 | `cogs_sold` | `items[]` | JSON string（money，4 位） | 售出货本 | 非 null |
-| `cogs_full_loss_cancelled` | `items[]` | JSON string（money，4 位） | v9 兼容海外取消桶货本，不等同于目标严格全损货本 | 非 null |
+| `strict_full_loss_cancelled_cogs` | `items[]` | JSON string（money，4 位） | 严格全损取消件货本 | 非 null |
 | `cogs_total` | `items[]` | JSON string（money，4 位） | 总货本 | 非 null |
 | `settled_order_count` | `items[]` | JSON int | 已结算订单数 | 非 null |
-| `full_loss_qty_rate` | `items[]` | JSON string（ratio，2 位） | v9 兼容件数率：`full_loss_qty / (units_sold + full_loss_cancelled_qty)`；沿用兼容 `full_loss_qty`，不是目标严格全损率 | 可 null |
+| `strict_full_loss_qty_rate` | `items[]` | JSON string（ratio，2 位） | 严格全损件数 / (售出件数 + 严格全损取消件数) | 可 null |
 | `fee_rate_used` | `items[]` | JSON string（ratio，4 位） | 本次采用的平台费率 | 非 null |
 | `fee_source` | `items[]` | JSON string | 平台费率来源 | 非 null |
 
@@ -564,7 +564,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `total_orders` | `items[] + totals` | JSON int | 有效销售与取消订单总数 | 非 null |
 | `effective_order_count` | `items[] + totals` | JSON int | 有效订单数 | 非 null |
 | `refund_order_count` | `items[] + totals` | JSON int | 已确认退款订单数 | 非 null |
-| `full_loss_order_count` | `items[] + totals` | JSON int | **v9 兼容计数**：`refund_order_count + overseas_cancelled_order_count`；含已完成退款订单，可能包含部分退款，不是严格全损订单数 | 非 null |
+| `strict_full_loss_order_count` | `items[] + totals` | JSON int | 符合严格全损判定的订单数 | 非 null |
 | `domestic_cancelled_order_count` | `items[] + totals` | JSON int | 国内取消订单数 | 非 null |
 | `overseas_cancelled_order_count` | `items[] + totals` | JSON int | 海外取消订单数 | 非 null |
 | `sales` | `items[] + totals` | JSON string（money，4 位） | 销售行金额 | 非 null |
@@ -572,45 +572,38 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `cancel_rate` | `items[] + totals` | JSON string（items ratio 2 位；totals ratio 4 位） | 国内取消率 | 可 null |
 | `refund_net_amount` | `items[] + totals` | JSON string（money，4 位） | 净退款金额 | 非 null |
 | `refund_rate` | `items[] + totals` | JSON string（items ratio 2 位；totals ratio 4 位） | 退款率 | 可 null |
-| `return_loss` | `items[] + totals` | JSON string（money，4 位） | 当前兼容货损：源码按兼容 `full_loss_qty × unit_cost_used` 计算；不得解释为目标严格全损货损 | 非 null |
+| `strict_full_loss_cost` | `items[] + totals` | JSON string（money，4 位） | 严格全损件数 × 当前单位成本 | 非 null |
 | `net_profit` | `items[] + totals` | JSON string（money，4 位） | 净利润 | 非 null |
 | `roi_real` | `items[] + totals` | JSON string（ratio，2 位） | 实际 ROI | 可 null |
 | `roi_breakeven` | `items[] + totals` | JSON string（ratio，2 位） | 实际保本 ROI | 可 null |
-| `full_loss_qty` | `items[] + totals` | JSON int | **v9 兼容件数**：已完成 `REFUND_ONLY`/`RETURN_AND_REFUND` case line `quantity` + 海外取消 `CANCELLED` 行 `quantity`；可能包含部分退款件数，不是严格全损件数 | 非 null |
-| `full_loss_cancelled_qty` | `items[] + totals` | JSON int | **v9 兼容海外取消桶件数**：命中 action `38301` 的 `CANCELLED` 行 `quantity`，计入兼容 `full_loss_qty`；不得解释为目标严格全损件数 | 非 null |
-| `full_loss_rate` | `items[] + totals` | JSON string（items ratio 2 位；totals ratio 4 位） | **v9 兼容率**：`full_loss_order_count / total_orders`，即 `(refund_order_count + overseas_cancelled_order_count) / total_orders`；可能包含部分退款，不是目标严格全损率 | 可 null |
+| `strict_full_loss_qty` | `items[] + totals` | JSON int | 严格全损订单关联的 SPU 件数 | 非 null |
+| `strict_full_loss_cancelled_qty` | `items[] + totals` | JSON int | 严格全损取消订单关联的 SPU 件数 | 非 null |
+| `strict_full_loss_rate` | `items[] + totals` | JSON string（items ratio 2 位；totals ratio 4 位） | 严格全损订单数 / 全部订单数 | 可 null |
 | `ad_system_actual_roi` | `items[] + totals` | JSON string（ratio，2 位） | 广告系统实际 ROI | 可 null |
 | `ad_system_breakeven_roi` | `items[] + totals` | JSON string（ratio，2 位） | 广告系统保本 ROI | 可 null |
 | `ad_system_max_ad_spend` | `items[] + totals` | JSON string（money，4 位） | 最大可承受广告费 | 非 null |
 | `ad_system_remaining_ad_spend_capacity` | `items[] + totals` | JSON string（money，4 位） | 剩余可承受广告费 | 非 null |
 | `ad_system_breakeven_roi_status` | `items[] + totals` | JSON string（enum code） | 广告系统保本 ROI 计算状态 | 非 null |
-| `projection_status` | `items[] + totals` | JSON string（enum code） | 大盘预测状态（兼容行字段仅为旧 consumer 保留） | 非 null |
+| `projection_status` | `items[] + totals` | JSON string（enum code） | 大盘预测状态（行级预测状态） | 非 null |
 | `projection_basis_order_count` | `items[] + totals` | JSON int | 预测基础样本订单数 | 非 null |
 | `projection_basis_qty` | `items[] + totals` | JSON int | 预测基础样本件数 | 非 null |
 | `projection_basis_sales` | `items[] + totals` | JSON string（money，4 位） | 预测基础样本销售额 | 非 null |
 | `projection_basis_refund_amount` | `items[] + totals` | JSON string（money，4 位） | 预测基础样本退款金额 | 非 null |
 | `projection_terminal_basis_order_count` | `items[] + totals` | JSON int | 物流终态样本订单数 | 非 null |
 | `projection_terminal_basis_sales` | `items[] + totals` | JSON string（money，4 位） | 物流终态样本销售额 | 非 null |
-| `projection_terminal_full_loss_sales` | `items[] + totals` | JSON string（money，4 位） | 预测诊断：物流终态严格全损销售额；不回写 stable `full_loss_*` 字段 | 非 null |
-| `projection_terminal_full_loss_order_count` | `items[] + totals` | JSON int | 预测诊断：物流终态严格全损订单数；不回写 stable `full_loss_order_count` | 非 null |
-| `projection_terminal_full_loss_qty` | `items[] + totals` | JSON int | 预测诊断：物流终态严格全损件数；不回写 stable `full_loss_qty` | 非 null |
+| `projection_terminal_full_loss_sales` | `items[] + totals` | JSON string（money，4 位） | 预测诊断：物流终态严格全损销售额；独立于当前严格全损指标 | 非 null |
+| `projection_terminal_full_loss_order_count` | `items[] + totals` | JSON int | 预测诊断：物流终态严格全损订单数；独立于当前经营窗口计数 | 非 null |
+| `projection_terminal_full_loss_qty` | `items[] + totals` | JSON int | 预测诊断：物流终态严格全损件数；独立于当前经营窗口件数 | 非 null |
 | `projection_completed_basis_order_count` | `items[] + totals` | JSON int | 已完结预测分母订单数 | 非 null |
-| `projection_completed_full_loss_order_count` | `items[] + totals` | JSON int | **当前预测字段**：已完结严格全损分子订单数；不等同于 stable `full_loss_order_count` | 非 null |
-| `projection_full_loss_basis_order_count` | `items[] + totals` | JSON int | 兼容物流全损样本分母 | 非 null |
-| `projection_basis_full_loss_order_count` | `items[] + totals` | JSON int | 兼容已送达退款样本订单数 | 非 null |
-| `projection_basis_full_loss_qty` | `items[] + totals` | JSON int | 兼容已送达退款样本全损件数，可能含部分退款；不等同于目标严格全损件数 | 非 null |
-| `projection_refund_amount_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容预测退款金额率 | 可 null |
-| `pre_delivery_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容送达前全损率 | 可 null |
-| `completed_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | **当前预测字段**：已完结订单严格全损率；不等同于 stable `full_loss_rate` | 可 null |
-| `delivered_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容已送达全损率 | 可 null |
-| `settled_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容已结算全损率 | 可 null |
-| `projection_full_loss_qty_rate` | `items[] + totals` | JSON string（ratio，4 位） | 兼容件数预测率 | 可 null |
+| `projection_completed_full_loss_order_count` | `items[] + totals` | JSON int | **当前预测字段**：已完结严格全损分子订单数；按成熟样本窗口统计 | 非 null |
+| `projection_refund_amount_rate` | `items[] + totals` | JSON string（ratio，4 位） | 预测退款金额率 | 可 null |
+| `completed_full_loss_rate` | `items[] + totals` | JSON string（ratio，4 位） | **当前预测字段**：已完结订单严格全损率；按成熟样本窗口统计 | 可 null |
 | `unsettled_order_count` | `items[] + totals` | JSON int | 未结算订单数 | 非 null |
 | `delivered_unsettled_order_count` | `items[] + totals` | JSON int | 未结算但已送达订单数 | 非 null |
 | `full_loss_exposure_unsettled_order_count` | `items[] + totals` | JSON int | 未结算未送达风险订单数 | 非 null |
 | `full_loss_exposure_unsettled_sales` | `items[] + totals` | JSON string（money，4 位） | 风险订单销售额 | 非 null |
-| `confirmed_full_loss_exposure_order_count` | `items[] + totals` | JSON int | 预测风险池已确认全损订单数；属于 projection 诊断，不是 stable `full_loss_order_count` | 非 null |
-| `confirmed_full_loss_exposure_qty` | `items[] + totals` | JSON int | 预测风险池已确认全损件数；属于 projection 诊断，不是 stable `full_loss_qty` | 非 null |
+| `confirmed_full_loss_exposure_order_count` | `items[] + totals` | JSON int | 预测风险池已确认全损订单数；属于 projection 诊断，按风险池统计 | 非 null |
+| `confirmed_full_loss_exposure_qty` | `items[] + totals` | JSON int | 预测风险池已确认全损件数；属于 projection 诊断，按风险池统计 | 非 null |
 | `confirmed_full_loss_exposure_refund_amount` | `items[] + totals` | JSON string（money，4 位） | 风险池已确认退款金额 | 非 null |
 | `unresolved_unsettled_order_count` | `items[] + totals` | JSON int | 仍有未确认事实的未结算订单数 | 非 null |
 | `unresolved_full_loss_exposure_order_count` | `items[] + totals` | JSON int | 仍有未确认事实的风险订单数 | 非 null |
@@ -653,7 +646,6 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 ### 6.8 `meta` 字段
 
 - `computed_at`：UTC datetime；目标 overview/result/evidence 共享快照时间。
-- 主表 overview 当前 `rubric_version` 为 `v10`；四个当前 drill payload 仍各自返回 `v9`，这是待修复的当前实现差异；目标所有结果统一由同一领域 basis 输出 v10，不能前端推断。
 - `currency.display` 固定 `CNY`；`native.ad=USD`、`native.sales_refund=VND`、`native.cost=CNY`。
 - `fx`：`snapshot_id` int、`usd_cny/cny_usd/usd_vnd/cny_vnd/vnd_cny` Decimal 字符串、`as_of/as_of_at`、`source=fx-cache`。缺完整 snapshot 返回 503。
 - `fee`：`mode` 是旧 alias（override/baseline）；`source=user_override|shop_estimate|baseline|mixed`；`rate`/`override` 4 位；`degraded` bool；`fallback_message`；`per_shop[]` 的 `shop_pk/shop_name/rate/source/fallback_reason/estimate`。
@@ -668,7 +660,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | --- | --- | --- | --- |
 | selection | `activity`（`ActivitySelection`）、`exact_ids`、`focused` | 活动范围、精确 SPU、重点关注 | Python 类型；未知 selection 422 |
 | evidence | `orders`、`settlements`、`cases`、`ads` | 订单物流、结算、售后、广告 | `EvidenceKind`；未知 tab 不发请求 |
-| sort | `roi_real`,`spend`,`ad_system_actual_roi`,`ad_system_breakeven_roi`,`refund_rate`,`refund_rate_qty`,`cancel_rate`,`net_profit`,`sales`,`effective_sales`,`gmv_sales`,`ad_count`,`gmv_ad`,`order_count`,`total_orders`,`effective_order_count`,`cancelled_order_count`,`units_sold`,`refund_net_amount`,`return_loss`,`roi_breakeven`,`full_loss_rate`,`purchasePriceMean`,`purchasePriceMedian`,`originalSalePriceMean`,`originalSalePriceMedian`,`paidPriceMean`,`paidPriceMedian` | 对应后端排序字段 | `SortField` 当前全集；末尾六个是件数加权价格列标识（null 双向沉底，无 `shop_pk` 时省略价格字段并忽略该排序），契约见 [`spu-price-statistics.md`](spu-price-statistics.md) §4.4 / [`../api/external-api.md`](../api/external-api.md)；未知 422 |
+| sort | `roi_real`,`spend`,`ad_system_actual_roi`,`ad_system_breakeven_roi`,`refund_rate`,`refund_rate_qty`,`cancel_rate`,`net_profit`,`sales`,`effective_sales`,`gmv_sales`,`ad_count`,`gmv_ad`,`order_count`,`total_orders`,`effective_order_count`,`cancelled_order_count`,`units_sold`,`refund_net_amount`,`strict_full_loss_cost`,`roi_breakeven`,`strict_full_loss_rate`,`purchasePriceMean`,`purchasePriceMedian`,`originalSalePriceMean`,`originalSalePriceMedian`,`paidPriceMean`,`paidPriceMedian` | 对应后端排序字段 | `SortField` 当前全集；末尾六个是件数加权价格列标识（null 双向沉底，无 `shop_pk` 时省略价格字段并忽略该排序），契约见 [`spu-price-statistics.md`](spu-price-statistics.md) §4.4 / [`../api/external-api.md`](../api/external-api.md)；未知 422 |
 | order | `asc`,`desc` | 升序、降序 | `SortDirection`；目标未知 422 |
 | formula status | `calculated`,`estimated_known_costs` | 已覆盖成本、已知成本下限估算 | `FormulaStatus`；未知 raw code + warning |
 | projection | `available`,`no_unsettled_orders`,`insufficient_sample` | 可预测、无未结算订单、样本不足 | `ProjectionStatus`；未知 raw code，不当 0 |
@@ -742,7 +734,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 1. 先停止继续发布并保留服务日志、版本和响应样本。
 2. 回退代码到上一已验证版本，执行 `bash restart.sh`；不删除数据库事实，不执行自动生产 migration。
 3. 验证 `/healthz`、登录、主表、四路钻取和非盈利导航；确认旧客户端仍读到稳定字段。
-4. 若问题只在静态资源，回退对应 JS/CSS 版本并清页面缓存；若 API 契约问题，优先恢复 adapter 兼容字段，再按新版本发布目标变更。
+4. 若问题只在静态资源，回退对应 JS/CSS 版本并清页面缓存；若 API 契约问题，按发布手册回退对应版本并复核字段契约。
 5. 数据库 schema 回滚由人工按项目 migration/备份规程执行，本方案不提供 destructive 命令。
 
 ## 10. 文件地图和实施顺序
@@ -771,7 +763,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 
 1. **契约和类型（已交付）**：projection policy（30/90）、basis/meta 类型和兼容 wire 已锁定。
 2. **快照和查询范围（已交付）**：经营窗口约束 current/risk target，projection sample 独立；aggregate 复用同一 snapshot、selection/catalog，避免递归完整 overview。
-3. **领域公式接线（已交付）**：projection 使用严格 completed sample 和 canonical paid/payment evidence；v9 兼容 fields 保留但隔离。
+3. **领域公式接线（已交付）**：projection 使用严格 completed sample 和 canonical paid/payment evidence；当前字段采用严格口径。
 4. **HTTP adapter（已交付）**：`projection_lookback_days`、meta projection、warnings/status 和 422 校验已生效。
 5. **前端（已交付）**：30/90 toggle、状态/错误/stale 呈现、请求竞态和可见 basis card 已覆盖。
 6. **文档和导航（当前任务）**：业务文档记录当前行为与兼容差异；本方案作为技术入口，external-api 只保留索引。
@@ -809,7 +801,6 @@ bash scripts/test_isolated.sh fast
 ## 12. 未决风险与明确处理
 
 1. **projection 双时钟已交付**：projection sample/basis/rate 独立于经营 `w_start/w_end`；risk pool、当前基线和预计最终 totals 跟随经营窗口；后续变更必须保持该边界。
-2. **当前 wire rubric/meta 分层不一致**：主表 overview basis 为 v10，而四个 drill payload 仍含 v9；保持旧字段直至版本化，新增目标字段必须显式标“目标契约”，不能覆盖旧字段含义。
 3. **当前 drill `_detail_*` 自行生成 computed_at**：目标必须把 snapshot basis 传入，避免 UI 声称证据与行同一快照。
 4. **广告日表覆盖缺口**：实现只读 `plugin.ad_daily`；数据新鲜度和 coverage 必须在页面呈现，不得用 `ad_today` 偷拼历史。
 5. **结算外成本尚未结构化**：广告系统保本 ROI 继续状态 `estimated_known_costs` 并以 `≈` 展示，不得描述为最终财务保本线。

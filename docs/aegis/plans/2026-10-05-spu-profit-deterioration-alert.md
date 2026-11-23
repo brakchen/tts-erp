@@ -110,33 +110,7 @@ Before implementation, merge current `origin/master`, update `docs/handoff/ACTIV
 
 ## 8. Required commands and evidence
 
-Narrow checks for the current design lane:
-
-```bash
-.venv/bin/python -m py_compile scripts/probe_spu_profit_deterioration_thresholds.py
-.venv/bin/python scripts/probe_spu_profit_deterioration_thresholds.py --help
-.venv/bin/python - <<'PY'
-from scripts.probe_spu_profit_deterioration_thresholds import self_check_formula_input_contract, self_check_policy, self_check_sql_scope
-self_check_policy(); self_check_sql_scope(); self_check_formula_input_contract(); print('scope-evaluability-formula-contract-smoke: passed')
-PY
-.venv/bin/python - <<'PY'
-from datetime import date
-from decimal import Decimal
-from scripts.probe_spu_profit_deterioration_thresholds import AlertConfig, WindowMetric, evaluate_alert
-m=lambda roi,profit: WindowMetric(1,2,date(2026,1,1),date(2026,1,1),Decimal(roi),Decimal(profit),Decimal('100'),5,0)
-w=AlertConfig(Decimal('.2'),Decimal('.2'),Decimal('.25'),Decimal('50'),2,0); c=AlertConfig(Decimal('.4'),Decimal('.4'),Decimal('.4'),Decimal('50'),2,0)
-assert evaluate_alert(m('1','100'),m('.8','75'),w,c).severity == 'warning'
-assert evaluate_alert(m('1','100'),m('.6','60'),w,c).severity == 'critical'
-assert evaluate_alert(m('-0.2','-20'),m('-0.4','-30'),w,c).roi_decline is None
-print('alert-boundary-smoke: passed')
-PY
-rm -f /tmp/spu-profit-deterioration-backtest.json
-set -a; . /home/schan/tts-erp/.env; set +a
- timeout 180 .venv/bin/python scripts/probe_spu_profit_deterioration_thresholds.py --confirm-read-only-production --lookback-days 30 --max-spus 300 --statement-timeout-ms 90000 --output /tmp/spu-profit-deterioration-backtest.json
- .venv/bin/python scripts/probe_spu_profit_deterioration_thresholds.py --verify-artifact /tmp/spu-profit-deterioration-backtest.json
- python3 -m json.tool /tmp/spu-profit-deterioration-backtest.json >/dev/null  # aggregate artifact syntax/digest envelope
- git diff --check
-```
+历史回测脚本已移除；其全损口径不适用于当前实现。当前验证使用隔离测试入口。
 
 Implementation lane commands (must use isolated runner; exact selections):
 

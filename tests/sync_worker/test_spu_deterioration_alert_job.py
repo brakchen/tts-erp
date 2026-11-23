@@ -298,8 +298,6 @@ def _fact_family(statement: str, parameters: object, context: object) -> str | N
         return "order_scope"
     if "confirmed_unsettled_refund_vnd" in statement:
         return "sales"
-    if "full_loss_qty" in statement and "FROM after_sales.cases c" in statement:
-        return "full_loss"
     if "cancelled_order_count" in statement:
         return "row_status"
     if "refund_only_amount" in statement:
@@ -313,7 +311,6 @@ def _assert_fact_keys(
     assert family in {
         "ad",
         "sales",
-        "full_loss",
         "row_status",
         "refund",
         "projection",
@@ -976,7 +973,6 @@ def test_real_canonical_queries_batch_more_than_500_scope(
             assert {
                 "ad",
                 "sales",
-                "full_loss",
                 "row_status",
                 "refund",
                 "projection",
@@ -1080,7 +1076,6 @@ def test_real_canonical_queries_batch_more_than_500_scope(
         expected_families = {
             "ad",
             "sales",
-            "full_loss",
             "row_status",
             "refund",
             "projection",
@@ -1093,7 +1088,6 @@ def test_real_canonical_queries_batch_more_than_500_scope(
         core_families = {
             "ad",
             "sales",
-            "full_loss",
             "row_status",
             "refund",
             "projection",
@@ -1155,20 +1149,20 @@ def test_real_canonical_queries_batch_more_than_500_scope(
             products[0].id: (Decimal(0), Decimal(0), Decimal(0), Decimal(0), 0),
             products[1].id: (Decimal(0), Decimal(0), Decimal(0), Decimal(0), 0),
             products[2].id: (Decimal(0), Decimal(0), Decimal(0), Decimal(0), 0),
-            products[99].id: (Decimal(0), Decimal(526600), Decimal(0), Decimal(0), 1),
+            products[99].id: (Decimal(0), Decimal(526600), Decimal(0), Decimal(0), 0),
             products[100].id: (
                 Decimal(526600),
                 Decimal(526600),
                 Decimal(0),
                 Decimal(0),
-                1,
+                0,
             ),
             products[499].id: (
                 Decimal(526600),
                 Decimal(0),
                 Decimal(526600),
                 Decimal(0),
-                1,
+                0,
             ),
             products[500].id: (Decimal(0), Decimal(0), Decimal(0), Decimal(526600), 0),
         }
@@ -1187,7 +1181,7 @@ def test_real_canonical_queries_batch_more_than_500_scope(
                         inputs.refund_only_vnd,
                         inputs.refund_return_vnd,
                         inputs.refund_cancelled_vnd,
-                        inputs.full_loss_qty,
+                        inputs.strict_full_loss_qty,
                     )
                     == expected
                 ),
@@ -1209,7 +1203,7 @@ def test_real_canonical_queries_batch_more_than_500_scope(
                 inputs.refund_only_vnd,
                 inputs.refund_return_vnd,
                 inputs.refund_cancelled_vnd,
-                inputs.full_loss_qty,
+                inputs.strict_full_loss_qty,
             ) == expected
 
         baseline_inputs, _baseline_output = matched[products[1].id]
@@ -1240,7 +1234,7 @@ def test_real_canonical_queries_batch_more_than_500_scope(
         baseline_roi = (
             expected_order_vnd * (Decimal(1) - expected_fee_rate) / vnd_per_cny
         ) / spend_cny
-        refund_roi = -expected_unit_cost_cny / spend_cny
+        refund_roi = Decimal(0)
 
         def persisted_money(value: Decimal) -> Decimal:
             return value.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)

@@ -7,7 +7,7 @@
 2. 分页 / spu_id 子串搜索 / 默认排序实际 ROI 升序 / sort+order
 3. 业务口径:单 SPU 场景(1 有效订单 + 1 已完结退货退款 + 1 已付被取消订单
    的取消退款 case)按 §4.2 公式精确断言 sales/refund_return/net_profit/
-   roi_real/roi_breakeven/platform_fee/return_loss/cpa/unit_cost_used;
+   roi_real/roi_breakeven/platform_fee/strict_full_loss_cost/cpa/unit_cost_used;
    取消桶只进信息列不进净额(DEFAULT_K1 + MANUAL 两分支);
    UNPAID 等异常订单的已完结退款按 §4.2 rule 0 防御性进未归属
    (不进 refund_* 桶/行内金额,meta.unattributed_refund_lines +1);
@@ -1329,11 +1329,11 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
       net_revenue = 55.36 USD ÷ cny_usd
       cogs_all = 5件 × 40 CNY = 200 CNY
       net_profit = 15.812 USD ÷ cny_usd
-      v9 全损：完结退货(不论物流)也算全损 → full_loss_qty=1(退货桶)
-      return_loss = 1 × 40 CNY
+      部分退款未达到整单严格全损，strict_full_loss_qty=0
+      strict_full_loss_cost = 0 CNY
       roi_real 与 roi_breakeven 为无量纲比例，换币前后保持不变
       platform_fee = 30.80 USD ÷ cny_usd
-      full_loss_rate = 1/(5+0) = 0.20
+      strict_full_loss_qty_rate = 0/(5+0) = 0
       cancel_rate = 1/(1+1) = 0.50（CANCELLED 单无 38301 → 国内取消）
     """
     with Session(db_engine) as sess:
@@ -1408,12 +1408,12 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["refund_cancelled_amount"] == cny4_from_usd("20")
     assert item["refund_cancelled_missing_lines"] == 1
 
-    # v9 全损：完结退货不论物流直接计全损（场景无 38301 仍计 1 件退货）
-    assert item["full_loss_qty"] == 1
-    assert item["full_loss_cancelled_qty"] == 0
-    assert item["full_loss_order_count"] == 1
-    assert item["full_loss_rate"] == "0.50"
-    assert item["full_loss_qty_rate"] == "0.20"
+    # 部分退款且无海外暴露或终局物流证据，不计严格全损。
+    assert item["strict_full_loss_qty"] == 0
+    assert item["strict_full_loss_cancelled_qty"] == 0
+    assert item["strict_full_loss_order_count"] == 0
+    assert item["strict_full_loss_rate"] == "0.00"
+    assert item["strict_full_loss_qty_rate"] == "0.00"
     # v10 取消率：国内取消 ÷ 全部订单 = 1/2
     assert item["cancel_rate"] == "0.50"
     assert item["domestic_cancelled_order_count"] == 1
@@ -1423,12 +1423,12 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["cost_source"] == "DEFAULT_K1"
     assert Decimal(item["unit_cost_used"]) == K1_CNY
 
-    # v9 利润域（return_loss = 完结退货 1 件 × 40 CNY）
-    assert item["return_loss"] == "40.0000"
+    # 严格全损成本为零，净利润计算不变。
+    assert item["strict_full_loss_cost"] == "0.0000"
     assert item["platform_fee"] == cny4_from_usd("30.8000")
     assert item["net_profit"] == m4(scenario_a_net_profit_cny())
-    assert item["roi_real"] == "4.95"
-    assert item["roi_breakeven"] == "1.92"
+    assert item["roi_real"] == "5.54"
+    assert item["roi_breakeven"] == "2.14"
     assert item["cpa"] == cny4_from_usd("2")
 
     # 物流终态样本独立于结算：一笔成功送达、没有拒收全损，风险率为 0。
@@ -1439,13 +1439,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["projection_completed_basis_order_count"] == 2
     assert item["projection_completed_full_loss_order_count"] == 0
     assert item["completed_full_loss_rate"] == "0.0000"
-    assert item["projection_basis_full_loss_order_count"] == 1
     assert item["projection_refund_amount_rate"] == "0.0000"
-    assert item["pre_delivery_full_loss_rate"] == "0.0000"
-    # Compatibility metrics preserve the pre-existing delivered-refund cohort.
-    assert item["delivered_full_loss_rate"] == "1.0000"
-    assert item["settled_full_loss_rate"] == "1.0000"
-    assert item["projection_full_loss_qty_rate"] == "1.0000"
     assert Decimal(item["projected_future_full_loss_qty"]) == Decimal(0)
     assert item["projected_net_profit"] == item["net_profit"]
     assert item["projected_roi_real"] == item["roi_real"]
@@ -1530,12 +1524,6 @@ def test_spu_roi_projects_undelivered_loss_from_terminal_delivery_outcomes(
     assert item["projection_completed_basis_order_count"] == 6
     assert item["projection_completed_full_loss_order_count"] == 3
     assert item["completed_full_loss_rate"] == "0.5000"
-    assert item["projection_full_loss_basis_order_count"] == 3
-    assert item["projection_basis_full_loss_order_count"] == 0
-    assert item["projection_basis_full_loss_qty"] == 0
-    assert item["pre_delivery_full_loss_rate"] == "0.2500"
-    assert item["delivered_full_loss_rate"] == "0.0000"
-    assert item["settled_full_loss_rate"] == "0.0000"
     assert item["projection_refund_amount_rate"] == "0.2500"
     assert Decimal(item["projected_future_full_loss_order_count"]) == Decimal("0.5")
     assert Decimal(item["projected_future_full_loss_qty"]) == Decimal(1)
@@ -1575,10 +1563,10 @@ def test_spu_roi_projects_unsettled_orders_from_independent_samples(
         projected_net_revenue - Decimal(640) - Decimal(10) * USD_CNY
     )
     projected_future_full_loss_qty = Decimal(0)
-    projected_terminal_full_loss_qty = Decimal(3)
-    projected_full_loss_cost = Decimal(120)
+    projected_terminal_full_loss_qty = Decimal(0)
+    projected_full_loss_cost = Decimal(0)
     projected_nc_prime = projected_net_revenue - projected_full_loss_cost
-    projected_cogs_kept = Decimal(520)
+    projected_cogs_kept = Decimal(640)
     projected_roi = projected_nc_prime / (Decimal(10) * USD_CNY)
     projected_ad_gmv = Decimal(100) * USD_CNY
 
@@ -1599,14 +1587,7 @@ def test_spu_roi_projects_unsettled_orders_from_independent_samples(
     assert item["projection_completed_basis_order_count"] == 1
     assert item["projection_completed_full_loss_order_count"] == 0
     assert item["completed_full_loss_rate"] == "0.0000"
-    assert item["projection_full_loss_basis_order_count"] == 1
-    assert item["projection_basis_full_loss_order_count"] == 1
-    assert item["projection_basis_full_loss_qty"] == 2
     assert item["projection_refund_amount_rate"] == "0.0000"
-    assert item["pre_delivery_full_loss_rate"] == "0.0000"
-    assert item["delivered_full_loss_rate"] == "1.0000"
-    assert item["settled_full_loss_rate"] == "1.0000"
-    assert item["projection_full_loss_qty_rate"] == "1.0000"
     assert item["full_loss_exposure_unsettled_order_count"] == 2
     # The in-transit partial refund is known revenue loss, not confirmed full loss.
     assert item["confirmed_full_loss_exposure_order_count"] == 0
@@ -1696,15 +1677,8 @@ def test_spu_roi_projects_unsettled_orders_from_independent_samples(
         "projection_terminal_full_loss_qty",
         "projection_completed_basis_order_count",
         "projection_completed_full_loss_order_count",
-        "projection_full_loss_basis_order_count",
-        "projection_basis_full_loss_order_count",
-        "projection_basis_full_loss_qty",
         "projection_refund_amount_rate",
-        "pre_delivery_full_loss_rate",
         "completed_full_loss_rate",
-        "delivered_full_loss_rate",
-        "settled_full_loss_rate",
-        "projection_full_loss_qty_rate",
         "delivered_unsettled_order_count",
         "full_loss_exposure_unsettled_order_count",
         "full_loss_exposure_unsettled_sales",
@@ -1978,6 +1952,23 @@ def test_paid_cancelled_returned_order_is_strict_full_loss_sample(
     item = response.json()["items"][0]
     assert item["projection_terminal_full_loss_order_count"] == 1
     assert item["projection_completed_full_loss_order_count"] >= 1
+    assert item["strict_full_loss_order_count"] == 3
+    assert item["strict_full_loss_qty"] == 3
+    assert item["strict_full_loss_cancelled_qty"] == 2
+
+    orders_response = api_client.get(
+        f"/v2/analytics/spu-roi/{item['spu_pk']}/orders",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+    )
+    assert orders_response.status_code == 200, orders_response.text
+    by_order = {
+        row["order_id"]: row["strict_full_loss"]
+        for row in orders_response.json()["orders"]
+    }
+    assert by_order["TEST_ORDER_TERMINAL_RETURNED"] is True
+    assert by_order["TEST_ORDER_DELIVERED_FULL_REFUND"] is True
+    assert by_order["TEST_ORDER_OVERSEAS_CANCEL_FULL_REFUND"] is True
+    assert by_order["TEST_ORDER_DOMESTIC_CANCEL_FULL_REFUND"] is False
 
 
 def test_projection_excludes_unpaid_cancelled_returned_order_from_strict_sample(
@@ -2643,10 +2634,10 @@ def test_profitability_order_evidence_attributes_refund_to_own_spu_line(
 
     x_order = explanations[x_pk].evidence.rows[EvidenceKind.ORDERS][0]
     y_order = explanations[y_pk].evidence.rows[EvidenceKind.ORDERS][0]
-    assert explanations[x_pk].result.full_loss_qty == 0
-    assert x_order["full_loss"] is False
-    assert explanations[y_pk].result.full_loss_qty == 1
-    assert y_order["full_loss"] is True
+    assert explanations[x_pk].result.strict_full_loss_qty == 0
+    assert x_order["strict_full_loss"] is False
+    assert explanations[y_pk].result.strict_full_loss_qty == 0
+    assert y_order["strict_full_loss"] is False
 
 
 def test_profitability_settlement_evidence_uses_order_window(
@@ -2907,11 +2898,11 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
 def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     """命中 manual_product_costs 有效行 → cost_source=MANUAL,unit_cost_used 用真值。
 
-    v10 公式（D1 MANUAL + 完结退货直接全损）统一输出 CNY:
-      cost=25 CNY；完结退货 1 件 → full_loss_qty=1
+    v10 公式（D1 MANUAL，部分退款不计严格全损）统一输出 CNY:
+      cost=25 CNY；部分退款 1 件 → strict_full_loss_qty=0
       net_revenue、广告消耗从原生币种换算为 CNY
       net_profit 等于旧 USD 结果 26.8925 ÷ cny_usd
-      return_loss = 1 × 25 CNY = 3.6935
+      strict_full_loss_cost = 0 CNY
     """
     with Session(db_engine) as sess:
         spu_pk = _seed(sess, _seed_spu_manual)
@@ -2927,8 +2918,8 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     assert item["spu_pk"] == spu_pk
     assert item["cost_source"] == "MANUAL"
     assert Decimal(item["unit_cost_used"]) == Decimal(25)
-    # v9: return_loss = 完结退货件数 × 单位成本（不论是否有物流轨迹）
-    assert item["return_loss"] == "25.0000"
+    # 部分退款无严格全损证据。
+    assert item["strict_full_loss_cost"] == "0.0000"
     # v10 net_profit（D1 MANUAL 25 CNY 成本 + D5 未结算折算）
     assert item["net_profit"] == cny4_from_usd("26.8925")
 
@@ -2973,7 +2964,7 @@ def test_spu_roi_unpaid_order_refund_defensive_unattributed(
     assert item["refund_cancelled_qty"] == 0
     assert item["refund_cancelled_amount"] == "0.0000"
     assert item["refund_cancelled_missing_lines"] == 0
-    assert item["return_loss"] == "0.0000"
+    assert item["strict_full_loss_cost"] == "0.0000"
     # 行内金额视同无此退款:v7 net_profit = 100×(1−0.308)×1.0 − 5×5.9096 − 0
     # = 69.2 − 29.5480 = 39.6520
     assert item["platform_fee"] == cny4_from_usd("30.8000")
@@ -3114,9 +3105,9 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     assert item2["refund_order_count"] == 1
     assert item2["refund_return_qty"] == 1
     assert item2["refund_return_amount"] == cny4_from_usd("20")
-    assert item2["full_loss_qty"] == 1
+    assert item2["strict_full_loss_qty"] == 0
     assert body2["totals"]["refund_order_count"] == 1
-    assert body2["totals"]["full_loss_order_count"] == 1
+    assert body2["totals"]["strict_full_loss_order_count"] == 0
     assert "跟随原订单" in body2["meta"]["window"]["note"]
     assert body2["totals"]["sales"] == cny4_from_usd("60")
     assert body2["totals"]["gmv"] == cny4_from_usd("60")
@@ -3135,7 +3126,7 @@ def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     assert item3["refund_order_count"] == 1
     assert item3["refund_return_qty"] == 1
     assert item3["refund_return_amount"] == cny4_from_usd("20")
-    assert item3["full_loss_qty"] == 1
+    assert item3["strict_full_loss_qty"] == 0
 
     orders_response = api_client.get(
         f"/v2/analytics/spu-roi/{spu_pk}/orders",
@@ -3490,7 +3481,7 @@ def test_spu_roi_sort_binding_is_declarative_and_delegated():
 def test_spu_roi_totals_roi_real_native_reconciliation(
     api_client, readonly_key, db_engine
 ):
-    """totals.roi_real 对账：(Σnet_revenue − Σreturn_loss)/Σspend，CNY 口径。
+    """totals.roi_real 对账：(Σnet_revenue − Σstrict_full_loss_cost)/Σspend，CNY 口径。
 
     net_revenue 已含汇率换算，Σ跨 SPU 累加后除 Σspend；比例换币前后不变。
     """
@@ -3507,16 +3498,16 @@ def test_spu_roi_totals_roi_real_native_reconciliation(
     items = {it["spu_id"]: it for it in body["items"]}
     # 场景 B/C 走默认 DEFAULT_K1 = 40 CNY
     # v7：net_revenue = sales × (1−0.308) × (1−refund_rate_spu)
-    # return_loss = full_loss_qty × unit_cost（v9：完结退货不论物流也计）
+    # 严格全损成本按服务端订单级判定后的件数与单位成本计算。
     # 三 SPU 默认成本 × 5件（unit_cost = 40 × 0.14774 = 5.9096）
     # A：sales=$100, refund=$20, units=5；net=100×0.692×0.80=55.36
     # B：sales=?, refund=?, units=? （按 _seed_spu_b）
     # C：sales=?, refund=?, units=? （按 _seed_spu_c）
-    # 统一验证：totals.roi_real == (Σnet_revenue − Σreturn_loss) / Σspend
+    # 统一验证：totals.roi_real == (Σnet_revenue − Σstrict_full_loss_cost) / Σspend
     total_net_revenue_cny = sum(Decimal(it["net_revenue"]) for it in items.values())
-    total_return_loss_cny = sum(Decimal(it["return_loss"]) for it in items.values())
+    total_strict_full_loss_cost_cny = sum(Decimal(it["strict_full_loss_cost"]) for it in items.values())
     total_spend_cny = sum(Decimal(it["spend"]) for it in items.values())
-    expected = (total_net_revenue_cny - total_return_loss_cny) / total_spend_cny
+    expected = (total_net_revenue_cny - total_strict_full_loss_cost_cny) / total_spend_cny
     assert body["totals"]["roi_real"] == m2(Decimal(expected))
 
 
@@ -3566,14 +3557,14 @@ def test_spu_roi_single_spu_row_metrics_align_with_dashboard_totals(
         "total_orders",
         "effective_order_count",
         "refund_order_count",
-        "full_loss_order_count",
+        "strict_full_loss_order_count",
         "domestic_cancelled_order_count",
         "overseas_cancelled_order_count",
     ):
         assert row[field] == totals[field], field
 
     assert Decimal(row["effective_sales"]) == Decimal(totals["effective_sales"])
-    for field in ("refund_rate", "full_loss_rate", "cancel_rate"):
+    for field in ("refund_rate", "strict_full_loss_rate", "cancel_rate"):
         assert Decimal(row[field]) == Decimal(totals[field]), field
 
 
@@ -3587,7 +3578,7 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     分页 limit/offset;totals 跨分页加总。
 
     v7 ROI 值变动（成本默认 40 CNY + 未结算 ×(1−r̂)×(1−rate)）。校验 ROI
-    排序顺序与具体数值一同产出（不写死数字，从 net_revenue/return_loss/
+    排序顺序与具体数值一同产出（不写死数字，从 net_revenue/strict_full_loss_cost/
     spend 反推）。
     """
     with Session(db_engine) as sess:
@@ -3609,10 +3600,10 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     expected_order = sorted(spu_roi, key=lambda k: spu_roi[k])
     assert [i["spu_id"] for i in items] == expected_order
     for spu_id, _ in spu_roi.items():
-        # 不再写死：从行 net_revenue/return_loss/spend 反推（舍入到 2dp）
+        # 不再写死：从行 net_revenue/strict_full_loss_cost/spend 反推（舍入到 2dp）
         row = next(it for it in items if it["spu_id"] == spu_id)
         nc = Decimal(row["net_revenue"])
-        rl = Decimal(row["return_loss"])
+        rl = Decimal(row["strict_full_loss_cost"])
         sp = Decimal(row["spend"])
         if sp != 0:
             expected = (nc - rl) / sp
@@ -3798,20 +3789,20 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "sales": "0.0000",
         "gmv": "0.0000",
         "refund_net_amount": "0.0000",
-        "return_loss": "0.0000",
+        "strict_full_loss_cost": "0.0000",
         "net_profit": "0.0000",
         "roi_real": None,  # Σspend=0 → null(页面显示 —)
         "refund_order_count": 0,
-        "full_loss_qty": 0,
-        "full_loss_cancelled_qty": 0,
+        "strict_full_loss_qty": 0,
+        "strict_full_loss_cancelled_qty": 0,
         "domestic_cancelled_order_count": 0,
         "overseas_cancelled_order_count": 0,
         "roi_breakeven": None,
         "effective_sales": "0.0000",
         "effective_order_count": 0,
-        "full_loss_order_count": 0,
+        "strict_full_loss_order_count": 0,
         "refund_rate": None,
-        "full_loss_rate": None,
+        "strict_full_loss_rate": None,
         "cancel_rate": None,
         "ad_system_actual_roi": None,
         "ad_system_breakeven_roi": None,
@@ -3830,15 +3821,8 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "projection_terminal_full_loss_qty": 0,
         "projection_completed_basis_order_count": 0,
         "projection_completed_full_loss_order_count": 0,
-        "projection_full_loss_basis_order_count": 0,
-        "projection_basis_full_loss_order_count": 0,
-        "projection_basis_full_loss_qty": 0,
         "projection_refund_amount_rate": None,
-        "pre_delivery_full_loss_rate": None,
         "completed_full_loss_rate": None,
-        "delivered_full_loss_rate": None,
-        "settled_full_loss_rate": None,
-        "projection_full_loss_qty_rate": None,
         "unsettled_order_count": 0,
         "delivered_unsettled_order_count": 0,
         "full_loss_exposure_unsettled_order_count": 0,
@@ -4109,7 +4093,7 @@ def test_spu_roi_dashboard_metrics_are_never_truncated():
 
 def test_spu_roi_drill_summary_matches_actual_dashboard_metrics():
     """Totals and row details share current-metric definitions and explanations."""
-    expected = {"总单量": "total_orders", "广告消耗": "spend", "有效单量": "effective_order_count", "有效销售": "effective_sales", "退款数": "refund_order_count", "退款率": "refund_rate", "全损量": "full_loss_order_count", "全损率": "full_loss_rate", "国内取消量": "domestic_cancelled_order_count", "国内取消率": "cancel_rate", "净利润": "net_profit", "实际ROI": "roi_real", "实际保本ROI": "roi_breakeven", "广告系统实际ROI": "ad_system_actual_roi", "广告系统保本ROI": "ad_system_breakeven_roi"}
+    expected = {"总单量": "total_orders", "广告消耗": "spend", "有效单量": "effective_order_count", "有效销售": "effective_sales", "退款数": "refund_order_count", "退款率": "refund_rate", "全损量": "strict_full_loss_order_count", "全损率": "strict_full_loss_rate", "国内取消量": "domestic_cancelled_order_count", "国内取消率": "cancel_rate", "净利润": "net_profit", "实际ROI": "roi_real", "实际保本ROI": "roi_breakeven", "广告系统实际ROI": "ad_system_actual_roi", "广告系统保本ROI": "ad_system_breakeven_roi"}
     assert {label: field for label, field, _ in _react_profitability_metrics("currentMetrics")} == expected
     summary = _react_profitability_source("Summary.tsx")
     details = _react_profitability_source("DrillDetails.tsx")
@@ -4124,10 +4108,10 @@ def test_spu_roi_pnl_cogs_rows_show_qty_times_unit_cost():
     details = _react_profitability_source("DrillDetails.tsx")
     assert "货本 · 售出件" in details and "货本 · 全损取消件" in details
     assert "件 × " in details
-    assert "displayValue(row.units_sold)" in details and "displayValue(row.full_loss_cancelled_qty)" in details
+    assert "displayValue(row.units_sold)" in details and "displayValue(row.strict_full_loss_cancelled_qty)" in details
     assert "displayValue(row.unit_cost_used)" in details
     assert "row.units_sold != null && row.unit_cost_used != null" in details
-    assert "row.full_loss_cancelled_qty != null && row.unit_cost_used != null" in details
+    assert "row.strict_full_loss_cancelled_qty != null && row.unit_cost_used != null" in details
     assert "displayValue(row[field])" in details
     assert "* row.unit_cost_used" not in details
 
@@ -4334,7 +4318,7 @@ def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
         assert retired not in body + page + table
     block = table.split("export const columns = [", 1)[1].split("] as const", 1)[0]
     fields = re.findall(r"\['[^']+', '([^']+)'\]", block)
-    assert fields == ["spend", "ad_system_actual_roi", "ad_system_breakeven_roi", "effective_sales", "total_orders", "effective_order_count", "cancel_rate", "full_loss_rate", "net_profit"]
+    assert fields == ["spend", "ad_system_actual_roi", "ad_system_breakeven_roi", "effective_sales", "total_orders", "effective_order_count", "cancel_rate", "strict_full_loss_rate", "net_profit"]
     assert "columns.map(([title, field])" in table
 
 
@@ -4360,7 +4344,7 @@ def test_spu_roi_page_sortable_headers_within_endpoint_whitelist(
     fields = re.findall(r"\['[^']+', '([a-z0-9_]+)'\]", definitions)
     assert set(fields) == {
         "spend", "ad_system_actual_roi", "ad_system_breakeven_roi", "effective_sales",
-        "total_orders", "effective_order_count", "cancel_rate", "full_loss_rate", "net_profit",
+        "total_orders", "effective_order_count", "cancel_rate", "strict_full_loss_rate", "net_profit",
     }
     assert fields
     with Session(db_engine) as sess:
@@ -4736,8 +4720,8 @@ def test_spu_roi_case_and_ad_drill_money_use_cny(
 
 
 # ═════════════════════════════════════════════════════════════════════
-# v9 全损口径（rubric v9：全损 = 完结退货(不论物流) + 海外取消(38301)；
-# 国内取消 ≠ 全损；取消率只计国内取消，与全损退款率不重叠）
+# 严格全损口径：部分退款和仅到海外的取消单不计全损；
+# 国内取消 ≠ 全损；取消率只计国内取消。
 # ═════════════════════════════════════════════════════════════════════
 
 
@@ -4778,7 +4762,7 @@ def _seed_refund_only_breakeven(sess) -> int:
     return spu_pk
 
 
-def test_refund_only_reduces_row_and_global_breakeven_cogs(
+def test_partial_refund_keeps_row_and_global_breakeven_cogs(
     api_client, readonly_key, db_engine
 ):
     with Session(db_engine) as session:
@@ -4794,23 +4778,23 @@ def test_refund_only_reduces_row_and_global_breakeven_cogs(
     item = body["items"][0]
     totals = body["totals"]
     assert item["refund_only_qty"] == 1
-    assert item["roi_breakeven"] == "17.70"
+    assert item["strict_full_loss_cost"] == "0.0000"
+    assert item["roi_breakeven"] == "19.56"
     assert totals["roi_breakeven"] == item["roi_breakeven"]
     assert Decimal(item["net_profit"]) < 0
     assert Decimal(item["roi_real"]) < Decimal(item["roi_breakeven"])
 
 
-def _seed_v9_bucket_split(sess) -> int:
-    """v9 三桶分离场景：完结退货 vs 海外取消 vs 国内取消。
+def _seed_strict_exclusion_scenario(sess) -> int:
+    """严格全损排除场景：部分退款、未全退的海外取消与国内取消。
 
     - 有效单 TEST_ORDER_V9_1：DELIVERED 已付 4 件 × 263,300 VND ($10) = $40
-      - 完结退货 RETURN_AND_REFUND 1 件（无 38301 物流，v9 仍计全损）
-      - 完结仅退款 REFUND_ONLY 1 件（v9 也入全损退货桶）
-    - 海外取消单 TEST_ORDER_V9_2：CANCELLED 已付 2 件 × $10 + 38301 → 全损取消桶
+      - 完结退货 RETURN_AND_REFUND 1 件，无严格全损证据
+      - 完结仅退款 REFUND_ONLY 1 件，属于部分退款
+    - 海外取消单 TEST_ORDER_V9_2：CANCELLED 已付 2 件 × $10 + 38301，未全退
     - 国内取消单 TEST_ORDER_V9_3：CANCELLED 已付 1 件 × $10，无物流 → 非全损
 
-    期望：full_loss_qty = 1+1+2 = 4、full_loss_cancelled_qty = 2、
-      full_loss_rate = 4/(4+2) = 0.67、return_loss = 4×5.9096 = 23.6384、
+    期望：严格全损订单数、件数和成本均为 0；
       cancelled_order_count = 2（信息列=全部取消单）、domestic=1/overseas=1、
       cancel_rate = 1/(1+1) = 0.50（只计国内取消；若含海外取消则错为 0.67）。
     """
@@ -4873,18 +4857,12 @@ def _seed_v9_bucket_split(sess) -> int:
     return spu_pk
 
 
-def test_spu_roi_v9_full_loss_two_buckets_and_disjoint_cancel_rate(
+def test_spu_roi_strict_full_loss_excludes_partial_refund_and_unrefunded_cancel(
     api_client, readonly_key, db_engine
 ):
-    """v9 口径主断言：全损两桶 + 取消率/全损退款率不重叠。
-
-    - 完结退货（RETURN_AND_REFUND + REFUND_ONLY，无 38301）也计全损件数
-    - 海外取消（CANCELLED∧38301）计全损取消件
-    - 国内取消（CANCELLED 无 38301）不计全损，只进取消率
-    - cancel_rate 分子不含海外取消（与全损退款率不重叠）
-    """
+    """部分退款、仅到海外但未全退的取消单均不计严格全损。"""
     with Session(db_engine) as sess:
-        _seed(sess, _seed_v9_bucket_split)
+        _seed(sess, _seed_strict_exclusion_scenario)
 
     h = {"Authorization": f"Bearer {readonly_key}"}
     r = api_client.get(
@@ -4895,13 +4873,23 @@ def test_spu_roi_v9_full_loss_two_buckets_and_disjoint_cancel_rate(
     assert body["total"] == 1, body["items"]
     item = body["items"][0]
 
-    # 全损 = 完结退货 2 件（不论物流）+ 海外取消 2 件
-    assert item["full_loss_qty"] == 4
-    assert item["full_loss_cancelled_qty"] == 2
-    assert item["full_loss_order_count"] == 2  # 1 退款订单 + 1 海外取消订单
-    assert item["full_loss_rate"] == "0.67"  # 2 / 3 全部订单
-    assert item["full_loss_qty_rate"] == "0.67"  # 旧件数解释口径 4/(4+2)
-    assert item["return_loss"] == "160.0000"  # 4 × 40 CNY
+    # 部分退款和仅有海外事件的取消单均不计严格全损。
+    assert item["strict_full_loss_qty"] == 0
+    assert item["strict_full_loss_cancelled_qty"] == 0
+    assert item["strict_full_loss_order_count"] == 0
+    assert item["strict_full_loss_rate"] == "0.00"
+    assert item["strict_full_loss_qty_rate"] == "0.00"
+    assert item["strict_full_loss_cost"] == "0.0000"
+    legacy_fields = {
+        "full_loss_order_count", "full_loss_rate", "full_loss_qty",
+        "full_loss_cancelled_qty", "full_loss_qty_rate", "return_loss",
+        "cogs_full_loss_cancelled", "projection_full_loss_basis_order_count",
+        "projection_basis_full_loss_order_count", "projection_basis_full_loss_qty",
+        "pre_delivery_full_loss_rate", "delivered_full_loss_rate",
+        "settled_full_loss_rate", "projection_full_loss_qty_rate",
+    }
+    assert legacy_fields.isdisjoint(item)
+    assert legacy_fields.isdisjoint(body["totals"])
 
     # 取消：信息列仍是全部取消单；分子仅国内取消，分母是全部 3 单。
     assert item["cancelled_order_count"] == 2
@@ -4916,11 +4904,10 @@ def test_spu_roi_v9_full_loss_two_buckets_and_disjoint_cancel_rate(
     assert item["refund_net_amount"] == cny4_from_usd("20")
 
 
-def test_spu_roi_v9_drill_orders_full_loss_flag(api_client, readonly_key, db_engine):
-    """钻取 orders 的 full_loss 旗标同 v9 口径：
-    完结退货(不论物流)=⚠、海外取消=⚠、国内取消≠全损。"""
+def test_spu_roi_drill_orders_strict_full_loss_flag(api_client, readonly_key, db_engine):
+    """钻取 orders 使用与主表相同的严格全损判定。"""
     with Session(db_engine) as sess:
-        spu_pk = _seed(sess, _seed_v9_bucket_split)
+        spu_pk = _seed(sess, _seed_strict_exclusion_scenario)
 
     h = {"Authorization": f"Bearer {readonly_key}"}
     r = api_client.get(f"/v2/analytics/spu-roi/{spu_pk}/orders", headers=h)
@@ -4928,9 +4915,10 @@ def test_spu_roi_v9_drill_orders_full_loss_flag(api_client, readonly_key, db_eng
     body = r.json()
     assert body["meta"]["rubric_version"] == "v10"
     by_id = {o["order_id"]: o for o in body["orders"]}
-    assert by_id["TEST_ORDER_V9_1"]["full_loss"] is True  # 完结退货，无 38301 也全损
-    assert by_id["TEST_ORDER_V9_2"]["full_loss"] is True  # 海外取消
-    assert by_id["TEST_ORDER_V9_3"]["full_loss"] is False  # 国内取消 ≠ 全损
+    assert by_id["TEST_ORDER_V9_1"]["strict_full_loss"] is False  # 部分退款
+    assert by_id["TEST_ORDER_V9_2"]["strict_full_loss"] is False  # 无全额退款或终局事件
+    assert by_id["TEST_ORDER_V9_3"]["strict_full_loss"] is False  # 国内取消 ≠ 全损
+    assert all("full_loss" not in order for order in body["orders"])
     assert by_id["TEST_ORDER_V9_2"]["arrived_overseas"] is True
     assert by_id["TEST_ORDER_V9_3"]["arrived_overseas"] is False
 

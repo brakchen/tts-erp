@@ -44,8 +44,9 @@ def _inputs(**overrides) -> FormulaInput:
         "domestic_cancelled_orders": 1,
         "overseas_cancelled_orders": 0,
         "units_sold": 5,
-        "full_loss_cancelled_qty": 0,
-        "full_loss_qty": 1,
+        "strict_full_loss_cancelled_qty": 0,
+        "strict_full_loss_qty": 1,
+        "strict_full_loss_order_count": 1,
         "refund_order_count": 1,
         "refund_only_qty": 0,
         "refund_return_qty": 1,
@@ -109,16 +110,16 @@ def test_v10_order_metrics_use_one_shared_order_dimension_formula() -> None:
         order_count=8,
         cancelled_orders=2,
         domestic_cancelled_orders=1,
-        overseas_cancelled_orders=1,
+        strict_full_loss_order_count=3,
         refund_order_count=2,
     )
 
     assert metrics.total_orders == 10
     assert metrics.effective_order_count == 6
     assert metrics.refund_order_count == 2
-    assert metrics.full_loss_order_count == 3
+    assert metrics.strict_full_loss_order_count == 3
     assert metrics.refund_rate == Decimal("0.2")
-    assert metrics.full_loss_rate == Decimal("0.3")
+    assert metrics.strict_full_loss_rate == Decimal("0.3")
     assert metrics.cancel_rate == Decimal("0.1")
 
 
@@ -138,9 +139,9 @@ def test_v10_formula_keeps_exact_domain_decimals() -> None:
     assert result.net_revenue_cny == net_revenue_cny
     assert result.unsettled_net_cny == net_revenue_cny
     assert result.cogs_sold_cny == Decimal(200)
-    assert result.cogs_full_loss_cancelled_cny == 0
+    assert result.strict_full_loss_cancelled_cogs_cny == 0
     assert result.cogs_all_cny == Decimal(200)
-    assert result.return_loss_cny == Decimal(40)
+    assert result.strict_full_loss_cost_cny == Decimal(40)
     assert result.net_profit_cny == max_ad_spend_cny - spend_cny
     assert result.roi_real == (net_revenue_cny - Decimal(40)) / spend_cny
     assert result.ad_system_actual_roi == Decimal(8)
@@ -154,12 +155,12 @@ def test_v10_formula_keeps_exact_domain_decimals() -> None:
     assert result.total_orders == 2
     assert result.effective_order_count == 0
     assert result.refund_order_count == 1
-    assert result.full_loss_order_count == 1
+    assert result.strict_full_loss_order_count == 1
     assert result.refund_rate == Decimal("0.5")
-    assert result.full_loss_rate == Decimal("0.5")
+    assert result.strict_full_loss_rate == Decimal("0.5")
     assert result.cancel_rate == Decimal("0.5")
     assert result.refund_amount_rate == Decimal("0.2")
-    assert result.full_loss_qty_rate == Decimal("0.2")
+    assert result.strict_full_loss_qty_rate == Decimal("0.2")
 
 
 def test_v10_formula_current_unsettled_net_uses_only_confirmed_refund() -> None:
@@ -197,7 +198,7 @@ def test_v10_formula_uses_settlement_as_actual_net_revenue() -> None:
     assert result.platform_fee_cny == 0
 
 
-def test_v10_formula_refund_only_reduces_kept_cogs_for_breakeven() -> None:
+def test_v10_formula_strict_loss_reduces_kept_cogs_for_breakeven() -> None:
     result = calculate(
         _inputs(
             units_sold=10,
@@ -208,7 +209,7 @@ def test_v10_formula_refund_only_reduces_kept_cogs_for_breakeven() -> None:
             confirmed_unsettled_refund_vnd=Decimal("263300"),
             refund_only_vnd=Decimal("263300"),
             refund_return_vnd=Decimal(0),
-            full_loss_qty=1,
+            strict_full_loss_qty=1,
             domestic_cancelled_orders=0,
             cancelled_sales_vnd=Decimal(0),
         )
@@ -276,9 +277,6 @@ def _projection_inputs(**overrides) -> ProjectionInput:
         "projection_terminal_full_loss_qty": Decimal(2),
         "projection_completed_basis_order_count": 10,
         "projection_completed_full_loss_order_count": 1,
-        "projection_full_loss_basis_order_count": 10,
-        "projection_basis_full_loss_order_count": 1,
-        "projection_basis_full_loss_qty": Decimal(2),
         "unsettled_order_count": 5,
         "confirmed_unsettled_full_loss_order_count": 0,
         "confirmed_unsettled_full_loss_qty": Decimal(0),
@@ -329,11 +327,7 @@ def test_projection_uses_completed_order_full_loss_rate_and_current_profit_delta
 
     assert result.status is ProjectionStatus.AVAILABLE
     assert result.completed_full_loss_rate == Decimal("0.10")
-    # Legacy diagnostics remain visible, but they no longer drive projection.
     assert result.refund_amount_rate == Decimal("0.10")
-    assert result.pre_delivery_full_loss_rate == Decimal("0.10")
-    assert result.delivered_full_loss_rate == Decimal("0.10")
-    assert result.settled_full_loss_rate == Decimal("0.10")
     assert result.projected_future_full_loss_order_count == Decimal("0.5")
     assert result.projected_future_full_loss_qty == Decimal(2)
     assert result.projected_terminal_full_loss_qty == Decimal(5)
@@ -365,9 +359,6 @@ def test_projection_refunds_only_undelivered_terminal_risk_cohort() -> None:
             projection_terminal_full_loss_sales_cny=Decimal(100),
             projection_terminal_full_loss_order_count=10,
             projection_terminal_full_loss_qty=Decimal(10),
-            projection_full_loss_basis_order_count=100,
-            projection_basis_full_loss_order_count=10,
-            projection_basis_full_loss_qty=Decimal(10),
             unsettled_order_count=100,
             unsettled_sales_after_fee_cny=Decimal(800),
             confirmed_unsettled_refund_after_fee_cny=Decimal(20),
@@ -393,9 +384,6 @@ def test_projection_subtracts_confirmed_outcomes_from_whole_cohort_quota() -> No
             projection_terminal_basis_order_count=100,
             projection_terminal_full_loss_order_count=10,
             projection_terminal_full_loss_qty=Decimal(10),
-            projection_full_loss_basis_order_count=100,
-            projection_basis_full_loss_order_count=10,
-            projection_basis_full_loss_qty=Decimal(10),
             unsettled_order_count=300,
             confirmed_unsettled_full_loss_order_count=8,
             confirmed_unsettled_full_loss_qty=Decimal(8),
@@ -473,18 +461,12 @@ def test_projection_completed_rate_is_independent_of_legacy_samples() -> None:
             projection_terminal_full_loss_sales_cny=Decimal(0),
             projection_terminal_full_loss_order_count=0,
             projection_terminal_full_loss_qty=Decimal(0),
-            projection_full_loss_basis_order_count=0,
-            projection_basis_full_loss_order_count=0,
-            projection_basis_full_loss_qty=Decimal(0),
         )
     )
 
     assert result.status is ProjectionStatus.AVAILABLE
     assert result.completed_full_loss_rate == Decimal("0.10")
     assert result.refund_amount_rate is None
-    assert result.pre_delivery_full_loss_rate is None
-    assert result.delivered_full_loss_rate is None
-    assert result.settled_full_loss_rate is None
     assert result.projected_future_full_loss_qty == Decimal(2)
     assert result.projected_unsettled_net_cny is not None
     assert result.projected_net_profit_cny is not None

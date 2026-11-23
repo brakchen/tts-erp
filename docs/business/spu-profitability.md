@@ -325,17 +325,17 @@ fee_rate
 cogs_sold
 = paid_quantity × current_unit_cost
 
-cogs_full_loss_cancelled
+strict_full_loss_cancelled_cogs
 = strict_full_loss_cancelled_quantity × current_unit_cost
 
 cogs_total
-= cogs_sold + cogs_full_loss_cancelled
+= cogs_sold + strict_full_loss_cancelled_cogs
 
-observed_full_loss_cost
+strict_full_loss_cost
 = confirmed_strict_full_loss_quantity × current_unit_cost
 
 current_cogs_kept
-= max(cogs_total - observed_full_loss_cost, 0)
+= max(cogs_total - strict_full_loss_cost, 0)
 ```
 
 当前利润与 ROI：
@@ -345,7 +345,7 @@ current_net_profit
 = current_net_revenue - cogs_total - ad_spend
 
 current_nc_prime
-= current_net_revenue - observed_full_loss_cost
+= current_net_revenue - strict_full_loss_cost
 
 current_roi
 = current_nc_prime / ad_spend
@@ -457,7 +457,7 @@ projected_future_full_loss_cost
 
 ```text
 projected_terminal_full_loss_cost
-= observed_full_loss_cost
+= strict_full_loss_cost
   + projected_future_full_loss_cost
 ```
 
@@ -495,7 +495,7 @@ projected_net_profit
 - 已确认退款只扣一次；
 - 付款订单货本已经进入 `cogs_total`，预测未来全损不得再次加入 COGS；
 - 未来全损先通过预计收入减少影响利润；
-- 海外取消等当前已经发生但未包含在 paid quantity 的严格全损货本，继续进入 `cogs_full_loss_cancelled`。
+- 海外取消等当前已经发生但未包含在 paid quantity 的严格全损货本，继续进入 `strict_full_loss_cancelled_cogs`。
 
 ### 6.6 预计 ROI 与预计保本 ROI
 
@@ -646,7 +646,7 @@ ProjectionPolicy(
 - `meta.fee` 返回实际费率来源、逐店费率和降级原因；
 - `meta.presentation` 返回页面说明和告警文案。
 
-稳定 `/v2` 兼容边界：旧客户端若仍依赖 `items[]` 的历史预测字段，adapter 可以临时保留兼容字段，但业务层和前端不得继续计算或展示单 SPU 预测。删除稳定字段需要版本化或明确的 breaking 变更授权。
+`items[]` 可以返回行级预测诊断；产品预测仅在 `totals` 展示。全损字段按 §4.3 的严格口径输出。
 
 ---
 
@@ -666,7 +666,7 @@ ProjectionPolicy(
 | 状态 | 条件 | 结果 |
 | --- | --- | --- |
 | `available` | 有预测对象且样本分母 > 0 | 返回预测结果 |
-| `no_unsettled_orders`（兼容名） | 当前范围没有待完结风险订单 | 未来新增全损为 0；预计结果与当前结果一致 |
+| `no_unsettled_orders` | 当前范围没有待完结风险订单 | 未来新增全损为 0；预计结果与当前结果一致 |
 | `insufficient_sample` | 有预测对象但样本分母为 0 | 依赖 `p` 的字段为 null |
 
 warning：
@@ -706,28 +706,13 @@ warning：
 
 ---
 
-## 11. 当前实现与目标契约的已知差异
+## 11. 严格全损当前口径
 
-以下差异是有意保留的兼容边界，不得误读为预测口径未实现：
+当前经营窗口与成熟预测样本共用 §4.3 的订单级判定：有付款证据，且出现 80101 终局物流事件，或海外暴露、送达后最终退款金额达到整单 GMV。部分退款、未付款取消和仅有 38301 的海外取消均不计全损。
 
-1. `items[]` / 领域行类型仍携带历史 SPU 行级 projection 字段；产品展示和新客户端只读取 `totals` 与 `meta.projection`，这些字段仅为 v9/v10 兼容 consumer 保留；
-2. 当前值仍保留 v9 `full_loss_qty/full_loss_rate` 诊断字段；严格全损预测分子不复用这些兼容字段；
-3. 未结算收入的旧 wire 字段仍按兼容 serializer 输出；当前净收入已按 §5.2 收敛为只扣同一经营窗口内、未结算订单的已确认退款，未来风险损失只进入 projection 结果；
-4. 部分接口历史文档仍可能引用 `docs/archive/` 的 M 码和旧 v9 口径，业务计算不得以 archive 为准。
+接口只返回 `strict_full_loss_order_count`、`strict_full_loss_qty`、`strict_full_loss_rate`、`strict_full_loss_qty_rate`、`strict_full_loss_cost` 和 `strict_full_loss_cancelled_cogs` 等严格口径字段。订单钻取标记为 `strict_full_loss`。大盘订单数按整单去重，SPU 件数按严格全损订单行归属。
 
-当前已经生效的预测契约：
-
-- 预测样本范围、样本计数和样本率独立于 `w_start/w_end`；风险池、当前基线和预计最终 totals 跟随经营窗口、店铺和已应用 SPU 范围；
-- HTTP 接受独立 `projection_lookback_days=30|90`，默认 30；页面可切换 90，非法值返回 422；
-- 严格终局全损以 80101 物流证据和 canonical paid/payment evidence 为前提；UNPAID、ON_HOLD 等非付费取消单不进入严格样本；
-- 样本 1–9 单返回 `projection_low_sample`，样本 0 返回 `projection_insufficient_sample`；已送达但未结算且无风险池时返回 `no_unsettled_orders`。
-
-### 11.1 当前实现复核清单
-
-- 预测窗口使用店铺本地 `T-1`、7 天成熟等待期和 30/90 lookback；
-- 报表日期改变当前事实、预测风险池和预计最终指标，但不改变独立成熟样本；
-- projection aggregate 在同一只读快照内复用已应用 selection/catalog，并独立于分页、排序和 `q`；
-- v9 兼容 fields 保留但不得作为严格预测公式或产品文案的依据。
+预测样本独立于经营日期范围，风险池与当前值跟随经营日期、店铺和 SPU 筛选；预测样本 1–9 单返回 `projection_low_sample`，0 单返回 `projection_insufficient_sample`。
 
 ---
 
@@ -737,7 +722,7 @@ warning：
 
 - [ ] 飞书业务口径版本已读取并记录；
 - [x] 当前窗口和预测窗口使用不同参数；
-- [x] 预测只在 totals 计算和展示（items 仅保留兼容字段）；
+- [x] 预测在 totals 展示，items 的行级诊断不参与大盘决策；
 - [x] 30/90 天公式、7 天成熟等待期和本地时区边界有测试；
 - [x] 当前净收入未使用当前窗口退款率预测未来；
 - [x] 严格全损与普通退款分开；

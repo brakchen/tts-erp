@@ -23,9 +23,10 @@ class FormulaInput:
     domestic_cancelled_orders: int
     overseas_cancelled_orders: int
     units_sold: int
-    full_loss_cancelled_qty: int
-    full_loss_qty: int
+    strict_full_loss_cancelled_qty: int
+    strict_full_loss_qty: int
     refund_order_count: int
+    strict_full_loss_order_count: int
     refund_only_qty: int
     refund_return_qty: int
     sales_vnd: Decimal
@@ -53,7 +54,7 @@ class FormulaOutput:
     total_orders: int
     effective_order_count: int
     refund_order_count: int
-    full_loss_order_count: int
+    strict_full_loss_order_count: int
     settled_net_cny: Decimal
     settled_sales_cny: Decimal
     unsettled_sales_cny: Decimal
@@ -65,11 +66,11 @@ class FormulaOutput:
     net_revenue_cny: Decimal
     unsettled_net_cny: Decimal
     cogs_sold_cny: Decimal
-    cogs_full_loss_cancelled_cny: Decimal
+    strict_full_loss_cancelled_cogs_cny: Decimal
     cogs_all_cny: Decimal
     cogs_kept_cny: Decimal
     platform_fee_cny: Decimal
-    return_loss_cny: Decimal
+    strict_full_loss_cost_cny: Decimal
     net_profit_cny: Decimal
     roi_real: Decimal | None
     roi_breakeven: Decimal | None
@@ -83,8 +84,8 @@ class FormulaOutput:
     refund_amount_rate: Decimal | None
     refund_rate_qty: Decimal | None
     cancel_rate: Decimal | None
-    full_loss_rate: Decimal | None
-    full_loss_qty_rate: Decimal | None
+    strict_full_loss_rate: Decimal | None
+    strict_full_loss_qty_rate: Decimal | None
     gmv_sales_cny: Decimal
 
 
@@ -103,9 +104,6 @@ class ProjectionInput:
     projection_terminal_full_loss_qty: Decimal
     projection_completed_basis_order_count: int
     projection_completed_full_loss_order_count: int
-    projection_full_loss_basis_order_count: int
-    projection_basis_full_loss_order_count: int
-    projection_basis_full_loss_qty: Decimal
     unsettled_order_count: int
     confirmed_unsettled_full_loss_order_count: int
     confirmed_unsettled_full_loss_qty: Decimal
@@ -139,11 +137,7 @@ class ProjectionInput:
 class ProjectionOutput:
     status: ProjectionStatus
     refund_amount_rate: Decimal | None
-    pre_delivery_full_loss_rate: Decimal | None
     completed_full_loss_rate: Decimal | None
-    delivered_full_loss_rate: Decimal | None
-    settled_full_loss_rate: Decimal | None
-    full_loss_qty_rate: Decimal | None
     projected_future_refund_amount_cny: Decimal | None
     projected_terminal_refund_amount_cny: Decimal | None
     projected_future_full_loss_order_count: Decimal | None
@@ -170,9 +164,9 @@ class OrderMetrics:
     total_orders: int
     effective_order_count: int
     refund_order_count: int
-    full_loss_order_count: int
+    strict_full_loss_order_count: int
     refund_rate: Decimal | None
-    full_loss_rate: Decimal | None
+    strict_full_loss_rate: Decimal | None
     cancel_rate: Decimal | None
 
 
@@ -181,14 +175,13 @@ def calculate_order_metrics(
     order_count: int,
     cancelled_orders: int,
     domestic_cancelled_orders: int,
-    overseas_cancelled_orders: int,
+    strict_full_loss_order_count: int,
     refund_order_count: int,
 ) -> OrderMetrics:
     """Apply the v10 order funnel definitions at any aggregation scope."""
 
     total_orders = order_count + cancelled_orders
     effective_order_count = max(0, order_count - refund_order_count)
-    full_loss_order_count = refund_order_count + overseas_cancelled_orders
 
     def rate(numerator: int) -> Decimal | None:
         if total_orders <= 0:
@@ -199,9 +192,9 @@ def calculate_order_metrics(
         total_orders=total_orders,
         effective_order_count=effective_order_count,
         refund_order_count=refund_order_count,
-        full_loss_order_count=full_loss_order_count,
+        strict_full_loss_order_count=strict_full_loss_order_count,
         refund_rate=rate(refund_order_count),
-        full_loss_rate=rate(full_loss_order_count),
+        strict_full_loss_rate=rate(strict_full_loss_order_count),
         cancel_rate=rate(domestic_cancelled_orders),
     )
 
@@ -220,9 +213,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
 
     has_reliable_sample = inputs.projection_completed_basis_order_count > 0
     refund_amount_rate: Decimal | None = None
-    pre_delivery_full_loss_rate: Decimal | None = None
     completed_full_loss_rate: Decimal | None = None
-    delivered_full_loss_rate: Decimal | None = None
     if inputs.projection_terminal_basis_sales_cny > 0:
         refund_amount_rate = min(
             Decimal(1),
@@ -230,15 +221,6 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
                 Decimal(0),
                 inputs.projection_terminal_full_loss_sales_cny
                 / inputs.projection_terminal_basis_sales_cny,
-            ),
-        )
-    if inputs.projection_terminal_basis_order_count > 0:
-        pre_delivery_full_loss_rate = min(
-            Decimal(1),
-            max(
-                Decimal(0),
-                Decimal(inputs.projection_terminal_full_loss_order_count)
-                / Decimal(inputs.projection_terminal_basis_order_count),
             ),
         )
     if has_reliable_sample:
@@ -250,16 +232,6 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
                 / Decimal(inputs.projection_completed_basis_order_count),
             ),
         )
-    if inputs.projection_full_loss_basis_order_count > 0:
-        delivered_full_loss_rate = min(
-            Decimal(1),
-            max(
-                Decimal(0),
-                Decimal(inputs.projection_basis_full_loss_order_count)
-                / Decimal(inputs.projection_full_loss_basis_order_count),
-            ),
-        )
-
     current_nc_prime = (
         inputs.current_net_revenue_cny - inputs.observed_full_loss_cost_cny
     )
@@ -286,11 +258,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
         return ProjectionOutput(
             status=ProjectionStatus.NO_UNSETTLED_ORDERS,
             refund_amount_rate=refund_amount_rate,
-            pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
             completed_full_loss_rate=completed_full_loss_rate,
-            delivered_full_loss_rate=delivered_full_loss_rate,
-            settled_full_loss_rate=delivered_full_loss_rate,
-            full_loss_qty_rate=delivered_full_loss_rate,
             projected_future_refund_amount_cny=Decimal(0),
             projected_terminal_refund_amount_cny=Decimal(0),
             projected_future_full_loss_order_count=Decimal(0),
@@ -316,11 +284,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
         return ProjectionOutput(
             status=ProjectionStatus.INSUFFICIENT_SAMPLE,
             refund_amount_rate=refund_amount_rate,
-            pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
             completed_full_loss_rate=completed_full_loss_rate,
-            delivered_full_loss_rate=delivered_full_loss_rate,
-            settled_full_loss_rate=delivered_full_loss_rate,
-            full_loss_qty_rate=delivered_full_loss_rate,
             projected_future_refund_amount_cny=None,
             projected_terminal_refund_amount_cny=None,
             projected_future_full_loss_order_count=None,
@@ -444,11 +408,7 @@ def calculate_projection(inputs: ProjectionInput) -> ProjectionOutput:
     return ProjectionOutput(
         status=ProjectionStatus.AVAILABLE,
         refund_amount_rate=refund_amount_rate,
-        pre_delivery_full_loss_rate=pre_delivery_full_loss_rate,
         completed_full_loss_rate=completed_full_loss_rate,
-        delivered_full_loss_rate=delivered_full_loss_rate,
-        settled_full_loss_rate=delivered_full_loss_rate,
-        full_loss_qty_rate=delivered_full_loss_rate,
         projected_future_refund_amount_cny=projected_future_refund,
         projected_terminal_refund_amount_cny=projected_terminal_refund,
         projected_future_full_loss_order_count=(
@@ -497,7 +457,7 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
         order_count=inputs.order_count,
         cancelled_orders=inputs.cancelled_orders,
         domestic_cancelled_orders=inputs.domestic_cancelled_orders,
-        overseas_cancelled_orders=inputs.overseas_cancelled_orders,
+        strict_full_loss_order_count=inputs.strict_full_loss_order_count,
         refund_order_count=inputs.refund_order_count,
     )
 
@@ -508,27 +468,23 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
     )
     net_revenue_cny = settled_net_cny + unsettled_net_cny
     cogs_sold_cny = Decimal(inputs.units_sold) * unit_cost_cny
-    cogs_full_loss_cancelled_cny = (
-        Decimal(inputs.full_loss_cancelled_qty) * unit_cost_cny
+    strict_full_loss_cancelled_cogs_cny = (
+        Decimal(inputs.strict_full_loss_cancelled_qty) * unit_cost_cny
     )
-    cogs_all_cny = cogs_sold_cny + cogs_full_loss_cancelled_cny
+    cogs_all_cny = cogs_sold_cny + strict_full_loss_cancelled_cogs_cny
     platform_fee_cny = inputs.unsettled_fee_rate * unsettled_sales_cny
-    return_loss_cny = Decimal(inputs.full_loss_qty) * unit_cost_cny
+    strict_full_loss_cost_cny = Decimal(inputs.strict_full_loss_qty) * unit_cost_cny
     net_profit_cny = net_revenue_cny - cogs_all_cny - spend_cny
 
     roi_real = None
     if spend_cny != 0:
-        roi_real = (net_revenue_cny - return_loss_cny) / spend_cny
+        roi_real = (net_revenue_cny - strict_full_loss_cost_cny) / spend_cny
 
-    cogs_kept_cny = max(
-        Decimal(0),
-        Decimal(inputs.units_sold - inputs.refund_only_qty - inputs.refund_return_qty)
-        * unit_cost_cny,
-    )
-    breakeven_denom = (net_revenue_cny - return_loss_cny) - cogs_kept_cny
+    cogs_kept_cny = max(cogs_all_cny - strict_full_loss_cost_cny, Decimal(0))
+    breakeven_denom = (net_revenue_cny - strict_full_loss_cost_cny) - cogs_kept_cny
     roi_breakeven = None
     if spend_cny != 0 and breakeven_denom > 0:
-        roi_breakeven = (net_revenue_cny - return_loss_cny) / breakeven_denom
+        roi_breakeven = (net_revenue_cny - strict_full_loss_cost_cny) / breakeven_denom
 
     cpa_cny = spend_cny / Decimal(inputs.ad_orders) if inputs.ad_orders else None
     # ROI 无币种；直接使用同源广告 USD 可避免两次 Decimal 换算引入尾差。
@@ -548,16 +504,16 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
     # roi_l0 是历史字段；保留为广告后台实际 ROI 的兼容别名。
     roi_l0 = ad_system_actual_roi
 
-    # 保留金额/件数旧口径的显式字段，仅用于解释，不能再冒充大盘三率。
+    # 退款件数率与严格全损件数率分别由各自的服务端事实计算。
     refund_amount_rate = refund_net_cny / sales_cny if sales_cny > 0 else None
     refund_rate_qty = (
         Decimal(inputs.refund_order_count) / Decimal(inputs.order_count)
         if inputs.order_count > 0
         else None
     )
-    full_loss_denom = inputs.units_sold + inputs.full_loss_cancelled_qty
-    full_loss_qty_rate = (
-        Decimal(inputs.full_loss_qty) / Decimal(full_loss_denom)
+    full_loss_denom = inputs.units_sold + inputs.strict_full_loss_cancelled_qty
+    strict_full_loss_qty_rate = (
+        Decimal(inputs.strict_full_loss_qty) / Decimal(full_loss_denom)
         if full_loss_denom > 0
         else None
     )
@@ -571,7 +527,7 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
         total_orders=order_metrics.total_orders,
         effective_order_count=order_metrics.effective_order_count,
         refund_order_count=order_metrics.refund_order_count,
-        full_loss_order_count=order_metrics.full_loss_order_count,
+        strict_full_loss_order_count=order_metrics.strict_full_loss_order_count,
         settled_net_cny=settled_net_cny,
         settled_sales_cny=settled_sales_cny,
         unsettled_sales_cny=unsettled_sales_cny,
@@ -583,11 +539,11 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
         net_revenue_cny=net_revenue_cny,
         unsettled_net_cny=unsettled_net_cny,
         cogs_sold_cny=cogs_sold_cny,
-        cogs_full_loss_cancelled_cny=cogs_full_loss_cancelled_cny,
+        strict_full_loss_cancelled_cogs_cny=strict_full_loss_cancelled_cogs_cny,
         cogs_all_cny=cogs_all_cny,
         cogs_kept_cny=cogs_kept_cny,
         platform_fee_cny=platform_fee_cny,
-        return_loss_cny=return_loss_cny,
+        strict_full_loss_cost_cny=strict_full_loss_cost_cny,
         net_profit_cny=net_profit_cny,
         roi_real=roi_real,
         roi_breakeven=roi_breakeven,
@@ -603,7 +559,7 @@ def calculate(inputs: FormulaInput) -> FormulaOutput:
         refund_amount_rate=refund_amount_rate,
         refund_rate_qty=refund_rate_qty,
         cancel_rate=order_metrics.cancel_rate,
-        full_loss_rate=order_metrics.full_loss_rate,
-        full_loss_qty_rate=full_loss_qty_rate,
+        strict_full_loss_rate=order_metrics.strict_full_loss_rate,
+        strict_full_loss_qty_rate=strict_full_loss_qty_rate,
         gmv_sales_cny=sales_cny + cancelled_sales_cny,
     )
