@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import ssl
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import partial
 from typing import Any, Protocol
@@ -45,7 +46,10 @@ SEARCH_PATH = "/open/v1/order/purchase_order/purchase_record/search_list"
 ENDPOINT = "miaoshou.purchase_record.search_list"
 PAGE_SIZE = 20
 MAX_PAGES = 1000
+MAX_WINDOW_PAGES = 10
+WINDOW_RESTARTS = 2
 _MIAOSHOU_TZ = ZoneInfo("Asia/Shanghai")
+_EARLIEST_PURCHASE_AT = datetime(1970, 1, 1, tzinfo=_MIAOSHOU_TZ)
 _COMPLETED_STATUS = "finished"
 _CNY_PURCHASE_PLATFORMS = {"1688", "1688妙手"}
 _CALCULATION_VERSION = "purchase-price-open-api-v1"
@@ -54,6 +58,10 @@ _PREVIOUS_CALCULATION_VERSION = "purchase-price-v1"
 
 class PurchaseApiClient(Protocol):
     def _call_erp(self, *, path: str, body: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class _WindowChanged(RuntimeError):
+    """The upstream finished-order set changed while a window was paged."""
 
 
 @dataclass(frozen=True)
@@ -77,7 +85,7 @@ def _schema_ready(session: Session) -> bool:
 def _retryable(error: BaseException) -> bool:
     return (
         is_retryable_miaoshou_error(error)
-        or isinstance(error, (URLError, TimeoutError))
+        or isinstance(error, (URLError, TimeoutError, ssl.SSLEOFError, BrokenPipeError))
         or isinstance(error, MiaoshouApiError)
         and error.code in (429, 500, 502, 503, 504)
     )
@@ -86,78 +94,128 @@ def _retryable(error: BaseException) -> bool:
 def _fetch_all_pages(
     client: PurchaseApiClient, *, max_retries: int
 ) -> tuple[list[dict[str, Any]], int, int]:
-    end = datetime.now(_MIAOSHOU_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    rows: dict[str, dict[str, Any]] = {}
-    seen_pages: set[tuple[str, ...]] = set()
-    total = None
-    page_count = 1
-    for page in range(1, MAX_PAGES + 1):
-        body = {
-            "page": page,
-            "pageSize": PAGE_SIZE,
-            "purchaseOrderStatus": _COMPLETED_STATUS,
-            "gmtRangeType": "gmtPurchaseOrderStart",
-            "gmtRangeTo": end,
-            "sortType": "gmtPurchaseOrderStartDesc",
-        }
-        try:
-            payload = call_with_retry(
-                partial(client._call_erp, path=SEARCH_PATH, body=body),
-                is_retryable=_retryable,
-                max_retries=max_retries,
-            )
-        except (
-            MiaoshouApiError,
-            MiaoshouRetryExhausted,
-            URLError,
-            TimeoutError,
-        ) as exc:
-            error = exc.last_error if isinstance(exc, MiaoshouRetryExhausted) else exc
-            code = getattr(error, "code", None)
-            safe_code = code if isinstance(code, int) else type(error).__name__
-            raise RuntimeError(
-                f"Miaoshou purchase API failed on page {page}: {safe_code}"
-            ) from None
-        data = payload.get("data")
-        if payload.get("result") != "success" or not isinstance(data, dict):
-            raise RuntimeError("invalid Miaoshou purchase API response")
-        batch = data.get("list")
-        advertised = data.get("total")
-        if (
-            isinstance(advertised, str)
-            and len(advertised) <= 20
-            and advertised.isascii()
-            and advertised.isdecimal()
-        ):
-            advertised = int(advertised)
-        if (
-            type(advertised) is not int
-            or advertised < 0
-            or not isinstance(batch, list)
-            or any(not isinstance(row, dict) for row in batch)
-        ):
-            raise RuntimeError("invalid purchase pagination metadata")
-        if total is None:
-            total = advertised
-            page_count = max(1, math.ceil(total / PAGE_SIZE))
-            if page_count > MAX_PAGES:
-                raise RuntimeError("purchase pagination exceeds safety cap")
-        if total != advertised:
-            raise RuntimeError("purchase total changed during pagination")
-        if len(batch) != min(PAGE_SIZE, total - (page - 1) * PAGE_SIZE):
-            raise RuntimeError("purchase pagination incomplete")
-        for row in batch:
-            _validate_order(row)
-        fingerprints = tuple(_fingerprint(_redact_secrets(row)) for row in batch)
-        page_signature = tuple(sorted(fingerprints))
-        if page_signature in seen_pages:
-            raise RuntimeError("purchase pagination repeated a page")
-        seen_pages.add(page_signature)
-        for fingerprint, row in zip(fingerprints, batch, strict=True):
-            rows[fingerprint] = row
-        if page == page_count:
-            return list(rows.values()), page_count, total
-    raise RuntimeError("purchase pagination exceeds safety cap")
+    end = datetime.now(_MIAOSHOU_TZ).replace(microsecond=0)
+    pages_walked = 0
+    root_advertised_total: int | None = None
+
+    def scan_window(
+        start: datetime, stop: datetime
+    ) -> dict[str, dict[str, Any]] | None:
+        """Return a complete window, or None when it needs splitting."""
+        nonlocal pages_walked, root_advertised_total
+        rows: dict[str, dict[str, Any]] = {}
+        seen_pages: set[tuple[str, ...]] = set()
+        total: int | None = None
+        page_count = 1
+        for page in range(1, MAX_PAGES + 1):
+            body = {
+                "page": page,
+                "pageSize": PAGE_SIZE,
+                "purchaseOrderStatus": _COMPLETED_STATUS,
+                "gmtRangeType": "gmtPurchaseOrderStart",
+                "gmtRangeFrom": start.strftime("%Y-%m-%d %H:%M:%S"),
+                "gmtRangeTo": stop.strftime("%Y-%m-%d %H:%M:%S"),
+                "sortType": "gmtPurchaseOrderStartDesc",
+            }
+            try:
+                payload = call_with_retry(
+                    partial(client._call_erp, path=SEARCH_PATH, body=body),
+                    is_retryable=_retryable,
+                    max_retries=max_retries,
+                )
+            except (
+                MiaoshouApiError,
+                MiaoshouRetryExhausted,
+                URLError,
+                TimeoutError,
+                ssl.SSLEOFError,
+                BrokenPipeError,
+            ) as exc:
+                error = (
+                    exc.last_error if isinstance(exc, MiaoshouRetryExhausted) else exc
+                )
+                code = getattr(error, "code", None)
+                safe_code = code if isinstance(code, int) else type(error).__name__
+                raise RuntimeError(
+                    f"Miaoshou purchase API failed on page {page}: {safe_code}"
+                ) from None
+            pages_walked += 1
+            data = payload.get("data")
+            if payload.get("result") != "success" or not isinstance(data, dict):
+                raise RuntimeError("invalid Miaoshou purchase API response")
+            batch = data.get("list")
+            advertised = data.get("total")
+            if (
+                isinstance(advertised, str)
+                and len(advertised) <= 20
+                and advertised.isascii()
+                and advertised.isdecimal()
+            ):
+                advertised = int(advertised)
+            if (
+                type(advertised) is not int
+                or advertised < 0
+                or not isinstance(batch, list)
+                or any(not isinstance(row, dict) for row in batch)
+            ):
+                raise RuntimeError("invalid purchase pagination metadata")
+            if total is None:
+                total = advertised
+                if start == _EARLIEST_PURCHASE_AT and stop == end and page == 1:
+                    root_advertised_total = advertised
+                page_count = max(1, math.ceil(total / PAGE_SIZE))
+                if page_count > MAX_WINDOW_PAGES and (stop - start).total_seconds() > 4:
+                    return None
+                if page_count > MAX_PAGES:
+                    raise RuntimeError("purchase pagination exceeds safety cap")
+            if total != advertised:
+                raise _WindowChanged("purchase total changed during pagination")
+            if len(batch) != min(PAGE_SIZE, total - (page - 1) * PAGE_SIZE):
+                raise RuntimeError("purchase pagination incomplete")
+            for row in batch:
+                _validate_order(row)
+                purchase_at = _parse_time(row.get("gmtPurchaseOrderStart"))
+                if (
+                    purchase_at is None
+                    or not start <= purchase_at.astimezone(_MIAOSHOU_TZ) <= stop
+                ):
+                    raise RuntimeError("Miaoshou purchase range filter was ignored")
+            fingerprints = tuple(_fingerprint(_redact_secrets(row)) for row in batch)
+            page_signature = tuple(sorted(fingerprints))
+            if page_signature in seen_pages:
+                raise RuntimeError("purchase pagination repeated a page")
+            seen_pages.add(page_signature)
+            for fingerprint, row in zip(fingerprints, batch, strict=True):
+                rows[fingerprint] = row
+            if page == page_count:
+                return rows
+        raise RuntimeError("purchase pagination exceeds safety cap")
+
+    def fetch_window(start: datetime, stop: datetime) -> dict[str, dict[str, Any]]:
+        split = False
+        for _ in range(WINDOW_RESTARTS + 1):
+            try:
+                rows = scan_window(start, stop)
+            except _WindowChanged:
+                split = True
+                continue
+            if rows is not None:
+                return rows
+            split = True
+            break
+        span_seconds = int((stop - start).total_seconds())
+        if split and span_seconds > 4:
+            middle = start + timedelta(seconds=span_seconds // 2)
+            # Overlap at the boundary: the API's inclusive/exclusive time
+            # comparison is not documented. Fingerprints remove duplicates.
+            left = fetch_window(start, middle + timedelta(seconds=1))
+            right = fetch_window(middle - timedelta(seconds=1), stop)
+            left.update(right)
+            return left
+        raise RuntimeError("purchase total changed during pagination")
+
+    rows = fetch_window(_EARLIEST_PURCHASE_AT, end)
+    return list(rows.values()), pages_walked, root_advertised_total or len(rows)
 
 
 def _parse_time(value: Any) -> datetime | None:

@@ -148,6 +148,11 @@ def test_build_scheduler_uses_utc_timezone(
     assert str(sched.timezone) == "UTC"
 
 
+def test_build_scheduler_limits_global_child_concurrency() -> None:
+    sched = build_scheduler(session_factory=MagicMock(name="session_factory"))
+    assert sched._executors["default"]._pool._max_workers == 2
+
+
 def test_build_scheduler_interval_trigger_uses_spec_seconds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -406,8 +411,13 @@ def _seed_credentials_for_enum(
         session.flush()
         if with_shop_row:
             from tests._job_invocation import authorize_test_shop
-            account = ChannelAccount(platform="tiktok", shop_id=external_id,
-                                     credential_id=cred.id, status="active")
+
+            account = ChannelAccount(
+                platform="tiktok",
+                shop_id=external_id,
+                credential_id=cred.id,
+                status="active",
+            )
             session.add(account)
             session.flush()
             authorize_test_shop(session, account.id, external_id)
@@ -736,9 +746,10 @@ def test_run_tiktok_job_waits_one_minute_only_on_rate_limit(
     factory = MagicMock()
     factory.return_value = MagicMock()
     mod = MagicMock()
-    mod.run.side_effect = [RateLimitedError("upstream 429"), MagicMock(
-        rows_total=1, rows_inserted=1, rows_failed=0
-    )]
+    mod.run.side_effect = [
+        RateLimitedError("upstream 429"),
+        MagicMock(rows_total=1, rows_inserted=1, rows_failed=0),
+    ]
     monkeypatch.setattr(scheduler, "build_proxy_call", lambda *a, **k: MagicMock())
     waits = []
     monkeypatch.setattr(scheduler.time, "sleep", waits.append)
