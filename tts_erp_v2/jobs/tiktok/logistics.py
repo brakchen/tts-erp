@@ -14,9 +14,9 @@ Verified live on 2026-08-30 against the production shop:
 
 Data flow
 ---------
-1. Select candidate orders from ``integration.raw_records`` whose
-   payload has a ``tracking_number`` and whose order is not already in a
-   terminal logistics state (DELIVERED / RETURNED_TO_SELLER).
+1. Prioritize shipped orders without a shipment, then select recent
+   ``integration.raw_records`` with a ``tracking_number`` whose order is
+   not already in a terminal logistics state.
 2. For each candidate: ``GET /fulfillment/202309/orders/{id}/tracking``.
 3. Upsert ``fulfillment.shipments`` (one row per package) and
    ``fulfillment.tracking_events`` (one row per event; most-recent wins
@@ -170,8 +170,10 @@ def _select_tracking_targets(
 
     Sources from ``integration.raw_records`` (the raw orders-search
     payloads) — the payload carries ``tracking_number`` /
-    ``shipping_provider_id`` / ``packages``. Orders already in a
-    terminal logistics state are excluded (their tracking never changes).
+    ``shipping_provider_id`` / ``packages``. Canonical order raw records
+    without a shipment get first priority, including historical orders
+    outside the recent raw-record window. Orders already in a terminal
+    logistics state are excluded (their tracking never changes).
 
     Two filters keep the target list honest (2026-10-03 fix):
 
@@ -211,6 +213,27 @@ def _select_tracking_targets(
     # identity map every 10 minutes and the long-lived worker never
     # returns that heap to the OS.
     payload = RawRecord.payload
+    # A historical order captured once can fall permanently outside the
+    # newest-raw-record window. Its canonical raw_record_id still contains
+    # the tracking number, so fill missing shipments before refreshing the
+    # recent active orders. Cap this slice to leave room for live tracking.
+    backfill_limit = min(limit, 100)
+    backfill_rows = session.execute(
+        select(
+            SalesOrder.order_id,
+            payload["tracking_number"].astext,
+            payload["packages"],
+            payload["shipping_provider_id"].astext,
+            payload["shipping_provider_name"].astext,
+        )
+        .join(RawRecord, RawRecord.id == SalesOrder.raw_record_id)
+        .where(SalesOrder.shop_pk == account_id)
+        .where(SalesOrder.shipped_at.is_not(None))
+        .where(payload["tracking_number"].astext.is_not(None))
+        .where(~select(Shipment.id).where(Shipment.order_pk == SalesOrder.id).exists())
+        .order_by(SalesOrder.id)
+        .limit(backfill_limit)
+    ).all()
     rows = session.execute(
         select(
             func.coalesce(payload["id"].astext, payload["order_id"].astext),
@@ -231,7 +254,7 @@ def _select_tracking_targets(
 
     targets: list[dict] = []
     seen: set[str] = set()
-    for oid, tracking, packages, provider_id, provider_name in rows:
+    for oid, tracking, packages, provider_id, provider_name in (*backfill_rows, *rows):
         if not oid or not tracking:
             continue
         oid = str(oid)

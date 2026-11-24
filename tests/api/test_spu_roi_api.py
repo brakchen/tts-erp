@@ -2035,6 +2035,70 @@ def test_projection_excludes_unpaid_cancelled_returned_order_from_strict_sample(
     ]
 
 
+def test_overseas_terminal_cod_cancelled_order_is_strict_full_loss(
+    api_client, readonly_key, db_engine
+):
+    with Session(db_engine) as sess:
+        spu_pk = _seed_terminal_delivery_risk_scenario(sess)
+        shop_pk = sess.execute(
+            text("SELECT shop_pk FROM commerce.products_spu WHERE id = :spu_pk"),
+            {"spu_pk": spu_pk},
+        ).scalar_one()
+        sess.commit()
+        baseline = api_client.get(
+            "/v2/analytics/spu-roi",
+            headers={"Authorization": f"Bearer {readonly_key}"},
+            params={"q": "TEST_ROI_SPU_TERMINAL_DELIVERY_RISK"},
+        ).json()["items"][0]
+        order_pk = _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_COD_OVERSEAS_TERMINAL",
+            status="CANCELLED",
+            line_ext="TEST_COD_OVERSEAS_TERMINAL_LINE",
+            qty="1",
+            unit_price="100000",
+            paid=False,
+        )
+        shipment_id = sess.execute(
+            text(
+                "INSERT INTO fulfillment.shipments (order_pk, external_package_id, status) "
+                "VALUES (:order_pk, 'TEST_COD_OVERSEAS_PKG', 'RETURNED_TO_SELLER') "
+                "RETURNING id"
+            ),
+            {"order_pk": order_pk},
+        ).scalar_one()
+        for code in (38301, 80101):
+            sess.execute(
+                text(
+                    "INSERT INTO fulfillment.tracking_events "
+                    "(shipment_id, external_event_key, action_code, event_at, description) "
+                    "VALUES (:shipment_id, :event_key, :code, now(), 'terminal')"
+                ),
+                {"shipment_id": shipment_id, "event_key": f"TEST_COD_{code}", "code": code},
+            )
+        sess.commit()
+
+    headers = {"Authorization": f"Bearer {readonly_key}"}
+    item = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=headers,
+        params={"q": "TEST_ROI_SPU_TERMINAL_DELIVERY_RISK"},
+    ).json()["items"][0]
+    assert item["strict_full_loss_order_count"] == baseline["strict_full_loss_order_count"] + 1
+    assert item["strict_full_loss_cancelled_qty"] == baseline["strict_full_loss_cancelled_qty"] + 1
+    assert item["projection_completed_full_loss_order_count"] == baseline[
+        "projection_completed_full_loss_order_count"
+    ] + 1
+    orders = api_client.get(
+        f"/v2/analytics/spu-roi/{spu_pk}/orders", headers=headers
+    ).json()["orders"]
+    assert next(row for row in orders if row["order_id"] == "TEST_COD_OVERSEAS_TERMINAL")[
+        "strict_full_loss"
+    ] is True
+
+
 def test_paid_non_cancelled_returned_order_is_completed_full_loss_not_risk(
     api_client, readonly_key, db_engine
 ):

@@ -11,6 +11,7 @@ follows the legacy v1 contract:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -188,6 +189,38 @@ def test_select_tracking_targets_does_not_load_full_raw_record(db_session) -> No
         obj for obj in db_session.identity_map.values() if isinstance(obj, RawRecord)
     ]
     assert loaded == []
+
+
+def test_select_tracking_targets_prioritizes_shipped_orders_without_shipments(
+    db_session,
+) -> None:
+    """A historical shipped order must not starve behind recent raw captures."""
+    account = _make_account_with_order(db_session)
+    old_order = db_session.execute(
+        select(SalesOrder).where(SalesOrder.shop_pk == account.id)
+    ).scalar_one()
+    old_order.status = "CANCELLED"
+    old_order.shipped_at = datetime(2026, 10, 1, tzinfo=UTC)
+    old_raw = _seed_orders_raw_record(
+        db_session,
+        order_id="TEST_SO_L",
+        tracking_number="TN_OLD",
+        package_id="PKG_OLD",
+    )
+    old_order.raw_record_id = old_raw.id
+    for i in range(5):
+        _seed_orders_raw_record(
+            db_session,
+            order_id=f"TEST_NEW_{i}",
+            tracking_number=f"TN_NEW_{i}",
+        )
+    db_session.flush()
+
+    targets = logistics_job._select_tracking_targets(
+        db_session, account_id=account.id, limit=1
+    )
+    assert [target["order_id"] for target in targets] == ["TEST_SO_L"]
+    assert targets[0]["external_package_id"] == "PKG_OLD"
 
 
 def test_logistics_synthesizes_package_id_from_order_id(db_session) -> None:
