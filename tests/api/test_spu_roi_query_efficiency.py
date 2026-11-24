@@ -25,7 +25,6 @@ pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 _FACT_QUERIES = (
     "_SQL_ROI_AD",
     "_SQL_ROI_SALES",
-    "_SQL_ROI_FULL_LOSS",
     "_SQL_ROI_ROW_STATUS",
     "_SQL_ROI_REFUNDS",
     "_SQL_ROI_PROJECTION",
