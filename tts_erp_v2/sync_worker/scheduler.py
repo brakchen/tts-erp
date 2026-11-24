@@ -33,6 +33,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import func, select, text
@@ -468,7 +469,10 @@ def _run_tiktok_job_for_shop(
                 raise
             delay = 60 if isinstance(exc, RateLimitedError) else 5
             log.warning(
-                "[%s] shop=%s retrying in %ds", spec.job_name, shop_id, delay,
+                "[%s] shop=%s retrying in %ds",
+                spec.job_name,
+                shop_id,
+                delay,
                 exc_info=True,
             )
         # The failed session/transaction is closed BEFORE backoff.
@@ -636,6 +640,7 @@ def _make_executor(
 #: startup so a restart after a long outage doesn't launch every overdue
 #: job in the same instant.
 _MAX_CATCHUP_SPREAD = 300
+_MAX_CONCURRENT_JOBS = 2
 
 
 def _overdue_first_runs(
@@ -730,7 +735,12 @@ def build_scheduler(
 
         session_factory = get_session_factory()
 
-    sched = BlockingScheduler(timezone="UTC")
+    # Each scheduler thread waits for a separate Python child. Limit the
+    # *global* number of children; max_instances below only limits one job.
+    sched = BlockingScheduler(
+        timezone="UTC",
+        executors={"default": ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_JOBS)},
+    )
     now = datetime.now(UTC)
     overdue_runs = _overdue_first_runs(
         session_factory, now=now, jitter_seconds=jitter_seconds
@@ -753,6 +763,7 @@ def build_scheduler(
             name=name,
             max_instances=1,  # no overlapping runs of the same job
             coalesce=True,  # if we miss fires, run only once on resume
+            misfire_grace_time=spec.interval_seconds,
             replace_existing=True,
             **extra,
         )

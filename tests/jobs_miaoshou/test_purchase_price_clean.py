@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ssl
 from copy import deepcopy
+from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -26,21 +29,37 @@ pytestmark = [pytest.mark.domain_miaoshou, pytest.mark.layer_integration]
 
 
 class FakePurchaseClient:
-    def __init__(self, rows: list[dict], *, advertised_total: int | str | None = None):
+    def __init__(
+        self,
+        rows: list[dict],
+        *,
+        advertised_total: int | str | None = None,
+        filter_ranges: bool = True,
+    ):
         self.rows = rows
         self.advertised_total = advertised_total
+        self.filter_ranges = filter_ranges
         self.calls: list[dict] = []
 
     def _call_erp(self, *, path: str, body: dict) -> dict:
         assert path == "/open/v1/order/purchase_order/purchase_record/search_list"
         assert body["purchaseOrderStatus"] == "finished"
         self.calls.append(body)
+        rows = self.rows
+        if self.filter_ranges:
+            rows = [
+                row
+                for row in rows
+                if body["gmtRangeFrom"]
+                <= row["gmtPurchaseOrderStart"]
+                <= body["gmtRangeTo"]
+            ]
         start = (body["page"] - 1) * body["pageSize"]
         return {
             "result": "success",
             "data": {
-                "list": self.rows[start : start + body["pageSize"]],
-                "total": len(self.rows)
+                "list": rows[start : start + body["pageSize"]],
+                "total": len(rows)
                 if self.advertised_total is None
                 else self.advertised_total,
             },
@@ -352,3 +371,100 @@ def test_pagination_follows_data_total_and_keeps_a_fixed_upper_bound(
     assert result["orders_seen"] == 3
     assert [body["page"] for body in client.calls] == [1, 2]
     assert len({body["gmtRangeTo"] for body in client.calls}) == 1
+
+
+def test_pagination_restarts_a_window_when_finished_total_changes(monkeypatch) -> None:
+    monkeypatch.setattr(job, "PAGE_SIZE", 2)
+    rows = [
+        _purchase_order()
+        | {
+            "purchaseOrderSn": f"TEST_PO_{day}",
+            "gmtPurchaseOrderStart": f"2026-10-0{day} 12:00:00",
+        }
+        for day in (3, 2, 1)
+    ]
+
+    class ChangingClient(FakePurchaseClient):
+        changed = False
+
+        def _call_erp(self, *, path: str, body: dict) -> dict:
+            if body["page"] == 2 and not self.changed:
+                self.rows.insert(
+                    0,
+                    _purchase_order()
+                    | {
+                        "purchaseOrderSn": "TEST_PO_4",
+                        "gmtPurchaseOrderStart": "2026-10-04 12:00:00",
+                    },
+                )
+                self.changed = True
+            return super()._call_erp(path=path, body=body)
+
+    client = ChangingClient(rows)
+    orders, pages, total = job._fetch_all_pages(client, max_retries=0)
+    assert (len(orders), total) == (4, 4)
+    assert pages == 4
+    assert [call["page"] for call in client.calls] == [1, 2, 1, 2]
+
+
+def test_large_scan_splits_windows_without_losing_boundary_rows(monkeypatch) -> None:
+    monkeypatch.setattr(job, "PAGE_SIZE", 2)
+    monkeypatch.setattr(job, "MAX_WINDOW_PAGES", 1)
+    monkeypatch.setattr(
+        job,
+        "_EARLIEST_PURCHASE_AT",
+        datetime(2026, 9, 28, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+    rows = [
+        _purchase_order()
+        | {
+            "purchaseOrderSn": f"TEST_PO_{day}",
+            "gmtPurchaseOrderStart": f"2026-10-0{day} 12:00:00",
+        }
+        for day in (5, 4, 3, 2, 1)
+    ]
+    client = FakePurchaseClient(rows)
+    orders, pages, total = job._fetch_all_pages(client, max_retries=0)
+    assert (len(orders), total) == (5, 5)
+    assert pages > 3
+    assert all("gmtRangeFrom" in call for call in client.calls)
+
+
+def test_range_filter_ignored_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(job, "PAGE_SIZE", 2)
+    monkeypatch.setattr(job, "MAX_WINDOW_PAGES", 1)
+    rows = [
+        _purchase_order()
+        | {
+            "purchaseOrderSn": f"TEST_PO_{day}",
+            "gmtPurchaseOrderStart": f"2026-10-0{day} 12:00:00",
+        }
+        for day in (3, 2, 1)
+    ]
+    with pytest.raises(RuntimeError, match="range filter was ignored"):
+        job._fetch_all_pages(
+            FakePurchaseClient(rows, filter_ranges=False), max_retries=0
+        )
+
+
+@pytest.mark.parametrize(
+    "error", [ssl.SSLEOFError(8, "test EOF"), BrokenPipeError(32, "test pipe")]
+)
+def test_transient_network_error_retries_the_page(monkeypatch, error) -> None:
+    from tts_erp_v2.proxy.miaoshou import retry
+
+    monkeypatch.setattr(retry, "_sleep_backoff", lambda _attempt: None)
+
+    class FlakyClient(FakePurchaseClient):
+        failed = False
+
+        def _call_erp(self, *, path: str, body: dict) -> dict:
+            if not self.failed:
+                self.failed = True
+                raise error
+            return super()._call_erp(path=path, body=body)
+
+    client = FlakyClient([_purchase_order()])
+    orders, _, _ = job._fetch_all_pages(client, max_retries=1)
+    assert len(orders) == 1
+    assert client.failed

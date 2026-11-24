@@ -95,9 +95,16 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schem
 应用需具备「包裹 → 采购记录 → 采购记录列表」权限。凭据由 `token_service` 加载，
 配置入口与妙手包裹同步相同。
 
-- 分页使用 `purchaseOrderStatus=finished`，在一次同步内固定查询截止时间。校验分页的
-  `data.total`（生产接口可能返回十进制字符串）和每页记录数，按响应内容去重，
-  保留同一采购单号下不同的记录。
+- 分页使用 `purchaseOrderStatus=finished`，在一次同步内固定查询截止时间。
+  按 `gmtPurchaseOrderStart` 的起止时间将全历史递归拆成最多 10 页的小窗口；
+  窗口边界重叠 1 秒，再按响应内容指纹去重，保留同一采购单号下不同的记录。
+  校验每个窗口的 `data.total`（生产接口可能返回十进制字符串）、每页记录数和时间范围。
+  总数变化时重抓该窗口，仍不稳定就继续拆窗；不能跳过校验或推进不完整的结果。
+  若上游忽略起始时间筛选，任务直接失败，避免错误价格入库。
+- TLS EOF 和 Broken pipe 使用现有的有限次数退避重试。生产 Sync Worker 的
+  APScheduler 线程池最多并行运行 2 个任务子进程；任务自身仍禁止重叠。
+  2026-11-24 已通过生产只读单页请求核验 `gmtRangeFrom`：全历史、11 月窗口和
+  最近 1 分钟窗口返回不同的有效总数，返回行也落在请求范围内。
 - 对采购平台为 `1688` 或 `1688妙手` 的记录，要求实付金额、采购行单价和数量均为正，
   并且单内货源标题唯一、有效关联指向同一个 TikTok SPU。同一货源的多个规格按
   `Σ(sourceUnitPrice×sourceQuantity)/Σ(sourceQuantity)` 算出 CNY 单位成本。

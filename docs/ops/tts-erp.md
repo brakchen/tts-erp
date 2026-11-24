@@ -89,6 +89,13 @@ systemctl list-timers '*logrotate*'
 `/healthz` 返回 `service: "tts-erp-v2"` 表示 API 进程响应。Worker 发布后还应查看近期
 任务结果；依赖故障分别核对 PostgreSQL、MinIO 和 frp。
 
+采购价同步稳定性核验：生产机约 1 GiB 内存、无 swap，Worker systemd 上限为
+`MemoryMax=400M`。代码将全局任务子进程并发限制为 2；不要只提高此上限而不增加
+主机内存。发布后连续 24 小时检查 `miaoshou.purchase_price_clean` 是否成功、
+`journalctl -u tts-erp-sync.service` 是否仍有 OOM，以及
+`systemctl show tts-erp-sync.service -p MemoryCurrent -p MemoryPeak`。
+若上游忽略采购记录的起始时间筛选，任务会安全失败并保留已有采购价。
+
 ### 生产 MinIO 预签名
 
 生产机的 `MINIO_ENDPOINT=127.0.0.1:6005` 用于应用经 frp 访问 MinIO。
