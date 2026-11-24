@@ -67,9 +67,9 @@ class SortField(StrEnum):
     CANCELLED_ORDER_COUNT = "cancelled_order_count"
     UNITS_SOLD = "units_sold"
     REFUND_NET_AMOUNT = "refund_net_amount"
-    RETURN_LOSS = "return_loss"
+    STRICT_FULL_LOSS_COST = "strict_full_loss_cost"
     ROI_BREAKEVEN = "roi_breakeven"
-    FULL_LOSS_RATE = "full_loss_rate"
+    STRICT_FULL_LOSS_RATE = "strict_full_loss_rate"
     # Quantity-weighted price columns; the identifiers are part of the wire
     # contract (docs/design/spu-price-statistics.md §4.4).
     PURCHASE_PRICE_MEAN = "purchasePriceMean"
@@ -322,7 +322,7 @@ class SpuProfitability:
     total_orders: int
     effective_order_count: int
     refund_order_count: int
-    full_loss_order_count: int
+    strict_full_loss_order_count: int
     domestic_cancelled_order_count: int
     overseas_cancelled_order_count: int
     units_sold: int
@@ -342,7 +342,7 @@ class SpuProfitability:
     refund_cancelled_qty: int
     refund_cancelled_amount: Decimal
     refund_cancelled_missing_lines: int
-    return_loss: Decimal
+    strict_full_loss_cost: Decimal
     net_profit: Decimal
     platform_fee: Decimal
     roi_real: Decimal | None
@@ -356,13 +356,13 @@ class SpuProfitability:
     settled_sales: Decimal
     unsettled_sales: Decimal
     cogs_sold: Decimal
-    cogs_full_loss_cancelled: Decimal
+    strict_full_loss_cancelled_cogs: Decimal
     cogs_total: Decimal
     settled_order_count: int
-    full_loss_qty: int
-    full_loss_cancelled_qty: int
-    full_loss_rate: Decimal | None
-    full_loss_qty_rate: Decimal | None
+    strict_full_loss_qty: int
+    strict_full_loss_cancelled_qty: int
+    strict_full_loss_rate: Decimal | None
+    strict_full_loss_qty_rate: Decimal | None
     ad_system_actual_roi: Decimal | None
     ad_system_breakeven_roi: Decimal | None
     ad_system_max_ad_spend: Decimal
@@ -382,15 +382,8 @@ class SpuProfitability:
     projection_terminal_full_loss_qty: int
     projection_completed_basis_order_count: int
     projection_completed_full_loss_order_count: int
-    projection_full_loss_basis_order_count: int
-    projection_basis_full_loss_order_count: int
-    projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
-    pre_delivery_full_loss_rate: Decimal | None
     completed_full_loss_rate: Decimal | None
-    delivered_full_loss_rate: Decimal | None
-    settled_full_loss_rate: Decimal | None
-    projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
     delivered_unsettled_order_count: int
     full_loss_exposure_unsettled_order_count: int
@@ -458,20 +451,20 @@ class ProfitabilityTotals:
     sales: Decimal
     gmv: Decimal
     refund_net_amount: Decimal
-    return_loss: Decimal
+    strict_full_loss_cost: Decimal
     net_profit: Decimal
     roi_real: Decimal | None
     refund_order_count: int
-    full_loss_qty: int
-    full_loss_cancelled_qty: int
+    strict_full_loss_qty: int
+    strict_full_loss_cancelled_qty: int
     domestic_cancelled_order_count: int
     overseas_cancelled_order_count: int
     roi_breakeven: Decimal | None
     effective_sales: Decimal
     effective_order_count: int
-    full_loss_order_count: int
+    strict_full_loss_order_count: int
     refund_rate: Decimal | None
-    full_loss_rate: Decimal | None
+    strict_full_loss_rate: Decimal | None
     cancel_rate: Decimal | None
     ad_system_actual_roi: Decimal | None
     ad_system_breakeven_roi: Decimal | None
@@ -490,15 +483,8 @@ class ProfitabilityTotals:
     projection_terminal_full_loss_qty: int
     projection_completed_basis_order_count: int
     projection_completed_full_loss_order_count: int
-    projection_full_loss_basis_order_count: int
-    projection_basis_full_loss_order_count: int
-    projection_basis_full_loss_qty: int
     projection_refund_amount_rate: Decimal | None
-    pre_delivery_full_loss_rate: Decimal | None
     completed_full_loss_rate: Decimal | None
-    delivered_full_loss_rate: Decimal | None
-    settled_full_loss_rate: Decimal | None
-    projection_full_loss_qty_rate: Decimal | None
     unsettled_order_count: int
     delivered_unsettled_order_count: int
     full_loss_exposure_unsettled_order_count: int

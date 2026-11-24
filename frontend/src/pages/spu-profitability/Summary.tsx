@@ -16,7 +16,7 @@ export function displayPercent(value: unknown): string { const raw = displayInpu
 export function priceValue(value: unknown, estimated: boolean): string { const raw = displayInput(value); return raw === undefined ? '—' : `${estimated ? '≈' : ''}${roundedDisplay(priceDisplay, raw)}`; }
 export const currentMetrics: [string, string, string, boolean?][] = [
   ['总单量', 'total_orders', 'sum-total-orders'], ['广告消耗', 'spend', 'sum-spend'], ['有效单量', 'effective_order_count', 'sum-orders'], ['有效销售', 'effective_sales', 'sum-sales'],
-  ['退款数', 'refund_order_count', 'sum-refund-count'], ['退款率', 'refund_rate', 'sum-refund-rate', true], ['全损量', 'full_loss_order_count', 'sum-loss-qty'], ['全损率', 'full_loss_rate', 'sum-loss-rate', true],
+  ['退款数', 'refund_order_count', 'sum-refund-count'], ['退款率', 'refund_rate', 'sum-refund-rate', true], ['严格全损单', 'strict_full_loss_order_count', 'sum-loss-qty'], ['严格全损率', 'strict_full_loss_rate', 'sum-loss-rate', true],
   ['国内取消量', 'domestic_cancelled_order_count', 'sum-cancel-count'], ['国内取消率', 'cancel_rate', 'sum-cancel-rate', true], ['净利润', 'net_profit', 'sum-net-profit'], ['实际ROI', 'roi_real', 'sum-roi'],
   ['实际保本ROI', 'roi_breakeven', 'sum-roi-breakeven'], ['广告系统实际ROI', 'ad_system_actual_roi', 'sum-roi-ad-actual'], ['广告系统保本ROI', 'ad_system_breakeven_roi', 'sum-roi-ad'],
 ];
@@ -28,9 +28,9 @@ const projectedMetrics: [string, string, string, boolean?][] = [
 /** Read-only explanations carried over from the approved metric contract; no
  * formula is executed here. Server presentation hints take precedence. */
 export const metricHints: Record<string, string> = {
-  gmv: '服务端当前经营范围的 GMV，未扣退款。', cogs_total: '服务端提供的采购成本汇总；未提供时显示 —，不从分页商品行加总。', net_revenue: '服务端当前净收入汇总；未提供时显示 —，不由其他指标反推。', return_loss: '服务端全损成本，为成本拆分信息，不重复加到采购成本。',
+  gmv: '服务端当前经营范围的 GMV，未扣退款。', cogs_total: '服务端提供的采购成本汇总；未提供时显示 —，不从分页商品行加总。', net_revenue: '服务端当前净收入汇总；未提供时显示 —，不由其他指标反推。', strict_full_loss_cost: '当前严格全损件数对应的货本，不重复加到采购成本。',
   total_orders: '所选店铺、SPU 范围与经营窗口内按订单去重的总单量。汇总不能由当前页 SPU 行相加。', spend: '当前经营窗口的广告消耗，服务端按同一汇率快照换算为 CNY。', effective_order_count: '有效销售订单数减去其中退款订单数，由服务端去重。', effective_sales: '有效销售订单 GMV 减去退款金额，统一 CNY。',
-  refund_order_count: '已完结退款关联的有效订单数，按订单去重。', refund_rate: '退款订单数占当前范围全部订单的比例；无有效分母显示 —。', full_loss_order_count: '服务端当前指标中的全损订单数，保持现有兼容口径；不是独立预测样本的严格全损数。', full_loss_rate: '服务端当前指标的全损率，分母为当前范围全部订单。',
+  refund_order_count: '已完结退款关联的有效订单数，按订单去重。', refund_rate: '退款订单数占当前范围全部订单的比例；无有效分母显示 —。', strict_full_loss_order_count: '当前经营范围内符合终局物流全损，或海外暴露且最终全额退款的订单数。', strict_full_loss_rate: '严格全损订单数占当前范围全部订单的比例。',
   domestic_cancelled_order_count: '国内取消订单数，排除已归入海外全损的取消订单。', cancel_rate: '国内取消订单数占全部订单的比例，海外取消不重复进入分子。', net_profit: '当前净收入减去货本与广告消耗；已结算使用实际到账，未结算估算由服务端标记。', roi_real: '实际 ROI 使用服务端净收入、全损成本与广告消耗计算，无广告消耗显示 —。', roi_breakeven: '服务端计算的净利润为零时 ROI 临界值；无可解分母时显示 —。',
   ad_system_actual_roi: '广告系统实际ROI = 广告归因GMV ÷ 广告实际消耗；无广告消耗显示 —。', ad_system_breakeven_roi: '广告系统保本ROI = 广告归因GMV ÷ 最大可承受广告费。≈ 表示已知成本下限估算，结算外必要成本尚未完整纳入；无解显示 —。',
   projection_status: '预测可用性由服务端决定，不因切换样本天数自动视为可用。', projection_completed_basis_order_count: '独立成熟样本窗口内的已完结订单数，与当前经营日期窗口分开。', projection_completed_full_loss_order_count: '独立成熟样本中已确认严格全损的订单数。', completed_full_loss_rate: '成熟样本的严格全损订单数占已完结样本订单数的比例。', unsettled_order_count: '当前经营范围内尚未结算的订单数。', delivered_unsettled_order_count: '未结算但已送达或已完成的订单，不再预测未来拒收或配送失败。', full_loss_exposure_unsettled_order_count: '当前经营范围内尚未送达、尚未确认终局全损的未结算风险订单。', projected_future_full_loss_qty: '服务端按成熟样本风险率预测未来新增全损件数，不重复计入已经确认的损失。',
@@ -98,7 +98,7 @@ export function Summary({ data, scope, stateMessage, salesPrices, costPrices, fe
       </Card.Content></Card>
       <Card aria-label="成本"><Card.Header><Card.Title>成本</Card.Title></Card.Header><Card.Content>
         <div className="erp-overview-primary"><Metrics values={data.totals} meta={data.meta} labels={overviewLabels} missingNotes={stateMessage ? undefined : { cogs_total: '未提供汇总；采购价为单件口径' }} metrics={[[ '采购成本', 'cogs_total', 'sum-purchase-cost' ], ...currentMetrics.filter((item) => item[1] === 'spend')]} /></div>
-        <Metrics values={data.totals} meta={data.meta} metrics={[[ '全损成本', 'return_loss', 'sum-full-loss-cost' ], ...currentMetrics.filter((item) => ['full_loss_order_count', 'full_loss_rate'].includes(item[1]))]} />
+        <Metrics values={data.totals} meta={data.meta} metrics={[[ '全损成本', 'strict_full_loss_cost', 'sum-full-loss-cost' ], ...currentMetrics.filter((item) => ['strict_full_loss_order_count', 'strict_full_loss_rate'].includes(item[1]))]} />
         {feeFacts}{costPrices}
       </Card.Content></Card>
       <Card className="erp-overview-profit" aria-label="利润"><Card.Header className="flex-row flex-wrap items-center justify-between gap-3"><Card.Title>利润</Card.Title><div className="flex items-center gap-2"><span id="sum-projection-status" className="erp-table-meta">{status[String(data.totals.projection_status)] ?? text(data.totals.projection_status)}</span><ProfitHelp data={data} /></div></Card.Header><Card.Content>

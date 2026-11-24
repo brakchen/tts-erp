@@ -52,6 +52,6 @@ def test_all_current_profitability_metrics_are_sortable() -> None:
         "total_orders": "total_orders",
         "effective_order_count": "effective_order_count",
         "cancel_rate": "cancel_rate",
-        "full_loss_rate": "full_loss_rate",
+        "strict_full_loss_rate": "strict_full_loss_rate",
         "net_profit": "net_profit",
     }

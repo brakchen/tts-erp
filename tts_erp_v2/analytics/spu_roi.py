@@ -59,7 +59,7 @@ _MONEY_FIELDS = {
     "refund_return_amount",
     "refund_net_amount",
     "refund_cancelled_amount",
-    "return_loss",
+    "strict_full_loss_cost",
     "net_profit",
     "platform_fee",
     "cpa",
@@ -70,7 +70,7 @@ _MONEY_FIELDS = {
     "settled_sales",
     "unsettled_sales",
     "cogs_sold",
-    "cogs_full_loss_cancelled",
+    "strict_full_loss_cancelled_cogs",
     "cogs_total",
     "gmv",
     "effective_sales",
@@ -108,8 +108,8 @@ _RATIO_FIELDS = {
     "refund_amount_rate",
     "roi_real",
     "roi_breakeven",
-    "full_loss_rate",
-    "full_loss_qty_rate",
+    "strict_full_loss_rate",
+    "strict_full_loss_qty_rate",
     "share_ratio",
     "ad_system_actual_roi",
     "ad_system_breakeven_roi",
@@ -118,17 +118,13 @@ _RATIO_FIELDS = {
     "projected_ad_system_actual_roi",
     "projected_ad_system_breakeven_roi",
 }
-_TOTAL_RATE_FIELDS = {"refund_rate", "full_loss_rate", "cancel_rate"}
+_TOTAL_RATE_FIELDS = {"refund_rate", "strict_full_loss_rate", "cancel_rate"}
 # fee_rate_used 与 DB 的 NUMERIC(8,6) 同量级，用 4 位小数与 meta.fee.rate 对齐。
 _FOUR_DECIMAL_RATIO_FIELDS = {
     "share_ratio",
     "fee_rate_used",
     "projection_refund_amount_rate",
-    "pre_delivery_full_loss_rate",
     "completed_full_loss_rate",
-    "delivered_full_loss_rate",
-    "settled_full_loss_rate",
-    "projection_full_loss_qty_rate",
 }
 
 _COST_ASSUMPTION = (
@@ -150,7 +146,7 @@ _PNL_HINTS = {
     "settled": "已结算部分使用 SETTLEMENT 实际到账净额",
     "unsettled": "未结算部分使用行级 fee_rate_used 与 SPU 退款率估算",
     "cogs_sold": "售出件使用已付款白名单订单的实际售出件数",
-    "cogs_full_loss": "海外取消且物流已到目的国的件数按全损货本计入",
+    "cogs_full_loss": "取消单只有符合严格全损判定时才按件数计入货本",
 }
 _DEFAULT_COST_ALERT_MESSAGE = "无当前有效人工采购成本，使用后端默认成本估算"
 _REFUND_RATE_ALERT_MESSAGE = "退款率超过后端配置的警戒线"

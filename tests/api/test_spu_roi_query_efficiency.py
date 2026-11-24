@@ -25,7 +25,6 @@ pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 _FACT_QUERIES = (
     "_SQL_ROI_AD",
     "_SQL_ROI_SALES",
-    "_SQL_ROI_FULL_LOSS",
     "_SQL_ROI_ROW_STATUS",
     "_SQL_ROI_REFUNDS",
     "_SQL_ROI_PROJECTION",
@@ -281,7 +280,7 @@ def _assert_orders(data: dict[str, Any], count: int) -> None:
         )
         assert row["is_settled"] is True
         assert row["arrived_overseas"] is True
-        assert row["full_loss"] is False
+        assert row["strict_full_loss"] is False
         first_package = row["shipment"]["tracking_number"].endswith("_0")
         expected = (
             ["early_first", "early_second", "late", "undated"]

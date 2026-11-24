@@ -154,7 +154,7 @@ _SPU_ITEMS = [
         "total_orders": 11,
         "effective_order_count": 9,
         "cancel_rate": "0.010",
-        "full_loss_rate": "0.005",
+        "strict_full_loss_rate": "0.005",
         "net_profit": f"{30 + i}.00",
         "roi_real": "1.80",
     }
@@ -313,7 +313,7 @@ def _mock_payload(path: str, query: str = "") -> dict[str, Any] | list[Any]:
         kind = path.rsplit("/", 1)[-1]
         evidence = {
             "orders": [{"order_id": "TEST_ORDER_1", "status": "DELIVERED", "qty": 2,
-                        "is_settled": True, "arrived_overseas": True, "full_loss": False}],
+                        "is_settled": True, "arrived_overseas": True, "strict_full_loss": False}],
             "settlements": [{"order_id": "TEST_ORDER_1", "status": "DELIVERED",
                              "share_ratio": "1.0000", "statement_time": _NOW,
                              "components": [{"code": "SETTLEMENT", "amount": "123.0000"}]}],

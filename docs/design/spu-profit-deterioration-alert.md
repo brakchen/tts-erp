@@ -51,40 +51,9 @@
 
 ## 2. 回测方法与 observed evidence
 
-### 2.1 可复现命令与安全边界
+### 2.1 历史证据边界
 
-实际执行的命令（生产数据库只读）：
-
-```bash
-rm -f /tmp/spu-profit-deterioration-backtest.json
-set -a; . /home/schan/tts-erp/.env; set +a
- timeout 180 .venv/bin/python scripts/probe_spu_profit_deterioration_thresholds.py \
-    --confirm-read-only-production --lookback-days 30 --max-spus 300 \
-    --statement-timeout-ms 90000 \
-    --output /tmp/spu-profit-deterioration-backtest.json
-.venv/bin/python scripts/probe_spu_profit_deterioration_thresholds.py \
-    --verify-artifact /tmp/spu-profit-deterioration-backtest.json
-```
-
-probe 行为：
-
-1. 未设置 URL、URL 无 database name、malformed URL、`tts_erp_test*`、`tts_erp_v3_test`、`tts_erp_test_template` 均 fail closed；生产形态库由共享 `tts_erp_v2.api.deps.is_prod_shaped_db()` 判定，覆盖 `tts_erp`、`tts_erp_prod`、`tts_erp_prod_*`，且必须显式传 `--confirm-read-only-production`。
-2. 复用 `analytics.spu_profitability._snapshot.consistent_read_snapshot`，在首条事实 SELECT 前建立 `REPEATABLE READ` + `READ ONLY`，并断言 `SHOW transaction_isolation=repeatable read`、`SHOW transaction_read_only=on`；随后设置事务本地 90 秒 statement timeout、2 秒 lock timeout，只发 SELECT/只读配置，绝不 commit 写入。
-3. 日期和 top shop×SPU 数量均参数化；`bounded_keys` CTE 以 `activity_orders DESC, shop_pk ASC, spu_pk ASC` 在 SQL 内先排序并 LIMIT，之后才读订单/广告事实；默认 anchor end 为当前日 T-2，最大回看 365 天。
-4. `scoped_order_lines` 在 `bounded_keys` 后按日期/key 限定订单行，并再次限定 `(so.status = ANY(CAST(:paid_statuses AS text[])) OR so.status = 'CANCELLED')`；`selected_orders`、sales/settlement 聚合以及 `refund_lines` 与两个 `full_loss_lines` UNION arms 必须只由此 scoped relation 派生，并在 scope 后再聚合。已对齐当前 master 的 canonical `FormulaInput`：completed `REFUND_ONLY`/`RETURN_AND_REFUND` case-line refund amounts 仅在 settlement absent 时聚合为 `confirmed_unsettled_refund_vnd`，cancellation refund 不折入；SQL grouped alias、`DailyFact`、window aggregation、adapter mapping 及 formula contract self-check 必须保持完整。启动前 `self_check_sql_scope()` 对 bounded-key 与 scoped-order-line 两处 status predicate 及这些 CTE 关系做 executable regression guard；`self_check_formula_input_contract()` 防止 required consumer field 漂移；Python 纯函数负责窗口、canonical formula、evaluability/sample_status、状态、样本门槛和矩阵。
-5. JSON 只输出日期、计数、分布和比例，省略店铺/SPU 标识以及所有 row-level 数据；末尾保存 `sha256` canonical digest 的 immutable aggregate-only evidence artifact。
-
-执行结果（observed）：
-
-- query fact date：`2026-08-13` 至 `2026-10-03`。
-- observation anchors：`2026-09-04` 至 `2026-10-03`，共 30 个；anchor 语义为 T-2。
-- daily fact rows：6,507。
-- usable shop×SPU keys：144；shops：2（仅汇总计数，未写入标识）。
-- current manual cost coverage：88.1944%；其余使用 canonical K1 fallback 40 CNY/件。
-- fee-v2 freshness：probe 只读 `calculation_version='fee-v2'`，严格复用维护 seam 的日期规则：`calculated_on >= calculated_at.date() - 7 days`；本次 144 个 key 均使用 fresh `shop_estimate`，`stale_fallback=0`、`baseline=0`。该结果是当前快照事实，不代表未来配置状态。
-- FX：使用最新 `fx.exchange_rates` USD snapshot（未使用 fallback constants）。
-- candidate matrix：648 个候选组合被评估，报告保留 24 个汇总候选。
-- probe exit：0。
+旧回测脚本已移除，原回测结果仅为当时观察记录，不能按当前严格全损口径复现或作为生产阈值证据。当前实现验证使用隔离测试入口。
 
 ### 2.2 计算定义
 
@@ -125,7 +94,7 @@ probe 行为：
 | candidate matrix | 每个 windowDays × ROI abs/relative × net-profit decline × gates 的 comparison、sufficient、alert count/rate、state counts | 已执行 648 候选并输出汇总 |
 | per-anchor alert volume | 每个 anchor、windowDays、config 下 warning/critical 的 shop×SPU 数量；输出 `per_anchor`，不把跨 anchor 总数命名为 daily | 已执行；summary 另给 median/mean/max/anchor_count/anchor_total，并在 30 anchors 给 `30_anchor_total` |
 | persistence | fast 告警在对应 shifted confirmation comparison 仍告警的比例 | 已执行；以同一 `(anchor, shop×SPU)` key 的 fast alert 与 confirmation alert 交集 / fast alert key 计算 |
-| reversal/recovery | 对每个 fast alert 的同一 `(anchor, shop×SPU)` 配对 confirmation decision，无论 confirmation 是否 alert；state 为 `loss_to_profit` 即 numerator（生产 `paired_recovery` 口径），fast alert 数为 denominator | denominator=0 返回 null；不能把 confirmation 未 alert 的配对丢出分母；当前 evidence 为真实 0 或比例，missing/unavailable 只按此配对口径解释。**注意口径差异**：本行与 §2.4 的 `recovery` 数字（`6/51`、`16/71`、`0/13`）均来自 probe，probe 的 `roi_recovery`/`recovery` 指「指标上升但未变号」，与生产枚举无关，故仍按 3 状态计（见 `scripts/probe_spu_profit_deterioration_thresholds.py`）；生产枚举只有 8 个状态，不含这两个值 |
+| reversal/recovery | 对每个 fast alert 的同一 `(anchor, shop×SPU)` 配对 confirmation decision，无论 confirmation 是否 alert；state 为 `loss_to_profit` 即 numerator（生产 `paired_recovery` 口径），fast alert 数为 denominator | denominator=0 返回 null；不能把 confirmation 未 alert 的配对丢出分母；当前 evidence 为真实 0 或比例，missing/unavailable 只按此配对口径解释。**注意口径差异**：本行与 §2.4 的 `recovery` 数字（`6/51`、`16/71`、`0/13`）均来自 probe，probe 的 `roi_recovery`/`recovery` 指「指标上升但未变号」，与生产枚举无关，故仍按 3 状态计（旧回测脚本已移除）；生产枚举只有 8 个状态，不含这两个值 |
 | data limitations | ad_daily 缺失、FX/cost/rate current valuation、时区 | 明确记录，不把缺失当作正常值 |
 
 > 当前 probe 输出是阈值选择证据，不是最终生产物化逻辑。probe 已输出各窗口 current/previous 的 ROI、net-profit、ad-spend、order-count count/min/p25/median/p75/max、sample_status/state counts、per-anchor warning/critical volumes 与 recovery numerator/denominator/rate；`self_check_sql_scope()` 验证 bounded scoped CTE 仍包住 refund/full-loss facts，`self_check_formula_input_contract()` 验证当前 master 所需 confirmed-unsettled-refund consumer path；bounded query 为可重复性使用 UTC 日，生产实现必须使用每店 IANA timezone。
@@ -423,7 +392,7 @@ runtime-config sidecar 的 `rollout`/`draftRollout` 只作为历史留存数据�
 - `templates/pages/spu-profit-deterioration.html`、`static/js/spu-profit-deterioration.js`、`static/css/spu-profit-deterioration.css`、sidebar page registry（实现前须按同步规则检查最新 active owner；重叠 owner 必须先协调）
 - `tests/analytics/test_spu_deterioration_alert.py`、`tests/api/test_spu_deterioration_alert_api.py`、`tests/browser/test_spu_deterioration_alert.py`、`tests/e2e/test_spu_deterioration_alert_smoke.py`、`tests/sync_worker/test_spu_deterioration_alert_job.py`（后继）
 
-当前 lane 实际拥有且已修改：`docs/design/spu-profit-deterioration-alert.md`、`docs/aegis/plans/2026-10-05-spu-profit-deterioration-alert.md`、`scripts/probe_spu_profit_deterioration_thresholds.py`。
+当前 lane 实际拥有且已修改：`docs/design/spu-profit-deterioration-alert.md`、`docs/aegis/plans/2026-10-05-spu-profit-deterioration-alert.md`。
 
 ## 9. Non-goals
 

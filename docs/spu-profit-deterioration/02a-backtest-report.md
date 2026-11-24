@@ -1,23 +1,10 @@
 # SPU 利润劣化告警：历史回测报告
 
-> **证据状态：历史、不可直接外推到当前生产 evaluator。** 本报告保存 2026-10-05/07 的可复现观察结果；它不是产品契约，也不是当前生产阈值的证明。
+> **证据状态：历史、不可直接外推到当前生产 evaluator。** 本报告保存 2026-10-05/07 的历史观察结果；它不是产品契约，也不是当前生产阈值的证明。
 
 ## 1. 运行条件
 
-历史 probe：
-
-```bash
-rm -f /tmp/spu-profit-deterioration-backtest.json
-set -a; . /home/schan/tts-erp/.env; set +a
-timeout 180 .venv/bin/python scripts/probe_spu_profit_deterioration_thresholds.py \
-  --confirm-read-only-production --lookback-days 30 --max-spus 300 \
-  --statement-timeout-ms 90000 \
-  --output /tmp/spu-profit-deterioration-backtest.json
-.venv/bin/python scripts/probe_spu_profit_deterioration_thresholds.py \
-  --verify-artifact /tmp/spu-profit-deterioration-backtest.json
-```
-
-安全边界：生产形态数据库必须显式 read-only 确认；事务为 `REPEATABLE READ + READ ONLY`；事实查询有 statement/lock timeout；输出 aggregate only，不含店铺/SPU/订单标识。
+旧回测脚本已移除；其全损计算不符合现行严格口径，历史结果仅作当时观察记录。
 
 ## 2. 历史 evaluator 条件
 

@@ -27,7 +27,7 @@ export function initialQuery(profile: Profile, search: string, saved: Record<str
     order: saved.order === 'desc' ? 'desc' : 'asc', projectionLookbackDays: saved.projectionLookbackDays === 90 ? 90 : 30, feePercent: '',
   };
 }
-export const sortable = new Set(['roi_real', 'spend', 'ad_system_actual_roi', 'ad_system_breakeven_roi', 'effective_sales', 'total_orders', 'effective_order_count', 'cancel_rate', 'full_loss_rate', 'net_profit', 'purchasePriceMean', 'purchasePriceMedian', 'originalSalePriceMean', 'originalSalePriceMedian', 'paidPriceMean', 'paidPriceMedian']);
+export const sortable = new Set(['roi_real', 'spend', 'ad_system_actual_roi', 'ad_system_breakeven_roi', 'effective_sales', 'total_orders', 'effective_order_count', 'cancel_rate', 'strict_full_loss_rate', 'net_profit', 'purchasePriceMean', 'purchasePriceMedian', 'originalSalePriceMean', 'originalSalePriceMedian', 'paidPriceMean', 'paidPriceMedian']);
 export function reportingDate(now: Date, region: string | null | undefined): string | null {
   const timeZone = reportingZone(region);
   if (!timeZone) return null;

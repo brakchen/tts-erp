@@ -115,9 +115,8 @@ def _gates_met(
 
     The gates answer "can these two windows be compared", so they bind the
     weaker of the pair. The design doc
-    (``docs/design/spu-profit-deterioration-alert.md`` §2.2 evaluability) and
-    ``scripts/probe_spu_profit_deterioration_thresholds.py`` both gate on
-    ``min(previous, current)``; ``evaluate()`` shares this one helper so the
+    (``docs/design/spu-profit-deterioration-alert.md`` §2.2 evaluability)
+    gates on ``min(previous, current)``; ``evaluate()`` shares this one helper so the
     sample_status gates and the severity gates cannot drift apart again.
     """
     return (
