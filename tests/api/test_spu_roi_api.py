@@ -1531,8 +1531,9 @@ def test_spu_roi_projects_undelivered_loss_from_terminal_delivery_outcomes(
         expected_future_refund.quantize(_Q4, rounding=ROUND_HALF_UP)
     )
     assert item["projected_unsettled_net"] == m4(expected_unsettled_net)
+    # Four sold units plus two strict-loss cancelled units each cost 40 CNY.
     expected_projected_profit = (
-        Decimal(100_000) * vnd_cny + expected_unsettled_net - Decimal(200)
+        Decimal(100_000) * vnd_cny + expected_unsettled_net - Decimal(240)
     )
     assert item["projected_net_profit"] == m4(expected_projected_profit)
 
