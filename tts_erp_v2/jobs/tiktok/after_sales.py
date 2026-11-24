@@ -170,6 +170,8 @@ def _walk_pages(proxy_call, *, endpoint: str, base_body: dict):
     """
     seen_tokens: set[str] = set()
     next_token: str | None = None
+    items_seen = 0
+    expected_total: int | None = None
     body = dict(base_body)
     while True:
         page_body = dict(body)
@@ -192,18 +194,32 @@ def _walk_pages(proxy_call, *, endpoint: str, base_body: dict):
             or data.get("cancellations")
             or []
         )
-        if not items and endpoint == RETURNS_ENDPOINT and data.get("total_count"):
-            # 2026-09 事故：字段名不匹配时 items 静默为空、无报错无告警，
-            # 9 月退款全部丢失。total_count > 0 但取不到列表 = 一定是字段
-            # 名又变了，必须告警；total_count=0/缺失 = 合法空页，不打扰。
+        next_token = data.get("next_page_token") or None
+        advertised = data.get("total_count")
+        if isinstance(advertised, str) and advertised.isdecimal():
+            advertised = int(advertised)
+        if type(advertised) is not int or advertised < 0:
+            advertised = None
+        if advertised is not None:
+            expected_total = max(expected_total or 0, advertised)
+        items_seen += len(items)
+        if (
+            expected_total is not None
+            and items_seen < expected_total
+            and not next_token
+        ):
+            raise UpstreamJobError(
+                f"{endpoint} total_count={expected_total} but only {items_seen} "
+                "items returned; refusing to advance the watermark"
+            )
+        if not items and expected_total and next_token:
             log.warning(
-                "returns/search total_count=%s but 0 items parsed; data keys=%s "
-                "(upstream field rename — check payload)",
-                data.get("total_count"),
+                "%s returned an empty intermediate page; total_count=%s, data keys=%s",
+                endpoint,
+                expected_total,
                 sorted(data.keys()),
             )
         yield from items
-        next_token = data.get("next_page_token") or None
         if not next_token:
             break
         if next_token in seen_tokens:
@@ -605,7 +621,7 @@ def _auto_resolve_stale_issues(session: Session, job_name: str, days: int) -> in
             {"now": datetime.now(UTC), "job": job_name, "cutoff": cutoff},
         ).rowcount
         return int(rows or 0)
-    except Exception:
+    except Exception:  # noqa: BLE001 -- best-effort issue cleanup must not fail sync
         # never let safeguard failure break the main job
         return 0
 

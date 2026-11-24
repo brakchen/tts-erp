@@ -156,3 +156,61 @@ def test_walk_pages_non_zero_code_still_fails_the_tick(
     proxy = _PageProxy([{"code": 500, "message": "boom"}])
     with pytest.raises(module.UpstreamJobError):
         list(_walk(module, proxy, extra))
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [after_sales_job.RETURNS_ENDPOINT, after_sales_job.CANCELLATIONS_ENDPOINT],
+)
+def test_after_sales_missing_final_list_fails_the_tick(endpoint: str) -> None:
+    proxy = _PageProxy([{"code": 0, "data": {"total_count": 1}}])
+    with pytest.raises(after_sales_job.UpstreamJobError, match="total_count=1"):
+        list(_walk(after_sales_job, proxy, {"endpoint": endpoint}))
+
+
+def test_after_sales_incomplete_final_page_fails_the_tick() -> None:
+    proxy = _PageProxy(
+        [{"code": 0, "data": {"total_count": 2, "return_orders": [{"id": "1"}]}}]
+    )
+    with pytest.raises(after_sales_job.UpstreamJobError, match="only 1 items"):
+        list(
+            _walk(
+                after_sales_job, proxy, {"endpoint": after_sales_job.RETURNS_ENDPOINT}
+            )
+        )
+
+
+def test_after_sales_keeps_first_page_total_when_final_page_omits_it() -> None:
+    proxy = _PageProxy(
+        [
+            {
+                "code": 0,
+                "data": {
+                    "total_count": 2,
+                    "next_page_token": "next",
+                    "return_orders": [{"id": "1"}],
+                },
+            },
+            {"code": 0, "data": {}},
+        ]
+    )
+    with pytest.raises(after_sales_job.UpstreamJobError, match="total_count=2"):
+        list(
+            _walk(
+                after_sales_job, proxy, {"endpoint": after_sales_job.RETURNS_ENDPOINT}
+            )
+        )
+
+
+def test_returns_empty_intermediate_page_can_advance() -> None:
+    proxy = _PageProxy(
+        [
+            {"code": 0, "data": {"total_count": 1, "next_page_token": "next"}},
+            {"code": 0, "data": {"total_count": 1, "return_orders": [{"id": "1"}]}},
+        ]
+    )
+    rows = list(
+        _walk(after_sales_job, proxy, {"endpoint": after_sales_job.RETURNS_ENDPOINT})
+    )
+    assert [row["id"] for row in rows] == ["1"]
+    assert len(proxy.calls) == 2

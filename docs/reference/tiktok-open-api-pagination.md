@@ -86,6 +86,11 @@ returns/search 与 cancellations/search 都是 10..50。page_size=50 时翻页�
 （A 店 returns 3 页 85 条，B 店 4 页 131 条）。⇒ **保持 50**；改成 100 会让
 每个 tick 直接失败。
 
+2026-11-24 生产复核：`returns/search` 偶尔返回 `total_count=1`，但响应没有
+`return_orders` / `returns`。分页器允许带 `next_page_token` 的空中间页继续；
+末页累计条数少于 `total_count` 时抛错，让本轮失败且不推进售后水位，避免将
+缺失退货误记为同步成功。`cancellations/search` 使用同一完整性检查。
+
 > 顺带记录（不是本次改动范围）：after_sales 的上游数据本身有少量重复 id
 > （A 店 85 条里 3 条、B 店 131 条里 7 条，重复出现在同一页内），与游标无关。
 
