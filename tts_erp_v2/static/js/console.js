@@ -771,26 +771,13 @@
       tr.dataset.origCurrency = it.currency || "CNY";
       var currency = it.currency || "CNY";
       var costCell;
-      // New row (no cost yet): the unregistered-only view must stay blank,
-      // even when a source price exists, so it never looks like a filed
-      // manual cost. Outside that view the source price remains a prefill.
+      // A collect-box list price must never prefill a manual purchase cost.
       if (it.unit_cost == null) {
-        if (catalogueMissingManualCost || it.source_unit_cost == null) {
-          costCell =
-            '<span class="op-cost-input" title="输入成本后点提交全部">' +
-            '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="缺" aria-label="单位成本">' +
-            '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
-            "</span>";
-        } else {
-          tr.dataset.origCost = String(it.source_unit_cost);
-          costCell =
-            '<span class="op-cost-input" title="货源价（妙手采集）—— 点提交全部即可入库">' +
-            '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" value="' +
-            esc(String(it.source_unit_cost)) +
-            '" aria-label="单位成本">' +
-            '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
-            "</span>";
-        }
+        costCell =
+          '<span class="op-cost-input" title="输入成本后点提交全部">' +
+          '<input type="number" class="op-input-cost" step="0.0001" min="0.0001" data-k="unit_cost" placeholder="缺" aria-label="单位成本">' +
+          '<span class="op-currency-fixed" aria-label="货币">CNY</span>' +
+          "</span>";
       } else {
         // Existing cost: pre-filled input + its currency badge. Editing
         // the number re-files under the SAME currency (the operator is

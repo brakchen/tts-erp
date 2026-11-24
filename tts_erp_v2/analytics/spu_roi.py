@@ -129,7 +129,8 @@ _FOUR_DECIMAL_RATIO_FIELDS = {
 
 _COST_ASSUMPTION = (
     "按 SPU 解析：使用当前有效的人工标注采购成交价(MANUAL)；"
-    "未命中 → 默认 40 CNY/件；妙手/1688 同步货源价不参与计算；"
+    "其次使用已核实的妙手采购成交价(PURCHASE_PRICE)；"
+    "未命中 → 默认 40 CNY/件；公共采集箱挂牌价不参与计算；"
     "DEFAULT_K1 行页面显示‘缺成本’标识，可补录"
 )
 _FEE_NOTE = (
@@ -148,7 +149,7 @@ _PNL_HINTS = {
     "cogs_sold": "售出件使用已付款白名单订单的实际售出件数",
     "cogs_full_loss": "取消单只有符合严格全损判定时才按件数计入货本",
 }
-_DEFAULT_COST_ALERT_MESSAGE = "无当前有效人工采购成本，使用后端默认成本估算"
+_DEFAULT_COST_ALERT_MESSAGE = "无人工或已核实采购成交价，使用后端默认成本估算"
 _REFUND_RATE_ALERT_MESSAGE = "退款率超过后端配置的警戒线"
 _UNSETTLED_ALERT_MESSAGE = "含未结算订单，净收入和净利润包含估算"
 _FEE_FALLBACK_MESSAGE = (

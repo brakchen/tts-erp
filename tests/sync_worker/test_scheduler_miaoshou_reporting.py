@@ -277,31 +277,27 @@ def _seed_source_price(db_session, spu_id: str, *, master_cost: Decimal | None =
     return cp
 
 
-def test_run_cost_snapshots_source_price_fallback_via_offer(db_session):
-    """SPU 主档行无成本但带 1688 offer → 经 offer 命中公共采集箱行价格 →
-    写 SOURCE_PRICE 快照（估算兜底，非成交口径）。"""
+def test_run_cost_snapshots_ignores_list_price_via_offer(db_session):
+    """公共采集箱挂牌价即使经 offer 匹配，也不能写成成交成本。"""
     cp = _seed_source_price(db_session, "TEST_MS_RPT_SRC_O")
     out = invoke_seeded_job(reporting_job.run_cost_snapshots, db_session)
-    assert out["snapshots_written"] >= 1
+    assert out["snapshots_written"] >= 0
     row = db_session.execute(
         select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
-    ).scalar_one()
-    assert row.cost_method == "SOURCE_PRICE"
-    assert row.unit_cost == Decimal("34.0000")
-    assert row.currency == "CNY"
+    ).scalar_one_or_none()
+    assert row is None
 
 
-def test_run_cost_snapshots_source_price_direct_on_master_row(db_session):
-    """SPU 主档行本身带 source_unit_cost → 直接命中（不经 offer 桥）。"""
+def test_run_cost_snapshots_ignores_list_price_on_master_row(db_session):
+    """SPU 主档行的挂牌价也不能充当采购成交价。"""
     cp = _seed_source_price(
         db_session, "TEST_MS_RPT_SRC_D", master_cost=Decimal("12.00")
     )
     invoke_seeded_job(reporting_job.run_cost_snapshots, db_session)
     row = db_session.execute(
         select(ProductCostSnapshot).where(ProductCostSnapshot.spu_pk == cp.id)
-    ).scalar_one()
-    assert row.cost_method == "SOURCE_PRICE"
-    assert row.unit_cost == Decimal("12.0000")
+    ).scalar_one_or_none()
+    assert row is None
 
 
 def test_run_profit_daily_far_future_date(db_session):

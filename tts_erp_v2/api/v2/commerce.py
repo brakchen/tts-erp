@@ -112,11 +112,25 @@ _ORDER_SHOP_AUTH = (
     "EXISTS (SELECT 1 FROM commerce.shops eligible_shop WHERE eligible_shop.id = commerce.sales_orders.shop_pk AND "
     + authorized_shop_clause("eligible_shop") + ")"
 )
+_PURCHASE_PRICE_JOIN = (
+    "LEFT JOIN LATERAL ("
+    "  SELECT min(unit_cost) AS unit_cost FROM ("
+    "    SELECT pp.unit_cost, dense_rank() OVER ("
+    "      ORDER BY pp.source_purchase_at DESC) AS price_rank "
+    "    FROM miaoshou.purchase_prices pp "
+    "    WHERE pp.shop_pk = cp.shop_pk AND pp.spu_id = cp.spu_id "
+    "      AND pp.resolution_status = 'matched_shop' "
+    "      AND pp.currency = 'CNY' AND pp.unit_cost > 0 "
+    "      AND pp.source_purchase_at IS NOT NULL"
+    "  ) ranked WHERE price_rank = 1 "
+    "  HAVING count(DISTINCT unit_cost) = 1"
+    ") purchase ON TRUE "
+)
 SQL_LIST_CHANNEL_PRODUCTS = (
     "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
     "       cp.source_created_at, cp.source_updated_at, "
     "       cp.main_image_url, cp.mirror_object_key, "
-    "       m.unit_cost, m.currency, "
+    "       m.unit_cost, m.currency, purchase.unit_cost AS purchase_unit_cost, "
     "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method, "
     "       (SELECT pp.source_unit_cost "
     "        FROM procurement.procurement_products pp "
@@ -127,6 +141,7 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
+    + _PURCHASE_PRICE_JOIN +
     "WHERE " + _PRODUCT_SHOP_AUTH + " AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
     "AND (CAST(:q AS text) IS NULL "
@@ -162,7 +177,7 @@ SQL_COUNT_CHANNEL_PRODUCTS = (
 # All-SPU catalogue sorters (2026-09-06): the tail of SQL_LIST_CHANNEL_PRODUCTS.
 # Values come from the allowlist below — no request input ever reaches the
 # SQL text, so each ORDER BY tail stays a module-level constant.
-# NULL manual costs sort to the tail in BOTH directions (cost-less rows are
+# NULL confirmed costs sort to the tail in BOTH directions (cost-less rows are
 # not "lowest cost" — they are "no cost yet", so they must not jump to the
 # top of an asc sort and masquerade as cheapest).
 _SORT_TAILS_CHANNEL_PRODUCTS = {
@@ -170,24 +185,8 @@ _SORT_TAILS_CHANNEL_PRODUCTS = {
     "created_at-desc": "ORDER BY cp.source_created_at DESC NULLS LAST, cp.id",
     "updated_at-asc": "ORDER BY cp.source_updated_at ASC NULLS LAST, cp.id",
     "updated_at-desc": "ORDER BY cp.source_updated_at DESC NULLS LAST, cp.id",
-    "unit_cost-asc": (
-        "ORDER BY COALESCE(m.unit_cost, "
-        "(SELECT pp.source_unit_cost "
-        " FROM procurement.procurement_products pp "
-        " WHERE pp.external_product_id = cp.spu_id "
-        "   AND pp.source_unit_cost IS NOT NULL "
-        " ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
-        " LIMIT 1)) ASC NULLS LAST, cp.id"
-    ),
-    "unit_cost-desc": (
-        "ORDER BY COALESCE(m.unit_cost, "
-        "(SELECT pp.source_unit_cost "
-        " FROM procurement.procurement_products pp "
-        " WHERE pp.external_product_id = cp.spu_id "
-        "   AND pp.source_unit_cost IS NOT NULL "
-        " ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
-        " LIMIT 1)) DESC NULLS LAST, cp.id"
-    ),
+    "unit_cost-asc": "ORDER BY COALESCE(m.unit_cost, purchase.unit_cost) ASC NULLS LAST, cp.id",
+    "unit_cost-desc": "ORDER BY COALESCE(m.unit_cost, purchase.unit_cost) DESC NULLS LAST, cp.id",
     # Status sort (2026-09-06): stable by a fixed weight so the list
     # doesn't depend on upstream enum spelling. Weights mirror the page's
     # Chinese labels: 商家(ACTIVATE)=0 < 下架(DELETED)=1 < 停售
@@ -231,7 +230,7 @@ SQL_GET_CHANNEL_PRODUCT = (
     "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
     "       cp.source_created_at, cp.source_updated_at, "
     "       cp.main_image_url, cp.mirror_object_key, "
-    "       m.unit_cost, m.currency, "
+    "       m.unit_cost, m.currency, purchase.unit_cost AS purchase_unit_cost, "
     "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method, "
     "       (SELECT pp.source_unit_cost "
     "        FROM procurement.procurement_products pp "
@@ -242,6 +241,7 @@ SQL_GET_CHANNEL_PRODUCT = (
     "FROM commerce.products_spu cp "
     "LEFT JOIN procurement.manual_product_costs m "
     "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
+    + _PURCHASE_PRICE_JOIN +
     "WHERE cp.id = :id AND " + _PRODUCT_SHOP_AUTH
 )
 SQL_LIST_CHANNEL_VARIANTS = (
@@ -345,7 +345,8 @@ def _row_to_channel_product(row: Any) -> ChannelProductOut:
         unit_cost=row.unit_cost,
         currency=row.currency,
         cost_method=row.cost_method,
-        # 货源价 fallback (from procurement.procurement_products)
+        purchase_unit_cost=row.purchase_unit_cost,
+        # Public collect-box list price, kept separate from purchase cost.
         source_unit_cost=getattr(row, "source_unit_cost", None),
         image_url=_resolve_mirror_url(row.mirror_object_key),
         main_image_url=row.main_image_url,

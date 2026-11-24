@@ -67,6 +67,7 @@ from tts_erp_v2.db.constants import (
     SHOP_FEE_RATE_CALCULATION_VERSION,
 )
 from tts_erp_v2.fx.rates import load_rate_map
+from tts_erp_v2.reporting.purchase_cost import load_purchase_costs
 
 log = logging.getLogger(__name__)
 
@@ -1088,7 +1089,7 @@ _SQL_ROI_UNATTRIBUTED = text(
 )
 
 # ═════════════════════════════════════════════════════════════════════
-# §3.4 成本 SQL（仅使用人工标注的当前有效采购成交价）
+# §3.4 人工成本 SQL（优先于已核实的妙手采购成交价）
 # ═════════════════════════════════════════════════════════════════════
 
 _SQL_COST_MANUAL = text(
@@ -1524,8 +1525,8 @@ def _resolve_costs_batch(
 ) -> dict[int, tuple[Decimal, str]]:
     """批量解析每个 SPU 的单位成本 CNY + 来源枚举。
 
-    仅使用 ``manual_product_costs`` 的当前有效人工成本；未命中时统一回退
-    40 CNY/件。妙手/1688 同步的 ``source_unit_cost`` 不参与盈利计算。
+    人工成本优先，其次是已核实的妙手采购成交价；仍未命中时回退
+    40 CNY/件。公共采集箱挂牌价不参与 SPU ROI。
     """
     if not spu_pks:
         return {}
@@ -1537,6 +1538,10 @@ def _resolve_costs_batch(
             Decimal(r["unit_cost"]),
             "MANUAL",
         )  # pi-lens-ignore: no-try-except
+
+    for pk, unit_cost in load_purchase_costs(sess, spu_pks).items():
+        if pk not in out:
+            out[pk] = (unit_cost, "PURCHASE_PRICE")
 
     for pk in spu_pks:
         if pk not in out:

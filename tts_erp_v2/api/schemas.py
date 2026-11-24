@@ -62,9 +62,9 @@ class ChannelProductOut(BaseModel):
     unit_cost: Decimal | None = None
     currency: str | None = None
     cost_method: str | None = None
-    # 2026-09 货源价 fallback: when no manual cost exists, the 货源价
-    # from procurement.procurement_products is exposed so the frontend
-    # can display it as a pre-filled default.
+    purchase_unit_cost: Decimal | None = None
+    # Public collect-box list price is exposed only for reference/comparison.
+    # The frontend must never prefill a manual purchase cost from it.
     source_unit_cost: Decimal | None = None
     image_url: str | None = None
     main_image_url: str | None = None

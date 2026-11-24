@@ -95,7 +95,7 @@ class ProcurementProduct(Base):
     source_item_url: Mapped[str | None] = mapped_column(Text)
     # 货源价（采集层挂牌口径）：由 miaoshou.common_collect_box job 从妙手公共采集箱
     # 列表写入（`price` / `minSkuPrice` / `maxSkuPrice`）。这是 1688 货源标价，
-    # 成本快照将它作为人工价之后的 SOURCE_PRICE 估算口径。
+    # 仅供货源参考和成交价核验，不进入成本快照或 ROI。
     source_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     source_min_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     source_max_unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))

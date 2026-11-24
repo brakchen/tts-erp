@@ -189,6 +189,17 @@ def _freeze_projection_clock(monkeypatch):
 def _wipe(db_engine) -> None:
     with db_engine.begin() as conn:
         # pi-lens-ignore: python-sql-injection
+        conn.execute(
+            text("DELETE FROM miaoshou.purchase_prices "
+                 "WHERE spu_id = 'TEST_ROI_PURCHASE_COST'")
+        )
+        # pi-lens-ignore: python-sql-injection
+        conn.execute(
+            text("DELETE FROM integration.credentials "
+                 "WHERE provider = 'miaoshou' "
+                 "AND external_account_id = 'TEST_ROI_PURCHASE_APP'")
+        )
+        # pi-lens-ignore: python-sql-injection
         conn.execute(text("DELETE FROM plugin.ad_daily WHERE seller_id LIKE 'TEST_%'"))
         conn.execute(text("DELETE FROM plugin.ad_today WHERE seller_id LIKE 'TEST_%'"))
         conn.execute(
@@ -2987,6 +2998,65 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     assert item["strict_full_loss_cost"] == "0.0000"
     # v10 net_profit（D1 MANUAL 25 CNY 成本 + D5 未结算折算）
     assert item["net_profit"] == cny4_from_usd("26.8925")
+
+
+def test_spu_roi_uses_verified_miaoshou_purchase_price(
+    api_client, readonly_key, db_engine
+):
+    spu_id = "TEST_ROI_PURCHASE_COST"
+    with Session(db_engine) as sess:
+        shop_pk = _seed_shop(sess, "TEST_ROI_PURCHASE_SELLER")
+        spu_pk = _seed_spu(sess, shop_pk, spu_id)
+        _seed_order_line(
+            sess,
+            shop_pk=shop_pk,
+            spu_pk=spu_pk,
+            order_id="TEST_ROI_PURCHASE_ORDER",
+            status=PAID_ORDER_STATUS,
+            line_ext="TEST_ROI_PURCHASE_LINE",
+            qty="2",
+            unit_price="526600",
+            paid=True,
+        )
+        credential_id = sess.execute(
+            text(
+                "INSERT INTO integration.credentials "
+                "(provider, external_account_id, ciphertext) "
+                "VALUES ('miaoshou', 'TEST_ROI_PURCHASE_APP', "
+                "decode(repeat('00', 32), 'hex')) RETURNING id"
+            )
+        ).scalar_one()
+        sess.execute(
+            text(
+                "INSERT INTO miaoshou.purchase_prices "
+                "(credential_id, miaoshou_shop_id, shop_pk, spu_id, unit_cost, "
+                "currency, source_purchase_order_sn, source_item_id, "
+                "source_purchase_at, resolution_status, evidence) "
+                "VALUES (:credential_id, 'TEST_MS_PURCHASE', :shop_pk, :spu_id, "
+                "27.2500, 'CNY', 'TEST_PURCHASE_ORDER', 'TEST_OFFER', "
+                "now(), 'matched_shop', '{}'::jsonb)"
+            ),
+            {"credential_id": credential_id, "shop_pk": shop_pk, "spu_id": spu_id},
+        )
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"q": spu_id},
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["cost_source"] == "PURCHASE_PRICE"
+    assert Decimal(item["unit_cost_used"]) == Decimal("27.25")
+    catalogue = api_client.get(
+        "/v2/commerce/channel-products",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"shop_pk": shop_pk, "q": spu_id},
+    )
+    assert catalogue.status_code == 200, catalogue.text
+    assert Decimal(catalogue.json()[0]["purchase_unit_cost"]) == Decimal("27.25")
+    assert catalogue.json()[0]["unit_cost"] is None
 
 
 def test_spu_roi_unpaid_order_refund_defensive_unattributed(

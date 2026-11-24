@@ -175,6 +175,29 @@ def test_no_cost_snapshot_means_cogs_null(db_session):
     assert row.cost_method is None
 
 
+def test_legacy_list_price_snapshot_does_not_set_cogs(db_session):
+    _acct, cp = _make_account_and_product(db_session)
+    db_session.add(
+        ProductCostSnapshot(
+            spu_pk=cp.id,
+            cost_method="SOURCE_PRICE",
+            unit_cost=Decimal("34.00"),
+            currency="USD",
+            valid_from=_utc(),
+            calculated_at=_utc(),
+            calculation_version=1,
+        )
+    )
+    db_session.flush()
+    _seed(db_session, spu_pk=cp.id)
+
+    rows = profit_daily.rebuild(db_session, profit_date=date(2026, 8, 29))
+    row = next(r for r in rows if r.spu_pk == cp.id)
+    assert row.estimated_cogs is None
+    assert row.estimated_gross_profit is None
+    assert row.cost_method is None
+
+
 # ─── 4. unrelated day / no orders ⇒ no row ───────────────────────────
 
 

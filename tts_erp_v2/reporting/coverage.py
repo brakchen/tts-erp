@@ -43,7 +43,8 @@ def cost_coverage_rate(session: Session) -> dict:
     ).scalar_one()
     costed = session.execute(
         select(func.count(func.distinct(ProductCostSnapshot.spu_pk))).where(
-            ProductCostSnapshot.valid_to.is_(None)
+            ProductCostSnapshot.valid_to.is_(None),
+            ProductCostSnapshot.cost_method.in_(("MANUAL_ENTRY", "PURCHASE_PRICE")),
         )
     ).scalar_one()
     rate = float(costed) / float(active) if active else 0.0

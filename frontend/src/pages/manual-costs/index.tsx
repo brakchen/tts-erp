@@ -92,7 +92,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
   const products = (currentList.products ?? []).filter((row) => view !== 'missing' || !onlyPhoto || row.missing_photo === true);
   const nextPageExhausted = currentList.total != null ? BigInt(offset) + BigInt(limit) >= BigInt(currentList.total)
     : (currentList.products ?? currentList.history ?? []).length < limit;
-  function draftFor(product: Product): Draft { const fields = initialFields(product, view === 'missing' || missingManual); return draftsRef.current[product.id] ?? { target: { ...product }, baseline: fields, fields }; }
+  function draftFor(product: Product): Draft { const fields = initialFields(product); return draftsRef.current[product.id] ?? { target: { ...product }, baseline: fields, fields }; }
   function change(product: Product, key: keyof Fields, value: string) {
     if (singleFlight.current) return;
     updateDrafts((previous) => { const draft = draftFor(product); return { ...previous, [product.id]: { ...draft, fields: { ...draft.fields, [key]: value }, status: draft.status === 'success' ? undefined : draft.status, failure: draft.failure ? { ...draft.failure, fieldErrors: {} } : undefined } }; });
@@ -177,7 +177,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     <p>重新提交使用保留草稿的当前输入；核对不会覆盖草稿。</p>
   </section>;
   return <div className="erp-page">
-    <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="把商品成本，管理清楚" description="按店铺核对货源价与人工成本，编辑草稿后确认提交。" />
+    <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="把商品成本，管理清楚" description="按店铺核对人工成本、妙手成交价与货源挂牌价，编辑草稿后确认提交。" />
     <section className="erp-panel erp-filter-workspace" aria-label="采购范围与筛选">
       <div className="erp-filter-row justify-between" aria-label="店铺与视图">
         <Select className="erp-shop-picker" value={shopId || null} isDisabled={pending || cooldown || !shops?.length} onChange={(key) => { if (typeof key === 'string') changeScope(() => setShopId(key)); }}>
@@ -233,12 +233,12 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     {pending && <Button variant="secondary" onPress={() => { stopBatch.current = true; setNotice('已请求停止后续行；正在发送的行仍需等待结果，不能假定已撤销。'); }}>停止后续行</Button>}
     {currentList.loading && <p role="status">加载列表中…</p>}{currentList.error && <Alert status="danger"><Alert.Content><Alert.Title>列表不可用</Alert.Title><Alert.Description>{currentList.error}</Alert.Description><Button isDisabled={cooldown} onPress={() => setRefresh((value) => value + 1)}>重试列表</Button></Alert.Content></Alert>}
     {view !== 'recent' && <div className="erp-list-actions"><div><h2 className="erp-section-heading">{view === 'missing' ? '待补全成本的商品' : '商品成本明细'}</h2></div><Button isDisabled={commandBlocked || dirtyVisible.length === 0} onPress={() => prepare(products)}>提交本页已编辑行</Button></div>}
-    {currentList.products && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="SPU 表格滚动区域"><Table.Content aria-label="SPU 成本工作台" className="min-w-[75rem] erp-table-content"><Table.Header className="erp-table-head">{['内部 PK / SPU', '标题 / 状态', '当前人工成本 / 货源价', '创建 / 更新', '图片 / 缺图事实', '操作'].map((label, i) => <Table.Column className="erp-table-column" key={label} isRowHeader={i === 0}>{label}</Table.Column>)}</Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'当前页暂无候选'}</div>}>{products.map((product) => {
+    {currentList.products && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="SPU 表格滚动区域"><Table.Content aria-label="SPU 成本工作台" className="min-w-[75rem] erp-table-content"><Table.Header className="erp-table-head">{['内部 PK / SPU', '标题 / 状态', '人工 / 妙手成交 / 货源挂牌', '创建 / 更新', '图片 / 缺图事实', '操作'].map((label, i) => <Table.Column className="erp-table-column" key={label} isRowHeader={i === 0}>{label}</Table.Column>)}</Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'当前页暂无候选'}</div>}>{products.map((product) => {
       const draft = draftFor(product); const shown = product;
       return <Table.Row className="erp-table-row" key={product.id} id={product.id}>
         <Table.Cell className="erp-table-cell"><p>{product.id}</p><p className="w-48 break-all">{product.spu_id}</p><p>店铺 #{product.shop_pk}</p></Table.Cell>
         <Table.Cell className="erp-table-cell"><p className="w-56 whitespace-normal break-words">{product.title ?? '—'}</p><p>{statusLabel(product.status)}</p></Table.Cell>
-        <Table.Cell className="erp-table-cell"><p>人工：{shown.unit_cost ?? '—'} {shown.currency ?? '—'}</p><p>货源：{product.source_unit_cost ?? '—'}</p><p className="erp-table-meta">货源价仅供参考。</p></Table.Cell>
+        <Table.Cell className="erp-table-cell"><p>人工：{shown.unit_cost ?? '—'} {shown.currency ?? '—'}</p><p>妙手成交：{product.purchase_unit_cost ?? '—'} {product.purchase_unit_cost ? 'CNY' : ''}</p><p>货源挂牌：{product.source_unit_cost ?? '—'}</p><p className="erp-table-meta">挂牌价仅供参考，不作为成交成本。</p></Table.Cell>
         <Table.Cell className="erp-table-cell"><p>{product.source_created_at ?? '—'}</p><p>{product.source_updated_at ?? '—'}</p></Table.Cell>
         <Table.Cell className="erp-table-cell" focusMode="child">{product.image_url && !brokenImages[product.id] ? <Button className="erp-table-action" variant="ghost" aria-label={`放大图片 PK ${product.id}`} onPress={() => setImage(product.image_url!)}><img src={product.image_url} alt={`${product.title ?? product.spu_id} 主图`} className="h-16 w-16 object-contain" onError={() => setBrokenImages((previous) => ({ ...previous, [product.id]: true }))} /></Button> : <span>无可用镜像图</span>}{product.missing_photo !== undefined && <p>missing_photo：{String(product.missing_photo)}</p>}</Table.Cell>
         <Table.Cell className="erp-table-cell" focusMode="child"><Button className="erp-table-action" variant="secondary" size="sm" isDisabled={!canWrite || pending} onPress={() => { updateDrafts((previous) => ({ ...previous, [product.id]: draft })); setEditor(product.id); }}>编辑详情</Button>{draft.status && draft.status !== 'error' && <p role="status">{draft.status === 'saving' ? '提交中…' : draft.status === 'success' ? '已确认成功' : '结果未确认'}</p>}{draft.failure && <p role="alert">{draft.failure.message}</p>}</Table.Cell>

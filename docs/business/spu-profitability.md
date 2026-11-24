@@ -167,7 +167,7 @@ AND 命中当前店铺/SPU 业务范围
 
 采购成本和汇率均使用计算当天的最新有效值：
 
-- 采购成本：`procurement.manual_product_costs.valid_to IS NULL`；缺失时回退 `40 CNY/件`；
+- 采购成本：优先取 `procurement.manual_product_costs.valid_to IS NULL` 的人工值，其次取店铺和 SPU 已核实匹配的 `miaoshou.purchase_prices` 最新 CNY 采购成交价；两者均缺失时回退 `40 CNY/件`。公共采集箱挂牌价不参与成本计算；
 - 汇率：最新可用 `fx.exchange_rate_snapshots` / `fx.exchange_rates` 快照；
 - 历史经营窗口也按当天成本和汇率重新估值，结果可随成本或汇率更新而变化；
 - 页面必须展示成本来源、汇率 `as_of` 和 `calculated_at`，不得暗示为交易日历史会计值。

@@ -2,11 +2,11 @@
 
 Priority chain (highest first):
     1. procurement.manual_product_costs (MANUAL_ENTRY) — operator-entered truth
-    2. procurement_products.source_unit_cost (SOURCE_PRICE) — 货源价估算
+    2. miaoshou.purchase_prices (PURCHASE_PRICE) — verified purchase transaction
 
-The source price is the synchronized public-collect-box price maintained by
-``miaoshou.common_collect_box``. Reports must label it as estimated cost. When
-neither source exists, the resolver returns None and the job writes no snapshot.
+Public collect-box list prices remain in procurement_products for comparison;
+they are not purchase costs. When neither confirmed cost exists, no snapshot
+is written.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from tts_erp_v2.db.models import (
     ManualProductCost,
     ProductCostSnapshot,
 )
+from tts_erp_v2.reporting.purchase_cost import load_purchase_costs
 
 
 @dataclass(frozen=True)
@@ -49,10 +50,9 @@ def resolve_unit_cost(
     session: Session,
     *,
     spu_pk: int,
-    source_unit_cost: Decimal | None = None,
-    source_currency: str | None = None,
+    purchase_cost_cny: Decimal | None = None,
 ) -> ResolvedCost | None:
-    """Resolve one SPU using manual cost first, then source-price estimate."""
+    """Resolve one SPU using manual cost, then verified purchase price."""
     # 1. MANUAL_ENTRY (highest priority)
     manual = _current_manual_cost(session, spu_pk)
     if manual is not None:
@@ -62,20 +62,19 @@ def resolve_unit_cost(
             currency=manual.currency,
         )
 
-    # 2. SOURCE_PRICE — 货源价兜底（method 区分，报表须标注估算成本）
-    if source_unit_cost is not None:
+    if purchase_cost_cny is not None:
         return ResolvedCost(
-            method="SOURCE_PRICE",
-            unit_cost=source_unit_cost,
-            currency=source_currency or "CNY",
+            method="PURCHASE_PRICE",
+            unit_cost=purchase_cost_cny,
+            currency="CNY",
         )
 
-    # No source ⇒ no snapshot.
+    # A public collect-box list price cannot stand in for a transaction.
     return None
 
 
 def active_spus_without_cost(session: Session) -> list[tuple[str, int]]:
-    """Return active products with no manual cost for operator follow-up."""
+    """Return active products with neither manual nor verified purchase cost."""
     cp_with_manual = exists().where(ManualProductCost.spu_pk == ChannelProduct.id)
     rows = session.execute(
         select(ChannelProduct.spu_id, ChannelProduct.id)
@@ -83,7 +82,8 @@ def active_spus_without_cost(session: Session) -> list[tuple[str, int]]:
         .where(~cp_with_manual)
         .order_by(ChannelProduct.spu_id)
     ).all()
-    return [(r[0], r[1]) for r in rows]
+    purchase_costs = load_purchase_costs(session, [r[1] for r in rows])
+    return [(r[0], r[1]) for r in rows if r[1] not in purchase_costs]
 
 
 def rebuild_snapshots(
@@ -92,13 +92,11 @@ def rebuild_snapshots(
     calculation_version: int,
     valid_from: datetime,
     spu_pks: list[int] | None = None,
-    source_cost_lookup=None,  # callable: spu_pk -> (Decimal|None, str|None)
 ) -> int:
     """Walk every active SPU, resolve unit cost, and write a snapshot.
     Returns the count of snapshots written (no-source SPUs are skipped).
 
-    Pass ``source_cost_lookup=fn`` to plug in the 货源价 resolver.
-    It defaults to ``None`` when not provided."""
+    Public collect-box list prices do not create cost snapshots."""
     rows_written = 0
     spus = (
         session.execute(
@@ -110,15 +108,12 @@ def rebuild_snapshots(
         .scalars()
         .all()
     )
+    purchase_costs = load_purchase_costs(session, [cp.id for cp in spus])
     for cp in spus:
-        src_cost, src_currency = (None, None)
-        if source_cost_lookup is not None:
-            src_cost, src_currency = source_cost_lookup(cp.id)
         resolved = resolve_unit_cost(
             session,
             spu_pk=cp.id,
-            source_unit_cost=src_cost,
-            source_currency=src_currency,
+            purchase_cost_cny=purchase_costs.get(cp.id),
         )
         if resolved is None:
             continue
