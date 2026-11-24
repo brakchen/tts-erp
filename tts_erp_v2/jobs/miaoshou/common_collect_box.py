@@ -11,12 +11,8 @@ TK 平台采集箱（``miaoshou.collect_box``）SKU 上的 ``originPrice`` 标�
 “货源价格”，但实测会被人工/模板改掉（同一 1688 offer 的 originPrice=244.72，
 而公共采集箱与 1688 官网挂牌价都是 ¥29~34，差 ~7×）。因此货源价的可信位在
 **公共采集箱列表的 ``price`` / ``minSkuPrice`` / ``maxSkuPrice``**
-（采集时从 1688 抓的挂牌价）。本 job 把这份可信货源价落库，供
-``reporting.product_cost_snapshots`` 的 ``SOURCE_PRICE`` 口径（兜底估算，
-优先级低于人工填写，见 docs/architecture/data-model-target-v3.md §11）。
-
-⚠ 口径提醒：``source_unit_cost`` 是 1688 挂牌标价。人工价缺失时才作估算
-兜底，报表须以“估算成本”命名。
+（采集时从 1688 抓的挂牌价）。本 job 保留挂牌价供货源参考和采购成交价差异核验。
+``source_unit_cost`` 不是成交成本，不写成本快照，也不进入 ROI。
 
 Endpoint
 --------

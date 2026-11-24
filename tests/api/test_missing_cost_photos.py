@@ -94,10 +94,10 @@ def test_coverage_reports_actual_cost_availability(api_client, readonly_key):
     assert "linked_spus" not in body
 
 
-def test_product_with_current_cost_snapshot_is_excluded(
+def test_product_with_list_price_snapshot_is_still_missing_cost(
     api_client, readonly_key, db_engine, seed_unmatched_active_product
 ):
-    """A current resolved cost removes the product from the operator queue."""
+    """A legacy list-price snapshot does not confirm a purchase cost."""
     with db_engine.begin() as conn:
         spu_pk = conn.execute(
             text(
@@ -122,7 +122,7 @@ def test_product_with_current_cost_snapshot_is_excluded(
         headers={"Authorization": f"Bearer {readonly_key}"},
     )
     assert response.status_code == 200, response.text
-    assert seed_unmatched_active_product["spu_id"] not in {
+    assert seed_unmatched_active_product["spu_id"] in {
         row["spu_id"] for row in response.json()["items"]
     }
 

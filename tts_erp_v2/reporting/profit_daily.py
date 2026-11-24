@@ -49,7 +49,7 @@ arrives with the finance-domain jobs. Columns are NULL until then.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -74,6 +74,7 @@ def _latest_snapshot(session: Session, spu_pk: int) -> ProductCostSnapshot | Non
         select(ProductCostSnapshot)
         .where(ProductCostSnapshot.spu_pk == spu_pk)
         .where(ProductCostSnapshot.valid_to.is_(None))
+        .where(ProductCostSnapshot.cost_method.in_(("MANUAL_ENTRY", "PURCHASE_PRICE")))
         .order_by(ProductCostSnapshot.valid_from.desc())
         .limit(1)
     ).scalar_one_or_none()
@@ -141,7 +142,7 @@ def rebuild(
     written in this run."""
     if calculation_version is None:
         calculation_version = _next_calculation_version(session)
-    calculated_at = datetime.utcnow()
+    calculated_at = datetime.now(UTC)
 
     # Aggregate paid sales_order_lines by channel_product for the day.
     # SalesOrder.paid_at is timestamptz; we cast to date in SQL.

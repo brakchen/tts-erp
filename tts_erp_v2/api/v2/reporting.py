@@ -23,8 +23,11 @@ from tts_erp_v2.api.schemas import (
     ManualCostOut,
     ProfitDailyOut,
 )
+from tts_erp_v2.commerce.shop_access import (
+    authorized_shop_clause,
+    require_authorized_shop,
+)
 from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
-from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
 from tts_erp_v2.storage.minio_client import MinioClient, MinioConfigError
 
 router = APIRouter(prefix="/v2/reporting", tags=["reporting"])
@@ -45,7 +48,8 @@ SQL_COST_SNAPSHOTS = (
     # PG cannot infer its type and refuses to plan the query. Explicit CASTs
     # pin the parameter types to the column types (channel_id bigint,
     # method text) so the WHERE evaluates cleanly with either bound value.
-    "WHERE spu_pk IN (" + _AUTHORIZED_PRODUCTS + ") AND (CAST(:channel_id AS bigint) IS NULL "
+    "WHERE cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE') "
+    "AND spu_pk IN (" + _AUTHORIZED_PRODUCTS + ") AND (CAST(:channel_id AS bigint) IS NULL "
     "OR spu_pk = :channel_id) "
     "AND (CAST(:method AS text) IS NULL OR cost_method = :method) "
     "ORDER BY calculated_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
@@ -64,8 +68,8 @@ SQL_PROFIT_DAILY = (
     "SELECT id, spu_pk, "
     "       profit_date AS on_date, "
     "       gross_revenue AS revenue, "
-    "       estimated_cogs AS cost, "
-    "       estimated_gross_profit AS profit, "
+    "       CASE WHEN cost_method = 'SOURCE_PRICE' THEN NULL ELSE estimated_cogs END AS cost, "
+    "       CASE WHEN cost_method = 'SOURCE_PRICE' THEN NULL ELSE estimated_gross_profit END AS profit, "
     "       currency "
     "FROM reporting.product_profit_daily "
     "WHERE spu_pk IN (" + _AUTHORIZED_PRODUCTS + ") AND (CAST(:channel_id AS bigint) IS NULL "
@@ -84,7 +88,8 @@ SQL_COVERAGE_REPORT = (
     "WHERE status ILIKE 'activate' AND id IN (" + _AUTHORIZED_PRODUCTS + ")) AS active_spus, "
     "(SELECT COUNT(DISTINCT spu_pk) "
     "FROM reporting.product_cost_snapshots "
-    "WHERE valid_to IS NULL AND spu_pk IN (" + _AUTHORIZED_PRODUCTS + ")) AS costed_spus, "
+    "WHERE valid_to IS NULL AND cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE') "
+    "AND spu_pk IN (" + _AUTHORIZED_PRODUCTS + ")) AS costed_spus, "
     "(SELECT COUNT(*) FROM commerce.products_spu cp "
     "WHERE cp.status ILIKE 'activate' AND cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
     "AND NOT EXISTS ("
@@ -92,7 +97,8 @@ SQL_COVERAGE_REPORT = (
     "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
     "  SELECT 1 FROM reporting.product_cost_snapshots pcs "
-    "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL"
+    "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL "
+    "  AND pcs.cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE')"
     ")) AS missing_cost_spus, "
     "(SELECT COALESCE(MAX(calculation_version), 1) "
     "FROM reporting.product_cost_snapshots WHERE spu_pk IN (" + _AUTHORIZED_PRODUCTS + ")) AS calculation_version"
@@ -172,7 +178,7 @@ SQL_LIST_MISSING_COST_PRODUCTS = (
     "         AND si.status = 'ready' AND si.deleted_at IS NULL"
     "       )) AS missing_photo "
     # A current cost snapshot means the scheduled resolver found a usable
-    # manual, purchase-order, or source-price cost. Manual rows are checked
+    # manual or verified purchase cost. Manual rows are checked
     # separately so a new submission disappears before the next rebuild.
     "FROM commerce.products_spu cp "
     "WHERE cp.status ILIKE 'activate' AND cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
@@ -182,7 +188,8 @@ SQL_LIST_MISSING_COST_PRODUCTS = (
     "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     ") AND NOT EXISTS ("
     "  SELECT 1 FROM reporting.product_cost_snapshots pcs "
-    "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL"
+    "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL "
+    "  AND pcs.cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE')"
     ") ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_TOTAL_MISSING_PHOTO = (
@@ -196,7 +203,8 @@ SQL_TOTAL_MISSING_PHOTO = (
     "    WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
     "  ) AND NOT EXISTS ("
     "    SELECT 1 FROM reporting.product_cost_snapshots pcs "
-    "    WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL"
+    "    WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL "
+    "    AND pcs.cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE')"
     "  ) AND NOT EXISTS ("
     "    SELECT 1 FROM procurement.spu_images si "
     "    WHERE si.spu_pk = cp.id "

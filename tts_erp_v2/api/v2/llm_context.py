@@ -125,10 +125,10 @@ The cost used to compute profit is the **first available** in this order:
 
 1. **MANUAL_ENTRY** — operator-entered cost in
    ``procurement.manual_product_costs`` (highest priority).
-2. **SOURCE_PRICE** — synchronized public-collect-box source price in
-   ``procurement.procurement_products.source_unit_cost``; explicitly an
-   estimated fallback rather than a negotiated purchase-order price.
+2. **PURCHASE_PRICE** — verified CNY Miaoshou purchase transaction price in
+   ``miaoshou.purchase_prices``, matched to the TikTok shop and SPU.
 
+Public collect-box list prices are reference prices, never purchase costs.
 If a TikTok active SPU has **no cost from either source**, it shows up in
 ``GET /v2/reporting/missing-cost-products`` — operators fill those via
 ``POST /v2/reporting/manual-costs`` (or the HTML form at
@@ -381,10 +381,9 @@ def _introspect_business_rules() -> str:
    ``next_cursor``; pass it back as ``?cursor=...`` to get the next
    page. When ``next_cursor`` is null, you are at the last page.
 5. **Limit** cap: 1 ≤ limit ≤ 500, default 50.
-6. **SOURCE_PRICE is estimated cost.** Never present the synchronized source
-   price as a negotiated or exact purchase-order cost.
+6. **Public collect-box price is a list price.** Keep it separate from cost.
 7. **Operator's manual entry wins over every other cost source.**
-   If the operator has set a manual cost, later source-price syncs do not override it.
+   If the operator has set a manual cost, later purchase-price syncs do not override it.
 8. **Channel account status**: ``active`` / ``inactive`` / ``banned``.
    The TikTok sync only runs for ``active`` accounts.
 9. **Channel product status**: ``active`` / ``inactive`` / ``deleted``.

@@ -1,7 +1,7 @@
 export interface Shop { id: string; shop_id: string; account_name: string | null }
 export interface Product {
   id: string; shop_pk: string; spu_id: string; title: string | null; status: string | null;
-  unit_cost: string | null; currency: string | null; source_unit_cost: string | null;
+  unit_cost: string | null; currency: string | null; purchase_unit_cost: string | null; source_unit_cost: string | null;
   source_created_at: string | null; source_updated_at: string | null; image_url: string | null;
   missing_photo?: boolean;
 }
@@ -36,7 +36,7 @@ export function decodeProduct(value: unknown, missing = false): Product {
   const row = record(value);
   if (missing && typeof row.missing_photo !== 'boolean') throw new Error('图片元数据不可用');
   return { id: identity(missing ? row.spu_pk : row.id), shop_pk: identity(row.shop_pk), spu_id: text(row.spu_id), title: nullable(row.title), status: nullable(row.status),
-    unit_cost: missing ? null : nullableMoney(row.unit_cost), currency: nullable(row.currency), source_unit_cost: nullableMoney(row.source_unit_cost),
+    unit_cost: missing ? null : nullableMoney(row.unit_cost), currency: nullable(row.currency), purchase_unit_cost: nullableMoney(row.purchase_unit_cost), source_unit_cost: nullableMoney(row.source_unit_cost),
     source_created_at: nullable(row.source_created_at), source_updated_at: nullable(row.source_updated_at), image_url: nullable(row.image_url),
     ...(missing ? { missing_photo: row.missing_photo as boolean } : {}) };
 }
@@ -56,8 +56,8 @@ export function decodeHistory(value: unknown): { items: History[]; total: string
   }; }) };
 }
 export interface Fields { unit_cost: string; currency: string; note: string; valid_from: string }
-export function initialFields(product: Product, blankSource: boolean): Fields {
-  return { unit_cost: product.unit_cost ?? (blankSource ? '' : product.source_unit_cost ?? ''), currency: product.currency ?? 'CNY', note: '', valid_from: '' };
+export function initialFields(product: Product): Fields {
+  return { unit_cost: product.unit_cost ?? '', currency: product.currency ?? 'CNY', note: '', valid_from: '' };
 }
 export function fieldsEqual(left: Fields, right: Fields): boolean { return (Object.keys(left) as (keyof Fields)[]).every((key) => left[key] === right[key]); }
 export function validateFields(fields: Fields): Record<string, string> {

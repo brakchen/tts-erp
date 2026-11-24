@@ -12,7 +12,7 @@ const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'manual-costs'
 const shop = { id: '9007199254740993', shop_id: 'TEST_shop', account_name: 'TEST 店铺' };
 const product = (index = 0): Product => ({
   id: String(9007199254740995n + BigInt(index)), shop_pk: shop.id, spu_id: `TEST_SPU_${index}`, title: `TEST 商品 ${index}`, status: 'ACTIVATE',
-  unit_cost: '0.0000', currency: 'VND', source_unit_cost: '123456789012345.1234',
+  unit_cost: '0.0000', currency: 'VND', purchase_unit_cost: null, source_unit_cost: '123456789012345.1234',
   source_created_at: '2026-10-23T12:00:00+07:00', source_updated_at: '2026-10-24T12:00:00+00:00', image_url: null,
 });
 const json = (data: unknown, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
@@ -161,11 +161,11 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     const row = { ...product(), unit_cost: null };
     const fetcher = setup([row]); const user = userEvent.setup(); render(<ManualCosts {...props} />);
     await screen.findByText('TEST 商品 0');
-    expect(screen.getByText('货源：123456789012345.1234')).toBeVisible();
+    expect(screen.getByText('货源挂牌：123456789012345.1234')).toBeVisible();
     if (view === 'unregistered') await user.click(screen.getByRole('checkbox', { name: '仅看未登记' }));
     else await user.click(screen.getByRole('button', { name: '缺成本候选' }));
     await waitFor(() => expect(readRowCost(screen.getByText('TEST 商品 0').closest('tr')!)).toBe(''));
-    expect(screen.getByText('货源：123456789012345.1234')).toBeVisible();
+    expect(screen.getByText('货源挂牌：123456789012345.1234')).toBeVisible();
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });

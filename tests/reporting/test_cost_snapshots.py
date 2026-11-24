@@ -1,6 +1,6 @@
 """TDD tests for reporting.cost_snapshots.
 
-Verifies the priority chain: MANUAL_ENTRY > SOURCE_PRICE. Both missing means
+Verifies the priority chain: MANUAL_ENTRY > PURCHASE_PRICE. Both missing means
 no snapshot and the SPU appears in the no-cost inventory.
 """
 
@@ -18,9 +18,11 @@ from tts_erp_v2.db.models import (
     ChannelProduct,
     Credentials,
     ManualProductCost,
+    MiaoshouPurchasePrice,
     ProductCostSnapshot,
 )
 from tts_erp_v2.reporting import cost_snapshots
+from tts_erp_v2.reporting.purchase_cost import load_purchase_costs
 
 pytestmark = [
     pytest.mark.domain_reporting,
@@ -60,12 +62,12 @@ def _make_channel_product(session, account, external_id, status=ACTIVE_PRODUCT_S
 # ─── 1. priority: MANUAL_ENTRY wins ───────────────────────────────────
 
 
-def test_manual_entry_wins_over_source_price(db_session):
-    """Manual cost wins over the synchronized source-price estimate."""
+def test_manual_entry_wins_over_purchase_price(db_session):
+    """Manual cost wins over a different verified purchase price."""
     ca = _make_channel_account(db_session)
     cp = _make_channel_product(db_session, ca, "TEST_SPU_MANUAL")
 
-    # Inject a manual cost and a different source-price estimate.
+    # Inject a manual cost and a different verified purchase price.
     manual = ManualProductCost(
         spu_pk=cp.id,
         unit_cost=Decimal("5.50"),
@@ -80,7 +82,7 @@ def test_manual_entry_wins_over_source_price(db_session):
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
         spu_pk=cp.id,
-        source_unit_cost=Decimal("99.99"),
+        purchase_cost_cny=Decimal("99.99"),
     )
     assert actual is not None
     assert actual.method == "MANUAL_ENTRY"
@@ -110,27 +112,23 @@ def test_no_source_produces_no_snapshot(db_session):
     assert len(snaps) == 0
 
 
-# ─── 3. SOURCE_PRICE (货源价) fallback ───────────────────────────────
+# ─── 3. Public list price is not purchase cost ───────────────────────
 
 
-def test_source_price_fallback_when_no_other_source(db_session):
-    """No manual cost but a 货源价 means SOURCE_PRICE with CNY default."""
+def test_source_price_cannot_be_used_as_cost(db_session):
+    """A collect-box listing alone must not create a cost snapshot."""
     ca = _make_channel_account(db_session)
     cp = _make_channel_product(db_session, ca, "TEST_SPU_SOURCE")
 
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
         spu_pk=cp.id,
-        source_unit_cost=Decimal("7.77"),
     )
-    assert actual is not None
-    assert actual.method == "SOURCE_PRICE"
-    assert actual.unit_cost == Decimal("7.77")
-    assert actual.currency == "CNY"
+    assert actual is None
 
 
-def test_source_price_loses_to_manual_cost(db_session):
-    """Manual entry always wins even when a 货源价 is present."""
+def test_manual_cost_is_used_without_purchase_price(db_session):
+    """Manual entry is used when there is no purchase price."""
     ca = _make_channel_account(db_session)
     cp = _make_channel_product(db_session, ca, "TEST_SPU_SRC_MANUAL")
     db_session.add(
@@ -148,38 +146,97 @@ def test_source_price_loses_to_manual_cost(db_session):
     actual = cost_snapshots.resolve_unit_cost(
         db_session,
         spu_pk=cp.id,
-        source_unit_cost=Decimal("7.77"),
     )
     assert actual is not None
     assert actual.method == "MANUAL_ENTRY"
     assert actual.unit_cost == Decimal("5.50")
 
 
-def test_rebuild_snapshots_writes_source_price_with_lookup(db_session):
-    """rebuild_snapshots accepts a source_cost_lookup and writes
-    SOURCE_PRICE rows for SPUs that only have a 货源价."""
-    ca = _make_channel_account(db_session)
-    cp_with = _make_channel_product(db_session, ca, "TEST_SPU_SRC_OK")
-
-    written = cost_snapshots.rebuild_snapshots(
-        db_session,
-        calculation_version=7,
-        valid_from=_utc(),
-        source_cost_lookup=lambda spu_pk: (
-            (Decimal("34.00"), "CNY") if spu_pk == cp_with.id else (None, None)
-        ),
+def test_confirmed_purchase_price_precedes_list_price_and_writes_snapshot(db_session):
+    account = _make_channel_account(db_session, "TEST_PURCHASE_SHOP")
+    spu = _make_channel_product(db_session, account, "TEST_PURCHASE_SPU")
+    credential = Credentials(
+        provider="miaoshou",
+        external_account_id="TEST_PURCHASE_APP",
+        ciphertext=b"\x00" * 32,
     )
-    assert written >= 1
-
-    snap = db_session.execute(
-        select(ProductCostSnapshot).where(
-            ProductCostSnapshot.spu_pk == cp_with.id,
-            ProductCostSnapshot.calculation_version == 7,
+    db_session.add(credential)
+    db_session.flush()
+    db_session.add(
+        MiaoshouPurchasePrice(
+            credential_id=credential.id,
+            miaoshou_shop_id="TEST_MS_PURCHASE_SHOP",
+            shop_pk=account.id,
+            spu_id=spu.spu_id,
+            unit_cost=Decimal("27.25"),
+            currency="CNY",
+            source_purchase_order_sn="TEST_PURCHASE_ORDER",
+            source_item_id="TEST_OFFER",
+            source_purchase_at=_utc(),
+            resolution_status="matched_shop",
+            evidence={},
         )
-    ).scalar_one()
-    assert snap.cost_method == "SOURCE_PRICE"
-    assert snap.unit_cost == Decimal("34.0000")
-    assert snap.currency == "CNY"
+    )
+    db_session.flush()
+
+    assert load_purchase_costs(db_session, [spu.id]) == {spu.id: Decimal("27.25")}
+    resolved = cost_snapshots.resolve_unit_cost(
+        db_session,
+        spu_pk=spu.id,
+        purchase_cost_cny=Decimal("27.25"),
+    )
+    assert resolved is not None
+    assert (resolved.method, resolved.unit_cost) == (
+        "PURCHASE_PRICE",
+        Decimal("27.25"),
+    )
+    cost_snapshots.rebuild_snapshots(
+        db_session,
+        calculation_version=8,
+        valid_from=_utc(),
+        spu_pks=[spu.id],
+    )
+    snapshot = db_session.scalars(
+        select(ProductCostSnapshot).where(
+            ProductCostSnapshot.spu_pk == spu.id,
+            ProductCostSnapshot.calculation_version == 8,
+        )
+    ).one()
+    assert (snapshot.cost_method, snapshot.unit_cost) == (
+        "PURCHASE_PRICE",
+        Decimal("27.25"),
+    )
+
+
+def test_conflicting_latest_purchase_prices_are_not_guessed(db_session):
+    account = _make_channel_account(db_session, "TEST_CONFLICT_SHOP")
+    spu = _make_channel_product(db_session, account, "TEST_CONFLICT_SPU")
+    for index, price in enumerate(("21.00", "23.00")):
+        credential = Credentials(
+            provider="miaoshou",
+            external_account_id=f"TEST_CONFLICT_APP_{index}",
+            ciphertext=b"\x00" * 32,
+        )
+        db_session.add(credential)
+        db_session.flush()
+        db_session.add(
+            MiaoshouPurchasePrice(
+                credential_id=credential.id,
+                miaoshou_shop_id=f"TEST_CONFLICT_MS_{index}",
+                shop_pk=account.id,
+                spu_id=spu.spu_id,
+                unit_cost=Decimal(price),
+                currency="CNY",
+                source_purchase_order_sn=f"TEST_CONFLICT_ORDER_{index}",
+                source_item_id="TEST_CONFLICT_OFFER",
+                source_purchase_at=_utc(),
+                resolution_status="matched_shop",
+                evidence={},
+            )
+        )
+    db_session.flush()
+
+    assert load_purchase_costs(db_session, [spu.id]) == {}
 
 
 # ─── 4. no-cost inventory query ───────────────────────────────────────

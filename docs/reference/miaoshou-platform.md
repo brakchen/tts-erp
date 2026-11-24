@@ -107,6 +107,8 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schem
 - 原始采购记录写入 `miaoshou.purchase_order_raw_records`，结果写入
   `miaoshou.purchase_prices`。开放平台凭据接管有同等或更新证据的历史价格行，
   历史采购原文仍保留在原凭据名下。采购价同步独立于人工成本。
+  已匹配店铺和 SPU、币种为 CNY 且单价为正的最新成交价进入成本解析链，
+  人工成本仍优先。公共采集箱挂牌价不进入成本解析链。
 
 ### 7.1 开放 API 采购价核验
 

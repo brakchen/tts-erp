@@ -565,25 +565,13 @@ calculated_at timestamptz
 
 ```text
 MANUAL_ENTRY  -- 人工填写（本系统事实源，优先级最高）
-SOURCE_PRICE  -- 货源价兜底估算
+PURCHASE_PRICE -- 妙手已核实的采购成交价
 ```
 
-> 2026-09-06 决策（配合 `miaoshou.common_collect_box` job）：用户在拍板
-> “货源价就是我们的采购价格”后，公共采集箱挂牌价（`procurement_products.source_unit_cost`）
-> 作为 **SOURCE_PRICE 估算兜底** 落账（优先级低于人工），method 区分开，
-> 报表只能叫“估算成本”。
->
-> 2026-09-07 补充（`miaoshou.sync_source_cost_to_master` 6h job）：
-> TK 侧 `procurement_products` 行（`external_product_id` 是 spu_id）原本
-> 只有 `source_item_id`，不填 cost——需要 read-time 按 offer 桥到公共采集箱行
-> 取价。本 job 把公共采集箱的 `source_unit_cost/min/max` 按
-> `source_item_id` latest-by-`synced_at` 回填到 TK 侧行（`IS DISTINCT FROM`
-> 守卫幂等），所以 `spu_id → source_price` 变成直读、reporting 的
-> `_source_cost_lookup` 首步直接命中；bridge 仍保留作为 fallback。
-
-注意：1688 采集标价严格说**不是**成交成本（标价 ≠ 实际采购价，TK 采集箱
-originPrice 曾被实测差 7×）；SOURCE_PRICE 只作估算兜底。无人工、无
-货源价的 SPU 不生成成本快照，进入异常/待填队列。
+2026-11-24 核验后，`procurement_products.source_unit_cost` 仅表示公共采集箱的
+1688 挂牌价。已匹配的在售 SPU 中，挂牌价与妙手采购成交价通常不同，故不再生成
+`SOURCE_PRICE` 成本快照。旧行保留审计，但成本查询、覆盖率和利润计算忽略。
+无人工成本且无已核实采购成交价的 SPU 不生成新成本快照，进入缺成本清单。
 
 ## 11.4 利润口径
 
@@ -609,7 +597,7 @@ estimated_gross_profit
 
 ```text
 MANUAL_ENTRY
-→ SOURCE_PRICE
+→ PURCHASE_PRICE
 → reporting.product_cost_snapshots
 → reporting.product_profit_daily
 ```

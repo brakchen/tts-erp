@@ -33,9 +33,9 @@ from tts_erp_v2.db.constants import SHOP_FEE_RATE_CALCULATION_VERSION
 class ProductCostSnapshot(Base):
     """Resolved unit cost for a TikTok product at a point in time.
 
-    cost_method ∈ {MANUAL_ENTRY, SOURCE_PRICE}。SOURCE_PRICE = 货源价
-    （procurement_products.source_unit_cost，公共采集箱挂牌价）兜底估算口径。
-    SPU 无任何可用口径则不写行，经 monitoring 暴露。
+    新行的 cost_method ∈ {MANUAL_ENTRY, PURCHASE_PRICE}。历史 SOURCE_PRICE
+    行只供审计，不作成本计算。公共采集箱挂牌价不是采购成交价。
+    SPU 无已确认成本则不写新行，经 monitoring 暴露。
     """
 
     __tablename__ = "product_cost_snapshots"

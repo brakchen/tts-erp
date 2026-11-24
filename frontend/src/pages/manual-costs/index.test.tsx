@@ -3,11 +3,13 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ManualCosts from './index';
+import { initialFields } from './contracts';
+import type { Product } from './contracts';
 import type { PageProps } from '../../shared/contracts';
 
 const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'manual-costs', navigation: [], releaseId: 'TEST', roleCapabilities: { readwrite: true, admin: false } } };
 const shop = { id: '9007199254740993', shop_id: 'TEST_shop', account_name: 'TEST 店铺', platform: 'tiktok' };
-const product = (id = '9007199254740995', name = 'TEST 商品') => ({ id, shop_pk: shop.id, spu_id: 'TEST_same_external', title: name, status: 'ACTIVATE', unit_cost: '0.0000', currency: 'VND', source_unit_cost: '123456789012345.1234', source_created_at: null, source_updated_at: '2026-10-24T12:00:00+00:00', image_url: null });
+const product = (id = '9007199254740995', name = 'TEST 商品'): Product => ({ id, shop_pk: shop.id, spu_id: 'TEST_same_external', title: name, status: 'ACTIVATE', unit_cost: '0.0000', currency: 'VND', purchase_unit_cost: null, source_unit_cost: '123456789012345.1234', source_created_at: null, source_updated_at: '2026-10-24T12:00:00+00:00', image_url: null });
 const json = (data: unknown, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
 function setup(command: (url: string, init: RequestInit) => Promise<Response> = async () => { throw new Error('TEST unexpected command'); }, rows = [product()]) {
   const fetcher = vi.fn(async (url: string, init: RequestInit) => {
@@ -32,6 +34,17 @@ async function confirmBatch(user: ReturnType<typeof userEvent.setup>) {
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe('manual-costs workbench', () => {
+  it('leaves manual cost blank when only the collect-box list price exists', () => {
+    const fields = initialFields({ ...product(), unit_cost: null, currency: null });
+    expect(fields.unit_cost).toBe('');
+    expect(fields.currency).toBe('CNY');
+  });
+  it('shows the purchase transaction and listing as separate prices', async () => {
+    setup(undefined, [{ ...product(), unit_cost: null, currency: null, purchase_unit_cost: '27.2500', source_unit_cost: '34.0000' }]);
+    render(<ManualCosts {...props} />);
+    expect(await screen.findByText('妙手成交：27.2500 CNY')).toBeVisible();
+    expect(screen.getByText('货源挂牌：34.0000')).toBeVisible();
+  });
   it('shows an actionable read error and correlation id without leaking server details', async () => {
     const fetcher = setup();
     fetcher.mockImplementation(async (url) => url.includes('channel-accounts?') ? json([shop])
