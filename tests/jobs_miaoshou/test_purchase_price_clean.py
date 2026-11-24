@@ -35,10 +35,12 @@ class FakePurchaseClient:
         *,
         advertised_total: int | str | None = None,
         filter_ranges: bool = True,
+        date_only_ranges: bool = False,
     ):
         self.rows = rows
         self.advertised_total = advertised_total
         self.filter_ranges = filter_ranges
+        self.date_only_ranges = date_only_ranges
         self.calls: list[dict] = []
 
     def _call_erp(self, *, path: str, body: dict) -> dict:
@@ -47,13 +49,22 @@ class FakePurchaseClient:
         self.calls.append(body)
         rows = self.rows
         if self.filter_ranges:
-            rows = [
-                row
-                for row in rows
-                if body["gmtRangeFrom"]
-                <= row["gmtPurchaseOrderStart"]
-                <= body["gmtRangeTo"]
-            ]
+            if self.date_only_ranges:
+                rows = [
+                    row
+                    for row in rows
+                    if body["gmtRangeFrom"][:10]
+                    <= row["gmtPurchaseOrderStart"][:10]
+                    <= body["gmtRangeTo"][:10]
+                ]
+            else:
+                rows = [
+                    row
+                    for row in rows
+                    if body["gmtRangeFrom"]
+                    <= row["gmtPurchaseOrderStart"]
+                    <= body["gmtRangeTo"]
+                ]
         start = (body["page"] - 1) * body["pageSize"]
         return {
             "result": "success",
@@ -428,6 +439,66 @@ def test_large_scan_splits_windows_without_losing_boundary_rows(monkeypatch) -> 
     assert (len(orders), total) == (5, 5)
     assert pages > 3
     assert all("gmtRangeFrom" in call for call in client.calls)
+
+
+def test_date_only_range_filter_splits_by_whole_day(monkeypatch) -> None:
+    monkeypatch.setattr(job, "PAGE_SIZE", 2)
+    monkeypatch.setattr(job, "MAX_WINDOW_PAGES", 1)
+    monkeypatch.setattr(
+        job,
+        "_EARLIEST_PURCHASE_AT",
+        datetime(2026, 10, 1, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+    rows = [
+        _purchase_order()
+        | {
+            "purchaseOrderSn": f"TEST_PO_{index}",
+            "gmtPurchaseOrderStart": timestamp,
+        }
+        for index, timestamp in enumerate(
+            (
+                "2026-10-03 13:00:00",
+                "2026-10-02 14:00:00",
+                "2026-10-02 08:00:00",
+                "2026-10-02 01:00:00",
+                "2026-10-01 09:00:00",
+            )
+        )
+    ]
+    client = FakePurchaseClient(rows, date_only_ranges=True)
+    orders, pages, total = job._fetch_all_pages(client, max_retries=0)
+    assert (len(orders), total) == (5, 5)
+    assert pages >= 4
+
+
+def test_date_window_total_change_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(job, "PAGE_SIZE", 2)
+    monkeypatch.setattr(job, "MAX_WINDOW_PAGES", 1)
+    monkeypatch.setattr(
+        job,
+        "_EARLIEST_PURCHASE_AT",
+        datetime(2026, 10, 1, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+    rows = [
+        _purchase_order()
+        | {
+            "purchaseOrderSn": f"TEST_PO_{day}",
+            "gmtPurchaseOrderStart": f"2026-10-0{day} 12:00:00",
+        }
+        for day in (3, 2, 1)
+    ]
+
+    class ChangedRootClient(FakePurchaseClient):
+        def _call_erp(self, *, path: str, body: dict) -> dict:
+            payload = super()._call_erp(path=path, body=body)
+            if len(self.calls) == 1:
+                payload["data"]["total"] += 1
+            return payload
+
+    with pytest.raises(RuntimeError, match="total changed across date windows"):
+        job._fetch_all_pages(
+            ChangedRootClient(rows, date_only_ranges=True), max_retries=0
+        )
 
 
 def test_range_filter_ignored_fails_closed(monkeypatch) -> None:

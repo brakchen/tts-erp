@@ -94,7 +94,8 @@ systemctl list-timers '*logrotate*'
 主机内存。发布后连续 24 小时检查 `miaoshou.purchase_price_clean` 是否成功、
 `journalctl -u tts-erp-sync.service` 是否仍有 OOM，以及
 `systemctl show tts-erp-sync.service -p MemoryCurrent -p MemoryPeak`。
-若上游忽略采购记录的起始时间筛选，任务会安全失败并保留已有采购价。
+上游采购记录接口只按日期筛选，任务按整天切窗；若返回记录超出日期范围或各窗
+总数与全范围不一致，任务会安全失败并保留已有采购价。
 
 ### 生产 MinIO 预签名
 
