@@ -7,7 +7,7 @@ import json
 import math
 import ssl
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import partial
 from typing import Any, Protocol
@@ -94,15 +94,17 @@ def _retryable(error: BaseException) -> bool:
 def _fetch_all_pages(
     client: PurchaseApiClient, *, max_retries: int
 ) -> tuple[list[dict[str, Any]], int, int]:
-    end = datetime.now(_MIAOSHOU_TZ).replace(microsecond=0)
+    # The purchase API applies both range bounds at calendar-day granularity.
+    # Hour-sized requests return every purchase from the selected day.
+    end = datetime.now(_MIAOSHOU_TZ).date()
+    first_day = _EARLIEST_PURCHASE_AT.date()
     pages_walked = 0
     root_advertised_total: int | None = None
+    leaf_advertised_total = 0
 
-    def scan_window(
-        start: datetime, stop: datetime
-    ) -> dict[str, dict[str, Any]] | None:
+    def scan_window(start: date, stop: date) -> dict[str, dict[str, Any]] | None:
         """Return a complete window, or None when it needs splitting."""
-        nonlocal pages_walked, root_advertised_total
+        nonlocal pages_walked, root_advertised_total, leaf_advertised_total
         rows: dict[str, dict[str, Any]] = {}
         seen_pages: set[tuple[str, ...]] = set()
         total: int | None = None
@@ -113,8 +115,8 @@ def _fetch_all_pages(
                 "pageSize": PAGE_SIZE,
                 "purchaseOrderStatus": _COMPLETED_STATUS,
                 "gmtRangeType": "gmtPurchaseOrderStart",
-                "gmtRangeFrom": start.strftime("%Y-%m-%d %H:%M:%S"),
-                "gmtRangeTo": stop.strftime("%Y-%m-%d %H:%M:%S"),
+                "gmtRangeFrom": f"{start.isoformat()} 00:00:00",
+                "gmtRangeTo": f"{stop.isoformat()} 23:59:59",
                 "sortType": "gmtPurchaseOrderStartDesc",
             }
             try:
@@ -161,10 +163,10 @@ def _fetch_all_pages(
                 raise RuntimeError("invalid purchase pagination metadata")
             if total is None:
                 total = advertised
-                if start == _EARLIEST_PURCHASE_AT and stop == end and page == 1:
+                if start == first_day and stop == end and page == 1:
                     root_advertised_total = advertised
                 page_count = max(1, math.ceil(total / PAGE_SIZE))
-                if page_count > MAX_WINDOW_PAGES and (stop - start).total_seconds() > 4:
+                if page_count > MAX_WINDOW_PAGES and start < stop:
                     return None
                 if page_count > MAX_PAGES:
                     raise RuntimeError("purchase pagination exceeds safety cap")
@@ -177,7 +179,7 @@ def _fetch_all_pages(
                 purchase_at = _parse_time(row.get("gmtPurchaseOrderStart"))
                 if (
                     purchase_at is None
-                    or not start <= purchase_at.astimezone(_MIAOSHOU_TZ) <= stop
+                    or not start <= purchase_at.astimezone(_MIAOSHOU_TZ).date() <= stop
                 ):
                     raise RuntimeError("Miaoshou purchase range filter was ignored")
             fingerprints = tuple(_fingerprint(_redact_secrets(row)) for row in batch)
@@ -188,10 +190,11 @@ def _fetch_all_pages(
             for fingerprint, row in zip(fingerprints, batch, strict=True):
                 rows[fingerprint] = row
             if page == page_count:
+                leaf_advertised_total += total
                 return rows
         raise RuntimeError("purchase pagination exceeds safety cap")
 
-    def fetch_window(start: datetime, stop: datetime) -> dict[str, dict[str, Any]]:
+    def fetch_window(start: date, stop: date) -> dict[str, dict[str, Any]]:
         split = False
         for _ in range(WINDOW_RESTARTS + 1):
             try:
@@ -203,18 +206,18 @@ def _fetch_all_pages(
                 return rows
             split = True
             break
-        span_seconds = int((stop - start).total_seconds())
-        if split and span_seconds > 4:
-            middle = start + timedelta(seconds=span_seconds // 2)
-            # Overlap at the boundary: the API's inclusive/exclusive time
-            # comparison is not documented. Fingerprints remove duplicates.
-            left = fetch_window(start, middle + timedelta(seconds=1))
-            right = fetch_window(middle - timedelta(seconds=1), stop)
+        span_days = (stop - start).days
+        if split and span_days > 0:
+            middle = start + timedelta(days=span_days // 2)
+            left = fetch_window(start, middle)
+            right = fetch_window(middle + timedelta(days=1), stop)
             left.update(right)
             return left
         raise RuntimeError("purchase total changed during pagination")
 
-    rows = fetch_window(_EARLIEST_PURCHASE_AT, end)
+    rows = fetch_window(first_day, end)
+    if root_advertised_total != leaf_advertised_total:
+        raise RuntimeError("purchase total changed across date windows")
     return list(rows.values()), pages_walked, root_advertised_total or len(rows)
 
 
