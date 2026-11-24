@@ -350,7 +350,14 @@ _SQL_ROI_PROJECTION = text(
                        WHERE sh.order_pk = so.id
                          AND te.action_code = :returned_to_seller_action_code
                    )
-               ) AS is_terminal_full_loss
+               ) AS is_terminal_full_loss,
+               EXISTS (
+                   SELECT 1
+                   FROM fulfillment.shipments sh
+                   JOIN fulfillment.tracking_events te ON te.shipment_id = sh.id
+                   WHERE sh.order_pk = so.id
+                     AND te.action_code = :overseas_action_code
+               ) AS is_overseas_arrived
         FROM selected_orders selected
         JOIN commerce.sales_orders so ON so.id = selected.order_pk
         JOIN order_gmv og ON og.order_pk = so.id
@@ -367,17 +374,8 @@ _SQL_ROI_PROJECTION = text(
     ),
     exposed_orders AS (
         SELECT order_facts.*,
-               (
-                   is_delivery_terminal
-                   OR EXISTS (
-                       SELECT 1
-                       FROM fulfillment.shipments sh
-                       JOIN fulfillment.tracking_events te
-                         ON te.shipment_id = sh.id
-                       WHERE sh.order_pk = order_facts.order_pk
-                         AND te.action_code = :overseas_action_code
-                   )
-               ) AS is_overseas_exposed
+               (is_delivery_terminal OR is_overseas_arrived)
+                   AS is_overseas_exposed
         FROM order_facts
     ),
     completed_orders AS (
@@ -391,7 +389,7 @@ _SQL_ROI_PROJECTION = text(
                    ))
                    OR (status = 'CANCELLED'
                        AND is_terminal_full_loss
-                       AND is_overseas_exposed)
+                       AND is_overseas_arrived)
                ) AS is_completed
         FROM exposed_orders
     ),
@@ -709,7 +707,14 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                        WHERE sh.order_pk = so.id
                          AND te.action_code = :returned_to_seller_action_code
                    )
-               ) AS is_terminal_full_loss
+               ) AS is_terminal_full_loss,
+               EXISTS (
+                   SELECT 1
+                   FROM fulfillment.shipments sh
+                   JOIN fulfillment.tracking_events te ON te.shipment_id = sh.id
+                   WHERE sh.order_pk = so.id
+                     AND te.action_code = :overseas_action_code
+               ) AS is_overseas_arrived
         FROM selected_orders selected
         JOIN commerce.sales_orders so ON so.id = selected.order_pk
         JOIN order_gmv og ON og.order_pk = so.id
@@ -726,17 +731,8 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
     ),
     exposed_orders AS (
         SELECT order_facts.*,
-               (
-                   is_delivery_terminal
-                   OR EXISTS (
-                       SELECT 1
-                       FROM fulfillment.shipments sh
-                       JOIN fulfillment.tracking_events te
-                         ON te.shipment_id = sh.id
-                       WHERE sh.order_pk = order_facts.order_pk
-                         AND te.action_code = :overseas_action_code
-                   )
-               ) AS is_overseas_exposed
+               (is_delivery_terminal OR is_overseas_arrived)
+                   AS is_overseas_exposed
         FROM order_facts
     ),
     completed_orders AS (
@@ -750,7 +746,7 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                    ))
                    OR (status = 'CANCELLED'
                        AND is_terminal_full_loss
-                       AND is_overseas_exposed)
+                       AND is_overseas_arrived)
                ) AS is_completed
         FROM exposed_orders
     ),
