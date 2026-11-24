@@ -2003,9 +2003,9 @@ def test_projection_excludes_unpaid_cancelled_returned_order_from_strict_sample(
         shipment_id = sess.execute(
             text(
                 "INSERT INTO fulfillment.shipments ("
-                " order_pk, external_package_id, status"
+                " order_pk, external_package_id, status, delivered_at"
                 ") VALUES (:order_pk, 'TEST_PKG_UNPAID_CANCELLED_RETURNED',"
-                " 'RETURNED_TO_SELLER') RETURNING id"
+                " 'RETURNED_TO_SELLER', now()) RETURNING id"
             ),
             {"order_pk": order_pk},
         ).scalar_one()
