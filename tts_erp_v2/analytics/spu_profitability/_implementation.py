@@ -235,9 +235,10 @@ _SQL_ROI_SALES = text(
 )
 
 # 预计事实：已完结样本包含已结算、已送达和结果已确定的国内取消订单。
-# 全损分子包含 80101 终局物流全损，以及到达海外/送达后最终全额退款的订单；
+# 全损分子包含已付款订单的 80101 终局物流全损、海外/送达后全额退款，
+# 以及同时有 38301 与 80101 的货到付款取消单货本损失；
 # 国内取消进入分母但不进入分子。该订单全损率应用于尚未送达的未结算风险池，
-# 同时预测订单数、件数和费后收入折损。旧物流终态与售后字段保留作兼容解释。
+# 同时预测订单数、件数和费后收入折损。
 _SQL_ROI_PROJECTION = text(
     """
     WITH selected_orders AS (
@@ -382,13 +383,15 @@ _SQL_ROI_PROJECTION = text(
     completed_orders AS (
         SELECT exposed_orders.*,
                (
-                   is_paid
-                   AND (
+                   (is_paid AND (
                        is_settled
                        OR is_delivery_terminal
                        OR is_terminal_full_loss
                        OR status = 'CANCELLED'
-                   )
+                   ))
+                   OR (status = 'CANCELLED'
+                       AND is_terminal_full_loss
+                       AND is_overseas_exposed)
                ) AS is_completed
         FROM exposed_orders
     ),
@@ -468,23 +471,25 @@ _SQL_ROI_PROJECTION = text(
                AS projection_basis_refund_amount_vnd,
            count(DISTINCT order_pk) FILTER (
                WHERE is_projection_sample
-                 AND is_paid
-                 AND (is_delivery_terminal OR is_terminal_full_loss))
+                 AND ((is_paid AND is_delivery_terminal)
+                      OR (is_completed_full_loss AND is_terminal_full_loss)))
                AS projection_terminal_basis_order_count,
            coalesce(sum(line_sales_vnd) FILTER (
                WHERE is_projection_sample
                  AND ((is_paid AND is_delivery_terminal)
-                      OR is_terminal_full_loss)), 0)
+                      OR (is_completed_full_loss AND is_terminal_full_loss))), 0)
                AS projection_terminal_basis_sales_vnd,
            coalesce(sum(line_sales_vnd) FILTER (
-               WHERE is_projection_sample AND is_terminal_full_loss), 0)
+               WHERE is_projection_sample
+                 AND is_completed_full_loss AND is_terminal_full_loss), 0)
                AS projection_terminal_full_loss_sales_vnd,
            count(DISTINCT order_pk) FILTER (
                WHERE is_projection_sample
-                 AND is_paid AND is_terminal_full_loss)
+                 AND is_completed_full_loss AND is_terminal_full_loss)
                AS projection_terminal_full_loss_order_count,
            coalesce(sum(terminal_full_loss_qty) FILTER (
-               WHERE is_projection_sample AND is_terminal_full_loss), 0)
+               WHERE is_projection_sample
+                 AND is_completed_full_loss AND is_terminal_full_loss), 0)
                AS projection_terminal_full_loss_qty,
            count(DISTINCT order_pk) FILTER (
                WHERE is_projection_sample AND is_completed)
@@ -737,13 +742,15 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
     completed_orders AS (
         SELECT exposed_orders.*,
                (
-                   is_paid
-                   AND (
+                   (is_paid AND (
                        is_settled
                        OR is_delivery_terminal
                        OR is_terminal_full_loss
                        OR status = 'CANCELLED'
-                   )
+                   ))
+                   OR (status = 'CANCELLED'
+                       AND is_terminal_full_loss
+                       AND is_overseas_exposed)
                ) AS is_completed
         FROM exposed_orders
     ),
@@ -797,12 +804,12 @@ _SQL_ROI_PROJECTION_SCOPE_COUNTS = text(
                AS projection_basis_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_projection_sample
-                 AND is_paid
-                 AND (is_delivery_terminal OR is_terminal_full_loss))
+                 AND ((is_paid AND is_delivery_terminal)
+                      OR (is_completed_full_loss AND is_terminal_full_loss)))
                AS projection_terminal_basis_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_projection_sample
-                 AND is_paid AND is_terminal_full_loss)
+                 AND is_completed_full_loss AND is_terminal_full_loss)
                AS projection_terminal_full_loss_order_count,
            count(DISTINCT order_pk) FILTER (
                WHERE is_projection_sample AND is_completed)
@@ -3111,11 +3118,18 @@ def _detail_orders(
             r["status"] in PAID_SALES_ORDER_STATUSES
             or (r["status"] == "CANCELLED" and r["actual_paid_at"] is not None)
         )
-        is_completed = is_paid and (
-            bool(r["is_settled"])
-            or delivery_terminal
-            or terminal_full_loss
-            or r["status"] == "CANCELLED"
+        is_completed = (
+            is_paid
+            and (
+                bool(r["is_settled"])
+                or delivery_terminal
+                or terminal_full_loss
+                or r["status"] == "CANCELLED"
+            )
+        ) or (
+            r["status"] == "CANCELLED"
+            and terminal_full_loss
+            and arrived_overseas
         )
         final_refund = max(
             abs(settled_refunds.get(order_pk, Decimal(0))),
