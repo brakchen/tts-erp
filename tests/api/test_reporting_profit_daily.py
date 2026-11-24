@@ -223,6 +223,27 @@ def test_profit_daily_one_row_aliases_all_fields(api_client, readwrite_key, db_e
     assert Decimal(row["profit"]) == Decimal("120.00")
     assert row["currency"] == "USD"
 
+    with Session(db_engine) as seed_sess:
+        seed_sess.execute(
+            text(
+                "INSERT INTO reporting.product_profit_daily "
+                "(spu_pk, profit_date, units_sold, gross_revenue, "
+                " estimated_cogs, estimated_gross_profit, currency, "
+                " cost_method, calculation_version) "
+                "VALUES (:cp, '2030-01-16', 3, 150, 102, 48, "
+                " 'USD', 'SOURCE_PRICE', 999)"
+            ),
+            {"cp": cp_id},
+        )
+        seed_sess.commit()
+    legacy = api_client.get(
+        f"/v2/reporting/profit-daily?spu_pk={cp_id}&on_date=2030-01-16",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+    )
+    assert legacy.status_code == 200, legacy.text
+    assert legacy.json()[0]["cost"] is None
+    assert legacy.json()[0]["profit"] is None
+
 
 def test_profit_daily_requires_readwrite_for_post(api_client, readonly_key):
     """Sanity: GET is readonly, no body, no auth-state mutations.
