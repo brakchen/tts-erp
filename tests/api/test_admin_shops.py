@@ -345,11 +345,15 @@ def test_update_shop_alias_is_separate_from_synced_name_and_searchable(
     assert updated.json()["shop"]["shop_alias"] == "TEST_local_alias"
     assert updated.json()["shop"]["account_name"] == "TEST_official_name"
 
-    detail = api_client.get(f"/v2/commerce/channel-accounts/{pk}?view=management")
+    detail = api_client.get(
+        f"/v2/commerce/channel-accounts/{pk}?view=management",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
+    )
     assert detail.status_code == 200, detail.text
     assert detail.json()["shop_alias"] == "TEST_local_alias"
     listed = api_client.get(
-        "/v2/commerce/channel-accounts?view=management&q=TEST_local_alias"
+        "/v2/commerce/channel-accounts?view=management&q=TEST_local_alias",
+        headers={"Authorization": f"Bearer {readwrite_key}"},
     )
     assert listed.status_code == 200, listed.text
     assert any(
@@ -369,7 +373,10 @@ def test_update_shop_alias_rejects_too_long_value(api_client, admin_key):
     pk = _register(api_client, admin_key).json()["shop"]["id"]
     rejected = _patch(api_client, admin_key, pk, shop_alias="x" * 201)
     assert rejected.status_code == 422, rejected.text
-    detail = api_client.get(f"/v2/commerce/channel-accounts/{pk}?view=management")
+    detail = api_client.get(
+        f"/v2/commerce/channel-accounts/{pk}?view=management",
+        headers={"Authorization": f"Bearer {admin_key}"},
+    )
     assert detail.json()["shop_alias"] is None
 
 

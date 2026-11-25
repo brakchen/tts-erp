@@ -1149,7 +1149,8 @@ def test_real_canonical_queries_batch_more_than_500_scope(
             products[0].id: (Decimal(0), Decimal(0), Decimal(0), Decimal(0), 0),
             products[1].id: (Decimal(0), Decimal(0), Decimal(0), Decimal(0), 0),
             products[2].id: (Decimal(0), Decimal(0), Decimal(0), Decimal(0), 0),
-            products[99].id: (Decimal(0), Decimal(526600), Decimal(0), Decimal(0), 0),
+            # Delivered order 99 is fully refunded, so its one unit is strict full loss.
+            products[99].id: (Decimal(0), Decimal(526600), Decimal(0), Decimal(0), 1),
             products[100].id: (
                 Decimal(526600),
                 Decimal(526600),

@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -56,7 +57,7 @@ def test_main_module_runs_main_when_invoked_as_script() -> None:
         text=True,
         timeout=15,
         env=env,
-        cwd="/home/schan/tts-erp",  # run from project root so package discovery works
+        cwd=Path(__file__).resolve().parents[2],  # package discovery from project root
     )
     # ``list`` exits 0 and prints a table of JOBS. The exact format is
     # not asserted (column widths etc. are cosmetic) — just verify the

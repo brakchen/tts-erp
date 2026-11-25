@@ -29,6 +29,7 @@ def test_catalogue_dto_keeps_cost_facts_without_optional_storage(monkeypatch: py
         unit_cost=Decimal("12.5000"),
         currency="CNY",
         cost_method="MANUAL_ENTRY",
+        purchase_unit_cost=Decimal("11.0000"),
         source_unit_cost=Decimal("10.0000"),
         mirror_object_key="TEST_existing_mirror.jpg",
         main_image_url=None,
@@ -36,6 +37,7 @@ def test_catalogue_dto_keeps_cost_facts_without_optional_storage(monkeypatch: py
     product = commerce._row_to_channel_product(row)
     assert product.id == 7
     assert product.unit_cost == Decimal("12.5000")
+    assert product.purchase_unit_cost == Decimal("11.0000")
     assert product.source_unit_cost == Decimal("10.0000")
     assert product.image_url is None
 
