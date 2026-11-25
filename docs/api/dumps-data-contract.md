@@ -522,6 +522,12 @@ POST /oec_ads/shopping/v1/oec/stat/campaign_opt_log_list
 [服务端路由](../../tts_erp_v2/api/v2/analytics.py)。
 
 - `today` 和 `daily` 写入相应结构化表，`monthly` 只写 `plugin.ad_raw_log`。
+- 商品分析行的消耗、成交金额、ROI 和订单量在结构化写入前统一规范化：
+  `null`、空白字符串和 `"-"` 表示该指标未知，写入 SQL `NULL`；真实 `0` 保留。
+  金额和 ROI 必须是能由 `NUMERIC(20,4)` 表达的有限数，订单量必须是
+  `BIGINT` 范围内的整数；布尔值、分数订单量、非有限数及其他非法数值返回
+  HTTP `422 / INVALID_AD_METRIC`（`retryable: false`），消息和 `errors[].loc`
+  指明行号及字段，整批回滚。原始转储行不修改，成功接收时仍完整保存在原始存档中。
 - 变更日志转储和覆盖核对遵循 §6.1 的事务及兼容约束。
 - 用 HTTP 状态判断结果，错误响应带 `requestId`。部署地址和排查命令见
   [广告同步运维](../ops/analytics-sync.md)。

@@ -604,6 +604,7 @@ def post_dumps(
             path=_PATH_DUMPS,
         )
 
+    from tts_erp_v2.plugin.ads.metrics import InvalidAdMetric
     from tts_erp_v2.plugin.ads.repository import (
         InvalidCampaignOptLog,
         is_product_level_endpoint,
@@ -687,6 +688,26 @@ def post_dumps(
         }
         common_kwargs["day"] = payload.dump.day
         inserted = repo_fn(**common_kwargs)
+    except InvalidAdMetric as exc:
+        sess.rollback()
+        return _audit_and_error(
+            request_id=request_id,
+            status=422,
+            code="INVALID_AD_METRIC",
+            message=str(exc),
+            retryable=False,
+            key_prefix=key_prefix,
+            error_code="INVALID_AD_METRIC",
+            method=method,
+            path=path,
+            structured_errors=[
+                {
+                    "loc": ["dump", "rows", exc.row_index, exc.field],
+                    "msg": exc.reason,
+                    "type": "invalid_ad_metric",
+                }
+            ],
+        )
     except InvalidCampaignOptLog as exc:
         sess.rollback()
         return _audit_and_error(
