@@ -122,7 +122,7 @@ def test_manual_costs_page_v2_self_hosted_font_hint(api_client, readonly_key):
 
 
 def test_page_does_not_render_source_price_badge(api_client, readonly_key):
-    """Source-price values may prefill the input, but the badge is removed."""
+    """The retired source-price badge stays absent from the page and asset."""
     r = api_client.get(
         "/v2/pages/manual-costs",
         headers={"Authorization": f"Bearer {readonly_key}"},
@@ -326,6 +326,12 @@ def test_console_js_forwards_the_catalogue_filters():
     assert "catalogueMissingManualCost" in src
     assert "missing_manual_cost=true" in src
     assert "filter-missing-manual-cost" in src
-    assert "catalogueMissingManualCost || it.source_unit_cost == null" in src, (
-        "unregistered-only rows must not prefill the source price"
+    empty_manual_cost_branch = src.split("if (it.unit_cost == null) {", 1)[1].split(
+        "} else {", 1
+    )[0]
+    assert 'placeholder="缺"' in empty_manual_cost_branch
+    assert "value=" not in empty_manual_cost_branch, (
+        "rows without a manual cost must leave the manual input empty"
     )
+    assert "source_unit_cost" not in empty_manual_cost_branch
+    assert "purchase_unit_cost" not in empty_manual_cost_branch
