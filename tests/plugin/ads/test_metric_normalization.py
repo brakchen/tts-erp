@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -60,7 +61,12 @@ def _write(kind: str, rows: list[dict[str, Any]], session: _RecordingSession):
 @pytest.mark.parametrize("kind", ["daily", "today"])
 @pytest.mark.parametrize("placeholder", [None, "", " \t\r\n", "-", " - "])
 def test_missing_metrics_bind_null_and_leave_raw_rows_unchanged(kind, placeholder):
-    rows = [{"product_id": "TEST_metric_product", **dict.fromkeys(_METRIC_FIELDS, placeholder)}]
+    rows = [
+        {
+            "product_id": "TEST_metric_product",
+            **dict.fromkeys(_METRIC_FIELDS, placeholder),
+        }
+    ]
     original = deepcopy(rows)
     session = _RecordingSession()
 
@@ -72,8 +78,6 @@ def test_missing_metrics_bind_null_and_leave_raw_rows_unchanged(kind, placeholde
     )
     assert rows == original
     assert session.commits == 1
-    import json
-
     archived = json.loads(session.calls[-1][1]["response_body"])
     assert archived["body"]["data"]["table"] == original
 
@@ -120,7 +124,13 @@ def test_decimal_metrics_are_parsed_without_binary_float_conversion(kind, raw, e
 @pytest.mark.parametrize("kind", ["daily", "today"])
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [(" 2 ", 2), ("2.0", 2), (2.0, 2), (str(2**63 - 1), 2**63 - 1), (-(2**63), -(2**63))],
+    [
+        (" 2 ", 2),
+        ("2.0", 2),
+        (2.0, 2),
+        (str(2**63 - 1), 2**63 - 1),
+        (-(2**63), -(2**63)),
+    ],
 )
 def test_order_counts_are_exact_integers_within_bigint_range(kind, raw, expected):
     session = _RecordingSession()
@@ -131,7 +141,10 @@ def test_order_counts_are_exact_integers_within_bigint_range(kind, raw, expected
 
 @pytest.mark.parametrize("kind", ["daily", "today"])
 @pytest.mark.parametrize("field", _METRIC_FIELDS)
-@pytest.mark.parametrize("invalid", [True, False, [], {}, "not-a-number", "NaN", "Infinity", float("nan"), float("inf")])
+@pytest.mark.parametrize(
+    "invalid",
+    [True, False, [], {}, "not-a-number", "NaN", "Infinity", float("nan"), float("inf")],
+)
 def test_invalid_metrics_fail_explicitly_without_committing(kind, field, invalid):
     session = _RecordingSession()
     row = {"product_id": "TEST_metric_invalid", field: invalid}
@@ -145,7 +158,9 @@ def test_invalid_metrics_fail_explicitly_without_committing(kind, field, invalid
 def test_fractional_or_overflowing_order_counts_do_not_truncate(kind, invalid):
     session = _RecordingSession()
     with pytest.raises(ValueError, match=_INTEGER_FIELD):
-        _write(kind, [{"product_id": "TEST_metric_fraction", _INTEGER_FIELD: invalid}], session)
+        _write(
+            kind, [{"product_id": "TEST_metric_fraction", _INTEGER_FIELD: invalid}], session
+        )
     assert session.commits == 0
 
 
@@ -154,5 +169,9 @@ def test_fractional_or_overflowing_order_counts_do_not_truncate(kind, invalid):
 def test_decimal_metrics_outside_column_range_fail_before_database_write(kind, invalid):
     session = _RecordingSession()
     with pytest.raises(ValueError, match="mixed_real_cost"):
-        _write(kind, [{"product_id": "TEST_metric_overflow", "mixed_real_cost": invalid}], session)
+        _write(
+            kind,
+            [{"product_id": "TEST_metric_overflow", "mixed_real_cost": invalid}],
+            session,
+        )
     assert session.commits == 0
