@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -549,7 +550,7 @@ def test_mock_official_chain_selects_vertical_not_first_and_local_recovery(
     compare = media_tools.root / "TEST_compare.mp4"
     _run(
         [
-            str(Path.home() / ".local/bin/ffmpeg"),
+            os.environ["RUNNINGHUB_FFMPEG"],
             "-v",
             "error",
             "-f",
@@ -675,7 +676,7 @@ def test_finalization_retains_optional_audio(media_tools):
     source = media_tools.root / "TEST_audio.mp4"
     _run(
         [
-            str(Path.home() / ".local/bin/ffmpeg"),
+            os.environ["RUNNINGHUB_FFMPEG"],
             "-v",
             "error",
             "-f",
