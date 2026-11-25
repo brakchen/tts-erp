@@ -1,0 +1,86 @@
+name: Ad metric isolated validation
+on:
+  push:
+    branches: [ci/ad-metric-isolated-validation]
+permissions:
+  contents: read
+concurrency:
+  group: ad-metric-isolated-validation
+  cancel-in-progress: false
+env:
+  TARGET_SHA: 9d77d131f17c8dbbcae9ef4e2c08210b86acaedf
+  BASE_SHA: c9bed5327762d8a80bd44a8d8a6701c28215202f
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18.7@sha256:c699303802144847d238196173655dbbecf7a96aeca1565f2b02eb671a1f0b6b
+        env:
+          POSTGRES_DB: tts_erp_test_base
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: TEST_ci_local_only
+        ports: ['127.0.0.1:5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tts_erp_test_base"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TTS_ERP_DB_URL_TEST: postgresql+psycopg://postgres:TEST_ci_local_only@127.0.0.1:5432/tts_erp_test_base
+      TTS_ERP_DB_URL: postgresql+psycopg://postgres:TEST_ci_local_only@127.0.0.1:5432/tts_erp_test_base
+      TTS_ERP_DB_URL_PROD_SOURCE: postgresql+psycopg://postgres:TEST_ci_local_only@127.0.0.1:5432/tts_erp_test_base
+    steps:
+      - name: Checkout auxiliary validation scripts
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, MIT
+        with:
+          ref: ${{ github.sha }}
+          path: validation-material
+          persist-credentials: false
+      - name: Checkout exact prospective merge
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, MIT
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6, MIT
+        with:
+          python-version: '3.13.5'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6, MIT
+        with:
+          node-version: '22.22.2'
+          package-manager-cache: false
+      - name: Bind the verified local PostgreSQL service
+        env:
+          CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          [[ "$CI_POSTGRES_CONTAINER" =~ ^[0-9a-f]{64}$ ]]
+          printf 'PG_DOCKER=%s\n' "$CI_POSTGRES_CONTAINER" >> "$GITHUB_ENV"
+      - name: Install isolated test dependencies
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          python -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -e '.[dev]' pytest pytest-asyncio pytest-cov PyYAML
+          npm ci --prefix frontend
+      - name: Restore safe schema into CI-only base
+        working-directory: candidate
+        env:
+          TTS_ERP_SCHEMA_A: ${{ secrets.TTS_ERP_AD_METRIC_TEST_SCHEMA }}
+          TTS_ERP_SCHEMA_B: ${{ secrets.TTS_ERP_AD_METRIC_TEST_SCHEMA_B }}
+          TTS_ERP_SCHEMA_C: ${{ secrets.TTS_ERP_AD_METRIC_TEST_SCHEMA_C }}
+          TTS_ERP_SCHEMA_D: ${{ secrets.TTS_ERP_AD_METRIC_TEST_SCHEMA_D }}
+        run: .venv/bin/python ../validation-material/ci-validation/bootstrap_ci.py
+      - name: Validate base regressions and exact candidate
+        working-directory: candidate
+        run: .venv/bin/python ../validation-material/ci-validation/run_validation.py
+      - name: Upload bounded validation evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6, MIT
+        with:
+          name: ad-metric-validation-${{ env.TARGET_SHA }}
+          path: ${{ runner.temp }}/ad-metric-validation-results/
+          if-no-files-found: warn
+          retention-days: 7
