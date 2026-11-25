@@ -153,6 +153,87 @@ def test_dumps_v4_today(api_client, readwrite_key, db_engine):
     assert _ad_raw_log_count(db_engine) == 1
 
 
+@pytest.mark.parametrize("kind", ["daily", "today"])
+def test_dumps_v4_roi_placeholder_preserves_all_31_rows_and_raw_archive(
+    api_client, readwrite_key, db_engine, kind
+):
+    """A TikTok unavailable ROI must not poison the complete persisted dump."""
+    rows = [
+        {
+            "product_id": f"TEST_PLACEHOLDER_{index:02d}",
+            "mixed_real_cost": "10.0000",
+            "onsite_roi2_shopping_sku": "2",
+            "onsite_roi2_shopping_value": "49.83",
+            "onsite_mixed_real_roi2_shopping": "4.9830",
+            "source_marker": f"TEST_raw_{index:02d}",
+        }
+        for index in range(31)
+    ]
+    rows[15]["onsite_mixed_real_roi2_shopping"] = "-"
+    body = _dump_body_v4(kind=kind, day="2026-11-14", rows=rows)
+    # Current plugins carry canonical rows once, without a duplicate response table.
+    body["dump"]["response"]["body"]["data"] = {}
+
+    response = _post(api_client, readwrite_key, body)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["rowCount"] == 31
+    statement = {
+        "daily": "SELECT product_id, mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value, onsite_mixed_real_roi2_shopping FROM plugin.ad_daily WHERE seller_id = :seller ORDER BY product_id",
+        "today": "SELECT product_id, mixed_real_cost, onsite_roi2_shopping_sku, onsite_roi2_shopping_value, onsite_mixed_real_roi2_shopping FROM plugin.ad_today WHERE seller_id = :seller ORDER BY product_id",
+    }[kind]
+    with db_engine.connect() as connection:
+        stored = connection.execute(text(statement), {"seller": SELLER}).mappings().all()
+        archived = connection.execute(
+            text("SELECT response_body FROM plugin.ad_raw_log WHERE seller_id = :seller"),
+            {"seller": SELLER},
+        ).scalar_one()
+    assert len(stored) == 31
+    for index, record in enumerate(stored):
+        assert record["product_id"] == f"TEST_PLACEHOLDER_{index:02d}"
+        assert record["mixed_real_cost"] == Decimal("10.0000")
+        assert record["onsite_roi2_shopping_sku"] == 2
+        assert record["onsite_roi2_shopping_value"] == Decimal("49.83")
+        assert record["onsite_mixed_real_roi2_shopping"] == (
+            None if index == 15 else Decimal("4.9830")
+        )
+    assert archived["body"]["data"]["table"] == rows
+    assert rows[15]["onsite_mixed_real_roi2_shopping"] == "-"
+
+
+@pytest.mark.parametrize("kind", ["daily", "today"])
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("mixed_real_cost", "not-a-number"),
+        ("mixed_real_cost", "1e16"),
+        ("onsite_roi2_shopping_value", "NaN"),
+        ("onsite_mixed_real_roi2_shopping", "Infinity"),
+        ("onsite_roi2_shopping_sku", True),
+        ("onsite_roi2_shopping_sku", "2.5"),
+        ("onsite_roi2_shopping_sku", str(2**63)),
+    ],
+)
+def test_dumps_v4_invalid_metrics_reject_complete_dump_with_field_diagnostic(
+    api_client, readwrite_key, db_engine, kind, field, invalid
+):
+    rows = [
+        {"product_id": "TEST_VALID_BEFORE_INVALID", "mixed_real_cost": "10.00"},
+        {"product_id": "TEST_INVALID_METRIC", field: invalid},
+    ]
+    response = _post(api_client, readwrite_key, _dump_body_v4(kind=kind, rows=rows))
+
+    assert response.status_code == 422, response.text
+    error = response.json()
+    assert error["code"] == "INVALID_AD_METRIC"
+    assert error["retryable"] is False
+    assert field in error["message"]
+    assert "rows[1]" in error["message"]
+    assert _ad_daily_count(db_engine) == 0
+    assert _ad_today_count(db_engine) == 0
+    assert _ad_raw_log_count(db_engine) == 0
+
+
 def test_dumps_v4_daily_correction_updates_existing_natural_key(
     api_client, readwrite_key, db_engine
 ):
