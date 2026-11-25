@@ -314,7 +314,8 @@ CREATE TABLE IF NOT EXISTS commerce.shops (
     service_id text,
     shop_code text,
     discovered_at timestamp with time zone,
-    plugin_metadata jsonb DEFAULT '{}'::jsonb NOT NULL
+    plugin_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    shop_alias text
 );
 
 
