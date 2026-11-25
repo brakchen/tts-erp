@@ -8,7 +8,7 @@ concurrency:
   group: ad-metric-isolated-validation
   cancel-in-progress: false
 env:
-  TARGET_SHA: c7c76224244ed7df9f5b15550f1379d653eabb8b
+  TARGET_SHA: caae9dc3ffe95d64cf036fbc425520ea12bf3914
   BASE_SHA: c9bed5327762d8a80bd44a8d8a6701c28215202f
 jobs:
   validate:
@@ -65,6 +65,9 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install --disable-pip-version-check -e '.[dev]' pytest pytest-asyncio pytest-cov PyYAML
           npm ci --prefix frontend
+      - name: Install Chromium for browser runtime contracts
+        working-directory: candidate
+        run: .venv/bin/python -m playwright install --with-deps chromium
       - name: Restore safe schema into CI-only base
         working-directory: candidate
         env:
