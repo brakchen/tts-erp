@@ -8,7 +8,7 @@ concurrency:
   group: ad-metric-isolated-validation
   cancel-in-progress: false
 env:
-  TARGET_SHA: 9d77d131f17c8dbbcae9ef4e2c08210b86acaedf
+  TARGET_SHA: c7c76224244ed7df9f5b15550f1379d653eabb8b
   BASE_SHA: c9bed5327762d8a80bd44a8d8a6701c28215202f
 jobs:
   validate:
