@@ -82,7 +82,7 @@ def main(results: Path, evidence: dict) -> int:
     os.environ["PYTEST_PLUGINS"] = "ci_result_report"
     os.environ["CI_RESULT_DIR"] = str(results)
     os.environ["PYTHONPATH"] = os.pathsep.join(filter(None, (os.environ.get("PYTHONPATH"), str(Path(__file__).resolve().parent))))
-    rc = logged(["bash", "scripts/test_baseline.sh", "--scope", "auto", "--base", base,
+    rc = logged(["bash", "scripts/test_baseline.sh", "--refresh-template", "--scope", "auto", "--base", base,
                  "--keep-log", str(results / "pytest.log")], results / "baseline-auto.log")
     evidence["baseline_exit"] = rc
     report = json.loads((results / "selected-report.json").read_text())
