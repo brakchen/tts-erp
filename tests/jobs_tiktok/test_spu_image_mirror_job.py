@@ -185,7 +185,7 @@ def test_stream_upload_closes_downloaded_file(db_session) -> None:
             self.puts.append((key, b"image", content_type))
 
     minio = StreamMinio()
-    _, result = invoke_seeded_job(
+    result = invoke_seeded_job(
         mirror.run,
         db_session,
         downloader=lambda _url: (stream, 5, "image/jpeg"),

@@ -684,17 +684,21 @@ def test_negative_canonical_roi_is_not_hidden(
         )
         session.add(case)
         session.flush()
-        session.add(
-            CaseLine(
-                case_id=case.id,
-                sales_order_line_id=line.id,
-                external_case_line_id="TEST_COMPARE_REFUND_LINE",
-                quantity=1,
-                refund_amount=100000,
-                currency="VND",
-                should_replenish_stock=False,
+        # Strict full loss requires the complete three-SPU order to be refunded.
+        for refund_line in session.scalars(
+            select(SalesOrderLine).where(SalesOrderLine.order_pk == order.id)
+        ):
+            session.add(
+                CaseLine(
+                    case_id=case.id,
+                    sales_order_line_id=refund_line.id,
+                    external_case_line_id=f"TEST_COMPARE_REFUND_LINE_{refund_line.id}",
+                    quantity=refund_line.quantity,
+                    refund_amount=refund_line.quantity * refund_line.unit_price,
+                    currency="VND",
+                    should_replenish_stock=False,
+                )
             )
-        )
         session.commit()
     response = get(api_client, readonly_key, scope, spu_ids=scope["products"][0])
     assert response.status_code == 200, response.text

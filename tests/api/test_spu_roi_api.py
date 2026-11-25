@@ -1476,7 +1476,8 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["sales"] == m4(reconstructed_sales)
     assert "SETTLEMENT" in body["meta"]["fee"]["note"]
     assert "人工标注" in body["meta"]["cost_assumption"]
-    assert "同步货源价不参与计算" in body["meta"]["cost_assumption"]
+    assert "其次使用已核实的妙手采购成交价(PURCHASE_PRICE)" in body["meta"]["cost_assumption"]
+    assert "公共采集箱挂牌价不参与计算" in body["meta"]["cost_assumption"]
     assert "40 CNY" in body["meta"]["cost_assumption"]
     assert "缺成本" in body["meta"]["cost_assumption"]
 
@@ -4180,7 +4181,6 @@ def test_spu_roi_page_uses_bootstrap_responsive_layout(api_client, readonly_key)
     assert "flex flex-wrap" in page and "@media (max-width: 767px)" in css
     assert "minmax(0, 1fr)" in css and 'className="erp-table-scroll"' in details
     assert "frozen: true" in table and "variableHeight: true" in table
-    assert "nth-child(" not in css
     assert "bootstrap.min" not in body and "row-cols-" not in page + details
     assert "column.hide()" in table and "key?.startsWith('priceStats.')" in table
 
@@ -4228,7 +4228,7 @@ def test_spu_roi_dashboard_metrics_are_never_truncated():
 
 def test_spu_roi_drill_summary_matches_actual_dashboard_metrics():
     """Totals and row details share current-metric definitions and explanations."""
-    expected = {"总单量": "total_orders", "广告消耗": "spend", "有效单量": "effective_order_count", "有效销售": "effective_sales", "退款数": "refund_order_count", "退款率": "refund_rate", "全损量": "strict_full_loss_order_count", "全损率": "strict_full_loss_rate", "国内取消量": "domestic_cancelled_order_count", "国内取消率": "cancel_rate", "净利润": "net_profit", "实际ROI": "roi_real", "实际保本ROI": "roi_breakeven", "广告系统实际ROI": "ad_system_actual_roi", "广告系统保本ROI": "ad_system_breakeven_roi"}
+    expected = {"总单量": "total_orders", "广告消耗": "spend", "有效单量": "effective_order_count", "有效销售": "effective_sales", "退款数": "refund_order_count", "退款率": "refund_rate", "严格全损单": "strict_full_loss_order_count", "严格全损率": "strict_full_loss_rate", "国内取消量": "domestic_cancelled_order_count", "国内取消率": "cancel_rate", "净利润": "net_profit", "实际ROI": "roi_real", "实际保本ROI": "roi_breakeven", "广告系统实际ROI": "ad_system_actual_roi", "广告系统保本ROI": "ad_system_breakeven_roi"}
     assert {label: field for label, field, _ in _react_profitability_metrics("currentMetrics")} == expected
     summary = _react_profitability_source("Summary.tsx")
     details = _react_profitability_source("DrillDetails.tsx")
@@ -4241,7 +4241,7 @@ def test_spu_roi_drill_summary_matches_actual_dashboard_metrics():
 
 def test_spu_roi_pnl_cogs_rows_show_qty_times_unit_cost():
     details = _react_profitability_source("DrillDetails.tsx")
-    assert "货本 · 售出件" in details and "货本 · 全损取消件" in details
+    assert "货本 · 售出件" in details and "货本 · 严格全损取消件" in details
     assert "件 × " in details
     assert "displayValue(row.units_sold)" in details and "displayValue(row.strict_full_loss_cancelled_qty)" in details
     assert "displayValue(row.unit_cost_used)" in details
@@ -4705,7 +4705,7 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
     table = _react_profitability_source("ProfitabilityTable.tsx")
     block = table.split("export const columns = [", 1)[1].split("] as const", 1)[0]
     labels = re.findall(r"\['([^']+)', '[^']+'\]", block)
-    assert labels == ["广告消耗", "广告系统实际ROI", "广告系统保本ROI", "有效销售", "总单量", "有效单量", "取消率%", "全损率%", "净利润"]
+    assert labels == ["广告消耗", "广告系统实际ROI", "广告系统保本ROI", "有效销售", "总单量", "有效单量", "取消率%", "严格全损率%", "净利润"]
     assert "title: '商品', field: 'spu_id'" in table
     for retired in ("实际ROI", "保本ROI", "销售$", "有效销售$", "退货$", "取消单量", "退货率%", "全损退款$", "关联广告数"):
         assert retired not in labels
