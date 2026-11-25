@@ -13,6 +13,8 @@ from typing import Any
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from tts_erp_v2.plugin.ads.metrics import normalize_ad_metrics
+
 log = logging.getLogger("tts_erp_v2.plugin.ads.repository")
 
 # ─── daily-sync-with-coverage 结构化写入 SQL ─────────────────────────
@@ -358,12 +360,9 @@ def upsert_daily_rows(
     first_product_id = rows[0]["product_id"] if rows else None
     inserted = 0
 
-    for row in rows:
+    for row_index, row in enumerate(rows):
         product_id = row["product_id"]
-        mixed_real_cost = row.get("mixed_real_cost")
-        onsite_roi2_shopping_sku = row.get("onsite_roi2_shopping_sku")
-        onsite_roi2_shopping_value = row.get("onsite_roi2_shopping_value")
-        onsite_mixed_real_roi2_shopping = row.get("onsite_mixed_real_roi2_shopping")
+        metrics = normalize_ad_metrics(row, row_index=row_index)
 
         metrics_extra = {k: v for k, v in row.items() if k not in _CORE_METRIC_KEYS}
 
@@ -377,10 +376,7 @@ def upsert_daily_rows(
                 "product_id": product_id,
                 "endpoint": endpoint,
                 "day": day,
-                "mixed_real_cost": mixed_real_cost,
-                "onsite_roi2_shopping_sku": onsite_roi2_shopping_sku,
-                "onsite_roi2_shopping_value": onsite_roi2_shopping_value,
-                "onsite_mixed_real_roi2_shopping": onsite_mixed_real_roi2_shopping,
+                **metrics,
                 "metrics_extra": json.dumps(metrics_extra, ensure_ascii=False),
                 "created_at": created_at,
             },
@@ -458,12 +454,9 @@ def upsert_today_rows(
     first_product_id = rows[0]["product_id"] if rows else None
     inserted = 0
 
-    for row in rows:
+    for row_index, row in enumerate(rows):
         product_id = row["product_id"]
-        mixed_real_cost = row.get("mixed_real_cost")
-        onsite_roi2_shopping_sku = row.get("onsite_roi2_shopping_sku")
-        onsite_roi2_shopping_value = row.get("onsite_roi2_shopping_value")
-        onsite_mixed_real_roi2_shopping = row.get("onsite_mixed_real_roi2_shopping")
+        metrics = normalize_ad_metrics(row, row_index=row_index)
 
         metrics_extra = {k: v for k, v in row.items() if k not in _CORE_METRIC_KEYS}
 
@@ -477,10 +470,7 @@ def upsert_today_rows(
                 "product_id": product_id,
                 "endpoint": endpoint,
                 "day": day,
-                "mixed_real_cost": mixed_real_cost,
-                "onsite_roi2_shopping_sku": onsite_roi2_shopping_sku,
-                "onsite_roi2_shopping_value": onsite_roi2_shopping_value,
-                "onsite_mixed_real_roi2_shopping": onsite_mixed_real_roi2_shopping,
+                **metrics,
                 "metrics_extra": json.dumps(metrics_extra, ensure_ascii=False),
                 "created_at": created_at,
             },
