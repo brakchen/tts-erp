@@ -358,10 +358,8 @@ class MemoryStore:
 
 @pytest.fixture()
 def media_tools(tmp_path, monkeypatch):
-    monkeypatch.setenv(
-        "RUNNINGHUB_FFMPEG",
-        shutil.which("ffmpeg") or str(Path.home() / ".local/bin/ffmpeg"),
-    )
+    ffmpeg = shutil.which("ffmpeg") or str(Path.home() / ".local/bin/ffmpeg")
+    monkeypatch.setenv("RUNNINGHUB_FFMPEG", ffmpeg)
     monkeypatch.setenv(
         "RUNNINGHUB_FFPROBE",
         shutil.which("ffprobe") or str(Path.home() / ".local/bin/ffprobe"),
@@ -369,7 +367,7 @@ def media_tools(tmp_path, monkeypatch):
     dry_run_video(tmp_path / "TEST_reference.mp4")
     _run(
         [
-            str(Path.home() / ".local/bin/ffmpeg"),
+            ffmpeg,
             "-v",
             "error",
             "-f",
