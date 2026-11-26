@@ -361,7 +361,7 @@ def test_callback_upgrades_plugin_registered_shop(
     assert account.id == target_shop.shop_pk and account.credential_id is not None
     assert account.account_name == "TEST Plugin Shop"
     assert account.shop_alias == "TEST Plugin Alias"
-    assert response.json()["shops"][0]["shop_alias"] == "TEST Plugin Alias"
+    assert response.json()["result"]["shops"][0]["shop_alias"] == "TEST Plugin Alias"
     assert str(account.opened_date) == "2026-06-01"
 
 
