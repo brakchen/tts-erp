@@ -66,20 +66,23 @@ describe('shops content', () => {
   it('sends the selected source, App and OAuth filters and clears them with the search on reset', async () => {
     const fetcher = api(async () => { throw new Error('TEST no commands'); });
     const user = userEvent.setup(); await mount(); await screen.findByText(shop.shop_id);
-    await user.click(screen.getByRole('button', { name: '全部来源 发现来源' }));
+    const filters = () => within(screen.getByLabelText('店铺筛选'));
+    await user.click(filters().getByRole('button', { name: '全部来源 发现来源' }));
     await user.click(await screen.findByRole('option', { name: 'Ads 插件' }));
-    await user.click(screen.getByRole('button', { name: '全部配置 App 配置' }));
+    await user.click(filters().getByRole('button', { name: '全部配置 App 配置' }));
     await user.keyboard('{ArrowDown}{Enter}');
-    await user.click(screen.getByRole('button', { name: '全部授权状态 OAuth 授权' }));
+    await user.click(filters().getByRole('button', { name: '全部授权状态 OAuth 授权' }));
     await user.click(await screen.findByRole('option', { name: '需重新授权' }));
-    await user.type(screen.getByRole('searchbox', { name: '店铺搜索' }), 'TEST_query{Enter}');
+    await user.click(filters().getByRole('searchbox', { name: '店铺搜索' }));
+    await user.paste('TEST_query');
+    await user.keyboard('{Enter}');
     await waitFor(() => {
       const query = new URL(fetcher.mock.calls.at(-1)![0], 'https://test.invalid').searchParams;
       expect(Object.fromEntries(query)).toMatchObject({ platform: 'tiktok', view: 'management', offset: '0', q: 'TEST_query', source: 'ads-data-sync', app_state: 'configured', auth_state: 'reauthorize' });
     });
-    await user.click(screen.getByRole('button', { name: '重置' }));
+    await user.click(filters().getByRole('button', { name: '重置' }));
     await waitFor(() => expect(fetcher.mock.calls.at(-1)![0]).toBe('/tts/v2/commerce/channel-accounts?platform=tiktok&view=management&limit=50&offset=0'));
-    expect(screen.getByRole('searchbox', { name: '店铺搜索' })).toHaveValue('');
+    expect(filters().getByRole('searchbox', { name: '店铺搜索' })).toHaveValue('');
   });
 
   it('registers metadata once under repeated submit without sending App credentials', async () => {
