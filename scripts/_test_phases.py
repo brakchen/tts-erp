@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -87,12 +88,32 @@ def _strings(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(entry, str) for entry in value)
 
 
+def _template_fingerprint(value: Any) -> str | None:
+    if (isinstance(value, dict) and type(value.get("schemaVersion")) is int and value["schemaVersion"] == 1
+            and isinstance(value.get("fingerprint"), str) and re.fullmatch(r"[0-9a-f]{64}", value["fingerprint"])):
+        return value["fingerprint"]
+    return None
+
+
+def _terminal_evidence(value: dict[str, Any]) -> bool:
+    outcomes, skips = value.get("terminalOutcomes"), value.get("allowedSkips")
+    return (isinstance(outcomes, dict)
+            and all(isinstance(node, str) and isinstance(outcome, str)
+                    and outcome in {"passed", "failed", "error", "skipped", "xfailed", "xpassed"}
+                    for node, outcome in outcomes.items())
+            and isinstance(skips, list)
+            and all(isinstance(skip, dict) and isinstance(skip.get("nodeid"), str)
+                    and isinstance(skip.get("reason"), str) and _strings(skip.get("markers"))
+                    and bool(skip["markers"]) and set(skip["markers"]) <= {"skip", "skipif"} for skip in skips))
+
+
 def _valid_report(value: dict[str, Any] | None, phase: Phase) -> bool:
-    return bool(value is not None and value.get("phase") == phase.name
+    return bool(isinstance(value, dict) and value.get("phase") == phase.name
                 and value.get("required") == phase.required
                 and type(value.get("status")) is int and value["status"] in range(6)
                 and type(value.get("ran")) is int and value["ran"] >= 0
-                and all(_strings(value.get(key)) for key in ("failed", "missing", "nodes", "collectedNodes")))
+                and all(_strings(value.get(key)) for key in ("failed", "missing", "nodes", "collectedNodes"))
+                and _terminal_evidence(value))
 
 
 def aggregate(phases: list[Phase], results: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -101,21 +122,42 @@ def aggregate(phases: list[Phase], results: dict[str, dict[str, Any]]) -> dict[s
     seen: set[str] = set()
     duplicates: set[str] = set()
     ran = 0
+    expected_template: str | None = None
     for phase in phases:
         result = results.get(phase.name, {})
+        fingerprint = _template_fingerprint(result.get("templateReceipt"))
+        if fingerprint is None:
+            missing.add(f"phase:{phase.name}:template-receipt")
+        elif expected_template is None:
+            expected_template = fingerprint
+        elif fingerprint != expected_template:
+            missing.add(f"phase:{phase.name}:template-changed")
         value = result.get("report")
         if not _valid_report(value, phase):
             missing.update([f"phase:{phase.name}", *phase.required])
             continue
         missing.update(value["missing"])
-        missing.update(target for target in phase.required if not any(_matches(node, target) for node in value["nodes"]))
+        terminal = value["terminalOutcomes"]
+        allowed_skips = {skip["nodeid"] for skip in value["allowedSkips"]}
+        evidence = set(value["nodes"]) | {node for node, outcome in terminal.items() if outcome == "xfailed"}
+        missing.update(target for target in phase.required if not any(
+            _matches(node, target) for node in evidence | (allowed_skips if "::" not in target else set())
+        ))
         failed.update(value["failed"])
         ran += value["ran"]
         collected = set(value["collectedNodes"])
+        missing.update(f"unreported:{node}" for node in collected - set(terminal))
+        if set(terminal) - collected or not allowed_skips <= {node for node, outcome in terminal.items()
+                                                            if outcome == "skipped"}:
+            missing.add(f"phase:{phase.name}:invalid-terminal-outcomes")
+        missing.update(f"skipped:{node}" for node, outcome in terminal.items() if outcome == "skipped" and (
+            node not in allowed_skips or any("::" in target and _matches(node, target) for target in phase.required)
+        ))
         duplicates.update(node for node, count in Counter(value["collectedNodes"]).items() if count > 1)
         duplicates.update(seen & collected)
         seen.update(collected)
         if (not set(value["nodes"]) <= collected or not set(value["failed"]) <= set(value["nodes"])
+                or any(terminal.get(node) == "skipped" for node in value["nodes"])
                 or value["ran"] > len(value["nodes"])):
             missing.add(f"phase:{phase.name}:invalid-nodes")
         code = result.get("exitCode")
@@ -169,6 +211,7 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str, ref
     results: dict[str, dict[str, Any]] = {}
     started = time.monotonic()
     refreshed = False
+    template_fingerprint: str | None = None
 
     def save() -> dict[str, Any]:
         value = aggregate(phases, results)
@@ -183,14 +226,19 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str, ref
             log = destination.parent / f"{phase.name}.log"
             progress = child_report.with_suffix(".progress.json")
             components = destination.parent / f"{phase.name}.components.json"
+            template_receipt = destination.parent / f"{phase.name}.template.json"
             # Never accept a previous invocation's successful report as evidence.
-            for artifact in (child_report, progress, components):
+            for artifact in (child_report, progress, components, template_receipt):
                 artifact.unlink(missing_ok=True)
             env = os.environ.copy()
             for name in ("TTS_ERP_TEST_PREPARED_RELEASE", "TTS_ERP_TEST_REFRESHED_SELECTION_HEAD",
-                         "TTS_ERP_COMPONENT_REPORT", "TTS_ERP_TEST_PROGRESS"):
+                         "TTS_ERP_COMPONENT_REPORT", "TTS_ERP_TEST_PROGRESS",
+                         "TTS_ERP_TEST_TEMPLATE_RECEIPT", "TTS_ERP_TEST_EXPECTED_TEMPLATE_FINGERPRINT"):
                 env.pop(name, None)
-            env.update(TTS_ERP_TEST_PHASE=phase.name, TTS_ERP_TEST_PROGRESS=str(progress))
+            env.update(TTS_ERP_TEST_PHASE=phase.name, TTS_ERP_TEST_PROGRESS=str(progress),
+                       TTS_ERP_TEST_TEMPLATE_RECEIPT=str(template_receipt))
+            if template_fingerprint is not None:
+                env["TTS_ERP_TEST_EXPECTED_TEMPLATE_FINGERPRINT"] = template_fingerprint
             if refreshed:
                 env["TTS_ERP_TEST_REFRESHED_SELECTION_HEAD"] = head
             components_required = phase.name == "frontend" and plan.frontend
@@ -207,6 +255,7 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str, ref
             result: dict[str, Any] = {
                 "log": str(log), "progress": str(progress), "reportPath": str(child_report),
                 "componentsRequired": components_required,
+                "templateReceiptPath": str(template_receipt),
             }
             results[phase.name] = result
             try:
@@ -214,6 +263,7 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str, ref
             finally:
                 result["elapsedSeconds"] = round(time.monotonic() - phase_started, 3)
                 result["report"] = _read(child_report)
+                result["templateReceipt"] = _read(template_receipt)
                 if components_required:
                     result["components"] = _read(components)
                 save()
@@ -221,13 +271,17 @@ def run(base: str, head: str, report: str, scenarios: list[str], scope: str, ref
                   flush=True)
             _component_summary(result.get("components"))
             value = result["report"]
+            fingerprint = _template_fingerprint(result["templateReceipt"])
             if _valid_report(value, phase):
                 for node in value["failed"]:
                     print(f"FAILED {node}", flush=True)
             # A missing report means the wrapper/collection never established
             # usable execution evidence. Cleanup failure is always terminal.
-            if not _valid_report(value, phase) or result["exitCode"] in {70, 130, 143}:
+            if (not _valid_report(value, phase) or result["exitCode"] in {70, 130, 143}
+                    or fingerprint is None
+                    or (template_fingerprint is not None and fingerprint != template_fingerprint)):
                 break
+            template_fingerprint = fingerprint
             if refresh and index == 0:
                 refreshed = True
     finally:

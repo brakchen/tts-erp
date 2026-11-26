@@ -168,3 +168,68 @@ def test_phase_targets_deduplicate_parent_roots_and_explicit_children(tmp_path, 
     [phase] = runner.phase_plan(plan, "auto")
     assert phase.targets == ["tests/sync_worker"]
     assert phase.required == plan.backend
+
+
+@pytest.mark.parametrize("declaration,allowed", [
+    ("", False),
+    ('@pytest.mark.skipif(False, reason="TEST_inactive")\n', False),
+    ('@pytest.mark.skip(reason="TEST_declared")\n', True),
+    ('@pytest.mark.skipif(True, reason="TEST_declared")\n', True),
+])
+def test_phase_reports_every_terminal_outcome_and_rejects_dynamic_skips(tmp_path, monkeypatch, declaration, allowed):
+    from scripts import _test_phases
+
+    target = "tests/unit/test_outcomes.py"
+    plan = Selection(backend=[target])
+    sources = {target: (
+        "import pytest\n"
+        "def test_pass(): pass\n"
+        f"{declaration}def test_skip(): pytest.skip('TEST_missing_environment')\n"
+        "@pytest.mark.xfail(reason='TEST_expected')\ndef test_expected(): assert False\n"
+        "@pytest.mark.xfail(run=False, reason='TEST_expected_notrun')\ndef test_expected_notrun(): assert False\n"
+    )}
+    runner = _collector_project(tmp_path, monkeypatch, plan, sources)
+    report = tmp_path / "backend.json"
+    assert runner.run("base", "head", str(report), [], "auto", "backend") == 0
+    value = json.loads(report.read_text())
+    skipped = f"{target}::test_skip"
+    assert value["terminalOutcomes"] == {
+        f"{target}::test_pass": "passed", skipped: "skipped",
+        f"{target}::test_expected": "xfailed", f"{target}::test_expected_notrun": "xfailed",
+    }
+    assert set(value["collectedNodes"]) == set(value["terminalOutcomes"])
+    if allowed:
+        assert value["missing"] == []
+        assert value["allowedSkips"] == [{
+            "nodeid": skipped, "markers": ["skipif" if "skipif" in declaration else "skip"],
+            "reason": "TEST_declared",
+        }]
+    else:
+        assert value["missing"] == [f"skipped:{skipped}"]
+        assert value["allowedSkips"] == []
+    [phase] = runner.phase_plan(plan, "auto")
+    result = _test_phases.aggregate([phase], {"backend": {
+        "report": value, "exitCode": 0, "templateReceipt": {"schemaVersion": 1, "fingerprint": "a" * 64},
+    }})
+    assert result["status"] == (0 if allowed else 2)
+
+
+def test_explicit_required_node_cannot_pass_as_declared_skip(tmp_path, monkeypatch):
+    from scripts import _test_phases
+
+    target = "tests/unit/test_declared.py"
+    node = f"{target}::test_declared"
+    plan = Selection(backend=[node])
+    runner = _collector_project(tmp_path, monkeypatch, plan, {target: (
+        "import pytest\n@pytest.mark.skip(reason='TEST_declared')\ndef test_declared(): pass\n"
+    )})
+    report = tmp_path / "backend.json"
+    assert runner.run("base", "head", str(report), [], "auto", "backend") == 0
+    value = json.loads(report.read_text())
+    assert value["terminalOutcomes"] == {node: "skipped"}
+    assert {node, f"skipped:{node}"} <= set(value["missing"])
+    [phase] = runner.phase_plan(plan, "auto")
+    result = _test_phases.aggregate([phase], {"backend": {
+        "report": value, "exitCode": 0, "templateReceipt": {"schemaVersion": 1, "fingerprint": "a" * 64},
+    }})
+    assert result["status"] == 2 and "selection:zero-executions" in result["missing"]

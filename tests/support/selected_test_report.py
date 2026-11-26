@@ -11,6 +11,8 @@ import pytest
 from _pytest.terminal import TerminalReporter
 
 _collected: list[str] = []
+_declared_marks: dict[str, list[str]] = {}
+_allowed_skips: dict[str, dict[str, object]] = {}
 
 
 def _matches(node: str, target: str) -> bool:
@@ -46,6 +48,31 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         rejected = set(deselected)
         items[:] = [item for item in items if item not in rejected]
     _collected[:] = [item.nodeid for item in items]
+    _declared_marks.clear()
+    _allowed_skips.clear()
+    _declared_marks.update({
+        item.nodeid: sorted({mark.name for mark in item.iter_markers() if mark.name in {"skip", "skipif"}})
+        for item in items
+    })
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Iterator[None]:
+    outcome = yield
+    report = outcome.get_result()
+    # Pytest's own skip-mark setup raises skip.Exception with this evidence.
+    # Observe the actual decision instead of evaluating skipif expressions a
+    # second time. A false skipif followed by pytest.skip() is not an allowance.
+    # Pytest 9.0.2 skip-mark protocol (MIT):
+    # https://github.com/pytest-dev/pytest/blob/9.0.2/src/_pytest/skipping.py
+    if (report.when == "setup" and report.skipped and not hasattr(report, "wasxfail")
+            and _declared_marks.get(item.nodeid) and call.excinfo is not None
+            and isinstance(call.excinfo.value, pytest.skip.Exception)
+            and getattr(call.excinfo.value, "_use_item_location", False)):
+        _allowed_skips[item.nodeid] = {
+            "nodeid": item.nodeid, "markers": _declared_marks[item.nodeid],
+            "reason": str(call.excinfo.value),
+        }
 
 
 def pytest_terminal_summary(terminalreporter: TerminalReporter, exitstatus: int) -> None:
@@ -62,8 +89,25 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, exitstatus: int)
         for report in stats.get(outcome, ())
         if getattr(report, "when", None) in {"setup", "call", "teardown"}
     }
+    terminal = {
+        report.nodeid: outcome
+        for outcome in ("passed", "xfailed", "xpassed", "skipped", "failed", "error")
+        for report in stats.get(outcome, ())
+        if (getattr(report, "when", None) == "call"
+            or (getattr(report, "when", None) in {"setup", "teardown"}
+                and outcome in {"failed", "error", "skipped", "xfailed"}))
+    }
     required = json.loads(os.environ["TTS_ERP_TEST_SELECTION_REQUIRED"])
-    missing = [target for target in required if not any(_matches(node, target) for node in ran | failed)]
+    evidence = ran | failed | {node for node, outcome in terminal.items() if outcome == "xfailed"}
+    missing = [target for target in required if not any(
+        _matches(node, target) for node in evidence | (set(_allowed_skips) if "::" not in target else set())
+    )]
+    missing.extend(f"unreported:{node}" for node in _collected if node not in terminal)
+    missing.extend(f"skipped:{node}" for node, outcome in terminal.items()
+                   if outcome == "skipped" and (
+                       node not in _allowed_skips
+                       or any("::" in target and _matches(node, target) for target in required)
+                   ))
     if os.environ["TTS_ERP_TEST_SELECTION_BACKEND_ALL"] == "1" and not (ran | failed):
         missing.append("backend")
     progress = {}
@@ -78,6 +122,8 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, exitstatus: int)
             "status": int(exitstatus), "ran": len(ran), "failed": sorted(failed), "missing": missing,
             "phase": os.environ["TTS_ERP_TEST_PHASE"], "required": required,
             "nodes": sorted(ran | failed), "collectedNodes": _collected,
+            "terminalOutcomes": terminal,
+            "allowedSkips": [_allowed_skips[node] for node in sorted(_allowed_skips)],
             "timings": progress.get("timings", {}),
         }),
         encoding="utf-8",
