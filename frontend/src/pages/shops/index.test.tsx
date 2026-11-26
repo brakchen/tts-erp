@@ -145,7 +145,7 @@ describe('shops content', () => {
     expect(within(dialog).queryByRole('textbox', { name: '店铺名称' })).toBeNull();
     expect(within(dialog).queryByRole('textbox', { name: '区域' })).toBeNull();
     const alias = within(dialog).getByRole('textbox', { name: '店铺别名' });
-    await user.type(alias, '  TEST_alias  ');
+    fireEvent.change(alias, { target: { value: '  TEST_alias  ' } });
     fireEvent.change(within(dialog).getByLabelText('开店日期', { exact: true }), { target: { value: openedDate } });
     await user.click(save(dialog)); await screen.findByText('店铺信息已保存');
     expect(commands).toHaveLength(1); expect(commands[0].url).toBe('/tts/v2/admin/shops/41');

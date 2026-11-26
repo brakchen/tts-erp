@@ -579,25 +579,31 @@ def test_drill_same_row_close_then_reopen_works(browser_conftest, frontend_brows
     page.locator(".tabulator-row").first.wait_for(state="visible")
     page.evaluate(_DRILL_CLICK_HELPERS_JS)
 
-    page.evaluate("() => window.__drillClickRow()")  # 打开
-    drill = page.locator(".op-drill-row")
-    drill.wait_for(state="visible")
-    assert drill.locator(".op-drill-body").inner_text().strip() != ""
-    page.wait_for_timeout(20)
-
-    page.evaluate("() => window.__drillClickRow()")  # 同一行再点一次 = 关闭
-    assert page.locator(".op-drill-row").count() == 0
-    page.wait_for_timeout(20)
-
-    page.evaluate("() => window.__drillClickRow()")  # 立即重开
-    drill = page.locator(".op-drill-row")
-    drill.wait_for(state="visible")
-    assert drill.locator(".op-drill-body").inner_text().strip() != ""
-
-    # 三次点击确实都落在 300ms 内：用例覆盖的就是「用户级快速 toggle」。
-    marks = page.evaluate("() => window.__drillClicks")
+    # Keep the rapid interaction in the browser so Python/Playwright round trips
+    # do not consume the 300ms user-interaction window.
+    observed = page.evaluate("""async () => {
+      const frame = () => new Promise(requestAnimationFrame);
+      const pause = () => new Promise(resolve => setTimeout(resolve, 20));
+      const body = () => document.querySelector('.op-drill-row .op-drill-body')?.innerText.trim() || '';
+      window.__drillClickRow();
+      await frame();
+      const opened = body();
+      await pause();
+      window.__drillClickRow();
+      await frame();
+      const closed = document.querySelectorAll('.op-drill-row').length;
+      await pause();
+      window.__drillClickRow();
+      await frame();
+      return {opened, closed, reopened: body(), marks: window.__drillClicks};
+    }""")
+    assert observed["opened"], observed
+    assert observed["closed"] == 0, observed
+    assert observed["reopened"], observed
+    marks = observed["marks"]
     assert len(marks) == 3, marks
     assert marks[2] - marks[0] < 300, marks
+
 
 
 def test_drill_tabulator_frozen_row_duplicate_event_still_deduplicated(
