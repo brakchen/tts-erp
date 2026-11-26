@@ -27,7 +27,6 @@
 #spu-time-scope .scope-sample-controls label { display: flex; align-items: center; gap: 8px; }
 #spu-time-scope .scope-reference .erp-profit-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 14px 0; border-top: 1px solid color-mix(in srgb, var(--warn) 18%, var(--surface)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 18%, var(--surface)); }
 #spu-time-scope .scope-reference .erp-profit-metrics dd { font-size: 25px; color: var(--ink); }
-#spu-time-scope .scope-reference footer { display: flex; gap: 12px; flex-wrap: wrap; justify-content: space-between; font-size: 12px; color: var(--ink-soft); }
 #spu-time-scope .scope-source-link { color: var(--warn); font-size: 12px; }
 #spu-time-scope .scope-exposure { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 #spu-time-scope .scope-date-error { color: var(--danger); margin: 8px 0 0; }

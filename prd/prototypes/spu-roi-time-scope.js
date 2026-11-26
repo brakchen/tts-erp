@@ -43,10 +43,6 @@
       });
     });
     lookback.addEventListener('change', applySample);
-    root.querySelector('#scope-shop').addEventListener('change', function (event) {
-      const name = event.target.selectedOptions[0].textContent;
-      root.querySelectorAll('[data-shop-name]').forEach(function (el) { el.textContent = name; });
-    });
     applyRange();
     applySample();
   }

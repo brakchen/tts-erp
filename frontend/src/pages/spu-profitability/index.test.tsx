@@ -54,13 +54,15 @@ beforeEach(() => {
   }));
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-it.each(['spu-roi', 'focused-spus'] as const)('keeps every %s search and scope control below the overview', async (pageId) => {
+it.each(['spu-roi', 'focused-spus'] as const)('keeps %s dates with results and the sample control inside profit', async (pageId) => {
   render(<Page bootstrap={{ ...bootstrap, pageId }} />);
   await screen.findByText('TEST_RESULT');
   const overview = screen.getByRole('region', { name: '经营概览' });
-  for (const control of [screen.getByRole('region', { name: '店铺与经营范围' }), screen.getByLabelText('按 SPU ID / 标题搜索')]) {
-    expect(overview.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  }
+  expect(overview).toContainElement(screen.getByRole('region', { name: '经营日期筛选' }));
+  expect(overview.compareDocumentPosition(screen.getByLabelText('按 SPU ID / 标题搜索')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const sample = within(overview).getByRole('region', { name: '历史预测依据' });
+  expect(sample).toContainElement(document.getElementById('filter-projection-lookback-days'));
+  expect(within(overview).getByLabelText('利润')).toContainElement(sample);
   expect(within(overview).getByLabelText('销售')).toBeInTheDocument();
   expect(within(overview).getByLabelText('成本')).toBeInTheDocument();
   expect(within(overview).getByLabelText('利润')).toBeInTheDocument();
