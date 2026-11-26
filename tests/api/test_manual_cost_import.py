@@ -5,11 +5,15 @@ from __future__ import annotations
 from io import BytesIO
 
 import pytest
+from fastapi import HTTPException, Request
 from openpyxl import Workbook
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 
 from tests.api.test_frontend_remaining_manual_identity import _facts
 from tests.api.test_frontend_remaining_manual_identity import products as _products
 from tts_erp_v2.api.v2 import manual_cost_import as routes
+from tts_erp_v2.db.models import ChannelAccount, ChannelProduct
 from tts_erp_v2.reporting.manual_cost_import import CostImportError, parse_cost_file
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
@@ -74,6 +78,16 @@ def test_parser_rejects_invalid_file_and_headers(content):
 
 def test_import_requires_readwrite(api_client, readonly_key):
     assert post(api_client, readonly_key, b"TEST").status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.layer_unit
+async def test_cookie_upload_requires_csrf_before_reading_file():
+    request = Request({"type": "http", "method": "POST", "path": BASE + "confirm",
+                       "headers": [], "api_key_role": "readwrite", "auth_method": "cookie"})
+    with pytest.raises(HTTPException) as error:
+        await routes.read_upload(request)
+    assert error.value.status_code == 403
 
 
 def test_preview_matches_shops_averages_and_never_writes(api_client, readwrite_key, db_engine, products):
@@ -172,3 +186,36 @@ def test_invalid_nonblank_amount_blocks_entire_product_group(api_client, readwri
     response = post(api_client, readwrite_key, content, "confirm?fingerprint=" + preview["fingerprint"])
     assert response.status_code == 422
     assert _facts(db_engine, products) == before
+
+
+def test_shop_alias_samples_merge_before_averaging(api_client, readwrite_key, db_engine, products):
+    with Session(db_engine) as session:
+        shop_pk = session.scalar(select(ChannelProduct.shop_pk).where(ChannelProduct.id == products[0]))
+        session.execute(update(ChannelAccount).where(ChannelAccount.id == shop_pk).values(shop_alias="TEST alias"))
+        session.commit()
+    content = xlsx([["10", SHOP_A, SHARED], ["20", "TEST alias", SHARED], ["30", "TEST alias", SHARED]])
+    response = post(api_client, readwrite_key, content)
+    assert response.status_code == 200, response.text
+    item, = response.json()["items"]
+    assert item["spuPk"] == str(products[0])
+    assert item["sampleCount"] == 3 and item["unitCost"] == "20.0000"
+
+
+def test_unauthorized_shops_are_not_import_targets(api_client, readwrite_key, db_engine, products):
+    with Session(db_engine) as session:
+        shop_pk = session.scalar(select(ChannelProduct.shop_pk).where(ChannelProduct.id == products[0]))
+        session.execute(update(ChannelAccount).where(ChannelAccount.id == shop_pk).values(credential_id=None))
+        session.commit()
+    response = post(api_client, readwrite_key, xlsx([["10", SHOP_A, SHARED]]))
+    assert response.status_code == 200, response.text
+    assert response.json()["readyCount"] == 0
+
+
+def test_unnamed_shop_can_use_an_unambiguous_spu(api_client, readwrite_key, db_engine, products):
+    with Session(db_engine) as session:
+        shop_pk = session.scalar(select(ChannelProduct.shop_pk).where(ChannelProduct.id == products[2]))
+        session.execute(update(ChannelAccount).where(ChannelAccount.id == shop_pk).values(account_name=None, shop_alias=None))
+        session.commit()
+    response = post(api_client, readwrite_key, xlsx([["10", "TEST export shop", UNIQUE]]))
+    assert response.status_code == 200, response.text
+    assert response.json()["items"][0]["spuPk"] == str(products[2])
