@@ -1,5 +1,5 @@
 import { editRowCost, readRowCost } from './test-editor';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
@@ -41,9 +41,13 @@ async function chooseOption(user: ReturnType<typeof userEvent.setup>, label: str
   // Select includes both its aria-label and visible Label in the trigger name.
   // Limit catalogue controls to their form so 50 rows' actions are not scanned.
   const scope = label === '当前店铺' ? screen : within(screen.getByLabelText('工作台筛选'));
-  await user.click(scope.getByRole('button', { name: (name) => name === label || name.endsWith(` ${label}`)
-    || (['排序字段', '排序方向'].includes(label) && name.includes(label)) }));
-  await user.click(await screen.findByRole('option', { name: option }));
+  await act(async () => {
+    await user.click(scope.getByRole('button', { name: (name) => name === label || name.endsWith(` ${label}`)
+      || (['排序字段', '排序方向'].includes(label) && name.includes(label)) }));
+  });
+  const options = within(await screen.findByRole('listbox'));
+  // These fetch mocks resolve immediately; flush the real selection and its read.
+  await act(async () => { await user.click(options.getByRole('option', { name: option })); });
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -95,7 +99,9 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     ['q', 'TEST 搜索 & SPU', '按 SPU 或标题搜索'],
   ])('sends %s=%s to the server before pagination and resets a nonzero offset', async (key, value, label) => {
     const fetcher = setup((query) => Array.from({ length: Number(query.get('limit')) }, (_, index) => ({ ...product(index), title: `TEST server ${query.get('offset')} row ${index}` })));
-    const user = userEvent.setup(); render(<ManualCosts {...props} />);
+    const user = userEvent.setup();
+    // Flush the immediate shop read, catalogue read and collection mount together.
+    await act(async () => { render(<ManualCosts {...props} />); });
     // Find the labelled container without scanning every row's accessible roles.
     const filters = () => within(screen.getByLabelText('工作台筛选'));
     const pagination = () => within(screen.getByLabelText('采购工作台分页'));
@@ -104,7 +110,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(catalogueQuery(fetcher).get('order')).toBe('asc');
     expect(catalogueQuery(fetcher).get('limit')).toBe('50');
     await waitFor(() => expect(pagination().getByRole('button', { name: '下一页' })).toBeEnabled());
-    await user.click(pagination().getByRole('button', { name: '下一页' }));
+    await act(async () => { await user.click(pagination().getByRole('button', { name: '下一页' })); });
     await screen.findByText('TEST server 50 row 0');
     expect(catalogueQuery(fetcher).get('offset')).toBe('50');
     if (key === 'q') {

@@ -166,6 +166,10 @@ isolation: every admitted run still creates and cleans its own clone and proof.
 Only offline lock/command-double tests use a private `TTS_ERP_TEST_CAPACITY_LOCK`;
 normal lanes must use the host default. Queue timeout defaults to 7200 seconds
 and prints waiting status; it does not increase test deadlines.
+An admitted heavy run uses at most three isolated Vitest workers, within the
+existing VM's memory budget. Other/manual invocations keep the two-worker default.
+Test files retain Vitest isolation; neither extra machines nor shared JS globals
+are used to gain throughput.
 
 Formal baseline comparisons run backend, frontend and browser phases sequentially
 through fresh `test_isolated.sh` children. Each pytest process exits before the

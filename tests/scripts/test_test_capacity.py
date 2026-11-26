@@ -20,7 +20,8 @@ def _start(tmp_path: Path, *args: str, timeout: str = "10") -> subprocess.Popen[
     source.parent.mkdir(parents=True, exist_ok=True)
     source.touch()
     return subprocess.Popen(
-        ["bash", "-c", 'set -eu; source "$1"; shift; test_capacity_acquire "$@"; echo TEST_READY; read -r line',
+        ["bash", "-c", ('set -eu; source "$1"; shift; test_capacity_acquire "$@"; '
+                        'echo "TEST_READY=$TTS_ERP_TEST_CAPACITY_CLASS"; read -r line'),
          "TEST_capacity", str(HELPER), *args],
         env={**os.environ, "TTS_ERP_TEST_CAPACITY_LOCK": str(tmp_path / "capacity.lock"),
              "TTS_ERP_TEST_CAPACITY_TIMEOUT_S": timeout},
@@ -62,7 +63,7 @@ def test_full_and_unknown_commands_take_exclusive_capacity(tmp_path: Path, args:
     owner = _start(tmp_path, *args)
     follower = None
     try:
-        assert "class=heavy" in _ready(owner)
+        assert "TEST_READY=heavy" in _ready(owner)
         follower = _start(tmp_path, "fast", timeout="1")
         output, _ = follower.communicate(timeout=4)
         assert follower.returncode != 0
@@ -81,8 +82,8 @@ def test_two_light_selections_are_bounded_and_block_heavy_run(tmp_path: Path) ->
     first, second = _start(tmp_path, *args), _start(tmp_path, *args)
     third = None
     try:
-        assert "class=light" in _ready(first)
-        assert "class=light" in _ready(second)
+        assert "TEST_READY=light" in _ready(first)
+        assert "TEST_READY=light" in _ready(second)
         third = _start(tmp_path, *args, timeout="1")
         output, _ = third.communicate(timeout=4)
         assert third.returncode != 0 and "TEST_READY" not in output

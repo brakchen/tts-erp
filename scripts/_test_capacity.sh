@@ -46,6 +46,8 @@ test_capacity_acquire() {
   fi
   flock -u 6
   exec 6>&-
+  # Frontend may use the fixed three-worker budget only after exclusive admission.
+  export TTS_ERP_TEST_CAPACITY_CLASS="$class"
   printf '[test-timing] capacity_wait=%ds\n' "$((SECONDS - started))"
   echo "[test-queue] admitted class=$class pid=$$"
 }

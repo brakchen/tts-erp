@@ -66,7 +66,7 @@ it.each(['spu-roi', 'focused-spus'] as const)('keeps every %s search and scope c
   expect(within(overview).getByLabelText('利润')).toBeInTheDocument();
 });
 it('both page profiles render through the same React owner and keep the server scope', async () => {
-  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />); });
   await screen.findByText('TEST_RESULT');
   const reads = calls.filter((call) => call.url.includes('/analytics/spu-roi?'));
   expect(reads.length).toBeGreaterThan(0); const query = new URL(reads.at(-1)!.url, location.origin).searchParams;
@@ -178,7 +178,7 @@ it('removing a focused item on the last page resets offset before refreshing the
   await pagination().findByText('第 2 页 · 共 2 页');
   const selected = within(screen.getByLabelText('SPU 搜索与已选标签'));
   expect(selected.getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(101);
-  const firstTag = within(selected.getByRole('row', { name: 'TEST_PAGE_0' }));
+  const firstTag = within(selected.getByLabelText('TEST_PAGE_0'));
   await act(async () => { fireEvent.click(firstTag.getByRole('button', { name: '移除 SPU TEST_PAGE_0' })); });
   await pagination().findByText('第 1 页 · 共 1 页');
   await screen.findByText('TEST_RESULT');
