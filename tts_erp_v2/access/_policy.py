@@ -36,6 +36,8 @@ _READONLY_PREFIXES = (
 
 _READWRITE_EXACT = {
     "/v2/reporting/manual-costs",
+    "/v2/reporting/manual-costs/import/preview",
+    "/v2/reporting/manual-costs/import/confirm",
 }
 
 _READWRITE_PREFIXES = (

@@ -9,6 +9,7 @@ import { parseIdentityJson } from '../../shared/api/identity-json';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { count, decodeHistory, decodeMissing, decodeProduct, decodeProducts, decodeSaved, decodeShops, fieldLabels, fieldsEqual, initialFields, validateFields, type Fields, type History, type Product, type Shop } from './contracts';
 import CostFields from './CostFields';
+import CostImport from './CostImport';
 
 type View = 'all' | 'missing' | 'recent';
 interface Draft { target: Product; baseline: Fields; fields: Fields; status?: 'saving' | 'success' | 'error' | 'unknown'; failure?: CommandFailure }
@@ -42,7 +43,10 @@ export default function ManualCosts({ bootstrap }: PageProps) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({}); const draftsRef = useRef(drafts);
   const [editor, setEditor] = useState<string>(); const [confirmation, setConfirmation] = useState<Attempt[]>();
   const [image, setImage] = useState<string>(); const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
-  const [pending, setPending] = useState(false); const [notice, setNotice] = useState(''); const [cooldown, setCooldown] = useState(false);
+  const [manualPending, setPending] = useState(false); const [importBusy, setImportBusy] = useState(false);
+  const [importFenced, setImportFenced] = useState(false);
+  const pending = manualPending || importBusy;
+  const [notice, setNotice] = useState(''); const [cooldown, setCooldown] = useState(false);
   const [denied, setDenied] = useState(false); const [recovery, setRecovery] = useState<Recovery>();
   // React state alone cannot fence two confirmations in the same event turn.
   const singleFlight = useRef(false); const stopBatch = useRef(false); const mounted = useRef(true);
@@ -102,13 +106,13 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     updateDrafts((previous) => { const draft = previous[id]; return draft ? { ...previous, [id]: { ...draft, fields: { ...draft.baseline }, failure: undefined, status: undefined } } : previous; }); setNotice('已撤销该行草稿');
   }
   function prepare(targets: Product[]) {
-    if (!canWrite || denied || singleFlight.current || performance.now() < notBefore.current || recoveryRef.current) return;
+    if (!canWrite || denied || importFenced || singleFlight.current || performance.now() < notBefore.current || recoveryRef.current) return;
     // Capture only these visible dirty rows, including both identities; later reads never retarget a command.
     const attempts = targets.map((product) => draftFor(product)).filter(dirty).map((draft) => ({ target: { ...draft.target }, fields: { ...draft.fields } }));
     if (attempts.length) { setEditor(undefined); setConfirmation(attempts); }
   }
   async function submit(attempts: Attempt[], explicitRecovery = false) {
-    if (!canWriteRef.current || denied || singleFlight.current || performance.now() < notBefore.current || (recoveryRef.current && (!explicitRecovery || recoveryRef.current.phase !== 'checked'))) return;
+    if (!canWriteRef.current || denied || importFenced || singleFlight.current || performance.now() < notBefore.current || (recoveryRef.current && (!explicitRecovery || recoveryRef.current.phase !== 'checked'))) return;
     singleFlight.current = true; stopBatch.current = false; setPending(true); setNotice('逐行提交中；每行独立事务，不是原子批次'); setConfirmation(undefined);
     let succeeded = 0; let failed = 0; let attempted = 0;
     for (const attempt of attempts) {
@@ -162,7 +166,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
       else updateRecovery({ ...previous, phase: 'failed', message: `核对未完成：${errorMessage(error)}。草稿和目标仍保留。` });
     } finally { if (verification.current === controller) verification.current = undefined; }
   }
-  const commandBlocked = !canWrite || pending || cooldown || denied || Boolean(recovery);
+  const commandBlocked = !canWrite || pending || importFenced || cooldown || denied || Boolean(recovery);
   const dirtyVisible = products.filter((product) => dirty(draftFor(product)));
   const savedDrafts = Object.values(drafts).filter(dirty);
   const activeDraft = editor ? drafts[editor] : undefined;
@@ -227,6 +231,10 @@ export default function ManualCosts({ bootstrap }: PageProps) {
       {!canWrite && <p>当前仅浏览；写入需要 readwrite，以服务端判定为准。</p>}{denied && <p role="alert">服务端拒绝写入（HTTP 403）；草稿保留，编辑不会解除权限限制。</p>}
       {cooldown && <p role="status">服务端冷却中：读取、核对及提交均需等待完整 Retry-After；到期后仍须手动操作。</p>}
     </section>
+    <CostImport rootPath={bootstrap.rootPath} blocked={!canWrite || pending || cooldown || denied || Boolean(recovery)} hasDrafts={savedDrafts.length > 0}
+      onBusy={(busy) => { singleFlight.current = busy; setImportBusy(busy); }} onFence={setImportFenced}
+      onFailure={(error) => { gate(error); if (error instanceof ApiError && error.status === 403) setDenied(true); }}
+      onImported={() => setRefresh((value) => value + 1)} />
     {savedDrafts.length > 0 && <section className="erp-panel" aria-label="保留草稿"><h2>保留草稿（切换店铺、视图、分页或关闭编辑不会丢失）</h2><ul>{savedDrafts.map((draft) => <li key={draft.target.id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">店铺 #{draft.target.shop_pk} · PK {draft.target.id} · {draft.target.title ?? draft.target.spu_id}</span><Button size="sm" variant="secondary" isDisabled={pending} onPress={() => setEditor(draft.target.id)}>继续编辑 PK {draft.target.id}</Button><Button size="sm" variant="secondary" isDisabled={pending || recovery?.attempt.target.id === draft.target.id} onPress={() => undo(draft.target.id)}>撤销草稿 PK {draft.target.id}</Button></li>)}</ul><p>批量提交只包含当前页显示的已编辑行，不会扩大到其他页或其他店铺。</p></section>}
     {recoveryPanel}
     {notice && <p role="status">{notice}</p>}

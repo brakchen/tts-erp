@@ -8,7 +8,7 @@ Auth classification (in ``auth.required_role``):
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -23,14 +23,16 @@ from tts_erp_v2.api.schemas import (
     ManualCostOut,
     ProfitDailyOut,
 )
+from tts_erp_v2.api.v2.manual_cost_import import router as manual_cost_import_router
 from tts_erp_v2.commerce.shop_access import (
     authorized_shop_clause,
     require_authorized_shop,
 )
-from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
+from tts_erp_v2.reporting.manual_costs import append_manual_cost
 from tts_erp_v2.storage.minio_client import MinioClient, MinioConfigError
 
 router = APIRouter(prefix="/v2/reporting", tags=["reporting"])
+router.include_router(manual_cost_import_router)
 
 _AUTHORIZED_SHOPS = "SELECT id FROM commerce.shops WHERE " + authorized_shop_clause()
 _AUTHORIZED_PRODUCTS = (
@@ -107,31 +109,6 @@ SQL_RESOLVE_CHANNEL_PRODUCT = (
     "SELECT id FROM commerce.products_spu WHERE spu_id = :ext_id AND shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
     "AND (CAST(:spu_pk AS bigint) IS NULL OR id = CAST(:spu_pk AS bigint)) "
     "LIMIT 2"
-)
-SQL_INSERT_MANUAL_COST = (
-    "INSERT INTO procurement.manual_product_costs ("
-    "spu_pk, unit_cost, currency, valid_from, valid_to, "
-    "note, created_by, created_at) "
-    "VALUES (:cp_id, :unit_cost, :currency, :valid_from, NULL, "
-    ":note, :created_by, now()) "
-    "RETURNING id, spu_pk, unit_cost, currency, valid_from, "
-    "valid_to, note, created_by"
-)
-# 2026-09-01: close-old-then-insert sequence rewritten as a single
-# transaction (audit P1-6). The two-commit pattern used to drop the
-# UPDATE into a try/except + rollback, so a connection blip mid-handler
-# left the previous row's valid_to NULL and the new row's valid_to NULL
-# simultaneously — two effective manual costs per SPU. We now:
-#   1. UPDATE old rows first (within the same transaction)
-#   2. INSERT the new row
-#   3. commit once
-# The partial unique index uq_manual_costs_one_open (added in
-# migration 0003_manual_costs_one_open) is the DB-side safety net: even
-# if the application logic regresses, the index will reject a second
-# valid_to IS NULL row for the same spu_pk.
-SQL_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = (
-    "UPDATE procurement.manual_product_costs SET valid_to = now() "
-    "WHERE spu_pk = :cp_id AND valid_to IS NULL"
 )
 # 2026-09-06: recently-filed list reads the truth table directly so the
 # operator sees their submission immediately — the old page relied on
@@ -218,10 +195,6 @@ _STMT_COST_SNAPSHOTS = text(SQL_COST_SNAPSHOTS)
 _STMT_PROFIT_DAILY = text(SQL_PROFIT_DAILY)
 _STMT_COVERAGE_REPORT = text(SQL_COVERAGE_REPORT)
 _STMT_RESOLVE_CHANNEL_PRODUCT = text(SQL_RESOLVE_CHANNEL_PRODUCT)
-_STMT_INSERT_MANUAL_COST = text(SQL_INSERT_MANUAL_COST)
-_STMT_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT = text(
-    SQL_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT
-)
 _STMT_LIST_MISSING_COST_PRODUCTS = text(SQL_LIST_MISSING_COST_PRODUCTS)
 _STMT_TOTAL_MISSING_PHOTO = text(SQL_TOTAL_MISSING_PHOTO)
 _STMT_LIST_MANUAL_COSTS = text(SQL_LIST_MANUAL_COSTS)
@@ -521,42 +494,12 @@ def submit_manual_cost(
             "spu_id is ambiguous; provide spu_pk",
         )
     cp_id = matches[0].id
-    lock_manual_cost_spu(sess, spu_pk=cp_id)
     role = request.scope.get("api_key_role") or "unknown"
     created_by = f"api_key:{role}"
-    valid_from = body.valid_from or datetime.now(UTC)
-
-    # 2026-09-01: close-old + insert in ONE transaction (audit P1-6).
-    # The previous two-commit pattern (insert+commit, then
-    # try/except: rollback the close) silently lost the UPDATE on any
-    # error path, leaving two rows with valid_to IS NULL for the same
-    # spu_pk. The DB-side partial unique index
-    # uq_manual_costs_one_open (alembic 0003) is the safety net; the
-    # app-level guarantee below is that we flush the UPDATE before the
-    # INSERT, so a same-SPU race against another concurrent POST is
-    # rejected by the index rather than producing ghost rows.
-    # pi-lens-ignore opengrep.sqlalchemy.sql-injection: text() with bound :cp_id, no string interpolation
-    sess.execute(
-        _STMT_CLOSE_OLD_MANUAL_COSTS_BEFORE_INSERT,
-        {"cp_id": cp_id},
+    new_row = append_manual_cost(
+        sess, spu_pk=cp_id, unit_cost=body.unit_cost, currency=body.currency,
+        valid_from=body.valid_from, note=body.note, created_by=created_by,
     )
-    new_row = sess.execute(
-        _STMT_INSERT_MANUAL_COST,
-        {
-            "cp_id": cp_id,
-            "unit_cost": str(body.unit_cost),
-            "currency": body.currency,
-            "valid_from": valid_from,
-            "note": body.note,
-            "created_by": created_by,
-        },
-    ).first()
-    if new_row is None:
-        sess.rollback()
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "failed to insert manual cost",
-        )
     sess.commit()
     return _manual_cost_row(new_row)
 
