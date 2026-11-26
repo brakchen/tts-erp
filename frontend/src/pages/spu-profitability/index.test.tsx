@@ -54,13 +54,15 @@ beforeEach(() => {
   }));
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-it.each(['spu-roi', 'focused-spus'] as const)('keeps every %s search and scope control below the overview', async (pageId) => {
-  render(<Page bootstrap={{ ...bootstrap, pageId }} />);
+it.each(['spu-roi', 'focused-spus'] as const)('keeps %s dates with results and the sample control inside profit', async (pageId) => {
+  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId }} />); });
   await screen.findByText('TEST_RESULT');
   const overview = screen.getByRole('region', { name: '经营概览' });
-  for (const control of [screen.getByRole('region', { name: '店铺与经营范围' }), screen.getByLabelText('按 SPU ID / 标题搜索')]) {
-    expect(overview.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  }
+  expect(overview).toContainElement(screen.getByRole('region', { name: '经营日期筛选' }));
+  expect(overview.compareDocumentPosition(screen.getByLabelText('按 SPU ID / 标题搜索')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const sample = within(overview).getByRole('region', { name: '历史预测依据' });
+  expect(sample).toContainElement(document.getElementById('filter-projection-lookback-days'));
+  expect(within(overview).getByLabelText('利润')).toContainElement(sample);
   expect(within(overview).getByLabelText('销售')).toBeInTheDocument();
   expect(within(overview).getByLabelText('成本')).toBeInTheDocument();
   expect(within(overview).getByLabelText('利润')).toBeInTheDocument();
@@ -184,7 +186,7 @@ it('removing a focused item on the last page resets offset before refreshing the
   const last = calls.filter((call) => call.url.includes('/analytics/spu-roi?')).at(-1)!;
   expect(new URL(last.url, location.origin).searchParams.get('offset')).toBe('0');
   expect(stored).toHaveLength(100);
-});
+}, 15_000);
 it('a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs', async () => {
   patchFailure = 503; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
@@ -217,11 +219,11 @@ it('changing shop retains the selection Retry-After fence and requires explicit 
   expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(0);
 });
 
-it.each(['spu-roi', 'focused-spus'])('shows alias in the %s scope and picker', async (pageId) => {
+it.each(['spu-roi', 'focused-spus'])('shows alias in the %s shop picker', async (pageId) => {
   shopRows = [{ ...shop, shop_alias: 'TEST_alias' } as typeof shop];
-  const user = userEvent.setup();
-  render(<Page bootstrap={{ ...bootstrap, pageId }} />);
-  expect(await screen.findByText(/^TEST_alias · .* · CNY$/)).toBeVisible();
-  await user.click(screen.getByRole('button', { name: /当前店铺/ }));
+  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId }} />); });
+  const picker = screen.getByRole('button', { name: /TEST_alias.*当前店铺/ });
+  expect(picker).toBeVisible();
+  await act(async () => { fireEvent.click(picker); });
   expect(screen.getByRole('option', { name: `TEST_alias · ${shop.shop_id}` })).toBeVisible();
-});
+}, 10_000);

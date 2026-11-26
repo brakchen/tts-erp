@@ -1,0 +1,48 @@
+/* SPU ROI 原型：经营日期与滚动预测样本的视觉分区。 */
+#spu-time-scope { display: grid; gap: 24px; min-width: 0; }
+#spu-time-scope .scope-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+#spu-time-scope .scope-heading h2 { margin: 4px 0; font-size: 21px; font-weight: 600; }
+#spu-time-scope .scope-kicker { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+#spu-time-scope .scope-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+#spu-time-scope .scope-note { margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.7; }
+#spu-time-scope .scope-global { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+#spu-time-scope .scope-global select { max-width: 100%; }
+#spu-time-scope .scope-global p { margin: 0; font-size: 12px; color: var(--muted); }
+#spu-time-scope .scope-report { border: 1px solid var(--rule); border-top: 4px solid var(--accent); border-radius: 10px; padding: 22px; background: var(--surface); min-width: 0; }
+#spu-time-scope .scope-report .scope-kicker { color: var(--accent); }
+#spu-time-scope .scope-range { color: var(--accent); background: var(--paper-deep); padding: 6px 10px; border-radius: 6px; font-size: 13px; font-variant-numeric: tabular-nums; }
+#spu-time-scope .scope-report .erp-profit-controls { margin: 16px 0; padding: 14px 0; border: 0; border-top: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft); box-shadow: none; border-radius: 0; }
+#spu-time-scope .scope-report .erp-overview-grid { gap: 16px; }
+#spu-time-scope .scope-report .erp-card { padding: 18px; box-shadow: none; }
+#spu-time-scope .scope-report .erp-overview-profit { border-color: var(--rule); }
+#spu-time-scope .scope-report .erp-overview-comparison { gap: 20px; }
+#spu-time-scope .scope-profit-subtitle { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+#spu-time-scope .scope-current, #spu-time-scope .scope-projected { padding: 14px; border-radius: 6px; background: var(--paper); }
+#spu-time-scope .scope-projected { background: var(--paper-deep); }
+#spu-time-scope .scope-reference { display: grid; gap: 12px; min-width: 0; margin-top: 20px; padding: 18px; border: 1px solid color-mix(in srgb, var(--warn) 25%, var(--rule)); border-left: 4px solid var(--warn); border-radius: 8px; background: color-mix(in srgb, var(--warn) 7%, var(--surface)); }
+#spu-time-scope .scope-reference h2 { font-size: 17px; }
+#spu-time-scope .scope-reference .scope-kicker { color: var(--warn); }
+#spu-time-scope .scope-reference .scope-range { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
+#spu-time-scope .scope-sample-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+#spu-time-scope .scope-sample-controls label { display: flex; align-items: center; gap: 8px; }
+#spu-time-scope .scope-reference .erp-profit-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 14px 0; border-top: 1px solid color-mix(in srgb, var(--warn) 18%, var(--surface)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 18%, var(--surface)); }
+#spu-time-scope .scope-reference .erp-profit-metrics dd { font-size: 25px; color: var(--ink); }
+#spu-time-scope .scope-source-link { color: var(--warn); font-size: 12px; }
+#spu-time-scope .scope-exposure { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#spu-time-scope .scope-date-error { color: var(--danger); margin: 8px 0 0; }
+#spu-time-scope .scope-date-error:empty { display: none; }
+#spu-time-scope .scope-reference:target { outline: 2px solid var(--warn); outline-offset: 3px; }
+@media (max-width: 700px) {
+  #spu-time-scope { gap: 16px; }
+  #spu-time-scope .scope-report, #spu-time-scope .scope-reference { padding: 16px; }
+  #spu-time-scope .scope-report .erp-card { padding: 14px; }
+  #spu-time-scope .scope-exposure { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #spu-time-scope .scope-reference .erp-profit-metrics { gap: 12px; }
+  #spu-time-scope .scope-reference .erp-profit-metrics dd { font-size: 20px; }
+  #spu-time-scope .scope-range { overflow-wrap: anywhere; }
+}
+@media (max-width: 600px) {
+  #spu-time-scope .scope-reference .erp-profit-metrics { grid-template-columns: minmax(0, 1fr); }
+  #spu-time-scope .scope-reference .erp-profit-metrics > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  #spu-time-scope .scope-reference .erp-profit-metrics dd { flex-shrink: 0; }
+}

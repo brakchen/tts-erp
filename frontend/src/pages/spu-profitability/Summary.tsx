@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Button, Card, Disclosure, Modal, Table } from '@heroui/react';
 import { optionalRecord, text, type Overview, type RecordValue } from './contracts';
 import { displayDecimal } from '../ad-daily/query';
+import { reportingDate } from './query';
 
 const decimalDisplay = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const percentDisplay = new Intl.NumberFormat('zh-CN', { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -41,7 +42,7 @@ export function Metrics({ values, metrics = currentMetrics, prefix = '', meta = 
   return <><dl className="erp-profit-metrics">{metrics.map(([originalLabel, field, id, percent]) => { const label = labels[field] ?? originalLabel; const missing = values[field] == null || values[field] === ''; return <div key={field}><dt className="flex items-center gap-1">{label}{showHints && <Button size="sm" variant="ghost" className="erp-metric-hint" aria-label={`查看${label}口径`} onPress={() => setHint({ label, body: text(hints[field] ?? (field === 'net_profit' ? pnl.net_profit : field === 'spend' ? pnl.ad_spend : undefined) ?? metricHints[field]) })}>?</Button>}</dt><dd id={prefix + id} className={(field === 'net_profit' && values.profit_status === 'loss') || (field === 'projected_net_profit' && String(values[field]).startsWith('-')) ? 'text-danger' : field === 'net_profit' && values.profit_status === 'profit' ? 'text-accent' : undefined}>{field === 'ad_system_breakeven_roi' && values.ad_system_breakeven_roi_status === 'estimated_known_costs' && values[field] != null ? '≈' : ''}{percent ? displayPercent(values[field]) : displayValue(values[field])}</dd>{missing && missingNotes[field] && <small className="erp-overview-missing">{missingNotes[field]}</small>}</div>; })}</dl>
     <Modal.Backdrop isOpen={Boolean(hint)} onOpenChange={(open) => { if (!open) setHint(undefined); }}><Modal.Container><Modal.Dialog><Modal.CloseTrigger aria-label="关闭指标说明" /><Modal.Header><Modal.Heading>{hint?.label}口径</Modal.Heading></Modal.Header><Modal.Body><p>{hint?.body}</p></Modal.Body></Modal.Dialog></Modal.Container></Modal.Backdrop></>;
 }
-const overviewLabels = { spend: '广告成本', effective_sales: '有效 GMV', projected_future_full_loss_qty: '预计新增全损', unsettled_order_count: '未结算', delivered_unsettled_order_count: '已送达未结算', full_loss_exposure_unsettled_order_count: '待完结风险' };
+const overviewLabels = { spend: '广告成本', effective_sales: '有效 GMV', projected_future_full_loss_qty: '预计新增全损（件）', unsettled_order_count: '未结算', delivered_unsettled_order_count: '已送达未结算', full_loss_exposure_unsettled_order_count: '待完结风险' };
 const currentRoiMetrics = currentMetrics.filter((item) => item[1].includes('roi'));
 const projectedRoiMetrics = projectedMetrics.filter((item) => item[1].includes('roi'));
 const profitExposureFields = ['unsettled_order_count', 'delivered_unsettled_order_count', 'full_loss_exposure_unsettled_order_count'];
@@ -68,7 +69,7 @@ function ProfitHelp({ data }: { data: Overview }) {
     ['预计净利润', 'projected_net_profit'], ['预计净收入', 'projected_net_revenue'],
     ...currentRoiMetrics.map(([label, field]) => [label, field]),
     ...projectedRoiMetrics.map(([label, field]) => [label, field]),
-    ...projectedMetrics.filter(([, field]) => profitExposureFields.includes(field))
+    ...projectedMetrics.filter(([, field]) => profitExposureFields.includes(field) || field === 'projected_future_full_loss_qty')
       .map(([label, field]) => [overviewLabels[field as keyof typeof overviewLabels] ?? label, field]),
   ];
   return <Modal.Root>
@@ -84,11 +85,14 @@ function ProfitHelp({ data }: { data: Overview }) {
   </Modal.Root>;
 }
 
-export function Summary({ data, scope, stateMessage, salesPrices, costPrices, feeFacts }: { data: Overview; scope?: string; stateMessage?: string; salesPrices?: ReactNode; costPrices?: ReactNode; feeFacts?: ReactNode }) {
+export function Summary({ data, scope, stateMessage, salesPrices, costPrices, feeFacts, dateControls, projectionControl, reportingRegion }: { data: Overview; scope?: string; stateMessage?: string; salesPrices?: ReactNode; costPrices?: ReactNode; feeFacts?: ReactNode; dateControls?: ReactNode; projectionControl?: ReactNode; reportingRegion?: string | null }) {
   const projection = optionalRecord(data.meta.projection); const status: Record<string, string> = { available: '可预测', no_unsettled_orders: '无未结算订单', insufficient_sample: '样本不足' };
   const profitStatus: Record<string, string> = { profit: '盈利', loss: '亏损', break_even: '持平', unavailable: '不可用' };
+  const calculatedAt = typeof projection.calculated_at === 'string' ? new Date(projection.calculated_at) : undefined;
+  const calculatedDay = calculatedAt && Number.isFinite(calculatedAt.getTime()) ? reportingDate(calculatedAt, reportingRegion) : null;
   return <section id="summaries" className="erp-overview space-y-4" aria-label="经营概览" aria-live="polite">
-    <header className="flex flex-wrap items-center gap-3"><h2 className="erp-section-heading">经营概览</h2><span className="erp-table-meta">{scope} · CNY</span></header>
+    <header className="erp-overview-heading"><div><p className="erp-time-label">跟随经营日期</p><h2 className="erp-section-heading">经营概览</h2></div><span className="erp-report-range">{scope ?? '—'} · CNY</span></header>
+    {dateControls}
     {stateMessage && <p role="status" className="erp-table-meta">{stateMessage}</p>}
     <div className="erp-overview-grid">
       <Card aria-label="销售"><Card.Header><Card.Title>销售</Card.Title></Card.Header><Card.Content>
@@ -103,13 +107,16 @@ export function Summary({ data, scope, stateMessage, salesPrices, costPrices, fe
       </Card.Content></Card>
       <Card className="erp-overview-profit" aria-label="利润"><Card.Header className="flex-row flex-wrap items-center justify-between gap-3"><Card.Title>利润</Card.Title><div className="flex items-center gap-2"><span id="sum-projection-status" className="erp-table-meta">{status[String(data.totals.projection_status)] ?? text(data.totals.projection_status)}</span><ProfitHelp data={data} /></div></Card.Header><Card.Content>
         <div className="erp-overview-comparison">
-          <div><div className="flex flex-wrap gap-3"><h4>当前</h4><span className={data.totals.profit_status === 'loss' ? 'text-danger' : 'erp-table-meta'}>{profitStatus[String(data.totals.profit_status)] ?? text(data.totals.profit_status)}</span></div><div className="erp-overview-primary"><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={currentMetrics.filter((item) => item[1] === 'net_profit')} /></div><Metrics showHints={false} values={data.totals} meta={data.meta} missingNotes={stateMessage ? undefined : { net_revenue: '未提供汇总；净利润为服务端结果' }} metrics={[[ '净收入', 'net_revenue', 'sum-net-revenue' ]]} /></div>
-          <div><h4>预计最终</h4><div className="erp-overview-primary"><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => item[1] === 'projected_net_profit')} /></div><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => item[1] === 'projected_net_revenue')} /></div>
+          <div className="erp-profit-current"><div className="flex flex-wrap gap-3"><h4>当前</h4><span className={data.totals.profit_status === 'loss' ? 'text-danger' : 'erp-table-meta'}>{profitStatus[String(data.totals.profit_status)] ?? text(data.totals.profit_status)}</span></div><div className="erp-overview-primary"><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={currentMetrics.filter((item) => item[1] === 'net_profit')} /></div><Metrics showHints={false} values={data.totals} meta={data.meta} missingNotes={stateMessage ? undefined : { net_revenue: '未提供汇总；净利润为服务端结果' }} metrics={[[ '净收入', 'net_revenue', 'sum-net-revenue' ]]} /></div>
+          <div className="erp-profit-projected"><div className="flex flex-wrap items-center justify-between gap-2"><h4>预计最终</h4>{typeof projection.lookback_days === 'number' && <a className="erp-projection-link" href="#projection-basis-card">{projection.lookback_days} 天样本 ↓</a>}</div><div className="erp-overview-primary"><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => item[1] === 'projected_net_profit')} /></div><Metrics showHints={false} values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => item[1] === 'projected_net_revenue')} /></div>
         </div>
         <RoiComparison data={data} />
-        <Metrics showHints={false} values={data.totals} meta={data.meta} labels={overviewLabels} metrics={projectedMetrics.filter((item) => profitExposureFields.includes(item[1]))} />
-        <Metrics values={data.totals} meta={data.meta} labels={overviewLabels} metrics={projectedMetrics.filter((item) => item[1] === 'projected_future_full_loss_qty')} />
-        <div id="projection-basis-card"><Disclosure><Disclosure.Heading><Disclosure.Trigger className="op-counter-group-label">预测依据<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body><p className="op-projection-window erp-table-meta">样本：<span id="projection-sample-window">{text(projection.sample_start)} ~ {text(projection.sample_end)}</span></p><p className="erp-table-meta">{metricHints.projection_status}</p><Metrics values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => ['projection_completed_basis_order_count', 'projection_completed_full_loss_order_count', 'completed_full_loss_rate'].includes(item[1]))} /></Disclosure.Body></Disclosure.Content></Disclosure></div>
+        <div className="erp-profit-exposure"><Metrics values={data.totals} meta={data.meta} labels={overviewLabels} showHints={false} metrics={projectedMetrics.filter((item) => profitExposureFields.includes(item[1]) || item[1] === 'projected_future_full_loss_qty')} /></div>
+        <section id="projection-basis-card" className="erp-projection-basis" aria-label="历史预测依据">
+          <header className="erp-overview-heading"><div><p className="erp-time-label">按当前时间回看</p><h3 className="erp-section-heading">历史预测依据</h3></div><span className="erp-report-range">计算日 {calculatedDay ?? '—'}</span></header>
+          <div className="erp-projection-window">{projectionControl}<p className="op-projection-window erp-table-meta">样本：<span id="projection-sample-window">{text(projection.sample_start)} ~ {text(projection.sample_end)}</span></p><span className="erp-table-meta">跳过最近 {displayValue(projection.maturity_lag_days)} 天</span></div>
+          <Metrics values={data.totals} meta={data.meta} metrics={projectedMetrics.filter((item) => ['projection_completed_basis_order_count', 'projection_completed_full_loss_order_count', 'completed_full_loss_rate'].includes(item[1]))} />
+        </section>
       </Card.Content></Card>
     </div>
   </section>;

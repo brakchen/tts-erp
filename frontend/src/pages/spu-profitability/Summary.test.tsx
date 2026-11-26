@@ -45,5 +45,20 @@ it('groups the original server values into sales, costs and profit without deriv
   expect(within(sales).queryByText('预计净收入')).toBeNull();
   expect(within(costs).queryByText('预计净收入')).toBeNull();
   expect(within(costs).queryByText('预计新增全损')).toBeNull();
-  expect(within(profit).getByText('预计新增全损')).toBeInTheDocument();
+  expect(within(profit).getByText('预计新增全损（件）')).toBeInTheDocument();
+});
+
+it('separates the reporting dates from the server sample and keeps the sample inside profit', () => {
+  const data = { items: [], total: 0, totals: {}, meta: { projection: { calculated_at: '2026-11-25T18:00:00Z', sample_start: '2026-10-20', sample_end: '2026-11-18', lookback_days: 30, maturity_lag_days: 7 } } };
+  const view = render(<Summary data={data} scope="2026-11-19 ~ 2026-11-25" reportingRegion="VN" projectionControl={<button>TEST 样本切换</button>} />);
+  const sample = screen.getByRole('region', { name: '历史预测依据' });
+  expect(screen.getByLabelText('利润')).toContainElement(sample);
+  expect(within(sample).getByText('按当前时间回看')).toBeInTheDocument();
+  expect(within(sample).getByText('计算日 2026-11-26')).toBeInTheDocument();
+  expect(within(sample).getByText('2026-10-20 ~ 2026-11-18')).toBeVisible();
+  expect(within(sample).getByRole('button', { name: 'TEST 样本切换' })).toBeInTheDocument();
+  expect(within(sample).queryByText(/SPU 范围/)).toBeNull();
+  view.rerender(<Summary data={data} scope="2026-10-01 ~ 2026-10-31" reportingRegion="VN" />);
+  expect(screen.getByText('2026-10-01 ~ 2026-10-31 · CNY')).toBeInTheDocument();
+  expect(within(sample).getByText('2026-10-20 ~ 2026-11-18')).toBeVisible();
 });

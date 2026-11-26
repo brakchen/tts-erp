@@ -42,6 +42,7 @@ def test_projection_control_is_visible_and_switches_only_projection(browser_conf
                 "as_of": "2026-10-08",
                 "lookback_days": lookback,
                 "maturity_lag_days": 7,
+                "calculated_at": "2026-10-09T01:00:00Z",
                 "sample_start": "2026-07-03" if lookback == 90 else "2026-09-01",
                 "sample_end": "2026-09-30",
                 "basis_order_count": lookback,
@@ -71,8 +72,9 @@ def test_projection_control_is_visible_and_switches_only_projection(browser_conf
     assert control.is_visible()
     expect(control).to_contain_text("30 天")
     expect(page.locator("#projection-basis-card")).to_be_visible()
-    page.locator("#projection-basis-card").get_by_role("button", name="预测依据", exact=True).click()
     assert page.locator("#projection-sample-window").is_visible()
+    expect(page.get_by_label("利润", exact=True).locator("#projection-basis-card")).to_be_visible()
+    expect(page.get_by_role("region", name="历史预测依据")).to_contain_text("按当前时间回看")
 
     reporting_start = page.locator("#filter-w-start").input_value()
     reporting_end = page.locator("#filter-w-end").input_value()
@@ -93,8 +95,7 @@ def test_projection_control_is_visible_and_switches_only_projection(browser_conf
     card = page.locator("#projection-basis-card")
     window = card.locator(".op-projection-window")
     assert window.inner_text() == "样本：2026-07-03 ~ 2026-09-30"
-    title = card.locator(".op-counter-group-label")
-    assert title.inner_text() == "预测依据"
+    expect(card.get_by_role("heading", name="历史预测依据")).to_be_visible()
     assert card.locator(".op-projection-window").count() == 1
     assert page.locator("#projection-maturity-as-of").count() == 0
     assert page.locator("#projection-basis-counts").count() == 0

@@ -51,14 +51,16 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
         assert costs['x'] >= sales['x'] + sales['width']
     else:
         assert costs['y'] >= sales['y'] + sales['height']
-    filters = page.get_by_role('region', name='店铺与经营范围').bounding_box()
+    filters = page.get_by_role('region', name='经营日期筛选').bounding_box()
     assert filters
-    assert filters['y'] >= overview['y'] + overview['height']
+    assert overview['y'] <= filters['y'] < sales['y']
+    sample = page.get_by_role('region', name='历史预测依据').bounding_box()
+    assert sample and sample['y'] > profit['y']
+    assert sample['y'] + sample['height'] <= profit['y'] + profit['height']
     if width == 2560:
         assert filters['height'] <= 160, filters
         controls = [page.locator(selector).bounding_box() for selector in (
-            '#shop-switcher', '#filter-w-start', '#filter-w-end',
-            '#filter-projection-lookback-days', '#btn-toolbar-more',
+            '#filter-w-start', '#filter-w-end', '#btn-toolbar-more',
         )]
         assert all(controls)
         bottoms = [box['y'] + box['height'] for box in controls]
@@ -85,7 +87,7 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
                     page.get_by_role('group', name='快捷日期范围')]:
         bounds = control.bounding_box()
         assert bounds and grid and bounds['y'] + bounds['height'] <= grid['y'], bounds
-        assert bounds['y'] >= overview['y'] + overview['height'], bounds
+    assert page.get_by_label('按 SPU ID / 标题搜索').bounding_box()['y'] >= overview['y'] + overview['height']
     if profile == 'spu-roi':
         bounds = page.locator('#btn-spu-apply').bounding_box()
         assert bounds and bounds['y'] < grid['y']
