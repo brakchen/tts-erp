@@ -12,7 +12,7 @@ Zabbix 继续拥有失联、业务停滞、事件去重、恢复和飞书通知�
 
 服务端配置 `TTS_ERP_ZABBIX_URL`，使用 HTTPS 或回环 HTTP 地址。服务凭据通过 `token_service.upsert_credentials` 写入加密凭据库，provider 为 `zabbix`，external_account_id 为 `monitor-relay`。运行时仅通过 `load_credentials` 读取。专用 Zabbix 服务账号需要 Monitor 主机组读写权限、模板组读取权限，以及 `host.get/create/update`、`hostgroup.get`、`template.get`、`history.push` 的 API 权限。已有主机被停用、归属错误或缺少模板时交由运维处理。
 
-模板与飞书动作在服务器配置一次。每家新登记店铺由第一次上报自动建主机，重复请求和并发首次上报复用唯一技术名称。浏览器不再需要 Zabbix Token。上线前需要部署 ERP 转发版本并配置上述服务账号，随后使用新插件传输方式。
+模板与飞书动作在服务器配置一次。每家新登记店铺由第一次上报自动建主机，重复请求和并发首次上报复用唯一技术名称。主机显示名使用 `shop_alias`（非空时）或平台店铺名 `account_name`，再附加 ` · Seller ID`；两者均为空时仅显示 Seller ID。显示名按 Zabbix 的 128 字符限制截断名称部分并保留 Seller ID 后缀。别名修改或清空后，下一次遥测请求准备主机时会自动更新已有主机显示名；技术名称和监控归属继续使用 Seller ID。浏览器不再需要 Zabbix Token。上线前需要部署 ERP 转发版本并配置上述服务账号，随后使用新插件传输方式。
 
 正式模板的 `{$TTS.MONITOR.TRAPPER.HOSTS}` 使用 `172.18.0.1,zabbix-web-1`。第一项为当前 Docker 网桥网关，第二项为 Web 容器在专用 Docker 网络中的稳定 DNS 别名，避免容器重建导致 Web IP 变化后拒收。部署时用 `docker exec zabbix-server-1 getent hosts zabbix-web-1` 核对解析；网络重建或服务改名后重新核对网关和别名。Zabbix 官方支持在 [Allowed hosts 中使用 DNS 名称](https://www.zabbix.com/documentation/7.4/en/manual/config/items/itemtypes/trapper)。新建主机及宏更新后，配置缓存可能需要约 60 秒生效，这期间上报返回 503，插件下一次心跳继续尝试。
 
@@ -25,7 +25,7 @@ Zabbix 继续拥有失联、业务停滞、事件去重、恢复和飞书通知�
 ## 导入模板和登记店铺
 
 1. 在 Zabbix 导入 [TTS Monitor 模板](zabbix-monitor.yaml)，保留「删除缺失」选项关闭。导入模板后，只有链接模板的主机才有监控项。
-2. 从 ERP 的 `GET /v2/commerce/channel-accounts?view=management&platform=tiktok&source=monitor` 分页读取登记店铺。每个 Seller ID 创建或匹配主机技术名称 `tts-monitor-<sellerId>`，显示名使用 `店名 · Seller ID`，空名称用 Seller ID。Zabbix 要求显示名唯一，保留 Seller ID 后缀可以区分同名店铺。主机放入专用组 `TTS Monitor shops` 并链接模板。名册为空时等待真实店铺登记。
+2. 从 ERP 的 `GET /v2/commerce/channel-accounts?view=management&platform=tiktok&source=monitor` 分页读取登记店铺。每个 Seller ID 创建或匹配主机技术名称 `tts-monitor-<sellerId>`，显示名使用 `别名（非空时）或店铺名 · Seller ID`，两者均为空时用 Seller ID。Zabbix 要求显示名唯一，保留 Seller ID 后缀可以区分同名店铺。主机放入专用组 `TTS Monitor shops` 并链接模板。名册为空时等待真实店铺登记。
 3. 模板宏 `{$TTS.MONITOR.TRAPPER.HOSTS}` 须同时包含 Zabbix Web 看到的 HTTP 客户端地址（PHP 的 `REMOTE_ADDR`），以及 Web 向 Zabbix Server 发起连接时的源地址。初次隔离验证为 `172.18.0.1` 和 `172.18.0.3`；正式部署已按上文使用网关地址及 Web 容器 DNS 别名。启用最终 HTTPS 路径或网络重建后，复核允许来源，再验证写入。
 4. 通过生产 HTTPS 网关提供独立的 Zabbix 上报路径，转发到 HP Desk 的 Zabbix Web API。浏览器配置使用仅允许 `history.push` 且只授权 Monitor 主机范围的 Token。优先按单店授权，使其他店的 Seller ID 无法被同一凭据写入。Token 在插件本地连接设置中保存，且排除在配置导出和日志之外。
 

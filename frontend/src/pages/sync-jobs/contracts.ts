@@ -1,3 +1,4 @@
+import { decodeShopAlias } from '../../shared/shop-name';
 export interface JobStatus {
   job_name: string; interval_seconds: number | null; last_run_at: string | null;
   last_finished_at: string | null; last_status: string | null; last_error: string | null;
@@ -9,7 +10,7 @@ export interface Job {
 }
 export interface JobsData {
   server_time: string; jobs: Job[];
-  tiktok_shops: { shop_pk: number; shop_id: string; account_name: string | null; status: string | null }[];
+  tiktok_shops: { shop_pk: number; shop_id: string; account_name: string | null; shop_alias?: string | null; status: string | null }[];
 }
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === 'string';
@@ -37,6 +38,7 @@ export function decodeJobs(value: unknown): JobsData {
   for (const s of value.tiktok_shops) {
     if (!record(s) || !number(s.shop_pk) || !Number.isSafeInteger(s.shop_pk) || !text(s.shop_id) || !s.shop_id
       || shops.has(s.shop_id) || !nullableText(s.account_name) || !nullableText(s.status)) throw invalid();
+    decodeShopAlias(s.shop_alias);
     shops.add(s.shop_id);
   }
   // SAFETY: every required wire field and nested record was checked above; extra fields are ignored.

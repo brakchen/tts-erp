@@ -1,4 +1,5 @@
-export interface Shop { id: string; shop_id: string; account_name: string | null }
+import { decodeShopAlias } from '../../shared/shop-name';
+export interface Shop { id: string; shop_id: string; account_name: string | null; shop_alias?: string | null }
 export interface Product {
   id: string; shop_pk: string; spu_id: string; title: string | null; status: string | null;
   unit_cost: string | null; currency: string | null; purchase_unit_cost: string | null; source_unit_cost: string | null;
@@ -30,7 +31,7 @@ function money(value: unknown): string { const result = text(value); if (!/^-?\d
 function nullableMoney(value: unknown): string | null { return value == null ? null : money(value); }
 export function decodeShops(value: unknown): Shop[] {
   if (!Array.isArray(value)) throw new Error('店铺列表不可用');
-  return value.map((item) => { const row = record(item); return { id: identity(row.id), shop_id: text(row.shop_id), account_name: nullable(row.account_name) }; });
+  return value.map((item) => { const row = record(item); return { id: identity(row.id), shop_id: text(row.shop_id), shop_alias: decodeShopAlias(row.shop_alias), account_name: nullable(row.account_name) }; });
 }
 export function decodeProduct(value: unknown, missing = false): Product {
   const row = record(value);

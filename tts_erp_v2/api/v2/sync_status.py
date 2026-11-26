@@ -101,6 +101,7 @@ class SyncJobShopOut(BaseModel):
     shop_pk: int
     shop_id: str
     account_name: str | None = None
+    shop_alias: str | None = None
     status: str | None = None
 
 
@@ -134,6 +135,7 @@ def _list_tiktok_shops(session: Session) -> list[SyncJobShopOut]:
             ChannelAccount.id,
             ChannelAccount.shop_id,
             ChannelAccount.account_name,
+            ChannelAccount.shop_alias,
             ChannelAccount.status,
         )
         .where(
@@ -147,6 +149,7 @@ def _list_tiktok_shops(session: Session) -> list[SyncJobShopOut]:
             shop_pk=row.id,
             shop_id=row.shop_id,
             account_name=row.account_name,
+            shop_alias=row.shop_alias,
             status=row.status,
         )
         for row in rows

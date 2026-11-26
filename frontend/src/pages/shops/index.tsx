@@ -1,3 +1,4 @@
+import { displayShopName } from '../../shared/shop-name';
 import OffsetPagination from '../../shared/OffsetPagination';
 import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -200,7 +201,7 @@ export default function Shops({ bootstrap }: PageProps) {
         <Button variant="secondary" size="sm" isDisabled={recovery.phase === 'checking' || readBlocked} onPress={() => { void verify(key); }}>{recovery.phase === 'checking' ? '核对中…' : '读取当前记录核对'}</Button>
         {recovery.message && <p role="status">{recovery.message}</p>}
         <p className="erp-table-meta">{recovery.attempt.appPair ? '读取结果不会显示密钥；再次保存会重新写入配置。' : recovery.attempt.kind === 'authorize' ? '重新获取会生成新的授权链接。' : '查询当前记录不能证明原请求的提交结果。'}</p>
-        {recovery.snapshot && <p className="erp-table-meta">当前记录：{recovery.snapshot.account_name ?? recovery.snapshot.shop_id} · {recovery.snapshot.opened_date ?? '未填开店日期'} · Service {recovery.snapshot.service_id ?? '未配置'}</p>}
+        {recovery.snapshot && <p className="erp-table-meta">当前记录：{displayShopName(recovery.snapshot, recovery.snapshot.shop_id)} · {recovery.snapshot.opened_date ?? '未填开店日期'} · Service {recovery.snapshot.service_id ?? '未配置'}</p>}
       </div>}
     </div>;
   }
@@ -214,7 +215,7 @@ export default function Shops({ bootstrap }: PageProps) {
     </PageIntro>
     <form aria-label="店铺筛选" className="erp-filters shops-filters" onSubmit={(event) => { event.preventDefault(); updateFilter('q', search); }}>
       <TextField className="min-w-0" value={search} onChange={setSearch}>
-        <Label>店铺搜索</Label><Input fullWidth className="h-11" type="search" placeholder="店铺名称 / ID / 编码" />
+        <Label>店铺搜索</Label><Input fullWidth className="h-11" type="search" placeholder="店铺别名 / 名称 / ID / 编码" />
       </TextField>
       {filterOptions.map((field) => <Select key={field.key} fullWidth selectedKey={filters[field.key] || 'all'} onSelectionChange={(key) => updateFilter(field.key, key == null || key === 'all' ? '' : String(key))}>
         <Label>{field.label}</Label><Select.Trigger className="h-11"><Select.Value /><Select.Indicator /></Select.Trigger>
@@ -231,7 +232,7 @@ export default function Shops({ bootstrap }: PageProps) {
     {list.shops && <Table variant="secondary" className="erp-table shops-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="店铺表格"><Table.Content aria-label="店铺接入列表" className="erp-table-content shops-table-content"><Table.Header className="erp-table-head">
       {['店铺', '区域 / 开店日期', '插件资料同步', 'App 配置', 'OAuth 授权', '操作'].map((name, index) => <Table.Column className={`erp-table-column shops-column-${index}`} key={name} isRowHeader={index === 0}>{name}</Table.Column>)}
     </Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">没有符合条件的店铺。绑定插件后会自动登记，也可以手工补录。</div>}>{list.shops.map((shop) => <Table.Row className="erp-table-row" key={shop.id} id={shop.id}>
-      <Table.Cell className="erp-table-cell"><p className="erp-table-primary shops-name">{shop.shop_alias || shop.account_name || '名称待同步'}</p>{shop.shop_alias && <p className="erp-table-meta">店铺名称：{shop.account_name ?? '待同步'}</p>}<p className="erp-table-id mt-1">{shop.shop_id}</p>{shop.shop_code && <p className="erp-table-meta">编码 {shop.shop_code}</p>}{shop.discovered_at && <p className="erp-table-meta">首次发现 {localTime(shop.discovered_at)}</p>}</Table.Cell>
+      <Table.Cell className="erp-table-cell"><p className="erp-table-primary shops-name">{displayShopName(shop, '名称待同步')}</p>{shop.shop_alias && <p className="erp-table-meta">店铺名称：{shop.account_name ?? '待同步'}</p>}<p className="erp-table-id mt-1">{shop.shop_id}</p>{shop.shop_code && <p className="erp-table-meta">编码 {shop.shop_code}</p>}{shop.discovered_at && <p className="erp-table-meta">首次发现 {localTime(shop.discovered_at)}</p>}</Table.Cell>
       <Table.Cell className="erp-table-cell"><p className="font-medium">{shop.region ?? '区域待同步'}</p><p className="erp-table-meta">{shop.opened_date ?? '未填开店日期'}</p></Table.Cell>
       <Table.Cell className="erp-table-cell">{shop.plugin_sources?.length ? shop.plugin_sources.map((source) => <div key={source.source} className="mb-2 last:mb-0"><p>{sourceLabels[source.source] ?? source.source}</p><p className="erp-table-meta">{localTime(source.last_received_at)}</p></div>) : <span className="erp-table-meta">尚无插件上报</span>}</Table.Cell>
       <Table.Cell className="erp-table-cell"><Chip size="sm" variant="soft" color={shop.app_credentials_configured ? 'success' : 'default'}>{shop.app_credentials_configured ? '已配置' : '未配置'}</Chip><p className="erp-table-meta">Service ID</p><p className="erp-table-id">{shop.service_id ?? '未填 Service ID'}</p></Table.Cell>
@@ -255,7 +256,7 @@ export default function Shops({ bootstrap }: PageProps) {
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
     <Modal.Backdrop isOpen={link !== undefined} onOpenChange={(isOpen) => { if (!isOpen) setLink(undefined); }}><Modal.Container size="lg"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭授权链接" /><Modal.Header><Modal.Heading>为当前店铺授权</Modal.Heading></Modal.Header>
-      <Modal.Body className="space-y-4">{link && <><div><p className="font-semibold">{link.shop.account_name ?? link.shop.shop_id}</p><p className="erp-table-meta break-all">店铺 {link.shop.shop_id} · Service {link.shop.service_id}</p></div><p>请使用此店铺完成授权。成功后系统会自动开始同步。</p><p className="erp-table-meta">链接有效至 {localTime(link.value.state_expires_at)}，仅可使用一次。</p><p className="rounded-lg border border-[var(--rule)] p-3 text-sm break-all">{link.value.authorize_url}</p><div className="flex flex-wrap gap-3"><a className={buttonVariants({ variant: 'primary' })} href={link.value.authorize_url} target="_blank" rel="noopener noreferrer">打开授权页面</a><Button variant="secondary" onPress={() => { void navigator.clipboard.writeText(link.value.authorize_url).then(() => setNotice('授权链接已复制'), () => setNotice('复制失败，请手动选择链接复制')); }}>复制链接</Button></div>{notice && <p role="status">{notice}</p>}</>}</Modal.Body>
+      <Modal.Body className="space-y-4">{link && <><div><p className="font-semibold">{displayShopName(link.shop, link.shop.shop_id)}</p><p className="erp-table-meta break-all">店铺 {link.shop.shop_id} · Service {link.shop.service_id}</p></div><p>请使用此店铺完成授权。成功后系统会自动开始同步。</p><p className="erp-table-meta">链接有效至 {localTime(link.value.state_expires_at)}，仅可使用一次。</p><p className="rounded-lg border border-[var(--rule)] p-3 text-sm break-all">{link.value.authorize_url}</p><div className="flex flex-wrap gap-3"><a className={buttonVariants({ variant: 'primary' })} href={link.value.authorize_url} target="_blank" rel="noopener noreferrer">打开授权页面</a><Button variant="secondary" onPress={() => { void navigator.clipboard.writeText(link.value.authorize_url).then(() => setNotice('授权链接已复制'), () => setNotice('复制失败，请手动选择链接复制')); }}>复制链接</Button></div>{notice && <p role="status">{notice}</p>}</>}</Modal.Body>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
   </div>;
 }

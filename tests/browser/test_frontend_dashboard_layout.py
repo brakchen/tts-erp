@@ -62,3 +62,17 @@ def test_dashboard_has_readable_visual_hierarchy(frontend_browser_renderer, pref
     report = overflow_report(page)
     assert report["scrollWidth"] <= report["clientWidth"] + 1, report
     assert not report["offenders"], report
+
+
+@pytest.mark.parametrize("prefix", ["", "/tts"])
+@pytest.mark.parametrize("shop_alias", ["TEST_alias", "", None])
+def test_dashboard_shop_alias_falls_back_after_clearing(frontend_browser_renderer, prefix, shop_alias) -> None:
+    page = frontend_browser_renderer.open(f"{prefix}/v2/pages/dashboard", width=1440)
+    shop = {"id": 41, "shop_id": "TEST_SHOP_ALIAS", "account_name": "TEST_platform_name",
+            "shop_alias": shop_alias, "region": "VN", "platform": "tiktok"}
+    page.route("**/v2/commerce/channel-accounts?*", lambda route: route.fulfill(
+        json=[shop], headers={"X-Total-Count": "1"}))
+    page.reload(wait_until="domcontentloaded")
+    grid = page.get_by_role("grid", name="已注册店铺")
+    grid.get_by_text(shop_alias or shop["account_name"], exact=True).wait_for()
+    assert grid.get_by_text(shop["shop_id"], exact=True).is_visible()

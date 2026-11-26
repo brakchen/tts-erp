@@ -39,7 +39,7 @@ SELECT
   d.id,
   d.seller_id,
   s.id AS shop_pk,
-  s.account_name AS shop_name,
+  COALESCE(NULLIF(s.shop_alias, ''), s.account_name) AS shop_name,
   d.advertiser_id,
   d.campaign_id,
   d.product_id,
@@ -64,7 +64,7 @@ LEFT JOIN commerce.products_spu AS p
 # 拼进 ORDER BY 的永远是字面量表达式，不接受自由 SQL 片段。
 _SORT_COLUMNS: dict[str, str] = {
     "day": "d.day",
-    "shop": "COALESCE(s.account_name, d.seller_id)",
+    "shop": "COALESCE(NULLIF(s.shop_alias, ''), s.account_name, d.seller_id)",
     "campaign": "d.campaign_id",
     "product": "COALESCE(p.title, d.product_id)",
     "spend": "d.mixed_real_cost",
@@ -141,13 +141,13 @@ WITH seller_rows AS (
 )
 SELECT
   COALESCE(s.shop_id, d.seller_id) AS seller_id,
-  s.account_name AS shop_name,
+  COALESCE(NULLIF(s.shop_alias, ''), s.account_name) AS shop_name,
   COALESCE(d.row_count, 0) AS row_count
 FROM (
-  SELECT shop_id, account_name FROM commerce.shops WHERE platform = 'tiktok'
+  SELECT shop_id, account_name, shop_alias FROM commerce.shops WHERE platform = 'tiktok'
 ) AS s
 FULL OUTER JOIN seller_rows AS d ON d.seller_id = s.shop_id
-ORDER BY COALESCE(s.account_name, s.shop_id, d.seller_id),
+ORDER BY COALESCE(NULLIF(s.shop_alias, ''), s.account_name, s.shop_id, d.seller_id),
   COALESCE(s.shop_id, d.seller_id)
 """
 )
