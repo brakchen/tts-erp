@@ -41,13 +41,10 @@ async function chooseOption(user: ReturnType<typeof userEvent.setup>, label: str
   // Select includes both its aria-label and visible Label in the trigger name.
   // Limit catalogue controls to their form so 50 rows' actions are not scanned.
   const scope = label === '当前店铺' ? screen : within(screen.getByLabelText('工作台筛选'));
-  await act(async () => {
-    await user.click(scope.getByRole('button', { name: (name) => name === label || name.endsWith(` ${label}`)
-      || (['排序字段', '排序方向'].includes(label) && name.includes(label)) }));
-  });
+  await user.click(scope.getByRole('button', { name: (name) => name === label || name.endsWith(` ${label}`)
+    || (['排序字段', '排序方向'].includes(label) && name.includes(label)) }));
   const options = within(await screen.findByRole('listbox'));
-  // These fetch mocks resolve immediately; flush the real selection and its read.
-  await act(async () => { await user.click(options.getByRole('option', { name: option })); });
+  await user.click(options.getByRole('option', { name: option }));
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -112,7 +109,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(catalogueQuery(fetcher).get('order')).toBe('asc');
     expect(catalogueQuery(fetcher).get('limit')).toBe('50');
     await waitFor(() => expect(pagination().getByRole('button', { name: '下一页' })).toBeEnabled());
-    await act(async () => { await user.click(pagination().getByRole('button', { name: '下一页' })); });
+    await user.click(pagination().getByRole('button', { name: '下一页' }));
     await screen.findByText('TEST server 50 row 0');
     expect(catalogueQuery(fetcher).get('offset')).toBe('50');
     if (key === 'q') {
