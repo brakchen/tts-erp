@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import update
+from sqlalchemy import insert, update
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models import ManualProductCost
@@ -30,15 +30,11 @@ def append_manual_cost(
         .where(ManualProductCost.spu_pk == spu_pk, ManualProductCost.valid_to.is_(None))
         .values(valid_to=now)
     )
-    row = ManualProductCost(
-        spu_pk=spu_pk,
-        unit_cost=unit_cost,
-        currency=currency,
-        valid_from=valid_from or now,
-        note=note,
-        created_by=created_by,
-        created_at=now,
-    )
-    session.add(row)
-    session.flush()
-    return row
+    # RETURNING keeps the response identical to the persisted numeric(20,4),
+    # including callers that submit more than four decimal places.
+    return session.scalars(
+        insert(ManualProductCost).values(
+            spu_pk=spu_pk, unit_cost=unit_cost, currency=currency,
+            valid_from=valid_from or now, note=note, created_by=created_by, created_at=now,
+        ).returning(ManualProductCost)
+    ).one()

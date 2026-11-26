@@ -219,3 +219,12 @@ def test_unnamed_shop_can_use_an_unambiguous_spu(api_client, readwrite_key, db_e
     response = post(api_client, readwrite_key, xlsx([["10", "TEST export shop", UNIQUE]]))
     assert response.status_code == 200, response.text
     assert response.json()["items"][0]["spuPk"] == str(products[2])
+
+
+def test_shared_writer_keeps_single_entry_response_at_database_precision(api_client, readwrite_key, db_engine, products):
+    response = api_client.post("/v2/reporting/manual-costs", headers={"X-API-Key": readwrite_key},
+                               json={"spu_pk": products[2], "spu_id": UNIQUE, "unit_cost": "12.123456", "currency": "CNY"})
+    assert response.status_code == 201, response.text
+    assert response.json()["unit_cost"] == "12.1235"
+    rows = [row for row in _facts(db_engine, products) if row.spu_pk == products[2]]
+    assert len(rows) == 1 and str(rows[0].unit_cost) == response.json()["unit_cost"]
