@@ -173,6 +173,11 @@ next starts, releasing its memory. The phase report verifies required targets,
 duplicate items, process exit, component completeness and missing phases. All
 safe fast tests remain selected; deployment-dependent E2E keeps its separate
 approved environment. Phase splitting does not turn skipped required targets green.
+Each phase fingerprints its freshly cloned schema and migration revision under
+the template lock; a change between phases stops validation. Collected nodes must
+have consistent terminal outcomes and execution counts. Declared active skip
+markers remain allowed for broad selections; dynamic skips and skipped explicitly
+required nodes are incomplete, not passing evidence.
 
 `test_baseline.sh` prints its worktree-private Git `test-runs/run.*` directory
 at startup. It retains phase logs, progress, aggregate JSON and component evidence
