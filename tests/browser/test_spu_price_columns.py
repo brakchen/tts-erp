@@ -16,7 +16,6 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from playwright.sync_api import expect
 
-
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
 
@@ -578,25 +577,30 @@ def test_drill_same_row_close_then_reopen_works(browser_conftest, frontend_brows
     page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     page.locator(".tabulator-row").first.wait_for(state="visible")
     page.evaluate(_DRILL_CLICK_HELPERS_JS)
+    # Control the debounce clock while React/browser timers keep running. CDP
+    # round trips must not consume the 300ms behavior window under host load.
+    # https://playwright.dev/python/docs/api/class-clock#clock-set-fixed-time
+    page.clock.set_fixed_time("2026-09-11T00:00:00.000Z")
 
     page.evaluate("() => window.__drillClickRow()")  # 打开
     drill = page.locator(".op-drill-row")
     drill.wait_for(state="visible")
     assert drill.locator(".op-drill-body").inner_text().strip() != ""
-    page.wait_for_timeout(20)
+    page.clock.set_fixed_time("2026-09-11T00:00:00.020Z")
 
     page.evaluate("() => window.__drillClickRow()")  # 同一行再点一次 = 关闭
     assert page.locator(".op-drill-row").count() == 0
-    page.wait_for_timeout(20)
+    page.clock.set_fixed_time("2026-09-11T00:00:00.040Z")
 
     page.evaluate("() => window.__drillClickRow()")  # 立即重开
     drill = page.locator(".op-drill-row")
     drill.wait_for(state="visible")
     assert drill.locator(".op-drill-body").inner_text().strip() != ""
 
-    # 三次点击确实都落在 300ms 内：用例覆盖的就是「用户级快速 toggle」。
+    # 应用读到的三次点击间隔固定为 20ms，仍覆盖旧 300ms 防重会吞掉的 toggle。
     marks = page.evaluate("() => window.__drillClicks")
     assert len(marks) == 3, marks
+    assert [mark - marks[0] for mark in marks] == [0, 20, 40], marks
     assert marks[2] - marks[0] < 300, marks
 
 
