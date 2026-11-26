@@ -10,12 +10,12 @@ from __future__ import annotations
 import copy
 import time
 from collections.abc import Callable
+from threading import Event
 from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from playwright.sync_api import expect
-
 
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
@@ -315,6 +315,7 @@ def test_rapid_date_requests_keep_latest_price_payload(browser_conftest, fronten
 
 def test_rapid_shop_requests_keep_latest_price_payload(browser_conftest, frontend_browser_renderer, monkeypatch):
     original = cast(Callable[..., Any], browser_conftest._mock_payload)
+    old_started, release_old, old_returned = Event(), Event(), Event()
 
     def mock_payload(request_path: str, query: str = ""):
         if request_path.endswith("/v2/commerce/channel-accounts"):
@@ -328,10 +329,11 @@ def test_rapid_shop_requests_keep_latest_price_payload(browser_conftest, fronten
             payload = _nested_payload(original)
             shop_pk = parse_qs(query).get("shop_pk", [""])[0]
             if shop_pk == "7":
-                time.sleep(0.20)
+                old_started.set()
+                assert release_old.wait(timeout=10), "old shop response was not released"
+                old_returned.set()
                 value = "7.0000"
             elif shop_pk == "8":
-                time.sleep(0.01)
                 value = "8.0000"
             else:
                 value = "37.0000"
@@ -343,12 +345,23 @@ def test_rapid_shop_requests_keep_latest_price_payload(browser_conftest, fronten
 
     monkeypatch.setattr(browser_conftest, "_mock_payload", mock_payload)
     page = frontend_browser_renderer.open("/v2/pages/spu-roi")
-    buttons = page.locator("#shop-modal-list button")
-    buttons.nth(0).click()
-    buttons.nth(1).evaluate("button => button.click()")
-    page.locator("#price-summary").wait_for(state="visible")
-    page.wait_for_timeout(550)
-    assert page.locator("#price-purchase-mean").inner_text() == "≈8.00"
+    try:
+        page.locator("#shop-modal-list button").first.click()
+        assert old_started.wait(timeout=3), "the old shop request never started"
+        # The initial modal closes after selection; use the actual shop picker.
+        # Hold the old response until the new one renders, as in test_spu_projection.
+        page.locator("#shop-switcher").click()
+        with page.expect_request(
+            lambda request: "/v2/analytics/spu-roi?" in request.url
+            and parse_qs(urlsplit(request.url).query).get("shop_pk") == ["8"]
+        ):
+            page.get_by_role("option", name="QA 店 8 · TEST_SHOP_8", exact=True).click()
+        expect(page.locator("#price-purchase-mean")).to_have_text("≈8.00")
+    finally:
+        release_old.set()
+    assert old_returned.wait(timeout=3), "the old shop handler did not finish"
+    page.wait_for_load_state("networkidle")
+    expect(page.locator("#price-purchase-mean")).to_have_text("≈8.00")
 
 
 def test_legacy_payload_hides_price_capability_without_fake_zeroes(frontend_browser_renderer):
@@ -578,7 +591,6 @@ def test_drill_same_row_close_then_reopen_works(browser_conftest, frontend_brows
     page = _open_with_supported_payload(browser_conftest, frontend_browser_renderer, monkeypatch, "/v2/pages/spu-roi")
     page.locator(".tabulator-row").first.wait_for(state="visible")
     page.evaluate(_DRILL_CLICK_HELPERS_JS)
-
     # Keep protocol round trips outside the measured interval: slow hosts must
     # still exercise real rapid clicks rather than timing Python/CDP overhead.
     result = page.evaluate("""async () => {

@@ -32,6 +32,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/envsetup/test-runtime.sh
+. scripts/envsetup/test-runtime.sh
 
 BASELINE_FILE="docs/testing/baseline-fast.txt"
 SCOPE="fast"
@@ -115,7 +117,7 @@ case "$SCOPE" in
     if [[ -n "$BASE" || "$REFRESH_TEMPLATE" -eq 1 ]]; then
       [[ "$MODE" == compare ]] || fail 'fast with --base or --refresh-template requires compare mode'
     fi
-    if [[ -n "$BASE" ]]; then SCOPED=1; fi
+    if [[ "$MODE" == compare ]]; then BASE="${BASE:-HEAD}"; SCOPED=1; fi
     ;;
   all|coverage|migration|domain_migration)
     fail 'historical migration suites are not supported by the baseline driver'
@@ -126,15 +128,20 @@ case "$SCOPE" in
     ;;
 esac
 
-RUN_TMP="$(mktemp -d)"
+RUN_ROOT="$(git rev-parse --path-format=absolute --git-path test-runs)"
+mkdir -p "$RUN_ROOT"
+RUN_TMP="$(mktemp -d "$RUN_ROOT/run.XXXXXXXX")"
 RUN_LOG="$RUN_TMP/pytest.log"
+echo "[test-baseline] artifacts: $RUN_TMP"
 cleanup() {
   local rc=$?
   if [[ -n "$KEEP_LOG" ]]; then
     cp "$RUN_LOG" "$KEEP_LOG" 2>/dev/null || true
     echo "[test-baseline] raw pytest output: $KEEP_LOG"
   fi
-  rm -rf "$RUN_TMP"
+  # Keep reports/logs after failures and cancellation; links printed in component
+  # and phase reports must remain usable. This is worktree-private Git storage.
+  echo "[test-baseline] retained artifacts: $RUN_TMP"
   exit "$rc"
 }
 trap cleanup EXIT
@@ -161,7 +168,7 @@ baseline_ids() {
 }
 
 if [[ "$SCOPED" -eq 1 ]]; then
-  SELECT_PYTHON="${PYTHON:-python3}"
+  SELECT_PYTHON="${PYTHON:-.venv/bin/python}"
   [[ -z "$(git status --porcelain --untracked-files=all)" ]] ||
     fail 'scoped runs require a clean committed worktree'
   "$SELECT_PYTHON" scripts/_test_selection.py --scope "$SCOPE" --base "$BASE" "${SCENARIOS[@]}" >"$RUN_TMP/plan.json"
@@ -182,10 +189,13 @@ if [[ "$SCOPED" -eq 1 ]]; then
   options=()
   if [[ "$REFRESH_TEMPLATE" -eq 1 ]]; then options+=(--refresh-template); fi
   rc=0
-  bash scripts/test_isolated.sh "${options[@]}" selected --scope "$SCOPE" --base "$BASE" --head "$HEAD_SHA" --report "$RUN_TMP/report.json" \
-    "${SCENARIOS[@]}" >"$RUN_LOG" 2>&1 || rc=$?
-  if [[ "$SCOPE" != fast || "$rc" -ne 0 ]]; then cat "$RUN_LOG"
-  else sed -n '/^\[test-timing\]/p' "$RUN_LOG"; fi
+  if "$SELECT_PYTHON" -m scripts._test_phases "${options[@]}" --scope "$SCOPE" --base "$BASE" --head "$HEAD_SHA" --report "$RUN_TMP/report.json" \
+    "${SCENARIOS[@]}" 2>&1 | tee "$RUN_LOG"; then rc=0
+  else
+    statuses=("${PIPESTATUS[@]}")
+    rc="${statuses[0]}"
+    if [[ "$rc" -eq 0 ]]; then rc=70; fi
+  fi
   "$SELECT_PYTHON" - "$RUN_TMP/report.json" "$RUN_TMP/target-baseline.txt" "$rc" <<'PYTHON'
 import json
 import sys

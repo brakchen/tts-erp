@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -84,6 +85,8 @@ if name == "pg_dump":
     if os.environ.get("FAKE_DUMP_FAIL") == "1":
         sys.exit(4)
     print("-- TEST_complete_schema_snapshot")
+    if os.environ.get("FAKE_SCHEMA_SUFFIX"):
+        print(os.environ["FAKE_SCHEMA_SUFFIX"])
     record("DUMP_COMPLETE")
     sys.exit(0)
 if name == "psql":
@@ -149,10 +152,14 @@ def _environment(tools: Path, trace: Path, pg_docker: str | None | object) -> di
         "TTS_ERP_DB_URL": SOURCE_URL,
         "TTS_ERP_DB_URL_TEST": TARGET_URL,
         "FAKE_TRACE": str(trace),
+        # Nested wrappers use command doubles, never the outer capacity lease.
+        "TTS_ERP_TEST_CAPACITY_LOCK": str(trace.parent / "capacity.lock"),
         "PATH": f"{tools}:{env['PATH']}",
     })
     env.pop("DOCKER_HOST", None)
     env.pop("DOCKER_CONTEXT", None)
+    env.pop("TTS_ERP_TEST_TEMPLATE_RECEIPT", None)
+    env.pop("TTS_ERP_TEST_EXPECTED_TEMPLATE_FINGERPRINT", None)
     for key in ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS", "PGTARGETSESSIONATTRS", "PGLOADBALANCEHOSTS"):
         env.pop(key, None)
     if pg_docker is _UNSET:
@@ -216,6 +223,26 @@ def _run_refresh(
 def _trace(tmp_path: Path) -> str:
     path = tmp_path / "trace.log"
     return path.read_text() if path.exists() else ""
+
+
+def test_phase_template_fingerprint_rejects_changed_schema_before_tests(tmp_path: Path) -> None:
+    first, second = tmp_path / "TEST_first", tmp_path / "TEST_second"
+    first.mkdir()
+    second.mkdir()
+    receipt = first / "template.json"
+    result = _run_refresh(first, settings={"TTS_ERP_TEST_TEMPLATE_RECEIPT": str(receipt)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    fingerprint = json.loads(receipt.read_text())["fingerprint"]
+    next_receipt = second / "template.json"
+    result = _run_refresh(second, settings={
+        "TTS_ERP_TEST_TEMPLATE_RECEIPT": str(next_receipt),
+        "TTS_ERP_TEST_EXPECTED_TEMPLATE_FINGERPRINT": fingerprint,
+        "FAKE_SCHEMA_SUFFIX": "CREATE TABLE TEST_changed (id integer);",
+    })
+    assert result.returncode != 0 and "template changed between phases" in result.stderr
+    assert not next_receipt.exists()
+    assert "TEST_RUN_URL" not in _trace(second)
+    assert "dropdb" in _trace(second).split("CLONE tts_erp_test_refresh_run", 1)[1]
 
 
 def _mutations(trace: str) -> list[str]:

@@ -431,6 +431,9 @@ def test_failure_lifecycle_never_leaves_writable_provenance(
     (repo / "scripts").mkdir(parents=True)
     (repo / ".venv/bin").mkdir(parents=True)
     shutil.copyfile(ISOLATED, repo / "scripts/test_isolated.sh")
+    shutil.copyfile(REPO_ROOT / "scripts/_test_capacity.sh", repo / "scripts/_test_capacity.sh")
+    (repo / "scripts/envsetup").mkdir()
+    shutil.copyfile(REPO_ROOT / "scripts/envsetup/test-runtime.sh", repo / "scripts/envsetup/test-runtime.sh")
     script_doubles._script(
         repo / ".venv/bin/python",
         f'''

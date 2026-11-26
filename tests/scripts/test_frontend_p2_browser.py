@@ -142,6 +142,20 @@ def test_management_reads_and_authorization_are_fixed_to_owned_shop_pks(monkeypa
     for body in ({"account_name": "TEST_edited"}, {"region": "VN"}, {"opened_date": "2026-01-02", "unexpected": True}):
         with pytest.raises(ValueError, match="^P2 browser request refused$"):
             gate.check_request("PATCH", root + "/v2/admin/shops/123", body)
+    for alias in (None, "TEST_alias", "TEST_" + "a" * 195):
+        body = {"opened_date": "2026-01-02", "shop_alias": alias}
+        assert gate.check_request("PATCH", root + "/v2/admin/shops/123", body) == "/v2/admin/shops/123"
+        for path in ("/v2/admin/shops/124", "/v2/admin/shops/123?extra=true"):
+            with pytest.raises(ValueError, match="^P2 browser request refused$"):
+                gate.check_request("PATCH", root + path, body)
+        with pytest.raises(ValueError, match="^P2 browser request refused$"):
+            gate.check_request("PATCH", root + "/v2/admin/shops/123", {**body, "unexpected": True})
+        registration = {"shop_id": gate.shop_id, "platform": "tiktok", "account_name": "TEST_name", "shop_alias": alias}
+        with pytest.raises(ValueError, match="^P2 browser request refused$"):
+            gate.check_request("POST", root + "/v2/admin/shops/register", registration)
+    for alias in ("REAL_alias", "", "TEST_" + "a" * 196, 123, False, [], {}):
+        with pytest.raises(ValueError, match="^P2 browser request refused$"):
+            gate.check_request("PATCH", root + "/v2/admin/shops/123", {"shop_alias": alias})
 
 
 def test_app_validation_fault_stays_on_one_owned_patch_and_does_not_change_the_draft(monkeypatch):

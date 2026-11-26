@@ -47,6 +47,13 @@ done
 fail() { echo "[isolated-test] ERROR: $*" >&2; exit 1; }
 [[ -x "$PYTHON" ]] || fail 'missing project Python; run test dependency setup'
 
+# Acquire capacity before connection probes, cloning, builds or test processes.
+# shellcheck source=scripts/_test_capacity.sh
+. scripts/_test_capacity.sh
+test_capacity_acquire "$@" || fail 'could not acquire host test capacity'
+# shellcheck source=scripts/envsetup/test-runtime.sh
+. scripts/envsetup/test-runtime.sh
+
 if [[ -z "${TTS_ERP_DB_URL_TEST:-}" && -f .env.test ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -185,6 +192,34 @@ RUN_CREATED=0
 RUN_PROOF_DIR=''
 RUN_PROOF_PATH=''
 RUN_ID=''
+verify_phase_template() {
+  local receipt="${TTS_ERP_TEST_TEMPLATE_RECEIPT:-}" expected="${TTS_ERP_TEST_EXPECTED_TEMPLATE_FINGERPRINT:-}"
+  [[ -n "$receipt" || -n "$expected" ]] || return 0
+  [[ -n "$receipt" ]] || fail 'phase template receipt is required'
+  local schema revision fingerprint phase_started_us="${EPOCHREALTIME/./}"
+  # Hash the actual freshly cloned schema while the template lock is still
+  # held. pg_dump --restrict-key provides repeatable output; this stream is
+  # hashed only, never restored or saved. No table data/credentials are emitted.
+  # https://www.postgresql.org/docs/18/app-pgdump.html
+  schema="$(pg_exec pg_dump --schema-only --no-owner --no-privileges --no-comments \
+    --restrict-key=TTSTestSchema "$(plain_pg_url "$RUN_URL")" | sha256sum | cut -d ' ' -f 1)" ||
+    fail 'could not fingerprint cloned test schema'
+  revision="$(pg_exec psql --no-psqlrc --tuples-only --no-align --quiet \
+    --command 'SELECT version_num FROM alembic_version ORDER BY version_num' "$(plain_pg_url "$RUN_URL")")" ||
+    fail 'could not read cloned test schema revision'
+  fingerprint="$(printf '%s\n%s\n' "$schema" "$revision" | sha256sum | cut -d ' ' -f 1)"
+  [[ -z "$expected" || "$fingerprint" == "$expected" ]] || fail 'test template changed between phases; rerun on one schema'
+  "$PYTHON" - "$receipt" "$fingerprint" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+temporary = path.with_suffix(path.suffix + '.tmp')
+temporary.write_text(json.dumps({'schemaVersion': 1, 'fingerprint': sys.argv[2]}), encoding='utf-8')
+temporary.replace(path)
+PY
+  phase_timing template_fingerprint "$phase_started_us"
+}
 prepare_template_and_clone() {
   local phase_started_us="${EPOCHREALTIME/./}"
   exec 9>"$TEMPLATE_LOCK_PATH"
@@ -200,9 +235,10 @@ prepare_template_and_clone() {
   pg_exec createdb --maintenance-db "$MAINTENANCE_URL" -T "$TEMPLATE_DB" "$RUN_DB"
   RUN_CREATED=1
   phase_timing database_clone "$phase_started_us"
-  warn_revision_drift
+  verify_phase_template
   flock -u 9
   exec 9>&-
+  warn_revision_drift
 }
 issue_run_binding() {
   [[ "$RUN_CREATED" -eq 1 ]] || fail 'cannot issue proof before clone creation'

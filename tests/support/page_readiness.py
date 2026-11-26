@@ -4,7 +4,7 @@ The contract table below is the single source of truth: every slug names the
 **structural** anchors the page really renders, so "ready" never depends on
 fixture text. P6 retired the Jinja templates, so anchors that name their DOM
 (``#alert-page`` / ``#alert-status`` / ``#alert-rows``) are permanently false
-and are banned by ``tests/support/test_page_readiness_contract.py``.
+and are banned by ``tests/support/test_support_page_readiness_contract.py``.
 
 Two rules keep the table honest:
 

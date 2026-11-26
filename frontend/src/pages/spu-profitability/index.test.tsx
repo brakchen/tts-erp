@@ -5,6 +5,11 @@ import Page from './index';
 import type { FrontendBootstrap } from '../../shared/contracts';
 
 vi.mock('./ProfitabilityTable', () => ({ sortLabel: (value: string) => value, ProfitabilityTable: ({ rows, error }: { rows: { spu_id: string }[]; error?: string }) => <div aria-label="TEST 盈利行">{rows.map((row) => <span key={row.spu_id}>{row.spu_id}</span>)}{error && <p role="alert">{error}</p>}</div> }));
+const componentScope = vi.hoisted(() => ({ renderSummary: true }));
+vi.mock('./Summary', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./Summary')>();
+  return { ...actual, Summary: (props: Parameters<typeof actual.Summary>[0]) => componentScope.renderSummary ? <actual.Summary {...props} /> : null };
+});
 const bootstrap: FrontendBootstrap = { pageId: 'spu-roi', rootPath: '', releaseId: 'TEST_release', navigation: [], roleCapabilities: { readwrite: true, admin: false } };
 const shop = { id: 7, shop_id: '90071992547409931', account_name: 'TEST 店铺', region: 'VN' };
 const product = { spu_pk: 101, spu_id: 'TEST_OLD', title: 'TEST 原商品', status: 'ACTIVATE', main_image_url: null };
@@ -29,6 +34,7 @@ async function clickWithFakeTimers(user: ReturnType<typeof userEvent.setup>, tar
   });
 }
 beforeEach(() => {
+  componentScope.renderSummary = true;
   calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; overviewTotal = 1; shopRows = [shop]; limitedFocusedShop = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); calls.push({ url, init });
@@ -68,7 +74,10 @@ it.each(['spu-roi', 'focused-spus'] as const)('keeps %s dates with results and t
   expect(within(overview).getByLabelText('利润')).toBeInTheDocument();
 });
 it('both page profiles render through the same React owner and keep the server scope', async () => {
-  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  // This case owns request scope; Summary.test.tsx owns metric rendering.
+  // Layout cases above continue rendering the real Summary.
+  componentScope.renderSummary = false;
+  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />); });
   await screen.findByText('TEST_RESULT');
   const reads = calls.filter((call) => call.url.includes('/analytics/spu-roi?'));
   expect(reads.length).toBeGreaterThan(0); const query = new URL(reads.at(-1)!.url, location.origin).searchParams;
@@ -92,7 +101,7 @@ it('shows every focused SPU inside the search field and removes only the clicked
   fetcher.mockImplementation((input, init) => init?.method === 'PATCH' ? new Promise<Response>((resolve) => { finish = () => { void original(input, init).then(resolve); }; }) : original(input, init));
   render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByRole('button', { name: '移除 SPU TEST_TAG_28' });
-  const field = screen.getByRole('group', { name: 'SPU 搜索与已选标签' });
+  const field = screen.getByLabelText('SPU 搜索与已选标签');
   expect(within(field).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(29);
   expect(field).toContainElement(screen.getByLabelText('按 SPU ID / 标题搜索'));
   expect(field.querySelector('details')).toBeNull();
@@ -169,15 +178,19 @@ it('clear cancels a standard bulk lookup and ignores its late response', async (
   expect(input).toHaveValue('');
 });
 it('removing a focused item on the last page resets offset before refreshing the smaller scope', async () => {
+  // Keep real TagGroup/101 tags and pagination; repeated metric-card rendering
+  // belongs to Summary.test.tsx and is unrelated to this offset transition.
+  componentScope.renderSummary = false;
   overviewTotal = 101; stored = Array.from({ length: 101 }, (_, index) => ({ spuId: `TEST_PAGE_${index}`, title: `TEST 商品 ${index}` }));
   // All fetches in this case resolve immediately. Flush their collection work
   // before starting user assertions rather than racing a 101-tag initial mount.
   await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />); });
-  const pagination = () => within(screen.getByRole('navigation', { name: 'SPU ROI 分页' }));
+  // Locate the labelled owner before querying controls among 101 rendered tags.
+  const pagination = () => within(screen.getByLabelText('SPU ROI 分页'));
   await screen.findByText('TEST_RESULT');
   await act(async () => { fireEvent.click(pagination().getByRole('button', { name: '下一页' })); });
   await pagination().findByText('第 2 页 · 共 2 页');
-  const selected = within(screen.getByRole('group', { name: 'SPU 搜索与已选标签' }));
+  const selected = within(screen.getByLabelText('SPU 搜索与已选标签'));
   expect(selected.getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(101);
   const firstTag = within(selected.getByRole('row', { name: 'TEST_PAGE_0' }));
   await act(async () => { fireEvent.click(firstTag.getByRole('button', { name: '移除 SPU TEST_PAGE_0' })); });

@@ -245,7 +245,8 @@ describe('video publish read slice', () => {
     await screen.findByText('TEST_device_locked');
     const fileInput = screen.getByLabelText('选择 MP4 视频');
     await user.upload(fileInput, new File(['TEST_VIDEO'], 'TEST_upload.mp4', { type: 'video/mp4' }));
-    await user.type(screen.getByRole('textbox', { name: '发布文案' }), 'TEST_new_caption');
+    await user.click(screen.getByRole('textbox', { name: '发布文案' }));
+    await user.paste('TEST_new_caption');
     await user.click(screen.getByRole('button', { name: '上传并加入发布队列' }));
     expect(await screen.findByRole('dialog', { name: '确认加入发布队列' })).toHaveTextContent('TEST_new_caption');
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
@@ -342,7 +343,8 @@ describe('video publish read slice', () => {
     const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '编辑发布设置' }));
     const panel = screen.getByRole('region', { name: '任务操作与核对' });
-    await user.type(within(panel).getByRole('textbox', { name: '正文 Prompt' }), 'TEST_dirty_prompt');
+    await user.click(within(panel).getByRole('textbox', { name: '正文 Prompt' }));
+    await user.paste('TEST_dirty_prompt');
     await user.click(within(panel).getByRole('button', { name: '查询当前事实' })); await within(panel).findByText(/当前事实已读取/);
     expect(within(panel).getByRole('textbox', { name: '正文 Prompt' })).toHaveValue('TEST_dirty_prompt');
     expect(within(panel).getByRole('textbox', { name: '设置设备序列号' })).toHaveValue('');
@@ -388,7 +390,8 @@ describe('video publish read slice', () => {
     const resumable = { ...task, caption: 'TEST_full_resume_caption', allowedActions: ['view', 'continue_upload'] };
     mockReads((url) => url.endsWith('/tasks') ? json({ ...list, items: [resumable] }) : url.endsWith('/tasks/' + id) ? new Promise<Response>((r) => { resolve = r; }) : undefined);
     const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
-    await user.type(screen.getByRole('textbox', { name: '发布文案' }), 'TEST_local_draft');
+    await user.click(screen.getByRole('textbox', { name: '发布文案' }));
+    await user.paste('TEST_local_draft');
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重新选择文件继续' }));
     expect(screen.getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_local_draft');
     await user.click(screen.getByRole('button', { name: '确认替换草稿并续传此任务' }));
@@ -686,7 +689,9 @@ describe('video publish read slice', () => {
     await user.click(screen.getByRole('button', { name: '核对上传任务' }));
     await user.click(screen.getByRole('button', { name: '清除选择 / 放弃续传' })); await user.click(screen.getByRole('button', { name: '确认清除本地草稿' }));
     const next = new File(['TEST_NEXT_VIDEO'], 'TEST_next.mp4', { type: 'video/mp4' });
-    await user.upload(screen.getByLabelText('选择 MP4 视频'), next); await user.type(screen.getByRole('textbox', { name: '发布文案' }), 'TEST_next_caption');
+    await user.upload(screen.getByLabelText('选择 MP4 视频'), next);
+    await user.click(screen.getByRole('textbox', { name: '发布文案' }));
+    await user.paste('TEST_next_caption');
     await act(async () => { resolve(json({ ...detail, ...uploadingTask(bodies[0]) })); });
     const workbench = screen.getByRole('region', { name: '新建发布任务' });
     expect(within(workbench).getByRole('textbox', { name: '发布文案' })).toBeEnabled();
@@ -785,7 +790,9 @@ describe('video publish read slice', () => {
   async function prepareConfirmation(user: ReturnType<typeof userEvent.setup>) {
     await screen.findByText('TEST_device_locked');
     const file = new File(['TEST_VIDEO'], 'TEST_upload.mp4', { type: 'video/mp4' });
-    await user.upload(screen.getByLabelText('选择 MP4 视频'), file); await user.type(screen.getByRole('textbox', { name: '发布文案' }), 'TEST_captured_caption');
+    await user.upload(screen.getByLabelText('选择 MP4 视频'), file);
+    await user.click(screen.getByRole('textbox', { name: '发布文案' }));
+    await user.paste('TEST_captured_caption');
     await user.click(screen.getByRole('button', { name: '上传并加入发布队列' })); return file;
   }
   it.each(['fetch', 'body'] as const)('bounds a stalled create %s to 30s, preserves capture/unknown and ignores late success', async (stage) => {

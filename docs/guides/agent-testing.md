@@ -38,7 +38,7 @@ Evidence and incident analysis: `docs/handoff/test-baseline-verify-2026-11-08.md
 
 ### 1.2 Local capacity and prerequisites
 
-Run validation on the development machine. Browser tests (Playwright/Chromium) and frontend
+Run validation on the development machine or the existing `tts-erp-test` validation VM (8 CPU / 7.2 GiB, fixed capacity). Browser tests (Playwright/Chromium) and frontend
 builds can exhaust local resources when several suites run at once. Prefer the narrowest
 selection and rerun a failing case alone when there is evidence of resource contention.
 
@@ -54,9 +54,9 @@ worktree has none of them and `scripts/test_isolated.sh` fails with
 `missing project Python`, `TTS_ERP_DB_URL_TEST is unset` or
 `Frontend dependencies missing`.
 
-Run `bash scripts/envsetup/prepare-worktree.sh` once per worktree. It links the venv and
+Run `bash scripts/envsetup/prepare-worktree.sh --scope auto --base "$target_sha"` for a committed worktree; use `--scope backend` for browser-free backend work or `--scope fast` for complete validation. `--check` and `--dry-run` do not mutate the environment. It links the venv and
 `.env.test` from the Git main checkout and installs frontend dependencies from the current
-worktree's lockfile. Set `TTS_ERP_MAIN_CHECKOUT` when reusing a different prepared checkout.
+worktree's lockfile only when the selected plan needs frontend tooling. Installation fingerprints bind package/lockfile and Node/npm versions. Set `TTS_ERP_MAIN_CHECKOUT` when reusing a different prepared checkout.
 
 > **Do not symlink `frontend/node_modules` across worktrees.** Node's ESM resolution follows
 > the real path of the link, so a shared `node_modules` resolves against the *other*
@@ -154,6 +154,52 @@ call sites you missed.
 
 ## 2. Supported commands
 
+### Fixed-capacity execution and retained evidence
+
+The isolated wrapper admits work before connection probes, cloning and builds.
+One heavy run owns `/tmp/tts-erp-test-capacity.lock` exclusively; at most two
+explicit small file selections in unit/sync_worker/fx may share capacity. Paths
+must be canonical real files, with at most eight file/node targets; unknown,
+browser, API, full and selected invocations are heavy. The gate prevents new
+light readers starving a waiting heavy run. Capacity is scheduling, not database
+isolation: every admitted run still creates and cleans its own clone and proof.
+Only offline lock/command-double tests use a private `TTS_ERP_TEST_CAPACITY_LOCK`;
+normal lanes must use the host default. Queue timeout defaults to 7200 seconds
+and prints waiting status; it does not increase test deadlines.
+An admitted heavy run uses at most three isolated Vitest workers, within the
+existing VM's memory budget. Other/manual invocations keep the two-worker default.
+Test files retain Vitest isolation; neither extra machines nor shared JS globals
+are used to gain throughput.
+
+Formal baseline comparisons run backend, frontend and browser phases sequentially
+through fresh `test_isolated.sh` children. Each pytest process exits before the
+next starts, releasing its memory. The phase report verifies required targets,
+duplicate items, process exit, component completeness and missing phases. All
+safe fast tests remain selected; deployment-dependent E2E keeps its separate
+approved environment. Phase splitting does not turn skipped required targets green.
+Each phase fingerprints its freshly cloned schema and migration revision under
+the template lock; a change between phases stops validation. Collected nodes must
+have consistent terminal outcomes and execution counts. Declared active skip
+markers remain allowed for broad selections; dynamic skips and skipped explicitly
+required nodes are incomplete, not passing evidence.
+
+`test_baseline.sh` prints its worktree-private Git `test-runs/run.*` directory
+at startup. It retains phase logs, progress, aggregate JSON and component evidence
+after success, failure or cancellation; `--keep-log` additionally saves the driver
+log. Every 20 seconds the driver reports phase/current item and completed count.
+The outer pytest component item is not a count of its internal Vitest assertions.
+Component reports include each file/test and a quoted isolated rerun command.
+Use those commands rather than rerunning the full wrapper after one failure.
+Missing final JSON or timeout remains incomplete; unreported assertions did not
+become passes. Successful tests no longer dump all captured stdout with `-rP`.
+
+Node is selected from `TTS_ERP_TEST_NODE_BIN` when set, otherwise the existing
+`$HOME/.local/tts-erp-test-node/node_modules/.bin` installation when available,
+then the normal PATH. No automatic download or per-lane Node installation is
+performed. Frontend commands validate the package engine; browser-free tests do
+not require Node. Private npm installs are fingerprinted and may use npm's shared
+download cache, but writable node_modules/Vite caches must not be shared.
+
 | Scope | Command |
 | --- | --- |
 | **DoD validation (one selected run against the target baseline)** | `bash scripts/test_baseline.sh --scope auto --base "$target_sha"` |
@@ -174,7 +220,7 @@ Domain names may be passed with or without the `domain_` prefix.
 
 Use the exact synchronized master SHA as `target_sha`. On a prospective merge
 commit it is the first parent. `--plan` reads Git and prints the affected
-groups and reasons. An ordinary run uses a clean committed worktree and
+groups and reasons. The formal gate runs once on the clean committed prospective merge, under the master integration lock, and
 compares the executed tests with the baseline from that target commit.
 
 ```bash
@@ -241,7 +287,7 @@ driver, test execution or isolation, result reporting, or global test collection
 and fixtures. This includes `scripts/test*.sh`, `scripts/_test_selection.py`,
 `scripts/_run_selected_tests.py`, `tests/support/selected_test_report.py`, and
 changes to global pytest collection or `tests/conftest.py`. Fast remains an explicit
-regression command. An auto run counts as the baseline comparison for an ordinary
+regression command. Branch preflight uses narrow tests and `--plan`; it does not repeat the formal full baseline. An auto run on the prospective merge counts as the baseline comparison for an ordinary
 change, so a second full run is unnecessary.
 
 Changes to `tests/e2e/` require separate evidence from the affected explicit
@@ -253,7 +299,7 @@ Agents must not invoke the underlying test framework or low-level wrapper direct
 
 ## 本地启动与手动验证
 
-当前无专用测试机。手动验收在开发机运行回环实例。使用本地测试配置和独立测试库，
+现有 `tts-erp-test` 验证虚拟机供自动化验证使用，容量固定。手动验收在开发机运行回环实例。使用本地测试配置和独立测试库，
 通过已生成的前端产物验证页面时先执行前端构建：
 
 ```bash
@@ -330,8 +376,7 @@ This first-option form accepts one or two workers, explicit files/node targets
 from `scripts/_test_browser_parallel.py::SAFE_FILES`, and no pytest flags. Unknown
 files, duplicate/overlapping targets and `TTS_ERP_TEST_DB_NAME` overrides are
 rejected. Use serial commands for filters, writable workflows, Vite and heavy
-components. Whole modules stay together. Prewarming releases its lease before
-children revalidate inputs after loading `.env.test`. Each child enters the
+components. Whole modules stay together. Parent prewarming is removed: each child acquires host capacity before loading/building its inputs. The host capacity policy may serialize these browser children. Each child enters the
 original isolated wrapper, gets its own generated database/proof, local server
 ports and private log. Every child must finish; any failure, empty collection or
 cleanup failure makes the overall command fail. Cancellation/launch failure
@@ -380,6 +425,8 @@ If template cloning or PostgreSQL client tooling is unavailable, stop and repair
 ## 6. Failure classification
 
 The default completion criterion is zero failures.
+
+The formal regression belongs to the prospective merge, not both the branch and the merge. Before queueing, run affected narrow checks; while holding `/tmp/tts-erp-master-merge.lock`, create the candidate, validate it once and push without force. If master moved, resynchronize and build a fresh candidate. Standalone branch delivery still requires the corresponding committed-HEAD baseline and must state that integration is pending.
 
 The master baseline is a property of **master**, not of your lane. It is
 committed at `docs/testing/baseline-fast.txt`, so a lane does **not** re-measure
