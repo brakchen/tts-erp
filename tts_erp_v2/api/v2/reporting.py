@@ -8,7 +8,7 @@ Auth classification (in ``auth.required_role``):
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -498,7 +498,7 @@ def submit_manual_cost(
     created_by = f"api_key:{role}"
     new_row = append_manual_cost(
         sess, spu_pk=cp_id, unit_cost=body.unit_cost, currency=body.currency,
-        valid_from=body.valid_from, note=body.note, created_by=created_by,
+        valid_from=body.valid_from or datetime.now(UTC), note=body.note, created_by=created_by,
     )
     sess.commit()
     return _manual_cost_row(new_row)
