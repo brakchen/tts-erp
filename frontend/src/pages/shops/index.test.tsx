@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 
 const modulePath = './index';
@@ -41,6 +41,9 @@ async function fillApp(user: ReturnType<typeof userEvent.setup>, dialog: HTMLEle
   await user.paste(secret);
 }
 const save = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: /^保存(?:中…)?$/ });
+// Charge the one-time real module load to setup, including single-case reruns.
+// Every interaction still runs with the normal 5s budget and file isolation.
+beforeAll(async () => { await import(modulePath); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('shops content', () => {
