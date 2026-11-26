@@ -61,7 +61,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it.each(['spu-roi', 'focused-spus'] as const)('keeps every %s search and scope control below the overview', async (pageId) => {
-  render(<Page bootstrap={{ ...bootstrap, pageId }} />);
+  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId }} />); });
   await screen.findByText('TEST_RESULT');
   const overview = screen.getByRole('region', { name: '经营概览' });
   for (const control of [screen.getByRole('region', { name: '店铺与经营范围' }), screen.getByLabelText('按 SPU ID / 标题搜索')]) {
