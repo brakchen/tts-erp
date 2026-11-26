@@ -1,6 +1,6 @@
 """Browser-level guard: every readiness anchor really hits the canned page.
 
-The source-level guards live in ``tests/support/test_page_readiness_contract.py``
+The source-level guards live in ``tests/support/test_support_page_readiness_contract.py``
 (they run in the fast scope). This file proves the part only a browser can
 show: the anchors in the contract table really match what the page renders.
 

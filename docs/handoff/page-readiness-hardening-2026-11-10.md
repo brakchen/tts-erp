@@ -151,7 +151,7 @@ else:
 | `tests/browser/test_render_smoke.py` | 只调用方，**大概率无需改**（4 处调用：L53/61/74/82） |
 | `tests/browser/test_frontend_pilots.py` | 1 处调用（L74）；runninghub 走自己的分支，**无需改** |
 | `tests/scripts/test_browser_runtime.py` | 3 处引用（L74/88/93，用 "shops"），**无需改** |
-| `tests/support/test_page_readiness_contract.py` | **新增**：契约表护栏（见 §4） |
+| `tests/support/test_support_page_readiness_contract.py` | **新增**：契约表护栏（见 §4） |
 
 **依赖 `TEST_RENDER_COMPARE_` 夹具约定的既有测试**（它们是**数据契约**不是就绪判据，改结构锚点后不受影响；但若要让 spuId 自由化，需同步这 3 处）
 
@@ -166,7 +166,7 @@ else:
 
 ## 4. 护栏设计 + 破坏性自验证
 
-### 4.1 护栏（`tests/support/test_page_readiness_contract.py`，新增）
+### 4.1 护栏（`tests/support/test_support_page_readiness_contract.py`，新增）
 
 | 护栏 | 断言什么 | 怎么被破坏时必须红 |
 | --- | --- | --- |
@@ -234,7 +234,7 @@ M tests/support/test_runtime.py
 | `tests/browser/test_frontend_pilots.py` | 否 |
 | `tests/scripts/test_browser_runtime.py` | 否 |
 | `tests/browser/conftest.py` | 否 |
-| `tests/support/test_page_readiness_contract.py`（新增） | 否 |
+| `tests/support/test_support_page_readiness_contract.py`（新增） | 否 |
 
 ⇒ **无写域冲突**。两点提醒：
 
@@ -281,7 +281,7 @@ Chief 的决定：① runninghub 死分支**删掉，本轮不启用**；② 改
 | 文件 | 改动 |
 | --- | --- |
 | `tests/support/page_readiness.py` | 契约表化：`Anchor` 数据类 + `CONTRACTS`（17 个 slug）+ 显式 `SUPPORTED_SLUGS`；删 3 条旧 DOM 判据与 runninghub 死分支；告警页改用 `get_by_role("grid", name="SPU 两期盈利对比")`；未知 slug 直接 `AssertionError`，不再静默等一个永不出现的元素 |
-| `tests/support/test_page_readiness_contract.py` | 新增：G1 覆盖完整性、G2 禁止旧 DOM、G3 锚点必须存在于 React 源码，外加三条破坏性自验证 |
+| `tests/support/test_support_page_readiness_contract.py` | 新增：G1 覆盖完整性、G2 禁止旧 DOM、G3 锚点必须存在于 React 源码，外加三条破坏性自验证 |
 | `tests/browser/test_page_readiness_contract.py` | 新增：浏览器级 G3 —— 每个 slug 打开夹具页面，锚点必须真的命中 |
 | `tests/e2e/test_spu_deterioration_alert_smoke.py` | 补一条验收断言：`get_by_role("grid", name="SPU 两期盈利对比")` 必须在**真实 API + 真实 React 产物**的页面上命中（Chief 验收口径：夹具路径全绿不算数，夹具就是这次假绿的根源） |
 
