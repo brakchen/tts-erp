@@ -194,16 +194,16 @@ JOBS: dict[str, JobSpec] = {
         is_tiktok=False,
         entrypoint="sync_source_cost_to_master",
     ),
-    # Private ERP purchase records expose sourceUnitPrice ↔ TikTok SPU data.
-    # The cleaner updates the source-owned Miaoshou candidate history and only
-    # promotes price changes through the manual-cost lock.
-    "miaoshou.purchase_price_clean": JobSpec(
-        job_name="miaoshou.purchase_price_clean",
-        module_path="tts_erp_v2.jobs.miaoshou.purchase_price_clean",
-        interval_seconds=3600,
-        is_tiktok=False,
-        entrypoint="sync_purchase_prices",
-    ),
+    # 2026-11-26：采购价改由人工维护，停用妙手 API 采购价同步（JOBS 19 → 18）。
+    # 注释注册入口，同时阻止定时调度、启动补跑和操作员手动触发；保留历史数据
+    # 与清洗实现供复核。重新启用须经产品决定，不得仅恢复历史 enabled 开关。
+    # "miaoshou.purchase_price_clean": JobSpec(
+    #     job_name="miaoshou.purchase_price_clean",
+    #     module_path="tts_erp_v2.jobs.miaoshou.purchase_price_clean",
+    #     interval_seconds=3600,
+    #     is_tiktok=False,
+    #     entrypoint="sync_purchase_prices",
+    # ),
     # 妙手包裹列表按 gmtModified watermark 增量拉取，source-owned 数据只写
     # miaoshou.*；包裹详情 endpoint 作为单包修复入口。
     "miaoshou.packages": JobSpec(

@@ -89,9 +89,16 @@ ALLOW_PROD_DESTRUCTIVE=1 bash scripts/oneoff_migrate_0045_miaoshou_package_schem
 备份默认写入 `$HOME/backups/tts_erp_manual/miaoshou_package_0045_*.jsonl.gz`，并生成带行数和 ID
 清单的 `.meta.json`。脚本自身不会设置生产 destructive override；缺少环境变量或 `--confirm` 会拒绝执行。
 
-## 7. 采购价同步
+## 7. 采购价同步（已停用）
 
-`miaoshou.purchase_price_clean` 每小时使用现有妙手开放平台应用凭据调用采购记录列表。
+2026-11-26 决定停用 `miaoshou.purchase_price_clean`，采购价通过
+[采购价维护页面](../../prd/pages/manual-costs.md)和 `POST /v2/reporting/manual-costs` 人工维护。
+任务注册入口已注释，Worker 发布并重启后不再定时执行、启动补跑或接受操作员手动触发；
+历史 `enabled` 开关不能恢复此任务。历史采购记录、采购价及其读取优先级保留，人工成本仍优先。
+
+以下为停用前的实现说明，保留供历史数据复核：
+
+任务原先每小时使用现有妙手开放平台应用凭据调用采购记录列表。
 应用需具备「包裹 → 采购记录 → 采购记录列表」权限。凭据由 `token_service` 加载，
 配置入口与妙手包裹同步相同。
 
