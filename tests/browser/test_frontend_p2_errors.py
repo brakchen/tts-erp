@@ -94,7 +94,8 @@ def test_real_http_rejection_and_wire_error_recovery(frontend_build, monkeypatch
                     dialog = fill_registration(page, gate)
                     gate.invalid_region_next = True
                     dialog.get_by_role("button", name="保存", exact=True).click()
-                    expect(dialog.get_by_text("校验未通过，请检查输入（HTTP 422）", exact=True)).to_be_visible()
+                    expect(dialog.get_by_text("请检查标红的字段", exact=True)).to_be_visible()
+                    expect(dialog.get_by_label("区域", exact=True)).to_have_attribute("aria-invalid", "true")
                     assert gate.mutated == 1 and ("POST", REGISTER, 422) in gate.responses
                     assert dialog.get_by_label("区域", exact=True).input_value() == "VN"
                     assert dialog.get_by_label("店铺名称", exact=True).input_value() == "TEST_error_shop"
@@ -121,7 +122,8 @@ def test_real_http_rejection_and_wire_error_recovery(frontend_build, monkeypatch
                     fill_sensitive(dialog.get_by_label("App Secret", exact=True), secret)
                     gate.invalid_app_key_next = True
                     dialog.get_by_role("button", name="保存", exact=True).click()
-                    expect(dialog.get_by_text("校验未通过，请检查输入（HTTP 422）", exact=True)).to_be_visible()
+                    expect(dialog.get_by_text("请检查标红的字段", exact=True)).to_be_visible()
+                    expect(dialog.get_by_label("App Key", exact=True)).to_have_attribute("aria-invalid", "true")
                     assert gate.mutated == 2 and ("PATCH", patch, 422) in gate.responses
                     retained = dialog.get_by_label("App Secret", exact=True).input_value() == secret
                     assert retained and dialog.get_by_label("Service ID", exact=True).input_value() == gate.service_id
@@ -159,18 +161,23 @@ def test_real_http_rejection_and_wire_error_recovery(frontend_build, monkeypatch
                     before = command_count(gate, "PATCH", patch)
                     gate.inject_next("PATCH", patch, 500)
                     dialog.get_by_role("button", name="保存", exact=True).click()
-                    expect(dialog.get_by_role("button", name="读取当前记录核对", exact=True)).to_be_visible()
+                    # PRD 04 §6 removed the verification gate; no automatic replay.
+                    expect(dialog.get_by_text("服务出错了，请稍后重试", exact=True)).to_be_visible()
+                    expect(dialog.get_by_role("button", name="读取当前记录核对", exact=True)).to_have_count(0)
                     assert gate.injected[-1] == ("PATCH", patch, 500) and ("PATCH", patch, 200) in gate.responses
-                    expect(dialog.get_by_role("button", name="保存", exact=True)).to_be_disabled()
+                    expect(dialog.get_by_role("button", name="保存", exact=True)).to_be_enabled()
+                    assert dialog.get_by_label("开店日期", exact=True).input_value() == "2026-02-03"
                     with independent(probe) as session:
                         shop = session.get(ChannelAccount, shop_pk)
                         assert shop is not None and shop.account_name == "TEST_error_shop" and str(shop.opened_date) == "2026-02-03"
-                    dialog.get_by_role("button", name="读取当前记录核对", exact=True).click()
-                    expect(dialog.get_by_role("button", name="核对后重新保存", exact=True)).to_be_enabled()
-                    discard_shop_dialog(page, dialog)
+                    page.wait_for_load_state("networkidle")
+                    assert command_count(gate, "PATCH", patch) == before + 1
+                    dialog.get_by_role("button", name="保存", exact=True).click()
+                    dialog.wait_for(state="hidden")
+                    assert command_count(gate, "PATCH", patch) == before + 2
                     page.reload(wait_until="networkidle")
                     expect(row.get_by_text("2026-02-03", exact=True)).to_be_visible()
-                    assert command_count(gate, "PATCH", patch) == before + 1
+                    assert command_count(gate, "PATCH", patch) == before + 2
                     page.goto(child.base + prefix + "/v2/pages/enum-map", wait_until="networkidle")
                     page.get_by_role("button", name=re.compile(" 分类$")).click()
                     page.get_by_role("option", name="订单状态（order_status）", exact=True).click()
@@ -186,18 +193,21 @@ def test_real_http_rejection_and_wire_error_recovery(frontend_build, monkeypatch
 
                     gate.inject_next("PUT", ENUM, 500)
                     form = enum_form("TEST_enum_wire500")
-                    expect(form.get_by_role("button", name="查询核对", exact=True)).to_be_visible()
+                    expect(form.get_by_text("服务出错了，请稍后重试", exact=True)).to_be_visible()
+                    expect(form.get_by_role("button", name="查询核对", exact=True)).to_have_count(0)
                     assert gate.injected[-1] == ("PUT", ENUM, 500) and ("PUT", ENUM, 200) in gate.responses
-                    expect(form.get_by_role("button", name="保存映射", exact=True)).to_be_disabled()
+                    expect(form.get_by_role("button", name="保存映射", exact=True)).to_be_enabled()
                     assert form.get_by_label("中文标签", exact=True).input_value() == "TEST_enum_wire500"
                     with independent(probe) as session:
                         fact = session.scalar(select(EnumMap).where(EnumMap.enum_type == "order_status", EnumMap.enum_value == gate.enum_value))
                         assert fact is not None and fact.label_zh == "TEST_enum_wire500"
-                    form.get_by_role("button", name="查询核对", exact=True).click()
-                    expect(form.get_by_role("button", name="核对后明确重新提交", exact=True)).to_be_enabled()
-                    form.get_by_role("button", name="取消", exact=True).click()
-                    page.reload(wait_until="networkidle")
+                    page.wait_for_load_state("networkidle")
                     assert command_count(gate, "PUT", ENUM) == 1
+                    form.get_by_role("button", name="保存映射", exact=True).click()
+                    form.wait_for(state="hidden")
+                    assert command_count(gate, "PUT", ENUM) == 2
+                    page.reload(wait_until="networkidle")
+                    assert command_count(gate, "PUT", ENUM) == 2
                     rows = public_get(probe, "/v2/config/enum-map/list")
                     assert isinstance(rows, list) and any(item["enum_value"] == gate.enum_value for item in rows)
 
