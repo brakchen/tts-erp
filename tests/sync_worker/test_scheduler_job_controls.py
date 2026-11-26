@@ -47,6 +47,47 @@ def test_set_job_enabled_rejects_unknown_job(db_session) -> None:
         set_job_enabled(db_session, "unknown.job", False)
 
 
+def test_retired_purchase_price_job_is_not_scheduled_with_old_enabled_control(
+    db_session,
+) -> None:
+    job_name = "miaoshou.purchase_price_clean"
+    db_session.add(
+        SyncCursor(
+            job_name=SCHEDULER_CONTROL_JOB,
+            scope=job_name,
+            cursor_value=CONTROL_ENABLED,
+        )
+    )
+    db_session.flush()
+
+    assert job_name not in get_job_control_values(db_session)
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = db_session
+    sched = scheduler.build_scheduler(session_factory=factory)
+    assert job_name not in {job.id for job in sched.get_jobs()}
+
+
+def test_retired_purchase_price_job_cannot_be_enabled() -> None:
+    session = MagicMock()
+    with pytest.raises(KeyError, match="miaoshou.purchase_price_clean"):
+        set_job_enabled(session, "miaoshou.purchase_price_clean", True)
+    session.execute.assert_not_called()
+
+
+def test_retired_purchase_price_job_cannot_be_run_manually(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = MagicMock()
+    monkeypatch.setattr("tts_erp_v2.db.base.get_session_factory", factory)
+    dispatch = MagicMock()
+    monkeypatch.setattr(scheduler, "_run_system_job", dispatch)
+
+    with pytest.raises(KeyError, match="miaoshou.purchase_price_clean"):
+        scheduler.run_scheduled_job_once("miaoshou.purchase_price_clean")
+    factory.assert_not_called()
+    dispatch.assert_not_called()
+
+
 def test_make_executor_skips_disabled_tiktok_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
