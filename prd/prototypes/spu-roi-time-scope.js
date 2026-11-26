@@ -30,7 +30,7 @@
       set('sum-projection-completed-basis-orders', value.orders);
       set('sum-projection-completed-loss-orders', value.losses);
       set('sum-projection-full-loss-rate', value.rate);
-      set('scope-sample-link', lookback.value + ' 天历史样本 · 全损率 ' + value.rate);
+      set('scope-sample-link', lookback.value + ' 天样本');
     }
     start.addEventListener('change', applyRange);
     end.addEventListener('change', applyRange);

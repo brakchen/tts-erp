@@ -10,7 +10,7 @@
 <body>
   <div hidden data-page="spu-roi" data-title="SPU ROI" data-desc="按店铺与经营日期查看全量或指定 SPU 的盈利大盘与明细。">
 
-<p class="sample-banner">时间分区方案 · <strong>示例数据</strong>。日期与样本控件可交互，金额仅作展示，不代表真实经营结果。</p>
+<p class="sample-banner"><strong>示例数据</strong> · 金额不随筛选重算</p>
 
 <section class="erp-intro">
   <div>
@@ -24,14 +24,13 @@
 <div id="spu-time-scope">
 <div class="scope-global">
   <label>当前店铺 <select id="scope-shop" aria-label="当前店铺"><option>示例店铺 A</option><option>示例店铺 B</option></select></label>
-  <p>店铺与已应用 SPU 范围同时作用于两个区域 · 金额 CNY</p>
+  <p>金额 CNY</p>
 </div>
 
 <section id="summaries" class="erp-overview scope-report" aria-label="经营概览" aria-live="polite">
   <header class="scope-heading">
-    <div><div class="scope-kicker"><span class="scope-dot"></span>跟随页面经营日期</div>
-      <h2>所选期间的经营结果</h2>
-      <p class="scope-note">当前与预计最终，都对应这段日期内的订单。</p>
+    <div><div class="scope-kicker"><span class="scope-dot"></span>跟随经营日期</div>
+      <h2>经营概览</h2>
     </div>
     <span class="scope-range" data-report-range>2026-11-19 ~ 2026-11-25</span>
   </header>
@@ -117,7 +116,7 @@
     
       <article class="erp-card erp-overview-profit" aria-label="利润">
         <header class="erp-toolbar" style="justify-content:space-between;width:100%;">
-          <h3 class="erp-section-heading">这批订单的利润</h3>
+          <h3 class="erp-section-heading">利润</h3>
           <div class="gap-2">
             <span id="sum-projection-status" class="erp-table-meta">可预测</span>
             <button class="btn btn-sm" type="button" data-open="dlg-profit-help">口径帮助</button>
@@ -126,15 +125,15 @@
         <p class="scope-profit-subtitle">经营日期：<span data-report-range>2026-11-19 ~ 2026-11-25</span> · CNY</p>
         <div class="erp-overview-comparison">
           <div class="scope-current">
-            <div class="gap-2"><h4>当前结果</h4><span class="text-accent">盈利</span></div>
+            <div class="gap-2"><h4>当前</h4><span class="text-accent">盈利</span></div>
             <div class="erp-overview-primary"><dl class="erp-profit-metrics">
               <div><dt>净利润</dt><dd id="sum-net-profit" class="text-accent">12,860.00</dd></div>
             </dl></div>
             <dl class="erp-profit-metrics"><div><dt>净收入</dt><dd id="sum-net-revenue">72,700.00</dd></div></dl>
           </div>
           <div class="scope-projected">
-            <h4>这批订单预计最终</h4>
-            <a class="scope-source-link" href="#projection-basis-card">采用 <span id="scope-sample-link">30 天历史样本 · 全损率 3.16%</span> ↓</a>
+            <h4>预计最终</h4>
+            <a class="scope-source-link" href="#projection-basis-card"><span id="scope-sample-link">30 天样本</span> ↓</a>
             <div class="erp-overview-primary"><dl class="erp-profit-metrics">
               <div><dt>预计净利润</dt><dd id="sum-projected-net-profit">11,420.00</dd></div>
             </dl></div>
@@ -160,24 +159,22 @@
         </dl>
 <section id="projection-basis-card" class="scope-reference" aria-label="按计算当天回看的历史预测样本">
   <header class="scope-heading">
-    <div><div class="scope-kicker"><span class="scope-dot"></span>根据当前时间确定 · 独立样本窗口</div>
+    <div><div class="scope-kicker"><span class="scope-dot"></span>按当前时间回看</div>
       <h2>历史预测依据</h2>
-      <p class="scope-note">样本窗口按计算当天回看，不跟随所选经营日期。</p>
     </div>
-    <span class="scope-range">计算基准日 2026-11-26</span>
+    <span class="scope-range">计算日 2026-11-26</span>
   </header>
   <div class="scope-sample-controls">
     <label>历史样本<select id="filter-projection-lookback-days" aria-label="预测样本天数"><option value="30" selected>30 天</option><option value="90">90 天</option></select></label>
     <span>样本日期 <strong id="projection-sample-window">2026-10-20 ~ 2026-11-18</strong></span>
-    <span class="scope-note">跳过最近 7 个完整自然日</span>
+    <span class="scope-note">跳过最近 7 天</span>
   </div>
             <dl class="erp-profit-metrics">
               <div><dt>已完结样本单<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="已完结样本单口径" data-hint="独立成熟样本窗口内的已完结订单数，与当前经营日期窗口分开。" aria-label="查看已完结样本单口径">?</button></dt><dd id="sum-projection-completed-basis-orders">1,204</dd></div>
               <div><dt>已完结全损单<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="已完结全损单口径" data-hint="独立成熟样本中已确认严格全损的订单数。" aria-label="查看已完结全损单口径">?</button></dt><dd id="sum-projection-completed-loss-orders">38</dd></div>
               <div><dt>已完结订单全损率<button type="button" class="btn btn-sm erp-metric-hint" data-hint-title="已完结订单全损率口径" data-hint="成熟样本的严格全损订单数占已完结样本订单数的比例。" aria-label="查看已完结订单全损率口径">?</button></dt><dd id="sum-projection-full-loss-rate">3.16%</dd></div>
             </dl>
-  <footer><span><span data-shop-name>示例店铺 A</span> · 已应用 SPU 范围</span><span>店铺、SPU 和样本天数会影响此区域</span></footer>
-  <details><summary>计算时采用的其他参考值</summary><p class="scope-note">采购单价与汇率采用计算时的最新有效数据；销售、采购成本汇总及利润仍属于上方所选经营期间。</p></details>
+  <footer><span><span data-shop-name>示例店铺 A</span> · 当前 SPU 范围</span></footer>
 </section>
       </article>
   </div>
