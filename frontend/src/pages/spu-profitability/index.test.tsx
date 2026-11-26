@@ -5,6 +5,11 @@ import Page from './index';
 import type { FrontendBootstrap } from '../../shared/contracts';
 
 vi.mock('./ProfitabilityTable', () => ({ sortLabel: (value: string) => value, ProfitabilityTable: ({ rows, error }: { rows: { spu_id: string }[]; error?: string }) => <div aria-label="TEST 盈利行">{rows.map((row) => <span key={row.spu_id}>{row.spu_id}</span>)}{error && <p role="alert">{error}</p>}</div> }));
+const componentScope = vi.hoisted(() => ({ renderSummary: true }));
+vi.mock('./Summary', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./Summary')>();
+  return { ...actual, Summary: (props: Parameters<typeof actual.Summary>[0]) => componentScope.renderSummary ? <actual.Summary {...props} /> : null };
+});
 const bootstrap: FrontendBootstrap = { pageId: 'spu-roi', rootPath: '', releaseId: 'TEST_release', navigation: [], roleCapabilities: { readwrite: true, admin: false } };
 const shop = { id: 7, shop_id: '90071992547409931', account_name: 'TEST 店铺', region: 'VN' };
 const product = { spu_pk: 101, spu_id: 'TEST_OLD', title: 'TEST 原商品', status: 'ACTIVATE', main_image_url: null };
@@ -29,6 +34,7 @@ async function clickWithFakeTimers(user: ReturnType<typeof userEvent.setup>, tar
   });
 }
 beforeEach(() => {
+  componentScope.renderSummary = true;
   calls = []; stored = [{ spuId: 'TEST_OLD', title: 'TEST 原商品' }]; patchFailure = undefined; overviewError = undefined; overviewTotal = 1; shopRows = [shop]; limitedFocusedShop = undefined; localStorage.clear(); history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); calls.push({ url, init });
@@ -66,6 +72,9 @@ it.each(['spu-roi', 'focused-spus'] as const)('keeps every %s search and scope c
   expect(within(overview).getByLabelText('利润')).toBeInTheDocument();
 });
 it('both page profiles render through the same React owner and keep the server scope', async () => {
+  // This case owns request scope; Summary.test.tsx owns metric rendering.
+  // Layout cases above continue rendering the real Summary.
+  componentScope.renderSummary = false;
   await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />); });
   await screen.findByText('TEST_RESULT');
   const reads = calls.filter((call) => call.url.includes('/analytics/spu-roi?'));
@@ -166,9 +175,10 @@ it('clear cancels a standard bulk lookup and ignores its late response', async (
   expect(screen.queryByRole('button', { name: '移除 SPU TEST_NEW' })).not.toBeInTheDocument();
   expect(input).toHaveValue('');
 });
-// Retain the real 101-tag boundary: React's development render chain alone
-// measured 5.8s on the fixed VM. Other tests keep Vitest's default deadline.
 it('removing a focused item on the last page resets offset before refreshing the smaller scope', async () => {
+  // Keep real TagGroup/101 tags and pagination; repeated metric-card rendering
+  // belongs to Summary.test.tsx and is unrelated to this offset transition.
+  componentScope.renderSummary = false;
   overviewTotal = 101; stored = Array.from({ length: 101 }, (_, index) => ({ spuId: `TEST_PAGE_${index}`, title: `TEST 商品 ${index}` }));
   // All fetches in this case resolve immediately. Flush their collection work
   // before starting user assertions rather than racing a 101-tag initial mount.
