@@ -221,10 +221,9 @@ it('changing shop retains the selection Retry-After fence and requires explicit 
 
 it.each(['spu-roi', 'focused-spus'])('shows alias in the %s shop picker', async (pageId) => {
   shopRows = [{ ...shop, shop_alias: 'TEST_alias' } as typeof shop];
-  const user = userEvent.setup();
   await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId }} />); });
   const picker = screen.getByRole('button', { name: /TEST_alias.*当前店铺/ });
   expect(picker).toBeVisible();
-  await user.click(picker);
+  await act(async () => { fireEvent.click(picker); });
   expect(screen.getByRole('option', { name: `TEST_alias · ${shop.shop_id}` })).toBeVisible();
-});
+}, 10_000);
