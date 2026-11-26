@@ -113,7 +113,7 @@ def test_guard_turns_red_when_a_constant_is_deleted_but_its_use_stays() -> None:
     assert "COMPONENTS" in source, "fixture drifted; pick another imported name"
 
     # Same shape as the incident: the import line goes away, the use site stays.
-    broken = source.replace("    COMPONENTS,\n", "", 1)
+    broken = source.replace("        COMPONENTS,\n", "")
     assert "COMPONENTS," not in broken.split("def ", 1)[0]
     assert "COMPONENTS" in broken, "the use site must survive to be undefined"
 

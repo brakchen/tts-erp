@@ -23,7 +23,7 @@
 - Stable lane lifecycle and board record format: `docs/guides/agent-git-workflow.md`. `docs/handoff/ACTIVE.md` is only a relocation notice; do not maintain live rows there.
 
 - **207 是生产应用机**，运行 ERP API、Sync Worker 和 Nginx。**HP desk 承载生产 PostgreSQL 和 MinIO**。服务路径、公开入口、发布和回退见 [部署手册](docs/ops/tts-erp.md)。
-- 当前无专用测试机。手动页面验证在开发机绑定 `127.0.0.1`，加载独立测试配置。自动化测试使用 §3 的隔离入口。见 [测试指南](docs/guides/agent-testing.md)。
+- 自动化验证可使用开发机或现有 `tts-erp-test` 验证虚拟机（8 CPU / 7.2 GiB，不扩容）。统一通过 §3 隔离入口与主机容量队列；手动页面验证绑定 `127.0.0.1`、加载独立测试配置。见 [测试指南](docs/guides/agent-testing.md)。
 
 ## 3. Non-negotiable safety boundaries
 
@@ -132,7 +132,7 @@ Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md
 - `scripts/test_isolated.sh` is the sole agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, injects `TTS_ERP_DB_URL_TEST`, runs the selected scope, then drops the clone.
 - Refresh the template with `bash scripts/test_isolated.sh --refresh-template fast` when migrations/schema change or the template is missing/stale.
 - If template cloning or its prerequisites fail, stop and repair them with `bash scripts/envsetup/install-test-deps.sh --check`; do not substitute another runner or database.
-- Run `bash scripts/envsetup/prepare-worktree.sh` for a new local worktree. It reuses `.venv` and `.env.test` from the main checkout and installs frontend dependencies from the worktree's lockfile.
+- Run `bash scripts/envsetup/prepare-worktree.sh --scope auto --base "$target_sha"` for a committed worktree; use `--scope backend` for browser-free backend-only preparation or `--scope fast` for full validation. It reuses `.venv` and `.env.test` and installs private frontend dependencies only when selected; `--check`/`--dry-run` do not modify the environment.
 - Full command reference: `docs/guides/commands-reference.md`.
 
 ### 5.1 Reuse-first implementation policy
@@ -171,7 +171,7 @@ Do not reimplement functionality that a suitable maintained dependency already p
 - Before the first task edit, non-Codex sessions must register a lane record in the canonical board's `lane-registry` thread with the real Pi session UUID, board identity, branch/worktree and explicit file ownership. Read back the record and check all current lanes and child reservations; no ACTIVE edit or registry-only Git commit is required. Codex sessions may omit this board registration and its read-back; all other worktree, ownership, validation, commit, and push requirements still apply.
 - Track task decomposition, dependencies and progress on ordinary board tasks. Lane phases and file ownership live in the board lane records, not a second Markdown registry.
 - `draft`/`active`/`blocked` lanes reserve their declared files unless explicitly released. A `ready` branch is immutable and may be integrated by any session; session identity never blocks merge or cleanup.
-- Ready lanes merge in `readyAt` order by default. Before entering `ready`, merge current `origin/master`, resolve conflicts, validate, commit and push; record full lane HEAD, synchronized master SHA and evidence. If master advances at all, repeat synchronization and validation. Imported legacy ready claims require revalidation; task `completed` is not lane `ready`.
+- Ready lanes merge in `readyAt` order by default. Before entering `ready`, merge current `origin/master`, resolve conflicts, run relevant narrow checks, commit and push; record full lane HEAD, synchronized master SHA and evidence. The sole formal baseline gate runs on the prospective merge under the integration lock, not again on the branch. If master advances, resynchronize and repeat checks affected by that integration, then build a fresh prospective merge. Imported legacy ready claims require revalidation; task `completed` is not lane `ready`.
 - Serialize final master merge, post-merge validation, push and board closure with `/tmp/tts-erp-master-merge.lock`. Build the prospective master commit in a clean temporary integration worktree, merge with `--no-ff`, validate that exact commit, then push without force. Close the lane on the board after successful push; no registry cleanup commit.
 - Do not modify or stash another lane's work. For shared hotspots, keep one writer and exchange a patch or create an explicit successor lane instead of waiting for the original session to return.
 - Keep each writable worktree owned by one writer unless separate worktrees are used.
@@ -208,7 +208,7 @@ conn.execute(text("..."))
 Definition of done:
 
 1. Run the narrowest relevant test command.
-2. For ordinary code/test changes, run `bash scripts/test_baseline.sh --scope auto --base "$target_sha"` on the committed candidate. Use the exact synchronized master SHA, and for integration use the prospective merge's first parent. Add a named `--scenario` when the change affects a real browser boundary. For changes to the selector, baseline driver, isolated runner, result reporting, or global test collection, run `--scope fast --base "$target_sha"` instead. See the testing guide for the full regression rule and explicit E2E checks. The target baseline is already committed. Regenerate it only from a clean master worktree.
+2. Run the formal baseline gate once on the committed prospective merge, under the integration lock: `bash scripts/test_baseline.sh --scope auto --base "$target_sha"`, where `target_sha` is its first parent and exact synchronized master. Branch preparation uses relevant narrow checks, not a duplicate full baseline. Add a named `--scenario` for a real browser boundary. Changes to selection, baseline driving, isolation, reporting or global collection require `--scope fast --base "$target_sha"` on that prospective merge. If a branch is delivered without integration, run the corresponding baseline on its committed HEAD and report integration pending. The committed target baseline must only be regenerated from clean master.
 3. The default requirement is zero failures. If master has an explicitly recorded stable baseline, the change must introduce zero new stable failures; isolate and rerun only the individual failing tests once to distinguish flakes.
 4. A lane needs **one** suite execution in the normal case. If the tool reports new failures, rerun the smallest failing selection — never the whole suite — to classify them. Repeated full-suite runs are what previously pushed worker sessions past their wall-clock cap.
 4. Update contracts and operational documentation affected by the change.

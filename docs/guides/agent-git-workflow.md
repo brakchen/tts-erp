@@ -161,7 +161,7 @@ git merge --no-edit origin/master
 Resolve both sides' intent, never blanket `--ours`, `--theirs`, or `-X theirs`. Abort and ask if intent is unclear. Then:
 
 1. Run diagnostics/link/path checks and the narrowest relevant safe tests.
-2. For ordinary code/test changes, run `bash scripts/test_baseline.sh --scope auto --base "$synced_master"` against the exact synchronized master SHA. Record the selected scope and any named scenarios. Changes to test execution or global collection use `--scope fast --base "$synced_master"` according to the [testing guide](agent-testing.md). Both scopes run application tests through `scripts/test_isolated.sh`. Zero new stable failures are required.
+2. Inspect `bash scripts/test_baseline.sh --scope auto --base "$synced_master" --plan`, record the final scope/scenarios and run relevant narrow checks. The sole formal baseline gate belongs to the prospective merge in section 7; test infrastructure still requires `--scope fast` there. If delivering only a branch without integration, run that gate on the committed branch and report integration pending. Zero new stable failures are required.
 3. Review `git diff --check`, branch diff and staged file list; exclude secrets and foreign WIP.
 4. Push the synchronized lane branch. Record full HEAD and `origin/master` SHA, exact validation evidence and a fresh UTC `readyAt` in its full ready record.
 
@@ -183,9 +183,9 @@ Before integration, re-read the accepted ready record and queue, fetch origin, a
 
 - branch HEAD equals the full recorded `headCommit`;
 - **no master commit advanced beyond `syncedMaster`** (compare commit IDs); board updates no longer create Git commits and need no registry-only exception;
-- validation evidence applies to that exact branch/commit and the integration path is unused.
+- narrow-check evidence applies to that exact branch/commit and the integration path is unused; formal baseline evidence is produced on the prospective merge, not reused from another commit.
 
-If master advanced, release the integration lock, move the lane back to active, merge the new master, resolve conflicts, rerun required checks, push and publish fresh ready fields. Do not hold the master lock during lane preflight or conflict resolution.
+If master advanced, release the integration lock, move the lane back to active, merge the new master, resolve conflicts, rerun affected narrow checks, push and publish fresh ready fields. Do not restart a full branch baseline. Do not hold the master lock during lane preflight or conflict resolution.
 
 Build a prospective master in a clean detached worktree:
 
@@ -194,7 +194,7 @@ git worktree add --detach .worktrees/.integrate-<slug> origin/master
 git -C .worktrees/.integrate-<slug> merge <branch> --no-ff -m "merge: <slug> (lane <lane-id>)"
 ```
 
-Validate that exact prospective commit. Documentation-only integration confirms no application/test changes and repeats documentation checks. For ordinary code/test integration, run `bash scripts/test_baseline.sh --scope auto --base "$synced_master"` inside the locked integration worktree. Verify that the prospective commit's first parent equals `$synced_master`, the locked target SHA. Carry over applicable named scenarios and add any that the merge itself requires. Use `--scope fast --base "$synced_master"` for the testing guide's full regression cases. Overlap without a textual conflict still requires validation of the prospective commit.
+Validate that exact prospective commit. This is the one formal baseline run; no duplicate full branch baseline is required. Documentation-only integration confirms no application/test changes and repeats documentation checks. For ordinary code/test integration, run `bash scripts/test_baseline.sh --scope auto --base "$synced_master"` inside the locked integration worktree. Verify that the prospective commit's first parent equals `$synced_master`, the locked target SHA. Carry over applicable named scenarios and add any that the merge itself requires. Use `--scope fast --base "$synced_master"` for the testing guide's full regression cases. Overlap without a textual conflict still requires validation of the prospective commit.
 
 Push only the validated commit, without force:
 

@@ -47,6 +47,13 @@ done
 fail() { echo "[isolated-test] ERROR: $*" >&2; exit 1; }
 [[ -x "$PYTHON" ]] || fail 'missing project Python; run test dependency setup'
 
+# Acquire capacity before connection probes, cloning, builds or test processes.
+# shellcheck source=scripts/_test_capacity.sh
+. scripts/_test_capacity.sh
+test_capacity_acquire "$@" || fail 'could not acquire host test capacity'
+# shellcheck source=scripts/envsetup/test-runtime.sh
+. scripts/envsetup/test-runtime.sh
+
 if [[ -z "${TTS_ERP_DB_URL_TEST:-}" && -f .env.test ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -200,9 +207,9 @@ prepare_template_and_clone() {
   pg_exec createdb --maintenance-db "$MAINTENANCE_URL" -T "$TEMPLATE_DB" "$RUN_DB"
   RUN_CREATED=1
   phase_timing database_clone "$phase_started_us"
-  warn_revision_drift
   flock -u 9
   exec 9>&-
+  warn_revision_drift
 }
 issue_run_binding() {
   [[ "$RUN_CREATED" -eq 1 ]] || fail 'cannot issue proof before clone creation'

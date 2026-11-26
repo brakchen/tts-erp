@@ -149,6 +149,8 @@ def _environment(tools: Path, trace: Path, pg_docker: str | None | object) -> di
         "TTS_ERP_DB_URL": SOURCE_URL,
         "TTS_ERP_DB_URL_TEST": TARGET_URL,
         "FAKE_TRACE": str(trace),
+        # Nested wrappers use command doubles, never the outer capacity lease.
+        "TTS_ERP_TEST_CAPACITY_LOCK": str(trace.parent / "capacity.lock"),
         "PATH": f"{tools}:{env['PATH']}",
     })
     env.pop("DOCKER_HOST", None)
