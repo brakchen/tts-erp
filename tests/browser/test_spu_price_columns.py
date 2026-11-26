@@ -579,23 +579,31 @@ def test_drill_same_row_close_then_reopen_works(browser_conftest, frontend_brows
     page.locator(".tabulator-row").first.wait_for(state="visible")
     page.evaluate(_DRILL_CLICK_HELPERS_JS)
 
-    page.evaluate("() => window.__drillClickRow()")  # 打开
-    drill = page.locator(".op-drill-row")
-    drill.wait_for(state="visible")
-    assert drill.locator(".op-drill-body").inner_text().strip() != ""
-    page.wait_for_timeout(20)
-
-    page.evaluate("() => window.__drillClickRow()")  # 同一行再点一次 = 关闭
-    assert page.locator(".op-drill-row").count() == 0
-    page.wait_for_timeout(20)
-
-    page.evaluate("() => window.__drillClickRow()")  # 立即重开
-    drill = page.locator(".op-drill-row")
-    drill.wait_for(state="visible")
-    assert drill.locator(".op-drill-body").inner_text().strip() != ""
-
-    # 三次点击确实都落在 300ms 内：用例覆盖的就是「用户级快速 toggle」。
-    marks = page.evaluate("() => window.__drillClicks")
+    # Keep protocol round trips outside the measured interval: slow hosts must
+    # still exercise real rapid clicks rather than timing Python/CDP overhead.
+    result = page.evaluate("""async () => {
+      const body = () => document.querySelector('.op-drill-body')?.innerText.trim() || '';
+      const waitFor = (open) => new Promise((resolve, reject) => {
+        const matches = () => open ? Boolean(body()) : !document.querySelector('.op-drill-row');
+        if (matches()) { resolve(); return; }
+        const observer = new MutationObserver(() => {
+          if (matches()) { observer.disconnect(); clearTimeout(timer); resolve(); }
+        });
+        const timer = setTimeout(() => { observer.disconnect(); reject(new Error('Drill toggle did not render')); }, 2000);
+        observer.observe(document.body, {childList: true, subtree: true, characterData: true});
+      });
+      window.__drillClickRow();
+      await waitFor(true);
+      const opened = body();
+      window.__drillClickRow();
+      await waitFor(false);
+      const closed = !document.querySelector('.op-drill-row');
+      window.__drillClickRow();
+      await waitFor(true);
+      return {opened, closed, reopened: body(), marks: window.__drillClicks};
+    }""")
+    assert result["opened"] and result["closed"] and result["reopened"]
+    marks = result["marks"]
     assert len(marks) == 3, marks
     assert marks[2] - marks[0] < 300, marks
 

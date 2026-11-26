@@ -24,7 +24,18 @@
 .erp-profit-metrics dd { margin-top: 6px; font-size: 22px; font-weight: 600; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .erp-price-summary-table th, .erp-price-summary-table td { padding: 12px; border-bottom: 1px solid var(--rule); }
 .erp-price-summary-table { min-width: 400px; }
-.erp-overview { min-width: 0; }
+.erp-overview { min-width: 0; border-top: 3px solid var(--accent); padding-top: 16px; }
+.erp-overview-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.erp-time-label { color: var(--accent); font-size: 12px; margin-bottom: 4px; }
+.erp-report-range { padding: 5px 9px; background: var(--surface-secondary); border-radius: 6px; color: var(--ink-soft); font-size: 12px; overflow-wrap: anywhere; }
+.erp-overview .erp-profit-controls { padding: 12px 0; border-block: 1px solid var(--rule); }
+.erp-projection-basis { padding: 16px; margin-top: 12px; border: 1px solid color-mix(in srgb, var(--warn) 25%, var(--rule)); border-left: 3px solid var(--warn); border-radius: 8px; background: color-mix(in srgb, var(--warn) 7%, var(--surface)); scroll-margin-top: 100px; }
+.erp-projection-basis .erp-time-label { color: var(--warn); }
+.erp-projection-basis .erp-report-range { background: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
+.erp-projection-window { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-block: 12px; }
+.erp-projection-link { color: var(--warn); font-size: 12px; }
+.erp-overview .erp-projection-basis .erp-profit-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); padding-top: 12px; border-top: 1px solid var(--rule); }
+.erp-overview .erp-profit-exposure .erp-profit-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .erp-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .erp-overview-grid > * { min-width: 0; }
 .erp-overview-profit { grid-column: 1 / -1; }
@@ -41,8 +52,8 @@
 .erp-overview .erp-price-summary-table th, .erp-overview .erp-price-summary-table td { padding: 4px 10px; overflow-wrap: anywhere; }
 .erp-overview .erp-price-summary-table th:nth-child(2), .erp-overview .erp-price-summary-table th:nth-child(3) { text-align: end; }
 .erp-overview-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-.erp-overview-comparison > div { min-width: 0; }
-.erp-overview-comparison > div + div { border-left: 1px solid var(--rule); padding-left: 24px; }
+.erp-overview-comparison > div { min-width: 0; padding: 14px; border-radius: 6px; background: var(--paper); }
+.erp-overview-comparison > .erp-profit-projected { background: var(--surface-secondary); }
 .erp-overview-comparison .erp-profit-metrics { grid-template-columns: minmax(0, 1fr); }
 .erp-overview-comparison .erp-overview-primary { border: 0; padding: 0; }
 .erp-overview-roi { width: 100%; table-layout: fixed; font-size: 13px; }
@@ -55,7 +66,9 @@
 }
 @media (max-width: 480px) {
   .erp-overview-comparison { gap: 12px; }
-  .erp-overview-comparison > div + div { padding-left: 12px; }
+  .erp-overview-comparison { grid-template-columns: minmax(0, 1fr); }
+  .erp-overview .erp-profit-exposure .erp-profit-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .erp-overview .erp-projection-basis .erp-profit-metrics { grid-template-columns: minmax(0, 1fr); }
   .erp-overview-primary .erp-profit-metrics dd { font-size: 24px; }
   .erp-overview-roi th, .erp-overview-roi td { padding-inline: 4px; }
 }

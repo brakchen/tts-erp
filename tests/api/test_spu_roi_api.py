@@ -5092,7 +5092,7 @@ def test_spu_roi_table_wrap_content_insets_match_toolbar():
     css = _react_profitability_source("profitability.css")
     workspace = (root / "frontend/src/app/workspace.css").read_text(encoding="utf-8")
     assert 'className="erp-page"' in page
-    assert 'className="erp-panel erp-profit-controls"' in page
+    assert 'className="erp-profit-controls"' in page
     assert 'className="erp-panel min-w-0 space-y-4"' in page
     assert "<Selection " in page and "<Summary " in page
     assert ".erp-main" in workspace and ".erp-panel" in workspace
