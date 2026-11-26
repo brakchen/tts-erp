@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -22,9 +23,20 @@ pytestmark = [pytest.mark.domain_frontend, pytest.mark.layer_unit]
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_frontend_components(tmp_path: Path) -> None:
+def test_frontend_components() -> None:
     frontend = ROOT / "frontend"
-    report_path = Path(os.environ.get("TTS_ERP_COMPONENT_REPORT", str(tmp_path / "TEST_components.json"))).resolve()
+    destination = os.environ.get("TTS_ERP_COMPONENT_REPORT")
+    if destination:
+        report_path = Path(destination).resolve()
+    else:
+        # Pytest rotates its tmp_path after a few runs, exactly when repeated
+        # narrow reruns need earlier failure evidence. Keep manual runs too.
+        storage = Path(subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-path", "test-runs"],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+        ).stdout.strip())
+        storage.mkdir(parents=True, exist_ok=True)
+        report_path = Path(tempfile.mkdtemp(prefix="components.", dir=storage)) / "components.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     raw_path = report_path.with_suffix(".vitest.json")
     log = report_path.with_suffix(".log")
