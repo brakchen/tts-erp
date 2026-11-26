@@ -69,7 +69,6 @@ EXPECTED_JOB_INTERVALS = {
     "miaoshou.move_collect": 1800,
     "miaoshou.common_collect_box": 21600,
     "miaoshou.sync_source_cost_to_master": 21600,
-    "miaoshou.purchase_price_clean": 3600,
     "miaoshou.packages": 1800,
     "reporting.cost_snapshots": 21600,
     "reporting.profit_daily": 3600,
@@ -80,8 +79,8 @@ EXPECTED_JOB_INTERVALS = {
 
 
 def test_jobs_registry_has_expected_count() -> None:
-    """The registry contains 6 TikTok jobs and 13 system jobs."""
-    assert len(JOBS) == 19
+    """The registry contains 6 TikTok jobs and 12 system jobs."""
+    assert len(JOBS) == 18
 
 
 def test_legacy_threshold_alert_job_stays_unregistered() -> None:

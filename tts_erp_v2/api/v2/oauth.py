@@ -331,7 +331,8 @@ def _handle_html(
             "oauth callback: shop=%s authorized (html) credential_id=%s account_id=%s",
             shop.get("shop_id"), shop.get("credential_id"), shop.get("account_id"),
         )
-        facts = [{"label": label, "value": displayed(shop.get(key))} for label, key in (
+        display_fields = {**shop, "account_name": shop.get("shop_alias") or shop.get("account_name")}
+        facts = [{"label": label, "value": displayed(display_fields.get(key))} for label, key in (
             ("店铺 ID", "shop_id"), ("店铺名称", "account_name"), ("地区", "region"),
             ("卖家类型", "seller_type"), ("凭据记录 ID", "credential_id"),
             ("店铺记录 ID", "account_id"), ("访问令牌到期时间", "expires_at"),

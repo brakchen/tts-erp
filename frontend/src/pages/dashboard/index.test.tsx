@@ -182,3 +182,12 @@ describe('dashboard page', () => {
     }
   });
 });
+
+it.each(['TEST_alias', '', null])('uses alias or platform name in the dashboard (%s)', async (shop_alias) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.includes('channel-accounts')
+    ? json([{ ...shop, shop_alias }], 200, { 'X-Total-Count': '1' }) : responses(url)));
+  render(<Dashboard {...props} />);
+  const grid = await screen.findByRole('grid', { name: '已注册店铺' });
+  expect(within(grid).getByText(shop_alias || shop.account_name)).toBeVisible();
+  expect(screen.getByText(`${shop_alias || shop.account_name} · VN`)).toBeVisible();
+});

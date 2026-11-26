@@ -343,6 +343,7 @@ def test_callback_upgrades_plugin_registered_shop(
         account = session.get(ChannelAccount, target_shop.shop_pk)
         assert account is not None and account.credential_id is None
         account.account_name = "TEST Plugin Shop"
+        account.shop_alias = "TEST Plugin Alias"
         account.opened_date = date(2026, 6, 1)
         session.commit()
     issued = api_client.get(AUTHZ, headers=_bearer(readwrite_key),
@@ -359,6 +360,8 @@ def test_callback_upgrades_plugin_registered_shop(
     account = rows[0]
     assert account.id == target_shop.shop_pk and account.credential_id is not None
     assert account.account_name == "TEST Plugin Shop"
+    assert account.shop_alias == "TEST Plugin Alias"
+    assert response.json()["result"]["shops"][0]["shop_alias"] == "TEST Plugin Alias"
     assert str(account.opened_date) == "2026-06-01"
 
 
@@ -436,3 +439,25 @@ def test_onboard_page_admin_same_shell(api_client, admin_key, app_env: None) -> 
     assert r.status_code == 200, r.text
     assert _bootstrap(r.text)["pageData"] == {"kind": "oauth-onboard"}
     assert 'href="/v2/pages/shops"' in r.text
+
+
+@pytest.mark.parametrize("shop_alias", ["TEST OAuth Alias", "", None])
+def test_callback_html_displays_shop_alias(
+    api_client, readwrite_key, db_engine, target_shop: OAuthTarget,
+    fake_exchange: dict[str, Any], shop_alias,
+) -> None:
+    with Session(db_engine) as session, session.begin():
+        account = session.get(ChannelAccount, target_shop.shop_pk)
+        assert account is not None
+        account.account_name = "TEST OAuth Platform Name"
+        account.shop_alias = shop_alias
+    issued = api_client.get(AUTHZ, headers=_bearer(readwrite_key),
+        params={"format": "json", "shop_pk": target_shop.shop_pk})
+    assert issued.status_code == 200, issued.text
+    state = _state_from_url(issued.json()["authorize_url"])
+    response = api_client.get(CALLBACK, params={"code": "TEST_alias_code", "state": state})
+    assert response.status_code == 200, response.text
+    facts = _bootstrap(response.text)["pageData"]["sections"][0]["facts"]
+    assert next(fact["value"] for fact in facts if fact["label"] == "店铺名称") == (
+        shop_alias or "TEST OAuth Platform Name"
+    )

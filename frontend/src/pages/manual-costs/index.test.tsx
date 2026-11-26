@@ -476,3 +476,15 @@ describe('manual-costs received error-header fences', () => {
     page.unmount();
   });
 });
+
+it.each(['TEST_alias', '', null])('shows alias with the stable manual-cost shop ID (%s)', async (shop_alias) => {
+  const fetcher = setup();
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, init) => url.includes('channel-accounts?')
+    ? Promise.resolve(json([{ ...shop, shop_alias }])) : original(url, init));
+  render(<ManualCosts {...props} />);
+  const user = userEvent.setup();
+  await screen.findByText('TEST 商品');
+  await user.click(screen.getByRole('button', { name: /当前店铺/ }));
+  expect(screen.getByRole('option', { name: `${shop_alias || shop.account_name} · ${shop.shop_id} · #${shop.id}` })).toBeVisible();
+});

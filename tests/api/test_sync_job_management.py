@@ -189,3 +189,25 @@ def test_sync_jobs_includes_latest_status(api_client, readonly_key, db_engine) -
         with Session(db_engine) as sess:
             sess.execute(delete(SyncJob).where(SyncJob.job_name == job_name))
             sess.commit()
+
+
+@pytest.mark.parametrize("shop_alias", ["TEST sync alias", "", None])
+def test_sync_jobs_shop_alias_keeps_original_identity(api_client, readwrite_key, db_engine, monkeypatch, shop_alias) -> None:
+    from tests._job_invocation import authorize_test_shop
+    from tts_erp_v2.api.v2 import sync_status
+    from tts_erp_v2.db.models import ChannelAccount
+
+    # Permit only this TEST_ fixture in the read-only selector; no job is triggered.
+    monkeypatch.setattr(sync_status, "NON_PRODUCTION_SHOP_PREFIXES", ("MOCK_",))
+    with Session(db_engine) as session, session.begin():
+        shop = ChannelAccount(platform="tiktok", shop_id="TEST_SYNC_ALIAS", account_name="TEST sync name", shop_alias=shop_alias)
+        session.add(shop)
+        session.flush()
+        authorize_test_shop(session, shop.id, shop.shop_id)
+        shop_pk = shop.id
+    response = api_client.get("/v2/sync/jobs", headers={"Authorization": f"Bearer {readwrite_key}"})
+    assert response.status_code == 200, response.text
+    row = next(row for row in response.json()["tiktok_shops"] if row["shop_pk"] == shop_pk)
+    assert row["shop_alias"] == shop_alias
+    assert row["account_name"] == "TEST sync name"
+    assert row["shop_id"] == "TEST_SYNC_ALIAS"

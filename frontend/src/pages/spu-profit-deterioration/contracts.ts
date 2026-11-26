@@ -1,3 +1,4 @@
+import { decodeShopAlias } from '../../shared/shop-name';
 export type Identity = number | string;
 export interface Period { startDate: string; endDate: string }
 export interface ComparisonItem {
@@ -26,7 +27,7 @@ export interface Comparison {
     coverage: Coverage; warnings: string[]; activityBypassed: boolean; scopeDescription: string; requestId: string;
   };
 }
-export interface Shop { id: Identity; account_name: string | null; shop_id: string }
+export interface Shop { id: Identity; account_name: string | null; shop_alias?: string | null; shop_id: string }
 function invalid(): never { throw new Error('数据格式不符合约定'); }
 function object(v: unknown): Record<string, unknown> { return v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : invalid(); }
 function text(v: unknown): string { return typeof v === 'string' ? v : invalid(); }
@@ -81,5 +82,5 @@ export function decodeComparison(v: unknown): Comparison {
   };
 }
 export function decodeShops(v: unknown): Shop[] {
-  return array(v, (value) => { const s = object(value); return { id: identity(s.id), account_name: nullableText(s.account_name), shop_id: text(s.shop_id) }; });
+  return array(v, (value) => { const s = object(value); return { id: identity(s.id), shop_alias: decodeShopAlias(s.shop_alias), account_name: nullableText(s.account_name), shop_id: text(s.shop_id) }; });
 }

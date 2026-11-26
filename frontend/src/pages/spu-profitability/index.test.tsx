@@ -218,3 +218,12 @@ it('changing shop retains the selection Retry-After fence and requires explicit 
   expect(readsForEight()).toHaveLength(1);
   expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(0);
 });
+
+it.each(['spu-roi', 'focused-spus'])('shows alias in the %s scope and picker', async (pageId) => {
+  shopRows = [{ ...shop, shop_alias: 'TEST_alias' } as typeof shop];
+  const user = userEvent.setup();
+  render(<Page bootstrap={{ ...bootstrap, pageId }} />);
+  expect(await screen.findByText(/^TEST_alias · .* · CNY$/)).toBeVisible();
+  await user.click(screen.getByRole('button', { name: /当前店铺/ }));
+  expect(screen.getByRole('option', { name: `TEST_alias · ${shop.shop_id}` })).toBeVisible();
+});
