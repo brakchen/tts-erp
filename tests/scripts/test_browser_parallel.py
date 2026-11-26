@@ -8,7 +8,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -32,7 +31,6 @@ def project(tmp_path, monkeypatch):
         "case \"$*\" in *dashboard*) exit \"${TEST_DASHBOARD_EXIT:-0}\";; esac\n",
     )
     monkeypatch.setattr(parallel, "ROOT", tmp_path)
-    monkeypatch.setattr(parallel, "prepare_frontend", lambda root: contextlib.nullcontext(SimpleNamespace(cached=True)))
 
 
 def test_partition_keeps_modules_and_rejects_unknown_overlap_and_duplicates(tmp_path, monkeypatch):
@@ -63,10 +61,9 @@ def test_termination_allows_children_to_run_cleanup_traps(tmp_path, monkeypatch)
         "touch TEST_ready_$$\nsleep 60\n",
     )
     code = (
-        "import contextlib, sys; from pathlib import Path; from types import SimpleNamespace;"
+        "import sys; from pathlib import Path;"
         "from scripts import _test_browser_parallel as p;"
         "p.ROOT=Path(sys.argv[1]);"
-        "p.prepare_frontend=lambda root: contextlib.nullcontext(SimpleNamespace(cached=True));"
         "sys.argv=['parallel','--workers','2','browser',*sys.argv[2:]];"
         "sys.exit(p.main())"
     )
@@ -96,21 +93,10 @@ def test_explicit_database_override_is_rejected_before_starting_workers(tmp_path
     assert not list(tmp_path.glob("TEST_executed_*"))
 
 
-def test_prewarm_lease_is_released_before_children_revalidate_changed_inputs(tmp_path, monkeypatch):
+def test_children_own_build_leases_without_parent_prewarming(tmp_path, monkeypatch):
     project(tmp_path, monkeypatch)
-    import fcntl
-
-    lock_path = tmp_path / "TEST_build.lock"
-
-    @contextlib.contextmanager
-    def warmup(root):
-        with lock_path.open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_SH)
-            yield SimpleNamespace(cached=True)
-
-    monkeypatch.setattr(parallel, "prepare_frontend", warmup)
-    # Represents the EX rebuild needed after a child loads differing .env.test
-    # or a source save. An inherited parent SH lease would make flock fail.
+    # A child rebuild follows its own admission/loading of .env.test. There is
+    # no parent warmup or inherited SH lease that could bypass host capacity.
     (tmp_path / "scripts/test_isolated.sh").write_text(
         "set -eu\nflock -x -w 2 TEST_build.lock -c 'echo TEST_rebuilt'\n",
     )

@@ -18,6 +18,50 @@ STYLE_TOKENS = "tests/frontend/test_style_tokens.py"
 SELECTOR_TESTS = "tests/scripts/test_test_selection.py"
 ZABBIX_TEMPLATE = "docs/plugins/monitor/zabbix-monitor.yaml"
 ZABBIX_CHECK = "tests/scripts/test_zabbix_monitor_template.py"
+PROTOTYPE_CHECK = "tests/scripts/test_prototype_assets.py"
+PROTOTYPE_PREFIX = "prd/prototypes/"
+SHOP_NAME_HELPER = "frontend/src/shared/shop-name.ts"
+SHOP_NAME_TEST = "frontend/src/shared/shop-name.test.ts"
+SHOP_NAME_PAGES = (
+    "dashboard", "manual-costs", "shops", "spu-profit-deterioration",
+    "spu-profitability", "sync-jobs",
+)
+# Audited against the shop-alias-display candidate f6f3e38b. Keep exact source
+# files: a new importer must widen selection until its coverage is registered.
+SHOP_NAME_CONSUMERS = frozenset({
+    SHOP_NAME_HELPER, SHOP_NAME_TEST,
+    "frontend/src/pages/dashboard/index.tsx",
+    "frontend/src/pages/manual-costs/contracts.ts", "frontend/src/pages/manual-costs/index.tsx",
+    "frontend/src/pages/shops/ShopForm.tsx", "frontend/src/pages/shops/index.tsx",
+    "frontend/src/pages/spu-profit-deterioration/contracts.ts",
+    "frontend/src/pages/spu-profit-deterioration/index.tsx",
+    "frontend/src/pages/spu-profitability/contracts.ts", "frontend/src/pages/spu-profitability/index.tsx",
+    "frontend/src/pages/sync-jobs/contracts.ts", "frontend/src/pages/sync-jobs/index.tsx",
+})
+SCHEDULER = "tts_erp_v2/sync_worker/scheduler.py"
+SCHEDULER_TESTS = (
+    "tests/sync_worker", "tests/api/test_admin_shops.py",
+    "tests/scripts/test_frontend_remaining_live_api.py",
+    "tests/scripts/test_frontend_test_collaborators.py",
+)
+MONITOR_RELAY = "tts_erp_v2/plugin/monitor_relay.py"
+MONITOR_TESTS = (
+    "tests/plugin/test_monitor_relay.py", "tests/api/test_monitor_telemetry.py",
+    "tests/api/test_monitor_health_wiring.py",
+)
+OAUTH_PATHS = {"tts_erp_v2/api/v2/oauth.py", "tts_erp_v2/proxy/tiktok_oauth.py"}
+OAUTH_TESTS = (
+    "tests/api/test_oauth_api.py", "tests/api/test_frontend_auxiliary.py",
+    "tests/proxy/test_oauth_flow.py", "tests/proxy/test_tiktok_oauth.py",
+    "tests/api/test_middleware.py", "tests/api/test_cookie_csrf.py",
+)
+PROFITABILITY_SELECTION = "tts_erp_v2/analytics/spu_profitability/_selection.py"
+PROFITABILITY_TESTS = (
+    "tests/analytics", "tests/api/test_spu_roi_evidence.py",
+    "tests/api/test_spu_roi_query_scope.py", "tests/api/test_spu_roi_query_efficiency.py",
+    "tests/sync_worker/test_spu_deterioration_alert_job.py",
+    "tests/scripts/test_frontend_remaining_financial_reads_live_api.py",
+)
 DRAWER_BROWSER = "tests/browser/test_frontend_pilots.py::test_navigation_drawer_theme_and_focus"
 # The old per-page JavaScript implementations were retired with P6 (2026-11-08),
 # and their Node-VM behaviour tests went with them. The selection used to carry
@@ -51,8 +95,11 @@ API_CONTRACTS = {
     "media": (("digital-humans", "media-assets"), ("tests/api/test_media_api.py",)),
     "spu_deterioration_alert": (("spu-profit-deterioration",), ("tests/api/test_spu_deterioration_alert_api.py",)),
     "sync_status": (
-        ("dashboard", "sync-jobs"),
-        ("tests/api/test_sync_status_api.py", "tests/api/test_sync_job_management.py"),
+        ("dashboard", "sync-jobs", "spu-profitability"),
+        (
+            "tests/api/test_sync_status_api.py", "tests/api/test_sync_job_management.py",
+            "tests/api/test_sync_freshness_api.py", "tests/api/test_frontend_remaining_safety.py",
+        ),
     ),
     "users": (("users",), ("tests/api/test_user_auth.py", "tests/api/test_frontend_remaining_cookie_writes.py")),
     "video_publish": (("video-publish",), ("tests/publishing/test_http_contracts.py",)),
@@ -155,6 +202,9 @@ def _contract(selection: Selection, api: str) -> None:
 
 
 def _classify(selection: Selection, path: str) -> str:
+    if path.startswith(PROTOTYPE_PREFIX) and Path(path).suffix in {".html", ".css", ".js"}:
+        selection.checks.append(PROTOTYPE_CHECK)
+        return "prototype HTML references, CSS and JavaScript syntax; no application build"
     if path in {ZABBIX_TEMPLATE, ZABBIX_CHECK}:
         selection.checks.append(ZABBIX_CHECK)
         return "Zabbix template syntax and structure"
@@ -180,17 +230,35 @@ def _classify(selection: Selection, path: str) -> str:
     if path.startswith("tts_erp_v2/media/"):
         _contract(selection, "media")
         return "media implementation and its API/UI consumers"
+    if path == SCHEDULER:
+        selection.backend.extend(SCHEDULER_TESTS)
+        _contract(selection, "sync_status")
+        return "scheduler domain, CLI, API controls, status and freshness consumers"
+    if path == MONITOR_RELAY:
+        selection.backend.extend(MONITOR_TESTS)
+        return "Monitor relay provider and telemetry intake consumers"
+    if path == PROFITABILITY_SELECTION:
+        selection.backend.extend(PROFITABILITY_TESTS)
+        for api in ("analytics", "focused_spus", "spu_deterioration_alert"):
+            _contract(selection, api)
+        return "profitability selection, evidence and comparison providers and consumers"
+    if path in OAUTH_PATHS:
+        selection.backend.extend(OAUTH_TESTS)
+        _frontend_filters(selection, "src/bootstrap.test.ts", "src/shared/api/")
+        for page in ("shops", "oauth-onboard", "message"):
+            _page(selection, page)
+        return "OAuth flow, shop authorization and auxiliary result consumers"
     if path.startswith("tts_erp_v2/api/v2/") and Path(path).stem in API_CONTRACTS:
         _contract(selection, Path(path).stem)
         return "registered API provider and consumer"
-    if path in {"tts_erp_v2/api/v2/auth.py", "tts_erp_v2/api/v2/oauth.py", "tts_erp_v2/middleware/auth.py"}:
+    if path in {"tts_erp_v2/api/v2/auth.py", "tts_erp_v2/middleware/auth.py"}:
         _frontend_filters(
             selection, "src/app/", "src/bootstrap-login.test.ts", "src/pages/login/",
             "src/pages/oauth-onboard/", "src/shared/api/",
         )
         selection.backend.extend((
             "tests/api/test_auth_login.py", "tests/api/test_cookie_csrf.py", "tests/api/test_middleware.py",
-            "tests/api/test_oauth_api.py", "tests/api/test_user_auth.py",
+            "tests/api/test_oauth_api.py", "tests/api/test_user_auth.py", "tests/api/test_frontend_auxiliary.py",
         ))
         return "auth contract; add a named browser scenario if browser behavior changes"
     if path.startswith(("tts_erp_v2/api/", "frontend/src/shared/api/")) or path in {
@@ -199,6 +267,12 @@ def _classify(selection: Selection, path: str) -> str:
         _frontend_all(selection)
         selection.backend_all = True
         return "shared boundary; both browser-free suites"
+    if path in {SHOP_NAME_HELPER, SHOP_NAME_TEST}:
+        _frontend_filters(selection, SHOP_NAME_TEST.removeprefix("frontend/"))
+        for page in SHOP_NAME_PAGES:
+            _page(selection, page)
+        selection.checks.append(SOURCE_CONTRACTS)
+        return "shared shop display helper and all registered page consumers"
     if path.startswith(PAGE_PREFIX) and "/" in path[len(PAGE_PREFIX):]:
         page = path[len(PAGE_PREFIX):].split("/", 1)[0]
         _page(selection, page)
@@ -334,6 +408,23 @@ def select_commits(base: str, head: str, scenarios: list[str] | None, scope: str
     changes = dict(zip(fields[1::2], fields[::2], strict=True))
     deleted = frozenset(path for path, status in changes.items() if status == "D")
     plan = select(list(changes), scenarios, scope=scope, deleted=deleted)
+    if scope == "auto" and {SHOP_NAME_HELPER, SHOP_NAME_TEST}.intersection(changes):
+        # Inspect the requested commit, not this checkout (historical --head and
+        # other worktrees may have a different dependency graph). Matching both
+        # module and export names deliberately prefers a safe false positive.
+        try:
+            references = _git_paths(git(
+                "grep", "-l", "-z", "-E", "shop-name|displayShopName|decodeShopAlias",
+                head, "--", "frontend/src",
+            ))
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode != 1:
+                raise
+            references = []
+        consumers = {path.removeprefix(f"{head}:") for path in references}
+        if not consumers or consumers - SHOP_NAME_CONSUMERS:
+            _frontend_all(plan)
+            plan.reasons["shop-name"] = "unmapped shop display consumers; run full frontend suite"
     if plan.vitest:
         files = _git_paths(git("ls-tree", "-r", "--name-only", "-z", head, "--", "frontend/src"))
         tests = [path.removeprefix("frontend/") for path in files if path.endswith((".test.ts", ".test.tsx"))]

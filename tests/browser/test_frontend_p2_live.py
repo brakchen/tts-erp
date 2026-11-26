@@ -303,8 +303,10 @@ def shop_task(page, gate, probe):
     lost_before = gate.lost
     gate.drop_next = ("PATCH", f"/v2/admin/shops/{shop_pk}")
     dialog.get_by_role("button", name="保存", exact=True).click()
-    expect(dialog.get_by_role("button", name="读取当前记录核对", exact=True)).to_be_visible()
-    expect(dialog.get_by_role("button", name="保存", exact=True)).to_be_disabled()
+    # PRD 04 §6: report directly, retain the draft, allow only manual retry.
+    expect(dialog.get_by_text("网络已断开，请检查网络后重试", exact=True)).to_be_visible()
+    expect(dialog.get_by_role("button", name="读取当前记录核对", exact=True)).to_have_count(0)
+    expect(dialog.get_by_role("button", name="保存", exact=True)).to_be_enabled()
     assert gate.lost == lost_before + 1 and gate.drop_next is None
     draft_preserved = dialog.get_by_label("App Secret", exact=True).input_value() == rotated
     assert draft_preserved
@@ -312,10 +314,6 @@ def shop_task(page, gate, probe):
         credentials = token_service.resolve_tiktok_app_credentials(session, shop_pk=shop_pk, service_id=gate.service_id)
         rotation_matches = hmac.compare_digest(credentials.app_secret, rotated)
         assert rotation_matches
-    dialog.get_by_role("button", name="读取当前记录核对", exact=True).click()
-    expect(dialog.get_by_text("已读取当前记录，请核对后再决定是否提交。", exact=True)).to_be_visible()
-    expect(dialog.get_by_text("读取结果不会显示密钥；再次保存会重新写入配置。", exact=True)).to_be_visible()
-    expect(dialog.get_by_role("button", name="核对后重新保存", exact=True)).to_be_enabled()
     page.wait_for_load_state("networkidle")
     assert command_count(gate, "PATCH", f"/v2/admin/shops/{shop_pk}") == before + 1
     discard_shop_dialog(page, dialog)
@@ -371,16 +369,14 @@ def enum_task(page, gate, probe):
     lost_before = gate.lost
     gate.drop_next = ("PUT", "/v2/config/enum-map")
     dialog.get_by_role("button", name="保存映射", exact=True).click()
-    expect(dialog.get_by_role("button", name="查询核对", exact=True)).to_be_visible()
-    expect(dialog.get_by_role("button", name="保存映射", exact=True)).to_be_disabled()
+    expect(dialog.get_by_text("网络已断开，请检查网络后重试", exact=True)).to_be_visible()
+    expect(dialog.get_by_role("button", name="查询核对", exact=True)).to_have_count(0)
+    expect(dialog.get_by_role("button", name="保存映射", exact=True)).to_be_enabled()
     assert dialog.get_by_label("中文标签", exact=True).input_value() == "TEST_committed_response_lost"
     assert gate.lost == lost_before + 1
     with independent(probe) as session:
         fact = session.get(EnumMap, enum_pk)
         assert fact is not None and fact.label_zh == "TEST_committed_response_lost"
-    dialog.get_by_role("button", name="查询核对", exact=True).click()
-    expect(dialog.get_by_text("公开列表已读取，当前记录如下；不证明原提交结果。", exact=True)).to_be_visible()
-    expect(dialog.get_by_role("button", name="核对后明确重新提交", exact=True)).to_be_enabled()
     page.wait_for_load_state("networkidle")
     assert command_count(gate, "PUT", "/v2/config/enum-map") == 2  # Add + one lost edit; no replay.
     dialog.get_by_role("button", name="取消", exact=True).click()

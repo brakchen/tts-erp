@@ -2,7 +2,28 @@
 
 from __future__ import annotations
 
-from scripts._test_selection import DRAWER_BROWSER, ZABBIX_CHECK, select
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from scripts import _test_selection as selection_module
+from scripts._test_selection import (
+    DRAWER_BROWSER,
+    MONITOR_TESTS,
+    OAUTH_TESTS,
+    PROFITABILITY_TESTS,
+    PROTOTYPE_CHECK,
+    SCHEDULER,
+    SCHEDULER_TESTS,
+    SHOP_NAME_CONSUMERS,
+    SHOP_NAME_HELPER,
+    SHOP_NAME_PAGES,
+    SHOP_NAME_TEST,
+    ZABBIX_CHECK,
+    select,
+    select_commits,
+)
 
 
 def test_page_ui_change_runs_its_browser_and_components():
@@ -202,6 +223,118 @@ def test_spu_deterioration_page_selects_both_its_mock_and_e2e_files():
     assert plan.build
 
 
+def test_prototype_acceptance_task_runs_only_real_static_asset_checks() -> None:
+    # b28f840f's complete diff: prototype style acceptance must not build ERP.
+    plan = select(["prd/03-prototype-full-replica.md", "prd/prototypes/styles.css"])
+    assert plan.checks == [PROTOTYPE_CHECK]
+    assert plan.docs and not (plan.frontend or plan.backend or plan.backend_all or plan.build)
+    for path in ("prd/prototypes/dashboard.html", "prd/prototypes/shell.js"):
+        assert select([path]).checks == [PROTOTYPE_CHECK]
+
+
+def test_scheduler_interval_task_keeps_all_worker_and_api_consumers() -> None:
+    plan = select([SCHEDULER, "tests/sync_worker/test_scheduler_jobs_coverage.py"])
+    assert set(SCHEDULER_TESTS) <= set(plan.backend)
+    assert {
+        "tests/api/test_sync_status_api.py", "tests/api/test_sync_job_management.py",
+        "tests/api/test_sync_freshness_api.py", "tests/api/test_frontend_remaining_safety.py",
+    } <= set(plan.backend)
+    assert plan.vitest == ["src/pages/dashboard/", "src/pages/spu-profitability/", "src/pages/sync-jobs/"]
+    assert not (plan.backend_all or plan.build or plan.browser_mock or plan.scenarios)
+
+
+def test_shop_alias_task_preserves_page_coverage_without_full_component_suite() -> None:
+    # The shared helper and its actual six page consumers from f6f3e38b.
+    plan = select([
+        *SHOP_NAME_CONSUMERS, "docs/api/external-api.md",
+        "frontend/src/pages/dashboard/index.test.tsx",
+        "frontend/src/pages/manual-costs/index.test.tsx",
+        "frontend/src/pages/spu-profit-deterioration/index.test.tsx",
+        "frontend/src/pages/spu-profitability/index.test.tsx",
+        "frontend/src/pages/sync-jobs/index.test.tsx",
+    ])
+    assert plan.vitest == sorted([
+        "src/shared/shop-name.test.ts", *(f"src/pages/{page}/" for page in SHOP_NAME_PAGES),
+    ])
+    assert plan.frontend and plan.build and not plan.backend_all
+    assert "tests/browser/test_frontend_dashboard_layout.py" in plan.browser_mock
+    assert "tests/browser/test_frontend_remaining_manual_native.py" in plan.browser_mock
+    assert "tests/e2e/test_spu_deterioration_alert_smoke.py" in plan.browser_mock
+
+
+def test_monitor_oauth_and_profitability_selection_keep_known_providers_and_consumers() -> None:
+    monitor = select(["tts_erp_v2/plugin/monitor_relay.py"])
+    assert monitor.backend == sorted(MONITOR_TESTS)
+    assert not (monitor.frontend or monitor.backend_all or monitor.build)
+    for path in sorted(selection_module.OAUTH_PATHS):
+        oauth = select([path])
+        assert set(OAUTH_TESTS) <= set(oauth.backend)
+        assert {"src/pages/shops/", "src/pages/message/", "src/pages/oauth-onboard/"} <= set(oauth.vitest)
+        assert not (oauth.backend_all or oauth.build)
+    profitability = select([selection_module.PROFITABILITY_SELECTION])
+    assert set(PROFITABILITY_TESTS) <= set(profitability.backend)
+    assert {"analytics", "focused_spus", "spu_deterioration_alert"} <= set(profitability.contracts)
+    assert not profitability.backend_all
+
+
+@pytest.mark.parametrize("path", [
+    "prd/prototypes/TEST_unknown.py", "prd/TEST_runtime.js",
+    "frontend/src/shared/TEST_new-helper.ts", "tts_erp_v2/sync_worker/TEST_new.py",
+    "tts_erp_v2/analytics/TEST_new.py", "tts_erp_v2/plugin/TEST_new.py",
+    "tts_erp_v2/db/session.py", "tts_erp_v2/api/deps.py",
+])
+def test_narrow_registrations_do_not_absorb_unknown_or_shared_runtime_paths(path: str) -> None:
+    plan = select([path])
+    assert plan.backend_all or (plan.frontend and not plan.vitest)
+
+
+def test_prototype_deletion_checks_remaining_links_but_test_deletion_stays_broad() -> None:
+    asset = "prd/prototypes/dashboard.html"
+    assert select([asset], deleted=frozenset({asset})).checks == [PROTOTYPE_CHECK]
+    assert select([PROTOTYPE_CHECK], deleted=frozenset({PROTOTYPE_CHECK})).backend_all
+    unknown = "tts_erp_v2/TEST_removed.py"
+    assert select([unknown], deleted=frozenset({unknown})).backend_all
+
+
+def _candidate_git(monkeypatch: pytest.MonkeyPatch, consumers: set[str], *, missing_test: bool = False) -> None:
+    def git(*args: str) -> bytes:
+        if args[0] == "diff":
+            return f"M\0{SHOP_NAME_HELPER}\0".encode()
+        if args[0] == "grep":
+            assert "TEST_head" in args and args[-1] == "frontend/src"
+            return "".join(f"TEST_head:{path}\0" for path in sorted(consumers)).encode()
+        assert args[0] == "ls-tree" and "TEST_head" in args
+        tests = [f"frontend/src/pages/{page}/index.test.tsx" for page in SHOP_NAME_PAGES]
+        if not missing_test:
+            tests.append(SHOP_NAME_TEST)
+        return "".join(f"{path}\0" for path in tests).encode()
+    monkeypatch.setattr(selection_module, "git", git)
+
+
+def test_candidate_shop_helper_checks_known_consumers_without_a_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    _candidate_git(monkeypatch, set(SHOP_NAME_CONSUMERS))
+    plan = select_commits("TEST_base", "TEST_head", None, "auto")
+    assert len(plan.vitest) == len(SHOP_NAME_PAGES) + 1
+    assert not (plan.build or plan.backend_all)
+
+
+@pytest.mark.parametrize("extra", ["frontend/src/pages/TEST_new/index.tsx", "frontend/src/app/TEST_shell.tsx"])
+def test_new_shop_helper_consumer_widens_candidate_selection(
+    monkeypatch: pytest.MonkeyPatch, extra: str,
+) -> None:
+    _candidate_git(monkeypatch, {*SHOP_NAME_CONSUMERS, extra})
+    plan = select_commits("TEST_base", "TEST_head", None, "auto")
+    assert plan.frontend and not plan.vitest
+    assert "unmapped" in plan.reasons["shop-name"]
+
+
+def test_missing_helper_consumer_or_test_widens_candidate_selection(monkeypatch: pytest.MonkeyPatch) -> None:
+    for consumers, missing_test in ((set(), False), (set(SHOP_NAME_CONSUMERS), True)):
+        _candidate_git(monkeypatch, consumers, missing_test=missing_test)
+        plan = select_commits("TEST_base", "TEST_head", None, "auto")
+        assert plan.frontend and not plan.vitest
+
+
 def test_every_selected_test_path_still_exists_on_disk():
     """选择器引用的测试文件必须真实存在。
 
@@ -212,37 +345,24 @@ def test_every_selected_test_path_still_exists_on_disk():
     扫描方式是通用的：模块里任何看起来像测试路径的字符串常量都会被检查，
     所以以后新增映射表时漏改也会被这条抓住。
     """
-    from scripts import _test_selection as selection_module
-
-    def looks_like_test_path(value: str) -> bool:
-        return value.startswith("tests/") and value.endswith(".py")
-
-    referenced: set[str] = set()
-    for name in dir(selection_module):
-        if name.startswith("_"):
-            continue
-        value = getattr(selection_module, name)
+    def references(value: Any) -> set[str]:
         if isinstance(value, str):
-            candidates = [value]
-        elif isinstance(value, (tuple, list, set, frozenset)):
-            candidates = [item for item in value if isinstance(item, str)]
-        elif isinstance(value, dict):
-            candidates = [
-                item
-                for entry in value.values()
-                if isinstance(entry, (tuple, list, set, frozenset))
-                for item in entry
-                if isinstance(item, str)
-            ]
-        else:
-            continue
-        referenced.update(item for item in candidates if looks_like_test_path(item))
+            return {value} if value.startswith("tests/") else set()
+        if isinstance(value, dict):
+            return set().union(*(references(item) for item in value.values()))
+        if isinstance(value, (tuple, list, set, frozenset)):
+            return set().union(*(references(item) for item in value))
+        return set()
 
-    missing = sorted(
-        {
-            target
-            for target in referenced
-            if not (selection_module.ROOT / target.split("::")[0]).is_file()
-        }
-    )
-    assert not missing, f"选择器引用了不存在的测试文件: {missing}"
+    def exists(target: str) -> bool:
+        path: Path = selection_module.ROOT / target.split("::", 1)[0]
+        return path.is_file() or (path.is_dir() and any(path.rglob("test_*.py")))
+
+    referenced = set().union(*(
+        references(value) for name, value in vars(selection_module).items() if not name.startswith("_")
+    ))
+    assert "tests/api/test_ad_daily.py" in referenced  # Nested provider/consumer table.
+    assert DRAWER_BROWSER in referenced  # Node targets must not escape the audit.
+    assert "tests/sync_worker" in referenced  # Whole domain targets are intentional.
+    missing = sorted(target for target in referenced if not exists(target))
+    assert not missing, f"选择器引用了不存在的测试路径: {missing}"

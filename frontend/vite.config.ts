@@ -18,8 +18,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    // Keep jsdom forks within the shared validation VM's memory budget.
-    maxWorkers: 2,
+    // One admitted heavy suite owns host capacity. Three jsdom forks fit the
+    // fixed VM budget; uncoordinated/manual runs retain the two-worker limit.
+    maxWorkers: process.env.TTS_ERP_TEST_CAPACITY_CLASS === 'heavy' ? 3 : 2,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     clearMocks: true,
