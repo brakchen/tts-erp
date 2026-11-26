@@ -188,6 +188,6 @@ it.each(['TEST_alias', '', null])('shows alias or platform name in comparison sh
     ? Promise.resolve(json([{ id: 11, account_name: 'TEST店铺', shop_alias, shop_id: 'TEST_SHOP' }])) : original(url, init));
   render(<Page {...props} />);
   await screen.findByRole('grid', { name: 'SPU 两期盈利对比' });
-  await userEvent.click(screen.getByRole('button', { name: '店铺' }));
+  await userEvent.click(screen.getByRole('button', { name: /^店铺/ }));
   expect(screen.getByRole('option', { name: shop_alias || 'TEST店铺' })).toBeVisible();
 });
