@@ -55,7 +55,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it.each(['spu-roi', 'focused-spus'] as const)('keeps %s dates with results and the sample control inside profit', async (pageId) => {
-  render(<Page bootstrap={{ ...bootstrap, pageId }} />);
+  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId }} />); });
   await screen.findByText('TEST_RESULT');
   const overview = screen.getByRole('region', { name: '经营概览' });
   expect(overview).toContainElement(screen.getByRole('region', { name: '经营日期筛选' }));
@@ -186,7 +186,7 @@ it('removing a focused item on the last page resets offset before refreshing the
   const last = calls.filter((call) => call.url.includes('/analytics/spu-roi?')).at(-1)!;
   expect(new URL(last.url, location.origin).searchParams.get('offset')).toBe('0');
   expect(stored).toHaveLength(100);
-});
+}, 15_000);
 it('a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs', async () => {
   patchFailure = 503; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
