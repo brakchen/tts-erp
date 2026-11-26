@@ -20,7 +20,8 @@ from tts_erp_v2.commerce.shop_access import (
 _SQL_SELECTED_CATALOG = text(
     """
     SELECT cp.id AS spu_pk, cp.shop_pk, cp.spu_id, cp.title, cp.status,
-           cp.main_image_url, s.shop_id, s.account_name AS shop_name
+           cp.main_image_url, s.shop_id,
+           COALESCE(NULLIF(s.shop_alias, ''), s.account_name) AS shop_name
     FROM commerce.products_spu cp
     LEFT JOIN commerce.shops s ON s.id = cp.shop_pk
     WHERE """ + authorized_shop_clause("s") + """

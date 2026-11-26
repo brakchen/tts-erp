@@ -1,3 +1,4 @@
+import { decodeShopAlias, displayShopName } from '../../shared/shop-name';
 import PageIntro from '../../shared/PageIntro';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Link, Table } from '@heroui/react';
@@ -6,7 +7,7 @@ import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/clien
 import { pathFor } from '../../shared/api/paths';
 import type { NavigationItem, PageProps } from '../../shared/contracts';
 
-interface Shop { id: number; shop_id: string; account_name: string | null; region: string | null; platform: string }
+interface Shop { id: number; shop_id: string; account_name: string | null; shop_alias?: string | null; region: string | null; platform: string }
 interface ShopList { items: Shop[]; total: number | null }
 interface Coverage { total_spus: number | null; missing_cost_spus: number | null }
 interface Health { status: string; auth_mode?: string }
@@ -28,7 +29,7 @@ function countOrUnknown(value: unknown) { return typeof value === 'number' && Nu
 const decodeShops: Decoder<ShopList> = (value, headers) => {
   if (!Array.isArray(value) || !value.every((shop: unknown) => isRecord(shop) && typeof shop.shop_id === 'string')) throw new Error('店铺响应格式错误');
   const total = headers.get('X-Total-Count');
-  return { items: value, total: total !== null && /^\d+$/.test(total) ? countOrUnknown(Number(total)) : null };
+  return { items: value.map((shop) => ({ ...shop, shop_alias: decodeShopAlias(shop.shop_alias) })), total: total !== null && /^\d+$/.test(total) ? countOrUnknown(Number(total)) : null };
 };
 const decodeCoverage: Decoder<Coverage> = (value) => {
   if (!isRecord(value)) throw new Error('覆盖率响应格式错误');
@@ -102,7 +103,7 @@ export default function Dashboard({ bootstrap }: PageProps) {
   const href = (item: NavigationItem) => pathFor(bootstrap.rootPath, item.href);
   const total = shops.data?.total;
   const scope = total === 0 ? '无店铺' : total === 1 && shops.data?.items.length === 1
-    ? `${shops.data.items[0].account_name || '(未命名)'} · ${shops.data.items[0].region || '?'}`
+    ? `${displayShopName(shops.data.items[0], '(未命名)')} · ${shops.data.items[0].region || '?'}`
     : total == null ? '全店铺（总数未知）' : `全店铺 (${total})`;
   const metrics = [
     { label: '待录成本', value: coverage.data?.missing_cost_spus, hint: '缺少采购成本的 SPU 数量', pageId: 'manual-costs' },
@@ -140,7 +141,7 @@ export default function Dashboard({ bootstrap }: PageProps) {
       {shops.data && (shops.data.items.length === 0 ? <p>暂无店铺</p> : <Table variant="secondary" className="erp-table erp-compact-table"><Table.ScrollContainer className="erp-table-scroll" role="region" aria-label="数据表格横向滚动区域" tabIndex={0}><Table.Content aria-label="已注册店铺" className="min-w-[40rem] erp-table-content">
         <Table.Header className="erp-table-head"><Table.Column className="erp-table-column" isRowHeader>店铺</Table.Column><Table.Column className="erp-table-column">店铺 ID</Table.Column><Table.Column className="erp-table-column">地区</Table.Column><Table.Column className="erp-table-column">平台</Table.Column></Table.Header>
         <Table.Body className="erp-table-body">{shops.data.items.map((shop) => <Table.Row className="erp-table-row" key={shop.id} id={shop.id}>
-          <Table.Cell className="erp-table-cell"><span className="block max-w-72 break-words font-medium">{shop.account_name || '(未命名)'}</span></Table.Cell>
+          <Table.Cell className="erp-table-cell"><span className="block max-w-72 break-words font-medium">{displayShopName(shop, '(未命名)')}</span></Table.Cell>
           <Table.Cell className="erp-table-cell"><span className="font-mono text-sm tabular-nums">{shop.shop_id}</span></Table.Cell><Table.Cell className="erp-table-cell">{shop.region || '?'}</Table.Cell><Table.Cell className="erp-table-cell">{shop.platform}</Table.Cell>
         </Table.Row>)}</Table.Body>
       </Table.Content></Table.ScrollContainer></Table>)}

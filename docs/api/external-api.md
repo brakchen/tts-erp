@@ -73,6 +73,8 @@ credential kinds:
 | Start TikTok seller authorization | `GET /v2/oauth/tiktok/authorize` | **readwrite** or above (handler-enforced) |
 | TikTok OAuth redirect target (new-shop onboarding) | `GET /v2/oauth/tiktok/callback?code&state` | **public** — see [`docs/api/tiktok-shop-oauth.md`](tiktok-shop-oauth.md) |
 
+店铺展示优先使用非空 `shop_alias`，否则使用 `account_name`。店铺接口继续分别返回这两个字段；广告明细/筛选的 `shop_name` 及盈利接口 `meta.fee.per_shop[].shop_name` 返回按此规则解析的展示名，广告店铺排序也采用该名称。
+
 Key gotchas (read these before writing code):
 
 - **Filter by internal ids, not shop_id.** v2 list endpoints take
@@ -342,7 +344,7 @@ sync-worker 周期作业健康展示（dashboard「数据同步状态」卡片�
 | --- | --- | --- |
 | `GET /v2/sync/status` | readonly | → `{server_time, jobs: [{job_name, interval_seconds, last_run_at, last_finished_at, last_status, last_error, next_expected_at, lag_seconds, cycles_late, severity}]}`。周期取自 `sync_worker.scheduler.JOBS` 注册表（单一真相源），运行记录取自 `integration.sync_jobs`（tiktok 作业按 shop 扇出多行，按 job_name 聚合取最新一行）。红灯规则：`now - last_run_at >= 2 × interval_seconds` → `severity="crit"`；≥1 周期 `"warn"`；周期内 `"ok"`；从未运行或注册表外 job `"unknown"`。只读、零上游外呼。 |
 | `GET /v2/sync/freshness?shop_pk=` | readonly | SPU ROI 页头四类同步时间。→ `{server_time, shop_pk, shop_id, sources: [{key, label, synced_at, scope, basis, job_name, last_status, severity, detail}]}`，`sources` 固定为 `ads` / `orders` / `logistics` / `miaoshou`。广告：`max(plugin.ad_daily.updated_at, plugin.ad_today.updated_at)`，`seller_id = shop_id`，判灯间隔 15 分钟（插件今日刷新是 30 秒，页头不按 30 秒报红）。订单 / 物流：该店 `integration.sync_jobs` 中 `extra.shop_id` 归因的最近成功 `finished_at`（`tiktok.orders` / `tiktok.logistics`，周期取自 `JOBS`）；尚无归因行时回退 `integration.sync_cursors.updated_at`（`scope=shop_id`）。妙手：注册表内 `miaoshou.*` 最近一次成功，按该作业自己的周期判灯，`scope="system"`。最近一次运行失败且新于上次成功时，`severity` 至少为 `warn`。未知 `shop_pk` 为 404。只读、零上游外呼。 |
-| `GET /v2/sync/jobs` | readwrite | 周期任务管理页的数据源：返回 `JOBS` 定义、`enabled` 启停状态、最近运行状态，以及可手动选择的 TikTok 店铺列表。启停状态持久化在 `integration.sync_cursors` 的保留命名空间 `scheduler.job_controls`。 |
+| `GET /v2/sync/jobs` | readwrite | 周期任务管理页的数据源：返回 `JOBS` 定义、`enabled` 启停状态、最近运行状态，以及可手动选择的 TikTok 店铺列表（保留 `account_name`，附带可空 `shop_alias` 供页面优先展示）。启停状态持久化在 `integration.sync_cursors` 的保留命名空间 `scheduler.job_controls`。 |
 | `GET /v2/pages/sync-jobs` | readwrite | 定时任务管理 HTML 页面（侧边栏入口）。页面可查看任务；readwrite 会话可立即执行任务；admin 会话还可切换周期启停。 |
 | `PATCH /v2/admin/sync-jobs/{job_name}/enabled` | admin | body `{"enabled": false}`：启用/停用周期 tick。只影响 APScheduler 自动触发；手动触发仍可执行。Cookie mutation 必须带 `X-Requested-With: tts-erp`。 |
 | `POST /v2/admin/sync-jobs/{job_name}/trigger` | readwrite | body 可选 `{"shop_id": "..."}`。TikTok 店铺级任务传 `shop_id` 时只跑该店，省略则按当前授权店铺 fan-out；系统级任务不接受 `shop_id`。返回 200 accepted，表示已提交 API 后台任务；最终运行结果异步写 `integration.sync_jobs`，调用方需稍后刷新状态查看。 |

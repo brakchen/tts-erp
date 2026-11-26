@@ -258,3 +258,17 @@ def test_override_beats_shop_estimate(api_client, readonly_key, _fx, db_engine) 
     row = payload["items"][0]
     assert row["fee_source"] == "user_override"
     assert row["fee_rate_used"] == "0.5000"
+
+
+@pytest.mark.parametrize("shop_alias", ["TEST fee alias", "", None])
+def test_fee_evidence_shop_name_uses_alias(api_client, readonly_key, _fx, db_engine, shop_alias) -> None:
+    from tts_erp_v2.db.models import ChannelAccount
+
+    shop_id = "TEST_FEEAPI_ALIAS"
+    shop_pk = _seed_shop_with_spu(db_engine, shop_id, "TEST_FEEAPI_ALIAS_SPU")
+    with Session(db_engine) as session, session.begin():
+        shop = session.get(ChannelAccount, shop_pk)
+        assert shop is not None
+        shop.shop_alias = shop_alias
+    payload = _get(api_client, readonly_key, shop_pk=shop_pk)
+    assert payload["meta"]["fee"]["per_shop"][0]["shop_name"] == (shop_alias or f"{shop_id} 店铺")
