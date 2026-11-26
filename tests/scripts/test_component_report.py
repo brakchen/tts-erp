@@ -250,12 +250,12 @@ def test_adapter_keeps_owned_cleanup_deadlines_and_persistent_concise_artifacts(
     monkeypatch.setattr(adapter, "owned_process", fake_owned_process)
     if mode == "timeout":
         with pytest.raises(subprocess.TimeoutExpired):
-            adapter.test_frontend_components(root / "TEST_pytest_tmp")
+            adapter.test_frontend_components()
     elif mode == "missing":
         with pytest.raises(AssertionError, match="incomplete"):
-            adapter.test_frontend_components(root / "TEST_pytest_tmp")
+            adapter.test_frontend_components()
     else:
-        adapter.test_frontend_components(root / "TEST_pytest_tmp")
+        adapter.test_frontend_components()
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == ("passed" if mode == "pass" else "incomplete")
     assert observed == [deadline, "cleaned"]

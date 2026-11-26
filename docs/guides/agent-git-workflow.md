@@ -160,7 +160,7 @@ git merge --no-edit origin/master
 
 Resolve both sides' intent, never blanket `--ours`, `--theirs`, or `-X theirs`. Abort and ask if intent is unclear. Then:
 
-1. Run diagnostics/link/path checks and the narrowest relevant safe tests.
+1. Run diagnostics/link/path checks and the narrowest relevant safe tests. Run tests only through `bash scripts/test_isolated.sh ...`; the baseline driver delegates to this same ephemeral-clone entry point.
 2. Inspect `bash scripts/test_baseline.sh --scope auto --base "$synced_master" --plan`, record the final scope/scenarios and run relevant narrow checks. The sole formal baseline gate belongs to the prospective merge in section 7; test infrastructure still requires `--scope fast` there. If delivering only a branch without integration, run that gate on the committed branch and report integration pending. Zero new stable failures are required.
 3. Review `git diff --check`, branch diff and staged file list; exclude secrets and foreign WIP.
 4. Push the synchronized lane branch. Record full HEAD and `origin/master` SHA, exact validation evidence and a fresh UTC `readyAt` in its full ready record.
