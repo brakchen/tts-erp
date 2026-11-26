@@ -27,6 +27,7 @@ def _report(phase: Phase, *, status: int = 0, node: str | None = None) -> dict:
     return {
         "phase": phase.name, "required": phase.required, "status": status, "ran": 1,
         "failed": [node] if status == 1 else [], "missing": [], "nodes": [node], "collectedNodes": [node],
+        "executedNodes": [node],
         "terminalOutcomes": {node: "failed" if status == 1 else "passed"}, "allowedSkips": [],
     }
 
@@ -125,6 +126,92 @@ def test_incomplete_component_evidence_cannot_be_green(component):
     }})
     assert result["status"] == 2
     assert result["missing"] == ["frontend:component-report"]
+
+
+@pytest.mark.parametrize("outcome", ["failed", "error"])
+def test_terminal_failure_cannot_be_hidden_by_success_header(outcome):
+    phase = Phase("backend", ["tests/api/test_example.py"], [])
+    value = _report(phase)
+    [node] = value["nodes"]
+    value["terminalOutcomes"][node] = outcome
+    result = phases.aggregate([phase], {"backend": {
+        "report": value, "exitCode": 0, "templateReceipt": TEMPLATE_RECEIPT,
+    }})
+    assert result["status"] == 2
+    assert result["failed"] == [node]
+    assert "phase:backend:inconsistent-failures" in result["missing"]
+
+
+def test_failure_list_cannot_invent_a_failure_for_a_passing_terminal():
+    phase = Phase("backend", ["tests/api/test_example.py"], [])
+    value = _report(phase, status=1)
+    [node] = value["nodes"]
+    value["terminalOutcomes"][node] = "passed"
+    result = phases.aggregate([phase], {"backend": {
+        "report": value, "exitCode": 1, "templateReceipt": TEMPLATE_RECEIPT,
+    }})
+    assert result["status"] == 2 and "phase:backend:inconsistent-failures" in result["missing"]
+
+
+@pytest.mark.parametrize("contradiction", ["undercount", "double-count", "omit-passed", "omit-node-union"])
+def test_execution_count_requires_matching_call_evidence(contradiction):
+    phase = Phase("backend", ["tests/api/test_example.py"], [])
+    value = _report(phase)
+    if contradiction == "undercount":
+        value["ran"] = 0
+    elif contradiction == "double-count":
+        value["ran"] = 2
+        value["executedNodes"] *= 2
+    elif contradiction == "omit-passed":
+        value.update(ran=0, executedNodes=[], nodes=[])
+    else:
+        value["nodes"] = []
+    result = phases.aggregate([phase], {"backend": {
+        "report": value, "exitCode": 0, "templateReceipt": TEMPLATE_RECEIPT,
+    }})
+    assert result["status"] == 2 and "phase:backend:inconsistent-execution" in result["missing"]
+
+
+def test_setup_error_and_teardown_error_keep_distinct_execution_counts():
+    phase = Phase("backend", ["tests/api/test_example.py"], [])
+    value = _report(phase, status=1)
+    [teardown] = value["nodes"]
+    setup = "tests/api/test_example.py::test_setup_error"
+    value["nodes"].append(setup)
+    value["failed"].append(setup)
+    value["collectedNodes"].append(setup)
+    value["terminalOutcomes"] = {teardown: "error", setup: "error"}
+    result = phases.aggregate([phase], {"backend": {
+        "report": value, "exitCode": 1, "templateReceipt": TEMPLATE_RECEIPT,
+    }})
+    assert result["status"] == 1 and result["missing"] == []
+    assert result["ran"] == 1 and len(result["failed"]) == 2
+
+
+@pytest.mark.parametrize("other_failure", [False, True])
+def test_failed_components_require_failure_of_the_component_wrapper(other_failure):
+    phase = Phase("frontend", ["tests/frontend/test_components.py"], [])
+    value = _report(phase)
+    if other_failure:
+        other = "tests/frontend/test_contract.py::test_contract"
+        value.update(status=1, ran=2, failed=[other])
+        for field in ("nodes", "collectedNodes", "executedNodes"):
+            value[field].append(other)
+        value["terminalOutcomes"][other] = "failed"
+    result = phases.aggregate([phase], {"frontend": {
+        "report": value, "exitCode": int(other_failure), "templateReceipt": TEMPLATE_RECEIPT,
+        "componentsRequired": True, "components": {"schemaVersion": 1, "complete": True, "status": "failed"},
+    }})
+    assert result["status"] == 2 and "frontend:component-outcome-mismatch" in result["missing"]
+
+
+def test_failed_components_with_matching_pytest_failure_remain_complete():
+    phase = Phase("frontend", ["tests/frontend/test_components.py"], [])
+    result = phases.aggregate([phase], {"frontend": {
+        "report": _report(phase, status=1), "exitCode": 1, "templateReceipt": TEMPLATE_RECEIPT,
+        "componentsRequired": True, "components": {"schemaVersion": 1, "complete": True, "status": "failed"},
+    }})
+    assert result["status"] == 1 and result["missing"] == []
 
 
 def test_duplicate_nodes_and_no_selection_fail_closed():

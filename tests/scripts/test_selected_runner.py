@@ -198,6 +198,8 @@ def test_phase_reports_every_terminal_outcome_and_rejects_dynamic_skips(tmp_path
         f"{target}::test_expected": "xfailed", f"{target}::test_expected_notrun": "xfailed",
     }
     assert set(value["collectedNodes"]) == set(value["terminalOutcomes"])
+    assert value["executedNodes"] == sorted([f"{target}::test_pass", f"{target}::test_expected"])
+    assert value["ran"] == len(value["executedNodes"]) == 2
     if allowed:
         assert value["missing"] == []
         assert value["allowedSkips"] == [{

@@ -90,7 +90,7 @@ it('shows every focused SPU inside the search field and removes only the clicked
   fetcher.mockImplementation((input, init) => init?.method === 'PATCH' ? new Promise<Response>((resolve) => { finish = () => { void original(input, init).then(resolve); }; }) : original(input, init));
   render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByRole('button', { name: '移除 SPU TEST_TAG_28' });
-  const field = screen.getByRole('group', { name: 'SPU 搜索与已选标签' });
+  const field = screen.getByLabelText('SPU 搜索与已选标签');
   expect(within(field).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(29);
   expect(field).toContainElement(screen.getByLabelText('按 SPU ID / 标题搜索'));
   expect(field.querySelector('details')).toBeNull();
@@ -171,11 +171,12 @@ it('removing a focused item on the last page resets offset before refreshing the
   // All fetches in this case resolve immediately. Flush their collection work
   // before starting user assertions rather than racing a 101-tag initial mount.
   await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />); });
-  const pagination = () => within(screen.getByRole('navigation', { name: 'SPU ROI 分页' }));
+  // Locate the labelled owner before querying controls among 101 rendered tags.
+  const pagination = () => within(screen.getByLabelText('SPU ROI 分页'));
   await screen.findByText('TEST_RESULT');
   await act(async () => { fireEvent.click(pagination().getByRole('button', { name: '下一页' })); });
   await pagination().findByText('第 2 页 · 共 2 页');
-  const selected = within(screen.getByRole('group', { name: 'SPU 搜索与已选标签' }));
+  const selected = within(screen.getByLabelText('SPU 搜索与已选标签'));
   expect(selected.getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(101);
   const firstTag = within(selected.getByRole('row', { name: 'TEST_PAGE_0' }));
   await act(async () => { fireEvent.click(firstTag.getByRole('button', { name: '移除 SPU TEST_PAGE_0' })); });

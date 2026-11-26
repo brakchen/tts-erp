@@ -122,6 +122,7 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, exitstatus: int)
             "status": int(exitstatus), "ran": len(ran), "failed": sorted(failed), "missing": missing,
             "phase": os.environ["TTS_ERP_TEST_PHASE"], "required": required,
             "nodes": sorted(ran | failed), "collectedNodes": _collected,
+            "executedNodes": sorted(ran),
             "terminalOutcomes": terminal,
             "allowedSkips": [_allowed_skips[node] for node in sorted(_allowed_skips)],
             "timings": progress.get("timings", {}),

@@ -26,7 +26,8 @@ async function openRegister(user: ReturnType<typeof userEvent.setup>) {
   return screen.getByRole('dialog');
 }
 async function fillRegister(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
-  await user.type(within(dialog).getByRole('textbox', { name: '店铺 ID' }), shop.shop_id);
+  await user.click(within(dialog).getByRole('textbox', { name: '店铺 ID' }));
+  await user.paste(shop.shop_id);
 }
 async function openApp(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText(shop.shop_id);
@@ -34,8 +35,10 @@ async function openApp(user: ReturnType<typeof userEvent.setup>) {
   return screen.getByRole('dialog');
 }
 async function fillApp(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement, secret = 'TEST_secret') {
-  await user.type(within(dialog).getByLabelText('App Key', { exact: true }), 'TEST_key');
-  await user.type(within(dialog).getByLabelText('App Secret', { exact: true }), secret);
+  await user.click(within(dialog).getByLabelText('App Key', { exact: true }));
+  await user.paste('TEST_key');
+  await user.click(within(dialog).getByLabelText('App Secret', { exact: true }));
+  await user.paste(secret);
 }
 const save = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: /^保存(?:中…)?$/ });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });

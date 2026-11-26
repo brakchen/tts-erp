@@ -28,6 +28,7 @@ from scripts._run_selected_tests import (
     committed_plan,
     phase_plan,
 )
+from scripts._test_selection import COMPONENTS
 from tests.support.owned_process import owned_process
 
 HEARTBEAT_SECONDS = 20
@@ -112,7 +113,7 @@ def _valid_report(value: dict[str, Any] | None, phase: Phase) -> bool:
                 and value.get("required") == phase.required
                 and type(value.get("status")) is int and value["status"] in range(6)
                 and type(value.get("ran")) is int and value["ran"] >= 0
-                and all(_strings(value.get(key)) for key in ("failed", "missing", "nodes", "collectedNodes"))
+                and all(_strings(value.get(key)) for key in ("failed", "missing", "nodes", "collectedNodes", "executedNodes"))
                 and _terminal_evidence(value))
 
 
@@ -138,12 +139,26 @@ def aggregate(phases: list[Phase], results: dict[str, dict[str, Any]]) -> dict[s
             continue
         missing.update(value["missing"])
         terminal = value["terminalOutcomes"]
+        terminal_failed = {node for node, outcome in terminal.items() if outcome in {"failed", "error"}}
+        if set(value["failed"]) != terminal_failed:
+            missing.add(f"phase:{phase.name}:inconsistent-failures")
+        executed = set(value["executedNodes"])
+        successful = {node for node, outcome in terminal.items() if outcome in {"passed", "xpassed"}}
+        # Setup errors/xfails need not reach the call phase. A teardown error
+        # can follow a completed call. Explicit call evidence keeps those cases
+        # distinguishable without guessing execution counts from final outcomes.
+        if (value["ran"] != len(executed) or len(executed) != len(value["executedNodes"])
+                or not successful <= executed or not executed <= set(terminal)
+                or any(terminal.get(node) == "skipped" for node in executed)
+                or set(value["nodes"]) != executed | terminal_failed):
+            missing.add(f"phase:{phase.name}:inconsistent-execution")
         allowed_skips = {skip["nodeid"] for skip in value["allowedSkips"]}
         evidence = set(value["nodes"]) | {node for node, outcome in terminal.items() if outcome == "xfailed"}
         missing.update(target for target in phase.required if not any(
             _matches(node, target) for node in evidence | (allowed_skips if "::" not in target else set())
         ))
         failed.update(value["failed"])
+        failed.update(terminal_failed)
         ran += value["ran"]
         collected = set(value["collectedNodes"])
         missing.update(f"unreported:{node}" for node in collected - set(terminal))
@@ -157,6 +172,8 @@ def aggregate(phases: list[Phase], results: dict[str, dict[str, Any]]) -> dict[s
         duplicates.update(seen & collected)
         seen.update(collected)
         if (not set(value["nodes"]) <= collected or not set(value["failed"]) <= set(value["nodes"])
+                or len(set(value["nodes"])) != len(value["nodes"])
+                or len(set(value["failed"])) != len(value["failed"])
                 or any(terminal.get(node) == "skipped" for node in value["nodes"])
                 or value["ran"] > len(value["nodes"])):
             missing.add(f"phase:{phase.name}:invalid-nodes")
@@ -171,6 +188,9 @@ def aggregate(phases: list[Phase], results: dict[str, dict[str, Any]]) -> dict[s
             or component.get("complete") is not True or component.get("status") not in {"passed", "failed"}
         ):
             missing.add("frontend:component-report")
+        elif (result.get("componentsRequired") and component["status"] == "failed"
+              and not any(_matches(node, COMPONENTS) for node in terminal_failed)):
+            missing.add("frontend:component-outcome-mismatch")
     missing.update(f"duplicate:{node}" for node in duplicates)
     if not phases:
         missing.add("selection:empty")
