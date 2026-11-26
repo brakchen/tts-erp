@@ -166,6 +166,8 @@ it('clear cancels a standard bulk lookup and ignores its late response', async (
   expect(screen.queryByRole('button', { name: '移除 SPU TEST_NEW' })).not.toBeInTheDocument();
   expect(input).toHaveValue('');
 });
+// Retain the real 101-tag boundary: React's development render chain alone
+// measured 5.8s on the fixed VM. Other tests keep Vitest's default deadline.
 it('removing a focused item on the last page resets offset before refreshing the smaller scope', async () => {
   overviewTotal = 101; stored = Array.from({ length: 101 }, (_, index) => ({ spuId: `TEST_PAGE_${index}`, title: `TEST 商品 ${index}` }));
   // All fetches in this case resolve immediately. Flush their collection work
@@ -185,7 +187,7 @@ it('removing a focused item on the last page resets offset before refreshing the
   const last = calls.filter((call) => call.url.includes('/analytics/spu-roi?')).at(-1)!;
   expect(new URL(last.url, location.origin).searchParams.get('offset')).toBe('0');
   expect(stored).toHaveLength(100);
-});
+}, 10_000);
 it('a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs', async () => {
   patchFailure = 503; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
   await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });

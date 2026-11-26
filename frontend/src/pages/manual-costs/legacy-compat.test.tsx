@@ -86,6 +86,8 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });
 
+  // The real 50-row React/HeroUI render chain exceeds the default 5s on the
+  // fixed validation VM (CPU profile: 5.4s in React). Keep the full page size.
   it.each([
     ['status', 'DELETED', '状态'],
     ['status', 'SELLER_DEACTIVATED', '状态'],
@@ -136,7 +138,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
       await waitFor(() => expect(catalogueQuery(fetcher).has(key)).toBe(false));
     }
     expect(fetcher.mock.calls.every(([url, init]) => url.startsWith('/tts/v2/') && init.method === 'GET')).toBe(true);
-  });
+  }, 10_000);
 
   it('labels SPU identities and preserves exact server money, nulls, status labels and timestamps in editable catalogue rows', async () => {
     const rows = [
