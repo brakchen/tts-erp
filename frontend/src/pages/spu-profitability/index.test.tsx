@@ -221,8 +221,7 @@ it.each(['spu-roi', 'focused-spus'])('shows alias in the %s scope and picker', a
   shopRows = [{ ...shop, shop_alias: 'TEST_alias' } as typeof shop];
   const user = userEvent.setup();
   render(<Page bootstrap={{ ...bootstrap, pageId }} />);
-  await screen.findByText('TEST_RESULT');
-  expect(screen.getByText(/^TEST_alias · .* · CNY$/)).toBeVisible();
-  await user.click(screen.getByRole('button', { name: /^当前店铺/ }));
+  expect(await screen.findByText(/^TEST_alias · .* · CNY$/)).toBeVisible();
+  await user.click(screen.getByRole('button', { name: /当前店铺/ }));
   expect(screen.getByRole('option', { name: `TEST_alias · ${shop.shop_id}` })).toBeVisible();
 });
