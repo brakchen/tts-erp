@@ -180,3 +180,14 @@ it('does not turn missing ROI or totals into true zero or discard an unavailable
   expect(screen.getByRole('region', { name: '完整分析范围统计' })).toHaveTextContent('TEST：汇总读取不可用');
   expect(screen.getByRole('region', { name: '完整分析范围统计' })).not.toHaveTextContent('101');
 });
+
+it.each(['TEST_alias', '', null])('shows alias or platform name in comparison shop choices (%s)', async (shop_alias) => {
+  const fetcher = api();
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, init) => url.includes('channel-accounts')
+    ? Promise.resolve(json([{ id: 11, account_name: 'TEST店铺', shop_alias, shop_id: 'TEST_SHOP' }])) : original(url, init));
+  render(<Page {...props} />);
+  await screen.findByRole('grid', { name: 'SPU 两期盈利对比' });
+  await userEvent.click(screen.getByRole('button', { name: '店铺' }));
+  expect(screen.getByRole('option', { name: shop_alias || 'TEST店铺' })).toBeVisible();
+});

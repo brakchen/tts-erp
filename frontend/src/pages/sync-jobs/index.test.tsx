@@ -173,3 +173,12 @@ describe('sync-jobs content', () => {
     void user;
   });
 });
+
+it.each(['TEST_alias', '', null])('uses the shop label while preserving the trigger ID (%s)', async (shop_alias) => {
+  const aliased = { ...data, tiktok_shops: [{ ...data.tiktok_shops[0], shop_alias }] };
+  mockApi(undefined, async () => json(aliased));
+  const user = userEvent.setup(); await mount(); const first = await row();
+  await user.click(within(first).getByRole('button', { name: /执行店铺/ }));
+  const label = shop_alias || data.tiktok_shops[0].account_name;
+  expect(screen.getByRole('option', { name: (name) => name.includes(label) && name.includes(data.tiktok_shops[0].shop_id) })).toBeVisible();
+});

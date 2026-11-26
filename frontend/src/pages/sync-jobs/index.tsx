@@ -1,3 +1,4 @@
+import { displayShopName } from '../../shared/shop-name';
 import PageIntro from '../../shared/PageIntro';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Label, ListBox, Modal, Select, Table } from '@heroui/react';
@@ -180,7 +181,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
         <Table.Cell className="erp-table-cell" focusMode="child"><p>{job.enabled ? '已启用' : '已停用'}</p><Button className="erp-table-action" variant="secondary" size="sm" isDisabled={blocked || !canAdmin} aria-label={`${job.enabled ? '停用' : '启用'} ${job.job_name} 周期调度`} onPress={() => { void submit({ kind: 'enabled', job_name: job.job_name, enabled: !job.enabled }); }}>{job.enabled ? '停用' : '启用'}</Button></Table.Cell>
         <Table.Cell className="erp-table-cell" focusMode="child"><div className="w-64 space-y-2">{job.is_tiktok && <Select aria-label={`执行店铺 ${job.job_name}`} value={selection[job.job_name] || 'all'} isDisabled={blocked} onChange={(key) => {
           if (typeof key === 'string') { setSelection((s) => ({ ...s, [job.job_name]: key === 'all' ? '' : key })); setScopeReset(false); setFailure((f) => f && Object.keys(f.fieldErrors).length ? { ...f, fieldErrors: {} } : f); }
-        }}><Label>执行店铺</Label><Select.Trigger aria-label={`执行店铺 ${job.job_name}`}><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="all" textValue="全部授权店铺">全部授权店铺</ListBox.Item>{data.tiktok_shops.map((s) => <ListBox.Item key={s.shop_id} id={s.shop_id} textValue={`${s.account_name ?? '未命名'} · ${s.shop_id}`}>{s.account_name ?? '未命名'} · {s.shop_id}{s.status === null ? '' : ` · ${s.status}`}</ListBox.Item>)}</ListBox></Select.Popover></Select>}
+        }}><Label>执行店铺</Label><Select.Trigger aria-label={`执行店铺 ${job.job_name}`}><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="all" textValue="全部授权店铺">全部授权店铺</ListBox.Item>{data.tiktok_shops.map((s) => <ListBox.Item key={s.shop_id} id={s.shop_id} textValue={`${displayShopName(s, '未命名')} · ${s.shop_id}`}>{displayShopName(s, '未命名')} · {s.shop_id}{s.status === null ? '' : ` · ${s.status}`}</ListBox.Item>)}</ListBox></Select.Popover></Select>}
         <Button className="erp-table-action" variant="secondary" size="sm" isDisabled={blocked} aria-label={`执行 ${job.job_name}`} onPress={() => trigger(job)}>执行</Button></div></Table.Cell>
       </Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table></>}
     <Modal.Backdrop isOpen={confirmation !== undefined} onOpenChange={(open) => { if (!open) setConfirmation(undefined); }}><Modal.Container><Modal.Dialog>

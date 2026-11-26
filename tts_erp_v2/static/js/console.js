@@ -186,7 +186,7 @@
           var opt = document.createElement("option");
           opt.value = String(s.id);
           opt.textContent =
-            s.account_name || "#" + s.id + " (" + (s.region || "?") + ")";
+            s.shop_alias || s.account_name || "#" + s.id + " (" + (s.region || "?") + ")";
           if (s.id === active) opt.selected = true;
           sel.appendChild(opt);
         });
