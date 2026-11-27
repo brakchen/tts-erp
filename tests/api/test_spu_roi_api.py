@@ -2973,9 +2973,9 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
 
 
 def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
-    """命中 manual_product_costs 有效行 → cost_source=MANUAL,unit_cost_used 用真值。
+    """人工维护的有效采购价统一返回 PURCHASE_PRICE，unit_cost_used 用真值。
 
-    v10 公式（D1 MANUAL，部分退款不计严格全损）统一输出 CNY:
+    v10 公式（当前采购价，部分退款不计严格全损）统一输出 CNY:
       cost=25 CNY；部分退款 1 件 → strict_full_loss_qty=0
       net_revenue、广告消耗从原生币种换算为 CNY
       net_profit 等于旧 USD 结果 26.8925 ÷ cny_usd
@@ -2993,11 +2993,11 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     assert body["total"] == 1
     item = body["items"][0]
     assert item["spu_pk"] == spu_pk
-    assert item["cost_source"] == "MANUAL"
+    assert item["cost_source"] == "PURCHASE_PRICE"
     assert Decimal(item["unit_cost_used"]) == Decimal(25)
     # 部分退款无严格全损证据。
     assert item["strict_full_loss_cost"] == "0.0000"
-    # v10 net_profit（D1 MANUAL 25 CNY 成本 + D5 未结算折算）
+    # v10 net_profit（当前采购价 25 CNY 成本 + 未结算折算）
     assert item["net_profit"] == cny4_from_usd("26.8925")
 
 
