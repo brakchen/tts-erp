@@ -1475,8 +1475,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["spend"] == m4(reconstructed_spend)
     assert item["sales"] == m4(reconstructed_sales)
     assert "SETTLEMENT" in body["meta"]["fee"]["note"]
-    assert "人工标注" in body["meta"]["cost_assumption"]
-    assert "其次使用已核实的妙手采购成交价(PURCHASE_PRICE)" in body["meta"]["cost_assumption"]
+    assert "使用当前有效的统一采购价(PURCHASE_PRICE)" in body["meta"]["cost_assumption"]
     assert "公共采集箱挂牌价不参与计算" in body["meta"]["cost_assumption"]
     assert "40 CNY" in body["meta"]["cost_assumption"]
     assert "缺成本" in body["meta"]["cost_assumption"]
