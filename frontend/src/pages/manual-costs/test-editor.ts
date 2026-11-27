@@ -7,7 +7,7 @@ export function openRowEditor(row: HTMLElement) {
 }
 
 export function closeRowEditor() {
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消', exact: true }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^取消$/ }));
 }
 
 export function readRowCost(row: HTMLElement) {
