@@ -128,8 +128,7 @@ _FOUR_DECIMAL_RATIO_FIELDS = {
 }
 
 _COST_ASSUMPTION = (
-    "按 SPU 解析：使用当前有效的人工标注采购成交价(MANUAL)；"
-    "其次使用已核实的妙手采购成交价(PURCHASE_PRICE)；"
+    "按 SPU 解析：使用当前有效的统一采购价(PURCHASE_PRICE)；"
     "未命中 → 默认 40 CNY/件；公共采集箱挂牌价不参与计算；"
     "DEFAULT_K1 行页面显示‘缺成本’标识，可补录"
 )

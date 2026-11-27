@@ -19,20 +19,27 @@ from tts_erp_v2.api.deps import get_session, require_role_at_least
 from tts_erp_v2.api.schemas import (
     CostSnapshotOut,
     CoverageReport,
-    ManualCostIn,
-    ManualCostOut,
     ProfitDailyOut,
+    PurchasePriceIn,
+    PurchasePriceOut,
 )
-from tts_erp_v2.api.v2.manual_cost_import import router as manual_cost_import_router
+from tts_erp_v2.api.v2.purchase_price_import import (
+    router as purchase_price_import_router,
+)
 from tts_erp_v2.commerce.shop_access import (
     authorized_shop_clause,
     require_authorized_shop,
 )
-from tts_erp_v2.reporting.manual_costs import append_manual_cost
+from tts_erp_v2.reporting.purchase_cost import (
+    PURCHASE_PRICE_AMOUNT,
+    PURCHASE_PRICE_JOINS,
+)
+from tts_erp_v2.reporting.purchase_prices import append_purchase_price
 from tts_erp_v2.storage.minio_client import MinioClient, MinioConfigError
 
 router = APIRouter(prefix="/v2/reporting", tags=["reporting"])
-router.include_router(manual_cost_import_router)
+router.include_router(purchase_price_import_router, prefix="/purchase-prices")
+router.include_router(purchase_price_import_router, prefix="/manual-costs", include_in_schema=False)
 
 _AUTHORIZED_SHOPS = "SELECT id FROM commerce.shops WHERE " + authorized_shop_clause()
 _AUTHORIZED_PRODUCTS = (
@@ -88,20 +95,12 @@ SQL_COVERAGE_REPORT = (
     # 'active'. Use ILIKE so the aggregate matches either case.
     "(SELECT COUNT(*) FROM commerce.products_spu "
     "WHERE status ILIKE 'activate' AND id IN (" + _AUTHORIZED_PRODUCTS + ")) AS active_spus, "
-    "(SELECT COUNT(DISTINCT spu_pk) "
-    "FROM reporting.product_cost_snapshots "
-    "WHERE valid_to IS NULL AND cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE') "
-    "AND spu_pk IN (" + _AUTHORIZED_PRODUCTS + ")) AS costed_spus, "
-    "(SELECT COUNT(*) FROM commerce.products_spu cp "
+    "(SELECT COUNT(*) FROM commerce.products_spu cp " + PURCHASE_PRICE_JOINS +
+    "WHERE cp.id IN (" + _AUTHORIZED_PRODUCTS + ") AND "
+    + PURCHASE_PRICE_AMOUNT + " IS NOT NULL) AS costed_spus, "
+    "(SELECT COUNT(*) FROM commerce.products_spu cp " + PURCHASE_PRICE_JOINS +
     "WHERE cp.status ILIKE 'activate' AND cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
-    "AND NOT EXISTS ("
-    "  SELECT 1 FROM procurement.manual_product_costs m "
-    "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
-    ") AND NOT EXISTS ("
-    "  SELECT 1 FROM reporting.product_cost_snapshots pcs "
-    "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL "
-    "  AND pcs.cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE')"
-    ")) AS missing_cost_spus, "
+    "AND " + PURCHASE_PRICE_AMOUNT + " IS NULL) AS missing_cost_spus, "
     "(SELECT COALESCE(MAX(calculation_version), 1) "
     "FROM reporting.product_cost_snapshots WHERE spu_pk IN (" + _AUTHORIZED_PRODUCTS + ")) AS calculation_version"
 )
@@ -146,48 +145,23 @@ SQL_COUNT_MANUAL_COSTS = (
     "     OR cp.spu_id ILIKE '%' || CAST(:q AS text) || '%' "
     "     OR COALESCE(cp.title, '') ILIKE '%' || CAST(:q AS text) || '%')"
 )
-SQL_LIST_MISSING_COST_PRODUCTS = (
-    "SELECT cp.id, cp.spu_id, cp.title, cp.shop_pk, "
-    "       cp.main_image_url, cp.mirror_object_key, "
-    "       (NOT EXISTS ("
-    "         SELECT 1 FROM procurement.spu_images si "
-    "         WHERE si.spu_pk = cp.id "
-    "         AND si.status = 'ready' AND si.deleted_at IS NULL"
-    "       )) AS missing_photo "
-    # A current cost snapshot means the scheduled resolver found a usable
-    # manual or verified purchase cost. Manual rows are checked
-    # separately so a new submission disappears before the next rebuild.
-    "FROM commerce.products_spu cp "
+_MISSING_PURCHASE_PRICE_SCOPE = (
+    "FROM commerce.products_spu cp " + PURCHASE_PRICE_JOINS +
     "WHERE cp.status ILIKE 'activate' AND cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
     "AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
-    "AND NOT EXISTS ("
-    "  SELECT 1 FROM procurement.manual_product_costs m "
-    "  WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
-    ") AND NOT EXISTS ("
-    "  SELECT 1 FROM reporting.product_cost_snapshots pcs "
-    "  WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL "
-    "  AND pcs.cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE')"
-    ") ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
+    "AND " + PURCHASE_PRICE_AMOUNT + " IS NULL "
+)
+_MISSING_PHOTO = (
+    "NOT EXISTS (SELECT 1 FROM procurement.spu_images si WHERE si.spu_pk = cp.id "
+    "AND si.status = 'ready' AND si.deleted_at IS NULL)"
+)
+SQL_LIST_MISSING_COST_PRODUCTS = (
+    "SELECT cp.id, cp.spu_id, cp.title, cp.shop_pk, cp.main_image_url, cp.mirror_object_key, "
+    + _MISSING_PHOTO + " AS missing_photo " + _MISSING_PURCHASE_PRICE_SCOPE +
+    "ORDER BY cp.id LIMIT CAST(:limit AS integer) OFFSET CAST(:offset AS integer)"
 )
 SQL_TOTAL_MISSING_PHOTO = (
-    "SELECT COUNT(*) AS n FROM ("
-    "  SELECT cp.id "
-    "  FROM commerce.products_spu cp "
-    "  WHERE cp.status ILIKE 'activate' AND cp.shop_pk IN (" + _AUTHORIZED_SHOPS + ") "
-    "  AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
-    "  AND NOT EXISTS ("
-    "    SELECT 1 FROM procurement.manual_product_costs m "
-    "    WHERE m.spu_pk = cp.id AND m.valid_to IS NULL"
-    "  ) AND NOT EXISTS ("
-    "    SELECT 1 FROM reporting.product_cost_snapshots pcs "
-    "    WHERE pcs.spu_pk = cp.id AND pcs.valid_to IS NULL "
-    "    AND pcs.cost_method IN ('MANUAL_ENTRY', 'PURCHASE_PRICE')"
-    "  ) AND NOT EXISTS ("
-    "    SELECT 1 FROM procurement.spu_images si "
-    "    WHERE si.spu_pk = cp.id "
-    "    AND si.status = 'ready' AND si.deleted_at IS NULL"
-    "  )"
-    ") sub"
+    "SELECT COUNT(*) AS n " + _MISSING_PURCHASE_PRICE_SCOPE + "AND " + _MISSING_PHOTO
 )
 
 
@@ -269,8 +243,8 @@ def _profit_daily_row(row: Any) -> ProfitDailyOut:
     )
 
 
-def _manual_cost_row(row: Any) -> ManualCostOut:
-    return ManualCostOut(
+def _purchase_price_row(row: Any) -> PurchasePriceOut:
+    return PurchasePriceOut(
         id=row.id,
         spu_pk=row.spu_pk,
         unit_cost=row.unit_cost,
@@ -342,7 +316,7 @@ def list_missing_cost_products(
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
-    """SPUs the operator should fill in: active + no manual cost + no link.
+    """Active SPUs without an effective purchase price.
 
     Returns the table backing the manual-costs page form. The page
     polls this endpoint with the operator's bearer token.
@@ -389,8 +363,9 @@ def list_missing_cost_products(
     }
 
 
-@router.get("/manual-costs")
-def list_manual_costs(
+@router.get("/manual-costs", include_in_schema=False)
+@router.get("/purchase-prices")
+def list_purchase_prices(
     sess: Session = Depends(get_session),
     shop_pk: int | None = Query(default=None, ge=1),
     q: str | None = Query(default=None, max_length=200),
@@ -446,16 +421,17 @@ def list_manual_costs(
     }
 
 
+@router.post("/manual-costs", response_model=PurchasePriceOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 @router.post(
-    "/manual-costs",
-    response_model=ManualCostOut,
+    "/purchase-prices",
+    response_model=PurchasePriceOut,
     status_code=status.HTTP_201_CREATED,
 )
-def submit_manual_cost(
-    body: ManualCostIn,
+def submit_purchase_price(
+    body: PurchasePriceIn,
     request: Request,
     sess: Session = Depends(get_session),
-) -> ManualCostOut:
+) -> PurchasePriceOut:
     """Operator-entered unit cost for one SPU. Requires readwrite.
 
     Resolves the matching ``spu_pk`` / ``spu_id`` pair, or an unambiguous
@@ -496,12 +472,12 @@ def submit_manual_cost(
     cp_id = matches[0].id
     role = request.scope.get("api_key_role") or "unknown"
     created_by = f"api_key:{role}"
-    new_row = append_manual_cost(
+    new_row = append_purchase_price(
         sess, spu_pk=cp_id, unit_cost=body.unit_cost, currency=body.currency,
         valid_from=body.valid_from or datetime.now(UTC), note=body.note, created_by=created_by,
     )
     sess.commit()
-    return _manual_cost_row(new_row)
+    return _purchase_price_row(new_row)
 
 
 def _q(compiled_stmt, params, db):

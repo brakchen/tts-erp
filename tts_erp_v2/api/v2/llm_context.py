@@ -109,7 +109,7 @@ SHA-256 hashes only; the plaintext is shown ONCE on creation via
 | ------------ | ----------------------------------------- | ----------------------------------------------------- |
 | integration  | 集成 / 同步运行时                          | credentials, shops, raw_records, sync_jobs |
 | commerce     | TikTok 销售（订单 / 商品）                 | sales_orders, sales_order_lines, products_spu     |
-| procurement  | 妙手采购 + 人工成本                        | procurement_accounts, procurement_products, manual_product_costs |
+| procurement  | 妙手采购 + 采购价                        | procurement_accounts, procurement_products, manual_product_costs |
 | fulfillment  | 物流                                       | shipments, tracking_events                            |
 | after_sales  | 退货 / 取消                                | cases, case_lines                                     |
 | finance      | 对账 / 打款                                | payouts, settlement_statements, settlement_transactions, settlement_components |
@@ -121,22 +121,20 @@ SHA-256 hashes only; the plaintext is shown ONCE on creation via
 
 ## 5. **CRITICAL: Cost & profit semantics**
 
-The cost used to compute profit is the **first available** in this order:
+Profit calculations consume one effective **purchase price** per SPU.
+Use the shared resolver in ``tts_erp_v2.reporting.purchase_cost``. Existing
+maintained prices retain their effective values; verified historical purchase
+transactions fill products without a maintained entry. Public listing prices
+are references and never purchase prices. Historical storage/provenance names
+are compatibility details, not additional business price fields.
 
-1. **MANUAL_ENTRY** — operator-entered cost in
-   ``procurement.manual_product_costs`` (highest priority).
-2. **PURCHASE_PRICE** — verified CNY Miaoshou purchase transaction price in
-   ``miaoshou.purchase_prices``, matched to the TikTok shop and SPU.
-
-Public collect-box list prices are reference prices, never purchase costs.
-If a TikTok active SPU has **no cost from either source**, it shows up in
-``GET /v2/reporting/missing-cost-products`` — operators fill those via
-``POST /v2/reporting/manual-costs`` (or the HTML form at
-``GET /v2/pages/manual-costs``).
+SPUs without a purchase price appear in ``GET /v2/reporting/missing-cost-products``.
+Prices are maintained through ``POST /v2/reporting/purchase-prices`` or the
+procurement workbench at ``GET /v2/pages/manual-costs``.
 
 **Implication for queries**: never join against
 ``miaoshou_move_collect_tasks.platform_item_id`` as a cost proxy. Always
-look up cost via the priority chain above. The
+look up cost via the shared purchase-price resolver above. The
 ``reporting.product_profit_daily`` and ``reporting.product_cost_snapshots``
 tables already encode this — **prefer reading those over recomputing**.
 
@@ -198,7 +196,7 @@ _SCHEMAS: list[tuple[str, str]] = [
     ),
     (
         "procurement",
-        "Miaoshou product source prices + manual costs: procurement_accounts/products, manual_product_costs",
+        "Unified purchase prices and retained transaction history: procurement_accounts/products, manual_product_costs",
     ),
     ("fulfillment", "Logistics: shipments, tracking_events"),
     ("after_sales", "Returns/cancellations: cases, case_lines"),

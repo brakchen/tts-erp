@@ -45,9 +45,9 @@ credential kinds:
 | Advertising filter metadata | `GET /v2/reporting/ad-daily/options` | readonly; registered TikTok shops (including zero-row shops) plus observed Sellers |
 | Coverage / health snapshot | `GET /v2/reporting/coverage` | readonly |
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
-| Search recent manual costs | `GET /v2/reporting/manual-costs` | readonly |
-| Submit a manual cost | `POST /v2/reporting/manual-costs` | readwrite |
-| Preview / confirm XLSX purchase costs | `POST /v2/reporting/manual-costs/import/{preview,confirm}` | readwrite |
+| Search recent manual costs | `GET /v2/reporting/purchase-prices` | readonly |
+| Submit a manual cost | `POST /v2/reporting/purchase-prices` | readwrite |
+| Preview / confirm XLSX purchase costs | `POST /v2/reporting/purchase-prices/import/{preview,confirm}` | readwrite |
 | List focused SPUs for one shop | `GET /v2/reporting/focused-spus/{shop_pk}` | readonly |
 | Add/remove focused SPUs | `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite |
 | Latest cached FX rates | `GET /v2/fx/latest` | readonly |
@@ -266,7 +266,7 @@ All list endpoints accept `limit` (1..500, default 100) + `offset` (≥0).
 | `GET /v2/commerce/channel-accounts/{shop_pk}` | — | one account; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/by-external/{shop_id}` | [`api/channel-accounts-by-external.md`](channel-accounts-by-external.md) | reverse-lookup by upstream shop_id; `?platform=tiktok` default; 404 if unknown |
 | `GET /v2/commerce/channel-accounts/{shop_pk}/order-stats` | — | `{order_count, payment_amount_sum}` aggregate (0/0 when empty) |
-| `GET /v2/commerce/channel-products` | `shop_pk`, `status`, `q`, `has_orders`, `missing_manual_cost`; `sort` 为 `id`（默认）、`created_at`、`updated_at`、`unit_cost` 或 `status`，`order` 为 `asc`（默认）或 `desc` | SPU list: `{id, shop_pk, spu_id, title, status, unit_cost, purchase_unit_cost, source_unit_cost, source_created_at, source_updated_at}`；`unit_cost` 为人工值，`purchase_unit_cost` 为已核实妙手采购成交价，`source_unit_cost` 为公共采集箱挂牌参考价；`unit_cost` 排序按人工值优先、其次成交价，挂牌价不参与；`q` 在服务端对 `spu_id/title` 做大小写不敏感子串过滤；`missing_manual_cost=true` 仅筛无当前人工行的 SPU；`X-Total-Count` 返回分页前总数 |
+| `GET /v2/commerce/channel-products` | `shop_pk`, `status`, `q`, `has_orders`, `missing_purchase_cost`; `sort` 为 `id`（默认）、`created_at`、`updated_at`、`unit_cost` 或 `status`，`order` 为 `asc`（默认）或 `desc` | SPU list: `{id, shop_pk, spu_id, title, status, unit_cost, purchase_unit_cost, source_unit_cost, source_created_at, source_updated_at}`；`unit_cost` 为人工值，`purchase_unit_cost` 为已核实妙手采购成交价，`source_unit_cost` 为公共采集箱挂牌参考价；`unit_cost` 排序按人工值优先、其次成交价，挂牌价不参与；`q` 在服务端对 `spu_id/title` 做大小写不敏感子串过滤；`missing_purchase_cost=true` 仅筛无当前人工行的 SPU；`X-Total-Count` 返回分页前总数 |
 | `GET /v2/commerce/channel-product-options` | required `shop_pk`; optional `q`, `spu_ids`, `limit` (1..100, default 50) | Bootstrap multi-select 的轻量 SPU 选项：`[{spu_id,title,status}]`。`q` 对 `spu_id/title` 做 ILIKE；`spu_ids` 按中英文逗号拆分后精确匹配，最多 100 个。 |
 | `GET /v2/commerce/channel-products/{spu_pk}` | — | one SPU; 404 if unknown |
 | `GET /v2/commerce/channel-products/{spu_pk}/variants` | — | SKU list: `{id, spu_pk, sku_id, seller_sku, variant_name}` |
@@ -291,8 +291,8 @@ require valid storage settings. Other query and processing errors remain failure
 | `GET /v2/reporting/profit-daily` | readonly | `spu_pk`, `on_date`, `limit`, `offset` |
 | `GET /v2/reporting/coverage` | readonly | — → `{total_spus, active_spus, costed_spus, missing_cost_spus, calculation_version}` |
 | `GET /v2/reporting/missing-cost-products` | readonly | `shop_pk`, `limit` (default 200), `offset` → `{items: [{spu_pk, spu_id, title, shop_pk, missing_photo}], total_missing_photo}` |
-| `GET /v2/reporting/manual-costs` | readonly | `shop_pk`, `q`, `limit`, `offset` → `{total, items}`；`q` 在服务端过滤 `spu_id/title`，`total` 是过滤后、分页前的提交记录数 |
-| `POST /v2/reporting/manual-costs` | readwrite | body `{"spu_id": str, "unit_cost": decimal>0, "currency": "VND", "valid_from"?: datetime, "note"?: str}` → 201 `ManualCostOut`; auto-closes the previous effective row for the SPU |
+| `GET /v2/reporting/purchase-prices` | readonly | `shop_pk`, `q`, `limit`, `offset` → `{total, items}`；`q` 在服务端过滤 `spu_id/title`，`total` 是过滤后、分页前的提交记录数 |
+| `POST /v2/reporting/purchase-prices` | readwrite | body `{"spu_id": str, "unit_cost": decimal>0, "currency": "VND", "valid_from"?: datetime, "note"?: str}` → 201 `ManualCostOut`; auto-closes the previous effective row for the SPU |
 | `GET /v2/reporting/focused-spus/{shop_pk}` | readonly | `q`, `limit` (default 50), `offset` → `{shopPk, items:[{spuPk,spuId,title,status,createdAt,updatedAt}], total, matchedTotal, limit, offset}`；按 `updated_at DESC, spu_id ASC` 稳定排序 |
 | `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite | body `{"addSpuIds": [...], "removeSpuIds": [...]}`；单次最多 500 个 ID、整批原子校验、移除为软删除；返回有界 `{shopPk,total,addedSpuIds,removedSpuIds}`。Cookie mutation 必须带 `X-Requested-With: tts-erp` |
 
@@ -385,7 +385,7 @@ Candidate preview/publication validation returns HTTP `422` with a controlled `d
 
 | Endpoint | Role | Notes |
 | --- | --- | --- |
-| `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console（店铺切换、全部 SPU / 最近提交、仅展示未登记 SPU 的后端筛选、人工采购价录入）。Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
+| `GET /v2/pages/manual-costs` | readonly | Server-rendered operator console（店铺切换、全部 SPU / 最近提交、仅展示未登记 SPU 的后端筛选、采购价录入）。Browser without a session → 302 to `/v2/auth/login`. Static assets under `/static/*` are readonly-classified too. |
 | `GET /v2/pages/spu-roi` | readonly | SPU 实际 ROI 看板。与重点关注页共享 `frontend/src/pages/spu-profitability/` React 模块、AppShell 和现有数据 API；标准页默认店铺当地 T-1。 |
 | `GET /v2/pages/spu-profit-deterioration` | readonly + `page:spu-profit-deterioration` | 保留既有入口的 SPU 盈利表现对比。只读消费同名 analytics API；默认 7 天、辅助 3 天，店铺/精确内部 SPU/活动范围/日期/分页可恢复。显示两期盈利原值、展示变化、订单/广告消耗、无单投放事实和来源限制；旧结果可读，日期不得超过后台上限；详情进入同店业务 SPU 与明确经营日期。没有阈值、severity/state/sample/layer、告警数量或配置写操作。 |
 | `GET /v2/pages/focused-spus` | readonly | 重点关注 SPU。共用 React 盈利汇总、表格、分页和五明细；关注清单由既有 focused API 持久化，默认不限经营日期。 |
@@ -1110,9 +1110,9 @@ curl -sS -H "X-API-Key: $KEY" \
   | jq -r '.[] | [.order_id, .status, .payment_amount, .currency] | @tsv'
 ```
 
-### Import manual purchase costs from an order-package export
+### Import purchase prices from an order-package export
 
-`POST /v2/reporting/manual-costs/import/preview` accepts the **raw XLSX file**
+`POST /v2/reporting/purchase-prices/import/preview` accepts the **raw XLSX file**
 as the HTTP body (not multipart or JSON), with content type
 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
 It requires `readwrite`; cookie clients also send `X-Requested-With: tts-erp`.
@@ -1138,7 +1138,7 @@ It requires `readwrite`; cookie clients also send `X-Requested-With: tts-erp`.
   Items include `spuPk/spuId/shopPk/shopName/title/sampleCount/unitCost/currency` and
   `previousId/previousCost/previousCurrency`. IDs and amounts are strings. Preview writes nothing.
 
-`POST /v2/reporting/manual-costs/import/confirm?fingerprint=<preview fingerprint>`
+`POST /v2/reporting/purchase-prices/import/confirm?fingerprint=<preview fingerprint>`
 receives the **same raw file**. The backend re-parses and matches it, acquires the shared
 SPU writer locks in ascending order and checks the fingerprint against the current
 manual costs. A changed file, match or previous cost returns `409`, requiring a new
@@ -1159,7 +1159,7 @@ confirmation results are displayed as unknown and never automatically replayed.
 curl -sS -X POST -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
   -d '{"spu_id":"1730000000000000001","unit_cost":"12.40","currency":"VND","note":"1688 议价后价"}' \
-  "http://127.0.0.1:9877/v2/reporting/manual-costs"
+  "http://127.0.0.1:9877/v2/reporting/purchase-prices"
 ```
 
 ### Analytics cursor has-data poll (Chrome extension pattern)
@@ -1181,7 +1181,7 @@ Stable external endpoints (safe to build dashboards / agents on):
 | `GET /openapi.json`, `/docs`, `/redoc` | public | stable (consider proxy-restricting in prod) |
 | `GET /v2/commerce/*` | readonly | v2 |
 | `GET /v2/reporting/*` | readonly | v2 |
-| `POST /v2/reporting/manual-costs` | readwrite | v2 |
+| `POST /v2/reporting/purchase-prices` | readwrite | v2 |
 | `GET /v2/fx/latest`, `/v2/fx/convert` | readonly | v2 — cached (fx.sync ≈1 上游请求/天，API 路径零上游) |
 | `GET /v2/sync/status` | readonly | v2 — sync-worker 周期作业健康（红灯 = 落后 ≥2 周期） |
 | `GET /v2/sync/freshness` | readonly | v2 — 当前店铺广告/订单/物流与妙手最近同步时间 |
@@ -1215,3 +1215,26 @@ Monitor 使用 `POST /v2/plugin/shops/{sellerId}/telemetry`，要求 readwrite �
 `GET /v2/oauth/tiktok/authorize?shop_pk=...&format=json` 为指定店铺生成一次性链接。回调只接受唯一且匹配目标的店铺，并检查本店 App 配置版本；成功后自动进入下一轮定时同步。
 
 数据库升级到 `0072_shop_app_credentials` 后启用新版本。旧配置保留为未归属记录，每店复制独立配置；不会在运行时借用其他店铺的密钥。历史候选补录使用 `python scripts/backfill_discovered_shops.py` 预览，确认后加 `--apply`。
+
+
+### Unified purchase-price contract
+
+The procurement workbench exposes one effective purchase price, `unit_cost`,
+with its `currency`. The catalogue, row editor, import preview, missing-price
+filter and profitability resolver use the same existing effective-price rule.
+Listing references never become purchase prices. Import previews include the
+current price even when it comes from retained transaction history.
+
+- `GET/POST /v2/reporting/purchase-prices` maintain the price and its history.
+- `POST /v2/reporting/purchase-prices/import/{preview,confirm}` import prices.
+- `GET /v2/commerce/channel-products?missing_purchase_cost=true` selects products
+  without a price; its count header uses the identical rule.
+- `purchase_unit_cost` and `source_unit_cost` on the legacy product response are
+  deprecated transport references. Current clients consume only `unit_cost`.
+- Previously distributed clients retain hidden `/v2/reporting/manual-costs`
+  aliases and the deprecated `missing_manual_cost` query alias. They call the
+  same handlers, authorization and lock, not a separate price implementation.
+  Remove these aliases only in a versioned contract cutover after client migration.
+- Existing history table names, page permission IDs and historical provenance
+  tokens are storage/compatibility identifiers. Prices and history are preserved;
+  this change requires no database migration.

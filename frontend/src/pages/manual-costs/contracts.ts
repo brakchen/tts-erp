@@ -2,7 +2,7 @@ import { decodeShopAlias } from '../../shared/shop-name';
 export interface Shop { id: string; shop_id: string; account_name: string | null; shop_alias?: string | null }
 export interface Product {
   id: string; shop_pk: string; spu_id: string; title: string | null; status: string | null;
-  unit_cost: string | null; currency: string | null; purchase_unit_cost: string | null; source_unit_cost: string | null;
+  unit_cost: string | null; currency: string | null;
   source_created_at: string | null; source_updated_at: string | null; image_url: string | null;
   missing_photo?: boolean;
 }
@@ -11,7 +11,7 @@ export interface History {
   unit_cost: string; currency: string; prev_unit_cost: string | null; prev_currency: string | null;
   note: string | null; valid_from: string | null; valid_to: string | null; created_at: string | null;
 }
-export const fieldLabels: Record<string, string> = { unit_cost: '单位成本', currency: '货币', note: '备注', valid_from: '生效时间', spu_id: 'SPU ID', spu_pk: '内部 PK' };
+export const fieldLabels: Record<string, string> = { unit_cost: '采购价', currency: '币种', note: '备注', valid_from: '生效时间', spu_id: 'SPU ID', spu_pk: '内部 PK' };
 export function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('数据结构不可用');
   return value as Record<string, unknown>;
@@ -37,7 +37,7 @@ export function decodeProduct(value: unknown, missing = false): Product {
   const row = record(value);
   if (missing && typeof row.missing_photo !== 'boolean') throw new Error('图片元数据不可用');
   return { id: identity(missing ? row.spu_pk : row.id), shop_pk: identity(row.shop_pk), spu_id: text(row.spu_id), title: nullable(row.title), status: nullable(row.status),
-    unit_cost: missing ? null : nullableMoney(row.unit_cost), currency: nullable(row.currency), purchase_unit_cost: nullableMoney(row.purchase_unit_cost), source_unit_cost: nullableMoney(row.source_unit_cost),
+    unit_cost: missing ? null : nullableMoney(row.unit_cost), currency: nullable(row.currency),
     source_created_at: nullable(row.source_created_at), source_updated_at: nullable(row.source_updated_at), image_url: nullable(row.image_url),
     ...(missing ? { missing_photo: row.missing_photo as boolean } : {}) };
 }
@@ -64,8 +64,8 @@ export function fieldsEqual(left: Fields, right: Fields): boolean { return (Obje
 export function validateFields(fields: Fields): Record<string, string> {
   const errors: Record<string, string> = {};
   // Input syntax only. Financial validation and precision remain server-owned.
-  if (!fields.unit_cost.trim()) errors.unit_cost = '请填写单位成本';
-  if (!fields.currency.trim()) errors.currency = '请填写货币';
+  if (!fields.unit_cost.trim()) errors.unit_cost = '请填写采购价';
+  if (!fields.currency.trim()) errors.currency = '请填写币种';
   if (fields.valid_from && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(fields.valid_from) || !Number.isFinite(Date.parse(fields.valid_from)))) errors.valid_from = '请填写带 Z 或明确时区偏移的 ISO 时间';
   return errors;
 }

@@ -22,7 +22,7 @@ from tts_erp_v2.db.models import (
     ProductCostSnapshot,
 )
 from tts_erp_v2.reporting import cost_snapshots
-from tts_erp_v2.reporting.purchase_cost import load_purchase_costs
+from tts_erp_v2.reporting.purchase_cost import load_effective_purchase_prices
 
 pytestmark = [
     pytest.mark.domain_reporting,
@@ -85,7 +85,7 @@ def test_manual_entry_wins_over_purchase_price(db_session):
         purchase_cost_cny=Decimal("99.99"),
     )
     assert actual is not None
-    assert actual.method == "MANUAL_ENTRY"
+    assert actual.method == "PURCHASE_PRICE"
     assert actual.unit_cost == Decimal("5.50")
     assert actual.currency == "USD"
 
@@ -148,7 +148,7 @@ def test_manual_cost_is_used_without_purchase_price(db_session):
         spu_pk=cp.id,
     )
     assert actual is not None
-    assert actual.method == "MANUAL_ENTRY"
+    assert actual.method == "PURCHASE_PRICE"
     assert actual.unit_cost == Decimal("5.50")
 
 
@@ -179,7 +179,7 @@ def test_confirmed_purchase_price_precedes_list_price_and_writes_snapshot(db_ses
     )
     db_session.flush()
 
-    assert load_purchase_costs(db_session, [spu.id]) == {spu.id: Decimal("27.25")}
+    assert {pk: price.unit_cost for pk, price in load_effective_purchase_prices(db_session, [spu.id]).items()} == {spu.id: Decimal("27.25")}
     resolved = cost_snapshots.resolve_unit_cost(
         db_session,
         spu_pk=spu.id,
@@ -236,7 +236,7 @@ def test_conflicting_latest_purchase_prices_are_not_guessed(db_session):
         )
     db_session.flush()
 
-    assert load_purchase_costs(db_session, [spu.id]) == {}
+    assert {pk: price.unit_cost for pk, price in load_effective_purchase_prices(db_session, [spu.id]).items()} == {}
 
 
 # ─── 4. no-cost inventory query ───────────────────────────────────────
@@ -295,3 +295,21 @@ def test_historical_manual_cost_not_picked_up(db_session):
 
     actual = cost_snapshots.resolve_unit_cost(db_session, spu_pk=cp.id)
     assert actual is None  # only old (closed) manual entry exists
+
+
+def test_unified_price_retains_existing_effective_value_and_one_currency(db_session):
+    account = _make_channel_account(db_session, "TEST_UNIFIED_PRICE_SHOP")
+    spu = _make_channel_product(db_session, account, "TEST_UNIFIED_PRICE_SPU")
+    entry = ManualProductCost(
+        spu_pk=spu.id, unit_cost=Decimal("31.1250"), currency="CNY",
+        valid_from=_utc(), valid_to=None, created_by="TEST_unified_price",
+    )
+    db_session.add(entry)
+    db_session.flush()
+    price = load_effective_purchase_prices(db_session, [spu.id])[spu.id]
+    assert (price.unit_cost, price.currency, price.record_id) == (
+        Decimal("31.1250"), "CNY", entry.id,
+    )
+    resolved = cost_snapshots.resolve_unit_cost(db_session, spu_pk=spu.id)
+    assert resolved is not None
+    assert (resolved.method, resolved.unit_cost) == ("PURCHASE_PRICE", price.unit_cost)

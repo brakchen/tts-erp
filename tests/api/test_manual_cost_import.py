@@ -12,13 +12,13 @@ from sqlalchemy.orm import Session
 
 from tests.api.test_frontend_remaining_manual_identity import _facts
 from tests.api.test_frontend_remaining_manual_identity import products as _products
-from tts_erp_v2.api.v2 import manual_cost_import as routes
+from tts_erp_v2.api.v2 import purchase_price_import as routes
 from tts_erp_v2.db.models import ChannelAccount, ChannelProduct
-from tts_erp_v2.reporting.manual_cost_import import CostImportError, parse_cost_file
+from tts_erp_v2.reporting.purchase_price_import import CostImportError, parse_cost_file
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 products = _products
-BASE = "/v2/reporting/manual-costs/import/"
+BASE = "/v2/reporting/purchase-prices/import/"
 HEADERS = ["采购金额(产品-RMB)", "店铺名称", "产品ID"]
 SHARED = "TEST_remaining_shared_spu"
 UNIQUE = "TEST_remaining_unique_spu"
@@ -150,7 +150,7 @@ def test_failure_rolls_back_whole_import(api_client, readwrite_key, db_engine, p
     content = xlsx([["10", SHOP_A, SHARED], ["20", SHOP_B, SHARED]])
     preview = post(api_client, readwrite_key, content).json()
     before = _facts(db_engine, products)
-    append = routes.append_manual_cost
+    append = routes.append_purchase_price
     calls = []
 
     def fail_second(session, **kwargs):
@@ -159,7 +159,7 @@ def test_failure_rolls_back_whole_import(api_client, readwrite_key, db_engine, p
             raise RuntimeError("TEST rollback whole import")
         return append(session, **kwargs)
 
-    monkeypatch.setattr(routes, "append_manual_cost", fail_second)
+    monkeypatch.setattr(routes, "append_purchase_price", fail_second)
     with pytest.raises(RuntimeError, match="TEST rollback"):
         post(api_client, readwrite_key, content, "confirm?fingerprint=" + preview["fingerprint"])
     assert len(calls) == 2

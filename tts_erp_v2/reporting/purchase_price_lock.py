@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
-def lock_manual_cost_spu(session: Session, *, spu_pk: int) -> None:
+def lock_purchase_price_spu(session: Session, *, spu_pk: int) -> None:
     """Serialize close-old + insert for one SPU across API/jobs/processes."""
     # pi-lens-ignore: python-sql-injection
     session.execute(
@@ -15,4 +15,4 @@ def lock_manual_cost_spu(session: Session, *, spu_pk: int) -> None:
     )
 
 
-__all__ = ["lock_manual_cost_spu"]
+__all__ = ["lock_purchase_price_spu"]

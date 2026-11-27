@@ -32,21 +32,21 @@ function errorMessage(error: unknown): string {
 }
 function dirty(draft: Draft) { return !fieldsEqual(draft.baseline, draft.fields); }
 
-export default function ManualCosts({ bootstrap }: PageProps) {
+export default function PurchasePrices({ bootstrap }: PageProps) {
   const canWrite = bootstrap.roleCapabilities?.readwrite === true;
   const [shops, setShops] = useState<Shop[]>(); const [shopError, setShopError] = useState(''); const [shopRefresh, setShopRefresh] = useState(0);
   const [shopId, setShopId] = useState(''); const [view, setView] = useState<View>('all');
   const [searchInput, setSearchInput] = useState(''); const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
-  const [status, setStatus] = useState(''); const [hasOrders, setHasOrders] = useState(false); const [missingManual, setMissingManual] = useState(false);
+  const [status, setStatus] = useState(''); const [hasOrders, setHasOrders] = useState(false); const [missingPrice, setMissingPrice] = useState(false);
   const [sort, setSort] = useState('status'); const [order, setOrder] = useState('asc'); const [onlyPhoto, setOnlyPhoto] = useState(false);
   const [refresh, setRefresh] = useState(0); const [list, setList] = useState<List>({ key: '', loading: false });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({}); const draftsRef = useRef(drafts);
   const [editor, setEditor] = useState<string>(); const [confirmation, setConfirmation] = useState<Attempt[]>();
   const [image, setImage] = useState<string>(); const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
-  const [manualPending, setPending] = useState(false); const [importBusy, setImportBusy] = useState(false);
+  const [editPending, setPending] = useState(false); const [importBusy, setImportBusy] = useState(false);
   const [importFenced, setImportFenced] = useState(false);
-  const pending = manualPending || importBusy;
+  const pending = editPending || importBusy;
   const [notice, setNotice] = useState(''); const [cooldown, setCooldown] = useState(false);
   const [denied, setDenied] = useState(false); const [recovery, setRecovery] = useState<Recovery>();
   // React state alone cannot fence two confirmations in the same event turn.
@@ -78,9 +78,9 @@ export default function ManualCosts({ bootstrap }: PageProps) {
   if (view !== 'missing' && query) params.set('q', query);
   if (view === 'all') {
     params.set('sort', sort); params.set('order', order);
-    if (status) params.set('status', status); if (hasOrders) params.set('has_orders', 'true'); if (missingManual) params.set('missing_manual_cost', 'true');
+    if (status) params.set('status', status); if (hasOrders) params.set('has_orders', 'true'); if (missingPrice) params.set('missing_purchase_cost', 'true');
   }
-  const path = `${view === 'all' ? '/v2/commerce/channel-products' : view === 'missing' ? '/v2/reporting/missing-cost-products' : '/v2/reporting/manual-costs'}?${params}`;
+  const path = `${view === 'all' ? '/v2/commerce/channel-products' : view === 'missing' ? '/v2/reporting/missing-cost-products' : '/v2/reporting/purchase-prices'}?${params}`;
   useEffect(() => {
     if (!shopId || performance.now() < notBefore.current) return;
     const controller = new AbortController(); let current = true; setList({ key: path, loading: true });
@@ -132,7 +132,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
       try {
         const body = { spu_pk: id, spu_id: attempt.target.spu_id, unit_cost: attempt.fields.unit_cost, currency: attempt.fields.currency, note: attempt.fields.note, ...(attempt.fields.valid_from ? { valid_from: attempt.fields.valid_from } : {}) };
         // This bounds local waiting across both fetch and body reads, not server execution or commit.
-        const { data, status: responseStatus } = await withinRequestLifetime(controller, (signal) => requestJson<unknown>(bootstrap.rootPath, '/v2/reporting/manual-costs', { method: 'POST', body: JSON.stringify(body), signal }, parseIdentityJson));
+        const { data, status: responseStatus } = await withinRequestLifetime(controller, (signal) => requestJson<unknown>(bootstrap.rootPath, '/v2/reporting/purchase-prices', { method: 'POST', body: JSON.stringify(body), signal }, parseIdentityJson));
         if (responseStatus !== 201) throw new Error('提交响应未确认');
         const saved = decodeSaved(data, attempt.target);
         if (!mounted.current || writeController.current !== controller) break;
@@ -177,19 +177,19 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     <p>剩余批次已停止；已确认成功的行不会重放。先查询公开事实，再独立决定是否重新提交；重复提交会新增历史记录。</p>
     <Button variant="secondary" isDisabled={cooldown || recovery.phase === 'checking' || pending} onPress={() => { void verify(); }}>查询当前事实</Button>
     {recovery.phase === 'checking' && <p role="status">核对中…</p>}{recovery.message && <p role="status">{recovery.message}</p>}
-    {recovery.snapshot && <p>当前人工成本：{recovery.snapshot.unit_cost ?? '—'} {recovery.snapshot.currency ?? '—'} · 货源价：{recovery.snapshot.source_unit_cost ?? '—'}（不代表本次提交确认）</p>}
+    {recovery.snapshot && <p>当前采购价：{recovery.snapshot.unit_cost ?? '—'} {recovery.snapshot.currency ?? '—'}（不代表本次提交确认）</p>}
     <Button isDisabled={!canWrite || denied || cooldown || pending || recovery.phase !== 'checked'} onPress={() => { const target = recovery.attempt.target; const draft = draftsRef.current[target.id]; if (draft) setConfirmation([{ target, fields: { ...draft.fields } }]); }}>核对后决定重新提交</Button>
     <p>重新提交使用保留草稿的当前输入；核对不会覆盖草稿。</p>
   </section>;
   return <div className="erp-page">
-    <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="把商品成本，管理清楚" description="按店铺核对人工成本、妙手成交价与货源挂牌价，编辑草稿后确认提交。" />
+    <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="维护商品采购价" description="按店铺维护商品采购价，支持逐条编辑和文件导入，确认后保存。" />
     <section className="erp-panel erp-filter-workspace" aria-label="采购范围与筛选">
       <div className="erp-filter-row justify-between" aria-label="店铺与视图">
         <Select className="erp-shop-picker" value={shopId || null} isDisabled={pending || cooldown || !shops?.length} onChange={(key) => { if (typeof key === 'string') changeScope(() => setShopId(key)); }}>
           <Label>当前店铺</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{shops?.map((shop) => <ListBox.Item key={shop.id} id={shop.id} textValue={`${displayShopName(shop, shop.shop_id)} · ${shop.shop_id} · #${shop.id}`}>{displayShopName(shop, shop.shop_id)} · {shop.shop_id} · #{shop.id}</ListBox.Item>)}</ListBox></Select.Popover>
         </Select>
         <div className="erp-tabs" role="group" aria-label="工作台视图">
-          {([['all', '全部 SPU'], ['missing', '缺成本候选'], ['recent', '最近提交']] as const).map(([key, label]) =>
+          {([['all', '全部 SPU'], ['missing', '缺采购价候选'], ['recent', '最近提交']] as const).map(([key, label]) =>
             <Button key={key} className="whitespace-nowrap" variant={view === key ? 'primary' : 'ghost'} aria-pressed={view === key}
               isDisabled={pending || cooldown} onPress={() => changeScope(() => setView(key))}>{label}</Button>)}
         </div>
@@ -208,7 +208,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
             </Select>
             <div className="erp-filter-row">
               <Checkbox isSelected={hasOrders} isDisabled={pending || cooldown} onChange={(checked) => changeScope(() => setHasOrders(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅看有单</Checkbox.Content></Checkbox>
-              <Checkbox isSelected={missingManual} isDisabled={pending || cooldown} onChange={(checked) => changeScope(() => setMissingManual(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅看未登记</Checkbox.Content></Checkbox>
+              <Checkbox isSelected={missingPrice} isDisabled={pending || cooldown} onChange={(checked) => changeScope(() => setMissingPrice(checked))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>仅看缺采购价</Checkbox.Content></Checkbox>
             </div>
           </div>
           <div className="erp-filter-row" role="group" aria-label="排序设置">
@@ -241,13 +241,13 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     {notice && <p role="status">{notice}</p>}
     {pending && <Button variant="secondary" onPress={() => { stopBatch.current = true; setNotice('已请求停止后续行；正在发送的行仍需等待结果，不能假定已撤销。'); }}>停止后续行</Button>}
     {currentList.loading && <p role="status">加载列表中…</p>}{currentList.error && <Alert status="danger"><Alert.Content><Alert.Title>列表不可用</Alert.Title><Alert.Description>{currentList.error}</Alert.Description><Button isDisabled={cooldown} onPress={() => setRefresh((value) => value + 1)}>重试列表</Button></Alert.Content></Alert>}
-    {view !== 'recent' && <div className="erp-list-actions"><div><h2 className="erp-section-heading">{view === 'missing' ? '待补全成本的商品' : '商品成本明细'}</h2></div><Button isDisabled={commandBlocked || dirtyVisible.length === 0} onPress={() => prepare(products)}>提交本页已编辑行</Button></div>}
-    {currentList.products && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="SPU 表格滚动区域"><Table.Content aria-label="SPU 成本工作台" className="min-w-[75rem] erp-table-content"><Table.Header className="erp-table-head">{['内部 PK / SPU', '标题 / 状态', '人工 / 妙手成交 / 货源挂牌', '创建 / 更新', '图片 / 缺图事实', '操作'].map((label, i) => <Table.Column className="erp-table-column" key={label} isRowHeader={i === 0}>{label}</Table.Column>)}</Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'当前页暂无候选'}</div>}>{products.map((product) => {
+    {view !== 'recent' && <div className="erp-list-actions"><div><h2 className="erp-section-heading">{view === 'missing' ? '待补全采购价的商品' : '商品采购价明细'}</h2></div><Button isDisabled={commandBlocked || dirtyVisible.length === 0} onPress={() => prepare(products)}>提交本页已编辑行</Button></div>}
+    {currentList.products && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="SPU 表格滚动区域"><Table.Content aria-label="SPU 采购价工作台" className="min-w-[75rem] erp-table-content"><Table.Header className="erp-table-head">{['内部 PK / SPU', '标题 / 状态', '采购价', '创建 / 更新', '图片 / 缺图事实', '操作'].map((label, i) => <Table.Column className="erp-table-column" key={label} isRowHeader={i === 0}>{label}</Table.Column>)}</Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'当前页暂无候选'}</div>}>{products.map((product) => {
       const draft = draftFor(product); const shown = product;
       return <Table.Row className="erp-table-row" key={product.id} id={product.id}>
         <Table.Cell className="erp-table-cell"><p>{product.id}</p><p className="w-48 break-all">{product.spu_id}</p><p>店铺 #{product.shop_pk}</p></Table.Cell>
         <Table.Cell className="erp-table-cell"><p className="w-56 whitespace-normal break-words">{product.title ?? '—'}</p><p>{statusLabel(product.status)}</p></Table.Cell>
-        <Table.Cell className="erp-table-cell"><p>人工：{shown.unit_cost ?? '—'} {shown.currency ?? '—'}</p><p>妙手成交：{product.purchase_unit_cost ?? '—'} {product.purchase_unit_cost ? 'CNY' : ''}</p><p>货源挂牌：{product.source_unit_cost ?? '—'}</p><p className="erp-table-meta">挂牌价仅供参考，不作为成交成本。</p></Table.Cell>
+        <Table.Cell className="erp-table-cell"><p>{shown.unit_cost ?? '—'} {shown.currency ?? '—'}</p></Table.Cell>
         <Table.Cell className="erp-table-cell"><p>{product.source_created_at ?? '—'}</p><p>{product.source_updated_at ?? '—'}</p></Table.Cell>
         <Table.Cell className="erp-table-cell" focusMode="child">{product.image_url && !brokenImages[product.id] ? <Button className="erp-table-action" variant="ghost" aria-label={`放大图片 PK ${product.id}`} onPress={() => setImage(product.image_url!)}><img src={product.image_url} alt={`${product.title ?? product.spu_id} 主图`} className="h-16 w-16 object-contain" onError={() => setBrokenImages((previous) => ({ ...previous, [product.id]: true }))} /></Button> : <span>无可用镜像图</span>}{product.missing_photo !== undefined && <p>missing_photo：{String(product.missing_photo)}</p>}</Table.Cell>
         <Table.Cell className="erp-table-cell" focusMode="child"><Button className="erp-table-action" variant="secondary" size="sm" isDisabled={!canWrite || pending} onPress={() => { updateDrafts((previous) => ({ ...previous, [product.id]: draft })); setEditor(product.id); }}>编辑详情</Button>{draft.status && draft.status !== 'error' && <p role="status">{draft.status === 'saving' ? '提交中…' : draft.status === 'success' ? '已确认成功' : '结果未确认'}</p>}{draft.failure && <p role="alert">{draft.failure.message}</p>}</Table.Cell>
@@ -260,7 +260,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     <Modal.Backdrop isOpen={editor !== undefined} onOpenChange={(open) => { if (!open && !pending) setEditor(undefined); }}>
       <Modal.Container size="lg" scroll="inside"><Modal.Dialog className="max-w-2xl gap-6 sm:p-8">
         <Modal.CloseTrigger aria-label="关闭编辑并保留草稿" />
-        <Modal.Header className="pr-8"><Modal.Heading className="text-xl font-semibold">编辑商品成本</Modal.Heading><p className="text-sm text-muted">核对商品信息后修改成本，保存前会再次确认。</p></Modal.Header>
+        <Modal.Header className="pr-8"><Modal.Heading className="text-xl font-semibold">编辑商品采购价</Modal.Heading><p className="text-sm text-muted">核对商品信息后修改采购价，保存前会再次确认。</p></Modal.Header>
         <Modal.Body className="space-y-6">{activeDraft && <>
           <section className="rounded-xl border border-separator bg-default/40 p-4" aria-label="当前编辑商品">
             <p className="mb-3 break-words font-medium text-foreground">{activeDraft.target.title ?? '未命名商品'}</p>
@@ -272,7 +272,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
           </section>
           <CostFields fields={activeDraft.fields} errors={activeDraft.failure?.fieldErrors ?? {}} disabled={pending || !canWrite} onChange={(key, value) => change(activeDraft.target, key, value)} />
           {activeDraft.failure && <Alert status="danger"><Alert.Content><Alert.Description>{activeDraft.failure.message}</Alert.Description></Alert.Content></Alert>}
-          <p className="text-xs leading-relaxed text-muted">关闭弹窗会保留未保存的修改；只有确认提交后才会更新商品成本。</p>
+          <p className="text-xs leading-relaxed text-muted">关闭弹窗会保留未保存的修改；只有确认提交后才会更新商品采购价。</p>
         </>}</Modal.Body>
         <Modal.Footer className="flex-wrap gap-3 border-t border-separator pt-5">
           <Button variant="secondary" isDisabled={pending} onPress={() => setEditor(undefined)}>取消并保留草稿</Button>
