@@ -659,7 +659,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 - `fee`：`mode` 是旧 alias（override/baseline）；`source=user_override|shop_estimate|baseline|mixed`；`rate`/`override` 4 位；`degraded` bool；`fallback_message`；`per_shop[]` 的 `shop_pk/shop_name/rate/source/fallback_reason/estimate`。
 - `window`：广告和 coverage 的首尾日期、窗口说明，并明确 `w_start/w_end` 的店铺本地解释。
 - `warnings[]`：当前代码实际可能有 `default_unit_cost_used`、`unsettled_orders_estimated`、projection warning；未知 warning 原样显示。
-- `presentation`：`rubric_label`、退款警戒阈值、默认成本/未结算提示、`pnl_hints`；前端只显示。
+- `presentation`：`rubric_label`、退款警戒阈值、默认成本/未结算提示、`pnl_hints`；`summary_hints.cogs_total/strict_full_loss_cost` 分别解释总采购成本及其中全部全损货本，区别于钻取的取消件货本说明；前端只显示。
 - `projection` 当前包含 `status`、`lookback_days`、`maturity_lag_days`、`as_of`、`sample_start/end`、basis counts、范围说明、warning 和 status labels；预测展示以该 meta 与 totals 为准。
 
 ### 7.1 实际稳定代码值

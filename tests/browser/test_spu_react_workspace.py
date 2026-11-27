@@ -44,7 +44,7 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
     _wait_rows(page)
     expect(page.locator('#sum-purchase-cost')).to_have_text('2,060.00')
     expect(page.locator('#sum-full-loss-cost')).to_have_text('200.00')
-    expect(page.get_by_label('成本', exact=True).get_by_text('其中：全损成本', exact=True)).to_be_visible()
+    expect(page.get_by_label('成本', exact=True).locator('dt').filter(has_text='其中：全损成本')).to_be_visible()
     expect(page.locator('#sum-net-revenue')).to_have_text('3,000.00')
     assert page.locator('.tabulator-row').count() >= 3
     overview = page.get_by_role('region', name='经营概览').bounding_box()
