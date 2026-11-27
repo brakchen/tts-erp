@@ -1949,6 +1949,68 @@ def test_projection_target_is_empty_when_reporting_window_has_no_activity(
     ]
 
 
+def test_purchase_cost_totals_include_all_full_loss_once(
+    api_client, readonly_key, db_engine
+):
+    """100 paid + 3 extra overseas loss; all 10 loss units are already included."""
+    with Session(db_engine) as sess:
+        shop_pk = _seed_shop(sess, "TEST_SELLER_PURCHASE_TOTAL")
+        spu_pk = _seed_spu(sess, shop_pk, "TEST_ROI_SPU_PURCHASE_TOTAL")
+        sess.execute(
+            text(
+                "INSERT INTO procurement.manual_product_costs "
+                "(spu_pk, unit_cost, currency, valid_from, note, created_by) "
+                "VALUES (:spu, 20, 'CNY', now(), 'TEST total cost', 'TEST')"
+            ),
+            {"spu": spu_pk},
+        )
+        for name, status, qty, paid in (
+            ("KEPT", "AWAITING_SHIPMENT", "93", True),
+            ("PAID_LOSS", "IN_TRANSIT", "7", True),
+            ("OVERSEAS_LOSS", "CANCELLED", "3", False),
+            ("DOMESTIC_CANCEL", "CANCELLED", "9", False),
+            ("UNPAID", "UNPAID", "5", False),
+        ):
+            order_pk = _seed_order_line(
+                sess, shop_pk=shop_pk, spu_pk=spu_pk,
+                order_id=f"TEST_PURCHASE_TOTAL_{name}", status=status,
+                line_ext=f"TEST_PURCHASE_TOTAL_LINE_{name}", qty=qty,
+                unit_price="100000", paid=paid,
+            )
+            if name == "PAID_LOSS":
+                _seed_tracking_event_overseas(sess, order_pk=order_pk, action_code=80101)
+            elif name == "OVERSEAS_LOSS":
+                shipment_pk = _seed_tracking_event_overseas(sess, order_pk=order_pk)
+                sess.execute(
+                    text(
+                        "INSERT INTO fulfillment.tracking_events "
+                        "(shipment_id, external_event_key, action_code, event_at, description) "
+                        "VALUES (:shipment, 'TEST_PURCHASE_TOTAL_RETURN', 80101, now(), 'TEST return')"
+                    ),
+                    {"shipment": shipment_pk},
+                )
+        sess.commit()
+
+    response = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers={"Authorization": f"Bearer {readonly_key}"},
+        params={"shop_pk": shop_pk, "w_start": "2026-09-01", "w_end": "2026-09-30"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item, = body["items"]
+    assert item["units_sold"] == 100
+    assert item["strict_full_loss_qty"] == 10
+    assert item["strict_full_loss_cancelled_qty"] == 3
+    for values in (item, body["totals"]):
+        assert values["cogs_total"] == "2060.0000"
+        assert values["strict_full_loss_cost"] == "200.0000"
+        assert abs(
+            Decimal(values["net_revenue"]) - Decimal(values["cogs_total"])
+            - Decimal(values["spend"]) - Decimal(values["net_profit"])
+        ) <= _Q4
+
+
 def test_paid_cancelled_returned_order_is_strict_full_loss_sample(
     api_client, readonly_key, db_engine
 ):
@@ -3768,6 +3830,8 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
             (Decimal(i["refund_net_amount"]) for i in items), Decimal(0)
         ),
         "net_profit": sum((Decimal(i["net_profit"]) for i in items), Decimal(0)),
+        "cogs_total": sum((Decimal(i["cogs_total"]) for i in items), Decimal(0)),
+        "net_revenue": sum((Decimal(i["net_revenue"]) for i in items), Decimal(0)),
     }
     # totals 按服务端未量化 Decimal 加总；逐行 wire 值已量化 4 位，允许 1 个最小单位尾差。
     for field, value in row_sum.items():
@@ -3791,6 +3855,9 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     )
     b3 = r3.json()
     assert [i["spu_id"] for i in b3["items"]] == expected_order[2:]
+    for page in (b2, b3):
+        for field in ("cogs_total", "net_revenue"):
+            assert page["totals"][field] == totals[field]
 
 
 def test_spu_roi_sort_order_desc_and_search(api_client, readonly_key, db_engine):
@@ -3926,6 +3993,8 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "gmv": "0.0000",
         "refund_net_amount": "0.0000",
         "strict_full_loss_cost": "0.0000",
+        "cogs_total": "0.0000",
+        "net_revenue": "0.0000",
         "net_profit": "0.0000",
         "roi_real": None,  # Σspend=0 → null(页面显示 —)
         "refund_order_count": 0,

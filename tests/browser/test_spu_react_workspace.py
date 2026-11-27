@@ -33,12 +33,19 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
 
     def payload(path, query=''):
         if path.endswith('/v2/analytics/spu-roi'):
-            return _nested_payload(original)
+            result = _nested_payload(original)
+            result['totals'].update(cogs_total='2060.0000', strict_full_loss_cost='200.0000',
+                                    net_revenue='3000.0000', net_profit='840.0000', spend='100.0000')
+            return result
         return original(path, query)
 
     monkeypatch.setattr(browser_conftest, '_mock_payload', payload)
     page = frontend_browser_renderer.open(f'/v2/pages/{profile}?shop_pk=7', width=width, height=900)
     _wait_rows(page)
+    expect(page.locator('#sum-purchase-cost')).to_have_text('2,060.00')
+    expect(page.locator('#sum-full-loss-cost')).to_have_text('200.00')
+    expect(page.get_by_label('成本', exact=True).get_by_text('其中：全损成本', exact=True)).to_be_visible()
+    expect(page.locator('#sum-net-revenue')).to_have_text('3,000.00')
     assert page.locator('.tabulator-row').count() >= 3
     overview = page.get_by_role('region', name='经营概览').bounding_box()
     sales = page.get_by_label('销售', exact=True).bounding_box()

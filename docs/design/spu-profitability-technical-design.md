@@ -114,6 +114,7 @@ Bootstrap `container-fluid`、`row-cols-*` 和 `table-responsive` 负责断点�
 
 | 区域 | 控件/文案 | 服务端字段 | 状态 |
 | --- | --- | --- | --- |
+| 成本 | 采购成本、广告成本、其中全损成本 | `cogs_total`, `spend`, `strict_full_loss_cost` | 采购成本直接读取完整范围 `totals.cogs_total`；全损成本是其中项，不额外累加；含默认成本时显示估算提示 |
 | 总览 | 总单量、广告消耗 | `total_orders`, `spend` | 空范围显示 0 或 `—`，不展示旧请求值 |
 | 有效 | 有效单量、有效销售 | `effective_order_count`, `effective_sales` | 估算收入带 `≈`/提示；金额仍来自服务端 |
 | 退款 | 退款数、退款率 | `refund_order_count`, `refund_rate` | 分母为 0 显示 `—` |
@@ -295,7 +296,8 @@ X-API-Key: ttserp_ro_...
   "items": [{
     "spu_pk": 912, "spu_id": "1730000000000000001", "title": "Example",
     "status": "ACTIVATE", "shop_id": "7494763368967603447", "shop_name": "VN shop",
-    "spend": "100.0000", "sales": "1200.0000", "net_profit": "80.0000",
+    "spend": "100.0000", "sales": "1200.0000", "net_revenue": "1110.0000", "cogs_total": "930.0000", "spend": "100.0000",
+    "net_profit": "80.0000",
     "roi_real": "1.20", "profit_status": "profit", "roi_status": "non_negative",
     "projection_status": "available", "projected_net_profit": "70.0000",
     "has_unsettled_orders": true, "uses_default_unit_cost": false,
@@ -534,14 +536,12 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `cpa` | `items[]` | JSON string（money，4 位） | 广告消耗/广告归因订单 | 可 null |
 | `unit_cost_used` | `items[]` | JSON string（money，4 位） | 本次采用的单位采购成本 | 非 null |
 | `cost_source` | `items[]` | JSON string | 单位成本来源 | 非 null |
-| `net_revenue` | `items[]` | JSON string（money，4 位） | 净收入 | 非 null |
 | `settled_net` | `items[]` | JSON string（money，4 位） | 已结算净收入 | 非 null |
 | `unsettled_net` | `items[]` | JSON string（money，4 位） | 未结算净收入估算 | 非 null |
 | `settled_sales` | `items[]` | JSON string（money，4 位） | 已结算销售额 | 非 null |
 | `unsettled_sales` | `items[]` | JSON string（money，4 位） | 未结算销售额 | 非 null |
 | `cogs_sold` | `items[]` | JSON string（money，4 位） | 售出货本 | 非 null |
 | `strict_full_loss_cancelled_cogs` | `items[]` | JSON string（money，4 位） | 严格全损取消件货本 | 非 null |
-| `cogs_total` | `items[]` | JSON string（money，4 位） | 总货本 | 非 null |
 | `settled_order_count` | `items[]` | JSON int | 已结算订单数 | 非 null |
 | `strict_full_loss_qty_rate` | `items[]` | JSON string（ratio，2 位） | 严格全损件数 / (售出件数 + 严格全损取消件数) | 可 null |
 | `fee_rate_used` | `items[]` | JSON string（ratio，4 位） | 本次采用的平台费率 | 非 null |
@@ -556,8 +556,14 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 
 #### 6.7.3 同时出现在 `items[]` 和 `totals` 的 shared 字段
 
+`totals.net_revenue` 和 `totals.cogs_total` 在分页前按完整入选范围汇总；
+页面直接读取这些字段，不从当前页 `items[]` 累加。空范围返回 `"0.0000"`。
+成本包含关系与示例见 [业务口径 §5.4](../business/spu-profitability.md#54-当前成本利润与-roi)。
+
 | 字段 | 出现 | JSON 类型/精度 | 含义 | nullable |
 | --- | --- | --- | --- | --- |
+| `net_revenue` | `items[] + totals` | JSON string（money，4 位） | 当前净收入；totals 为完整入选范围合计 | 非 null |
+| `cogs_total` | `items[] + totals` | JSON string（money，4 位） | 当前总采购成本；totals 为完整入选范围逐 SPU 货本合计，包含严格全损成本 | 非 null |
 | `spend` | `items[] + totals` | JSON string（money，4 位） | 广告实际消耗 | 非 null |
 | `order_count` | `items[] + totals` | JSON int | 已付款白名单有效销售订单数 | 非 null |
 | `cancelled_order_count` | `items[] + totals` | JSON int | CANCELLED 订单数 | 非 null |
@@ -572,11 +578,11 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `cancel_rate` | `items[] + totals` | JSON string（items ratio 2 位；totals ratio 4 位） | 国内取消率 | 可 null |
 | `refund_net_amount` | `items[] + totals` | JSON string（money，4 位） | 净退款金额 | 非 null |
 | `refund_rate` | `items[] + totals` | JSON string（items ratio 2 位；totals ratio 4 位） | 退款率 | 可 null |
-| `strict_full_loss_cost` | `items[] + totals` | JSON string（money，4 位） | 严格全损件数 × 当前单位成本 | 非 null |
+| `strict_full_loss_cost` | `items[] + totals` | JSON string（money，4 位） | 全部已确认严格全损件的当前货本，属于 `cogs_total`，不重复加扣 | 非 null |
 | `net_profit` | `items[] + totals` | JSON string（money，4 位） | 净利润 | 非 null |
 | `roi_real` | `items[] + totals` | JSON string（ratio，2 位） | 实际 ROI | 可 null |
 | `roi_breakeven` | `items[] + totals` | JSON string（ratio，2 位） | 实际保本 ROI | 可 null |
-| `strict_full_loss_qty` | `items[] + totals` | JSON int | 严格全损订单关联的 SPU 件数 | 非 null |
+| `strict_full_loss_qty` | `items[] + totals` | JSON int | 全部已确认严格全损件数，包含付款销量内及额外严格全损取消件 | 非 null |
 | `strict_full_loss_cancelled_qty` | `items[] + totals` | JSON int | 严格全损取消订单关联的 SPU 件数 | 非 null |
 | `strict_full_loss_rate` | `items[] + totals` | JSON string（items ratio 2 位；totals ratio 4 位） | 严格全损订单数 / 全部订单数 | 可 null |
 | `ad_system_actual_roi` | `items[] + totals` | JSON string（ratio，2 位） | 广告系统实际 ROI | 可 null |
