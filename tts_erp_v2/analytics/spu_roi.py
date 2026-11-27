@@ -140,13 +140,25 @@ _FEE_NOTE = (
 )
 _PNL_HINTS = {
     "net_revenue": "净收入 = 已结算 SETTLEMENT 分摊 + 未结算净额估算",
-    "cogs": "货本 = (售出件 + 海外取消全损件) × 单位成本",
+    "cogs": (
+        "采购成本按各 SPU 的当前有效采购单价乘以计成本件数后汇总；"
+        "计成本件数为已付款商品件数，加上未包含在其中的严格全损取消件数。"
+        "包含全部已确认全损货本，每件只计一次；历史经营窗口按当前采购价重估，"
+        "缺价使用默认 40 CNY/件估算。汇总跟随店铺、已应用 SPU 和经营日期，不受分页影响"
+    ),
     "ad_spend": "广告消耗 = mixed_real_cost；服务端按汇率快照换算为 CNY",
     "net_profit": "净利润 = 净收入 − 货本 − 广告消耗",
     "settled": "已结算部分使用 SETTLEMENT 实际到账净额",
     "unsettled": "未结算部分使用行级 fee_rate_used 与 SPU 退款率估算",
     "cogs_sold": "售出件使用已付款白名单订单的实际售出件数",
     "cogs_full_loss": "取消单只有符合严格全损判定时才按件数计入货本",
+}
+_SUMMARY_HINTS = {
+    "cogs_total": _PNL_HINTS["cogs"],
+    "strict_full_loss_cost": (
+        "全部已确认严格全损件数对应的货本，包含符合条件的海外取消全损；"
+        "是采购成本的其中项，计算净利润时不再额外扣除"
+    ),
 }
 _DEFAULT_COST_ALERT_MESSAGE = "无人工或已核实采购成交价，使用后端默认成本估算"
 _REFUND_RATE_ALERT_MESSAGE = "退款率超过后端配置的警戒线"
@@ -406,6 +418,7 @@ def _meta_payload(
             "default_cost_alert_message": _DEFAULT_COST_ALERT_MESSAGE,
             "unsettled_alert_message": _UNSETTLED_ALERT_MESSAGE,
             "pnl_hints": _PNL_HINTS,
+            "summary_hints": _SUMMARY_HINTS,
         },
         "currency": {
             "display": basis.display_currency,

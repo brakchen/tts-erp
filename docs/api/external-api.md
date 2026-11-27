@@ -604,6 +604,12 @@ SPU 盈利主端点和四个懒加载钻取端点是稳定的 readonly API。完
 | `GET /v2/pages/spu-roi` | readonly HTML | 标准 SPU 盈利页面 |
 | `GET /v2/pages/focused-spus` | readonly HTML | 重点关注 SPU 页面 |
 
+主端点的 `totals` 返回完整入选范围的 `net_revenue`（当前净收入）和
+`cogs_total`（总采购成本），均为 CNY 四位小数字符串，不受分页影响；
+空范围为 `"0.0000"`。`strict_full_loss_cost` 是总采购成本的其中项。
+字段矩阵见 [技术契约 §6.7](../design/spu-profitability-technical-design.md)，
+成本口径与示例见 [业务 §5.4](../business/spu-profitability.md#54-当前成本利润与-roi)。
+
 鉴权沿用本文件前文的 readonly 角色矩阵、API key/session 方式、限流和标准错误；盈利 GET 不写入数据。`/v2/analytics/sync/*` 是 Chrome 扩展 ingest 的另一组 readwrite+scope API，不属于盈利查询契约。
 
 ### Analytics — SPU 盈利表现对比 (`/v2/analytics/spu-profit-deterioration`)

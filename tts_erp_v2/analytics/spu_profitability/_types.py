@@ -452,6 +452,8 @@ class ProfitabilityTotals:
     gmv: Decimal
     refund_net_amount: Decimal
     strict_full_loss_cost: Decimal
+    cogs_total: Decimal
+    net_revenue: Decimal
     net_profit: Decimal
     roi_real: Decimal | None
     refund_order_count: int
