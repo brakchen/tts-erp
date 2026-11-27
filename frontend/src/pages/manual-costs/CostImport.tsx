@@ -1,24 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { Input } from '@heroui/react';
-import OffsetPagination from '../../shared/OffsetPagination';
+import { Input, toast } from '@heroui/react';
 import { ApiError, requestJson } from '../../shared/api/client';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { record } from './contracts';
 
-interface Issue { row: number | null; spuId: string; shopName: string; count: number; reason: string }
 interface ImportResult {
   totalRows: number; blankCostRows: number; importRows: number;
-  importedCount: number; skippedRows: number; issues: Issue[];
+  importedCount: number; skippedRows: number;
 }
-function text(value: unknown): string { if (typeof value !== 'string') throw new Error('导入响应格式不兼容'); return value; }
 function count(value: unknown): number { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('导入计数不可用'); return value; }
 function decodeResult(value: unknown): ImportResult {
   const body = record(value);
   if (!Array.isArray(body.issues)) throw new Error('导入响应格式不兼容');
   const result = { totalRows: count(body.totalRows), blankCostRows: count(body.blankCostRows),
-    importRows: count(body.importRows), importedCount: count(body.importedCount), skippedRows: count(body.skippedRows),
-    issues: body.issues.map((value) => { const issue = record(value); return { row: issue.row === null ? null : count(issue.row),
-      spuId: text(issue.spuId), shopName: text(issue.shopName), count: count(issue.count), reason: text(issue.reason) }; }) };
+    importRows: count(body.importRows), importedCount: count(body.importedCount), skippedRows: count(body.skippedRows) };
   if (result.totalRows !== result.blankCostRows + result.importRows + result.skippedRows
     || result.importedCount > result.importRows || (result.importedCount === 0 && result.importRows !== 0)) throw new Error('导入计数不一致');
   return result;
@@ -39,19 +34,22 @@ interface Props {
 }
 
 export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFence, onFailure, onImported }: Props) {
-  const [result, setResult] = useState<ImportResult>(); const [fileName, setFileName] = useState('');
-  const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
-  const [uncertain, setUncertain] = useState(false); const [issueOffset, setIssueOffset] = useState(0);
+  const [busy, setBusy] = useState(false); const [uncertain, setUncertain] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined);
+  const activeToast = useRef<string | undefined>(undefined);
   const mounted = useRef(true); const flight = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; controller.current?.abort(); }; }, []);
+  useEffect(() => { mounted.current = true; return () => {
+    mounted.current = false; controller.current?.abort();
+    if (activeToast.current) toast.close(activeToast.current);
+  }; }, []);
   async function upload(file: File) {
     if (blocked || hasDrafts || uncertain || flight.current) return;
-    setResult(undefined); setNotice(''); setIssueOffset(0); setFileName(file.name);
+    if (activeToast.current) toast.close(activeToast.current);
     if (!file.name.toLowerCase().endsWith('.xlsx') || file.size > 8 * 1024 * 1024) {
-      setNotice('请选择不超过 8 MB 的 .xlsx 文件'); return;
+      activeToast.current = toast.danger('处理失败', { description: '请选择不超过 8 MB 的 .xlsx 文件', timeout: 6000 }); return;
     }
     flight.current = true; setBusy(true); onBusy(true);
+    const notification = toast('处理中', { isLoading: true, timeout: 0 }); activeToast.current = notification;
     const current = new AbortController(); controller.current = current;
     try {
       const { data, status } = await withinRequestLifetime(current, (signal) => requestJson<unknown>(rootPath, '/v2/reporting/purchase-prices/import', {
@@ -59,14 +57,18 @@ export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFen
       }));
       if (!mounted.current) return;
       if (status !== 201) throw new Error('导入结果未确认');
-      setResult(decodeResult(data)); setUncertain(false); onFence(false); onImported();
+      const result = decodeResult(data);
+      activeToast.current = toast.update(notification, '处理成功', { variant: 'success', isLoading: false, timeout: 4000,
+        description: result.importedCount === 0 ? '没有可更新的商品' : undefined });
+      setUncertain(false); onFence(false); onImported();
     } catch (error: unknown) {
       if (!mounted.current) return;
       onFailure(error);
       if (!(error instanceof ApiError && error.status >= 400 && error.status < 500)) {
         setUncertain(true); onFence(true);
-        setNotice('导入结果未确认，请刷新页面核对最新采购价后再操作，避免重复上传。');
-      } else setNotice(message(error));
+        activeToast.current = toast.update(notification, '处理失败', { variant: 'danger', isLoading: false, timeout: 0,
+          description: '导入结果未确认，请刷新页面核对最新采购价后再操作，避免重复上传。' });
+      } else activeToast.current = toast.update(notification, '处理失败', { variant: 'danger', isLoading: false, timeout: 6000, description: message(error) });
     } finally {
       flight.current = false;
       if (mounted.current) { setBusy(false); onBusy(false); }
@@ -84,14 +86,5 @@ export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFen
         if (selected) void upload(selected);
       }} />
     {hasDrafts && <p role="status">请先提交或撤销现有草稿，再导入文件。</p>}
-    {busy && <p role="status" className="break-words">正在解析并导入 {fileName}，请等待结果…</p>}
-    {notice && <p role="alert">{notice}</p>}
-    {result && <div className="space-y-3">
-      <p role="status">{result.importedCount > 0 ? `已更新 ${result.importedCount} 个商品采购价。` : '处理完成，没有可更新的商品。'}共 {result.totalRows} 行，有效采购记录 {result.importRows} 行，空金额跳过 {result.blankCostRows} 行，其他跳过 {result.skippedRows} 行。</p>
-      {result.issues.length > 0 && <details><summary>查看跳过原因（{result.issues.length} 项）</summary>
-        <ul className="space-y-2">{result.issues.slice(issueOffset, issueOffset + 50).map((issue, index) => <li key={index} className="break-words">{issue.row ? `第 ${issue.row} 行 · ` : ''}{issue.shopName || '无店铺名'} · {issue.spuId || '无产品ID'} · {issue.reason}（{issue.count} 条）</li>)}</ul>
-        {result.issues.length > 50 && <OffsetPagination label="跳过原因分页" offset={issueOffset} pageSize={50} total={result.issues.length} disabled={busy} onPage={setIssueOffset} />}
-      </details>}
-    </div>}
   </section>;
 }
