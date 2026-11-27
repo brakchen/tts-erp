@@ -72,3 +72,23 @@ it('separates the reporting dates from the server sample and keeps the sample in
   expect(screen.getByText('2026-10-01 ~ 2026-10-31 · CNY')).toBeInTheDocument();
   expect(within(sample).getByText('2026-10-20 ~ 2026-11-18')).toBeVisible();
 });
+
+it('renders full-scope purchase cost and its loss subset directly from the server', () => {
+  const totals = { cogs_total: '2060.0000', strict_full_loss_cost: '200.0000', net_revenue: '3000.0000', spend: '100.0000', net_profit: '840.0000' };
+  const view = render(<Summary data={{ items: [{ spu_pk: '1', spu_id: 'TEST_PAGE', title: null, status: null, main_image_url: null, cogs_total: '20.0000' }], total: 10, totals, meta: {} }} />);
+  const costs = screen.getByLabelText('成本');
+  expect(costs.querySelector('#sum-purchase-cost')).toHaveTextContent('2,060.00');
+  expect(within(costs).getByText('其中：全损成本')).toBeInTheDocument();
+  expect(costs.querySelector('#sum-full-loss-cost')).toHaveTextContent('200.00');
+  expect(document.getElementById('sum-net-revenue')).toHaveTextContent('3,000.00');
+  expect(document.getElementById('sum-net-profit')).toHaveTextContent('840.00');
+  expect(within(costs).queryByText(/未提供汇总/)).toBeNull();
+  view.rerender(<Summary data={{ items: [], total: 0, totals: { cogs_total: '0.0000', strict_full_loss_cost: '0.0000', net_revenue: '0.0000' }, meta: {} }} />);
+  expect(costs.querySelector('#sum-purchase-cost')).toHaveTextContent('0.00');
+  expect(document.getElementById('sum-net-revenue')).toHaveTextContent('0.00');
+});
+
+it('shows the server default-cost warning when purchase cost includes estimates', () => {
+  render(<Summary data={{ items: [], total: 1, totals: { cogs_total: '40.0000' }, meta: { warnings: ['default_unit_cost_used'], presentation: { default_cost_alert_message: 'TEST 缺价按后端默认单价估算' } } }} />);
+  expect(within(screen.getByLabelText('成本')).getByText('采购成本含估算：TEST 缺价按后端默认单价估算')).toBeVisible();
+});

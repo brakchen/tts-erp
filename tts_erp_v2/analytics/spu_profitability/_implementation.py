@@ -2838,6 +2838,7 @@ def _query_spu_roi(
         gmv=gmv_total,
         refund_net_amount=money_total["refund_net_amount"],
         strict_full_loss_cost=money_total["strict_full_loss_cost"],
+        cogs_total=money_total["cogs_total"],
         net_revenue=money_total["net_revenue"],
         net_profit=money_total["net_profit"],
         roi_real=overall_roi,
