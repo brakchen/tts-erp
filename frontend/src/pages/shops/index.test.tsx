@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 
 const modulePath = './index';
@@ -26,7 +26,8 @@ async function openRegister(user: ReturnType<typeof userEvent.setup>) {
   return screen.getByRole('dialog');
 }
 async function fillRegister(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
-  await user.type(within(dialog).getByRole('textbox', { name: '店铺 ID' }), shop.shop_id);
+  await user.click(within(dialog).getByRole('textbox', { name: '店铺 ID' }));
+  await user.paste(shop.shop_id);
 }
 async function openApp(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText(shop.shop_id);
@@ -34,10 +35,15 @@ async function openApp(user: ReturnType<typeof userEvent.setup>) {
   return screen.getByRole('dialog');
 }
 async function fillApp(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement, secret = 'TEST_secret') {
-  await user.type(within(dialog).getByLabelText('App Key', { exact: true }), 'TEST_key');
-  await user.type(within(dialog).getByLabelText('App Secret', { exact: true }), secret);
+  await user.click(within(dialog).getByLabelText('App Key', { exact: true }));
+  await user.paste('TEST_key');
+  await user.click(within(dialog).getByLabelText('App Secret', { exact: true }));
+  await user.paste(secret);
 }
 const save = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: /^保存(?:中…)?$/ });
+// Charge the one-time real module load to setup, including single-case reruns.
+// Every interaction still runs with the normal 5s budget and file isolation.
+beforeAll(async () => { await import(modulePath); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('shops content', () => {
@@ -63,20 +69,23 @@ describe('shops content', () => {
   it('sends the selected source, App and OAuth filters and clears them with the search on reset', async () => {
     const fetcher = api(async () => { throw new Error('TEST no commands'); });
     const user = userEvent.setup(); await mount(); await screen.findByText(shop.shop_id);
-    await user.click(screen.getByRole('button', { name: '全部来源 发现来源' }));
+    const filters = () => within(screen.getByLabelText('店铺筛选'));
+    await user.click(filters().getByRole('button', { name: '全部来源 发现来源' }));
     await user.click(await screen.findByRole('option', { name: 'Ads 插件' }));
-    await user.click(screen.getByRole('button', { name: '全部配置 App 配置' }));
+    await user.click(filters().getByRole('button', { name: '全部配置 App 配置' }));
     await user.keyboard('{ArrowDown}{Enter}');
-    await user.click(screen.getByRole('button', { name: '全部授权状态 OAuth 授权' }));
+    await user.click(filters().getByRole('button', { name: '全部授权状态 OAuth 授权' }));
     await user.click(await screen.findByRole('option', { name: '需重新授权' }));
-    await user.type(screen.getByRole('searchbox', { name: '店铺搜索' }), 'TEST_query{Enter}');
+    await user.click(filters().getByRole('searchbox', { name: '店铺搜索' }));
+    await user.paste('TEST_query');
+    await user.keyboard('{Enter}');
     await waitFor(() => {
       const query = new URL(fetcher.mock.calls.at(-1)![0], 'https://test.invalid').searchParams;
       expect(Object.fromEntries(query)).toMatchObject({ platform: 'tiktok', view: 'management', offset: '0', q: 'TEST_query', source: 'ads-data-sync', app_state: 'configured', auth_state: 'reauthorize' });
     });
-    await user.click(screen.getByRole('button', { name: '重置' }));
+    await user.click(filters().getByRole('button', { name: '重置' }));
     await waitFor(() => expect(fetcher.mock.calls.at(-1)![0]).toBe('/tts/v2/commerce/channel-accounts?platform=tiktok&view=management&limit=50&offset=0'));
-    expect(screen.getByRole('searchbox', { name: '店铺搜索' })).toHaveValue('');
+    expect(filters().getByRole('searchbox', { name: '店铺搜索' })).toHaveValue('');
   });
 
   it('registers metadata once under repeated submit without sending App credentials', async () => {
@@ -145,7 +154,7 @@ describe('shops content', () => {
     expect(within(dialog).queryByRole('textbox', { name: '店铺名称' })).toBeNull();
     expect(within(dialog).queryByRole('textbox', { name: '区域' })).toBeNull();
     const alias = within(dialog).getByRole('textbox', { name: '店铺别名' });
-    await user.type(alias, '  TEST_alias  ');
+    fireEvent.change(alias, { target: { value: '  TEST_alias  ' } });
     fireEvent.change(within(dialog).getByLabelText('开店日期', { exact: true }), { target: { value: openedDate } });
     await user.click(save(dialog)); await screen.findByText('店铺信息已保存');
     expect(commands).toHaveLength(1); expect(commands[0].url).toBe('/tts/v2/admin/shops/41');

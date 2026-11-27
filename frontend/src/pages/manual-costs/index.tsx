@@ -1,3 +1,4 @@
+import { displayShopName } from '../../shared/shop-name';
 import OffsetPagination from '../../shared/OffsetPagination';
 import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -185,7 +186,7 @@ export default function ManualCosts({ bootstrap }: PageProps) {
     <section className="erp-panel erp-filter-workspace" aria-label="采购范围与筛选">
       <div className="erp-filter-row justify-between" aria-label="店铺与视图">
         <Select className="erp-shop-picker" value={shopId || null} isDisabled={pending || cooldown || !shops?.length} onChange={(key) => { if (typeof key === 'string') changeScope(() => setShopId(key)); }}>
-          <Label>当前店铺</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{shops?.map((shop) => <ListBox.Item key={shop.id} id={shop.id} textValue={`${shop.account_name ?? shop.shop_id} · ${shop.shop_id} · #${shop.id}`}>{shop.account_name ?? shop.shop_id} · {shop.shop_id} · #{shop.id}</ListBox.Item>)}</ListBox></Select.Popover>
+          <Label>当前店铺</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{shops?.map((shop) => <ListBox.Item key={shop.id} id={shop.id} textValue={`${displayShopName(shop, shop.shop_id)} · ${shop.shop_id} · #${shop.id}`}>{displayShopName(shop, shop.shop_id)} · {shop.shop_id} · #{shop.id}</ListBox.Item>)}</ListBox></Select.Popover>
         </Select>
         <div className="erp-tabs" role="group" aria-label="工作台视图">
           {([['all', '全部 SPU'], ['missing', '缺成本候选'], ['recent', '最近提交']] as const).map(([key, label]) =>

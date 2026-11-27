@@ -11,7 +11,6 @@ import time
 from contextlib import ExitStack, suppress
 from pathlib import Path
 
-from scripts._test_frontend import prepare_frontend
 from tests.support.owned_process import owned_process
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,12 +47,9 @@ def run(targets: list[str], workers: int) -> int:
     if os.environ.get("TTS_ERP_TEST_DB_NAME"):
         raise ValueError("Parallel browser runs require generated per-worker database names; unset TTS_ERP_TEST_DB_NAME")
     started = time.monotonic()
-    # Prewarm under EX before starting consumers; readers then share one lease.
-    # There is no parent database. Each child invokes the full isolated wrapper.
-    with prepare_frontend(ROOT) as result:
-        print(f"[browser-parallel] workers={len(groups)} cache={'hit' if result.cached else 'miss'}", flush=True)
-    # Children revalidate after loading .env.test. Release the warmup lease so
-    # an input/environment change cannot deadlock a child needing an EX build.
+    # Builds belong to admitted isolated children. Parent prewarming used to
+    # consume memory before host admission and could compete with a full suite.
+    print(f"[browser-parallel] workers={len(groups)}; children wait for host capacity", flush=True)
     with ExitStack() as resources:
         directory = Path(resources.enter_context(tempfile.TemporaryDirectory(prefix="tts-browser-parallel-")))
         children = []
@@ -67,10 +63,21 @@ def run(targets: list[str], workers: int) -> int:
                 ))
                 children.append((process, path))
                 print(f"[browser-parallel] worker={index + 1} targets={group}", flush=True)
-            deadline = time.monotonic() + 1200
+            # Queue waiting is not browser execution. Enforce the original
+            # execution budget only after each real wrapper is admitted.
+            queue_deadline = time.monotonic() + int(os.environ.get("TTS_ERP_TEST_CAPACITY_TIMEOUT_S", "7200")) + 30
+            admitted: dict[int, float] = {}
             while any(process.poll() is None for process, _ in children):
-                if time.monotonic() > deadline:
-                    raise TimeoutError("Parallel browser execution exceeded 1200s")
+                for process, path in children:
+                    if process.poll() is not None:
+                        continue
+                    if process.pid not in admitted and "[test-queue] admitted" in path.read_text(encoding="utf-8"):
+                        admitted[process.pid] = time.monotonic()
+                    began = admitted.get(process.pid)
+                    if began is not None and time.monotonic() - began > 1200:
+                        raise TimeoutError("Parallel browser execution exceeded 1200s after admission")
+                    if began is None and time.monotonic() > queue_deadline:
+                        raise TimeoutError("Parallel browser capacity waiting exceeded its queue budget")
                 time.sleep(0.1)
         finally:
             # Let pytest finalizers and shell EXIT traps clean contexts and DBs

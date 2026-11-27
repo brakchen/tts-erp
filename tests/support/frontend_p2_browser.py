@@ -292,9 +292,16 @@ class BrowserFence:
                 allowed = {"opened_date", "service_id", "app_key", "app_secret"}
                 if register:
                     allowed |= {"platform", "shop_id", "account_name", "region"}
+                if patch:
+                    allowed.add("shop_alias")
                 safe = set(body) <= allowed
                 safe = safe and (not register or body.get("shop_id") == self.shop_id and body.get("platform") == "tiktok")
                 safe = safe and all(isinstance(body[key], str) and body[key].startswith("TEST_") for key in ("account_name", "app_key", "app_secret") if key in body)
+                # The current edit form sends null even when only the date changes.
+                # Keep alias writes confined to this run's owned shop and TEST data.
+                alias = body.get("shop_alias")
+                safe = safe and (alias is None or isinstance(alias, str)
+                                 and alias.startswith("TEST_") and len(alias) <= 200)
                 services = {self.service_id, self.service_id + "_conflict"}
                 safe = safe and ("service_id" not in body or body["service_id"] in services)
                 safe = safe and ("opened_date" not in body or body["opened_date"] is None

@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from tests._job_invocation import authorize_test_shop
@@ -403,3 +403,26 @@ def test_ad_daily_rejects_unknown_sort_and_order(api_client, readonly_key):
     assert "campaign" in unknown_key.json()["detail"]
     assert unknown_order.status_code == 422
     assert unknown_order.json()["detail"] == "order must be asc or desc"
+
+
+@pytest.mark.parametrize("shop_alias", ["TEST ad alias", "", None])
+def test_ad_daily_names_use_alias_with_platform_name_fallback(
+    api_client, readonly_key, db_engine, shop_alias,
+):
+    _seed_rows(db_engine)
+    with Session(db_engine) as session, session.begin():
+        shop = session.scalars(select(ChannelAccount).where(
+            ChannelAccount.platform == "tiktok", ChannelAccount.shop_id == _SELLER,
+        )).one()
+        shop.shop_alias = shop_alias
+    expected = shop_alias or "TEST ad daily shop"
+    listed = api_client.get(
+        "/v2/reporting/ad-daily", headers=_auth(readonly_key),
+        params={"seller_id": _SELLER, "sort": "shop", "order": "asc"},
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"]
+    assert all(row["shop_name"] == expected for row in listed.json()["items"])
+    options = api_client.get("/v2/reporting/ad-daily/options", headers=_auth(readonly_key))
+    assert options.status_code == 200, options.text
+    assert next(row for row in options.json()["sellers"] if row["seller_id"] == _SELLER)["shop_name"] == expected

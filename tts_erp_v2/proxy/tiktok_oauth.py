@@ -220,7 +220,8 @@ def complete_tiktok_authorization(
     account.updated_at = now
     summary = {
         "shop_id": account.shop_id, "credential_id": cred.id, "account_id": account.id,
-        "account_name": account.account_name, "region": account.region,
+        "account_name": account.account_name, "shop_alias": account.shop_alias,
+        "region": account.region,
         "seller_type": account.seller_type, "granted_scopes": grant.get("granted_scopes"),
         "expires_at": grant.get("expires_at"),
     }

@@ -1,5 +1,5 @@
 import { editRowCost, readRowCost } from './test-editor';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
@@ -40,10 +40,11 @@ const selectOptionLabels: Record<string, string> = {
 async function chooseOption(user: ReturnType<typeof userEvent.setup>, label: string, option: string) {
   // Select includes both its aria-label and visible Label in the trigger name.
   // Limit catalogue controls to their form so 50 rows' actions are not scanned.
-  const scope = label === '当前店铺' ? screen : within(screen.getByRole('form', { name: '工作台筛选' }));
+  const scope = label === '当前店铺' ? screen : within(screen.getByLabelText('工作台筛选'));
   await user.click(scope.getByRole('button', { name: (name) => name === label || name.endsWith(` ${label}`)
     || (['排序字段', '排序方向'].includes(label) && name.includes(label)) }));
-  await user.click(await screen.findByRole('option', { name: option }));
+  const options = within(await screen.findByRole('listbox'));
+  await user.click(options.getByRole('option', { name: option }));
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -82,6 +83,8 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });
 
+  // The real 50-row React/HeroUI render chain exceeds the default 5s on the
+  // fixed validation VM (CPU profile: 5.4s in React). Keep the full page size.
   it.each([
     ['status', 'DELETED', '状态'],
     ['status', 'SELLER_DEACTIVATED', '状态'],
@@ -95,9 +98,12 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     ['q', 'TEST 搜索 & SPU', '按 SPU 或标题搜索'],
   ])('sends %s=%s to the server before pagination and resets a nonzero offset', async (key, value, label) => {
     const fetcher = setup((query) => Array.from({ length: Number(query.get('limit')) }, (_, index) => ({ ...product(index), title: `TEST server ${query.get('offset')} row ${index}` })));
-    const user = userEvent.setup(); render(<ManualCosts {...props} />);
-    const filters = () => within(screen.getByRole('form', { name: '工作台筛选' }));
-    const pagination = () => within(screen.getByRole('navigation', { name: '采购工作台分页' }));
+    const user = userEvent.setup();
+    // Flush the immediate shop read, catalogue read and collection mount together.
+    await act(async () => { render(<ManualCosts {...props} />); });
+    // Find the labelled container without scanning every row's accessible roles.
+    const filters = () => within(screen.getByLabelText('工作台筛选'));
+    const pagination = () => within(screen.getByLabelText('采购工作台分页'));
     await screen.findByText('TEST server 0 row 0');
     expect(catalogueQuery(fetcher).get('sort')).toBe('status');
     expect(catalogueQuery(fetcher).get('order')).toBe('asc');
@@ -121,7 +127,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(query.get('shop_pk')).toBe(shop.id);
     // The server deliberately returns ACTIVATE rows even for DELETED/search scopes.
     // Rendering them unchanged protects server authority, not client-side re-filtering.
-    expect(within(screen.getByRole('region', { name: 'SPU 表格滚动区域' })).getAllByText('在售')).toHaveLength(Number(query.get('limit')));
+    expect(within(screen.getByLabelText('SPU 表格滚动区域')).getAllByText('在售')).toHaveLength(Number(query.get('limit')));
     expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     if (key === 'status' || key === 'has_orders' || key === 'missing_manual_cost') {
       if (key === 'status') await chooseOption(user, label, '全部');
@@ -129,7 +135,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
       await waitFor(() => expect(catalogueQuery(fetcher).has(key)).toBe(false));
     }
     expect(fetcher.mock.calls.every(([url, init]) => url.startsWith('/tts/v2/') && init.method === 'GET')).toBe(true);
-  });
+  }, 10_000);
 
   it('labels SPU identities and preserves exact server money, nulls, status labels and timestamps in editable catalogue rows', async () => {
     const rows = [
@@ -150,7 +156,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
       expect(within(row).getByText(rows[index].source_created_at!)).toBeVisible();
       expect(within(row).getByText(rows[index].source_updated_at!)).toBeVisible();
     }
-    const catalogue = within(screen.getByRole('region', { name: 'SPU 表格滚动区域' }));
+    const catalogue = within(screen.getByLabelText('SPU 表格滚动区域'));
     for (const label of ['在售', '下架', '停售', 'TEST_UPSTREAM_STATUS']) expect(catalogue.getByText(label)).toBeVisible();
     expect(screen.getByText('人工：— —')).toBeVisible();
     expect(screen.getByText('人工：999999999999999.9999 VND')).toBeVisible();

@@ -59,7 +59,7 @@ def _ensure_host(api: ZabbixAPI, shop: ChannelAccount) -> str:
     host = f"tts-monitor-{shop.shop_id}"
     # Zabbix visible names are limited to 128 characters. Preserve the unique
     # seller suffix even for the ERP's longer shop names.
-    label = shop.account_name or ""
+    label = shop.shop_alias or shop.account_name or ""
     display_name = f"{label[:125 - len(shop.shop_id)]} · {shop.shop_id}" if label else shop.shop_id
     existing = _find_host(api, host)
     if existing is None:

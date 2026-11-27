@@ -89,13 +89,16 @@ systemctl list-timers '*logrotate*'
 `/healthz` 返回 `service: "tts-erp-v2"` 表示 API 进程响应。Worker 发布后还应查看近期
 任务结果；依赖故障分别核对 PostgreSQL、MinIO 和 frp。
 
-采购价同步稳定性核验：生产机约 1 GiB 内存、无 swap，Worker systemd 上限为
+采购价同步停用核验（2026-11-26）：`miaoshou.purchase_price_clean` 的注册入口已注释。
+由人工按上面的 Sync Worker 发布流程切换版本并重启后，确认本次启动的调度器日志不再注册
+该任务，运行 `python -m tts_erp_v2.sync_worker.main list` 的输出也不再包含该任务。
+发布后连续 24 小时确认它没有新的执行记录；旧 Worker 进程退出前仍可能继续调度，
+只发布 API 不会停用采购价同步。历史采购数据保留，采购价由人工维护。
+
+Worker 资源核验：生产机约 1 GiB 内存、无 swap，Worker systemd 上限为
 `MemoryMax=400M`。代码将全局任务子进程并发限制为 2；不要只提高此上限而不增加
-主机内存。发布后连续 24 小时检查 `miaoshou.purchase_price_clean` 是否成功、
-`journalctl -u tts-erp-sync.service` 是否仍有 OOM，以及
+主机内存。发布后检查 `journalctl -u tts-erp-sync.service` 是否仍有 OOM，以及
 `systemctl show tts-erp-sync.service -p MemoryCurrent -p MemoryPeak`。
-上游采购记录接口只按日期筛选，任务按整天切窗；若返回记录超出日期范围或各窗
-总数与全范围不一致，任务会安全失败并保留已有采购价。
 
 ### 生产 MinIO 预签名
 
