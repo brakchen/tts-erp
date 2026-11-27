@@ -16,8 +16,8 @@ from tts_erp_v2.reporting.purchase_price_import import (
     parse_cost_file,
     preview_cost_import,
 )
-from tts_erp_v2.reporting.purchase_price_lock import lock_purchase_price_spu
-from tts_erp_v2.reporting.purchase_prices import append_purchase_price
+from tts_erp_v2.reporting.purchase_price_lock import lock_purchase_price_spus
+from tts_erp_v2.reporting.purchase_prices import PurchasePriceEntry, append_purchase_prices
 
 router = APIRouter(prefix="/import")
 UPLOAD_SCHEMA = {"requestBody": {"required": True, "content": {
@@ -50,8 +50,7 @@ def process_import(
             return preview
         # Match and current costs are re-read after taking all shared writer locks.
         locked = {item["spuPk"] for item in preview["items"]}
-        for item in preview["items"]:
-            lock_purchase_price_spu(session, spu_pk=int(item["spuPk"]))
+        lock_purchase_price_spus(session, spu_pks=[int(pk) for pk in locked])
         preview = preview_cost_import(session, content, parsed)
         if any(item["spuPk"] not in locked for item in preview["items"]):
             raise HTTPException(409, "商品匹配已变化，请重新上传文件")
@@ -59,15 +58,10 @@ def process_import(
             raise HTTPException(409, "文件、商品匹配或当前采购价已变化，请重新预览后确认")
         if fingerprint is not None and not preview["items"]:
             raise HTTPException(422, "没有可以导入的商品")
-        for item in preview["items"]:
-            append_purchase_price(
-                session,
-                spu_pk=int(item["spuPk"]),
-                unit_cost=Decimal(item["unitCost"]),
-                currency="CNY",
-                note=f"订单包裹文件导入；{item['sampleCount']} 条非空采购金额的算术平均值",
-                created_by=created_by,
-            )
+        append_purchase_prices(session, prices=[PurchasePriceEntry(
+            spu_pk=int(item["spuPk"]), unit_cost=Decimal(item["unitCost"]), currency="CNY",
+            note=f"订单包裹文件导入；{item['sampleCount']} 条非空采购金额的算术平均值",
+        ) for item in preview["items"]], created_by=created_by)
         session.commit()
         return {"importedCount": preview["readyCount"], "importRows": preview["importRows"],
                 "totalRows": preview["totalRows"], "blankCostRows": preview["blankCostRows"],

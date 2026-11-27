@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Input, toast } from '@heroui/react';
+import { Button, toast } from '@heroui/react';
 import { ApiError, requestJson } from '../../shared/api/client';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { record } from './contracts';
 
+// File transfer + bounded XLSX work gets its own budget; ordinary writes stay at 30s.
+export const IMPORT_DEADLINE_MS = 240_000;
 interface ImportResult {
   totalRows: number; blankCostRows: number; importRows: number;
   importedCount: number; skippedRows: number;
@@ -35,6 +37,7 @@ interface Props {
 
 export default function CostImport({ rootPath, blocked, onBusy, onFence, onFailure, onImported }: Props) {
   const [busy, setBusy] = useState(false); const [uncertain, setUncertain] = useState(false);
+  const [fileName, setFileName] = useState(''); const picker = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController | undefined>(undefined);
   const activeToast = useRef<string | undefined>(undefined);
   const mounted = useRef(true); const flight = useRef(false);
@@ -44,6 +47,7 @@ export default function CostImport({ rootPath, blocked, onBusy, onFence, onFailu
   }; }, []);
   async function upload(file: File) {
     if (blocked || uncertain || flight.current) return;
+    setFileName(file.name);
     if (activeToast.current) toast.close(activeToast.current);
     if (!file.name.toLowerCase().endsWith('.xlsx') || file.size > 8 * 1024 * 1024) {
       activeToast.current = toast.danger('处理失败', { description: '请选择不超过 8 MB 的 .xlsx 文件', timeout: 6000 }); return;
@@ -54,7 +58,7 @@ export default function CostImport({ rootPath, blocked, onBusy, onFence, onFailu
     try {
       const { data, status } = await withinRequestLifetime(current, (signal) => requestJson<unknown>(rootPath, '/v2/reporting/purchase-prices/import', {
         method: 'POST', body: file, headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, signal,
-      }));
+      }), undefined, IMPORT_DEADLINE_MS);
       if (!mounted.current) return;
       if (status !== 201) throw new Error('导入结果未确认');
       const result = decodeResult(data);
@@ -77,12 +81,16 @@ export default function CostImport({ rootPath, blocked, onBusy, onFence, onFailu
   return <section className="erp-panel space-y-4" aria-label="文件导入采购价" aria-busy={busy}>
     <div><h2 className="erp-section-heading">导入采购价</h2>
       <p className="erp-table-meta">选择订单包裹 .xlsx 文件，自动匹配店铺并更新采购价。</p></div>
-    <Input type="file" accept=".xlsx" aria-label="采购价 Excel 文件" disabled={blocked || busy || uncertain} className="min-w-0 max-w-md"
+    <div className="flex min-w-0 max-w-full items-center gap-3">
+    <input ref={picker} type="file" hidden accept=".xlsx" aria-label="采购价 Excel 文件" disabled={blocked || busy || uncertain}
       onChange={(event) => {
         const selected = event.target.files?.[0];
         // Clear only the native selection so a corrected/rejected file can be chosen again.
         event.target.value = '';
         if (selected) void upload(selected);
       }} />
+    <Button type="button" variant="secondary" className="shrink-0" isDisabled={blocked || busy || uncertain} onPress={() => picker.current?.click()}>选择文件</Button>
+    <span className="min-w-0 flex-1 truncate text-sm text-muted" title={fileName || undefined}>{fileName || '未选择文件'}</span>
+    </div>
   </section>;
 }

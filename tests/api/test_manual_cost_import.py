@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from decimal import Decimal
 from io import BytesIO
 
 import pytest
 from fastapi import HTTPException, Request
 from openpyxl import Workbook
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 
 from tests.api.test_frontend_remaining_manual_identity import _facts
@@ -96,13 +99,26 @@ def test_single_upload_imports_averages_and_reports_skips(api_client, readwrite_
         ["10", SHOP_A, SHARED], ["20", SHOP_A, SHARED], [None, SHOP_A, SHARED],
         ["8", SHOP_B, SHARED], ["9", "TEST wrong shop", SHARED],
     ])
-    response = post(api_client, readwrite_key, content, "")
+    statements = []
+
+    def capture(_conn, _cursor, statement, _params, _context, _many):
+        statements.append(statement)
+
+    event.listen(db_engine, "before_cursor_execute", capture)
+    try:
+        response = post(api_client, readwrite_key, content, "")
+    finally:
+        event.remove(db_engine, "before_cursor_execute", capture)
     assert response.status_code == 201, response.text
     result = response.json()
     assert result["importedCount"] == 2 and result["importRows"] == 3
     assert result["totalRows"] == 5 and result["blankCostRows"] == 1 and result["skippedRows"] == 1
     assert result["issues"][0]["reason"] == "店铺或商品未匹配"
     assert "fingerprint" not in result and "items" not in result
+    # Bulk history operations stay constant instead of growing per product.
+    assert sum("pg_advisory_xact_lock" in sql for sql in statements) == 2
+    assert sum(sql.startswith("UPDATE procurement.manual_product_costs") for sql in statements) == 1
+    assert sum(sql.startswith("INSERT INTO procurement.manual_product_costs") for sql in statements) == 1
     facts = _facts(db_engine, products)
     for pk, expected in ((products[0], "15.0000"), (products[1], "8.0000")):
         history = [row for row in facts if row.spu_pk == pk]
@@ -182,19 +198,16 @@ def test_failure_rolls_back_whole_import(api_client, readwrite_key, db_engine, p
     content = xlsx([["10", SHOP_A, SHARED], ["20", SHOP_B, SHARED]])
     action = "" if direct else "confirm?fingerprint=" + post(api_client, readwrite_key, content).json()["fingerprint"]
     before = _facts(db_engine, products)
-    append = routes.append_purchase_price
-    calls = []
+    append = routes.append_purchase_prices
 
-    def fail_second(session, **kwargs):
-        calls.append(kwargs["spu_pk"])
-        if len(calls) == 2:
-            raise RuntimeError("TEST rollback whole import")
-        return append(session, **kwargs)
+    def fail_insert(session, *, prices, created_by):
+        # The bulk UPDATE has closed old versions before the INSERT overflows.
+        invalid = [prices[0], replace(prices[1], unit_cost=Decimal("1e30"))]
+        return append(session, prices=invalid, created_by=created_by)
 
-    monkeypatch.setattr(routes, "append_purchase_price", fail_second)
-    with pytest.raises(RuntimeError, match="TEST rollback"):
+    monkeypatch.setattr(routes, "append_purchase_prices", fail_insert)
+    with pytest.raises(DataError):
         post(api_client, readwrite_key, content, action)
-    assert len(calls) == 2
     assert _facts(db_engine, products) == before
 
 
