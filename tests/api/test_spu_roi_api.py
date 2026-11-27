@@ -1475,8 +1475,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert item["spend"] == m4(reconstructed_spend)
     assert item["sales"] == m4(reconstructed_sales)
     assert "SETTLEMENT" in body["meta"]["fee"]["note"]
-    assert "人工标注" in body["meta"]["cost_assumption"]
-    assert "其次使用已核实的妙手采购成交价(PURCHASE_PRICE)" in body["meta"]["cost_assumption"]
+    assert "使用当前有效的统一采购价(PURCHASE_PRICE)" in body["meta"]["cost_assumption"]
     assert "公共采集箱挂牌价不参与计算" in body["meta"]["cost_assumption"]
     assert "40 CNY" in body["meta"]["cost_assumption"]
     assert "缺成本" in body["meta"]["cost_assumption"]
@@ -1490,6 +1489,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert body["totals"]["cancelled_order_count"] == 1
     assert body["totals"]["total_orders"] == 2
     assert body["totals"]["refund_net_amount"] == cny4_from_usd("20")
+    assert body["totals"]["net_revenue"] == m4(scenario_a_net_revenue_cny())
     assert body["totals"]["net_profit"] == m4(scenario_a_net_profit_cny())
     assert body["totals"]["ad_system_actual_roi"] == "5.00"
     assert body["totals"]["ad_system_breakeven_roi"] == "1.94"
@@ -3035,9 +3035,9 @@ def test_spu_roi_totals_order_status_scope_cod_shop(
 
 
 def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
-    """命中 manual_product_costs 有效行 → cost_source=MANUAL,unit_cost_used 用真值。
+    """人工维护的有效采购价统一返回 PURCHASE_PRICE，unit_cost_used 用真值。
 
-    v10 公式（D1 MANUAL，部分退款不计严格全损）统一输出 CNY:
+    v10 公式（当前采购价，部分退款不计严格全损）统一输出 CNY:
       cost=25 CNY；部分退款 1 件 → strict_full_loss_qty=0
       net_revenue、广告消耗从原生币种换算为 CNY
       net_profit 等于旧 USD 结果 26.8925 ÷ cny_usd
@@ -3055,11 +3055,11 @@ def test_spu_roi_manual_cost_source(api_client, readonly_key, db_engine):
     assert body["total"] == 1
     item = body["items"][0]
     assert item["spu_pk"] == spu_pk
-    assert item["cost_source"] == "MANUAL"
+    assert item["cost_source"] == "PURCHASE_PRICE"
     assert Decimal(item["unit_cost_used"]) == Decimal(25)
     # 部分退款无严格全损证据。
     assert item["strict_full_loss_cost"] == "0.0000"
-    # v10 net_profit（D1 MANUAL 25 CNY 成本 + D5 未结算折算）
+    # v10 net_profit（当前采购价 25 CNY 成本 + 未结算折算）
     assert item["net_profit"] == cny4_from_usd("26.8925")
 
 
@@ -3119,7 +3119,7 @@ def test_spu_roi_uses_verified_miaoshou_purchase_price(
     )
     assert catalogue.status_code == 200, catalogue.text
     assert Decimal(catalogue.json()[0]["purchase_unit_cost"]) == Decimal("27.25")
-    assert catalogue.json()[0]["unit_cost"] is None
+    assert Decimal(catalogue.json()[0]["unit_cost"]) == Decimal("27.25")
 
 
 def test_spu_roi_unpaid_order_refund_defensive_unattributed(
