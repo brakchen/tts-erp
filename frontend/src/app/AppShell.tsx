@@ -1,4 +1,4 @@
-import { Button, Drawer, Link, Tooltip, buttonVariants } from '@heroui/react';
+import { Button, Drawer, Link, Toast, Tooltip, buttonVariants } from '@heroui/react';
 import { useEffect, useId, useState } from 'react';
 import type { AppShellProps, FrontendBootstrap } from '../shared/contracts';
 import AppBrand from './AppBrand';
@@ -91,6 +91,7 @@ export default function AppShell({ bootstrap, title, description, actions, child
 
   return (
     <div className="erp-shell flex min-h-dvh min-w-0">
+      <Toast.Provider />
       {hasNavigation && isDesktop && !collapsed && (
         <aside id={navigationId} className="erp-sidebar sticky top-0 max-h-dvh shrink-0 overflow-y-auto">
           <AppBrand />

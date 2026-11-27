@@ -1144,8 +1144,10 @@ It requires `readwrite`; cookie clients also send `X-Requested-With: tts-erp`.
   `{row,spuId,shopName,count,reason}`. A valid all-skipped file returns a completed result
   with zero updates. Invalid workbooks/headers return `422`; oversized files return `413`.
 
-The purchase workbench uploads immediately when a file is selected, shows progress, then
-shows the result and optional skip reasons. There is no preview table or confirmation step.
+The purchase workbench uploads immediately when a file is selected. A shared HeroUI Toast
+shows “处理中”, then updates in place to “处理成功” or “处理失败”. Zero-update results and
+errors include a short description. There is no preview table, confirmation step or inline
+results panel; detailed counts and skip reasons remain available in the API response.
 Imports may span multiple shops; the page's selected shop does not constrain the file.
 Existing edited drafts must be submitted or discarded before importing. The UI prevents
 concurrent uploads. Network/5xx/invalid-success results are unknown, never automatically
