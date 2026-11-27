@@ -7,13 +7,7 @@ export function openRowEditor(row: HTMLElement) {
 }
 
 export function closeRowEditor() {
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消并保留草稿' }));
-}
-
-export function editRowCost(row: HTMLElement, value: string) {
-  const dialog = openRowEditor(row);
-  fireEvent.change(dialog.getByRole('textbox', { name: '采购价' }), { target: { value } });
-  closeRowEditor();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消', exact: true }));
 }
 
 export function readRowCost(row: HTMLElement) {

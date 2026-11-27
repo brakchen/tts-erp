@@ -174,18 +174,13 @@ def test_manual_native_write_preview_and_readback(
         logins = sum(1 for verb, target, _c in gate.calls if verb == "POST" and target == LOGIN_PATH)
         assert logins == 1, "TEST manual native: the UI login issued more than one request"
 
-        # 5. The shop the UI actually selected, validated against the owned PKs.
-        shop_select = page.get_by_role("button", name=re.compile("当前店铺"))
-        selected_pk = re.search(r" · #(\d+)(?:\s|$)", shop_select.inner_text())
-        assert selected_pk is not None, "TEST manual native: selected shop PK is not displayed"
-        selected_value = selected_pk.group(1)
-        selected_ok = selected_value in {str(pk) for pk in owned_shop_pks}
-        assert selected_ok, "TEST manual native: the selected shop is not an owned shop"
-        default_contract = selected_value == str(first_visible_pk)
-        assert default_contract, "TEST manual native: the UI default is not the first shop"
-        selected_shop_pk = int(selected_value)
-        target_pk = target_by_shop.get(selected_shop_pk)
-        assert target_pk is not None, "TEST manual native: the selected shop has no shared product"
+        # 5. All shops is the default; explicitly filter to one owned shop.
+        shop_select = page.get_by_role("button", name=re.compile("店铺"))
+        expect(shop_select).to_contain_text("全部店铺")
+        selected_shop_pk = first_visible_pk
+        shop_select.click()
+        page.get_by_role("option", name=re.compile(rf" · #{selected_shop_pk}$")).click()
+        target_pk = target_by_shop[selected_shop_pk]
         shared_id = shared_external
 
         region = page.get_by_role("region", name="SPU 表格滚动区域", exact=True)
@@ -197,17 +192,8 @@ def test_manual_native_write_preview_and_readback(
         expect(dialog.get_by_role("heading", name="编辑商品采购价", exact=True)).to_be_visible()
         dialog.get_by_label("采购价", exact=True).fill(AMOUNT)
         dialog.get_by_label("备注", exact=True).fill(marker)
-        dialog.get_by_role("button", name="保存成本", exact=True).click()
-
-        confirm = page.get_by_role("dialog")
-        expect(confirm.get_by_role("heading", name="确认逐行写入", exact=True)).to_be_visible()
-        preview = (
-            f"店铺 #{selected_shop_pk} · PK {target_pk} · SPU {shared_id} · "
-            f"{AMOUNT} {CURRENCY} · 备注：{marker} · 生效：服务端当前 UTC"
-        )
-        expect(confirm.get_by_text(preview, exact=True)).to_have_count(1)
-        confirm.get_by_role("button", name="确认逐行提交", exact=True).click()
-        expect(row).to_contain_text("已确认成功")
+        dialog.get_by_role("button", name="保存采购价", exact=True).click()
+        expect(page.get_by_text("处理成功", exact=True)).to_be_visible()
 
         # 6. The fence's own ledger carries the ERP API status (no PW adapter).
         posts = [e for e in gate.responses if e[0] == "POST" and e[1] == COST_PATH]
@@ -238,7 +224,7 @@ def test_manual_native_write_preview_and_readback(
         region = page.get_by_role("region", name="SPU 表格滚动区域", exact=True)
         row = region.get_by_role("row").filter(has=page.get_by_text(shared_id, exact=True))
         expect(row).to_have_count(1)
-        expect(row).to_contain_text(f"人工：{AMOUNT} {CURRENCY}")
+        expect(row).to_contain_text(f"{AMOUNT} {CURRENCY}")
 
         SCREENSHOTS.mkdir(parents=True, exist_ok=True)
         page.evaluate("document.fonts.ready")

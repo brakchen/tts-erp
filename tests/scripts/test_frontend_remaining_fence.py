@@ -142,7 +142,8 @@ def test_cold_default_child_forged_profile_cannot_grant_remaining():
             gate.check_request("GET", child.base + "/v2/pages/manual-costs", None)
 
 
-def test_cold_manual_cost_crossed_owned_tuple_refused(manual_owned):
+@pytest.mark.parametrize("path", ["/v2/reporting/manual-costs", "/v2/reporting/purchase-prices"])
+def test_cold_manual_cost_crossed_owned_tuple_refused(manual_owned, path):
     probe, marker, shops, products, _engine, _factory = manual_owned
     gate = gate_for(
         probe, marker, shop_pks=frozenset(shops), product_pks=frozenset(products)
@@ -156,8 +157,24 @@ def test_cold_manual_cost_crossed_owned_tuple_refused(manual_owned):
     }
     with pytest.raises(ValueError):
         gate.check_request(
-            "POST", probe.child.base + "/v2/reporting/manual-costs", body
+            "POST", probe.child.base + path, body
         )
+
+
+@pytest.mark.parametrize("path", [
+    "/v2/commerce/channel-products",
+    "/v2/reporting/missing-cost-products",
+    "/v2/reporting/purchase-prices",
+])
+def test_all_shop_reads_require_ownership_of_every_product(manual_owned, path):
+    probe, marker, shops, products, _engine, _factory = manual_owned
+    gate = gate_for(probe, marker, shop_pks=frozenset(shops), product_pks=frozenset({products[0]}))
+    # The other shop's product is real but outside this fence's declared PKs.
+    with pytest.raises(ValueError):
+        gate.check_request("GET", probe.child.base + path + "?limit=50&offset=0", None)
+    assert gate.check_request(
+        "GET", probe.child.base + path + f"?limit=50&offset=0&shop_pk={shops[0]}", None
+    ) == path
 
 
 def test_cold_fixed_profile_requires_original_nonce():

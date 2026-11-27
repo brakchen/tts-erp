@@ -28,12 +28,12 @@ function message(error: unknown): string {
   return '请求未完成，请检查网络或联系管理员';
 }
 interface Props {
-  rootPath: string; blocked: boolean; hasDrafts: boolean;
+  rootPath: string; blocked: boolean;
   onBusy: (busy: boolean) => void; onFence: (fenced: boolean) => void;
   onFailure: (error: unknown) => void; onImported: () => void;
 }
 
-export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFence, onFailure, onImported }: Props) {
+export default function CostImport({ rootPath, blocked, onBusy, onFence, onFailure, onImported }: Props) {
   const [busy, setBusy] = useState(false); const [uncertain, setUncertain] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined);
   const activeToast = useRef<string | undefined>(undefined);
@@ -43,7 +43,7 @@ export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFen
     if (activeToast.current) toast.close(activeToast.current);
   }; }, []);
   async function upload(file: File) {
-    if (blocked || hasDrafts || uncertain || flight.current) return;
+    if (blocked || uncertain || flight.current) return;
     if (activeToast.current) toast.close(activeToast.current);
     if (!file.name.toLowerCase().endsWith('.xlsx') || file.size > 8 * 1024 * 1024) {
       activeToast.current = toast.danger('处理失败', { description: '请选择不超过 8 MB 的 .xlsx 文件', timeout: 6000 }); return;
@@ -75,16 +75,14 @@ export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFen
     }
   }
   return <section className="erp-panel space-y-4" aria-label="文件导入采购价" aria-busy={busy}>
-    <div><h2 className="erp-section-heading">从订单包裹文件导入采购价</h2>
-      <p>选择 .xlsx 文件后自动导入。必填列：「采购金额(产品-RMB)」「产品ID」；可选列：「店铺名称」。</p>
-      <p className="erp-table-meta">空金额跳过，同一商品取平均采购价。按文件匹配店铺，不受上方筛选限制，原采购价保留历史。</p></div>
-    <Input type="file" accept=".xlsx" aria-label="采购价 Excel 文件" disabled={blocked || hasDrafts || busy || uncertain} className="min-w-0 max-w-md"
+    <div><h2 className="erp-section-heading">导入采购价</h2>
+      <p className="erp-table-meta">选择订单包裹 .xlsx 文件，自动匹配店铺并更新采购价。</p></div>
+    <Input type="file" accept=".xlsx" aria-label="采购价 Excel 文件" disabled={blocked || busy || uncertain} className="min-w-0 max-w-md"
       onChange={(event) => {
         const selected = event.target.files?.[0];
         // Clear only the native selection so a corrected/rejected file can be chosen again.
         event.target.value = '';
         if (selected) void upload(selected);
       }} />
-    {hasDrafts && <p role="status">请先提交或撤销现有草稿，再导入文件。</p>}
   </section>;
 }
