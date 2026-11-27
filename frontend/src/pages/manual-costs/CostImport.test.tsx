@@ -7,7 +7,7 @@ import CostImport from './CostImport';
 const result = { totalRows: 4, blankCostRows: 1, skippedRows: 1, importRows: 2, importedCount: 1,
   issues: [{ row: 4, spuId: 'TEST_unknown', shopName: 'TEST 店铺', count: 1, reason: '店铺或商品未匹配' }] };
 const json = (data: unknown, status = 201) => new Response(JSON.stringify(data), { status });
-const props = () => ({ rootPath: '/tts', blocked: false, hasDrafts: false, onBusy: vi.fn(), onFence: vi.fn(), onFailure: vi.fn(), onImported: vi.fn() });
+const props = () => ({ rootPath: '/tts', blocked: false, onBusy: vi.fn(), onFence: vi.fn(), onFailure: vi.fn(), onImported: vi.fn() });
 const file = () => new File(['TEST XLSX'], 'TEST_costs.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 
 afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -69,10 +69,7 @@ it.each(['network', 'invalid-success'] as const)('does not replay or report succ
   expect(fetcher).toHaveBeenCalledOnce(); expect(callbacks.onImported).not.toHaveBeenCalled();
 });
 
-it('disables uploads without write access or while edited drafts exist', () => {
-  const callbacks = props(); const { rerender } = render(<><CostImport {...callbacks} blocked /><Toast.Provider /></>);
+it('disables uploads when the page blocks writing', () => {
+  const callbacks = props(); render(<><CostImport {...callbacks} blocked /><Toast.Provider /></>);
   expect(screen.getByLabelText('采购价 Excel 文件')).toBeDisabled();
-  rerender(<><CostImport {...callbacks} hasDrafts /><Toast.Provider /></>);
-  expect(screen.getByLabelText('采购价 Excel 文件')).toBeDisabled();
-  expect(screen.getByText('请先提交或撤销现有草稿，再导入文件。')).toBeVisible();
 });

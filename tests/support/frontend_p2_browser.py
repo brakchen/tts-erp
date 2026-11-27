@@ -125,7 +125,7 @@ class BrowserFence:
                         or {row.id for row in products} != t.product_pks or any(row.shop_pk not in t.shop_pks or row.title != t.marker for row in products)):
                     raise ValueError(REFUSAL)
                 self._products = tuple(ManualTarget(row.id, row.shop_pk, row.spu_id) for row in products)
-                if method == "POST" and path == "/v2/reporting/manual-costs":
+                if method == "POST" and path in {"/v2/reporting/manual-costs", "/v2/reporting/purchase-prices"}:
                     if not isinstance(body, dict) or not isinstance(body.get("spu_id"), str):
                         raise ValueError(REFUSAL)
                     operands = {key: manual_pk_operand(body[key]) for key in ("spu_pk", "shop_pk") if key in body}
@@ -137,11 +137,16 @@ class BrowserFence:
                                   and ("shop_pk" not in operands or row.shop_pk == operands["shop_pk"])]
                     if not candidates or any(ManualTarget(row.id, row.shop_pk, row.spu_id) not in self._products for row in candidates):
                         raise ValueError(REFUSAL)
-                if method == "GET" and path in {"/v2/commerce/channel-products", "/v2/reporting/missing-cost-products", "/v2/reporting/manual-costs"}:
-                    scopes = (query or {}).get("shop_pk", [])
-                    if len(scopes) != 1 or not scopes[0].isdigit() or int(scopes[0]) not in t.shop_pks:
-                        raise ValueError(REFUSAL)
-                    visible = set(session.scalars(select(ChannelProduct.id).where(ChannelProduct.shop_pk == int(scopes[0]))))
+                if method == "GET" and path in {"/v2/commerce/channel-products", "/v2/reporting/missing-cost-products", "/v2/reporting/manual-costs", "/v2/reporting/purchase-prices"}:
+                    scopes = (query or {}).get("shop_pk")
+                    visible_query = select(ChannelProduct.id)
+                    if scopes is not None:
+                        if len(scopes) != 1 or not scopes[0].isdigit() or int(scopes[0]) not in t.shop_pks:
+                            raise ValueError(REFUSAL)
+                        visible_query = visible_query.where(ChannelProduct.shop_pk == int(scopes[0]))
+                    # All-shop reads require ownership of every product in the
+                    # isolated database; no response filtering or marker shortcut.
+                    visible = set(session.scalars(visible_query))
                     if not visible <= t.product_pks:
                         raise ValueError(REFUSAL)
                 actor = session.scalar(select(User.id).where(User.username == self.username))

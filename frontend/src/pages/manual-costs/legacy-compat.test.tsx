@@ -1,4 +1,4 @@
-import { editRowCost, readRowCost } from './test-editor';
+import { readRowCost } from './test-editor';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -23,7 +23,7 @@ function setup(rows: Product[] | ((query: URLSearchParams) => Product[]) = [prod
     if (url.includes('channel-accounts?')) return json([shop]);
     if (url.includes('channel-products?')) return json(typeof rows === 'function' ? rows(query) : rows, 200, { 'X-Total-Count': '9007199254740997' });
     if (url.includes('missing-cost-products?')) return json({ items: [{ ...product(), spu_pk: product().id, missing_photo: true }], total_missing_photo: '9007199254740999' });
-    if (url.includes('/reporting/manual-costs?')) return json({ items: [{ id: '9223372036854775800', spu_pk: product().id, shop_pk: shop.id, spu_id: product().spu_id, title: 'TEST 变更记录', prev_unit_cost: '123456789012345.1234', prev_currency: 'CNY', unit_cost: '0.0000', currency: 'VND', note: null, valid_from: null, valid_to: null, created_at: null }], total: '9007199254740998' });
+    if (url.includes('/reporting/purchase-prices?')) return json({ items: [{ id: '9223372036854775800', spu_pk: product().id, shop_pk: shop.id, spu_id: product().spu_id, title: 'TEST 变更记录', prev_unit_cost: '123456789012345.1234', prev_currency: 'CNY', unit_cost: '0.0000', currency: 'VND', note: null, valid_from: null, valid_to: null, created_at: null }], total: '9007199254740998' });
     throw new Error('TEST unexpected read');
   });
   vi.stubGlobal('fetch', fetcher);
@@ -35,12 +35,12 @@ function catalogueQuery(fetcher: ReturnType<typeof setup>) {
 }
 const selectOptionLabels: Record<string, string> = {
   DELETED: '下架', SELLER_DEACTIVATED: '停售', ACTIVATE: '在售',
-  unit_cost: '成本', created_at: '创建时间', updated_at: '更新时间', desc: '降序',
+  unit_cost: '采购价', created_at: '创建时间', updated_at: '更新时间', desc: '降序',
 };
 async function chooseOption(user: ReturnType<typeof userEvent.setup>, label: string, option: string) {
   // Select includes both its aria-label and visible Label in the trigger name.
   // Limit catalogue controls to their form so 50 rows' actions are not scanned.
-  const scope = label === '当前店铺' ? screen : within(screen.getByLabelText('工作台筛选'));
+  const scope = label === '店铺' ? screen : within(screen.getByLabelText('工作台筛选'));
   await user.click(scope.getByRole('button', { name: (name) => name === label || name.endsWith(` ${label}`)
     || (['排序字段', '排序方向'].includes(label) && name.includes(label)) }));
   const options = within(await screen.findByRole('listbox'));
@@ -63,7 +63,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     await user.click(views.getByRole('button', { name: '缺采购价候选' }));
     expect(await screen.findByText(/缺图总数 9007199254740999/)).toBeVisible();
-    expect(screen.getByText('missing_photo：true')).toBeVisible();
+    expect(screen.getByText('缺少主图')).toBeVisible();
     expect(screen.queryByRole('textbox', { name: '按 SPU 或标题搜索' })).toBeNull();
     for (const retired of ['待处理', '待填成本', '待传图片']) expect(document.body.textContent).not.toContain(retired);
     expect(fetcher.mock.calls.every(([url, init]) => init.method === 'GET' && !url.includes('pending'))).toBe(true);
@@ -71,11 +71,11 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
 
   it('switches the actual shop_pk query while keeping the readonly catalogue usable', async () => {
     const other = { ...shop, id: '9007199254740994', shop_id: 'TEST_other', account_name: 'TEST 别店' };
-    const fetcher = setup((query) => [{ ...product(), shop_pk: query.get('shop_pk')!, title: `TEST 店铺 ${query.get('shop_pk')}` }]);
+    const fetcher = setup((query) => [{ ...product(), shop_pk: query.get('shop_pk') ?? shop.id, title: `TEST 店铺 ${query.get('shop_pk') ?? shop.id}` }]);
     fetcher.mockImplementationOnce(async () => json([shop, other]));
     const user = userEvent.setup(); render(<ManualCosts bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} />);
     await screen.findByText(`TEST 店铺 ${shop.id}`);
-    await chooseOption(user, '当前店铺', `${other.account_name} · ${other.shop_id} · #${other.id}`);
+    await chooseOption(user, '店铺', `${other.account_name} · ${other.shop_id} · #${other.id}`);
     const row = (await screen.findByText(`TEST 店铺 ${other.id}`)).closest('tr')!;
     expect(catalogueQuery(fetcher).get('shop_pk')).toBe(other.id);
     expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled();
@@ -124,7 +124,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     await screen.findByText('TEST server 0 row 0');
     const query = catalogueQuery(fetcher);
     expect(query.get(key)).toBe(value); expect(query.get('offset')).toBe('0');
-    expect(query.get('shop_pk')).toBe(shop.id);
+    expect(query.has('shop_pk')).toBe(false);
     // The server deliberately returns ACTIVATE rows even for DELETED/search scopes.
     // Rendering them unchanged protects server authority, not client-side re-filtering.
     expect(within(screen.getByLabelText('SPU 表格滚动区域')).getAllByText('在售')).toHaveLength(Number(query.get('limit')));
@@ -146,12 +146,12 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     ];
     setup(rows); render(<ManualCosts {...props} />); await screen.findByText('TEST 商品 0');
     expect(screen.getByRole('textbox', { name: '按 SPU 或标题搜索' })).toBeVisible();
-    expect(screen.getByRole('columnheader', { name: '内部 PK / SPU' })).toBeVisible();
+    expect(screen.getByRole('columnheader', { name: '店铺 / SPU' })).toBeVisible();
     expect(document.body.textContent).not.toContain('SKU');
     for (const [index, value] of ['999999999999999.9999', '-0.0100', '', '0.0000'].entries()) {
       const row = screen.getByText(`TEST 商品 ${index}`).closest('tr')!;
       expect(readRowCost(row)).toBe(value);
-      expect(within(row).getByText(rows[index].id)).toBeVisible();
+      expect(within(row).getByText(`PK ${rows[index].id}`)).toBeVisible();
       expect(within(row).getByText(rows[index].spu_id)).toBeVisible();
       expect(within(row).getByText(rows[index].source_created_at!)).toBeVisible();
       expect(within(row).getByText(rows[index].source_updated_at!)).toBeVisible();
@@ -160,7 +160,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     for (const label of ['在售', '下架', '停售', 'TEST_UPSTREAM_STATUS']) expect(catalogue.getByText(label)).toBeVisible();
     expect(screen.getByText('— —')).toBeVisible();
     expect(screen.getByText('999999999999999.9999 VND')).toBeVisible();
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '提交本页已编辑行' })).toBeNull();
   });
 
   it.each(['unregistered', 'candidate'])('never prefills a source price or auto-submits an untouched %s row', async (view) => {
@@ -172,30 +172,8 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     else await user.click(screen.getByRole('button', { name: '缺采购价候选' }));
     await waitFor(() => expect(readRowCost(screen.getByText('TEST 商品 0').closest('tr')!)).toBe(''));
     expect(screen.queryByText('货源挂牌：123456789012345.1234')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '提交本页已编辑行' })).toBeNull();
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
-  });
-
-  it('replaces submit-all hooks with explicit dirty-row confirmation and confirmed per-row progress', async () => {
-    const fetcher = setup([product(), product(1)]); const user = userEvent.setup(); render(<ManualCosts {...props} />);
-    const row = (await screen.findByText('TEST 商品 0')).closest('tr')!;
-    editRowCost(row, '77.0100');
-    expect(within(row).queryByText('未编辑')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
-    const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByText(/SPU TEST_SPU_0 · 77.0100 VND/)).toBeVisible();
-    expect(within(dialog).queryByText(/TEST_SPU_1/)).toBeNull();
-    expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
-    fetcher.mockImplementationOnce(async (url, init) => {
-      expect(url).toBe('/tts/v2/reporting/purchase-prices'); expect(init.method).toBe('POST');
-      expect(JSON.parse(init.body as string)).toMatchObject({ spu_pk: product().id, spu_id: 'TEST_SPU_0', unit_cost: '77.0100', currency: 'VND' });
-      return json({ id: '9223372036854775800', spu_pk: product().id, unit_cost: '77.0100', currency: 'VND', valid_from: '2026-10-24T12:00:00Z', valid_to: null }, 201);
-    });
-    await user.click(within(dialog).getByRole('button', { name: '确认逐行提交' }));
-    expect(await within(row).findByText('已确认成功')).toBeVisible();
-    expect(screen.getByText(/本次已确认 1 行 · 未完成 0 行 · 未发送 0 行/)).toBeVisible();
-    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
   });
 
   it('opens the image by keyboard, closes with Escape or the close control, and restores focus in readonly mode', async () => {
@@ -222,7 +200,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     const image = await screen.findByRole('img', { name: 'TEST 商品 0 主图' });
     fireEvent.error(image);
     expect(screen.queryByRole('button', { name: `放大图片 PK ${product().id}` })).toBeNull();
-    expect(screen.getAllByText('无可用镜像图')).toHaveLength(2);
+    expect(screen.getAllByText('暂无图片')).toHaveLength(2);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });

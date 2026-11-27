@@ -45,8 +45,8 @@ credential kinds:
 | Advertising filter metadata | `GET /v2/reporting/ad-daily/options` | readonly; registered TikTok shops (including zero-row shops) plus observed Sellers |
 | Coverage / health snapshot | `GET /v2/reporting/coverage` | readonly |
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
-| Search recent manual costs | `GET /v2/reporting/purchase-prices` | readonly |
-| Submit a manual cost | `POST /v2/reporting/purchase-prices` | readwrite |
+| Search recent purchase prices | `GET /v2/reporting/purchase-prices` | readonly |
+| Submit a purchase price | `POST /v2/reporting/purchase-prices` | readwrite |
 | Import XLSX purchase prices | `POST /v2/reporting/purchase-prices/import` | readwrite |
 | List focused SPUs for one shop | `GET /v2/reporting/focused-spus/{shop_pk}` | readonly |
 | Add/remove focused SPUs | `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite |
@@ -1149,8 +1149,12 @@ shows “处理中”, then updates in place to “处理成功” or “处理�
 errors include a short description. There is no preview table, confirmation step or inline
 results panel; detailed counts and skip reasons remain available in the API response.
 Imports may span multiple shops; the page's selected shop does not constrain the file.
-Existing edited drafts must be submitted or discarded before importing. The UI prevents
-concurrent uploads. Network/5xx/invalid-success results are unknown, never automatically
+The catalogue, missing-price view and price history default to all shops; `shop_pk` is
+sent only when a specific shop is selected. A product editor saves exactly one captured
+`spu_pk/spu_id` pair with one click, without a confirmation step. Cancel or close discards
+unsaved input; there is no retained-draft or multi-row submission workflow. Saving and
+file imports share the same Toast states, and successful saves refresh the list.
+The UI prevents concurrent writes. Network/5xx/invalid-success results are unknown, never automatically
 replayed; users reload and inspect current prices before choosing whether to upload again.
 Each explicit import can append a new history version.
 

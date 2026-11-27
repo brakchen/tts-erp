@@ -1,87 +1,127 @@
-import { closeRowEditor, editRowCost, openRowEditor, readRowCost } from './test-editor';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { closeRowEditor, openRowEditor, readRowCost } from './test-editor';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import ManualCosts from './index';
+import PurchasePrices from './index';
 import { initialFields } from './contracts';
 import type { Product } from './contracts';
 import type { PageProps } from '../../shared/contracts';
 
 const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'manual-costs', navigation: [], releaseId: 'TEST', roleCapabilities: { readwrite: true, admin: false } } };
 const shop = { id: '9007199254740993', shop_id: 'TEST_shop', account_name: 'TEST 店铺', platform: 'tiktok' };
-const product = (id = '9007199254740995', name = 'TEST 商品'): Product & { purchase_unit_cost?: string | null; source_unit_cost?: string | null } => ({ id, shop_pk: shop.id, spu_id: 'TEST_same_external', title: name, status: 'ACTIVATE', unit_cost: '0.0000', currency: 'VND', purchase_unit_cost: null, source_unit_cost: '123456789012345.1234', source_created_at: null, source_updated_at: '2026-10-24T12:00:00+00:00', image_url: null });
+const otherShop = { ...shop, id: '9007199254740994', shop_id: 'TEST_other_shop', account_name: 'TEST 别店' };
+const product = (id = '9007199254740995', name = 'TEST 商品'): Product => ({ id, shop_pk: shop.id, spu_id: 'TEST_same_external', title: name,
+  status: 'ACTIVATE', unit_cost: '0.0000', currency: 'VND', source_created_at: null, source_updated_at: '2026-10-24T12:00:00+00:00', image_url: null });
 const json = (data: unknown, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
+const saved = (row: Product, value = '12.3400') => json({ id: '9223372036854775800', spu_pk: row.id, unit_cost: value,
+  currency: row.currency, valid_from: '2026-10-24T12:00:00Z', valid_to: null }, 201);
 function setup(command: (url: string, init: RequestInit) => Promise<Response> = async () => { throw new Error('TEST unexpected command'); }, rows = [product()]) {
   const fetcher = vi.fn(async (url: string, init: RequestInit) => {
     if (init.method === 'POST') return command(url, init);
-    if (url.includes('channel-accounts?')) return json([shop]);
-    if (url.includes('channel-products?')) return json(rows, 200, { 'X-Total-Count': '9007199254740997' });
-    if (url.includes('channel-products/')) return json(rows[0]);
+    if (url.includes('channel-accounts?')) return json([shop, otherShop]);
+    if (url.includes('channel-products?')) {
+      const scope = new URL(url, 'https://test.invalid').searchParams.get('shop_pk');
+      return json(rows.filter((row) => !scope || row.shop_pk === scope), 200, { 'X-Total-Count': '9007199254740997' });
+    }
     if (url.includes('missing-cost-products?')) return json({ items: rows.map(({ id, ...row }) => ({ ...row, spu_pk: id, missing_photo: true })), total_missing_photo: '9007199254740999' });
-    if (url.includes('/reporting/manual-costs?')) return json({ items: [], total: 0 });
+    if (url.includes('/reporting/purchase-prices?')) return json({ items: [], total: 0 });
     throw new Error('TEST unexpected read');
   });
   vi.stubGlobal('fetch', fetcher); return fetcher;
 }
-async function editCost(value = '123456789012345.1234', name = 'TEST 商品') {
-  const row = (await screen.findByText(name)).closest('tr')!;
-  editRowCost(row, value);
-  return row;
-}
+const ManualCosts = (properties: PageProps) => <><PurchasePrices {...properties} /><Toast.Provider /></>;
 const workbenchFilters = () => within(screen.getByLabelText('工作台筛选'));
 const workbenchViews = () => within(screen.getByLabelText('工作台视图'));
-async function confirmBatch(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
-  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
+async function chooseShop(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(workbenchFilters().getByRole('button', { name: /店铺/ }));
+  await user.click(within(await screen.findByRole('listbox')).getByRole('option', { name: label }));
 }
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
-describe('manual-costs workbench', () => {
-  it('leaves manual cost blank when only the collect-box list price exists', () => {
-    const fields = initialFields({ ...product(), unit_cost: null, currency: null });
-    expect(fields.unit_cost).toBe('');
-    expect(fields.currency).toBe('CNY');
+async function editCost(value = '12.3400', name = 'TEST 商品') {
+  const row = (await screen.findByText(name)).closest('tr')!;
+  const dialog = openRowEditor(row);
+  fireEvent.change(dialog.getByRole('textbox', { name: '采购价' }), { target: { value } });
+  return dialog;
+}
+afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+describe('purchase-price workbench', () => {
+  it('keeps missing purchase prices blank and defaults their currency to CNY', () => {
+    expect(initialFields({ ...product(), unit_cost: null, currency: null })).toMatchObject({ unit_cost: '', currency: 'CNY' });
   });
-  it('shows exactly one server-resolved purchase price', async () => {
-    setup(undefined, [{ ...product(), unit_cost: '27.2500', currency: 'CNY', purchase_unit_cost: '27.2500', source_unit_cost: '34.0000' }]);
-    render(<ManualCosts {...props} />);
-    expect(await screen.findByText('27.2500 CNY')).toBeVisible();
-    expect(screen.queryByText(/人工：|妙手成交：|货源挂牌：/)).not.toBeInTheDocument();
+  it('defaults to all shops and can filter and return to all without changing identity', async () => {
+    const other = { ...product('9007199254740996', 'TEST 跨店商品'), shop_pk: otherShop.id };
+    const fetcher = setup(undefined, [product(), other]); render(<ManualCosts {...props} />); const user = userEvent.setup();
+    await screen.findByText('TEST 商品'); expect(screen.getByText('TEST 跨店商品')).toBeVisible();
+    const reads = () => fetcher.mock.calls.filter(([url]) => url.includes('channel-products?'));
+    expect(new URL(reads()[0][0], 'https://test.invalid').searchParams.has('shop_pk')).toBe(false);
+    await chooseShop(user, `${otherShop.account_name} · ${otherShop.shop_id} · #${otherShop.id}`);
+    await waitFor(() => expect(screen.queryByText('TEST 商品')).not.toBeInTheDocument());
+    expect(new URL(reads().at(-1)![0], 'https://test.invalid').searchParams.get('shop_pk')).toBe(otherShop.id);
+    await chooseShop(user, '全部店铺'); await screen.findByText('TEST 商品');
+    expect(new URL(reads().at(-1)![0], 'https://test.invalid').searchParams.has('shop_pk')).toBe(false);
   });
-  it('shows an actionable read error and correlation id without leaking server details', async () => {
-    const fetcher = setup();
-    fetcher.mockImplementation(async (url) => url.includes('channel-accounts?') ? json([shop])
-      : json({ detail: 'TEST_private_database_error' }, 500, { 'x-request-id': 'TEST_read_request' }));
-    render(<ManualCosts {...props} />);
-    expect(await screen.findByText(/HTTP 500/)).toBeVisible();
-    expect(screen.getByText(/TEST_read_request/)).toBeVisible();
-    expect(screen.getByRole('button', { name: '重试列表' })).toBeEnabled();
-    expect(document.body.textContent).not.toContain('TEST_private_database_error');
-    expect(screen.queryByRole('table', { name: 'SPU 成本工作台' })).not.toBeInTheDocument();
-  });
-  it('reads the actual shop-scoped catalogue and preserves zero, money strings and oversized counts', async () => {
-    const fetcher = setup(); render(<ManualCosts {...props} />);
-    const row = (await screen.findByText('TEST 商品')).closest('tr')!;
-    expect(within(row).queryByRole('textbox')).not.toBeInTheDocument();
-    expect(within(row).queryByRole('button', { name: '撤销' })).not.toBeInTheDocument();
-    expect(within(row).queryByRole('button', { name: '提交此行' })).not.toBeInTheDocument();
-    expect(within(row).queryByText('未编辑')).not.toBeInTheDocument();
-    expect(readRowCost(row)).toBe('0.0000');
-    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
-    expect(screen.getByText('9007199254740995')).toBeVisible();
-    expect(fetcher.mock.calls.some(([url]) => url.includes('shop_pk=9007199254740993'))).toBe(true);
-  });
-  it('confirms only dirty rows once, retaining exact decimal strings and the captured internal/external identity pair', async () => {
-    let release!: (r: Response) => void; const writes: RequestInit[] = [];
-    setup(async (_url, init) => { writes.push(init); return new Promise((resolve) => { release = resolve; }); }, [product(), product('9007199254740996', 'TEST 未编辑')]);
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost();
-    await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
-    const confirm = within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' });
-    await user.click(confirm); fireEvent.click(confirm); expect(writes).toHaveLength(1);
-    expect(JSON.parse(writes[0].body as string)).toEqual({ spu_pk: '9007199254740995', spu_id: 'TEST_same_external', unit_cost: '123456789012345.1234', currency: 'VND', note: '' });
+  it('saves the chosen product once with exact price and captured IDs, then closes the editor', async () => {
+    let finish!: (response: Response) => void; const writes: RequestInit[] = [];
+    setup(async (_url, init) => { writes.push(init); return new Promise((resolve) => { finish = resolve; }); },
+      [product(), { ...product('9007199254740996', 'TEST 同 SPU 别店'), shop_pk: otherShop.id }]);
+    render(<ManualCosts {...props} />); const dialog = await editCost('123456789012345.1234', 'TEST 同 SPU 别店');
+    const save = dialog.getByRole('button', { name: '保存采购价' }); fireEvent.click(save); fireEvent.click(save);
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0].body as string)).toEqual({ spu_pk: '9007199254740996', spu_id: 'TEST_same_external', unit_cost: '123456789012345.1234', currency: 'VND', note: '' });
     expect(new Headers(writes[0].headers).get('X-Requested-With')).toBe('tts-erp');
-    await act(async () => release(json({ id: '9223372036854775800', spu_pk: '9007199254740995', unit_cost: '123456789012345.1234', currency: 'VND', valid_from: '2026-10-24T12:00:00+00:00', valid_to: null }, 201)));
-    expect(await screen.findByText('已确认成功')).toBeVisible();
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
+    expect(await screen.findByText('处理中')).toBeVisible();
+    await act(async () => finish(saved(product('9007199254740996'), '123456789012345.1234')));
+    expect(await screen.findByText('处理成功')).toBeVisible(); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.queryByRole('button', { name: '提交本页已编辑行' })).toBeNull();
+  });
+  it('discards unsaved input on cancel and never creates a draft or a write', async () => {
+    const fetcher = setup(); render(<ManualCosts {...props} />); await editCost('88.0000'); closeRowEditor();
+    const row = screen.getByText('TEST 商品').closest('tr')!; expect(readRowCost(row)).toBe('0.0000');
+    expect(screen.queryByLabelText('保留草稿')).toBeNull(); expect(screen.getByLabelText('采购价 Excel 文件')).toBeEnabled();
+    expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+  });
+  it.each([409, 422])('preserves only the open form on HTTP %s and permits one explicit save retry', async (status) => {
+    let attempts = 0;
+    setup(async () => ++attempts === 1 ? json({ detail: 'TEST_rejected' }, status) : saved(product()));
+    render(<ManualCosts {...props} />); const dialog = await editCost();
+    fireEvent.click(dialog.getByRole('button', { name: '保存采购价' }));
+    expect(await screen.findByText('处理失败')).toBeVisible();
+    expect(dialog.getByRole('textbox', { name: '采购价' })).toHaveValue('12.3400');
+    fireEvent.click(dialog.getByRole('button', { name: '保存采购价' }));
+    expect(await screen.findByText('处理成功')).toBeVisible(); expect(attempts).toBe(2);
+  });
+  it.each(['network', '500', 'malformed', 'wrong-identity'] as const)('never replays an unknown %s save or reports it as success', async (mode) => {
+    const fetcher = setup(async () => {
+      if (mode === 'network') throw new TypeError('TEST offline');
+      if (mode === '500') return json({}, 500);
+      return mode === 'malformed' ? json({ unit_cost: '12.3400' }, 201) : saved(product('9007199254740996'));
+    });
+    render(<ManualCosts {...props} />); const dialog = await editCost(); fireEvent.click(dialog.getByRole('button', { name: '保存采购价' }));
+    expect(await screen.findByText(/保存结果未确认/)).toBeVisible(); expect(dialog.getByRole('button', { name: '保存采购价' })).toBeDisabled();
+    closeRowEditor(); expect(screen.getByLabelText('采购价 Excel 文件')).toBeDisabled();
+    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+    expect(screen.queryByText('处理成功')).toBeNull();
+  });
+  it('validates optional aware timestamps without sending or converting the amount', async () => {
+    const fetcher = setup(); render(<ManualCosts {...props} />); const dialog = await editCost('0.123456');
+    fireEvent.change(dialog.getByRole('textbox', { name: '生效时间' }), { target: { value: '2026-11-27T12:00:00' } });
+    fireEvent.click(dialog.getByRole('button', { name: '保存采购价' }));
+    expect(await screen.findByText('请填写带 Z 或明确时区偏移的 ISO 时间')).toBeVisible();
+    expect(dialog.getByRole('textbox', { name: '采购价' })).toHaveValue('0.123456');
+    expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+  });
+  it('shows a read error and correlation id without exposing database details', async () => {
+    const fetcher = setup(); fetcher.mockImplementation(async (url) => url.includes('channel-accounts?') ? json([shop])
+      : json({ detail: 'TEST_private_database_error' }, 500, { 'x-request-id': 'TEST_read_request' }));
+    render(<ManualCosts {...props} />); expect(await screen.findByText(/HTTP 500/)).toBeVisible();
+    expect(screen.getByText(/TEST_read_request/)).toBeVisible(); expect(screen.getByRole('button', { name: '重试列表' })).toBeEnabled();
+    expect(document.body.textContent).not.toContain('TEST_private_database_error');
+  });
+  it('keeps readonly browsing usable without enabling editing or uploads', async () => {
+    setup(); render(<ManualCosts bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} />);
+    await screen.findByText('TEST 商品'); expect(screen.getByRole('button', { name: '编辑详情' })).toBeDisabled();
+    expect(screen.getByLabelText('采购价 Excel 文件')).toBeDisabled(); expect(workbenchFilters().getByRole('button', { name: '搜索' })).toBeEnabled();
   });
 });
 
@@ -98,7 +138,7 @@ describe('manual-costs server-total pagination', () => {
       const offset = Number(new URL(url, 'https://test.invalid').searchParams.get('offset'));
       const rows = fullPage ? pageRows(offset) : [product('1000', 'TEST partial page')];
       if (url.includes('channel-products?')) return view === 'all' ? json(rows, 200, { 'X-Total-Count': total }) : json([]);
-      if (url.includes('/reporting/manual-costs?')) {
+      if (url.includes('/reporting/purchase-prices?')) {
         // Exercise raw JSON integer decoding, not a pre-rounded JavaScript number.
         return new Response(`{"items":${JSON.stringify(historyRows(rows))},"total":${total}}`);
       }
@@ -109,7 +149,7 @@ describe('manual-costs server-total pagination', () => {
   async function openView(view: 'all' | 'recent', user: ReturnType<typeof userEvent.setup>) {
     render(<ManualCosts {...props} />);
     if (view === 'recent') {
-      await screen.findByText('当前页暂无候选');
+      await screen.findByText('当前页暂无商品');
       await user.click(workbenchViews().getByRole('button', { name: '最近提交' }));
     }
   }
@@ -128,7 +168,7 @@ describe('manual-costs server-total pagination', () => {
     fetcher.mockImplementationOnce(async () => view === 'all' ? json(pageRows(), 200, { 'X-Total-Count': '50' }) : json({ items: historyRows(pageRows()), total: 50 }));
     await user.click(pagingControls().getByRole('button', { name: '上一页' })); await pagingControls().findByText('第 1 页 · 共 1 页');
     expect(pagingControls().getByRole('button', { name: '下一页' })).toBeDisabled();
-    expect(fetcher.mock.calls.some(([url]) => url.includes('offset=50') && url.includes(view === 'all' ? 'channel-products?' : '/reporting/manual-costs?'))).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => url.includes('offset=50') && url.includes(view === 'all' ? 'channel-products?' : '/reporting/purchase-prices?'))).toBe(true);
     expect(fetcher.mock.calls.some(([url]) => url.includes('offset=100'))).toBe(false);
   });
   it.each(['all', 'recent'] as const)('uses an authoritative remaining %s total even when the returned page is short', async (view) => {
@@ -161,7 +201,7 @@ describe('manual-costs server-total pagination', () => {
     });
     const next = () => within(screen.getByRole('navigation', { name: '采购工作台分页' })).getByRole('button', { name: '下一页' });
     await user.click(workbenchViews().getByRole('button', { name: '缺采购价候选' })); await screen.findByText(/缺图总数 9007199254740997/);
-    await user.click(within(screen.getByRole('form', { name: '工作台筛选' })).getByRole('checkbox', { name: /仅看本页缺图/ })); await screen.findByText('当前页暂无候选');
+    await user.click(within(screen.getByRole('form', { name: '工作台筛选' })).getByRole('checkbox', { name: /仅看本页缺图/ })); await screen.findByText('当前页暂无商品');
     expect(next()).toBeEnabled();
     await user.click(next());
     await screen.findByText(/缺图总数 9007199254740997/);
@@ -169,326 +209,4 @@ describe('manual-costs server-total pagination', () => {
     expect(screen.queryByText(/共 \d+ 页/)).toBeNull();
     expect(fetcher.mock.calls.some(([url]) => url.includes('missing-cost-products?') && url.includes('offset=50') && !url.includes('q='))).toBe(true);
   });
-});
-
-const saved = (id = '9007199254740995', cost = '123456789012345.1234') => json({ id: '9223372036854775800', spu_pk: id, unit_cost: cost, currency: 'VND', valid_from: '2026-10-24T12:00:00+00:00', valid_to: null }, 201);
-describe('manual-costs draft and batch recovery', () => {
-  it('undoes a later edit back to the last confirmed submission rather than a stale pre-submit catalogue value', async () => {
-    setup(async () => saved()); const user = userEvent.setup(); render(<ManualCosts {...props} />);
-    await editCost(); await confirmBatch(user); await screen.findByText('已确认成功');
-    const row = await editCost('999.0000'); await user.click(screen.getByRole('button', { name: '撤销草稿 PK 9007199254740995' }));
-    expect(readRowCost(row)).toBe('123456789012345.1234');
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
-  });
-  it('submits dirty same-external-ID rows sequentially by distinct captured internal PKs, never untouched prefills', async () => {
-    const writes: RequestInit[] = []; const releases: ((value: Response) => void)[] = [];
-    setup(async (_url, init) => { writes.push(init); return new Promise((resolve) => releases.push(resolve)); }, [product(), product('9007199254740996', 'TEST 第二'), product('9007199254740997', 'TEST 未改')]);
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost(); await editCost('77.1000', 'TEST 第二');
-    await confirmBatch(user); expect(writes).toHaveLength(1);
-    await act(async () => releases[0](saved())); expect(writes).toHaveLength(2);
-    expect(JSON.parse(writes[1].body as string)).toMatchObject({ spu_pk: '9007199254740996', spu_id: 'TEST_same_external', unit_cost: '77.1000' });
-    await act(async () => releases[1](saved('9007199254740996', '77.1000')));
-    expect(screen.getAllByText('已确认成功')).toHaveLength(2); expect(writes).toHaveLength(2);
-  });
-  it.each(['network', '500', 'malformed', 'wrong-identity'])('stops a non-atomic batch on %s, preserves unsent targets, and needs a separate GET and retry decision', async (mode) => {
-    const writes: RequestInit[] = [];
-    const fetcher = setup(async (_url, init) => {
-      writes.push(init); if (writes.length === 1) return saved();
-      if (mode === 'network') throw new TypeError('TEST_PRIVATE');
-      if (mode === 'malformed') return json(null, 201);
-      if (mode === 'wrong-identity') return saved('42');
-      return json({ detail: 'TEST_PRIVATE' }, 500);
-    }, [product(), product('9007199254740996', 'TEST 第二'), product('9007199254740997', 'TEST 第三')]);
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost(); await editCost('22.0000', 'TEST 第二'); const unsent = await editCost('33.0000', 'TEST 第三');
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
-    return;
-});
-  it.each([409, 422])('keeps actionable per-row HTTP %s errors, clears only field snapshots on genuine edit and permits explicit retry', async (status) => {
-    let writes = 0; setup(async () => ++writes === 1 ? json({ detail: [{ loc: ['body', 'unit_cost'], type: 'greater_than', input: 'TEST_PRIVATE' }] }, status) : saved());
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
-    await within(row).findByText(({403:'没有权限执行此操作',409:'数据已变化，请刷新后确认再提交',422:'请检查标红的字段'} as Record<number, string>)[status]); expect(document.body.textContent).not.toContain('TEST_PRIVATE');
-    const input = openRowEditor(row).getByRole('textbox', { name: '采购价' }); if (status === 422) expect(input).toBeInvalid();
-    fireEvent.change(input, { target: { value: '123456789012345.1235' } }); expect(input).toBeValid(); closeRowEditor();
-    await confirmBatch(user); await screen.findByText('已确认成功'); expect(writes).toBe(2);
-  });
-  it('preserves drafts across view switches, dialog cancellation, server refresh and explicit server filters without submitting prefills', async () => {
-    const fetcher = setup(); const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost('5.0001');
-    await user.click(workbenchViews().getByRole('button', { name: '最近提交' })); await screen.findByText('暂无提交记录');
-    await user.click(screen.getByRole('button', { name: '继续编辑 PK 9007199254740995' }));
-    let dialog = screen.getByRole('dialog'); expect(within(dialog).getByRole('textbox', { name: '采购价' })).toHaveValue('5.0001');
-    fireEvent.change(within(dialog).getByRole('textbox', { name: '备注' }), { target: { value: 'TEST draft note' } });
-    await user.click(within(dialog).getByRole('button', { name: '取消并保留草稿' }));
-    await user.click(workbenchViews().getByRole('button', { name: '全部 SPU' })); const row = (await screen.findByText('TEST 商品')).closest('tr')!;
-    expect(readRowCost(row)).toBe('5.0001');
-    await user.click(screen.getByRole('checkbox', { name: '仅看缺采购价' }));
-    await screen.findByText('TEST 商品'); expect(fetcher.mock.calls.some(([url]) => url.includes('missing_purchase_cost=true'))).toBe(true);
-    await user.click(within(screen.getByText('TEST 商品').closest('tr')!).getByRole('button', { name: '编辑详情' })); dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByRole('textbox', { name: '备注' })).toHaveValue('TEST draft note');
-    expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
-  });
-  it('does not clear a 403 command denial when editing and preserves usable reads', async () => {
-    let writes = 0; const fetcher = setup(async () => { writes++; return json({ detail: 'TEST_PRIVATE' }, 403); });
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
-    await within(row).findByText('没有权限执行此操作'); await editCost('6.0000');
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled(); expect(workbenchFilters().getByRole('button', { name: '搜索' })).toBeEnabled();
-    fireEvent.change(screen.getByRole('textbox', { name: '按 SPU 或标题搜索' }), { target: { value: 'TEST 查询' } });
-    await user.click(workbenchFilters().getByRole('button', { name: '搜索' })); await screen.findByText('TEST 商品');
-    expect(writes).toBe(1); expect(fetcher.mock.calls.some(([url]) => url.includes('/auth/login'))).toBe(false);
-  });
-  it('requires explicitly aware optional time without converting decimal inputs or inventing a timezone', async () => {
-    const writes: RequestInit[] = []; setup(async (_url, init) => { writes.push(init); return saved(); });
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost();
-    await user.click(within(screen.getByText('TEST 商品').closest('tr')!).getByRole('button', { name: '编辑详情' }));
-    let dialog = screen.getByRole('dialog'); fireEvent.change(within(dialog).getByRole('textbox', { name: '生效时间' }), { target: { value: '2026-10-24T12:00' } });
-    await user.click(within(dialog).getByRole('button', { name: '保存成本' })); await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
-    expect(writes).toHaveLength(0);
-    await user.click(within(screen.getByText('TEST 商品').closest('tr')!).getByRole('button', { name: '编辑详情' })); dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByRole('textbox', { name: '生效时间' })).toBeInvalid();
-    fireEvent.change(within(dialog).getByRole('textbox', { name: '生效时间' }), { target: { value: '2026-10-24T12:00:00+07:00' } });
-    expect(within(dialog).getByRole('textbox', { name: '生效时间' })).toBeValid();
-    await user.click(within(dialog).getByRole('button', { name: '保存成本' })); await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' }));
-    await screen.findByText('已确认成功'); expect(JSON.parse(writes[0].body as string).valid_from).toBe('2026-10-24T12:00:00+07:00');
-  });
-});
-
-describe('manual-costs read fences and cancellation', () => {
-  it('can stop the remaining captured batch without cancelling or replaying the in-flight row', async () => {
-    let release!: (response: Response) => void; const writes: RequestInit[] = [];
-    setup(async (_url, init) => { writes.push(init); return new Promise((resolve) => { release = resolve; }); }, [product(), product('9007199254740996', 'TEST 第二')]);
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost(); const unsent = await editCost('22.0000', 'TEST 第二');
-    await confirmBatch(user); await user.click(screen.getByRole('button', { name: '停止后续行' }));
-    await act(async () => release(saved()));
-    await screen.findByText('已确认成功'); expect(writes).toHaveLength(1);
-    expect(readRowCost(unsent)).toBe('22.0000'); expect(within(unsent).queryByText('未编辑')).not.toBeInTheDocument();
-  });
-  it('keeps a full 600-second Retry-After across draft edits and scope changes, with explicit-only requests after expiry', async () => {
-    let release!: (response: Response) => void;
-    const fetcher = setup(async () => new Promise((resolve) => { release = resolve; }));
-    const user = userEvent.setup(); const page = render(<ManualCosts {...props} />); await editCost(); await confirmBatch(user);
-    vi.useFakeTimers(); await act(async () => release(json({}, 500, { 'Retry-After': '600' })));
-    const writes = fetcher.mock.calls.filter(([, init]) => init.method === 'POST').length;
-    const reads = fetcher.mock.calls.filter(([, init]) => init.method === 'GET').length;
-    const row = screen.getByText('TEST 商品').closest('tr')!; editRowCost(row, '88.0001');
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
-    expect(workbenchFilters().getByRole('button', { name: '搜索' })).toBeDisabled();
-    fireEvent.click(workbenchViews().getByRole('button', { name: '最近提交' })); await act(async () => {});
-    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(reads);
-    await act(async () => { await vi.advanceTimersByTimeAsync(599000); }); expect(workbenchFilters().getByRole('button', { name: '搜索' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(workbenchFilters().getByRole('button', { name: '搜索' })).toBeEnabled();
-    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(reads);
-    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(writes);
-    page.unmount(); await act(async () => { await vi.advanceTimersByTimeAsync(600000); });
-    expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(writes);
-  });
-  it('renders missing-photo metadata and its exact server count without adding an ignored q filter', async () => {
-    const fetcher = setup(); const user = userEvent.setup(); render(<ManualCosts {...props} />); await screen.findByText('TEST 商品');
-    await user.click(workbenchViews().getByRole('button', { name: '缺采购价候选' })); await screen.findByText(/缺图总数 9007199254740999/);
-    expect(screen.getByText('missing_photo：true')).toBeVisible(); expect(screen.queryByRole('textbox', { name: '按 SPU 或标题搜索' })).toBeNull();
-    expect(fetcher.mock.calls.find(([url]) => url.includes('missing-cost-products?'))?.[0]).not.toContain('q=');
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
-  });
-  it('preserves raw numeric bigint identities before JSON rounding and never converts money strings', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.includes('channel-accounts?')
-      ? new Response('[{"id":9007199254740993,"shop_id":"TEST_shop","account_name":"TEST 店铺"}]')
-      : new Response('[{"id":9007199254740995,"shop_pk":9007199254740993,"spu_id":"TEST_long","title":"TEST exact","unit_cost":"999999999999999.9999","currency":"CNY"}]', { headers: { 'X-Total-Count': '9007199254740997' } })));
-    render(<ManualCosts {...props} />); const row = (await screen.findByText('TEST exact')).closest('tr')!;
-    expect(within(row).getByText('9007199254740995')).toBeVisible(); expect(readRowCost(row)).toBe('999999999999999.9999');
-    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
-  });
-  it('does not let an old-shop GET overwrite a newer shop and retains the old-shop draft target', async () => {
-    const other = { ...shop, id: '9007199254740994', shop_id: 'TEST_other', account_name: 'TEST 别店' };
-    let stale!: (response: Response) => void; let firstReads = 0;
-    const fetcher = vi.fn(async (url: string) => {
-      if (url.includes('channel-accounts?')) return json([shop, other]);
-      if (url.includes('shop_pk=9007199254740993')) { firstReads++; return firstReads === 1 ? json([product()]) : new Promise<Response>((resolve) => { stale = resolve; }); }
-      return json([{ ...product('9007199254740996', 'TEST 别店商品'), shop_pk: other.id }]);
-    });
-    vi.stubGlobal('fetch', fetcher); const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost('22.2000');
-    fireEvent.change(screen.getByRole('textbox', { name: '按 SPU 或标题搜索' }), { target: { value: 'TEST 查询' } });
-    await user.click(workbenchFilters().getByRole('button', { name: '搜索' }));
-    await user.click(screen.getByRole('button', { name: /当前店铺/ }));
-    await user.click(await screen.findByRole('option', { name: /TEST 别店/ }));
-    await screen.findByText('TEST 别店商品'); await act(async () => stale(json([product('9007199254740997', 'TEST stale')])));
-    expect(screen.queryByText('TEST stale')).toBeNull(); expect(screen.getByText('TEST 别店商品')).toBeVisible();
-    expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: '继续编辑 PK 9007199254740995' }));
-    expect(within(screen.getByRole('dialog')).getByRole('textbox', { name: '采购价' })).toHaveValue('22.2000');
-    expect(within(screen.getByRole('dialog')).getByText('#9007199254740993')).toBeVisible();
-  });
-});
-
-describe('manual-costs authority and read states', () => {
-  it('does not erase a checked uncertainty when a retry is rejected by local time syntax before any write', async () => {
-    let writes = 0; setup(async () => { writes++; return json({}, 500); });
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); const row = await editCost(); await confirmBatch(user);
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
-    return;
-});
-  it('renders server-provided history and previous amounts/currencies without financial math, and sends search/paging to the actual history endpoint', async () => {
-    const fetcher = setup(); const user = userEvent.setup(); render(<ManualCosts {...props} />); await screen.findByText('TEST 商品');
-    fetcher.mockImplementationOnce(async () => json({ total: '9007199254740999', items: [{ id: '9007199254740999', spu_pk: '9007199254740995', shop_pk: shop.id, spu_id: 'TEST_same_external', title: 'TEST history', unit_cost: '0.0000', currency: 'VND', prev_unit_cost: '9999999999999.9999', prev_currency: 'CNY', note: null, valid_from: '2026-10-24T12:00:00+00:00', valid_to: null, created_at: null }] }));
-    await user.click(workbenchViews().getByRole('button', { name: '最近提交' }));
-    const row = (await screen.findByText('TEST history')).closest('tr')!;
-    expect(within(row).getByText('9999999999999.9999 CNY')).toBeVisible(); expect(within(row).getByText('0.0000 VND')).toBeVisible();
-    expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
-    fireEvent.change(screen.getByRole('textbox', { name: '按 SPU 或标题搜索' }), { target: { value: 'TEST search' } });
-    await user.click(workbenchFilters().getByRole('button', { name: '搜索' })); await screen.findByText('暂无提交记录');
-    expect(fetcher.mock.calls.some(([url]) => url.includes('/v2/reporting/purchase-prices?') && url.includes('q=TEST+search') && url.includes('offset=0'))).toBe(true);
-  });
-  it.each([undefined, { readwrite: false, admin: true }, { readwrite: false, admin: false }])('fails closed for non-write capabilities %# while preserving readable facts', async (roleCapabilities) => {
-    const fetcher = setup(); render(<ManualCosts bootstrap={{ ...props.bootstrap, roleCapabilities }} />);
-    const row = (await screen.findByText('TEST 商品')).closest('tr')!;
-    expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled(); expect(within(row).getByRole('button', { name: '编辑详情' })).toBeDisabled();
-    expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
-  });
-  it('gives malformed reads an explicit retry rather than silently treating them as empty data', async () => {
-    const fetcher = setup(); fetcher.mockImplementationOnce(async () => json([shop])).mockImplementationOnce(async () => json(null));
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await screen.findByText('列表不可用');
-    expect(screen.queryByText('当前页暂无候选')).toBeNull(); await user.click(screen.getByRole('button', { name: '重试列表' }));
-    await screen.findByText('TEST 商品');
-  });
-});
-
-describe('manual-costs captured-target boundaries', () => {
-  it('retries only the uncertain row after explicit GET and decision, then submits the remaining unsent draft without replaying confirmed rows', async () => {
-    const ids: string[] = []; const fetcher = setup(async (_url, init) => {
-      const body = JSON.parse(init.body as string) as { spu_pk: string; unit_cost: string }; ids.push(body.spu_pk);
-      return ids.length === 2 ? json({}, 500) : saved(body.spu_pk, body.unit_cost);
-    }, [product(), product('9007199254740996', 'TEST 第二'), product('9007199254740997', 'TEST 第三')]);
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await editCost(); await editCost('22.0000', 'TEST 第二'); await editCost('33.0000', 'TEST 第三');
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
-    return;
-});
-  it.each(['wrong-shop', 'malformed', '403'])('keeps an uncertain row fenced after a %s verification GET', async (mode) => {
-    let writes = 0; const fetcher = setup(async () => { writes++; return json({}, 500); });
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
-    return;
-});
-  it('never expands a missing-photo current-page display filter into extra batch targets', async () => {
-    const writes: RequestInit[] = []; const fetcher = setup(async (_url, init) => { writes.push(init); const body = JSON.parse(init.body as string); return saved(body.spu_pk, body.unit_cost); });
-    const user = userEvent.setup(); render(<ManualCosts {...props} />); await screen.findByText('TEST 商品');
-    fetcher.mockImplementationOnce(async () => json({ total_missing_photo: 81, items: [
-      { ...product(), spu_pk: '9007199254740995', missing_photo: true },
-      { ...product('9007199254740996', 'TEST 有图'), spu_pk: '9007199254740996', missing_photo: false },
-    ] }));
-    await user.click(workbenchViews().getByRole('button', { name: '缺采购价候选' })); await editCost(); await editCost('22.0000', 'TEST 有图');
-    await user.click(screen.getByRole('checkbox', { name: /仅看本页缺图/ })); await confirmBatch(user); await screen.findByText('已确认成功');
-    expect(writes).toHaveLength(1); expect(JSON.parse(writes[0].body as string).spu_pk).toBe('9007199254740995');
-    expect(screen.getByRole('button', { name: '继续编辑 PK 9007199254740996' })).toBeEnabled(); expect(screen.getByText(/缺图总数 81/)).toBeVisible();
-  });
-});
-
-describe('manual-costs bounded request lifetimes', () => {
-  it.each(['fetch', 'body'])('bounds stalled POST %s, stops remaining targets and ignores late success without replay', async (stage) => {
-    let finish!: () => void; let signal!: AbortSignal; const writes: RequestInit[] = [];
-    const fetcher = setup(async (_url, init) => {
-      writes.push(init); signal = init.signal as AbortSignal;
-      if (stage === 'fetch') return new Promise<Response>((resolve) => { finish = () => resolve(saved()); });
-      const response = saved(); const raw = await response.clone().text();
-      vi.spyOn(response, 'text').mockImplementation(() => new Promise<string>((resolve) => { finish = () => resolve(raw); }));
-      return response;
-    }, [product(), product('9007199254740996', 'TEST 第二')]);
-    const user = userEvent.setup(); const page = render(<ManualCosts {...props} />);
-    const first = await editCost(); const remaining = await editCost('22.0000', 'TEST 第二');
-    await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
-    vi.useFakeTimers(); await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' })); });
-    const calls = fetcher.mock.calls.length;
-    expect(writes).toHaveLength(1); expect(within(first).getByRole('button', { name: '编辑详情' })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
-    return;
-});
-});
-
-describe('manual-costs deadline cleanup', () => {
-  it('quietly aborts a stalled write on unmount and ignores later completion without follow-up requests', async () => {
-    let finish!: () => void; let signal!: AbortSignal;
-    const fetcher = setup(async (_url, init) => {
-      signal = init.signal as AbortSignal;
-      return new Promise<Response>((resolve) => { finish = () => resolve(saved()); });
-    }, [product(), product('9007199254740996', 'TEST 第二')]);
-    const user = userEvent.setup(); const page = render(<ManualCosts {...props} />); await editCost(); await editCost('22.0000', 'TEST 第二');
-    await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
-    vi.useFakeTimers();
-    const scheduled = vi.spyOn(globalThis, 'setTimeout'); const cleared = vi.spyOn(globalThis, 'clearTimeout');
-    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' })); });
-    const deadline = scheduled.mock.results[scheduled.mock.calls.findIndex((call) => call[1] === 30_000)].value;
-    const calls = fetcher.mock.calls.length; const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await act(async () => { page.unmount(); });
-    expect(signal.aborted).toBe(true); expect(cleared).toHaveBeenCalledWith(deadline);
-    await act(async () => { finish(); await vi.advanceTimersByTimeAsync(60_000); });
-    expect(fetcher.mock.calls).toHaveLength(calls); expect(errors).not.toHaveBeenCalled();
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    expect(screen.queryByText('已确认成功')).toBeNull();
-  });
-});
-
-describe('manual-costs received error-header fences', () => {
-  it('keeps a received 600-second fence from a stalled 500 POST body and the local deadline, then allows an explicit retry', async () => {
-    const stalled = new Response(new ReadableStream<Uint8Array>({ start() {} }), {
-      status: 500, headers: { 'Retry-After': '600', 'x-request-id': 'TEST_fenced_error' },
-    });
-    const writes: RequestInit[] = [];
-    const fetcher = setup(async (_url, init) => {
-      writes.push(init);
-      if (writes.length === 1) return stalled;
-      const body = JSON.parse(init.body as string) as { spu_pk: string; unit_cost: string };
-      return saved(body.spu_pk, body.unit_cost);
-    }, [product(), product('9007199254740996', 'TEST 第二')]);
-    const user = userEvent.setup(); const page = render(<ManualCosts {...props} />);
-    await editCost(); await editCost('22.0000', 'TEST 第二');
-    await user.click(screen.getByRole('button', { name: '提交本页已编辑行' }));
-    vi.useFakeTimers();
-    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认逐行提交' })); });
-    const calls = fetcher.mock.calls.length;
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(screen.queryByRole('region', { name: '提交结果核对' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '查询当前事实' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '停止后续行' })).toBeNull();
-    expect(workbenchFilters().getByRole('button', { name: '搜索' })).toBeDisabled();
-    expect(writes).toHaveLength(1); expect(screen.queryByText('已确认成功')).toBeNull();
-    const first = screen.getByText('TEST 商品').closest('tr')!;
-    const firstCost = openRowEditor(first).getByRole('textbox', { name: '采购价' });
-    expect(firstCost).toHaveValue('123456789012345.1234');
-    fireEvent.change(firstCost, { target: { value: '33.0000' } });
-    closeRowEditor();
-    expect(readRowCost(screen.getByText('TEST 第二').closest('tr')!)).toBe('22.0000');
-    await act(async () => { fireEvent.click(workbenchViews().getByRole('button', { name: '最近提交' })); });
-    expect(fetcher.mock.calls).toHaveLength(calls);
-    await act(async () => { await vi.advanceTimersByTimeAsync(569_999); });
-    expect(workbenchFilters().getByRole('button', { name: '搜索' })).toBeDisabled();
-    await act(async () => { fireEvent.click(workbenchViews().getByRole('button', { name: '全部 SPU' })); });
-    expect(fetcher.mock.calls).toHaveLength(calls); expect(writes).toHaveLength(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(workbenchFilters().getByRole('button', { name: '搜索' })).toBeEnabled();
-    expect(fetcher.mock.calls).toHaveLength(calls); // Expiry never sends a request.
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '提交本页已编辑行' })); });
-    const dialog = screen.getByRole('dialog'); expect(within(dialog).getByText(/33.0000 VND/)).toBeVisible();
-    expect(writes).toHaveLength(1);
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '确认逐行提交' })); });
-    expect(writes).toHaveLength(3);
-    expect(JSON.parse(writes[1].body as string)).toMatchObject({ spu_pk: '9007199254740995', spu_id: 'TEST_same_external', unit_cost: '33.0000', currency: 'VND' });
-    expect(screen.getAllByText('已确认成功').length).toBeGreaterThan(0);
-    page.unmount();
-  });
-});
-
-it.each(['TEST_alias', '', null])('shows alias with the stable manual-cost shop ID (%s)', async (shop_alias) => {
-  const fetcher = setup();
-  const original = fetcher.getMockImplementation()!;
-  fetcher.mockImplementation((url, init) => url.includes('channel-accounts?')
-    ? Promise.resolve(json([{ ...shop, shop_alias }])) : original(url, init));
-  render(<ManualCosts {...props} />);
-  const user = userEvent.setup();
-  await screen.findByText('TEST 商品');
-  await user.click(screen.getByRole('button', { name: /当前店铺/ }));
-  expect(screen.getByRole('option', { name: `${shop_alias || shop.account_name} · ${shop.shop_id} · #${shop.id}` })).toBeVisible();
 });

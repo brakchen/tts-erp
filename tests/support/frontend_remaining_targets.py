@@ -117,11 +117,9 @@ def remaining_request(
                         "missing_purchase_cost": {"true"},
                     }
                 )
-            return {
-                "shop_pk",
-                "limit",
-                "offset",
-            } <= query.keys() <= choices.keys() and all(
+            # An omitted shop is accepted only after BrowserFence proves every
+            # globally visible product belongs to this fixture's owned PKs.
+            return {"limit", "offset"} <= query.keys() <= choices.keys() and all(
                 len(values) == 1 and values[0] in choices[key]
                 for key, values in query.items()
             )
