@@ -534,7 +534,6 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `cpa` | `items[]` | JSON string（money，4 位） | 广告消耗/广告归因订单 | 可 null |
 | `unit_cost_used` | `items[]` | JSON string（money，4 位） | 本次采用的单位采购成本 | 非 null |
 | `cost_source` | `items[]` | JSON string | 单位成本来源 | 非 null |
-| `net_revenue` | `items[]` | JSON string（money，4 位） | 净收入 | 非 null |
 | `settled_net` | `items[]` | JSON string（money，4 位） | 已结算净收入 | 非 null |
 | `unsettled_net` | `items[]` | JSON string（money，4 位） | 未结算净收入估算 | 非 null |
 | `settled_sales` | `items[]` | JSON string（money，4 位） | 已结算销售额 | 非 null |
@@ -573,6 +572,7 @@ enum map 缺失或无某 code 时，kernel 显示后端原始 code；它不是�
 | `refund_net_amount` | `items[] + totals` | JSON string（money，4 位） | 净退款金额 | 非 null |
 | `refund_rate` | `items[] + totals` | JSON string（items ratio 2 位；totals ratio 4 位） | 退款率 | 可 null |
 | `strict_full_loss_cost` | `items[] + totals` | JSON string（money，4 位） | 严格全损件数 × 当前单位成本 | 非 null |
+| `net_revenue` | `items[] + totals` | JSON string（money，4 位） | 当前净收入；大盘为完整业务范围的服务端汇总，不随分页改变，空范围为 `"0.0000"` | 非 null |
 | `net_profit` | `items[] + totals` | JSON string（money，4 位） | 净利润 | 非 null |
 | `roi_real` | `items[] + totals` | JSON string（ratio，2 位） | 实际 ROI | 可 null |
 | `roi_breakeven` | `items[] + totals` | JSON string（ratio，2 位） | 实际保本 ROI | 可 null |

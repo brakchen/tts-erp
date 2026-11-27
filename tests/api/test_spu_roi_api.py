@@ -1490,6 +1490,7 @@ def test_spu_roi_math_single_spu_default_k1(api_client, readonly_key, db_engine)
     assert body["totals"]["cancelled_order_count"] == 1
     assert body["totals"]["total_orders"] == 2
     assert body["totals"]["refund_net_amount"] == cny4_from_usd("20")
+    assert body["totals"]["net_revenue"] == m4(scenario_a_net_revenue_cny())
     assert body["totals"]["net_profit"] == m4(scenario_a_net_profit_cny())
     assert body["totals"]["ad_system_actual_roi"] == "5.00"
     assert body["totals"]["ad_system_breakeven_roi"] == "1.94"
@@ -3762,6 +3763,7 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
 
     # totals = 行加总（money 4 位）
     row_sum = {
+        "net_revenue": sum((Decimal(i["net_revenue"]) for i in items), Decimal(0)),
         "spend": sum((Decimal(i["spend"]) for i in items), Decimal(0)),
         "sales": sum((Decimal(i["sales"]) for i in items), Decimal(0)),
         "refund_net_amount": sum(
@@ -3783,6 +3785,7 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     assert [i["spu_id"] for i in b2["items"]] == expected_order[:2]
     assert b2["total"] == 3
     assert b2["totals"]["row_count"] == 3
+    assert b2["totals"]["net_revenue"] == totals["net_revenue"]
 
     r3 = api_client.get(
         "/v2/analytics/spu-roi",
@@ -3791,6 +3794,7 @@ def test_spu_roi_default_sort_roi_asc_pagination_and_totals(
     )
     b3 = r3.json()
     assert [i["spu_id"] for i in b3["items"]] == expected_order[2:]
+    assert b3["totals"]["net_revenue"] == totals["net_revenue"]
 
 
 def test_spu_roi_sort_order_desc_and_search(api_client, readonly_key, db_engine):
@@ -3926,6 +3930,7 @@ def test_spu_roi_empty_result_and_meta(api_client, readonly_key):
         "gmv": "0.0000",
         "refund_net_amount": "0.0000",
         "strict_full_loss_cost": "0.0000",
+        "net_revenue": "0.0000",
         "net_profit": "0.0000",
         "roi_real": None,  # Σspend=0 → null(页面显示 —)
         "refund_order_count": 0,
