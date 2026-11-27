@@ -47,6 +47,7 @@ credential kinds:
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
 | Search recent manual costs | `GET /v2/reporting/manual-costs` | readonly |
 | Submit a manual cost | `POST /v2/reporting/manual-costs` | readwrite |
+| Preview / confirm XLSX purchase costs | `POST /v2/reporting/manual-costs/import/{preview,confirm}` | readwrite |
 | List focused SPUs for one shop | `GET /v2/reporting/focused-spus/{shop_pk}` | readonly |
 | Add/remove focused SPUs | `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite |
 | Latest cached FX rates | `GET /v2/fx/latest` | readonly |
@@ -1108,6 +1109,49 @@ curl -sS -H "X-API-Key: $KEY" \
   "http://127.0.0.1:9877/v2/commerce/sales-orders?shop_pk=$ACCT&limit=20" \
   | jq -r '.[] | [.order_id, .status, .payment_amount, .currency] | @tsv'
 ```
+
+### Import manual purchase costs from an order-package export
+
+`POST /v2/reporting/manual-costs/import/preview` accepts the **raw XLSX file**
+as the HTTP body (not multipart or JSON), with content type
+`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
+It requires `readwrite`; cookie clients also send `X-Requested-With: tts-erp`.
+
+- First worksheet only; maximum 8 MB, 50,000 data rows and 5,000 resolved products.
+  ZIP contents are bounded to 64 MB / 1,000 entries. XML is parsed with
+  `openpyxl==3.1.5` ([MIT](https://openpyxl.readthedocs.io/)) and
+  `defusedxml==0.7.1` ([PSF](https://github.com/tiran/defusedxml)); the only additional
+  parser dependency is openpyxl's `et-xmlfile`. No macros, formulas or external links are executed.
+- Required headers: `采购金额(产品-RMB)` and `产品ID`; optional `店铺名称`.
+  Surrounding whitespace, full-width parentheses and a trailing header comma are normalized.
+  Keep long product IDs as **text**; unsafe numeric IDs are reported instead of rounded.
+- Blank amounts are skipped. Each nonblank amount is one purchase sample, including
+  repeated equal prices. The backend uses Decimal arithmetic, then rounds the arithmetic
+  mean to four decimal places with `ROUND_HALF_UP`, in CNY. Quantities are not used.
+  A nonpositive, nonnumeric or formula amount blocks its entire resolved product group.
+- Only authorized TikTok products are eligible. A provided shop name must match its
+  account name or shop alias after whitespace/Unicode/case normalization. When the file
+  lacks a shop name, or the target shop has neither a name nor alias, a unique SPU match
+  is required. Ambiguous or unmatched products are skipped with reasons. Multiple source
+  groups resolving to one internal product combine their samples before averaging.
+- Preview returns `{fingerprint,totalRows,blankCostRows,importRows,readyCount,skippedRows,items,issues}`.
+  Items include `spuPk/spuId/shopPk/shopName/title/sampleCount/unitCost/currency` and
+  `previousId/previousCost/previousCurrency`. IDs and amounts are strings. Preview writes nothing.
+
+`POST /v2/reporting/manual-costs/import/confirm?fingerprint=<preview fingerprint>`
+receives the **same raw file**. The backend re-parses and matches it, acquires the shared
+SPU writer locks in ascending order and checks the fingerprint against the current
+manual costs. A changed file, match or previous cost returns `409`, requiring a new
+preview. A valid batch appends cost history and closes former effective rows in **one
+transaction**, returning `201 {importedCount,importRows,blankCostRows,skippedRows}` only
+after commit. Unexpected failures roll back the batch; no eligible products returns `422`.
+The file itself is not persisted. Replaying the old fingerprint after success returns `409`;
+an explicit new preview and confirmation can append another history version.
+
+File imports may span multiple shops; the page's currently selected shop does not constrain
+the file. This differs from the existing “submit edited rows on this page” scope. Existing
+drafts must be submitted or discarded before starting an import. Network/5xx/invalid-success
+confirmation results are displayed as unknown and never automatically replayed.
 
 ### Submit a manual cost for an SPU
 
