@@ -16,7 +16,9 @@ def test_upload_entry_layout(frontend_browser_renderer, tmp_path, prefix, width)
     panel = page.get_by_role("region", name="文件导入采购价", exact=True)
     expect(panel.get_by_role("heading", name="从订单包裹文件导入采购价")).to_be_visible()
     expect(panel.get_by_label("采购价 Excel 文件")).to_be_visible()
-    expect(panel.get_by_role("button", name="上传并预览")).to_be_visible()
+    expect(panel.get_by_text("选择 .xlsx 文件后自动导入。", exact=False)).to_be_visible()
+    expect(panel.get_by_role("button", name="上传并预览")).to_have_count(0)
+    expect(panel.get_by_role("button", name="确认导入", exact=False)).to_have_count(0)
     report = overflow_report(page)
     assert report["scrollWidth"] <= report["clientWidth"] + 1, report
     assert not report["offenders"], report

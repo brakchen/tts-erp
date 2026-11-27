@@ -1,4 +1,4 @@
-"""Bounded binary XLSX upload, preview and atomic cost-history confirmation."""
+"""Bounded XLSX upload and atomic purchase-price history import."""
 
 from __future__ import annotations
 
@@ -39,21 +39,25 @@ async def read_upload(request: Request) -> bytes:
 
 
 def process_import(
-    session: Session, content: bytes, created_by: str, fingerprint: str | None = None
+    session: Session, content: bytes, created_by: str, fingerprint: str | None = None,
+    *, write: bool = False,
 ) -> dict[str, Any]:
     """All synchronous parsing/database work runs off the event loop."""
     try:
         parsed = parse_cost_file(content)
         preview = preview_cost_import(session, content, parsed)
-        if fingerprint is None:
+        if not write and fingerprint is None:
             return preview
         # Match and current costs are re-read after taking all shared writer locks.
+        locked = {item["spuPk"] for item in preview["items"]}
         for item in preview["items"]:
             lock_purchase_price_spu(session, spu_pk=int(item["spuPk"]))
         preview = preview_cost_import(session, content, parsed)
-        if preview["fingerprint"] != fingerprint:
+        if any(item["spuPk"] not in locked for item in preview["items"]):
+            raise HTTPException(409, "商品匹配已变化，请重新上传文件")
+        if fingerprint is not None and preview["fingerprint"] != fingerprint:
             raise HTTPException(409, "文件、商品匹配或当前采购价已变化，请重新预览后确认")
-        if not preview["items"]:
+        if fingerprint is not None and not preview["items"]:
             raise HTTPException(422, "没有可以导入的商品")
         for item in preview["items"]:
             append_purchase_price(
@@ -66,18 +70,26 @@ def process_import(
             )
         session.commit()
         return {"importedCount": preview["readyCount"], "importRows": preview["importRows"],
-                "blankCostRows": preview["blankCostRows"], "skippedRows": preview["skippedRows"]}
+                "totalRows": preview["totalRows"], "blankCostRows": preview["blankCostRows"],
+                "skippedRows": preview["skippedRows"], "issues": preview["issues"]}
     except CostImportError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
-@router.post("/preview", openapi_extra=UPLOAD_SCHEMA)
+@router.post("", status_code=201, openapi_extra=UPLOAD_SCHEMA)
+async def import_prices(request: Request, session: SessionDep) -> dict[str, Any]:
+    content = await read_upload(request)
+    created_by = f"api_key:{request.scope.get('api_key_role') or 'unknown'}"
+    return await run_in_threadpool(process_import, session, content, created_by, write=True)
+
+
+@router.post("/preview", deprecated=True, openapi_extra=UPLOAD_SCHEMA)
 async def preview_import(request: Request, session: SessionDep) -> dict[str, Any]:
     content = await read_upload(request)
     return await run_in_threadpool(process_import, session, content, "")
 
 
-@router.post("/confirm", status_code=201, openapi_extra=UPLOAD_SCHEMA)
+@router.post("/confirm", status_code=201, deprecated=True, openapi_extra=UPLOAD_SCHEMA)
 async def confirm_import(
     request: Request,
     session: SessionDep,

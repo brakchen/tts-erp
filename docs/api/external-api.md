@@ -47,7 +47,7 @@ credential kinds:
 | Active SPUs missing a cost | `GET /v2/reporting/missing-cost-products` | readonly |
 | Search recent manual costs | `GET /v2/reporting/purchase-prices` | readonly |
 | Submit a manual cost | `POST /v2/reporting/purchase-prices` | readwrite |
-| Preview / confirm XLSX purchase costs | `POST /v2/reporting/purchase-prices/import/{preview,confirm}` | readwrite |
+| Import XLSX purchase prices | `POST /v2/reporting/purchase-prices/import` | readwrite |
 | List focused SPUs for one shop | `GET /v2/reporting/focused-spus/{shop_pk}` | readonly |
 | Add/remove focused SPUs | `PATCH /v2/reporting/focused-spus/{shop_pk}` | readwrite |
 | Latest cached FX rates | `GET /v2/fx/latest` | readonly |
@@ -1112,7 +1112,7 @@ curl -sS -H "X-API-Key: $KEY" \
 
 ### Import purchase prices from an order-package export
 
-`POST /v2/reporting/purchase-prices/import/preview` accepts the **raw XLSX file**
+`POST /v2/reporting/purchase-prices/import` accepts the **raw XLSX file**
 as the HTTP body (not multipart or JSON), with content type
 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
 It requires `readwrite`; cookie clients also send `X-Requested-With: tts-erp`.
@@ -1134,26 +1134,41 @@ It requires `readwrite`; cookie clients also send `X-Requested-With: tts-erp`.
   lacks a shop name, or the target shop has neither a name nor alias, a unique SPU match
   is required. Ambiguous or unmatched products are skipped with reasons. Multiple source
   groups resolving to one internal product combine their samples before averaging.
-- Preview returns `{fingerprint,totalRows,blankCostRows,importRows,readyCount,skippedRows,items,issues}`.
-  Items include `spuPk/spuId/shopPk/shopName/title/sampleCount/unitCost/currency` and
-  `previousId/previousCost/previousCurrency`. IDs and amounts are strings. Preview writes nothing.
+- One request parses, resolves products, calculates prices and saves the eligible batch.
+  The backend acquires shared SPU writer locks in ascending order, rechecks matches and
+  appends price history in one transaction. Prior prices remain in history. The file itself
+  is not persisted. Unexpected failures roll back the entire batch.
+- After commit, returns `201 {importedCount,totalRows,importRows,blankCostRows,skippedRows,issues}`.
+  `importedCount` counts products, while `importRows` counts their purchase samples.
+  `totalRows = importRows + blankCostRows + skippedRows`; issues contain
+  `{row,spuId,shopName,count,reason}`. A valid all-skipped file returns a completed result
+  with zero updates. Invalid workbooks/headers return `422`; oversized files return `413`.
+
+The purchase workbench uploads immediately when a file is selected, shows progress, then
+shows the result and optional skip reasons. There is no preview table or confirmation step.
+Imports may span multiple shops; the page's selected shop does not constrain the file.
+Existing edited drafts must be submitted or discarded before importing. The UI prevents
+concurrent uploads. Network/5xx/invalid-success results are unknown, never automatically
+replayed; users reload and inspect current prices before choosing whether to upload again.
+Each explicit import can append a new history version.
+
+Deprecated two-request endpoints remain for existing API clients; the workbench no longer
+uses them. `POST /v2/reporting/purchase-prices/import/preview` returns
+`{fingerprint,totalRows,blankCostRows,importRows,readyCount,skippedRows,items,issues}` without
+writing. Items include `spuPk/spuId/shopPk/shopName/title/sampleCount/unitCost/currency` and
+`previousId/previousCost/previousCurrency`; IDs and amounts are strings.
 
 `POST /v2/reporting/purchase-prices/import/confirm?fingerprint=<preview fingerprint>`
 receives the **same raw file**. The backend re-parses and matches it, acquires the shared
 SPU writer locks in ascending order and checks the fingerprint against the current
-manual costs. A changed file, match or previous cost returns `409`, requiring a new
+purchase prices. A changed file, match or previous cost returns `409`, requiring a new
 preview. A valid batch appends cost history and closes former effective rows in **one
 transaction**, returning `201 {importedCount,importRows,blankCostRows,skippedRows}` only
 after commit. Unexpected failures roll back the batch; no eligible products returns `422`.
 The file itself is not persisted. Replaying the old fingerprint after success returns `409`;
 an explicit new preview and confirmation can append another history version.
 
-File imports may span multiple shops; the page's currently selected shop does not constrain
-the file. This differs from the existing “submit edited rows on this page” scope. Existing
-drafts must be submitted or discarded before starting an import. Network/5xx/invalid-success
-confirmation results are displayed as unknown and never automatically replayed.
-
-### Submit a manual cost for an SPU
+### Submit a purchase price for an SPU
 
 ```bash
 curl -sS -X POST -H "Authorization: Bearer $KEY" \
@@ -1226,7 +1241,7 @@ Listing references never become purchase prices. Import previews include the
 current price even when it comes from retained transaction history.
 
 - `GET/POST /v2/reporting/purchase-prices` maintain the price and its history.
-- `POST /v2/reporting/purchase-prices/import/{preview,confirm}` import prices.
+- `POST /v2/reporting/purchase-prices/import` parses and imports prices in one request.
 - `GET /v2/commerce/channel-products?missing_purchase_cost=true` selects products
   without a price; its count header uses the identical rule.
 - `purchase_unit_cost` and `source_unit_cost` on the legacy product response are

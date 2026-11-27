@@ -182,7 +182,7 @@ export default function PurchasePrices({ bootstrap }: PageProps) {
     <p>重新提交使用保留草稿的当前输入；核对不会覆盖草稿。</p>
   </section>;
   return <div className="erp-page">
-    <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="维护商品采购价" description="按店铺维护商品采购价，支持逐条编辑和文件导入，确认后保存。" />
+    <PageIntro eyebrow="PROCUREMENT WORKSPACE" title="维护商品采购价" description="按店铺维护商品采购价，支持逐条编辑；选择文件后自动导入。" />
     <section className="erp-panel erp-filter-workspace" aria-label="采购范围与筛选">
       <div className="erp-filter-row justify-between" aria-label="店铺与视图">
         <Select className="erp-shop-picker" value={shopId || null} isDisabled={pending || cooldown || !shops?.length} onChange={(key) => { if (typeof key === 'string') changeScope(() => setShopId(key)); }}>
@@ -239,7 +239,7 @@ export default function PurchasePrices({ bootstrap }: PageProps) {
     {savedDrafts.length > 0 && <section className="erp-panel" aria-label="保留草稿"><h2>保留草稿（切换店铺、视图、分页或关闭编辑不会丢失）</h2><ul>{savedDrafts.map((draft) => <li key={draft.target.id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">店铺 #{draft.target.shop_pk} · PK {draft.target.id} · {draft.target.title ?? draft.target.spu_id}</span><Button size="sm" variant="secondary" isDisabled={pending} onPress={() => setEditor(draft.target.id)}>继续编辑 PK {draft.target.id}</Button><Button size="sm" variant="secondary" isDisabled={pending || recovery?.attempt.target.id === draft.target.id} onPress={() => undo(draft.target.id)}>撤销草稿 PK {draft.target.id}</Button></li>)}</ul><p>批量提交只包含当前页显示的已编辑行，不会扩大到其他页或其他店铺。</p></section>}
     {recoveryPanel}
     {notice && <p role="status">{notice}</p>}
-    {pending && <Button variant="secondary" onPress={() => { stopBatch.current = true; setNotice('已请求停止后续行；正在发送的行仍需等待结果，不能假定已撤销。'); }}>停止后续行</Button>}
+    {editPending && <Button variant="secondary" onPress={() => { stopBatch.current = true; setNotice('已请求停止后续行；正在发送的行仍需等待结果，不能假定已撤销。'); }}>停止后续行</Button>}
     {currentList.loading && <p role="status">加载列表中…</p>}{currentList.error && <Alert status="danger"><Alert.Content><Alert.Title>列表不可用</Alert.Title><Alert.Description>{currentList.error}</Alert.Description><Button isDisabled={cooldown} onPress={() => setRefresh((value) => value + 1)}>重试列表</Button></Alert.Content></Alert>}
     {view !== 'recent' && <div className="erp-list-actions"><div><h2 className="erp-section-heading">{view === 'missing' ? '待补全采购价的商品' : '商品采购价明细'}</h2></div><Button isDisabled={commandBlocked || dirtyVisible.length === 0} onPress={() => prepare(products)}>提交本页已编辑行</Button></div>}
     {currentList.products && <Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="SPU 表格滚动区域"><Table.Content aria-label="SPU 采购价工作台" className="min-w-[75rem] erp-table-content"><Table.Header className="erp-table-head">{['内部 PK / SPU', '标题 / 状态', '采购价', '创建 / 更新', '图片 / 缺图事实', '操作'].map((label, i) => <Table.Column className="erp-table-column" key={label} isRowHeader={i === 0}>{label}</Table.Column>)}</Table.Header><Table.Body className="erp-table-body" renderEmptyState={() => <div className="erp-table-empty">{'当前页暂无候选'}</div>}>{products.map((product) => {
