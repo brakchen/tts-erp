@@ -1135,8 +1135,10 @@ It requires `readwrite`; cookie clients also send `X-Requested-With: tts-erp`.
   is required. Ambiguous or unmatched products are skipped with reasons. Multiple source
   groups resolving to one internal product combine their samples before averaging.
 - One request parses, resolves products, calculates prices and saves the eligible batch.
-  The backend acquires shared SPU writer locks in ascending order, rechecks matches and
-  appends price history in one transaction. Prior prices remain in history. The file itself
+  The backend acquires shared SPU writer locks in ascending order in one query, rechecks
+  matches, closes prior versions with one bulk UPDATE and appends price history using
+  SQLAlchemy 2 bulk INSERT/RETURNING in one transaction. It does not perform per-product
+  database round trips. Prior prices remain in history. The file itself
   is not persisted. Unexpected failures roll back the entire batch.
 - After commit, returns `201 {importedCount,totalRows,importRows,blankCostRows,skippedRows,issues}`.
   `importedCount` counts products, while `importRows` counts their purchase samples.
@@ -1157,6 +1159,9 @@ file imports share the same Toast states, and successful saves refresh the list.
 The UI prevents concurrent writes. Network/5xx/invalid-success results are unknown, never automatically
 replayed; users reload and inspect current prices before choosing whether to upload again.
 Each explicit import can append a new history version.
+File uploads have a 240-second local waiting budget (including transfer and response),
+below the production proxy's 300-second budget; ordinary requests retain 30 seconds.
+The shared request-lifetime helper owns cancellation and cleanup for both budgets.
 
 Deprecated two-request endpoints remain for existing API clients; the workbench no longer
 uses them. `POST /v2/reporting/purchase-prices/import/preview` returns

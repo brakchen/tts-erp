@@ -29,6 +29,7 @@ export function isRequestCancelledError(error: unknown): boolean {
  */
 export async function withinRequestLifetime<T>(
   controller: AbortController, operation: (signal: AbortSignal) => Promise<T>, parent?: AbortSignal,
+  deadlineMs = REQUEST_DEADLINE_MS,
 ): Promise<T> {
   const abort = () => controller.abort();
   let timedOut = false;
@@ -38,7 +39,7 @@ export async function withinRequestLifetime<T>(
   const interrupted = new Promise<never>((_resolve, reject) => { rejectAbort = () => reject(failed()); });
   controller.signal.addEventListener('abort', rejectAbort, { once: true });
   parent?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => { timedOut = true; abort(); }, REQUEST_DEADLINE_MS);
+  const timer = setTimeout(() => { timedOut = true; abort(); }, deadlineMs);
   try {
     return await Promise.race([operation(controller.signal), interrupted]);
   } finally {

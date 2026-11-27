@@ -29,3 +29,13 @@ it('bounds local waiting with a recognizable timeout error at the original finit
   await vi.advanceTimersByTimeAsync(1); await rejected;
   expect(controller.signal.aborted).toBe(true); expect(vi.getTimerCount()).toBe(0);
 });
+
+it('uses an explicit upload deadline without changing the ordinary request budget', async () => {
+  vi.useFakeTimers(); const controller = new AbortController();
+  const result = withinRequestLifetime(controller, () => new Promise<never>(() => {}), undefined, 240_000);
+  const rejected = expect(result).rejects.toBeInstanceOf(RequestTimeoutError);
+  await vi.advanceTimersByTimeAsync(30_000); expect(controller.signal.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(209_999); expect(controller.signal.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(1); await rejected;
+  expect(REQUEST_DEADLINE_MS).toBe(30_000); expect(vi.getTimerCount()).toBe(0);
+});
