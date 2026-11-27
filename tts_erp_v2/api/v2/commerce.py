@@ -20,8 +20,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.api.deps import get_session
-from tts_erp_v2.commerce.shop_access import authorized_shop_clause, require_authorized_shop
-from tts_erp_v2.commerce.shop_metadata import plugin_sources
 from tts_erp_v2.api.query_params import parse_spu_ids
 from tts_erp_v2.api.schemas import (
     ChannelAccountOut,
@@ -30,6 +28,16 @@ from tts_erp_v2.api.schemas import (
     ChannelProductVariantOut,
     SalesOrderLineOut,
     SalesOrderOut,
+)
+from tts_erp_v2.commerce.shop_access import (
+    authorized_shop_clause,
+    require_authorized_shop,
+)
+from tts_erp_v2.commerce.shop_metadata import plugin_sources
+from tts_erp_v2.reporting.purchase_cost import (
+    PURCHASE_PRICE_AMOUNT,
+    PURCHASE_PRICE_CURRENCY,
+    PURCHASE_PRICE_JOINS,
 )
 from tts_erp_v2.storage.minio_client import MinioClient, MinioConfigError
 
@@ -112,26 +120,13 @@ _ORDER_SHOP_AUTH = (
     "EXISTS (SELECT 1 FROM commerce.shops eligible_shop WHERE eligible_shop.id = commerce.sales_orders.shop_pk AND "
     + authorized_shop_clause("eligible_shop") + ")"
 )
-_PURCHASE_PRICE_JOIN = (
-    "LEFT JOIN LATERAL ("
-    "  SELECT min(unit_cost) AS unit_cost FROM ("
-    "    SELECT pp.unit_cost, dense_rank() OVER ("
-    "      ORDER BY pp.source_purchase_at DESC) AS price_rank "
-    "    FROM miaoshou.purchase_prices pp "
-    "    WHERE pp.shop_pk = cp.shop_pk AND pp.spu_id = cp.spu_id "
-    "      AND pp.resolution_status = 'matched_shop' "
-    "      AND pp.currency = 'CNY' AND pp.unit_cost > 0 "
-    "      AND pp.source_purchase_at IS NOT NULL"
-    "  ) ranked WHERE price_rank = 1 "
-    "  HAVING count(DISTINCT unit_cost) = 1"
-    ") purchase ON TRUE "
-)
 SQL_LIST_CHANNEL_PRODUCTS = (
     "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
     "       cp.source_created_at, cp.source_updated_at, "
     "       cp.main_image_url, cp.mirror_object_key, "
-    "       m.unit_cost, m.currency, purchase.unit_cost AS purchase_unit_cost, "
-    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method, "
+    "       " + PURCHASE_PRICE_AMOUNT + " AS unit_cost, "
+    + PURCHASE_PRICE_CURRENCY + " AS currency, purchase.unit_cost AS purchase_unit_cost, "
+    "       CASE WHEN " + PURCHASE_PRICE_AMOUNT + " IS NULL THEN NULL ELSE 'PURCHASE_PRICE' END AS cost_method, "
     "       (SELECT pp.source_unit_cost "
     "        FROM procurement.procurement_products pp "
     "        WHERE pp.external_product_id = cp.spu_id "
@@ -139,9 +134,7 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "        ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
     "        LIMIT 1) AS source_unit_cost "
     "FROM commerce.products_spu cp "
-    "LEFT JOIN procurement.manual_product_costs m "
-    "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
-    + _PURCHASE_PRICE_JOIN +
+    + PURCHASE_PRICE_JOINS +
     "WHERE " + _PRODUCT_SHOP_AUTH + " AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
     "AND (CAST(:q AS text) IS NULL "
@@ -151,7 +144,7 @@ SQL_LIST_CHANNEL_PRODUCTS = (
     "  SELECT 1 FROM commerce.sales_order_lines sol "
     "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
     ")) "
-    "AND (NOT CAST(:missing_manual_cost AS boolean) OR m.id IS NULL)"
+    "AND (NOT CAST(:missing_manual_cost AS boolean) OR " + PURCHASE_PRICE_AMOUNT + " IS NULL)"
 )
 # Total row count for the SAME filter (no sort / page suffix) — surfaced as
 # the X-Total-Count header so the page can render 共 N 行 / paging without
@@ -161,8 +154,7 @@ SQL_LIST_CHANNEL_PRODUCTS = (
 # has-orders EXISTS also cannot inflate it.
 SQL_COUNT_CHANNEL_PRODUCTS = (
     "SELECT COUNT(*) AS n FROM commerce.products_spu cp "
-    "LEFT JOIN procurement.manual_product_costs m "
-    "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
+    + PURCHASE_PRICE_JOINS +
     "WHERE " + _PRODUCT_SHOP_AUTH + " AND (CAST(:acct_id AS bigint) IS NULL OR cp.shop_pk = CAST(:acct_id AS bigint)) "
     "AND (CAST(:status AS text) IS NULL OR cp.status = CAST(:status AS text)) "
     "AND (CAST(:q AS text) IS NULL "
@@ -172,7 +164,7 @@ SQL_COUNT_CHANNEL_PRODUCTS = (
     "  SELECT 1 FROM commerce.sales_order_lines sol "
     "  WHERE sol.spu_pk = cp.id AND sol.spu_pk IS NOT NULL"
     ")) "
-    "AND (NOT CAST(:missing_manual_cost AS boolean) OR m.id IS NULL)"
+    "AND (NOT CAST(:missing_manual_cost AS boolean) OR " + PURCHASE_PRICE_AMOUNT + " IS NULL)"
 )
 # All-SPU catalogue sorters (2026-09-06): the tail of SQL_LIST_CHANNEL_PRODUCTS.
 # Values come from the allowlist below — no request input ever reaches the
@@ -230,8 +222,9 @@ SQL_GET_CHANNEL_PRODUCT = (
     "SELECT cp.id, cp.shop_pk, cp.spu_id, cp.title, cp.status, "
     "       cp.source_created_at, cp.source_updated_at, "
     "       cp.main_image_url, cp.mirror_object_key, "
-    "       m.unit_cost, m.currency, purchase.unit_cost AS purchase_unit_cost, "
-    "       CASE WHEN m.id IS NULL THEN NULL ELSE 'MANUAL_ENTRY' END AS cost_method, "
+    "       " + PURCHASE_PRICE_AMOUNT + " AS unit_cost, "
+    + PURCHASE_PRICE_CURRENCY + " AS currency, purchase.unit_cost AS purchase_unit_cost, "
+    "       CASE WHEN " + PURCHASE_PRICE_AMOUNT + " IS NULL THEN NULL ELSE 'PURCHASE_PRICE' END AS cost_method, "
     "       (SELECT pp.source_unit_cost "
     "        FROM procurement.procurement_products pp "
     "        WHERE pp.external_product_id = cp.spu_id "
@@ -239,9 +232,7 @@ SQL_GET_CHANNEL_PRODUCT = (
     "        ORDER BY pp.synced_at DESC NULLS LAST, pp.id DESC "
     "        LIMIT 1) AS source_unit_cost "
     "FROM commerce.products_spu cp "
-    "LEFT JOIN procurement.manual_product_costs m "
-    "  ON m.spu_pk = cp.id AND m.valid_to IS NULL "
-    + _PURCHASE_PRICE_JOIN +
+    + PURCHASE_PRICE_JOINS +
     "WHERE cp.id = :id AND " + _PRODUCT_SHOP_AUTH
 )
 SQL_LIST_CHANNEL_VARIANTS = (
@@ -340,7 +331,7 @@ def _row_to_channel_product(row: Any) -> ChannelProductOut:
         status=row.status,
         source_created_at=row.source_created_at,
         source_updated_at=row.source_updated_at,
-        # 2026-09-06 all-SPU tab: current effective manual cost + the
+        # 2026-09-06 all-SPU tab: current effective purchase price + the
         # local MinIO mirror URL (resolved from mirror_object_key).
         unit_cost=row.unit_cost,
         currency=row.currency,
@@ -550,12 +541,12 @@ def list_products_spu(
             "catalogue."
         ),
     ),
+    missing_purchase_cost: bool = Query(
+        default=False, description="Only return SPUs without an effective purchase price.",
+    ),
     missing_manual_cost: bool = Query(
-        default=False,
-        description=(
-            "Only return SPUs without a current effective row in "
-            "procurement.manual_product_costs."
-        ),
+        default=False, deprecated=True,
+        description="Legacy alias for missing_purchase_cost.",
     ),
     sort: str = Query(
         default="id",
@@ -563,7 +554,7 @@ def list_products_spu(
         description=(
             "Catalogue column to sort on: id (insertion order), "
             "created_at / updated_at (source timestamps), unit_cost "
-            "(current effective manual cost; cost-less rows always tail), "
+            "(current effective purchase price; cost-less rows always tail), "
             "or status (ACTIVATE=在售 first, then DELETED, then "
             "SELLER_DEACTIVATED)."
         ),
@@ -581,7 +572,7 @@ def list_products_spu(
         "status": status_filter,
         "q": q.strip() if q and q.strip() else None,
         "has_orders": has_orders,
-        "missing_manual_cost": missing_manual_cost,
+        "missing_manual_cost": missing_purchase_cost is True or missing_manual_cost is True,
     }
     # Total matching rows (same filter, ignoring page bounds) — exposed as
     # X-Total-Count so the UI can render 共 N 行 without switching the

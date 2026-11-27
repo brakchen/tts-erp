@@ -12,13 +12,13 @@ export function closeRowEditor() {
 
 export function editRowCost(row: HTMLElement, value: string) {
   const dialog = openRowEditor(row);
-  fireEvent.change(dialog.getByRole('textbox', { name: '单位成本' }), { target: { value } });
+  fireEvent.change(dialog.getByRole('textbox', { name: '采购价' }), { target: { value } });
   closeRowEditor();
 }
 
 export function readRowCost(row: HTMLElement) {
   const dialog = openRowEditor(row);
-  const value = (dialog.getByRole('textbox', { name: '单位成本' }) as HTMLInputElement).value;
+  const value = (dialog.getByRole('textbox', { name: '采购价' }) as HTMLInputElement).value;
   closeRowEditor();
   return value;
 }

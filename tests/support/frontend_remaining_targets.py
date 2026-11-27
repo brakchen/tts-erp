@@ -98,6 +98,7 @@ def remaining_request(
             "/v2/commerce/channel-products",
             "/v2/reporting/missing-cost-products",
             "/v2/reporting/manual-costs",
+            "/v2/reporting/purchase-prices",
         }:
             choices = {
                 "shop_pk": {str(pk) for pk in t.shop_pks},
@@ -113,6 +114,7 @@ def remaining_request(
                         "status": {"ACTIVATE", "DEACTIVATE", "DRAFT", "DELETED"},
                         "has_orders": {"true"},
                         "missing_manual_cost": {"true"},
+                        "missing_purchase_cost": {"true"},
                     }
                 )
             return {
@@ -131,7 +133,7 @@ def remaining_request(
             return not query or query == {"includeDiagnostics": ["true"]}
     if query or not isinstance(body, dict):
         return False
-    if method == "POST" and path == "/v2/reporting/manual-costs":
+    if method == "POST" and path in {"/v2/reporting/manual-costs", "/v2/reporting/purchase-prices"}:
         if (
             not {"spu_id", "unit_cost", "currency"}
             <= body.keys()

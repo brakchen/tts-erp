@@ -22,14 +22,14 @@ it('uploads binary once for preview and confirms only the server average with it
   await user.click(screen.getByRole('button', { name: '上传并预览' }));
   expect(await screen.findByText('12.3456')).toBeVisible();
   expect(screen.getByText('1730000000000000001')).toBeVisible();
-  expect(fetcher.mock.calls[0][0]).toBe('/tts/v2/reporting/manual-costs/import/preview');
+  expect(fetcher.mock.calls[0][0]).toBe('/tts/v2/reporting/purchase-prices/import/preview');
   const init = fetcher.mock.calls[0][1] as RequestInit;
   expect(init.body).toBe(source); expect(new Headers(init.headers).get('X-Requested-With')).toBe('tts-erp');
   fireEvent.click(screen.getByRole('button', { name: '确认导入 1 个商品' }));
   fireEvent.click(screen.getByRole('button', { name: '确认导入 1 个商品' }));
   expect(await screen.findByText('已更新 1 个商品采购价，保留原成本历史。')).toBeVisible();
   expect(fetcher).toHaveBeenCalledTimes(2);
-  expect(fetcher.mock.calls[1][0]).toBe('/tts/v2/reporting/manual-costs/import/confirm?fingerprint=' + preview.fingerprint);
+  expect(fetcher.mock.calls[1][0]).toBe('/tts/v2/reporting/purchase-prices/import/confirm?fingerprint=' + preview.fingerprint);
   expect(fetcher.mock.calls[1][1].body).toBe(source);
   expect(callbacks.onImported).toHaveBeenCalledOnce();
 });

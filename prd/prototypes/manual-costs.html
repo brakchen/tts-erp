@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div hidden data-page="manual-costs" data-title="采购工作台" data-desc="按店铺核对货源价与人工成本，编辑草稿后确认提交。">
+  <div hidden data-page="manual-costs" data-title="采购工作台" data-desc="按店铺维护统一采购价，编辑草稿后确认提交。">
 
 <p class="sample-banner">以下为<strong>示例数据</strong>，仅用于原型演示，不代表真实经营结果或生产环境数字。</p>
 
@@ -15,7 +15,7 @@
   <div>
     <p class="erp-eyebrow">COST WORKBENCH</p>
     <h2>把商品成本，管理清楚</h2>
-    <p class="erp-description">按店铺核对货源价与人工成本，编辑草稿后确认提交。</p>
+    <p class="erp-description">按店铺维护统一采购价，编辑草稿后确认提交。</p>
   </div>
 </section>
 <p class="meta">切换店铺、视图、分页或关闭编辑不会丢失草稿。</p>
@@ -61,14 +61,14 @@
 <div class="erp-table-wrap">
   <table class="erp-table" aria-label="SPU 成本工作台">
     <thead><tr>
-      <th>内部 PK / SPU</th><th>标题 / 状态</th><th>当前人工成本 / 货源价</th>
+      <th>内部 PK / SPU</th><th>标题 / 状态</th><th>采购价</th>
       <th>创建 / 更新</th><th>图片 / 缺图事实</th><th>操作</th>
     </tr></thead>
     <tbody>
       <tr>
         <td><span class="id">PK-881 / SPU-1001</span></td>
         <td><div class="primary">无线吸尘器 Pro（示例）</div><span class="badge badge-ok">在售</span></td>
-        <td>人工价 32.5000 CNY<br><span class="meta">货源价 31.0000 CNY</span></td>
+        <td>32.5000 CNY</td>
         <td class="meta">2026-10-01<br>2026-11-11</td>
         <td><button class="btn btn-sm" type="button" data-open="dlg-cost-zoom" aria-label="放大图片 PK 881">主图</button></td>
         <td><button class="btn btn-sm" type="button" data-write data-open="dlg-cost-edit">编辑</button></td>
@@ -76,7 +76,7 @@
       <tr>
         <td><span class="id">PK-882 / SPU-1002</span></td>
         <td><div class="primary">桌面收纳架（示例）</div><span class="badge badge-warn">下架</span></td>
-        <td>人工价 — <br><span class="meta">货源价 9.8000 CNY</span></td>
+        <td>—</td>
         <td class="meta">2026-10-08<br>2026-11-10</td>
         <td class="meta">缺图</td>
         <td><button class="btn btn-sm" type="button" data-write data-open="dlg-cost-edit-1002">编辑</button></td>
@@ -122,9 +122,9 @@
     <h2 id="dlg-cost-edit-title">当前编辑商品 · SPU-1001</h2>
     
   <p class="primary">无线吸尘器 Pro（示例） · PK-881</p>
-  <p class="meta">人工价与货源价并排展示。关闭编辑并保留草稿。</p>
+  <p class="meta">每个商品统一展示和维护一个采购价。关闭编辑并保留草稿。</p>
   <div class="grid-2">
-    <label>人工成本<input value="32.5000" placeholder="例如 25.0000" data-write></label>
+    <label>采购价<input value="32.5000" placeholder="例如 25.0000" data-write></label>
     <label>币种<input value="CNY" placeholder="例如 CNY" data-write></label>
   </div>
   <p class="meta">货源价：31.0000 CNY（只读对照）</p>
@@ -144,7 +144,7 @@
     
   <p class="primary">桌面收纳架（示例） · PK-882</p>
   <div class="grid-2">
-    <label>人工成本<input placeholder="例如 25.0000" data-write></label>
+    <label>采购价<input placeholder="例如 25.0000" data-write></label>
     <label>币种<input value="CNY" data-write></label>
   </div>
   <p class="meta">货源价：9.8000 CNY（只读对照）</p>

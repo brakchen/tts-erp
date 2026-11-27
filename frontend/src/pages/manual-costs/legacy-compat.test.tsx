@@ -10,7 +10,7 @@ import ManualCosts from './index';
 // tests/api/test_manual_costs_page_v2.py. No legacy DOM hooks are required here.
 const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'manual-costs', navigation: [], releaseId: 'TEST', roleCapabilities: { readwrite: true, admin: false } } };
 const shop = { id: '9007199254740993', shop_id: 'TEST_shop', account_name: 'TEST 店铺' };
-const product = (index = 0): Product => ({
+const product = (index = 0): Product & { purchase_unit_cost?: string | null; source_unit_cost?: string | null } => ({
   id: String(9007199254740995n + BigInt(index)), shop_pk: shop.id, spu_id: `TEST_SPU_${index}`, title: `TEST 商品 ${index}`, status: 'ACTIVATE',
   unit_cost: '0.0000', currency: 'VND', purchase_unit_cost: null, source_unit_cost: '123456789012345.1234',
   source_created_at: '2026-10-23T12:00:00+07:00', source_updated_at: '2026-10-24T12:00:00+00:00', image_url: null,
@@ -53,7 +53,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     const fetcher = setup(); const user = userEvent.setup(); render(<ManualCosts {...props} />);
     await screen.findByText('TEST 商品 0');
     const views = within(screen.getByLabelText('工作台视图'));
-    expect(views.getAllByRole('button').map((button) => button.textContent)).toEqual(['全部 SPU', '缺成本候选', '最近提交']);
+    expect(views.getAllByRole('button').map((button) => button.textContent)).toEqual(['全部 SPU', '缺采购价候选', '最近提交']);
     expect(views.getByRole('button', { name: '全部 SPU' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
     await user.click(views.getByRole('button', { name: '最近提交' }));
@@ -61,7 +61,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(within(history).getByText('123456789012345.1234 CNY')).toBeVisible();
     expect(within(history).getByText('0.0000 VND')).toBeVisible();
     expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
-    await user.click(views.getByRole('button', { name: '缺成本候选' }));
+    await user.click(views.getByRole('button', { name: '缺采购价候选' }));
     expect(await screen.findByText(/缺图总数 9007199254740999/)).toBeVisible();
     expect(screen.getByText('missing_photo：true')).toBeVisible();
     expect(screen.queryByRole('textbox', { name: '按 SPU 或标题搜索' })).toBeNull();
@@ -90,7 +90,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     ['status', 'SELLER_DEACTIVATED', '状态'],
     ['status', 'ACTIVATE', '状态'],
     ['has_orders', 'true', '仅看有单'],
-    ['missing_manual_cost', 'true', '仅看未登记'],
+    ['missing_purchase_cost', 'true', '仅看缺采购价'],
     ['sort', 'unit_cost', '排序字段'],
     ['sort', 'created_at', '排序字段'],
     ['sort', 'updated_at', '排序字段'],
@@ -116,7 +116,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
       fireEvent.change(filters().getByRole('textbox', { name: label }), { target: { value } });
       expect(catalogueQuery(fetcher).has('q')).toBe(false); // Explicit search, not a local row filter.
       await user.click(filters().getByRole('button', { name: '搜索' }));
-    } else if (key === 'has_orders' || key === 'missing_manual_cost') {
+    } else if (key === 'has_orders' || key === 'missing_purchase_cost') {
       await user.click(filters().getByRole('checkbox', { name: label }));
     } else {
       await chooseOption(user, label, selectOptionLabels[value] ?? value);
@@ -129,7 +129,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     // Rendering them unchanged protects server authority, not client-side re-filtering.
     expect(within(screen.getByLabelText('SPU 表格滚动区域')).getAllByText('在售')).toHaveLength(Number(query.get('limit')));
     expect(screen.getByText(/共 180143985094820 页/)).toBeVisible();
-    if (key === 'status' || key === 'has_orders' || key === 'missing_manual_cost') {
+    if (key === 'status' || key === 'has_orders' || key === 'missing_purchase_cost') {
       if (key === 'status') await chooseOption(user, label, '全部');
       else await user.click(filters().getByRole('checkbox', { name: label }));
       await waitFor(() => expect(catalogueQuery(fetcher).has(key)).toBe(false));
@@ -158,8 +158,8 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     }
     const catalogue = within(screen.getByLabelText('SPU 表格滚动区域'));
     for (const label of ['在售', '下架', '停售', 'TEST_UPSTREAM_STATUS']) expect(catalogue.getByText(label)).toBeVisible();
-    expect(screen.getByText('人工：— —')).toBeVisible();
-    expect(screen.getByText('人工：999999999999999.9999 VND')).toBeVisible();
+    expect(screen.getByText('— —')).toBeVisible();
+    expect(screen.getByText('999999999999999.9999 VND')).toBeVisible();
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
   });
 
@@ -167,11 +167,11 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     const row = { ...product(), unit_cost: null };
     const fetcher = setup([row]); const user = userEvent.setup(); render(<ManualCosts {...props} />);
     await screen.findByText('TEST 商品 0');
-    expect(screen.getByText('货源挂牌：123456789012345.1234')).toBeVisible();
-    if (view === 'unregistered') await user.click(screen.getByRole('checkbox', { name: '仅看未登记' }));
-    else await user.click(screen.getByRole('button', { name: '缺成本候选' }));
+    expect(screen.queryByText('货源挂牌：123456789012345.1234')).not.toBeInTheDocument();
+    if (view === 'unregistered') await user.click(screen.getByRole('checkbox', { name: '仅看缺采购价' }));
+    else await user.click(screen.getByRole('button', { name: '缺采购价候选' }));
     await waitFor(() => expect(readRowCost(screen.getByText('TEST 商品 0').closest('tr')!)).toBe(''));
-    expect(screen.getByText('货源挂牌：123456789012345.1234')).toBeVisible();
+    expect(screen.queryByText('货源挂牌：123456789012345.1234')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '提交本页已编辑行' })).toBeDisabled();
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });
@@ -187,7 +187,7 @@ describe('manual-costs active replacements for retained legacy contracts', () =>
     expect(within(dialog).queryByText(/TEST_SPU_1/)).toBeNull();
     expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
     fetcher.mockImplementationOnce(async (url, init) => {
-      expect(url).toBe('/tts/v2/reporting/manual-costs'); expect(init.method).toBe('POST');
+      expect(url).toBe('/tts/v2/reporting/purchase-prices'); expect(init.method).toBe('POST');
       expect(JSON.parse(init.body as string)).toMatchObject({ spu_pk: product().id, spu_id: 'TEST_SPU_0', unit_cost: '77.0100', currency: 'VND' });
       return json({ id: '9223372036854775800', spu_pk: product().id, unit_cost: '77.0100', currency: 'VND', valid_from: '2026-10-24T12:00:00Z', valid_to: null }, 201);
     });

@@ -10,16 +10,16 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from tts_erp_v2.api.deps import SessionDep, require_cookie_csrf, require_role_at_least
-from tts_erp_v2.reporting.manual_cost_import import (
+from tts_erp_v2.reporting.purchase_price_import import (
     MAX_FILE_BYTES,
     CostImportError,
     parse_cost_file,
     preview_cost_import,
 )
-from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
-from tts_erp_v2.reporting.manual_costs import append_manual_cost
+from tts_erp_v2.reporting.purchase_price_lock import lock_purchase_price_spu
+from tts_erp_v2.reporting.purchase_prices import append_purchase_price
 
-router = APIRouter(prefix="/manual-costs/import")
+router = APIRouter(prefix="/import")
 UPLOAD_SCHEMA = {"requestBody": {"required": True, "content": {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
         "schema": {"type": "string", "format": "binary"}
@@ -49,14 +49,14 @@ def process_import(
             return preview
         # Match and current costs are re-read after taking all shared writer locks.
         for item in preview["items"]:
-            lock_manual_cost_spu(session, spu_pk=int(item["spuPk"]))
+            lock_purchase_price_spu(session, spu_pk=int(item["spuPk"]))
         preview = preview_cost_import(session, content, parsed)
         if preview["fingerprint"] != fingerprint:
             raise HTTPException(409, "文件、商品匹配或当前采购价已变化，请重新预览后确认")
         if not preview["items"]:
             raise HTTPException(422, "没有可以导入的商品")
         for item in preview["items"]:
-            append_manual_cost(
+            append_purchase_price(
                 session,
                 spu_pk=int(item["spuPk"]),
                 unit_cost=Decimal(item["unitCost"]),

@@ -62,7 +62,7 @@ export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFen
     flight.current = true; setBusy(confirm ? 'confirm' : 'preview'); setNotice(''); onBusy(true);
     const current = new AbortController(); controller.current = current;
     try {
-      const path = `/v2/reporting/manual-costs/import/${confirm ? `confirm?fingerprint=${preview!.fingerprint}` : 'preview'}`;
+      const path = `/v2/reporting/purchase-prices/import/${confirm ? `confirm?fingerprint=${preview!.fingerprint}` : 'preview'}`;
       const { data, status } = await withinRequestLifetime(current, (signal) => requestJson<unknown>(rootPath, path, {
         method: 'POST', body: file, headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, signal,
       }));
@@ -70,7 +70,7 @@ export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFen
       if (confirm) {
         const result = record(data);
         if (status !== 201 || count(result.importedCount) !== preview!.readyCount) throw new Error('导入结果未确认');
-        setNotice(`已更新 ${count(result.importedCount)} 个商品采购价，保留原成本历史。`);
+        setNotice(`已更新 ${count(result.importedCount)} 个商品采购价，保留原采购价历史。`);
         setPreview(undefined); setUncertain(false); onFence(false); onImported();
       } else {
         setPreview(decodePreview(data)); setOffset(0); setIssueOffset(0); setUncertain(false); onFence(false);
@@ -111,7 +111,7 @@ export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFen
       <p role="status">共 {preview.totalRows} 行 · 空金额跳过 {preview.blankCostRows} 行 · 其他跳过 {preview.skippedRows} 行 · 待更新 {preview.readyCount} 个商品（{preview.importRows} 条采购记录）</p>
       <Table variant="secondary"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="采购价导入预览滚动区域">
         <Table.Content aria-label="采购价导入预览" className="erp-table-content min-w-[48rem]">
-          <Table.Header>{['店铺', 'SPU / 商品', '有效采购记录', '原人工价', '平均采购价 CNY'].map((label, index) => <Table.Column key={label} isRowHeader={index === 0} className="erp-table-column">{label}</Table.Column>)}</Table.Header>
+          <Table.Header>{['店铺', 'SPU / 商品', '有效采购记录', '原采购价', '平均采购价 CNY'].map((label, index) => <Table.Column key={label} isRowHeader={index === 0} className="erp-table-column">{label}</Table.Column>)}</Table.Header>
           <Table.Body renderEmptyState={() => <div>没有可以导入的商品，请查看跳过原因。</div>}>{preview.items.slice(offset, offset + 50).map((item) => <Table.Row key={item.spuPk} id={item.spuPk}>
             <Table.Cell className="erp-table-cell"><p className="w-40 break-words whitespace-normal">{item.shopName || `店铺 #${item.shopPk}`}</p></Table.Cell>
             <Table.Cell className="erp-table-cell"><p className="break-all">{item.spuId}</p><p className="w-56 break-words whitespace-normal">{item.title ?? '—'}</p></Table.Cell>
@@ -127,7 +127,7 @@ export default function CostImport({ rootPath, blocked, hasDrafts, onBusy, onFen
         {preview.issues.length > 50 && <OffsetPagination label="跳过原因分页" offset={issueOffset} pageSize={50} total={preview.issues.length} disabled={Boolean(busy)} onPage={setIssueOffset} />}
       </details>}
       <div className="flex flex-wrap items-center gap-3"><Button isDisabled={blocked || hasDrafts || Boolean(busy) || uncertain || preview.readyCount === 0} onPress={() => { void upload(true); }}>确认导入 {preview.readyCount} 个商品</Button>
-        <p className="erp-table-meta">确认后统一写入人工成本并保留历史。此文件可能包含多个店铺，不受上方当前店铺筛选限制。</p></div>
+        <p className="erp-table-meta">确认后统一写入采购价并保留历史。此文件可能包含多个店铺，不受上方当前店铺筛选限制。</p></div>
     </>}
   </section>;
 }

@@ -18,7 +18,7 @@
     { id: "ad-daily", label: "广告日明细", group: "经营分析", href: "ad-daily.html",
       desc: "按账户、日期与商品筛选广告日数据，结合服务端汇总评估广告表现。" },
     { id: "manual-costs", label: "采购工作台", group: "基础设置", href: "manual-costs.html",
-      desc: "按店铺核对货源价与人工成本，编辑草稿后确认提交。" },
+      desc: "按店铺维护统一采购价，编辑草稿后确认提交。" },
     { id: "shops", label: "店铺注册", group: "基础设置", href: "shops.html",
       desc: "从插件发现到 App 配置与授权，完成每家店铺的接入。" },
     { id: "enum-map", label: "枚举映射", group: "基础设置", href: "enum-map.html",

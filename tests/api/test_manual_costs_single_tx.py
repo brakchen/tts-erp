@@ -35,7 +35,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from tests._job_invocation import authorize_test_shop
-from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
+from tts_erp_v2.reporting.purchase_price_lock import lock_purchase_price_spu
 
 pytestmark = [pytest.mark.domain_api, pytest.mark.layer_integration]
 
@@ -105,13 +105,13 @@ def test_shared_advisory_lock_serializes_manual_cost_writers(db_engine) -> None:
     first = Session(db_engine)
     second = Session(db_engine)
     try:
-        lock_manual_cost_spu(first, spu_pk=987654321)
+        lock_purchase_price_spu(first, spu_pk=987654321)
         second.execute(text("SET LOCAL lock_timeout = '100ms'"))
         with pytest.raises(OperationalError):
-            lock_manual_cost_spu(second, spu_pk=987654321)
+            lock_purchase_price_spu(second, spu_pk=987654321)
         second.rollback()
         first.rollback()
-        lock_manual_cost_spu(second, spu_pk=987654321)
+        lock_purchase_price_spu(second, spu_pk=987654321)
         second.rollback()
     finally:
         first.close()

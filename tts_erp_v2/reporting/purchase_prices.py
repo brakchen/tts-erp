@@ -9,10 +9,10 @@ from sqlalchemy import insert, update
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.db.models import ManualProductCost
-from tts_erp_v2.reporting.manual_cost_lock import lock_manual_cost_spu
+from tts_erp_v2.reporting.purchase_price_lock import lock_purchase_price_spu
 
 
-def append_manual_cost(
+def append_purchase_price(
     session: Session,
     *,
     spu_pk: int,
@@ -23,7 +23,7 @@ def append_manual_cost(
     valid_from: datetime | None = None,
 ) -> ManualProductCost:
     """Close the previous version and append under the shared per-SPU lock."""
-    lock_manual_cost_spu(session, spu_pk=spu_pk)
+    lock_purchase_price_spu(session, spu_pk=spu_pk)
     now = datetime.now(UTC)
     session.execute(
         update(ManualProductCost)

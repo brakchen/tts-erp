@@ -23,7 +23,8 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from tts_erp_v2.commerce.shop_access import authorized_shop_clause
-from tts_erp_v2.db.models import ChannelAccount, ChannelProduct, ManualProductCost
+from tts_erp_v2.db.models import ChannelAccount, ChannelProduct
+from tts_erp_v2.reporting.purchase_cost import load_effective_purchase_prices
 
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_ROWS = 50_000
@@ -178,10 +179,7 @@ def preview_cost_import(session: Session, content: bytes, parsed: ParsedCosts) -
         aggregate.invalid |= group.invalid
     if len(resolved) > MAX_PRODUCTS:
         raise CostImportError("每次最多导入 5,000 个商品，请拆分文件")
-    current = {row.spu_pk: row for row in session.scalars(
-        select(ManualProductCost).where(ManualProductCost.spu_pk.in_(list(resolved)),
-                                        ManualProductCost.valid_to.is_(None))
-    )} if resolved else {}
+    current = load_effective_purchase_prices(session, list(resolved))
     items = []
     for pk, (product, sample) in sorted(resolved.items()):
         if sample.invalid:
@@ -198,7 +196,7 @@ def preview_cost_import(session: Session, content: bytes, parsed: ParsedCosts) -
                       "shopName": product.account_name or product.shop_alias or sample.shop,
                       "title": product.title, "sampleCount": sample.count,
                       "unitCost": str(mean), "currency": "CNY",
-                      "previousId": str(old.id) if old else None,
+                      "previousId": str(old.record_id) if old and old.record_id is not None else None,
                       "previousCost": str(old.unit_cost) if old else None,
                       "previousCurrency": old.currency if old else None})
     import_rows = sum(item["sampleCount"] for item in items)

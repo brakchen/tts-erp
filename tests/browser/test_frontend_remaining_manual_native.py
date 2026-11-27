@@ -39,7 +39,7 @@ del _facts_owner
 pytestmark = [pytest.mark.domain_browser, pytest.mark.requires_browser]
 
 SCREENSHOTS = Path(__file__).resolve().parents[2] / "logs/TEST_manual_native/screenshots"
-COST_PATH = "/v2/reporting/manual-costs"
+COST_PATH = "/v2/reporting/purchase-prices"
 LOGIN_PATH = "/v2/auth/login"
 AMOUNT = "12.3400"
 CURRENCY = "CNY"
@@ -194,8 +194,8 @@ def test_manual_native_write_preview_and_readback(
 
         row.get_by_role("button", name="编辑详情", exact=True).click()
         dialog = page.get_by_role("dialog")
-        expect(dialog.get_by_role("heading", name="编辑商品成本", exact=True)).to_be_visible()
-        dialog.get_by_label("单位成本", exact=True).fill(AMOUNT)
+        expect(dialog.get_by_role("heading", name="编辑商品采购价", exact=True)).to_be_visible()
+        dialog.get_by_label("采购价", exact=True).fill(AMOUNT)
         dialog.get_by_label("备注", exact=True).fill(marker)
         dialog.get_by_role("button", name="保存成本", exact=True).click()
 

@@ -67,7 +67,7 @@ from tts_erp_v2.db.constants import (
     SHOP_FEE_RATE_CALCULATION_VERSION,
 )
 from tts_erp_v2.fx.rates import load_rate_map
-from tts_erp_v2.reporting.purchase_cost import load_purchase_costs
+from tts_erp_v2.reporting.purchase_cost import load_effective_purchase_prices
 
 log = logging.getLogger(__name__)
 
@@ -1089,19 +1089,6 @@ _SQL_ROI_UNATTRIBUTED = text(
 )
 
 # ═════════════════════════════════════════════════════════════════════
-# §3.4 人工成本 SQL（优先于已核实的妙手采购成交价）
-# ═════════════════════════════════════════════════════════════════════
-
-_SQL_COST_MANUAL = text(
-    """
-    SELECT spu_pk, unit_cost
-    FROM procurement.manual_product_costs
-    WHERE valid_to IS NULL
-      AND spu_pk = ANY(CAST(:pks AS bigint[]))
-    """
-)
-
-# ═════════════════════════════════════════════════════════════════════
 # 钻取面板 SQL（§6.3）
 # ═════════════════════════════════════════════════════════════════════
 
@@ -1523,25 +1510,13 @@ def _resolve_shop_fee(
 def _resolve_costs_batch(
     sess: Session, spu_pks: list[int]
 ) -> dict[int, tuple[Decimal, str]]:
-    """批量解析每个 SPU 的单位成本 CNY + 来源枚举。
-
-    人工成本优先，其次是已核实的妙手采购成交价；仍未命中时回退
-    40 CNY/件。公共采集箱挂牌价不参与 SPU ROI。
-    """
+    """批量读取统一采购价；缺价时保留现有 40 CNY/件估算兜底。"""
     if not spu_pks:
         return {}
-    out: dict[int, tuple[Decimal, str]] = {}
-
-    rows = sess.execute(_SQL_COST_MANUAL, {"pks": spu_pks}).mappings().all()
-    for r in rows:
-        out[int(r["spu_pk"])] = (
-            Decimal(r["unit_cost"]),
-            "MANUAL",
-        )  # pi-lens-ignore: no-try-except
-
-    for pk, unit_cost in load_purchase_costs(sess, spu_pks).items():
-        if pk not in out:
-            out[pk] = (unit_cost, "PURCHASE_PRICE")
+    out = {
+        pk: (price.unit_cost, "PURCHASE_PRICE")
+        for pk, price in load_effective_purchase_prices(sess, spu_pks).items()
+    }
 
     for pk in spu_pks:
         if pk not in out:

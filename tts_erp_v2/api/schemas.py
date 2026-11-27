@@ -57,15 +57,15 @@ class ChannelProductOut(BaseModel):
     status: str | None = None
     source_created_at: datetime | None = None
     source_updated_at: datetime | None = None
-    # 2026-09-06 all-SPU tab: current effective manual cost (if any) and
+    # 2026-09-06 all-SPU tab: current effective purchase price (if any) and
     # the local MinIO mirror of the TikTok main image. Null when absent.
     unit_cost: Decimal | None = None
     currency: str | None = None
     cost_method: str | None = None
-    purchase_unit_cost: Decimal | None = None
+    purchase_unit_cost: Decimal | None = Field(default=None, deprecated=True, description="Legacy reference; use unit_cost for the effective purchase price.")
     # Public collect-box list price is exposed only for reference/comparison.
-    # The frontend must never prefill a manual purchase cost from it.
-    source_unit_cost: Decimal | None = None
+    # Kept for existing clients; the purchase workbench consumes only unit_cost.
+    source_unit_cost: Decimal | None = Field(default=None, deprecated=True, description="Legacy listing reference, never a purchase price.")
     image_url: str | None = None
     main_image_url: str | None = None
 
@@ -117,8 +117,8 @@ class SalesOrderLineOut(BaseModel):
     updated_at: datetime | None = None
 
 
-class ManualCostIn(BaseModel):
-    """Body for POST /v2/reporting/manual-costs.
+class PurchasePriceIn(BaseModel):
+    """Body for POST /v2/reporting/purchase-prices.
 
     New callers provide the internal ``spu_pk`` and matching external
     ``spu_id`` from the selected row. Legacy external-only callers remain
@@ -137,7 +137,7 @@ class ManualCostIn(BaseModel):
     updated_at: datetime | None = None
 
 
-class ManualCostOut(BaseModel):
+class PurchasePriceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     spu_pk: int
