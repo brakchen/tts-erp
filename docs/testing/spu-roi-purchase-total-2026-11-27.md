@@ -1,8 +1,9 @@
 # SPU ROI 采购成本汇总验证（2026-11-27）
 
 实现、口径文档和新增检查已完成并推送到 `codex/spu-roi-purchase-total`。
-正式基线存在 10 项原主线可复现的失败，未进入 ready、未合并或发布。
-没有修改已提交 baseline，也没有以原主线失败的对照结果代替门禁通过。
+正式基线存在 10 项原主线可复现的失败。2026-11-27，用户明确授权“不是你的失败的话，合并就行”，
+接受下列已在原主线复现、不是本次引入的 10 项失败作为本次合并例外。
+没有修改已提交 baseline，也没有将正式门禁的原始失败结果改记为通过；本授权不包含生产发布。
 
 ## 改动与口径
 
@@ -65,4 +66,5 @@ tests/sync_worker/test_spu_deterioration_alert_job.py::test_real_canonical_queri
 - 候选失败项及页面复测：`/tmp/tts-erp-purchase-total-rerun.log`。
 - 原主线失败项对照：`/tmp/tts-erp-purchase-total-master-compare.log`。
 - 截图：验证检出的 `frontend/.cache/screenshots/TEST_spu_react_{spu-roi,focused-spus}_{375,1440,2560}.png`；均为合成测试数据。
-- 任务分支和验证检出保留，等待既有主线断言与现行采购价契约同步后重新执行合并流程。没有生产数据变更、迁移或服务重启。
+- 最新主线未推进时，复用这一轮完整门禁与失败对照证据，在合并锁内对最终 prospective merge 执行业务、组件和六个页面的定向检查；不重复完整套件。仅下列已证明为原主线问题的 10 项失败适用用户授权，其他新增失败仍阻止合并。
+- 验证检出及原始报告保留用于追溯。没有生产数据变更、迁移或服务重启。
