@@ -298,7 +298,7 @@ X-API-Key: ttserp_ro_...
     "status": "ACTIVATE", "shop_id": "7494763368967603447", "shop_name": "VN shop",
     "spend": "100.0000", "sales": "1200.0000", "net_revenue": "1110.0000", "cogs_total": "930.0000",
     "net_profit": "80.0000",
-    "roi_real": "1.20", "profit_status": "profit", "roi_status": "non_negative",
+    "strict_full_loss_cost": "100.0000", "roi_real": "10.10", "profit_status": "profit", "roi_status": "non_negative",
     "projection_status": "available", "projected_net_profit": "70.0000",
     "has_unsettled_orders": true, "uses_default_unit_cost": false,
     "refund_rate_alert": false
@@ -332,7 +332,7 @@ X-API-Key: ttserp_ro_...
     "status": "ACTIVATE", "main_image_url": null,
     "shop_id": "7494763368967603447", "shop_name": "VN shop",
     "spend": "100.0000", "sales": "1200.0000", "net_profit": "80.0000",
-    "roi_real": "1.20", "profit_status": "profit", "roi_status": "non_negative",
+    "strict_full_loss_cost": "100.0000", "roi_real": "10.10", "profit_status": "profit", "roi_status": "non_negative",
     "has_unsettled_orders": true, "uses_default_unit_cost": false,
     "refund_rate_alert": false
   }],
