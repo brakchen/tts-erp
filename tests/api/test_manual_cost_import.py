@@ -39,7 +39,7 @@ def xlsx(rows, headers=HEADERS):
 
 
 def post(client, key, content, action="preview"):
-    return client.post(BASE + action, content=content, headers={
+    return client.post(BASE + action if action else BASE.rstrip("/"), content=content, headers={
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     })
@@ -76,8 +76,9 @@ def test_parser_rejects_invalid_file_and_headers(content):
         parse_cost_file(content)
 
 
-def test_import_requires_readwrite(api_client, readonly_key):
-    assert post(api_client, readonly_key, b"TEST").status_code == 403
+@pytest.mark.parametrize("action", ["", "preview", "confirm?fingerprint=" + "a" * 64])
+def test_import_requires_readwrite(api_client, readonly_key, action):
+    assert post(api_client, readonly_key, b"TEST", action).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -88,6 +89,36 @@ async def test_cookie_upload_requires_csrf_before_reading_file():
     with pytest.raises(HTTPException) as error:
         await routes.read_upload(request)
     assert error.value.status_code == 403
+
+
+def test_single_upload_imports_averages_and_reports_skips(api_client, readwrite_key, db_engine, products):
+    content = xlsx([
+        ["10", SHOP_A, SHARED], ["20", SHOP_A, SHARED], [None, SHOP_A, SHARED],
+        ["8", SHOP_B, SHARED], ["9", "TEST wrong shop", SHARED],
+    ])
+    response = post(api_client, readwrite_key, content, "")
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["importedCount"] == 2 and result["importRows"] == 3
+    assert result["totalRows"] == 5 and result["blankCostRows"] == 1 and result["skippedRows"] == 1
+    assert result["issues"][0]["reason"] == "店铺或商品未匹配"
+    assert "fingerprint" not in result and "items" not in result
+    facts = _facts(db_engine, products)
+    for pk, expected in ((products[0], "15.0000"), (products[1], "8.0000")):
+        history = [row for row in facts if row.spu_pk == pk]
+        assert len(history) == 2 and history[0].valid_to is not None
+        assert history[1].valid_to is None and str(history[1].unit_cost) == expected
+        assert history[1].currency == "CNY"
+
+
+def test_single_upload_reports_no_eligible_rows_without_changing_prices(api_client, readwrite_key, db_engine, products):
+    before = _facts(db_engine, products)
+    response = post(api_client, readwrite_key, xlsx([[None, SHOP_A, SHARED], ["9", "TEST wrong shop", SHARED]]), "")
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["importedCount"] == 0 and result["importRows"] == 0
+    assert result["blankCostRows"] == 1 and result["skippedRows"] == 1
+    assert result["issues"] and _facts(db_engine, products) == before
 
 
 def test_preview_matches_shops_averages_and_never_writes(api_client, readwrite_key, db_engine, products):
@@ -146,9 +177,10 @@ def test_changed_file_or_current_price_requires_new_preview(api_client, readwrit
     assert _facts(db_engine, products) == changed_facts
 
 
-def test_failure_rolls_back_whole_import(api_client, readwrite_key, db_engine, products, monkeypatch):
+@pytest.mark.parametrize("direct", [False, True])
+def test_failure_rolls_back_whole_import(api_client, readwrite_key, db_engine, products, monkeypatch, direct):
     content = xlsx([["10", SHOP_A, SHARED], ["20", SHOP_B, SHARED]])
-    preview = post(api_client, readwrite_key, content).json()
+    action = "" if direct else "confirm?fingerprint=" + post(api_client, readwrite_key, content).json()["fingerprint"]
     before = _facts(db_engine, products)
     append = routes.append_purchase_price
     calls = []
@@ -161,7 +193,7 @@ def test_failure_rolls_back_whole_import(api_client, readwrite_key, db_engine, p
 
     monkeypatch.setattr(routes, "append_purchase_price", fail_second)
     with pytest.raises(RuntimeError, match="TEST rollback"):
-        post(api_client, readwrite_key, content, "confirm?fingerprint=" + preview["fingerprint"])
+        post(api_client, readwrite_key, content, action)
     assert len(calls) == 2
     assert _facts(db_engine, products) == before
 
