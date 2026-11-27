@@ -296,7 +296,7 @@ X-API-Key: ttserp_ro_...
   "items": [{
     "spu_pk": 912, "spu_id": "1730000000000000001", "title": "Example",
     "status": "ACTIVATE", "shop_id": "7494763368967603447", "shop_name": "VN shop",
-    "spend": "100.0000", "sales": "1200.0000", "net_revenue": "1110.0000", "cogs_total": "930.0000", "spend": "100.0000",
+    "spend": "100.0000", "sales": "1200.0000", "net_revenue": "1110.0000", "cogs_total": "930.0000",
     "net_profit": "80.0000",
     "roi_real": "1.20", "profit_status": "profit", "roi_status": "non_negative",
     "projection_status": "available", "projected_net_profit": "70.0000",
@@ -306,6 +306,7 @@ X-API-Key: ttserp_ro_...
   "total": 1,
   "totals": {
     "row_count": 1, "total_orders": 12, "sales": "1200.0000",
+    "net_revenue": "1110.0000", "cogs_total": "930.0000", "spend": "100.0000",
     "net_profit": "80.0000", "projection_status": "available",
     "completed_full_loss_rate": "0.1000"
   },
@@ -338,6 +339,7 @@ X-API-Key: ttserp_ro_...
   "total": 1,
   "totals": {
     "row_count": 1, "total_orders": 12, "sales": "1200.0000",
+    "net_revenue": "1110.0000", "cogs_total": "930.0000", "spend": "100.0000",
     "net_profit": "80.0000", "projection_status": "available",
     "projected_net_revenue": "1100.0000", "projected_net_profit": "70.0000",
     "completed_full_loss_rate": "0.1000"

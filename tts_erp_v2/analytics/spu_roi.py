@@ -151,7 +151,11 @@ _PNL_HINTS = {
     "settled": "已结算部分使用 SETTLEMENT 实际到账净额",
     "unsettled": "未结算部分使用行级 fee_rate_used 与 SPU 退款率估算",
     "cogs_sold": "售出件使用已付款白名单订单的实际售出件数",
-    "cogs_full_loss": (
+    "cogs_full_loss": "取消单只有符合严格全损判定时才按件数计入货本",
+}
+_SUMMARY_HINTS = {
+    "cogs_total": _PNL_HINTS["cogs"],
+    "strict_full_loss_cost": (
         "全部已确认严格全损件数对应的货本，包含符合条件的海外取消全损；"
         "是采购成本的其中项，计算净利润时不再额外扣除"
     ),
@@ -414,6 +418,7 @@ def _meta_payload(
             "default_cost_alert_message": _DEFAULT_COST_ALERT_MESSAGE,
             "unsettled_alert_message": _UNSETTLED_ALERT_MESSAGE,
             "pnl_hints": _PNL_HINTS,
+            "summary_hints": _SUMMARY_HINTS,
         },
         "currency": {
             "display": basis.display_currency,
