@@ -22,7 +22,7 @@ it('rounds displayed decimals to two places without losing large integer digits'
 
 it('renders null, empty and absent current or projected values as dashes', () => {
   render(<Summary data={{ items: [], total: 0, totals: { net_profit: null, projected_net_revenue: '', projected_future_full_loss_qty: undefined }, meta: { projection: null } }} />);
-  for (const id of ['sum-gmv', 'sum-sales', 'sum-purchase-cost', 'sum-net-profit', 'sum-net-revenue', 'sum-refund-rate', 'sum-projected-net-revenue', 'sum-projected-future-loss-qty']) {
+  for (const id of ['sum-gmv', 'sum-purchase-cost', 'sum-net-profit', 'sum-net-revenue', 'sum-refund-rate', 'sum-projected-net-revenue', 'sum-projected-future-loss-qty', 'kpi-net-profit', 'kpi-projected-net-profit', 'kpi-roi-real', 'kpi-spend', 'kpi-effective-sales', 'kpi-refund-rate']) {
     expect(document.getElementById(id)).toHaveTextContent(/^—$/);
   }
 });
@@ -41,17 +41,20 @@ it('groups the original server values into sales, costs and profit without deriv
   render(<Summary data={{ items: [], total: 0, totals: { gmv: '1234.5678', effective_sales: '661.9793', spend: '270.2993', net_profit: '14.6395', projected_net_revenue: '412.5134', projected_net_profit: '-33.7859', roi_real: '1.71', roi_breakeven: '1.62', projected_roi_real: '1.46', projected_roi_breakeven: '1.67', ad_system_breakeven_roi: '2.86', ad_system_breakeven_roi_status: 'estimated_known_costs' }, meta: {} }} />);
   const sales = screen.getByLabelText('销售'); const costs = screen.getByLabelText('成本'); const profit = screen.getByLabelText('利润');
   expect(within(sales).getByText('1,234.57')).toBeInTheDocument();
-  expect(within(sales).getByText('661.98')).toBeInTheDocument();
-  expect(within(costs).getByText('270.30')).toBeInTheDocument();
+  expect(document.getElementById('kpi-effective-sales')).toHaveTextContent('661.98');
+  expect(document.getElementById('kpi-spend')).toHaveTextContent('270.30');
+  expect(document.getElementById('kpi-net-profit')).toHaveTextContent('14.64');
+  expect(within(sales).queryByText('661.98')).toBeNull();
+  expect(within(costs).queryByText('270.30')).toBeNull();
   expect(costs.querySelector('#sum-purchase-cost')).toHaveTextContent('—');
   expect(within(costs).getByText('未提供汇总；采购价为单件口径')).toBeInTheDocument();
   expect(profit.querySelector('#sum-net-revenue')).toHaveTextContent('—');
   expect(within(profit).getByText('未提供汇总；净利润为服务端结果')).toBeInTheDocument();
   expect(within(profit).getByText('412.51')).toBeInTheDocument();
   expect(within(profit).getByText('-33.79')).toBeInTheDocument();
-  expect(within(profit).getByRole('grid', { name: '当前与预计 ROI' })).toHaveTextContent('1.71');
-  expect(within(profit).getByRole('grid', { name: '当前与预计 ROI' })).toHaveTextContent('1.46');
-  expect(within(profit).getByRole('grid', { name: '当前与预计 ROI' })).toHaveTextContent('≈2.86');
+  expect(within(profit).getByRole('grid', { name: '当前与预计最终对比' })).toHaveTextContent('1.71');
+  expect(within(profit).getByRole('grid', { name: '当前与预计最终对比' })).toHaveTextContent('1.46');
+  expect(within(profit).getByRole('grid', { name: '当前与预计最终对比' })).toHaveTextContent('≈2.86');
   expect(within(sales).queryByText('预计净收入')).toBeNull();
   expect(within(costs).queryByText('预计净收入')).toBeNull();
   expect(within(costs).queryByText('预计新增全损')).toBeNull();
@@ -61,12 +64,14 @@ it('groups the original server values into sales, costs and profit without deriv
 it('separates the reporting dates from the server sample and keeps the sample inside profit', () => {
   const data = { items: [], total: 0, totals: {}, meta: { projection: { calculated_at: '2026-11-25T18:00:00Z', sample_start: '2026-10-20', sample_end: '2026-11-18', lookback_days: 30, maturity_lag_days: 7 } } };
   const view = render(<Summary data={data} scope="2026-11-19 ~ 2026-11-25" reportingRegion="VN" projectionControl={<button>TEST 样本切换</button>} />);
+  const profit = screen.getByLabelText('利润');
   const sample = screen.getByRole('region', { name: '历史预测依据' });
-  expect(screen.getByLabelText('利润')).toContainElement(sample);
+  expect(profit).toContainElement(sample);
   expect(within(sample).getByText('按当前时间回看')).toBeInTheDocument();
   expect(within(sample).getByText('计算日 2026-11-26')).toBeInTheDocument();
   expect(within(sample).getByText('2026-10-20 ~ 2026-11-18')).toBeVisible();
-  expect(within(sample).getByRole('button', { name: 'TEST 样本切换' })).toBeInTheDocument();
+  expect(within(profit).getByRole('button', { name: 'TEST 样本切换' })).toBeInTheDocument();
+  expect(within(sample).queryByRole('button', { name: 'TEST 样本切换' })).toBeNull();
   expect(within(sample).queryByText(/SPU 范围/)).toBeNull();
   view.rerender(<Summary data={data} scope="2026-10-01 ~ 2026-10-31" reportingRegion="VN" />);
   expect(screen.getByText('2026-10-01 ~ 2026-10-31 · CNY')).toBeInTheDocument();

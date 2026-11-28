@@ -107,6 +107,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
     finally { scope?.signal.removeEventListener('abort', cancel); if (!scope?.signal.aborted && generation === resolveGeneration.current) { pending.current = false; setBusy(false); resolveController.current = undefined; } }
   }
   const disabled = !shopPk || loading || busy || cooldown || needsCheck || blocked || forbidden || focused && !canWrite;
+  const unapplied = !focused && (draft.length !== applied.length || draft.some((id) => !applied.includes(id)));
   const selected = draft.map((id) => choices.find((item) => item.spu_id === id) ?? { spu_id: id, title: null, status: null });
   const options = [...new Map([...selected, ...choices].map((item) => [item.spu_id, item])).values()];
   return <section aria-label={focused ? '重点关注 SPU' : 'SPU 范围'} className="erp-panel space-y-3">
@@ -140,7 +141,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
       </div>
     </TextField>
     {query.trim() && <fieldset id={focused ? 'focused-spu-select' : 'filter-spu-ids'} aria-label={focused ? '重点关注 SPU 多选' : '批量选择 SPU'} disabled={disabled} className="space-y-2"><legend className="sr-only">搜索结果</legend><div className="max-h-48 space-y-2 overflow-y-auto">{options.map((item) => <Checkbox key={item.spu_id} isSelected={draft.includes(item.spu_id)} isDisabled={disabled} onChange={(checked) => { void change(checked ? [...draft, item.spu_id] : draft.filter((id) => id !== item.spu_id)); }}><Checkbox.Content className="min-w-0 break-all"><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>{item.spu_id} · {item.title ?? '无标题'} · {item.status ?? '未知状态'}</Checkbox.Content></Checkbox>)}</div></fieldset>}
-    {!focused && <div className="flex flex-wrap items-center gap-2"><Button id="btn-spu-apply" isDisabled={disabled} onPress={() => onApply(draft)}>查询</Button><Button id="btn-spu-clear" variant="secondary" isDisabled={!shopPk || loading || cooldown || needsCheck || blocked} onPress={() => { cancelResolution(); setDraft([]); setQuery(''); setNotice(''); onApply([]); }}>清空</Button></div>}
+    {!focused && <div className="flex flex-wrap items-center gap-2"><Button id="btn-spu-apply" className={unapplied ? 'erp-spu-apply-pending' : undefined} isDisabled={disabled} onPress={() => onApply(draft)}>查询</Button><Button id="btn-spu-clear" variant="secondary" isDisabled={!shopPk || loading || cooldown || needsCheck || blocked} onPress={() => { cancelResolution(); setDraft([]); setQuery(''); setNotice(''); onApply([]); }}>清空</Button>{unapplied && <span className="erp-spu-pending">有未应用的 SPU 选择，点击查询生效</span>}</div>}
     {focused && !canWrite && <p>当前为只读权限；可浏览关注商品，修改需要 readwrite。</p>}
     {forbidden && <p role="alert">服务端拒绝修改此店铺的关注清单；重新读取事实不会解除写权限限制。</p>}
     {loading && <p role="status">正在读取完整关注清单…</p>}{notice && <p id="spu-filter-feedback" role={needsCheck ? 'alert' : 'status'} className="break-all">{notice}</p>}
