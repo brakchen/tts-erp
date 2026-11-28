@@ -104,7 +104,7 @@ describe('login determined failures', () => {
     expect(loginButton()).toBeDisabled();
     fireEvent.change(screen.getByLabelText('用户名', { exact: true }), { target: { value: 'TEST_changed' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(screen.getByText('登录过于频繁，请 599 秒后再试')).toBeVisible();
+    expect(screen.getByText('登录过于频繁，请 600 秒后再试')).toBeVisible();
     expect(loginButton()).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(598000); }); expect(loginButton()).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(loginButton()).toBeEnabled();
