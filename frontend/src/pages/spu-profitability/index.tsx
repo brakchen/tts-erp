@@ -21,6 +21,8 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
   const root = bootstrap.rootPath; const profile: Profile = bootstrap.pageId === 'focused-spus' ? 'focused-spus' : 'spu-roi'; const focused = profile === 'focused-spus';
   const [query, setQuery] = useState(() => initialQuery(profile, location.search, readPreferences(profile)));
   const [dateStart, setDateStart] = useState(query.wStart); const [dateEnd, setDateEnd] = useState(query.wEnd);
+  const dateTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(dateTimer.current), []);
   const [revision, setRevision] = useState(0); const [more, setMore] = useState(false); const [feeDismissed, setFeeDismissed] = useState(false);
   const [shopRevision, setShopRevision] = useState(0); const detailFence = useRef(0);
   const selectionFence = useRef(0);
@@ -31,7 +33,9 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
   const shop = shops.data?.find((row) => row.id === query.shopPk);
   const today = shop ? reportingDate(new Date(), shop.region) : null;
   const unknownZone = !focused && Boolean(shop) && !today;
-  const dateInverted = /^\d{4}-\d{2}-\d{2}$/.test(query.wStart) && /^\d{4}-\d{2}-\d{2}$/.test(query.wEnd) && query.wStart > query.wEnd;
+  // Reflect inversion from the inputs being edited, not the committed query, so
+  // the alert is immediate even while the debounced commit below is pending.
+  const dateInverted = /^\d{4}-\d{2}-\d{2}$/.test(dateStart) && /^\d{4}-\d{2}-\d{2}$/.test(dateEnd) && dateStart > dateEnd;
   const automaticDatesReady = focused || query.datesTouched || Boolean(query.wStart && query.wEnd);
   const params = useMemo(() => queryParams(query, focused), [query, focused]);
   const path = shop && !unknownZone && !dateInverted && automaticDatesReady && (!focused || focusedCount !== null) ? `/v2/analytics/spu-roi?${params}` : null;
@@ -54,6 +58,7 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
     setQuery((old) => ({ ...old, ...patch, offset: patch.offset ?? 0 }));
   }
   function changeShop(id: string) {
+    clearTimeout(dateTimer.current);
     setFocusedCount(null); setPriceCapability(undefined); update({ shopPk: id, spuIds: [], ...(!query.datesTouched ? { wStart: '', wEnd: '' } : {}) });
     const url = new URL(location.href); url.searchParams.set('shop_pk', id); url.searchParams.delete('spu_ids'); history.replaceState(null, '', url);
   }
@@ -62,16 +67,27 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
     update({ spuIds: ids }); const url = new URL(location.href); if (ids.length) url.searchParams.set('spu_ids', ids.join(',')); else url.searchParams.delete('spu_ids'); history.replaceState(null, '', url);
   }
   function commitDates(start: string, end: string) { update({ wStart: start, wEnd: end, datesTouched: true }); }
+  // Typing a date range is one gesture; commit once after the input settles
+  // instead of firing a full recompute per keystroke. Blur commits immediately.
+  function scheduleDates(start: string, end: string) {
+    clearTimeout(dateTimer.current);
+    dateTimer.current = setTimeout(() => commitDates(start, end), 400);
+  }
+  function flushDates(start: string, end: string) {
+    clearTimeout(dateTimer.current);
+    if (start !== query.wStart || end !== query.wEnd) commitDates(start, end);
+  }
   function preset(start: string, end: string) {
-    setDateStart(start); setDateEnd(end); commitDates(start, end);
+    setDateStart(start); setDateEnd(end); flushDates(start, end);
   }
   const closeDrill = useCallback(() => { setDrill(undefined); }, []);
   const receiveDrill = useCallback((row: ProfitRow | null, host: HTMLElement | null) => { setDrill(row && host ? { row, host } : undefined); }, []);
   const fee = optionalRecord(data?.meta.fee); const meta = data?.meta ?? {};
   const presetOptions = datePresets(today);
-  const dateControls = <section className="erp-profit-controls" aria-label="经营日期筛选">
+  const filterBar = <section className="erp-panel erp-profit-controls" aria-label="店铺与经营日期筛选">
       <div className="erp-profit-toolbar">
-      <div className="erp-profit-dates"><label>起始日<Input fullWidth className="min-w-0" id="filter-w-start" type="date" aria-label="销售/退款起始日期（空 = 不限）" value={dateStart} disabled={blocked} onChange={(event) => { const value = event.target.value; setDateStart(value); if (value) commitDates(value, dateEnd); }} onBlur={(event) => { if (!event.target.value) commitDates('', dateEnd); }} /></label><label>截止日<Input fullWidth className="min-w-0" id="filter-w-end" type="date" aria-label="销售/退款截止日期（空 = 不限）" value={dateEnd} disabled={blocked} onChange={(event) => { const value = event.target.value; setDateEnd(value); if (value) commitDates(dateStart, value); }} onBlur={(event) => { if (!event.target.value) commitDates(dateStart, ''); }} /></label>
+      <Select className="erp-shop-picker" isDisabled={shops.loading || blocked} aria-label="当前店铺" value={`choice:${shop?.id ?? ''}`} onChange={(key) => { if (typeof key === 'string') { changeShop(key.slice(7)); } } }><Label>当前店铺</Label><Select.Trigger id="shop-switcher" className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="choice:" textValue="请选择店铺" isDisabled>请选择店铺</ListBox.Item>{shops.data?.map((row) => <ListBox.Item key={row.id} id={`choice:${row.id}`} textValue={`${displayShopName(row, row.shop_id)} · ${row.shop_id}`}>{`${displayShopName(row, row.shop_id)} · ${row.shop_id}`}</ListBox.Item>)}</ListBox></Select.Popover></Select>
+      <div className="erp-profit-dates"><label>起始日<Input fullWidth className="min-w-0" id="filter-w-start" type="date" aria-label="销售/退款起始日期（空 = 不限）" value={dateStart} disabled={blocked} onChange={(event) => { const value = event.target.value; setDateStart(value); if (value) scheduleDates(value, dateEnd); }} onBlur={(event) => flushDates(event.target.value, dateEnd)} /></label><label>截止日<Input fullWidth className="min-w-0" id="filter-w-end" type="date" aria-label="销售/退款截止日期（空 = 不限）" value={dateEnd} disabled={blocked} onChange={(event) => { const value = event.target.value; setDateEnd(value); if (value) scheduleDates(dateStart, value); }} onBlur={(event) => flushDates(dateStart, event.target.value)} /></label>
       </div>
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="快捷日期范围">{presetOptions.map(({ id, label, start, end }) => <Button key={id} size="sm" variant="secondary" data-date-preset={id} aria-pressed={query.wStart === start && query.wEnd === end} isDisabled={blocked} onPress={() => preset(start, end)}>{label}</Button>)}</div>
       <Button id="btn-toolbar-more" size="sm" variant="ghost" isDisabled={blocked} aria-expanded={more} aria-controls="toolbar-more" onPress={() => setMore(!more)}>更多{!more && (query.feePercent || query.includeAll !== focused) ? ' · 已设置' : ''}</Button>
@@ -82,17 +98,18 @@ function ProfitabilityContent({ bootstrap }: PageProps) {
       {blocked && <p role="status">冷却结束后可重试。</p>}
     </section>;
   const projectionControl = <Select className="erp-profit-projection" isDisabled={overview.loading || blocked} aria-label="预测样本天数" value={`choice:${query.projectionLookbackDays}`} onChange={(key) => { if (typeof key === 'string') { update({ projectionLookbackDays: key.slice(7) === '90' ? 90 : 30 }); } } }><Label>历史样本</Label><Select.Trigger id="filter-projection-lookback-days" className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{[30, 90].map((days) => <ListBox.Item key={days} id={`choice:${days}`} textValue={`${days} 天`}>{`${days} 天`}</ListBox.Item>)}</ListBox></Select.Popover></Select>;
+  const freshnessSection = <section id="data-freshness" className="erp-profit-freshness" aria-label="数据更新" aria-live="polite"><span>数据更新</span>{freshness.error ? <span>同步时间加载失败</span> : Array.isArray(freshness.data?.sources) ? freshness.data.sources.map((raw) => { const source = optionalRecord(raw); const severity = ['ok', 'warn', 'crit', 'unknown'].includes(String(source.severity)) ? String(source.severity) : 'unknown'; const detail = text(source.detail); return <span key={String(source.key)} data-source={String(source.key)} data-severity={severity} title={`${detail} · ${text(source.job_name)} · ${text(source.synced_at)}`}><i className="erp-freshness-dot" aria-hidden="true" /><strong>{text(source.label ?? source.key)}</strong> <time dateTime={typeof source.synced_at === 'string' ? source.synced_at : undefined}>{displayTimestamp(source.synced_at, shop?.region)}</time> · {freshnessLabels[severity]}{source.scope === 'system' ? ' · 全账号' : ''}{(severity === 'warn' || severity === 'crit') && detail && detail !== '—' ? <span className="erp-freshness-detail">{detail}</span> : null}</span>; }) : <span>—</span>}<span data-source="fx" data-severity="unknown"><i className="erp-freshness-dot" aria-hidden="true" />汇率快照 <time title={text(optionalRecord(meta.fx).as_of_at)}>{displayTimestamp(optionalRecord(meta.fx).as_of_at, shop?.region)}</time></span></section>;
   return <div className="erp-page" data-page-profile={focused ? 'focused-spus' : 'standard-roi'}>
-    <div className="erp-profit-scope-row"><Select className="erp-shop-picker" isDisabled={shops.loading || blocked} aria-label="当前店铺" value={`choice:${shop?.id ?? ''}`} onChange={(key) => { if (typeof key === 'string') { changeShop(key.slice(7)); } } }><Label>当前店铺</Label><Select.Trigger id="shop-switcher" className="w-full"><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="choice:" textValue="请选择店铺" isDisabled>请选择店铺</ListBox.Item>{shops.data?.map((row) => <ListBox.Item key={row.id} id={`choice:${row.id}`} textValue={`${displayShopName(row, row.shop_id)} · ${row.shop_id}`}>{`${displayShopName(row, row.shop_id)} · ${row.shop_id}`}</ListBox.Item>)}</ListBox></Select.Popover></Select></div>
+    {filterBar}
+    {freshnessSection}
     <Summary data={data ?? emptyOverview} stateMessage={overview.error ? '经营概览加载失败' : overview.loading ? '加载中…' : !shop ? '请选择店铺' : undefined} scope={`${query.wStart || '不限'} ~ ${query.wEnd || '不限'}`}
-      reportingRegion={shop?.region} dateControls={dateControls} projectionControl={projectionControl}
+      reportingRegion={shop?.region} projectionControl={projectionControl}
       salesPrices={!focused && <PriceSummary data={data} supported={priceCapability} loading={overview.loading} error={overview.error} kind="sales" />}
       costPrices={!focused && <PriceSummary data={data} supported={priceCapability} loading={overview.loading} error={overview.error} kind="purchase" />}
       feeFacts={<FeeFacts fee={fee} dismissed={feeDismissed} onDismiss={() => setFeeDismissed(true)} />}
     />
     {shops.error && <div role="alert"><p>店铺读取失败：{shops.error}</p><Button variant="secondary" isDisabled={shops.loading || shops.blocked} onPress={() => setShopRevision((value) => value + 1)}>重试店铺列表</Button></div>}{shops.loading && <p role="status">加载店铺中…</p>}
     {shop && <Selection key={`${root}:${shop.id}:${profile}`} root={root} shopPk={shop.id} focused={focused} canWrite={bootstrap.roleCapabilities?.readwrite === true} blocked={blocked} fence={selectionFence} applied={query.spuIds} onApply={applyIds} onFocused={focusedChanged} />}
-    <section id="data-freshness" className="erp-profit-freshness" aria-label="数据更新" aria-live="polite"><span>数据更新</span>{freshness.error ? <span>同步时间加载失败</span> : Array.isArray(freshness.data?.sources) ? freshness.data.sources.map((raw) => { const source = optionalRecord(raw); const severity = ['ok', 'warn', 'crit', 'unknown'].includes(String(source.severity)) ? String(source.severity) : 'unknown'; return <span key={String(source.key)} data-source={String(source.key)} data-severity={severity} title={`${text(source.detail)} · ${text(source.job_name)} · ${text(source.synced_at)}`}><strong>{text(source.label ?? source.key)}</strong> <time dateTime={typeof source.synced_at === 'string' ? source.synced_at : undefined}>{displayTimestamp(source.synced_at, shop?.region)}</time> · {freshnessLabels[severity]}{source.scope === 'system' ? ' · 全账号' : ''}</span>; }) : <span>—</span>}<span data-source="fx" data-severity="unknown">汇率快照 <time title={text(optionalRecord(meta.fx).as_of_at)}>{displayTimestamp(optionalRecord(meta.fx).as_of_at, shop?.region)}</time></span></section>
     <section className="erp-panel min-w-0 space-y-4" aria-label="商品经营明细"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="erp-section-heading">商品经营明细</h2></div><span id="sort-note" className="erp-table-meta">排序：{sortLabel(query.sort)} {query.order === 'asc' ? '↑' : '↓'} · {data?.total ?? '—'} 条</span></div>
       {focused && focusedCount === 0 && <p>尚未关注 SPU，请在上方搜索并添加。当前范围仍为关注清单。</p>}
       <ProfitabilityTable root={root} rows={data?.items ?? emptyRows} sort={query.sort} order={query.order} prices={!focused && priceCapability === true} meta={meta} loading={overview.loading} error={overview.error} selectedKey={drill?.row.spu_pk ?? null} blocked={blocked} onSort={(sort, order) => update({ sort, order })} onDrill={receiveDrill} onZoom={setImage} onRetry={() => setRevision((value) => value + 1)} />

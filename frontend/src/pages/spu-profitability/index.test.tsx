@@ -65,14 +65,20 @@ it.each(['spu-roi', 'focused-spus'] as const)('keeps %s dates with results and t
   await act(async () => { render(<><Page bootstrap={{ ...bootstrap, pageId }} /><Toast.Provider /></>); });
   await screen.findByText('TEST_RESULT');
   const overview = screen.getByRole('region', { name: '经营概览' });
-  expect(overview).toContainElement(screen.getByRole('region', { name: '经营日期筛选' }));
+  const filters = screen.getByRole('region', { name: '店铺与经营日期筛选' });
+  expect(overview.contains(filters)).toBe(false);
+  expect(filters.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(filters.compareDocumentPosition(document.getElementById('data-freshness')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(overview.compareDocumentPosition(screen.getByLabelText('按 SPU ID / 标题搜索')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const sample = within(overview).getByRole('region', { name: '历史预测依据' });
-  expect(sample).toContainElement(document.getElementById('filter-projection-lookback-days'));
-  expect(within(overview).getByLabelText('利润')).toContainElement(sample);
+  const profit = within(overview).getByLabelText('利润');
+  expect(profit).toContainElement(document.getElementById('filter-projection-lookback-days'));
+  expect(sample.contains(document.getElementById('filter-projection-lookback-days'))).toBe(false);
+  expect(profit).toContainElement(sample);
   expect(within(overview).getByLabelText('销售')).toBeInTheDocument();
   expect(within(overview).getByLabelText('成本')).toBeInTheDocument();
   expect(within(overview).getByLabelText('利润')).toBeInTheDocument();
+  expect(document.getElementById('kpi-net-profit')).not.toBeNull();
 });
 it('both page profiles render through the same React owner and keep the server scope', async () => {
   // This case owns request scope; Summary.test.tsx owns metric rendering.
@@ -241,3 +247,29 @@ it.each(['spu-roi', 'focused-spus'])('shows alias in the %s shop picker', async 
   await act(async () => { fireEvent.click(picker); });
   expect(screen.getByRole('option', { name: `TEST_alias · ${shop.shop_id}` })).toBeVisible();
 }, 10_000);
+
+it('flags unapplied standard SPU selections until 查询 applies them', async () => {
+  render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>);
+  await screen.findByText('TEST_RESULT');
+  expect(screen.queryByText('有未应用的 SPU 选择，点击查询生效')).toBeNull();
+  const input = screen.getByRole('textbox', { name: '按 SPU ID / 标题搜索' });
+  fireEvent.change(input, { target: { value: 'TEST_NEW' } });
+  fireEvent.click(await screen.findByRole('checkbox', { name: /TEST_NEW/ }));
+  expect(await screen.findByText('有未应用的 SPU 选择，点击查询生效')).toBeVisible();
+  expect(document.getElementById('btn-spu-apply')).toHaveClass('erp-spu-apply-pending');
+  fireEvent.click(screen.getByRole('button', { name: '查询' }));
+  await waitFor(() => expect(screen.queryByText('有未应用的 SPU 选择，点击查询生效')).toBeNull());
+});
+
+it('shows lagging sync details inline instead of tooltip only', async () => {
+  const fetcher = vi.mocked(fetch); const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((input, init) => String(input).includes('/v2/sync/freshness')
+    ? Promise.resolve(response({ sources: [{ key: 'orders', label: '订单', synced_at: '2026-11-27T00:00:00Z', severity: 'crit', detail: 'TEST 滞后详情', job_name: 'tiktok.orders', scope: 'shop' }, { key: 'ads', label: '广告', synced_at: '2026-11-27T00:00:00Z', severity: 'ok', detail: 'TEST 正常详情', job_name: 'tiktok.ads', scope: 'shop' }] }))
+    : original(input, init));
+  render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>);
+  await screen.findByText('TEST_RESULT');
+  const freshness = document.getElementById('data-freshness')!;
+  await waitFor(() => expect(freshness).toHaveTextContent('TEST 滞后详情'));
+  expect(freshness).not.toHaveTextContent('TEST 正常详情');
+  expect(freshness.querySelector('[data-severity="crit"] .erp-freshness-dot')).not.toBeNull();
+});

@@ -58,9 +58,11 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
         assert costs['x'] >= sales['x'] + sales['width']
     else:
         assert costs['y'] >= sales['y'] + sales['height']
-    filters = page.get_by_role('region', name='经营日期筛选').bounding_box()
+    filters = page.get_by_role('region', name='店铺与经营日期筛选').bounding_box()
     assert filters
-    assert overview['y'] <= filters['y'] < sales['y']
+    assert filters['y'] + filters['height'] <= overview['y'] + 1
+    kpi = page.locator('#kpi-net-profit').bounding_box()
+    assert kpi and overview['y'] <= kpi['y'] < sales['y']
     sample = page.get_by_role('region', name='历史预测依据').bounding_box()
     assert sample and sample['y'] > profit['y']
     assert sample['y'] + sample['height'] <= profit['y'] + profit['height']
