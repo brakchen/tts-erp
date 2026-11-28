@@ -1,7 +1,7 @@
 export type Profile = 'spu-roi' | 'focused-spus';
 export interface Query {
   shopPk: string; spuIds: string[]; wStart: string; wEnd: string; datesTouched: boolean;
-  includeAll: boolean; limit: number; offset: number; sort: string; order: 'asc' | 'desc';
+  includeAll: boolean; listedOnly: boolean; limit: number; offset: number; sort: string; order: 'asc' | 'desc';
   projectionLookbackDays: 30 | 90; feePercent: string;
 }
 const zones: Record<string, string> = { VN: 'Asia/Ho_Chi_Minh', TH: 'Asia/Bangkok', SG: 'Asia/Singapore', MY: 'Asia/Kuala_Lumpur', PH: 'Asia/Manila', CN: 'Asia/Shanghai', JP: 'Asia/Tokyo', KR: 'Asia/Seoul', GB: 'Europe/London' };
@@ -22,6 +22,7 @@ export function initialQuery(profile: Profile, search: string, saved: Record<str
     wStart: explicitDates ? params.get('w_start') ?? '' : touched ? text(saved.wStart) : '',
     wEnd: explicitDates ? params.get('w_end') ?? '' : touched ? text(saved.wEnd) : '',
     datesTouched: explicitDates || touched, includeAll: typeof saved.includeAll === 'boolean' ? saved.includeAll : profile === 'focused-spus',
+    listedOnly: saved.listedOnly === true,
     limit: [50, 100, 200].includes(Number(saved.limit)) ? Number(saved.limit) : 100,
     offset: 0, sort: typeof saved.sort === 'string' && sortable.has(saved.sort) ? saved.sort : 'roi_real',
     order: saved.order === 'desc' ? 'desc' : 'asc', projectionLookbackDays: saved.projectionLookbackDays === 90 ? 90 : 30, feePercent: '',
@@ -58,12 +59,12 @@ export function percentToRatio(raw: string): string | null {
   return (match[1] === '-' ? '-' : '') + result.replace(/^0+(?=\d)/, '');
 }
 export function queryParams(q: Query, focused: boolean): URLSearchParams {
-  const params = new URLSearchParams({ shop_pk: q.shopPk, limit: String(q.limit), offset: String(q.offset), sort: q.sort, order: q.order, include_all: String(q.includeAll), projection_lookback_days: String(q.projectionLookbackDays) });
+  const params = new URLSearchParams({ shop_pk: q.shopPk, limit: String(q.limit), offset: String(q.offset), sort: q.sort, order: q.order, include_all: String(q.includeAll), listed_only: String(q.listedOnly), projection_lookback_days: String(q.projectionLookbackDays) });
   if (focused) params.set('scope', 'focused'); else if (q.spuIds.length) params.set('spu_ids', q.spuIds.join(','));
   if (q.wStart) params.set('w_start', q.wStart); if (q.wEnd) params.set('w_end', q.wEnd);
   const fee = percentToRatio(q.feePercent); if (fee !== null) params.set('fee_rate', fee);
   return params;
 }
 export function persistQuery(profile: Profile, q: Query) {
-  try { const { shopPk, wStart, wEnd, datesTouched, includeAll, limit, sort, order, projectionLookbackDays } = q; localStorage.setItem(preferenceKey(profile), JSON.stringify({ shopPk, wStart, wEnd, datesTouched, includeAll, limit, sort, order, projectionLookbackDays })); } catch { /* Storage is optional. */ }
+  try { const { shopPk, wStart, wEnd, datesTouched, includeAll, listedOnly, limit, sort, order, projectionLookbackDays } = q; localStorage.setItem(preferenceKey(profile), JSON.stringify({ shopPk, wStart, wEnd, datesTouched, includeAll, listedOnly, limit, sort, order, projectionLookbackDays })); } catch { /* Storage is optional. */ }
 }

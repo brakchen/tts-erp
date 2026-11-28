@@ -3249,6 +3249,42 @@ def test_spu_roi_include_all_filters_non_active_status(
     assert "TEST_ROI_SPU_DEACTIVE_IDLE" not in by_id2
 
 
+def test_spu_roi_listed_only_filters_status_without_include_all(
+    api_client, readonly_key, db_engine
+):
+    """listed_only=true 独立限定已上架(ACTIVATE)目录状态,与 include_all 解耦。
+
+    默认行范围("有活动",不按状态裁剪)叠加 listed_only 后只剩 ACTIVATE 且
+    有活动的行;与 include_all 叠加时保持 include_all 的既有目录口径。
+    """
+    with Session(db_engine) as sess:
+        _seed(sess, _seed_status_mix)
+
+    h = {"Authorization": f"Bearer {readonly_key}"}
+    r = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={"q": Q, "listed_only": "true"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 1
+    assert {i["spu_id"] for i in body["items"]} == {"TEST_ROI_SPU_ACTIVE_ON"}
+
+    r2 = api_client.get(
+        "/v2/analytics/spu-roi",
+        headers=h,
+        params={"q": Q, "listed_only": "true", "include_all": "true"},
+    )
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    assert body2["total"] == 2
+    assert {i["spu_id"] for i in body2["items"]} == {
+        "TEST_ROI_SPU_ACTIVE_ON",
+        "TEST_ROI_SPU_ACTIVE_IDLE",
+    }
+
+
 def test_spu_roi_window_params_clip_sales_and_refunds_by_order_time(
     api_client, readonly_key, db_engine
 ):

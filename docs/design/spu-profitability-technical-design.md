@@ -241,6 +241,7 @@ HTTP adapter负责鉴权矩阵外的参数校验、异常到 HTTP mapping、Deci
 - `spu_ids` 是当前店铺的业务编号精确匹配；`scope=focused` 由 `reporting.focused_spus(active=true)` 在 DB 内解析。
 - `q` 只过滤行集合的 `spu_id`/标题展示；目标不改变 totals。当前 `_implementation` 的 catalog search 同时参与 selected catalog，开发时必须以测试锁定该语义并将 q 从业务 selection 中分离。
 - `include_all=false` 只含有广告∨有效销售∨退款的 active SPU；`true` 包含所有 ACTIVE 目录 SPU，仍排除 DEACTIVATE/DELETED 等非 active 状态。
+- `listed_only=true` 独立限定目录状态为 ACTIVATE（已上架），与 `include_all` 解耦：默认行范围（按活动裁剪）叠加后只返回已上架且有活动的 SPU；默认 false 不改变既有行范围。
 - `limit` 1..500，默认 100；`offset≥0`；页面 UI 只提供 50/100/200。
 - sort 是 `SortField` 代码；相同值以 spend、最终 `spu_pk ASC` 稳定排序。总数和 totals 在分页前计算。
 - 预测范围跟随店铺和已应用 exact/focused SPU scope；搜索、排序、分页不改变 prediction totals。
@@ -268,6 +269,7 @@ HTTP adapter负责鉴权矩阵外的参数校验、异常到 HTTP mapping、Deci
 | `order` | `asc|desc`，默认 `asc` | 非 desc 的值当前被 adapter 当 asc；目标应非法值 422 |
 | `limit`/`offset` | 1..500 / ≥0 | 分页 |
 | `include_all` | bool，默认 false | 活动目录范围 |
+| `listed_only` | bool，默认 false | 只含 ACTIVATE（已上架）目录状态，与 `include_all` 解耦 |
 | `shop_pk` | int≥1 | 内部店铺 PK |
 | `fee_rate` | string Decimal | 页面临时覆写；有限、非负 |
 | `w_start`/`w_end` | ISO date | 经营窗口；店铺当地日含结束日 |
