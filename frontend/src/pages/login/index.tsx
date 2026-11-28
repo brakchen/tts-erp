@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, FieldError, Input, InputGroup, Label, TextField } from '@heroui/react';
+import { Button, FieldError, Input, InputGroup, Label, TextField } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
@@ -25,7 +25,6 @@ export default function Login({ bootstrap }: PageProps) {
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<CommandFailure>();
   const [cooldown, setCooldown] = useState(false);
-  const [remaining, setRemaining] = useState(0);
   const mounted = useRef(true);
   const inFlight = useRef(false);
   const controllers = useRef(new Set<AbortController>());
@@ -46,12 +45,12 @@ export default function Login({ bootstrap }: PageProps) {
     stopCooldown.current?.();
     const tick = () => {
       if (!mounted.current) return;
-      const left = Math.ceil((notBefore.current - performance.now()) / 1000);
+      const left = notBefore.current - performance.now();
       if (left <= 0) {
-        setCooldown(false); setRemaining(0); stopCooldown.current = undefined; return;
+        setCooldown(false); stopCooldown.current = undefined; return;
       }
-      setCooldown(true); setRemaining(left);
-      stopCooldown.current = scheduleReadDelay(tick, Math.min(1000, notBefore.current - performance.now()));
+      setCooldown(true);
+      stopCooldown.current = scheduleReadDelay(tick, Math.min(1000, left));
     };
     tick();
   }
@@ -79,10 +78,8 @@ export default function Login({ bootstrap }: PageProps) {
       const result = commandFailure(error, labels, 'login');
       setFailure(result);
       const status = error instanceof ApiError ? error.status : undefined;
-      const rateLimited = (status === 429 || status === 500 || status === 503) && result.retryAfter > 0;
-      // 限流冷却需要页面内倒计时，保留内联 Alert；其余失败是一次性结果，用 toast。
-      if (rateLimited) holdCooldown(result.retryAfter);
-      else notify.failure('登录未完成', result.message);
+      if ((status === 429 || status === 500 || status === 503) && result.retryAfter > 0) holdCooldown(result.retryAfter);
+      notify.failure('登录未完成', loginAlert(result, result.retryAfter));
     } finally {
       controllers.current.delete(controller); inFlight.current = false;
       if (mounted.current) setPending(false);
@@ -116,7 +113,6 @@ export default function Login({ bootstrap }: PageProps) {
                 </InputGroup>
                 <FieldError>{failure?.fieldErrors.password}</FieldError>
               </TextField>
-              {failure && cooldown && <Alert status="danger"><Alert.Content><Alert.Title>登录未完成</Alert.Title><Alert.Description>{loginAlert(failure, remaining)}</Alert.Description></Alert.Content></Alert>}
               <Button type="submit" fullWidth size="lg" isDisabled={blocked}>{pending ? '登录中…' : '登录'}<span aria-hidden="true">↗</span></Button>
               {pending && <p role="status">正在等待登录响应…</p>}
             </form>
