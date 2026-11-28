@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import Page from './index';
 import type { PageProps } from '../../shared/contracts';
@@ -27,13 +28,13 @@ function api(command: (url: string, init: RequestInit) => Promise<Response> = as
   }); vi.stubGlobal('fetch', fetcher); return fetcher;
 }
 async function mount(bootstrap = props.bootstrap) {
-  return { ...render(<Page bootstrap={bootstrap} />), Page };
+  return { ...render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>), Page };
 }
 async function openUser(user: ReturnType<typeof userEvent.setup>, label: string) {
   const cell = await screen.findByText('test_user'); await user.click(within(cell.closest('tr')!).getByRole('button', { name: label }));
   return screen.getByRole('dialog');
 }
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 it('renders complete user columns and authoritative detail without inventing grants', async () => {
   api(); const user = userEvent.setup({ delay: null }); await mount();
@@ -84,7 +85,7 @@ it('never proves unknown password reset through GET and requires an explicit ret
 it('lists all session columns and confirms one and all revocation using exact IDs', async () => {
   const fetcher = api(async () => json({ ok: true, revoked: 1 })); const user = userEvent.setup({ delay: null }); await mount(); const dialog = await openUser(user, '会话');
   await within(dialog).findByText('TEST Agent'); expect(within(dialog).getByRole('grid')).toHaveTextContent('9007199254740995');
-  await user.click(within(dialog).getByRole('button', { name: '吊销此会话' })); await user.click(within(dialog).getByRole('button', { name: '确认操作' })); await within(dialog).findByText('操作已确认');
+  await user.click(within(dialog).getByRole('button', { name: '吊销此会话' })); await user.click(within(dialog).getByRole('button', { name: '确认操作' })); await screen.findByText('操作已确认');
   await user.click(within(dialog).getByRole('button', { name: '吊销全部会话' })); await user.click(within(dialog).getByRole('button', { name: '确认操作' }));
   const calls = fetcher.mock.calls.filter(([, init]) => init.method === 'DELETE'); expect(calls.map(([url]) => url)).toEqual(['/tts/v2/users/9007199254740993/sessions/9007199254740995', '/tts/v2/users/9007199254740993/sessions']);
 });
@@ -98,9 +99,9 @@ it('creates updates and deletes custom roles using canonical aliases and explici
   const fetcher = api(async (_url, init) => init.method === 'POST' ? json({ code: 'test_new' }, 201) : json({ ok: true })); const user = userEvent.setup({ delay: null }); await mount(); await user.click(screen.getByRole('tab', { name: '角色权限' })); await screen.findByText('TEST Custom');
   await user.click(screen.getByRole('button', { name: '新建角色' })); let dialog = screen.getByRole('dialog');
   await user.type(within(dialog).getByRole('textbox', { name: '角色代码' }), 'test_new'); await user.type(within(dialog).getByRole('textbox', { name: '角色名称' }), 'TEST New');
-  await user.click(within(dialog).getByRole('checkbox', { name: 'TEST Dashboard（page:dashboard）' })); await user.click(within(dialog).getByRole('button', { name: '保存' })); await screen.findByText('操作已确认');
+  await user.click(within(dialog).getByRole('checkbox', { name: 'TEST Dashboard（page:dashboard）' })); await user.click(within(dialog).getByRole('button', { name: '保存' })); await screen.findAllByText('操作已确认');
   const body = JSON.parse(String(fetcher.mock.calls.find(([, init]) => init.method === 'POST')![1].body)); expect(body).toEqual({ code: 'test_new', name: 'TEST New', apiTier: 'readwrite', permissions: ['page:dashboard'] });
-  await user.click(within(screen.getByText('TEST Custom').closest('tr')!).getByRole('button', { name: '编辑角色' })); dialog = screen.getByRole('dialog'); await user.click(within(dialog).getByRole('button', { name: '保存' })); await screen.findByText('操作已确认');
+  await user.click(within(screen.getByText('TEST Custom').closest('tr')!).getByRole('button', { name: '编辑角色' })); dialog = screen.getByRole('dialog'); await user.click(within(dialog).getByRole('button', { name: '保存' })); await screen.findAllByText('操作已确认');
   await user.click(within(screen.getByText('TEST Custom').closest('tr')!).getByRole('button', { name: '删除角色' })); dialog = screen.getByRole('dialog'); expect(within(dialog).getByText(/仍被用户引用时/)).toBeVisible(); await user.click(within(dialog).getByRole('button', { name: '确认操作' }));
   expect(fetcher.mock.calls.some(([url, init]) => url === '/tts/v2/roles/test_custom' && init.method === 'DELETE')).toBe(true);
 }, 15000);

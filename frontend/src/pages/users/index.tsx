@@ -144,7 +144,7 @@ export default function Users({ bootstrap }: PageProps) {
     <PageIntro eyebrow="ACCESS MANAGEMENT" title="为团队配置合适的访问权限" description="管理账号、角色与会话，按实际工作职责分配能力。" />
     <p>用户与角色权限管理。显示名、角色和启停分别提交；所有授权及自身 / 最后管理员保护由服务端判定。</p>
     {!canManage && <p>当前仅浏览；维护需要 admin 权限，以服务端判定为准。</p>}
-    {command.notice && <p role="status">{command.notice}</p>}{command.pending && <p role="status">提交中，请勿重复操作…</p>}{command.cooldown && <p role="status">服务端冷却中，请等待指定时间后手动重试，不会自动请求。</p>}
+    {command.pending && <p role="status">提交中，请勿重复操作…</p>}{command.cooldown && <p role="status">服务端冷却中，请等待指定时间后手动重试，不会自动请求。</p>}
     {!isOpen && recovery}{!isOpen && unresolved && <Button onPress={() => setOpen(true)}>返回未确认的操作</Button>}
     <Tabs defaultSelectedKey="users"><Tabs.ListContainer className="w-fit max-w-full"><Tabs.List aria-label="管理页签"><Tabs.Tab id="users" className="w-auto shrink-0 whitespace-nowrap">用户<Tabs.Indicator /></Tabs.Tab><Tabs.Tab id="roles" className="w-auto shrink-0 whitespace-nowrap">角色权限<Tabs.Indicator /></Tabs.Tab></Tabs.List></Tabs.ListContainer>
       <Tabs.Panel id="users" className="space-y-4"><div className="flex flex-wrap items-end gap-3">
@@ -160,7 +160,6 @@ export default function Users({ bootstrap }: PageProps) {
         {recovery}
         {command.pending && <p role="status">提交中，请等待服务端确认…</p>}
         {command.cooldown && <p role="status">服务端冷却中，读取和提交均须等待指定时间；不会自动重试。</p>}
-        {command.notice && dialog?.kind === 'sessions' && <p role="status">{command.notice}</p>}
         {dialog && formKind && <AccountForm kind={dialog.kind as CommandKind} role={dialog.role} draft={draft} catalog={catalog.data ?? emptyCatalog} pending={command.pending} blocked={command.blocked || !catalogReady && ['createUser', 'roles', 'createRole', 'editRole'].includes(dialog.kind)} errors={command.failure?.fieldErrors ?? {}} retry={command.phase === 'allowed'} onEdit={(next) => { setDraft(next); command.edit(); }} onCancel={close} onSubmit={() => { void submit(); }} />}
         {dialog?.kind === 'detail' && <>{publicUser.loading && <p role="status">加载详情中…</p>}{publicUser.error && <p role="alert">{publicUser.error}</p>}{publicUser.data && <dl className="space-y-2"><dt>显示名</dt><dd>{publicUser.data.displayName}</dd><dt>状态</dt><dd>{publicUser.data.status}</dd><dt>角色</dt><dd>{publicUser.data.roles.join('、') || '—'}</dd><dt>API 档位</dt><dd>{publicUser.data.apiTier}</dd><dt>可访问页面（服务端结果）</dt><dd>{publicUser.data.pages.map((page) => <p key={page}>{page}</p>)}</dd><dt>最后登录</dt><dd>{publicUser.data.lastLoginAt ?? '—'}</dd></dl>}<Button isDisabled={command.cooldown || publicUser.loading} onPress={() => { void loadDialog(dialog); }}>刷新详情</Button></>}
         {dialog?.kind === 'sessions' && <>

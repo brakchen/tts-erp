@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 const modulePath = './index';
@@ -11,11 +12,11 @@ function api(command: (url: string, init: RequestInit) => Promise<Response>, dat
   const fetcher = vi.fn((url: string, init: RequestInit) => init.method === 'GET' && url.endsWith('/enum-map/list') ? Promise.resolve(json(data)) : command(url, init));
   vi.stubGlobal('fetch', fetcher); return fetcher;
 }
-async function mount(bootstrap = props.bootstrap) { const { default: EnumMap } = await import(modulePath); return render(<EnumMap bootstrap={bootstrap} />); }
+async function mount(bootstrap = props.bootstrap) { const { default: EnumMap } = await import(modulePath); return render(<><EnumMap bootstrap={bootstrap} /><Toast.Provider /></>); }
 async function edit(user: ReturnType<typeof userEvent.setup>) {
   const cell = await screen.findByText('TEST_A'); await user.click(within(cell.closest('tr')!).getByRole('button', { name: '编辑映射' })); return screen.getByRole('dialog');
 }
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('enum content', () => {
   it.each([undefined, { readwrite: true, admin: false }, { readwrite: false, admin: false }])('fails closed without exact admin capability %#', async (roleCapabilities) => {
@@ -76,7 +77,7 @@ describe('enum content', () => {
   it('retains safe field errors and cancels after capability downgrade without another write', async () => {
     let writes = 0; api(async () => { writes++; return json({ detail: [{ loc: ['body', 'label_zh'], type: 'string_too_long', msg: 'TEST_raw', input: 'TEST_secret' }] }, 422); }); const user = userEvent.setup(); const view = await mount(); const dialog = await edit(user);
     await user.click(within(dialog).getByRole('button', { name: '保存映射' })); expect(await within(dialog).findByText(/中文标签：内容过长/)).toBeVisible(); expect(document.body.textContent).not.toContain('TEST_secret');
-    const { default: EnumMap } = await import(modulePath); view.rerender(<EnumMap bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: true, admin: false } }} />);
+    const { default: EnumMap } = await import(modulePath); view.rerender(<><EnumMap bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: true, admin: false } }} /><Toast.Provider /></>);
     expect(within(dialog).getByRole('button', { name: '保存映射' })).toBeDisabled(); fireEvent.submit(within(dialog).getByRole('form', { name: '枚举表单' })); expect(writes).toBe(1); await user.click(within(dialog).getByRole('button', { name: '取消' })); expect(screen.queryByRole('dialog')).toBeNull();
   });
   it('keeps the selected unknown category empty after its last mapping is deleted instead of silently switching', async () => {

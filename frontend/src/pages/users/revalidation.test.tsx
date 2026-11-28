@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import Users from './index';
 import type { PageProps } from '../../shared/contracts';
@@ -7,7 +8,7 @@ import type { PageProps } from '../../shared/contracts';
 const originalAnimations = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations');
 beforeAll(() => Object.defineProperty(Element.prototype, 'getAnimations', { configurable: true, value: () => [] }));
 afterAll(() => { if (originalAnimations) Object.defineProperty(Element.prototype, 'getAnimations', originalAnimations); else Reflect.deleteProperty(Element.prototype, 'getAnimations'); });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const bootstrap: PageProps['bootstrap'] = { rootPath: '/tts', pageId: 'users', releaseId: 'TEST', navigation: [], roleCapabilities: { admin: true, readwrite: true } };
 const person = { id: '12', username: 'test_user', displayName: 'TEST User', status: 'active', roles: [], lastLoginAt: null, activeSessions: 0 };
 const role = { code: 'test_custom', name: 'TEST Custom', description: null, apiTier: 'readwrite', isBuiltin: false, permissions: [], userCount: 0 };
@@ -22,7 +23,7 @@ it('keyboard save keeps rows and the connected launcher while refresh GETs are p
     if (changed) return url.endsWith('/roles') ? rolesRead.promise : usersRead.promise;
     return json(url.endsWith('/roles') ? { roles: [role], allPermissions: [] } : { users: [person] });
   }));
-  const user = userEvent.setup({ delay: null }); render(<Users bootstrap={bootstrap} />);
+  const user = userEvent.setup({ delay: null }); render(<><Users bootstrap={bootstrap} /><Toast.Provider /></>);
   const row = (await screen.findByText('test_user')).closest('tr')!;
   const launch = within(row).getByRole('button', { name: '编辑显示名' });
   await user.click(launch); const dialog = screen.getByRole('dialog');
@@ -41,7 +42,7 @@ it('role deletion keeps a meaningful connected focus destination after the launc
     if (init.method !== 'GET') { deleted = true; return json({ ok: true }); }
     return url.endsWith('/roles') ? deleted ? rolesRead.promise : json({ roles: [role], allPermissions: [] }) : json({ users: [person] });
   }));
-  const user = userEvent.setup({ delay: null }); render(<Users bootstrap={bootstrap} />);
+  const user = userEvent.setup({ delay: null }); render(<><Users bootstrap={bootstrap} /><Toast.Provider /></>);
   await screen.findByText('test_user'); await user.click(screen.getByRole('tab', { name: '角色权限' }));
   const row = (await screen.findByText('TEST Custom')).closest('tr')!;
   const launch = within(row).getByRole('button', { name: '删除角色' }); launch.focus(); await user.keyboard('{Enter}');

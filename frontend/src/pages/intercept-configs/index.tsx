@@ -5,6 +5,7 @@ import { Alert, Button, Checkbox, Input, Label, ListBox, Modal, Select, Table, T
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import type { PageProps } from '../../shared/contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import ConfigForm, { type ConfigDraft } from './ConfigForm';
 import { batchBody, configDetail, configInput, configList, configRow, count, importInputs, labels, object, parseIdentityJson, type ConfigInput, type ConfigRow } from './contracts';
 
@@ -35,7 +36,7 @@ export default function InterceptConfigs({ bootstrap }: PageProps) {
   const [pending, setPending] = useState(false); const [exporting, setExporting] = useState(false);
   const [failure, setFailure] = useState<CommandFailure>(); const [recovery, setRecovery] = useState<Recovery>();
   const [readBlocked, setReadBlocked] = useState(false); const [commandBlocked, setCommandBlocked] = useState(false);
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const mounted = useRef(true); const inFlight = useRef(false); const exportFlight = useRef(false);
   const recoveryGate = useRef<Recovery['phase'] | 'none'>('none');
   const readDeadline = useRef(0); const commandDeadline = useRef(0);
@@ -64,15 +65,15 @@ export default function InterceptConfigs({ bootstrap }: PageProps) {
   function mayWrite() { return canWrite && !inFlight.current && performance.now() >= commandDeadline.current && (recoveryGate.current === 'none' || recoveryGate.current === 'checked'); }
   function open(target: Dialog) {
     if (!mayWrite()) return;
-    if (savedForm) { setNotice('已有未完成配置草稿，请先恢复或明确放弃。'); return; }
-    setFailure(undefined); setRecovery(undefined); recoveryGate.current = 'none'; setNotice(''); setDialog(target);
+    if (savedForm) { notify.warning('已有未完成配置草稿', '请先恢复或明确放弃。'); return; }
+    setFailure(undefined); setRecovery(undefined); recoveryGate.current = 'none'; setDialog(target);
   }
   function close() { if (!inFlight.current) { fileVersion.current++; setFileReading(false); detailController.current?.abort(); setDialog(undefined); } }
   function editField() { setFailure((previous) => previous ? { ...previous, fieldErrors: {} } : previous); }
   function saveDraft(draft: ConfigDraft) { editField(); if (dialog?.kind === 'create' || dialog?.kind === 'detail') setSavedForm({ target: dialog, draft }); }
   async function loadDetail(id: string) {
     if (inFlight.current || performance.now() < readDeadline.current || recoveryGate.current === 'checking' || (recoveryGate.current !== 'none' && recoveryGate.current !== 'checked')) return;
-    if (savedForm) { setNotice('已有未完成配置草稿，请先恢复或明确放弃。'); return; }
+    if (savedForm) { notify.warning('已有未完成配置草稿', '请先恢复或明确放弃。'); return; }
     detailController.current?.abort(); const controller = new AbortController(); detailController.current = controller;
     setFailure(undefined); setRecovery(undefined); recoveryGate.current = 'none'; setDialog({ kind: 'detail', id });
     try {
@@ -114,24 +115,26 @@ export default function InterceptConfigs({ bootstrap }: PageProps) {
     } catch {
       setFailure({ message: dialog.kind === 'import' ? '导入格式无效：需要非空数组或 { configs: [...] }，每项含合法域名、Endpoint、模式和开关；原文已保留。' : '请检查域名与 Endpoint 长度及配置字段', fieldErrors: {}, uncertain: false, retryAfter: 0 }); return;
     }
-    const target = dialog; inFlight.current = true; setPending(true); setFailure(undefined); setNotice('');
+    const target = dialog; inFlight.current = true; setPending(true); setFailure(undefined);
     try {
       const { data } = await requestJson<unknown>(bootstrap.rootPath, path, { method, body }, parseIdentityJson);
-      let message = '';
-      if (target.kind === 'delete') { if (object(data).success !== true) throw new Error('删除响应不符'); message = '配置删除已确认'; }
-      else if (target.kind === 'batch') { message = `批量${actions[target.action]}已确认：影响 ${count(object(data).affected)} 条`; }
+      let title = '';
+      let detail: string | undefined;
+      if (target.kind === 'delete') { if (object(data).success !== true) throw new Error('删除响应不符'); title = '配置删除已确认'; }
+      else if (target.kind === 'batch') { title = `批量${actions[target.action]}已确认`; detail = `影响 ${count(object(data).affected)} 条`; }
       else if (target.kind === 'import') {
         const result = object(data); const imported = count(result.imported); const skipped = count(result.skipped);
         if (!Array.isArray(result.errors)) throw new Error('导入响应不符');
         const indices = result.errors.map((item) => count(object(item).index));
-        message = `导入已确认：成功 ${imported} 条，跳过 ${skipped} 条，错误 ${indices.length} 条${indices.length ? `（项目索引：${indices.join('、')}；为避免泄露，不展示原始服务器错误）` : ''}`;
+        title = '导入已确认';
+        detail = `成功 ${imported} 条，跳过 ${skipped} 条，错误 ${indices.length} 条${indices.length ? `（项目索引：${indices.join('、')}；为避免泄露，不展示原始服务器错误）` : ''}`;
       } else {
         const row = configDetail(data, target.kind === 'create' ? undefined : attempt.ids[0]);
         if (target.kind === 'toggle' && row.enabled !== !target.row.enabled) throw new Error('启停响应不符');
         if (attempt.inputs[0] && (row.domain !== attempt.inputs[0].domain || row.endpoint !== attempt.inputs[0].endpoint)) throw new Error('保存响应身份不符');
-        message = target.kind === 'toggle' ? '配置启停已确认' : '配置保存已确认';
+        title = target.kind === 'toggle' ? '配置启停已确认' : '配置保存已确认';
       }
-      if (mounted.current) { setDialog(undefined); if (target.kind === 'create' || target.kind === 'detail') setSavedForm(undefined); setFailure(undefined); setRecovery(undefined); recoveryGate.current = 'none'; setNotice(message); setRefresh((value) => value + 1); }
+      if (mounted.current) { setDialog(undefined); if (target.kind === 'create' || target.kind === 'detail') setSavedForm(undefined); setFailure(undefined); setRecovery(undefined); recoveryGate.current = 'none'; notify.success(title, detail); setRefresh((value) => value + 1); }
     } catch (error: unknown) { if (mounted.current) rejected(error, attempt); }
     finally { inFlight.current = false; if (mounted.current) setPending(false); }
   }
@@ -170,8 +173,8 @@ export default function InterceptConfigs({ bootstrap }: PageProps) {
       const url = URL.createObjectURL(new Blob([data.raw], { type: 'application/json' }));
       try { const link = document.createElement('a'); link.href = url; link.download = `intercept-configs-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(link); link.click(); link.remove(); }
       finally { URL.revokeObjectURL(url); }
-      setNotice('全部配置已导出（不受当前筛选或分页限制）');
-    } catch (error: unknown) { if (mounted.current) { blockRead(error); setNotice(`导出未完成：${readMessage(error)}`); } }
+      notify.success('全部配置已导出', '不受当前筛选或分页限制');
+    } catch (error: unknown) { if (mounted.current) { blockRead(error); notify.failure('导出未完成', readMessage(error)); } }
     finally { exportFlight.current = false; if (mounted.current) setExporting(false); }
   }
   const alert = failure && <Alert status="danger"><Alert.Content><Alert.Title>提交未完成</Alert.Title><Alert.Description>{failure.message}</Alert.Description>{Object.entries(failure.fieldErrors).filter(([key]) => !['domain', 'endpoint', 'description', 'tags'].includes(key)).map(([key, value]) => <p key={key}>{value}</p>)}</Alert.Content></Alert>;
@@ -198,7 +201,7 @@ export default function InterceptConfigs({ bootstrap }: PageProps) {
     {!dialog && savedForm && <div className="flex flex-wrap gap-3"><p>有未完成配置草稿，切换配置不会覆盖输入。</p><Button variant="secondary" isDisabled={pending} onPress={() => setDialog(savedForm.target)}>恢复配置草稿</Button><Button variant="danger" isDisabled={pending || needsCheck} onPress={() => setSavedForm(undefined)}>放弃配置草稿</Button></div>}
     {!canWrite && <p>配置列表、详情、导出及变更均需 readwrite 权限和服务端授权；当前权限提示不允许变更。</p>}
     {pending && <p role="status">提交中，请等待确认…</p>}{commandBlocked && <p role="status">提交冷却中；请等待服务端指定时间，届时仅允许明确重试。</p>}{readBlocked && <p role="status">读取冷却中；等待结束后请明确查询，不会自动重试。</p>}
-    {notice && <p role="status">{notice}</p>}{!dialog && <>{alert}{check}</>}
+    {!dialog && <>{alert}{check}</>}
     {list.loading && <p role="status">加载配置中…</p>}{list.error && <Alert status="danger"><Alert.Content><Alert.Title>列表不可用</Alert.Title><Alert.Description>{list.error}</Alert.Description><Button isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>重试列表</Button></Alert.Content></Alert>}
     {list.configs && <><p>字段较多，可在表格区域横向滚动。</p><Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="拦截配置表格"><Table.Content aria-label="拦截配置" className="min-w-[78rem] erp-table-content"><Table.Header className="erp-table-head">
       {['选择', 'ID', '域名', 'Endpoint', '模式', '状态', '记录头', '记录体', '描述', '标签', '操作'].map((title) => <Table.Column className="erp-table-column" key={title} isRowHeader={title === 'ID'}>{title === '选择' ? <Checkbox slot={null} aria-label="选择本页全部" isSelected={rows.length > 0 && selectedRows.length === rows.length} onChange={(checked) => setSelected(checked ? rows.map((row) => row.id) : [])}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><Label>本页</Label></Checkbox.Content></Checkbox> : title}</Table.Column>)}

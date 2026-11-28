@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setUnauthorizedHandler } from '../../shared/api/client';
 import type { PageProps } from '../../shared/contracts';
@@ -17,11 +18,11 @@ function mockApi(command: (url: string, init: RequestInit) => Promise<Response> 
 }
 // Final behavior oracle always renders the recovered React page.
 async function mount(bootstrap = props.bootstrap) {
-  return render(<Page bootstrap={bootstrap} />);
+  return render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>);
 }
 const row = async (name = 'tiktok.orders') => (await screen.findByText(name)).closest('tr')!;
 const writes = (fetcher: ReturnType<typeof mockApi>) => fetcher.mock.calls.filter(([, init]) => init.method !== 'GET');
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('sync-jobs content', () => {
   it('renders all server columns and severity without recalculating from zero lag, preserving server order', async () => {
@@ -53,12 +54,12 @@ describe('sync-jobs content', () => {
     await user.click(within(first).getByRole('button', { name: '执行 tiktok.orders' })); let dialog = screen.getByRole('dialog'); expect(within(dialog).getByText(/全部授权店铺.*上游同步/)).toBeVisible(); expect(writes(fetcher)).toHaveLength(0);
     await user.click(within(dialog).getByRole('button', { name: '取消' })); expect(writes(fetcher)).toHaveLength(0);
     await user.click(within(first).getByRole('button', { name: '执行 tiktok.orders' })); dialog = screen.getByRole('dialog'); await user.click(within(dialog).getByRole('button', { name: '确认全店铺执行' }));
-    expect(await screen.findByText(/已提交后台，尚未确认完成/)).toBeVisible(); expect(JSON.parse(String(writes(fetcher)[0][1].body))).toEqual({}); expect(document.body.textContent).not.toContain('TEST_raw_message');
+    expect(await screen.findByText(/已提交后台/)).toBeVisible(); expect(JSON.parse(String(writes(fetcher)[0][1].body))).toEqual({}); expect(document.body.textContent).not.toContain('TEST_raw_message');
   });
   it('selects an exact long shop ID and sends only shop_id, while system trigger sends no shop', async () => {
     const fetcher = mockApi(async (url, init) => { const body = JSON.parse(String(init.body)); return json({ accepted: true, job_name: url.includes('TEST_system') ? 'TEST_system' : 'tiktok.orders', shop_id: body.shop_id ?? null, accepted_at: stamp, message: 'queued' }); }); const user = userEvent.setup(); await mount(); const first = await row();
     await user.click(within(first).getByRole('button', { name: /执行店铺/ })); await user.click(screen.getByRole('option', { name: /TEST_长店铺/ }));
-    await user.click(within(first).getByRole('button', { name: '执行 tiktok.orders' })); await screen.findByText(/已提交后台，尚未确认完成/); expect(screen.queryByRole('dialog')).toBeNull(); expect(JSON.parse(String(writes(fetcher)[0][1].body))).toEqual({ shop_id: '90071992547409931234' });
+    await user.click(within(first).getByRole('button', { name: '执行 tiktok.orders' })); await screen.findByText(/已提交后台/); expect(screen.queryByRole('dialog')).toBeNull(); expect(JSON.parse(String(writes(fetcher)[0][1].body))).toEqual({ shop_id: '90071992547409931234' });
     await user.click(within(await row('TEST_system')).getByRole('button', { name: '执行 TEST_system' })); expect(writes(fetcher)).toHaveLength(2); expect(JSON.parse(String(writes(fetcher)[1][1].body))).toEqual({});
   });
   it.each(['network', 'mismatch', 'server'])('gates uncertain %s outcome until explicit GET then explicit retry, never proves a trigger committed', async (mode) => {
@@ -149,7 +150,7 @@ describe('sync-jobs content', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent(/全部授权店铺.*上游同步/);
     expect(screen.queryByText(/原执行店铺已不可用/)).toBeVisible();
     await user.click(screen.getByRole('button', { name: '确认全店铺执行' }));
-    await screen.findByText(/已提交后台，尚未确认完成/);
+    await screen.findAllByText(/已提交后台/);
     expect(writes(fetcher)).toHaveLength(1);
     expect(JSON.parse(String(writes(fetcher)[0][1].body))).toEqual({});
     expect(writes(fetcher).some(([, init]) => String(init.body).includes(data.tiktok_shops[0].shop_id))).toBe(false);

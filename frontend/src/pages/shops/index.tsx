@@ -6,6 +6,7 @@ import { Alert, Button, Chip, Input, Label, ListBox, Modal, Select, Table, TextF
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import type { PageProps } from '../../shared/contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import { decodeAuthorization, decodeShop, decodeShopCommand, decodeShopList, decodeTotal, type AuthorizationLink, type Shop } from './contracts';
 import ShopForm, { fieldLabels, type ShopDraft, type ShopFormKind } from './ShopForm';
 import './shops.css';
@@ -46,7 +47,7 @@ export default function Shops({ bootstrap }: PageProps) {
   const [cooldown, setCooldown] = useState<Record<string, boolean>>({});
   const [failures, setFailures] = useState<Record<string, CommandFailure | undefined>>({});
   const [recoveries, setRecoveries] = useState<Record<string, Recovery | undefined>>({});
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const [link, setLink] = useState<{ shop: Shop; value: AuthorizationLink }>();
   const active = useRef(new Set<string>());
   const mounted = useRef(true);
@@ -91,7 +92,6 @@ export default function Shops({ bootstrap }: PageProps) {
     setPending((previous) => ({ ...previous, [key]: true }));
     setFailures((previous) => ({ ...previous, [key]: undefined }));
     setRecoveries((previous) => ({ ...previous, [key]: undefined }));
-    setNotice('');
     return true;
   }
   function end(key: string) {
@@ -151,7 +151,8 @@ export default function Shops({ bootstrap }: PageProps) {
       decodeShopCommand(data, register ? { shop_id: String(body.shop_id), register: true } : { id: target.shop!.id });
       if (mounted.current) {
         dirty.current = false; setDialog(undefined);
-        setNotice(target.kind === 'app' ? '当前店铺的 App 配置已保存，可以获取授权链接。' : '店铺信息已保存');
+        if (target.kind === 'app') notify.success('App 配置已保存', '可以获取授权链接。');
+        else notify.success('店铺信息已保存');
         setRefresh((value) => value + 1);
       }
     } catch (error: unknown) {
@@ -224,7 +225,6 @@ export default function Shops({ bootstrap }: PageProps) {
       <div className="shops-filter-actions"><Button type="submit" className="h-11">搜索</Button><Button type="button" variant="secondary" className="h-11" onPress={() => { setSearch(''); setFilters(initialFilters); setOffset(0); }}>重置</Button></div>
     </form>
     {!canWrite && <p className="erp-table-meta">当前为只读权限，配置和授权需要写入权限。</p>}
-    {notice && <p role="status">{notice}</p>}
     {!dialog && Object.keys(failures).map((key) => <div key={key}>{feedback(key)}</div>)}
     <section className="shops-list" aria-labelledby="shops-list-heading" aria-busy={list.loading}>
     <header className="shops-list-header"><div><h3 id="shops-list-heading" className="erp-section-heading">店铺列表</h3><p className="erp-table-meta">已登记 {list.total ?? '—'} 家店铺 · 未授权店铺仅在此页展示</p></div>{list.loading && <p role="status" className="erp-table-meta">正在读取店铺…</p>}</header>
@@ -256,7 +256,7 @@ export default function Shops({ bootstrap }: PageProps) {
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
     <Modal.Backdrop isOpen={link !== undefined} onOpenChange={(isOpen) => { if (!isOpen) setLink(undefined); }}><Modal.Container size="lg"><Modal.Dialog>
       <Modal.CloseTrigger aria-label="关闭授权链接" /><Modal.Header><Modal.Heading>为当前店铺授权</Modal.Heading></Modal.Header>
-      <Modal.Body className="space-y-4">{link && <><div><p className="font-semibold">{displayShopName(link.shop, link.shop.shop_id)}</p><p className="erp-table-meta break-all">店铺 {link.shop.shop_id} · Service {link.shop.service_id}</p></div><p>请使用此店铺完成授权。成功后系统会自动开始同步。</p><p className="erp-table-meta">链接有效至 {localTime(link.value.state_expires_at)}，仅可使用一次。</p><p className="rounded-lg border border-[var(--rule)] p-3 text-sm break-all">{link.value.authorize_url}</p><div className="flex flex-wrap gap-3"><a className={buttonVariants({ variant: 'primary' })} href={link.value.authorize_url} target="_blank" rel="noopener noreferrer">打开授权页面</a><Button variant="secondary" onPress={() => { void navigator.clipboard.writeText(link.value.authorize_url).then(() => setNotice('授权链接已复制'), () => setNotice('复制失败，请手动选择链接复制')); }}>复制链接</Button></div>{notice && <p role="status">{notice}</p>}</>}</Modal.Body>
+      <Modal.Body className="space-y-4">{link && <><div><p className="font-semibold">{displayShopName(link.shop, link.shop.shop_id)}</p><p className="erp-table-meta break-all">店铺 {link.shop.shop_id} · Service {link.shop.service_id}</p></div><p>请使用此店铺完成授权。成功后系统会自动开始同步。</p><p className="erp-table-meta">链接有效至 {localTime(link.value.state_expires_at)}，仅可使用一次。</p><p className="rounded-lg border border-[var(--rule)] p-3 text-sm break-all">{link.value.authorize_url}</p><div className="flex flex-wrap gap-3"><a className={buttonVariants({ variant: 'primary' })} href={link.value.authorize_url} target="_blank" rel="noopener noreferrer">打开授权页面</a><Button variant="secondary" onPress={() => { void navigator.clipboard.writeText(link.value.authorize_url).then(() => notify.success('授权链接已复制'), () => notify.failure('复制失败', '请手动选择链接复制')); }}>复制链接</Button></div></>}</Modal.Body>
     </Modal.Dialog></Modal.Container></Modal.Backdrop>
   </div>;
 }

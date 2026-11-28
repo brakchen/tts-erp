@@ -33,7 +33,7 @@ export default function SessionActions({ rootPath, onSignedOut }: {rootPath: str
   }
   return <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
     {session?.authenticated && <><span className="min-w-0 max-w-full break-words">{session.displayName || session.username || '已登录'}</span>
-      <Button variant="secondary" isDisabled={busy} onPress={logout}>退出登录</Button></>}
+      <Button variant="secondary" isDisabled={busy} isPending={busy} onPress={logout}>{busy ? '正在退出…' : '退出登录'}</Button></>}
     {error && <p role="alert">{error}</p>}
   </div>;
 }

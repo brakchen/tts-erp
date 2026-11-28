@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Button, Checkbox, Chip, Input, Label, Modal, TextArea, TextField } from '@heroui/react';
 import { ApiError } from '../../shared/api/client';
 import type { FrontendBootstrap, PageProps } from '../../shared/contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import AssetCard from './AssetCard';
 import AssetReferences from './AssetReferences';
 import { CursorTail, useCursorFeed } from './CursorFeed';
@@ -111,6 +112,7 @@ function EditAsset({ root, asset, onDone, onClose }: {
 export default function MediaAssets({ bootstrap }: PageProps) {
   const root = bootstrap.rootPath;
   const canWrite = bootstrap.roleCapabilities?.readwrite === true;
+  const notify = useOperationToast();
   const [filters, setFilters] = useState(emptyFilters);
   const [applied, setApplied] = useState(emptyFilters);
   const [revision, setRevision] = useState(0);
@@ -156,6 +158,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   function packSaved(id: string) {
     setPackAction(undefined);
     setPicked([]);
+    notify.success('素材包已保存');
     setRevision((value) => value + 1);
     selectPack(id);
   }
