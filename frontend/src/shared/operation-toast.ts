@@ -11,13 +11,16 @@ export interface OperationToast {
   failure(title: string, description?: string, options?: { uncertain?: boolean }): void;
   /** 非成败类提示（例如流程阻断、草稿冲突）。 */
   warning(title: string, description?: string): void;
+  /** 请求等待状态：带加载指示、不自动消失；返回关闭句柄，请求结束后必须调用。 */
+  pending(title: string, description?: string): () => void;
   dismiss(): void;
 }
 
 /**
- * 写操作结果反馈的统一入口（AppShell 已挂 Toast.Provider）。
+ * 写操作反馈的统一入口（AppShell 已挂 Toast.Provider）。
  * 多次反馈各自独立展示并自动过期，组件卸载时关闭仍未消失的反馈。
- * 持续性状态（加载中、冷却中、字段校验错误、结果核对流程）不要用 toast，保留内联。
+ * 一次性操作结果用 success/failure/warning；请求等待状态用 pending（登录页已采用）。
+ * 空结果、服务端冷却倒计时、结果核对流程等持续性页面状态仍保留内联。
  */
 export function useOperationToast(): OperationToast {
   const active = useRef<string | undefined>(undefined);
@@ -33,6 +36,13 @@ export function useOperationToast(): OperationToast {
       },
       warning(title, description) {
         show(toast.warning(title, { description, timeout: FAILURE_TIMEOUT }));
+      },
+      pending(title, description) {
+        const id = show(toast(title, { description, isLoading: true, timeout: 0 }));
+        return () => {
+          if (active.current === id) active.current = undefined;
+          toast.close(id);
+        };
       },
       dismiss() {
         if (active.current) toast.close(active.current);

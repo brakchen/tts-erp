@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, FieldError, Input, InputGroup, Label, TextField } from '@heroui/react';
+import { Button, Input, InputGroup, Label, TextField } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
@@ -33,6 +33,7 @@ export default function Login({ bootstrap }: PageProps) {
   const notify = useOperationToast();
   useEffect(() => {
     mounted.current = true;
+    if (!next) notify.failure('登录暂不可用', '缺少有效的返回地址，请重新打开服务端登录页。', { uncertain: true });
     return () => {
       mounted.current = false; stopCooldown.current?.();
       for (const controller of controllers.current) controller.abort();
@@ -63,6 +64,7 @@ export default function Login({ bootstrap }: PageProps) {
   async function submit() {
     if (!next || inFlight.current || performance.now() < notBefore.current || !username.trim() || !password) return;
     inFlight.current = true; setPending(true); setFailure(undefined);
+    const closePending = notify.pending('登录中', '正在等待登录响应…');
     const captured = { username, password, next, rootPath: bootstrap.rootPath };
     const controller = new AbortController(); controllers.current.add(controller);
     try {
@@ -79,9 +81,11 @@ export default function Login({ bootstrap }: PageProps) {
       setFailure(result);
       const status = error instanceof ApiError ? error.status : undefined;
       if ((status === 429 || status === 500 || status === 503) && result.retryAfter > 0) holdCooldown(result.retryAfter);
-      notify.failure('登录未完成', loginAlert(result, result.retryAfter));
+      const fieldMessages = Object.values(result.fieldErrors);
+      notify.failure('登录未完成', fieldMessages.length ? fieldMessages.join('；') : loginAlert(result, result.retryAfter));
     } finally {
       controllers.current.delete(controller); inFlight.current = false;
+      closePending();
       if (mounted.current) setPending(false);
     }
   }
@@ -96,10 +100,9 @@ export default function Login({ bootstrap }: PageProps) {
           <h2 id="login-welcome" className="login-welcome">欢迎回来</h2>
           <p className="login-intro">登录工作账号，继续今天的经营。</p>
           <div className="login-form-body">
-            {!next && <p role="alert">登录暂不可用：缺少有效的返回地址，请重新打开服务端登录页。</p>}
             <form aria-label="登录表单" className="space-y-5" aria-busy={pending} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
               <TextField name="username" value={username} onChange={(value) => edited('username', value)} isRequired isDisabled={pending} isInvalid={Boolean(failure?.fieldErrors.username)}>
-                <Label>用户名</Label><Input className="min-h-12 text-base" fullWidth autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="请输入用户名" maxLength={64} /><FieldError>{failure?.fieldErrors.username}</FieldError>
+                <Label>用户名</Label><Input className="min-h-12 text-base" fullWidth autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="请输入用户名" maxLength={64} />
               </TextField>
               <TextField name="password" value={password} onChange={(value) => edited('password', value)} isRequired isDisabled={pending} isInvalid={Boolean(failure?.fieldErrors.password)}>
                 <Label>密码</Label>
@@ -111,10 +114,8 @@ export default function Login({ bootstrap }: PageProps) {
                     </Button>
                   </InputGroup.Suffix>
                 </InputGroup>
-                <FieldError>{failure?.fieldErrors.password}</FieldError>
               </TextField>
               <Button type="submit" fullWidth size="lg" isDisabled={blocked}>{pending ? '登录中…' : '登录'}<span aria-hidden="true">↗</span></Button>
-              {pending && <p role="status">正在等待登录响应…</p>}
             </form>
           </div>
           <p className="login-account-help">账号由管理员分配。<br />如需开通账号或重置密码，请联系管理员。</p>
