@@ -127,19 +127,14 @@ export default function MediaAssets({ bootstrap }: PageProps) {
   const [editing, setEditing] = useState<Asset>();
   const [deleting, setDeleting] = useState<Asset>();
   const [upload, setUpload] = useState(false);
-  const [notice, setNotice] = useState<{ message: string; assetId?: string }>();
+  const [uploaded, setUploaded] = useState<{ id: string; filename: string }>();
   const params = new URLSearchParams();
   if (applied.keyword) params.set('keyword', applied.keyword);
   if (tab === 'videos') params.set('kind', 'video');
   else if (applied.kind) params.set('kind', applied.kind);
   const feed = useCursorFeed(root, tab === 'packs' || pack ? null : '/assets?' + params, decodeAssetList, revision);
   const assets = feed.data?.items ?? [];
-  const uploadedAssetId = notice?.assetId;
 
-  function changed(message: string, assetId?: string) {
-    setRevision((value) => value + 1);
-    setNotice({ message, assetId });
-  }
   function closeView() {
     const fromHuman = new URLSearchParams(window.location.search).get('fromHuman');
     const link = fromHuman && /^[1-9]\d*$/.test(fromHuman) && recordLink(bootstrap, 'digital-humans', 'human', fromHuman);
@@ -153,7 +148,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
     window.history.replaceState(window.history.state, '', url);
     setTab(next);
     setPicked([]);
-    setNotice(undefined);
+    setUploaded(undefined);
   }
   function packSaved(id: string) {
     setPackAction(undefined);
@@ -177,7 +172,7 @@ export default function MediaAssets({ bootstrap }: PageProps) {
         event.preventDefault();
         setApplied({ keyword: filters.keyword.trim(), kind: filters.kind });
         setRevision((value) => value + 1);
-        setNotice(undefined);
+        setUploaded(undefined);
       }}>
         <TextField value={filters.keyword} onChange={(keyword) => setFilters({ ...filters, keyword })}>
           <Label>搜索素材</Label><Input placeholder="名称、说明或标签" maxLength={120} />
@@ -195,9 +190,9 @@ export default function MediaAssets({ bootstrap }: PageProps) {
         <Button isDisabled={!picked.length} onPress={() => setPackAction('create')}>新建素材包</Button>
       </div>
     </div>}
-    {notice && <div className="media-status media-actions">
-      <p role="status">{notice.message}</p>
-      {uploadedAssetId && <Button variant="secondary" size="sm" onPress={() => select(uploadedAssetId)}>查看刚上传的素材</Button>}
+    {uploaded && <div className="media-status media-actions">
+      <p role="status">已入库「{uploaded.filename}」。</p>
+      <Button variant="secondary" size="sm" onPress={() => select(uploaded.id)}>查看刚上传的素材</Button>
     </div>}
     <ReadStatus title="素材列表" loading={feed.loading} error={!feed.data ? feed.error : undefined} onRetry={feed.retry} />
     {feed.data && !assets.length && <p className="media-box">没有符合条件的素材。</p>}
@@ -226,11 +221,11 @@ export default function MediaAssets({ bootstrap }: PageProps) {
     <CursorTail {...feed} paused={Boolean(upload || selected || editing || deleting || packAction)} />
     {selected && <ViewAsset key={selected} bootstrap={bootstrap} id={selected} onClose={closeView} />}
     {canWrite && editing && <EditAsset root={root} asset={editing} onClose={() => setEditing(undefined)}
-      onDone={() => { setEditing(undefined); changed('素材资料已保存。'); document.scrollingElement?.scrollTo(0, 0); }} />}
+      onDone={() => { setEditing(undefined); notify.success('素材资料已保存。'); setRevision((value) => value + 1); document.scrollingElement?.scrollTo(0, 0); }} />}
     {canWrite && deleting && <DeleteAsset bootstrap={bootstrap} asset={deleting} onClose={() => setDeleting(undefined)}
-      onDone={() => { setDeleting(undefined); changed('素材已从全局库删除。'); }} />}
+      onDone={() => { setDeleting(undefined); notify.success('素材已从全局库删除。'); setRevision((value) => value + 1); }} />}
     {canWrite && upload && <UploadAsset bootstrap={bootstrap} onClose={() => setUpload(false)}
-      onComplete={(id, filename) => { setUpload(false); changed('已入库「' + filename + '」。', id); document.scrollingElement?.scrollTo(0, 0); }} />}
+      onComplete={(id, filename) => { setUpload(false); setUploaded({ id, filename }); setRevision((value) => value + 1); document.scrollingElement?.scrollTo(0, 0); }} />}
     {packAction === 'create' && <PackEditor root={root} initialAssetIds={picked} onDone={(result) => packSaved(result.packId)}
       onClose={(refresh) => { setPackAction(undefined); if (refresh) setRevision((value) => value + 1); }} />}
     {packAction === 'append' && <PackPicker root={root} assetIds={picked} onDone={(result) => packSaved(result.packId)}

@@ -16,7 +16,7 @@ export interface OperationToast {
 
 /**
  * 写操作结果反馈的统一入口（AppShell 已挂 Toast.Provider）。
- * 同一组件内新的反馈会替换上一条，组件卸载时关闭仍未消失的反馈。
+ * 多次反馈各自独立展示并自动过期，组件卸载时关闭仍未消失的反馈。
  * 持续性状态（加载中、冷却中、字段校验错误、结果核对流程）不要用 toast，保留内联。
  */
 export function useOperationToast(): OperationToast {

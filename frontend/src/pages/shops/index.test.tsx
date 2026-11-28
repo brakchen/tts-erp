@@ -45,7 +45,7 @@ const save = (dialog: HTMLElement) => within(dialog).getByRole('button', { name:
 // Charge the one-time real module load to setup, including single-case reruns.
 // Every interaction still runs with the normal 5s budget and file isolation.
 beforeAll(async () => { await import(modulePath); });
-afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('shops content', () => {
   it.each([undefined, { readwrite: false, admin: false }, { readwrite: false, admin: true }])('fails closed on missing/readonly hints without inventing a hierarchy %#', async (roleCapabilities) => {

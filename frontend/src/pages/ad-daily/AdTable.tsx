@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Table } from '@heroui/react';
+import { useOperationToast } from '../../shared/operation-toast';
 import type { AdRow } from './contracts';
 import { displayDecimal, sorts, type Query, type Sort } from './query';
 export const columnLabels = ['日期', '店铺', '计划', '商品', '消耗 USD', '归因订单', '归因 GMV USD', '源 ROI', '最近更新'];
@@ -15,12 +16,12 @@ function AdDetails({ item, close }: { item: AdRow; close: () => void }) {
   </section>;
 }
 function CopyId({ value, kind }: { value: string; kind: string }) {
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   async function copy() {
-    try { await navigator.clipboard.writeText(value); setNotice('已复制'); }
-    catch { setNotice('复制失败，请手动选择 ID'); }
+    try { await navigator.clipboard.writeText(value); notify.success('已复制'); }
+    catch { notify.failure('复制失败', '请手动选择 ID'); }
   }
-  return <div><code className="break-all">{value || '—'}</code> <Button size="sm" variant="ghost" aria-label={`复制${kind} ID ${value}`} isDisabled={!value} onPress={() => { void copy(); }}>复制</Button><span role="status">{notice}</span></div>;
+  return <div><code className="break-all">{value || '—'}</code> <Button size="sm" variant="ghost" aria-label={`复制${kind} ID ${value}`} isDisabled={!value} onPress={() => { void copy(); }}>复制</Button></div>;
 }
 export default function AdTable({ items, query, disabled, onSort }: { items: AdRow[]; query: Query; disabled: boolean; onSort: (sort: Sort) => void }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());

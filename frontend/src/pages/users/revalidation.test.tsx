@@ -8,7 +8,7 @@ import type { PageProps } from '../../shared/contracts';
 const originalAnimations = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations');
 beforeAll(() => Object.defineProperty(Element.prototype, 'getAnimations', { configurable: true, value: () => [] }));
 afterAll(() => { if (originalAnimations) Object.defineProperty(Element.prototype, 'getAnimations', originalAnimations); else Reflect.deleteProperty(Element.prototype, 'getAnimations'); });
-afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const bootstrap: PageProps['bootstrap'] = { rootPath: '/tts', pageId: 'users', releaseId: 'TEST', navigation: [], roleCapabilities: { admin: true, readwrite: true } };
 const person = { id: '12', username: 'test_user', displayName: 'TEST User', status: 'active', roles: [], lastLoginAt: null, activeSessions: 0 };
 const role = { code: 'test_custom', name: 'TEST Custom', description: null, apiTier: 'readwrite', isBuiltin: false, permissions: [], userCount: 0 };

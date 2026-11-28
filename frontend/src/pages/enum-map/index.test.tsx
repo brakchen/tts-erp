@@ -16,7 +16,7 @@ async function mount(bootstrap = props.bootstrap) { const { default: EnumMap } =
 async function edit(user: ReturnType<typeof userEvent.setup>) {
   const cell = await screen.findByText('TEST_A'); await user.click(within(cell.closest('tr')!).getByRole('button', { name: '编辑映射' })); return screen.getByRole('dialog');
 }
-afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('enum content', () => {
   it.each([undefined, { readwrite: true, admin: false }, { readwrite: false, admin: false }])('fails closed without exact admin capability %#', async (roleCapabilities) => {

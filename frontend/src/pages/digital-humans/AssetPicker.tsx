@@ -13,8 +13,8 @@ export interface PickerDraft {
 }
 export const emptyPickerDraft: PickerDraft = { keyword: '', query: '', kind: '', appliedKind: '', hideAssociated: true, selected: [] };
 
-export default function AssetPicker({ root, human, pending, error, notice, onAdd, onClose, onUpload, draft, onDraft, targetRead, revision, uploading = false }: {
-  root: string; human: DigitalHuman; pending: boolean; error: string; notice: string;
+export default function AssetPicker({ root, human, pending, error, onAdd, onClose, onUpload, draft, onDraft, targetRead, revision, uploading = false }: {
+  root: string; human: DigitalHuman; pending: boolean; error: string;
   onAdd: (assets: readonly Asset[]) => void; onClose: () => void; onUpload: () => void;
   draft: PickerDraft; onDraft: (draft: PickerDraft) => void;
   revision: number;
@@ -59,7 +59,6 @@ export default function AssetPicker({ root, human, pending, error, notice, onAdd
           <Button variant="secondary" isDisabled={disabled} aria-haspopup="dialog" onPress={onUpload}>上传新素材</Button>
         </Modal.Header>
         <Modal.Body className="media-stack">
-      {notice && <p role="status" className="media-status">{notice}</p>}
       <form className="media-filters" onSubmit={(event) => {
         event.preventDefault(); change({ query: keyword.trim(), appliedKind: kind });
         setSearchRevision((value) => value + 1);

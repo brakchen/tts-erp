@@ -22,7 +22,7 @@ async function mount(bootstrap = props.bootstrap) {
 }
 const row = async (name = 'tiktok.orders') => (await screen.findByText(name)).closest('tr')!;
 const writes = (fetcher: ReturnType<typeof mockApi>) => fetcher.mock.calls.filter(([, init]) => init.method !== 'GET');
-afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('sync-jobs content', () => {
   it('renders all server columns and severity without recalculating from zero lag, preserving server order', async () => {

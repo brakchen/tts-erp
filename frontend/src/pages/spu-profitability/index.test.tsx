@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import Page from './index';
 import type { FrontendBootstrap } from '../../shared/contracts';
@@ -59,9 +60,9 @@ beforeEach(() => {
     return response({});
   }));
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { toastQueue.clear(); cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it.each(['spu-roi', 'focused-spus'] as const)('keeps %s dates with results and the sample control inside profit', async (pageId) => {
-  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId }} />); });
+  await act(async () => { render(<><Page bootstrap={{ ...bootstrap, pageId }} /><Toast.Provider /></>); });
   await screen.findByText('TEST_RESULT');
   const overview = screen.getByRole('region', { name: '经营概览' });
   expect(overview).toContainElement(screen.getByRole('region', { name: '经营日期筛选' }));
@@ -77,7 +78,7 @@ it('both page profiles render through the same React owner and keep the server s
   // This case owns request scope; Summary.test.tsx owns metric rendering.
   // Layout cases above continue rendering the real Summary.
   componentScope.renderSummary = false;
-  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />); });
+  await act(async () => { render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} /><Toast.Provider /></>); });
   await screen.findByText('TEST_RESULT');
   const reads = calls.filter((call) => call.url.includes('/analytics/spu-roi?'));
   expect(reads.length).toBeGreaterThan(0); const query = new URL(reads.at(-1)!.url, location.origin).searchParams;
@@ -85,7 +86,7 @@ it('both page profiles render through the same React owner and keep the server s
   expect(calls.filter((call) => call.url.includes('channel-accounts'))).toHaveLength(1);
 });
 it('adding one focused search result never implicitly removes existing subscriptions', async () => {
-  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} /><Toast.Provider /></>);
   await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
   fireEvent.change(screen.getByLabelText('按 SPU ID / 标题搜索'), { target: { value: 'TEST 新' } });
   const option = await screen.findByRole('checkbox', { name: /TEST_NEW/ }); fireEvent.click(option);
@@ -99,7 +100,7 @@ it('shows every focused SPU inside the search field and removes only the clicked
   stored = Array.from({ length: 29 }, (_, i) => ({ spuId: `TEST_TAG_${i}`, title: `TEST 商品 ${i}` }));
   const fetcher = vi.mocked(fetch); const original = fetcher.getMockImplementation()!; let finish!: () => void;
   fetcher.mockImplementation((input, init) => init?.method === 'PATCH' ? new Promise<Response>((resolve) => { finish = () => { void original(input, init).then(resolve); }; }) : original(input, init));
-  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} /><Toast.Provider /></>);
   await screen.findByRole('button', { name: '移除 SPU TEST_TAG_28' });
   const field = screen.getByLabelText('SPU 搜索与已选标签');
   expect(within(field).getAllByRole('button', { name: /^移除 SPU / })).toHaveLength(29);
@@ -118,7 +119,7 @@ it('shows every focused SPU inside the search field and removes only the clicked
   expect(stored.map((item) => item.spuId)).toEqual(Array.from({ length: 29 }, (_, i) => `TEST_TAG_${i}`).filter((id) => id !== 'TEST_TAG_12'));
 });
 it('shows focused tags in the search field without allowing readonly removal', async () => {
-  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus', roleCapabilities: { readwrite: false, admin: false } }} />);
+  render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus', roleCapabilities: { readwrite: false, admin: false } }} /><Toast.Provider /></>);
   const remove = await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
   expect(screen.getByRole('group', { name: 'SPU 搜索与已选标签' })).toContainElement(remove);
   expect(remove).toBeDisabled();
@@ -126,7 +127,7 @@ it('shows focused tags in the search field without allowing readonly removal', a
   expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(0);
 });
 it('a failed focused mutation preserves selection and requires reading facts before another write', async () => {
-  patchFailure = 500; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  patchFailure = 500; render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} /><Toast.Provider /></>);
   const remove = await screen.findByRole('button', { name: '移除 SPU TEST_OLD' }); fireEvent.click(remove);
   const retryRead = await screen.findByRole('button', { name: '重新读取关注事实' });
   expect(screen.getByRole('button', { name: '移除 SPU TEST_OLD' })).toBeDisabled();
@@ -137,14 +138,14 @@ it('a failed focused mutation preserves selection and requires reading facts bef
 });
 it('standard default uses the shop yesterday while explicit invalid drill dates reach validation unchanged', async () => {
   history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7&w_start=bad-date&w_end=2026-09-30&spu_ids=90071992547409931');
-  render(<Page bootstrap={bootstrap} />); await screen.findByText('TEST_RESULT');
+  render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>); await screen.findByText('TEST_RESULT');
   const last = calls.filter((call) => call.url.includes('/analytics/spu-roi?')).at(-1)!;
   const params = new URL(last.url, location.origin).searchParams;
   expect(params.get('w_start')).toBe('bad-date'); expect(params.get('w_end')).toBe('2026-09-30'); expect(params.get('spu_ids')).toBe('90071992547409931');
 });
 it('inverted date edits retain both inputs without querying a widened range', async () => {
   history.replaceState(null, '', '/v2/pages/spu-roi?shop_pk=7&w_start=2026-09-01&w_end=2026-09-30');
-  render(<Page bootstrap={bootstrap} />); await screen.findByText('TEST_RESULT');
+  render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>); await screen.findByText('TEST_RESULT');
   fireEvent.change(screen.getByLabelText('销售/退款起始日期（空 = 不限）'), { target: { value: '2026-10-01' } });
   expect(screen.getByLabelText('销售/退款起始日期（空 = 不限）')).toHaveValue('2026-10-01');
   expect(screen.getByLabelText('销售/退款截止日期（空 = 不限）')).toHaveValue('2026-09-30');
@@ -152,12 +153,12 @@ it('inverted date edits retain both inputs without querying a widened range', as
 });
 it('explains only the typed missing-FX error and leaves no old successful result visible', async () => {
   overviewError = { code: 'FX_RATE_UNAVAILABLE' };
-  render(<Page bootstrap={bootstrap} />);
+  render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>);
   expect(await screen.findByRole('alert')).toHaveTextContent('汇率数据缺失，无法计算结果');
   expect(screen.queryByText('TEST_RESULT')).not.toBeInTheDocument();
 });
 it('a server write denial remains a denial after reading the focused facts', async () => {
-  patchFailure = 403; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  patchFailure = 403; render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} /><Toast.Provider /></>);
   fireEvent.click(await screen.findByRole('button', { name: '移除 SPU TEST_OLD' }));
   fireEvent.click(await screen.findByRole('button', { name: '重新读取关注事实' }));
   await screen.findByText('服务端拒绝修改此店铺的关注清单；重新读取事实不会解除写权限限制。');
@@ -167,7 +168,7 @@ it('a server write denial remains a denial after reading the focused facts', asy
 it('clear cancels a standard bulk lookup and ignores its late response', async () => {
   const fetcher = vi.mocked(fetch); const original = fetcher.getMockImplementation()!; let finish!: (response: Response) => void;
   fetcher.mockImplementation((input, init) => String(input).includes('channel-product-options') ? new Promise<Response>((resolve) => { finish = resolve; }) : original(input, init));
-  render(<Page bootstrap={bootstrap} />); await screen.findByText('TEST_RESULT');
+  render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>); await screen.findByText('TEST_RESULT');
   const input = screen.getByRole('textbox', { name: '按 SPU ID / 标题搜索' });
   fireEvent.change(input, { target: { value: 'TEST_NEW' } });
   fireEvent.keyDown(input, { key: 'Enter' });
@@ -184,7 +185,7 @@ it('removing a focused item on the last page resets offset before refreshing the
   overviewTotal = 101; stored = Array.from({ length: 101 }, (_, index) => ({ spuId: `TEST_PAGE_${index}`, title: `TEST 商品 ${index}` }));
   // All fetches in this case resolve immediately. Flush their collection work
   // before starting user assertions rather than racing a 101-tag initial mount.
-  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />); });
+  await act(async () => { render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} /><Toast.Provider /></>); });
   // Locate the labelled owner before querying controls among 101 rendered tags.
   const pagination = () => within(screen.getByLabelText('SPU ROI 分页'));
   await screen.findByText('TEST_RESULT');
@@ -201,19 +202,19 @@ it('removing a focused item on the last page resets offset before refreshing the
   expect(stored).toHaveLength(100);
 }, 15_000);
 it('a mixed bulk lookup keeps an uncertain focused save visible instead of overwriting it with missing IDs', async () => {
-  patchFailure = 503; render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  patchFailure = 503; render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} /><Toast.Provider /></>);
   await screen.findByRole('button', { name: '移除 SPU TEST_OLD' });
   const input = screen.getByRole('textbox', { name: '按 SPU ID / 标题搜索' });
   fireEvent.paste(input, { clipboardData: { getData: () => 'TEST_NEW, TEST_MISSING' } });
   await screen.findByRole('button', { name: '重新读取关注事实' });
-  expect(screen.getByRole('alert')).toHaveTextContent('原选择保留。请先重新读取关注事实');
+  expect(await screen.findByText(/原选择保留。请先重新读取关注事实/)).toBeVisible();
   expect(input).toHaveValue('TEST_NEW, TEST_MISSING');
   expect(calls.filter((call) => call.init?.method === 'PATCH')).toHaveLength(1);
 });
 it('changing shop retains the selection Retry-After fence and requires explicit readback after expiry', async () => {
   vi.useFakeTimers(); let now = 0; vi.spyOn(performance, 'now').mockImplementation(() => now);
   limitedFocusedShop = '7'; shopRows = [shop, { ...shop, id: 8, shop_id: 'TEST_SHOP_EIGHT', account_name: 'TEST 店铺八' }];
-  render(<Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} />);
+  render(<><Page bootstrap={{ ...bootstrap, pageId: 'focused-spus' }} /><Toast.Provider /></>);
   await act(async () => { await vi.advanceTimersByTimeAsync(1); });
   expect(screen.getByRole('button', { name: '重新读取关注事实' })).toBeDisabled();
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -234,7 +235,7 @@ it('changing shop retains the selection Retry-After fence and requires explicit 
 
 it.each(['spu-roi', 'focused-spus'])('shows alias in the %s shop picker', async (pageId) => {
   shopRows = [{ ...shop, shop_alias: 'TEST_alias' } as typeof shop];
-  await act(async () => { render(<Page bootstrap={{ ...bootstrap, pageId }} />); });
+  await act(async () => { render(<><Page bootstrap={{ ...bootstrap, pageId }} /><Toast.Provider /></>); });
   const picker = screen.getByRole('button', { name: /TEST_alias.*当前店铺/ });
   expect(picker).toBeVisible();
   await act(async () => { fireEvent.click(picker); });

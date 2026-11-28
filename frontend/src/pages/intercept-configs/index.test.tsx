@@ -17,7 +17,7 @@ async function create(user: ReturnType<typeof userEvent.setup>) {
   fireEvent.change(within(dialog).getByRole('textbox', { name: '域名' }), { target: { value: 'TEST.new' } });
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Endpoint' }), { target: { value: '/new/*' } }); return dialog;
 }
-afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe('intercept-configs content', () => {
   it('retains a dirty create draft across cancel and refuses to overwrite it with row selection', async () => {
     api(async () => json({ config: row })); const user = userEvent.setup(); mount(<InterceptConfigs {...props} />); const dialog = await create(user);

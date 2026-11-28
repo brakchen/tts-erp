@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
+import { useOperationToast } from '../../shared/operation-toast';
 import { acknowledge, decodeDetail, decodeList, decodeSecret, record, version, type Detail } from './contracts';
 import { parseRuntime } from './json';
 
@@ -35,6 +36,7 @@ export function useRuntimeCommands(rootPath: string, canWrite: boolean) {
   const [failure, setFailure] = useState<CommandFailure>();
   const [recovery, setRecovery] = useState<Recovery>();
   const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const flight = useRef(false);
   const checkFlight = useRef(false);
   const gate = useRef<Recovery | undefined>(undefined);
@@ -67,7 +69,7 @@ export function useRuntimeCommands(rootPath: string, canWrite: boolean) {
         if (attempt.kind === 'publish' && record(data)) result = { publishedVersion: version(data.publishedVersion) };
       }
       if (!alive.current) return;
-      setNotice(result !== true && 'publishedVersion' in result && attempt.kind === 'publish' ? `已发布为 v${result.publishedVersion}；后续读取将使用此版本。` : success); return result;
+      notify.success(result !== true && 'publishedVersion' in result && attempt.kind === 'publish' ? `已发布为 v${result.publishedVersion}；后续读取将使用此版本。` : success); return result;
     } catch (error) {
       if (!alive.current) return;
       delay(error); const result = runtimeFailure(error); setFailure(result);

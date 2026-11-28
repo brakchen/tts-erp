@@ -34,7 +34,7 @@ async function openUser(user: ReturnType<typeof userEvent.setup>, label: string)
   const cell = await screen.findByText('test_user'); await user.click(within(cell.closest('tr')!).getByRole('button', { name: label }));
   return screen.getByRole('dialog');
 }
-afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 it('renders complete user columns and authoritative detail without inventing grants', async () => {
   api(); const user = userEvent.setup({ delay: null }); await mount();

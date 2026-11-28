@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 import RunningHub from './index';
@@ -31,14 +32,14 @@ function api(command: (path: string, init: RequestInit) => Promise<Response> = a
   });
 }
 
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { toastQueue.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('RunningHub workbench and write boundaries', () => {
   it('renders readonly progress and configuration facts without mutation controls', async () => {
     const user = userEvent.setup();
     const fetcher = api();
     vi.stubGlobal('fetch', fetcher);
-    render(<RunningHub bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} />);
+    render(<><RunningHub bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} /><Toast.Provider /></>);
     expect(await screen.findByRole('button', { name: '批次详情 ' + planned.id })).toBeVisible();
     expect(screen.getByText('当前为只读权限。')).toBeVisible();
     expect(screen.queryByRole('button', { name: '预览计划' })).toBeNull();
@@ -59,7 +60,7 @@ describe('RunningHub workbench and write boundaries', () => {
     let reject: (error: Error) => void = () => {};
     const fetcher = api(async () => new Promise<Response>((_, fail) => { reject = fail; }));
     vi.stubGlobal('fetch', fetcher);
-    render(<RunningHub {...props} />);
+    render(<><RunningHub {...props} /><Toast.Provider /></>);
     const config = screen.getByRole('button', { name: '工作流配置' });
     await waitFor(() => expect(config).toBeEnabled());
     await user.click(config);
@@ -70,7 +71,7 @@ describe('RunningHub workbench and write boundaries', () => {
     expect(save).toBeDisabled();
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
     await act(async () => reject(new Error('TEST_network_interrupted')));
-    expect(await within(dialog).findByText(/写操作不会自动重放/)).toBeVisible();
+    expect(await screen.findByText(/写操作不会自动重放/)).toBeVisible();
     expect(within(dialog).getByLabelText('凭据引用')).toHaveValue('env:RUNNINGHUB_STUDIO_API_KEY');
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
   });
@@ -95,7 +96,7 @@ describe('RunningHub workbench and write boundaries', () => {
       return json({}, 404);
     }, () => saved ? [planned] : []));
 
-    render(<RunningHub {...props} />);
+    render(<><RunningHub {...props} /><Toast.Provider /></>);
     expect(screen.queryByLabelText('生成模式')).toBeNull();
     expect(screen.getByRole('checkbox', { name: '仅跑首段' })).not.toBeChecked();
     await user.type(screen.getByLabelText('默认款式编号'), 'TEST_style');
@@ -105,7 +106,7 @@ describe('RunningHub workbench and write boundaries', () => {
     const plan = await screen.findByRole('dialog', { name: '确认生成计划' });
     expect(within(plan).getByText('服务端计划：486 段成片 / 81 组')).toBeVisible();
     await user.click(within(plan).getByRole('button', { name: '保存批次' }));
-    expect(await within(plan).findByText(/写操作不会自动重放/)).toBeVisible();
+    expect(await screen.findByText(/写操作不会自动重放/)).toBeVisible();
     await user.click(within(plan).getByRole('button', { name: '保存批次' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '确认生成计划' })).toBeNull());
     expect(drafts).toHaveLength(2);
@@ -130,7 +131,7 @@ describe('RunningHub workbench and write boundaries', () => {
       return json(batch);
     });
     vi.stubGlobal('fetch', api(terminate, () => [batch]));
-    render(<RunningHub {...props} />);
+    render(<><RunningHub {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: '批次详情 ' + batch.id }));
     const detail = await screen.findByRole('dialog', { name: '批次详情' });
     await user.click(await within(detail).findByRole('button', { name: '终止批次' }));
@@ -157,7 +158,7 @@ describe('RunningHub workbench and write boundaries', () => {
     });
     vi.stubGlobal('fetch', api(continueBatch, () => [batch], (path) => path.endsWith('/artifacts')
       ? json({ items: [{ id: 'TEST_video', kind: 'final', url: 'https://example.test/first.mp4' }] }) : undefined));
-    render(<RunningHub {...props} />);
+    render(<><RunningHub {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: '查看首段 ' + batch.id }));
     const detail = await screen.findByRole('dialog', { name: '查看首段' });
     expect(await within(detail).findByLabelText('首段成片', { selector: 'video' })).toHaveAttribute('src', 'https://example.test/first.mp4');
@@ -192,7 +193,7 @@ describe('RunningHub workbench and write boundaries', () => {
       if (path.endsWith('/digital-humans/1?includePackVideos=true')) return json({ ...person, assets: videos });
       return undefined;
     }));
-    render(<RunningHub {...props} />);
+    render(<><RunningHub {...props} /><Toast.Provider /></>);
     await user.click(screen.getByRole('button', { name: '新建模板' }));
     const editor = await screen.findByRole('dialog', { name: '新建人物模板' });
     const picker = within(editor).getByRole('button', { name: / 人物$/ });

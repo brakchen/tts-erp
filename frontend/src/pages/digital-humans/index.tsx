@@ -7,6 +7,7 @@ import { decodeDigitalHuman, decodeDigitalHumanFeed, type DigitalHuman } from '.
 import {
   ActionError, MediaSelect, ReadStatus, humanStatus, mediaWrite, useMediaAction, useRecordSelection,
 } from '../media-assets/media-ui';
+import { useOperationToast } from '../../shared/operation-toast';
 import HumanEditor, { PortraitTile, type EditorMode } from './HumanEditor';
 import HumanMaterials from './HumanMaterials';
 import HumanPackWorkspace from './HumanPackWorkspace';
@@ -26,7 +27,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   const [editor, setEditor] = useState<{ mode: EditorMode; human?: DigitalHuman }>();
   const [picker, setPicker] = useState<DigitalHuman>();
   const [operation, setOperation] = useState<{ mode: 'archive' | 'delete'; human: DigitalHuman }>();
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const returning = useRef<string | null>(null);
   const listHeading = useRef<HTMLHeadingElement>(null);
   const action = useMediaAction();
@@ -46,7 +47,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
     void action.run(async () => {
       const updated = await mediaWrite(root, '/digital-humans/' + human.digitalHumanId, 'PATCH', decodeDigitalHuman, { status: next });
       if (updated.digitalHumanId !== human.digitalHumanId || updated.status !== next) throw new Error('档案状态结果不符');
-      setNotice(next === 'archived' ? '档案已移到「已归档」。' : '档案已恢复，可在「启用中」查看。');
+      notify.success(next === 'archived' ? '档案已移到「已归档」。' : '档案已恢复，可在「启用中」查看。');
       setOperation(undefined);
       refresh();
     });
@@ -54,7 +55,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
   function remove(human: DigitalHuman) {
     void action.run(async () => {
       await mediaWrite(root, '/digital-humans/' + human.digitalHumanId, 'DELETE', () => undefined);
-      setNotice('档案已删除。素材仍在全局库。');
+      notify.success('档案已删除。素材仍在全局库。');
       setOperation(undefined);
       refresh();
     });
@@ -73,11 +74,10 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
         <h1 ref={listHeading} tabIndex={-1}>档案 {feed.data && <span className="media-count">{feed.data.total} 个</span>}</h1>
         <div className="media-actions">
           <div className="media-status-filter"><MediaSelect label="状态" value={status} options={statusOptions}
-            onChange={(next) => { setStatus(next); setNotice(''); action.clearError(); }} /></div>
+            onChange={(next) => { setStatus(next); action.clearError(); }} /></div>
           {canWrite && <Button aria-haspopup="dialog" onPress={() => setEditor({ mode: 'create' })}>新建数字人</Button>}
         </div>
       </div>
-      {notice && <p className="media-status" role="status">{notice}</p>}
       {!operation && <ActionError message={action.error} />}
       <ReadStatus title="档案列表" loading={feed.loading} error={!feed.data ? feed.error : undefined} onRetry={feed.retry} />
       {feed.data && !humans.length && <p className="media-box">{status === 'archived' ? '暂无已归档的档案。' : '当前没有档案。'}</p>}
@@ -112,7 +112,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
     </>}
     {canWrite && editor && <HumanEditor root={root} {...editor} onClose={() => setEditor(undefined)} onSaved={() => {
       if (editor.mode === 'create' && status === 'archived') setStatus('active');
-      setNotice(editor.mode === 'create' ? '档案已创建。打开档案即可添加素材包。'
+      notify.success(editor.mode === 'create' ? '档案已创建。打开档案即可添加素材包。'
         : editor.mode === 'portrait' ? '形象照片已更新。' : '档案资料已保存。');
       setEditor(undefined);
       refresh();
@@ -126,7 +126,7 @@ export default function DigitalHumans({ bootstrap }: PageProps) {
       onConfirm={() => operation.mode === 'archive' ? changeStatus(operation.human, 'archived') : remove(operation.human)} />}
     {canWrite && picker && <PickAssets bootstrap={bootstrap} target={picker} onChanged={refresh} onClose={(message) => {
       setPicker(undefined);
-      if (message) setNotice(message);
+      if (message) notify.success(message);
     }} />}
   </div>;
 }

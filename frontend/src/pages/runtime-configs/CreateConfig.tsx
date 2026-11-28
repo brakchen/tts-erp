@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Checkbox, Disclosure, FieldError, Input, Label, TextField } from '@heroui/react';
+import { useOperationToast } from '../../shared/operation-toast';
 import JsonEditor from './JsonEditor';
 import { parseObject, stringifyRuntime } from './json';
 import type { Detail } from './contracts';
@@ -10,14 +11,14 @@ export default function CreateConfig({ disabled, errors, edited, invalid, create
 }) {
   const [key, setKey] = useState(''); const [name, setName] = useState(''); const [payload, setPayload] = useState('{}');
   const [schema, setSchema] = useState('{}'); const [custom, setCustom] = useState(false); const [previewing, setPreviewing] = useState(false);
-  const [message, setMessage] = useState(''); const flight = useRef(false); const revision = useRef(0);
+  const notify = useOperationToast(); const flight = useRef(false); const revision = useRef(0);
   useEffect(() => { dirty(Boolean(key || name || payload !== '{}' || custom)); }, [key, name, payload, custom, dirty]);
-  function edit() { edited(); revision.current++; setMessage(''); }
+  function edit() { edited(); revision.current++; }
   async function infer() {
     if (disabled || flight.current) return;
     let data: Record<string, unknown>; try { data = parseObject(payload); } catch { invalid('初始内容必须是有效 JSON 对象'); return; }
     const current = revision.current; flight.current = true; setPreviewing(true);
-    try { const result = await preview(data, () => { void infer(); }); if (result && revision.current === current) { setSchema(stringifyRuntime(result, 2)); setMessage('校验规则预览已更新'); } }
+    try { const result = await preview(data, () => { void infer(); }); if (result && revision.current === current) { setSchema(stringifyRuntime(result, 2)); notify.success('校验规则预览已更新'); } }
     finally { flight.current = false; setPreviewing(false); }
   }
   async function submit() {
@@ -34,7 +35,7 @@ export default function CreateConfig({ disabled, errors, edited, invalid, create
       <TextField value={key} isRequired isDisabled={disabled} isInvalid={Boolean(errors.configKey)} onChange={(v) => { edit(); setKey(v); }}><Label>配置键</Label><Input maxLength={128} placeholder="例如 example.notifications.v1" /><FieldError>{errors.configKey}</FieldError></TextField>
       <JsonEditor label="初始内容" value={payload} disabled={disabled || previewing} onChange={(v) => { edit(); setPayload(v); }} />
       <Disclosure><Disclosure.Heading><Disclosure.Trigger type="button">高级选项：校验规则 Schema<Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading><Disclosure.Content><Disclosure.Body className="space-y-3"><p>默认根据初始内容自动推断；创建后不可修改。</p><div className="flex flex-wrap gap-3"><Button variant="secondary" isDisabled={disabled || previewing} onPress={() => { void infer(); }}>预览自动校验规则</Button><Checkbox isSelected={custom} isDisabled={disabled || previewing} onChange={(checked) => { edit(); setCustom(checked); }}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><Label>自定义校验规则</Label></Checkbox.Content></Checkbox></div><JsonEditor label="新配置 Schema" value={schema} disabled={disabled || previewing} readOnly={!custom} onChange={(v) => { edit(); setSchema(v); }} /></Disclosure.Body></Disclosure.Content></Disclosure>
-      {message && <p role="status">{message}</p>}{previewing && <p role="status">正在推断校验规则…</p>}
+      {previewing && <p role="status">正在推断校验规则…</p>}
       {Object.entries(errors).filter(([key]) => ['jsonSchema', 'draftPayload'].includes(key)).map(([key, value]) => <p role="alert" key={key}>{value}</p>)}
       <Button type="submit" isDisabled={disabled || previewing}>创建并继续编辑</Button>
     </form>

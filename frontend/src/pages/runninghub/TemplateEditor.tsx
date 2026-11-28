@@ -7,10 +7,9 @@ import { useRead } from './requests';
 
 type TemplateDraft = { humanId: string; name: string; assetIds: string[] };
 
-export default function TemplateEditor({ root, busy, feedback, close, save }: {
+export default function TemplateEditor({ root, busy, close, save }: {
   root: string;
   busy: boolean;
-  feedback: string;
   close: () => void;
   save: (draft: TemplateDraft) => Promise<void>;
 }) {
@@ -103,6 +102,5 @@ export default function TemplateEditor({ root, busy, feedback, close, save }: {
         </li>)}</ol> : <p>从可选列表加入参考视频。</p>}
       </section>
     </div>}
-    {feedback && <p role="status">{feedback}</p>}
   </WorkModal>;
 }

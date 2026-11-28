@@ -10,7 +10,7 @@ const json = (data: unknown, status = 201) => new Response(JSON.stringify(data),
 const props = () => ({ rootPath: '/tts', blocked: false, onBusy: vi.fn(), onFence: vi.fn(), onFailure: vi.fn(), onImported: vi.fn() });
 const file = () => new File(['TEST XLSX'], 'TEST_costs.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 
-afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('imports immediately after choosing a file and displays the backend result with one request', async () => {
   const fetcher = vi.fn().mockResolvedValue(json(result)); vi.stubGlobal('fetch', fetcher);
