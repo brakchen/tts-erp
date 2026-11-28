@@ -320,7 +320,7 @@ if [[ "$new_count" -gt 0 ]]; then
   echo "NEW failures introduced by this lane:"
   sed 's/^/  - /' "$RUN_TMP/new.txt"
   echo
-  echo "Classify each one before completing (docs/guides/agent-testing.md §6):"
+  echo "Classify each one before completing (docs/guides/agent-testing.md §3):"
   echo "  1. rerun the single smallest selection once through the isolated runner"
   echo "  2. if it passes in isolation it is an order/pollution flake, not a regression"
   echo "  3. if it fails consistently, it is real — fix it before completing"

@@ -23,15 +23,12 @@
 - Stable lane lifecycle and board record format: `docs/guides/agent-git-workflow.md`. `docs/handoff/ACTIVE.md` is only a relocation notice; do not maintain live rows there.
 
 - **207 是生产应用机**，运行 ERP API、Sync Worker 和 Nginx。**HP desk 承载生产 PostgreSQL 和 MinIO**。服务路径、公开入口、发布和回退见 [部署手册](docs/ops/tts-erp.md)。
-- 自动化验证可使用开发机或现有 `tts-erp-test` 验证虚拟机（8 CPU / 7.2 GiB，不扩容）。统一通过 §3 隔离入口与主机容量队列；手动页面验证绑定 `127.0.0.1`、加载独立测试配置。见 [测试指南](docs/guides/agent-testing.md)。
+- 自动化验证与手动页面验证的环境要求见 §9.2。
 
 ## 3. Non-negotiable safety boundaries
 
-- Never run tests against `tts_erp`, `tts_erp_prod`, or any prod-shaped database name.
-- Run tests only through `bash scripts/test_isolated.sh ...`; it must create an ephemeral clone for every run. There is no direct-runner or shared-database fallback.
-- Agents must not select full-history, coverage, or archived migration suites under `docs/archive/migrate-v1-to-v2-2026-08-29/`. These paths include or restore production-touching migration behavior.
 - Never execute `DELETE`, `TRUNCATE`, `DROP`, or irreversible `UPDATE` against production data without the documented guard and explicit human authorization.
-- Never run `alembic upgrade` against production. Agents may validate migrations only through the isolated runner against `tts_erp_test_template` and its ephemeral `tts_erp_test_*` clones; production migration and restart are human-operated.
+- Never run `alembic upgrade` against production; production migration and restart are human-operated.
 - Do not add an HTTP, CLI, migration, or job path that destroys source-of-truth facts (settlement, order, refund, ad, or config rows) without the shared guard from `tts_erp_v2.api.deps`.
 - Recomputing a derived snapshot the same job owns (for example `analytics.spu_deterioration_alerts`, whose rows are rebuilt from source facts on the next run) is not a destructive path and does not take that guard; adding a release switch to it reintroduces the mismatch. If a new write path is unclear, ask before adding it.
 - Credentials must go through `tts_erp_v2.proxy.token_service`; never query legacy `oauth_tokens` or decrypt `integration.credentials` directly.
@@ -129,9 +126,7 @@ Read [`docs/guides/frontend-development.md`](docs/guides/frontend-development.md
 | 生产 Sync Worker 发布或回退（人工） | `bash scripts/prod_sync_deploy.sh <sha>` · `--rollback <installed-sha>` |
 | 生产服务与版本检查 | [部署手册](docs/ops/tts-erp.md#运行状态与日志) |
 
-- `scripts/test_isolated.sh` is the sole agent entry point: it clones `tts_erp_test_template` into a per-session ephemeral DB, injects `TTS_ERP_DB_URL_TEST`, runs the selected scope, then drops the clone.
-- Refresh the template with `bash scripts/test_isolated.sh --refresh-template fast` when migrations/schema change or the template is missing/stale.
-- If template cloning or its prerequisites fail, stop and repair them with `bash scripts/envsetup/install-test-deps.sh --check`; do not substitute another runner or database.
+- 常用测试命令见上表；执行规则统一维护在 `docs/guides/agent-testing.md`（§9.2 只保留概述）。
 - Run `bash scripts/envsetup/prepare-worktree.sh --scope auto --base "$target_sha"` for a committed worktree; use `--scope backend` for browser-free backend-only preparation or `--scope fast` for full validation. It reuses `.venv` and `.env.test` and installs private frontend dependencies only when selected; `--check`/`--dry-run` do not modify the environment.
 - Full command reference: `docs/guides/commands-reference.md`.
 
@@ -260,19 +255,48 @@ Detailed lifecycle, environment setup, conflict handling, and cleanup: `docs/gui
 
 ## 9. Required context by task
 
+按任务类型先读对应文档；§3 的红线在任何场景下都生效。
+
+### 9.1 后端开发
+
+规则本体：安全红线见 §3，领域不变量（凭证、签名、HTTP 语义、认证与时间）见 §4，代码规范见 §6。下表只列"动什么先读什么"：
+
+| 主题 | Read first |
+| --- | --- |
+| 架构、目录结构、进程托管 | `docs/architecture/architecture-overview.md`；`docs/architecture/process-architecture.md` |
+| 破坏性操作、迁移、生产、鉴权、凭证 | `docs/guides/agent-safety.md` |
+| dumps 端点与 HTTP envelope | `docs/api/dumps-data-contract.md` |
+| 对外 API、角色、分页、schema | `docs/api/external-api.md` |
+| TikTok 签名 | `docs/reference/tiktok-hmac-signing.md` |
+| 妙手集成 | `docs/reference/miaoshou-platform.md` |
+
+### 9.2 测试
+
+测试的完整规则（隔离机制、命令与范围选择、失败分类、测试数据与证据要求）都维护在 [`docs/guides/agent-testing.md`](docs/guides/agent-testing.md)；已知常见失败见 `docs/guides/common-bugs.md`。本节只保留概述：
+
+- 唯一入口是 `bash scripts/test_isolated.sh ...`：每次从 `tts_erp_test_template` 克隆临时库、注入 `TTS_ERP_DB_URL_TEST`、跑完销毁；不存在直接运行器或共享库回退，前置失败先修环境而不是换运行器。
+- 不得对 `tts_erp`、`tts_erp_prod` 或任何生产形态库名运行测试；迁移验证同样只走 isolated 运行器对模板及其临时克隆。
+- DoD 顺序见 §7：先跑最窄相关测试，正式 baseline gate 只在集成锁下对 prospective merge 跑一次；默认零失败，新失败只重跑最小失败集做分类。
+
+### 9.3 前端开发
+
 | When touching | Read first |
 | --- | --- |
-| Architecture, credentials, database layout | `docs/architecture/architecture-overview.md` |
-| Destructive operations, migrations, production, auth | `docs/guides/agent-safety.md` |
-| Tests, fixtures, test database, baseline failures | `docs/guides/agent-testing.md` |
-| Worktrees, handoff, merge, push, conflict handling | `docs/guides/agent-git-workflow.md` |
-| Dumps endpoints and HTTP envelopes | `docs/api/dumps-data-contract.md` |
-| TikTok signing | `docs/reference/tiktok-hmac-signing.md` |
-| External endpoints, roles, pagination, schemas | `docs/api/external-api.md` |
 | ERP frontend components, navigation/layout, styling, or migration (not `plugins/`) | `docs/guides/frontend-development.md`; migration design: `docs/plans/frontend-progressive-migration.md` (P0–P6 implemented and merged) |
+
+### 9.4 协作
+
+| When touching | Read first |
+| --- | --- |
+| Worktrees, handoff, merge, push, conflict handling | `docs/guides/agent-git-workflow.md` |
+| 多会话 / 多 agent 协调 | §8（tower-do） |
+
+注：§8 的 tower-do 协调依赖 tower-do 工具支持（skill / MCP / plugin）。当前环境若没有任何 tower-do 接入，可忽略该协调规则。
+
+### 9.5 特定产品
+
+| When touching | Read first |
+| --- | --- |
 | SPU profit-deterioration product, design, implementation, or tests | `docs/spu-profit-deterioration/01-product-proposal.md`, then the matching numbered document in that directory |
-| Process/service architecture | `docs/architecture/process-architecture.md` |
-| Miaoshou integration | `docs/reference/miaoshou-platform.md` |
-| Known recurring failures | `docs/guides/common-bugs.md` |
 
 `docs/archive/` is historical reference only. Do not restore or execute archived code.

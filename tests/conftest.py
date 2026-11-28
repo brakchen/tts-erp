@@ -71,7 +71,7 @@ _load_env()
 # Test-safe defaults for keys the suite reads from the environment (2026-10-04).
 #
 # ``.env`` is gitignored and deliberately NOT linked into worktrees by
-# default (docs/guides/agent-testing.md §worktree), so a clean checkout
+# default (docs/guides/agent-testing.md §1), so a clean checkout
 # has none of these — yet several tests depend on them being present:
 #
 # - ``TTS_ERP_AUTH_MODE``: tests that build the app directly (e.g.

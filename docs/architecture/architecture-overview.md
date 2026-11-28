@@ -30,13 +30,9 @@ MinIO 和 Fernet。生产 API 与 Sync Worker 由系统级 systemd 单元运行�
 - `TTS_ERP_EXTERNAL_PREFIX` 在构建 FastAPI 应用时进入 `root_path`。鉴权和路由使用统一归一化结果。
 - 开发机在回环地址上运行验证实例。部署与本地启动见 [部署手册](../ops/tts-erp.md)。
 
-## 3. 测试 DB 隔离（2026-10-05）
+## 3. 测试 DB 隔离
 
-- **唯一标准入口**：`bash scripts/test_isolated.sh <domain>`。测试入口从 `tts_erp_test_template` 克隆每次运行独占的 `tts_erp_test_<session>_<run>` 临时数据库，结束后删除该 clone；并发运行不会共享或清除彼此数据。
-- **模板刷新**：schema/migration 变化后执行 `bash scripts/test_isolated.sh --refresh-template fast`；刷新只把生产 schema 形状导入测试模板并升级到当前 Alembic head，不复制生产业务数据。
-- **硬生产护栏**：隔离 wrapper、底层 runner 与测试 fixture 都拒绝 `tts_erp`、`tts_erp_prod` 等 production-shaped 数据库；命中即非零退出，不允许 warning-only 继续。
-- **禁止绕过**：Agent 只能调用隔离 wrapper；不得直接调用底层 runner，不得使用长寿命共享测试库，也不存在 clone 工具不可用时的降级路径。依赖失败时停止并修复前置条件。
-- **配置**：`.env.test` 只提供测试形连接基线；实际运行由隔离 wrapper 注入 clone 的 `TTS_ERP_DB_URL_TEST`。完整机制与故障处理见 `docs/guides/agent-testing.md`。
+测试隔离机制、模板刷新、生产护栏与故障处理统一维护在 [测试指南](../guides/agent-testing.md) §2，本节不再重复。
 
 ## 4. 数据库维护待办
 
@@ -109,35 +105,15 @@ shop_cipher = cred.shop_cipher
 
 ## 7. External API（外部契约）
 
-**完整活契约**（auth / 限流 / CORS / 分页 / 每端点 schema + curl + Stability matrix）= `docs/api/external-api.md`——加/改任何外部端点前先读它。
+**完整活契约**（auth / 限流 / CORS / 分页 / 每端点 schema + curl + Stability matrix）= `docs/api/external-api.md`——加/改任何外部端点前先读它。分页、时间格式、money 序列化、内部主键过滤（`shop_pk`/`spu_pk`）等契约要点与不稳定端点清单均以该文档为准。
 
 **本机实时清单**：`GET /endpoints`
 
-**端点契约要点**：
-
-- 分页 `limit`(1..500, 默认100)/`offset`
-- 时间 ISO-8601 UTC
-- money 列序列化为 JSON 字符串（用 Decimal 解析）
-
-**过滤用内部主键**（`shop_pk` / `spu_pk`），不是 `shop_id`——传 `?shop_id=` 不报错但被 FastAPI **静默忽略**（返回全量不过滤）。先查再过滤：
-
-```bash
-curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" "https://chen.daqiangplatform.com/tts/v2/commerce/channel-accounts"
-# → external_account_id 即 TikTok shop_id；返回里的 shop_pk 即内部主键（以实际结果为准）
-curl -s -H "X-API-Key: $TTS_ERP_RO_KEY" \
-  "https://chen.daqiangplatform.com/tts/v2/commerce/sales-orders?shop_pk=<内部 id>&limit=5"
-```
-
-### 7.1 不稳定端点（可随时 break，外部 client 勿依赖）
-
-`/v2/analytics/sync/*`（Chrome 扩展 ingest 契约，随扩展发布节奏演进）、`GET /v2/llm-context`
-（experimental）等端点。Miaoshou 已无任何 HTTP 面，不要等它回来。
-
-### 7.2 改 app.py / middleware 后验证
+### 7.1 改 app.py / middleware 后验证
 
 使用 [测试指南](../guides/agent-testing.md) 选择隔离的鉴权、API 契约和浏览器回归。生产只读检查由运维按 [部署手册](../ops/tts-erp.md#运行状态与日志) 执行。
 
-### 7.3 已拆除、不要再找
+### 7.2 已拆除、不要再找
 
 - 没有 `POST /v2/sync/*` —— 同步全部由 `tts-erp-sync.service` 调度（`sync_worker/scheduler.py` 的 `JOBS`）
 - 没有任何 `/v2/linkage/*` —— 未接通的映射层与 DB schema 已由 migration 0044 删除
