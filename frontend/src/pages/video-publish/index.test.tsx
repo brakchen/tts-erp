@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import VideoPublish from './index';
 import { decodeTicket } from './contracts';
@@ -78,13 +79,13 @@ beforeEach(() => {
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:TEST_preview') });
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); });
+afterEach(() => { toastQueue.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); });
 
 describe('video publish read slice', () => {
   it('opens a real task detail with full caption, server decisions, attempts, cleanup and copy-safe identity, using GET only', async () => {
     const fetcher = mockReads(); const clipboard = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup(); Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } });
-    render(<VideoPublish {...props} />);
+    render(<><VideoPublish {...props} /><Toast.Provider /></>);
     expect((await screen.findAllByText('TEST_video.mp4')).length).toBeGreaterThan(0);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     const panel = await screen.findByRole('dialog', { name: '任务详情' });
@@ -103,7 +104,7 @@ describe('video publish read slice', () => {
     const cursor = 'TEST opaque+/==&value';
     const second = { ...task, taskId: '00000000-0000-4000-8000-000000000004', filename: 'TEST_second.mp4', queuePosition: null };
     const fetcher = mockReads((url) => url.includes('cursor=') ? json({ ...list, items: [second] }) : url.endsWith('/tasks') ? json({ ...list, nextCursor: cursor }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: '加载更多' }));
     expect(await screen.findByText('TEST_second.mp4')).toBeVisible();
     expect(fetcher.mock.calls.some(([url]) => url === '/tts/v2/video-publish/tasks?cursor=TEST+opaque%2B%2F%3D%3D%26value')).toBe(true);
@@ -116,7 +117,7 @@ describe('video publish read slice', () => {
   });
   it('accepts 304 only with exact-path validated cache and sends no validator for a changed filter', async () => {
     const fetcher = mockReads((url, init) => url.includes('/tasks') && new Headers(init.headers).has('If-None-Match') ? new Response(null, { status: 304 }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.click(screen.getByRole('button', { name: '立即刷新' }));
     expect(screen.getByRole('grid', { name: '视频发布任务' })).toHaveTextContent('TEST_video.mp4');
     expect(fetcher.mock.calls.some(([url, init]) => url.endsWith('/tasks') && new Headers(init.headers).get('If-None-Match') === '"TEST_list"')).toBe(true);
@@ -127,13 +128,13 @@ describe('video publish read slice', () => {
   });
   it('rejects unsolicited 304 instead of inventing empty success', async () => {
     mockReads((url) => url.endsWith('/tasks') ? new Response(null, { status: 304 }) : undefined);
-    render(<VideoPublish {...props} />);
+    render(<><VideoPublish {...props} /><Toast.Provider /></>);
     expect(await screen.findByText(/读取失败（HTTP 304）/)).toBeVisible();
     expect(screen.queryByRole('grid', { name: '视频发布任务' })).toBeNull();
   });
   it.each([403, 401, 503])('separates HTTP %s from empty and does not render raw error bodies', async (status) => {
     mockReads((url) => url.endsWith('/tasks') ? json({ detail: 'TEST_SECRET_SIGNED_URL' }, status) : undefined);
-    render(<VideoPublish {...props} />);
+    render(<><VideoPublish {...props} /><Toast.Provider /></>);
     expect(await screen.findByText(new RegExp('HTTP ' + status))).toBeVisible();
     expect(screen.queryByText('TEST_SECRET_SIGNED_URL')).toBeNull();
     expect(screen.queryByRole('grid', { name: '视频发布任务' })).toBeNull();
@@ -141,7 +142,7 @@ describe('video publish read slice', () => {
   it('validates required fields and distinguishes a legitimate empty page', async () => {
     let malformed = true;
     mockReads((url) => url.endsWith('/tasks') ? json(malformed ? { ...list, items: [{ ...task, rowVersion: null }] } : { ...list, items: [], totalApprox: 0 }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     expect(await screen.findByText('视频发布响应格式错误')).toBeVisible();
     malformed = false; await user.click(screen.getByRole('button', { name: '立即刷新' }));
     expect(await screen.findByText('当前筛选下没有任务。')).toBeVisible();
@@ -150,7 +151,7 @@ describe('video publish read slice', () => {
   it('aborts obsolete filter reads and ignores a late response from the old scope', async () => {
     let resolve!: (response: Response) => void; let oldSignal: AbortSignal | null | undefined;
     mockReads((url, init) => url.endsWith('/tasks') ? new Promise<Response>((r) => { resolve = r; oldSignal = init.signal; }) : url.includes('status=failed') ? json({ ...list, items: [] }) : undefined);
-    const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(screen.getByRole('button', { name: /任务状态/ })); await user.click(screen.getByRole('option', { name: '失败' }));
     expect(oldSignal?.aborted).toBe(true); await screen.findByText('当前筛选下没有任务。');
     await act(async () => { resolve(json(list)); });
@@ -159,13 +160,13 @@ describe('video publish read slice', () => {
   });
   it('preserves oversized numeric rowVersion from raw JSON before rounding', async () => {
     mockReads((url) => url.endsWith('/tasks') ? new Response(JSON.stringify(list).replace('"rowVersion":0', '"rowVersion":9007199254740993')) : undefined);
-    render(<VideoPublish {...props} />);
+    render(<><VideoPublish {...props} /><Toast.Provider /></>);
     expect(await screen.findByText('rowVersion 9007199254740993')).toBeVisible();
   });
   it('waits full Retry-After across query changes; expiry allows explicit retry without replay', async () => {
     vi.useFakeTimers(); const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime }); let limited = true;
     const fetcher = mockReads((url) => url.includes('/tasks') && !url.includes('/current') && !url.includes(id) && limited ? json({}, 429, { 'Retry-After': '600' }) : undefined);
-    const view = render(<VideoPublish {...props} />); await act(async () => {});
+    const view = render(<><VideoPublish {...props} /><Toast.Provider /></>); await act(async () => {});
     expect(screen.getByRole('button', { name: '立即刷新' })).toBeDisabled();
     const count = fetcher.mock.calls.length;
     const cooldownStartedAt = performance.now();
@@ -188,7 +189,7 @@ describe('video publish read slice', () => {
   });
   it('polls at response plus five seconds, pauses while hidden and cleans up timers', async () => {
     vi.useFakeTimers(); localStorage.setItem('tts-erp.video-publish.refresh-preference', 'on');
-    const fetcher = mockReads(); const view = render(<VideoPublish {...props} />); await act(async () => {});
+    const fetcher = mockReads(); const view = render(<><VideoPublish {...props} /><Toast.Provider /></>); await act(async () => {});
     expect(fetcher).toHaveBeenCalledTimes(3);
     await act(async () => { await vi.advanceTimersByTimeAsync(4999); }); expect(fetcher).toHaveBeenCalledTimes(3);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); }); expect(fetcher).toHaveBeenCalledTimes(6);
@@ -205,7 +206,7 @@ describe('video publish read slice', () => {
 
   it('reopens the same detail from its valid 304 body cache and never substitutes another task', async () => {
     const fetcher = mockReads((url, init) => url.endsWith('/tasks/' + id) && new Headers(init.headers).has('If-None-Match') ? new Response(null, { status: 304 }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     let panel = await screen.findByRole('dialog', { name: '任务详情' }); await within(panel).findByText(/TEST_full_caption/);
     await user.click(within(panel).getByRole('button', { name: '关闭任务详情' }));
@@ -216,9 +217,9 @@ describe('video publish read slice', () => {
   it('aborts old deployment reads and does not carry an old selection into a new root', async () => {
     let selectedSignal: AbortSignal | null | undefined; let resolve!: (response: Response) => void;
     const fetcher = mockReads((url, init) => url === '/tts/v2/video-publish/tasks/' + id ? new Promise<Response>((r) => { resolve = r; selectedSignal = init.signal; }) : undefined);
-    const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
-    view.rerender(<VideoPublish bootstrap={{ ...props.bootstrap, rootPath: '/other' }} />);
+    view.rerender(<><VideoPublish bootstrap={{ ...props.bootstrap, rootPath: '/other' }} /><Toast.Provider /></>);
     expect(selectedSignal?.aborted).toBe(true);
     await act(async () => { resolve(json(detail)); });
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -229,7 +230,7 @@ describe('video publish read slice', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     let resolve!: (response: Response) => void;
     const fetcher = mockReads((url) => url.endsWith('/tasks') ? new Promise<Response>((r) => { resolve = r; }) : undefined);
-    const view = render(<VideoPublish {...props} />); await act(async () => {});
+    const view = render(<><VideoPublish {...props} /><Toast.Provider /></>); await act(async () => {});
     await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/tasks'))).toHaveLength(1);
     await act(async () => { resolve(json(list)); });
@@ -241,7 +242,7 @@ describe('video publish read slice', () => {
   });
 
   it('offers file selection, preserves caption and requires confirmation before creating a task', async () => {
-    const fetcher = mockReads(); const user = userEvent.setup(); render(<VideoPublish {...commandProps} />);
+    const fetcher = mockReads(); const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>);
     await screen.findByText('TEST_device_locked');
     const fileInput = screen.getByLabelText('选择 MP4 视频');
     await user.upload(fileInput, new File(['TEST_VIDEO'], 'TEST_upload.mp4', { type: 'video/mp4' }));
@@ -255,7 +256,7 @@ describe('video publish read slice', () => {
   });
 
   it('offers server-authorized retry with original failure evidence before any POST', async () => {
-    const fetcher = mockReads(); const user = userEvent.setup(); render(<VideoPublish {...commandProps} />);
+    const fetcher = mockReads(); const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>);
     await screen.findByRole('grid', { name: '视频发布任务' });
     const grid = screen.getByRole('grid', { name: '视频发布任务' });
     await user.click(await within(grid).findByRole('button', { name: '重试原任务' }));
@@ -272,7 +273,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/confirm-upload')) return json({ ...uploadingTask(body), stage: 'queued', allowedActions: ['view'], rowVersion: 8 });
       return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); const file = await prepareUpload(user);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); const file = await prepareUpload(user);
     const put = TestPut.requests[0]; expect(put).toBeDefined();
     expect(put.withCredentials).toBe(false); expect(put.open).toHaveBeenCalledWith('PUT', expect.stringContaining('https://TEST.invalid/'));
     expect(put.setRequestHeader.mock.calls).toEqual([['Content-Type', 'video/mp4']]); expect(put.send).toHaveBeenCalledWith(file);
@@ -296,7 +297,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks/' + id)) return json({ ...detail, ...uploadingTask(body) });
       return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); const file = await prepareUpload(user);
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); const file = await prepareUpload(user);
     await user.click(screen.getByRole('button', { name: '取消上传' }));
     expect(TestPut.requests[0].abort).toHaveBeenCalledTimes(1);
     expect((screen.getByLabelText('选择 MP4 视频') as HTMLInputElement).files?.[0]).toBe(file);
@@ -315,7 +316,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks') && init.method === 'POST') { writes++; bodies.push(init.body as string); return writes === 1 ? Promise.reject(new TypeError('TEST transport')) : json(ticketFor(JSON.parse(init.body as string))); }
       return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user);
     expect(await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/)).toBeVisible();
     await user.type(screen.getByRole('textbox', { name: '发布文案' }), '_EDIT');
     expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled(); expect(writes).toBe(1);
@@ -328,7 +329,7 @@ describe('video publish read slice', () => {
   it('sends one retry using captured task/version and requires current GET after uncertain response', async () => {
     let writes = 0; let resolve!: (value: Response) => void;
     const fetcher = mockReads((url, init) => url.endsWith('/retry') ? (++writes === 1 ? new Promise<Response>((r) => { resolve = r; }) : json(task)) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重试原任务' }));
     await user.click(screen.getByRole('button', { name: '确认重试原任务' })); expect(writes).toBe(1);
     await act(async () => { resolve(json(null)); });
@@ -340,7 +341,7 @@ describe('video publish read slice', () => {
 });
   it('loads settings without overwriting accepted dirty input and submits only changed fields plus captured rowVersion', async () => {
     const fetcher = mockReads((url, init) => url.endsWith('/settings') ? json(task) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '编辑发布设置' }));
     const panel = screen.getByRole('region', { name: '任务操作与核对' });
     await user.click(within(panel).getByRole('textbox', { name: '正文 Prompt' }));
@@ -354,7 +355,7 @@ describe('video publish read slice', () => {
   });
 
   it('keeps an explicit settings discard confirmation instead of silently losing dirty input', async () => {
-    mockReads(); const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    mockReads(); const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '编辑发布设置' }));
     await user.type(screen.getByRole('textbox', { name: '正文 Prompt' }), 'TEST_keep_me');
     await user.click(screen.getByRole('button', { name: '关闭操作面板（保留服务端任务）' }));
@@ -375,7 +376,7 @@ describe('video publish read slice', () => {
       if (init.method === 'POST') return json(action === 'replace_upload' ? { ...offered, caption: 'TEST_resume_caption', allowedActions: ['view', 'continue_upload'] } : offered);
       if (url.endsWith('/tasks')) return json({ ...list, items: [offered] }); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: label }));
     if (action !== 'confirm_published') expect(fetcher.mock.calls.some(([, init]) => init.method === 'POST')).toBe(false);
     await user.click(screen.getByRole('button', { name: confirm }));
@@ -389,7 +390,7 @@ describe('video publish read slice', () => {
     let resolve!: (response: Response) => void;
     const resumable = { ...task, caption: 'TEST_full_resume_caption', allowedActions: ['view', 'continue_upload'] };
     mockReads((url) => url.endsWith('/tasks') ? json({ ...list, items: [resumable] }) : url.endsWith('/tasks/' + id) ? new Promise<Response>((r) => { resolve = r; }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.click(screen.getByRole('textbox', { name: '发布文案' }));
     await user.paste('TEST_local_draft');
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重新选择文件继续' }));
@@ -403,7 +404,7 @@ describe('video publish read slice', () => {
   it('honors the full binary Retry-After across reads and does not replay PUT at expiry', async () => {
     let body: Record<string, unknown> = {};
     const fetcher = mockReads((url, init) => url.endsWith('/tasks') && init.method === 'POST' ? (body = JSON.parse(init.body as string), json(ticketFor(body))) : undefined);
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user);
     vi.useFakeTimers(); const put = TestPut.requests[0]; put.retryAfter = '600';
     await act(async () => { put.finish(429); });
     expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeDisabled();
@@ -421,7 +422,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/settings')) return json({ detail: [{ loc: ['body', 'prompt'], type: 'string_too_long', input: 'TEST_secret_input' }] }, 422);
       if (url.endsWith('/tasks/' + id)) return json({ ...detail, paramsLockedAt: locked ? time : null }); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '编辑发布设置' }));
     const panel = screen.getByRole('region', { name: '任务操作与核对' });
     await user.click(within(panel).getByRole('button', { name: '查询当前事实' })); await within(panel).findByText(/当前事实已读取/);
@@ -437,7 +438,7 @@ describe('video publish read slice', () => {
   it('keeps creation blocked by worker conditions while server-offered task commands remain available to readwrite role', async () => {
     const offered = { ...task, allowedActions: ['view', 'cancel', 'confirm_published', 'edit_settings'] };
     const fetcher = mockReads((url) => url.endsWith('/config') ? json({ ...config, worker: { ...config.worker, status: 'unavailable' }, canWrite: false, writeBlockReason: 'TEST_server_block' }) : url.endsWith('/tasks') ? json({ ...list, items: [offered] }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     const grid = screen.getByRole('grid', { name: '视频发布任务' });
     expect(await within(grid).findByRole('button', { name: '取消任务' })).toBeEnabled();
     expect(within(grid).getByRole('button', { name: '打开人工确认' })).toBeEnabled(); expect(within(grid).getByRole('button', { name: '编辑发布设置' })).toBeEnabled();
@@ -453,7 +454,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks') && init.method === 'POST') { body = JSON.parse(init.body as string); return json(ticketFor(body)); }
       if (url.endsWith('/upload-url')) return json(ticketFor(body)); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user);
     await act(async () => { TestPut.requests[0].finish(); });
     const replacement = new File(['NEW__VIDEO'], 'TEST_upload.mp4', { type: 'video/mp4' });
     await user.upload(screen.getByLabelText('选择 MP4 视频'), replacement);
@@ -468,7 +469,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks/' + id)) return new Promise<Response>((r) => { resolve = r; });
       if (url.endsWith('/confirm-upload')) return json({ ...uploadingTask(body), stage: 'queued', allowedActions: ['view'] }); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user); await act(async () => { TestPut.requests[0].finish(); });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user); await act(async () => { TestPut.requests[0].finish(); });
     await user.click(screen.getByRole('button', { name: '核对上传任务' }));
     await user.click(screen.getByRole('button', { name: '确认上传并入队' }));
     await act(async () => { resolve(json({ ...detail, ...uploadingTask(body), rowVersion: 42 })); });
@@ -480,7 +481,7 @@ describe('video publish read slice', () => {
   it('accepts resume only explicitly, reads full caption and exact target, and requires original file metadata', async () => {
     const resumable = { ...task, caption: 'TEST_full_resume_caption', allowedActions: ['view', 'continue_upload'] };
     mockReads((url) => url.endsWith('/tasks') ? json({ ...list, items: [resumable] }) : url.endsWith('/tasks/' + id) ? json({ ...detail, ...resumable, target: { ...target, deviceSerialMasked: 'TEST_resumed***' } }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await screen.findByRole('grid', { name: '视频发布任务' });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await screen.findByRole('grid', { name: '视频发布任务' });
     await user.type(screen.getByRole('textbox', { name: '发布文案' }), 'TEST_local');
     await user.click(await within(screen.getByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重新选择文件继续' }));
     await user.click(screen.getByRole('button', { name: '确认替换草稿并续传此任务' }));
@@ -492,14 +493,14 @@ describe('video publish read slice', () => {
   });
   it('rejects credential-bearing ticket headers before native PUT and retains draft without rendering the signed URL', async () => {
     mockReads((url, init) => url.endsWith('/tasks') && init.method === 'POST' ? json({ ...ticketFor(JSON.parse(init.body as string)), upload: { method: 'PUT', url: 'https://TEST.invalid/?TEST_do_not_render', headers: { 'Content-Type': 'video/mp4', Authorization: 'TEST_forbidden' }, expiresAt: time } }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user);
     expect(await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/)).toBeVisible(); expect(TestPut.requests).toHaveLength(0);
     expect(screen.getByRole('textbox', { name: '发布文案' })).toHaveValue('TEST_new_caption');
     expect(screen.queryByText(/TEST_forbidden|TEST_do_not_render/)).toBeNull();
   });
 
   it.each([undefined, { readwrite: false, admin: false }])('fails closed for task writes when role hint is missing/false %#', async (roleCapabilities) => {
-    const fetcher = mockReads(); render(<VideoPublish bootstrap={{ ...props.bootstrap, roleCapabilities }} />);
+    const fetcher = mockReads(); render(<><VideoPublish bootstrap={{ ...props.bootstrap, roleCapabilities }} /><Toast.Provider /></>);
     const grid = await screen.findByRole('grid', { name: '视频发布任务' });
     expect(within(grid).getByRole('button', { name: '重试原任务' })).toBeDisabled();
     expect(within(grid).getByRole('button', { name: '编辑发布设置' })).toBeDisabled();
@@ -513,7 +514,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks') && init.method === 'POST') { body = JSON.parse(init.body as string); return json(ticketFor(body)); }
       if (url.endsWith('/confirm-upload')) return json({ detail: { code: 'UPLOAD_SIZE_MISMATCH', message: 'TEST_never_render_raw_body', retryable: true } }, 422); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user); await act(async () => { TestPut.requests[0].finish(); });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user); await act(async () => { TestPut.requests[0].finish(); });
     await user.click(screen.getByRole('button', { name: '确认上传并入队' })); await user.click(screen.getByRole('button', { name: '确认入队' }));
     expect(await screen.findByText('上传对象大小与原文件不一致，请选择原文件后重新上传（HTTP 422）')).toBeVisible();
     expect(screen.queryByText('TEST_never_render_raw_body')).toBeNull();
@@ -522,7 +523,7 @@ describe('video publish read slice', () => {
   it('loads a sanitized diagnostic excerpt only after explicit GET, preserving structured output and plain escaped text', async () => {
     const diagnostic = { ...detail, attempts: [{ ...attempt, promptSnapshot: 'TEST_prompt <script>TEST_escaped</script> token=[REDACTED]', artemisOutput: { verdict: 'TEST_published', steps: [{ count: 0, safe: false, note: null, text: 'TEST_output <b>plain</b>' }], authorization: '[REDACTED]' } }] };
     const fetcher = mockReads((url) => url.endsWith('?includeDiagnostics=true') ? json(diagnostic, 200, { ETag: '"TEST_diagnostic"' }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     const dialog = await screen.findByRole('dialog', { name: '任务详情' }); await within(dialog).findByText(/TEST_full_caption/);
     expect(fetcher.mock.calls.some(([url]) => url.includes('includeDiagnostics'))).toBe(false);
@@ -540,7 +541,7 @@ describe('video publish read slice', () => {
     let reads = 0;
     const diagnostic = { ...detail, attempts: [{ ...attempt, promptSnapshot: 'TEST_cached_excerpt', artemisOutput: { ok: true } }] };
     const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? (++reads === 1 ? json(diagnostic, 200, { ETag: '"TEST_diag_only"' }) : new Response(null, { status: 304 })) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('TEST_cached_excerpt');
     await user.click(screen.getByRole('button', { name: '刷新脱敏诊断节选' }));
@@ -557,7 +558,7 @@ describe('video publish read slice', () => {
   });
   it('rejects an unsolicited diagnostic 304 rather than borrowing a regular detail cache', async () => {
     mockReads((url) => url.includes('includeDiagnostics') ? new Response(null, { status: 304 }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
     expect(await screen.findByText(/读取失败（HTTP 304）/)).toBeVisible();
@@ -569,7 +570,7 @@ describe('video publish read slice', () => {
     { promptSnapshot: '测'.repeat(2000), artemisOutput: { empty: [], no: false, zero: 0, absent: null }, expected: '测'.repeat(2000) },
   ])('preserves nullable/empty/max-length prompt and typed output values %#', async ({ promptSnapshot, artemisOutput, expected }) => {
     mockReads((url) => url.includes('includeDiagnostics') ? json({ ...detail, attempts: [{ ...attempt, promptSnapshot, artemisOutput }] }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
     expect(await screen.findByText(expected)).toBeVisible();
@@ -582,7 +583,7 @@ describe('video publish read slice', () => {
     { ...detail, attempts: [{ ...attempt, promptSnapshot: null, artemisOutput: [] }] },
   ])('rejects wrong identity or malformed diagnostic projection without rendering it %#', async (payload) => {
     mockReads((url) => url.includes('includeDiagnostics') ? json(payload) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
     expect(await screen.findByText('视频发布响应格式错误')).toBeVisible();
@@ -591,7 +592,7 @@ describe('video publish read slice', () => {
   it('shows empty diagnostics distinctly from HTTP 403 and does not display denied body text', async () => {
     let denied = false;
     mockReads((url) => url.includes('includeDiagnostics') ? denied ? json({ detail: 'TEST_denied [REDACTED]' }, 403) : json({ ...detail, attempts: [] }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('尚无执行诊断记录。');
     denied = true; await user.click(screen.getByRole('button', { name: '刷新脱敏诊断节选' }));
@@ -600,7 +601,7 @@ describe('video publish read slice', () => {
   });
   it('does not gate diagnostic GET on creation readiness, write role or mutation eligibility', async () => {
     const fetcher = mockReads((url) => url.endsWith('/config') ? json({ ...config, canWrite: false, worker: { ...config.worker, status: 'unavailable' } }) : url.includes('includeDiagnostics') ? json({ ...detail, allowedActions: ['view'], attempts: [] }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} />);
+    const user = userEvent.setup(); render(<><VideoPublish bootstrap={{ ...props.bootstrap, roleCapabilities: { readwrite: false, admin: false } }} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
     expect(await screen.findByText('尚无执行诊断记录。')).toBeVisible(); expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
@@ -614,7 +615,7 @@ describe('video publish read slice', () => {
       if (url.endsWith(`/tasks/${secondId}?includeDiagnostics=true`)) return json({ ...detail, taskId: secondId, attempts: [{ ...attempt, promptSnapshot: 'TEST_second_excerpt', artemisOutput: null }] });
       if (url.endsWith('/tasks/' + secondId)) return json({ ...detail, taskId: secondId }); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
     await user.click(screen.getByRole('button', { name: '关闭任务详情' })); expect(oldSignal?.aborted).toBe(true);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${secondId}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
@@ -629,9 +630,9 @@ describe('video publish read slice', () => {
       if (url === `/tts/v2/video-publish/tasks/${id}?includeDiagnostics=true`) return new Promise<Response>((r) => { resolve = r; oldSignal = init.signal; });
       if (url.includes('includeDiagnostics')) return json({ ...detail, attempts: [] }); return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' }));
-    view.rerender(<VideoPublish bootstrap={{ ...props.bootstrap, rootPath: '' }} />); expect(oldSignal?.aborted).toBe(true);
+    view.rerender(<><VideoPublish bootstrap={{ ...props.bootstrap, rootPath: '' }} /><Toast.Provider /></>); expect(oldSignal?.aborted).toBe(true);
     await act(async () => { resolve(json({ ...detail, attempts: [{ ...attempt, promptSnapshot: 'TEST_old_root', artemisOutput: null }] })); });
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1);
@@ -641,7 +642,7 @@ describe('video publish read slice', () => {
   it('retains the full diagnostic cooldown through hiding and ordinary refresh; expiry does not replay GET', async () => {
     let limited = true;
     const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? limited ? json({}, 429, { 'Retry-After': '600' }) : json({ ...detail, attempts: [] }) : undefined);
-    const user = userEvent.setup(); const view = render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` }));
     vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '读取脱敏诊断节选' }).click(); });
     expect(screen.getByRole('button', { name: '刷新脱敏诊断节选' })).toBeDisabled();
@@ -656,7 +657,7 @@ describe('video publish read slice', () => {
   it('keeps diagnostics explicit-only while ordinary refresh runs and retrieves newly appended attempts only on its own refresh', async () => {
     let latest = false;
     const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? json({ ...detail, attempts: [{ ...attempt, sequenceNo: latest ? 2 : 1, promptSnapshot: latest ? 'TEST_new_attempt' : 'TEST_first_attempt', artemisOutput: { url: 'https://TEST.invalid/path?[REDACTED]' } }] }) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...props} />);
+    const user = userEvent.setup(); render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await user.click(await screen.findByRole('button', { name: `查看详情 ${id}` })); await user.click(await screen.findByRole('button', { name: '读取脱敏诊断节选' })); await screen.findByText('TEST_first_attempt');
     latest = true; await user.click(screen.getByRole('button', { name: '刷新当前事实' }));
     expect(fetcher.mock.calls.filter(([url]) => url.includes('includeDiagnostics'))).toHaveLength(1); expect(screen.queryByText('TEST_new_attempt')).toBeNull();
@@ -668,7 +669,7 @@ describe('video publish read slice', () => {
   it('does not poll the diagnostic query when the ordinary five-second refresh is enabled', async () => {
     vi.useFakeTimers();
     const fetcher = mockReads((url) => url.includes('includeDiagnostics') ? json({ ...detail, attempts: [] }) : undefined);
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime }); const view = render(<VideoPublish {...props} />);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime }); const view = render(<><VideoPublish {...props} /><Toast.Provider /></>);
     await act(async () => {});
     await clickWithFakeTimers(user, screen.getByRole('button', { name: /自动刷新/ })); await clickWithFakeTimers(user, screen.getByRole('option', { name: '开（每 5 秒）' }));
     await clickWithFakeTimers(user, screen.getByRole('button', { name: `查看详情 ${id}` })); await clickWithFakeTimers(user, screen.getByRole('button', { name: '读取脱敏诊断节选' })); expect(screen.getByText('尚无执行诊断记录。')).toBeVisible();
@@ -684,7 +685,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks') && init.method === 'POST') { const body = JSON.parse(init.body as string); bodies.push(body); return json(ticketFor(body)); }
       if (url.endsWith('/tasks/' + id)) return new Promise<Response>((r) => { resolve = r; }); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user);
     await act(async () => { TestPut.requests[0].finish(); });
     await user.click(screen.getByRole('button', { name: '核对上传任务' }));
     await user.click(screen.getByRole('button', { name: '清除选择 / 放弃续传' })); await user.click(screen.getByRole('button', { name: '确认清除本地草稿' }));
@@ -712,7 +713,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks/' + id)) return new Promise<Response>((r) => { oldResolve = r; oldSignal = init.signal; });
       if (url.endsWith('/devices')) return new Promise<Response>((r) => { nextResolve = r; }); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user); await act(async () => { TestPut.requests[0].finish(); });
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user); await act(async () => { TestPut.requests[0].finish(); });
     await user.click(screen.getByRole('button', { name: '核对上传任务' }));
     await user.click(screen.getByRole('button', { name: '清除选择 / 放弃续传' })); await user.click(screen.getByRole('button', { name: '确认清除本地草稿' }));
     await user.click(screen.getByRole('button', { name: '加载设备列表' }));
@@ -728,7 +729,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks') && init.method === 'POST') { body = JSON.parse(init.body as string); const ticket = ticketFor(body); return json({ ...ticket, upload: { ...ticket.upload, url: `${location.origin}${rootPath}/minio/TEST_object?TEST_signature=TEST_fixture` } }); }
       return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish bootstrap={{ ...commandProps.bootstrap, rootPath }} />); const file = await prepareUpload(user);
+    const user = userEvent.setup(); render(<><VideoPublish bootstrap={{ ...commandProps.bootstrap, rootPath }} /><Toast.Provider /></>); const file = await prepareUpload(user);
     expect(TestPut.requests).toHaveLength(0);
     expect(await screen.findByText(/上传地址与 ERP 同源/)).toBeVisible();
     const workbench = screen.getByRole('region', { name: '新建发布任务' });
@@ -758,7 +759,7 @@ describe('video publish read slice', () => {
     let originReads = 0;
     vi.stubGlobal('location', { get origin() { return ++originReads === 1 ? 'https://test.erp.invalid' : 'https://test.invalid'; } });
     mockReads((url, init) => url.endsWith('/tasks') && init.method === 'POST' ? json(ticketFor(JSON.parse(init.body as string))) : undefined);
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user);
     expect(originReads).toBe(2); expect(TestPut.requests).toHaveLength(0);
     expect(await screen.findByText(/上传地址与 ERP 同源/)).toBeVisible();
     expect(screen.getByRole('button', { name: '明确重试原上传' })).toBeEnabled();
@@ -769,7 +770,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks') && init.method === 'POST') { body = JSON.parse(init.body as string); const ticket = ticketFor(body); return json({ ...ticket, upload: { ...ticket.upload, url: `${location.origin}/tts/minio/TEST` } }); }
       if (url.endsWith('/tasks/' + id)) return json({ ...detail, ...uploadingTask(body) }); return undefined;
     });
-    const user = userEvent.setup(); render(<VideoPublish {...commandProps} />); await prepareUpload(user);
+    const user = userEvent.setup(); render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user);
     await user.click(screen.getByRole('button', { name: '核对上传任务' }));
     expect(await screen.findByText(/已读取当前事实，不代表原提交或对象上传已确认/)).toBeVisible();
     expect(fetcher.mock.calls.some(([url]) => url === `/tts/v2/video-publish/tasks/${id}`)).toBe(true);
@@ -803,7 +804,7 @@ describe('video publish read slice', () => {
         signal = init.signal; stalled = stalledJson(stage, ticketFor(JSON.parse(init.body as string))); return stalled.result;
       } return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); const file = await prepareConfirmation(user);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); const file = await prepareConfirmation(user);
     vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '确认并上传' }).click(); });
     expect(screen.getByLabelText('选择 MP4 视频')).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(29999); }); expect(screen.getByLabelText('选择 MP4 视频')).toBeDisabled();
@@ -830,7 +831,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks') && init.method === 'GET' && block) { stalled = stalledJson(stage, { ...list, items: [uploadingTask(body)] }); return stalled.result; }
       return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareUpload(user); block = true;
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user); block = true;
     vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(screen.getByRole('button', { name: '核对上传任务' })).toBeEnabled();
@@ -850,7 +851,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks/' + id)) { if (!block) return json({ ...detail, rowVersion: 5 }); stalled = stalledJson(stage, { ...detail, rowVersion: 999 }); return stalled.result; }
       return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>);
     await user.click(await within(await screen.findByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重试原任务' }));
     await user.click(screen.getByRole('button', { name: '确认重试原任务' }));
     const panel = screen.getByRole('region', { name: '任务操作与核对' });
@@ -871,7 +872,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/retry')) { signal = init.signal; removal = vi.spyOn(signal!, 'removeEventListener'); stalled = stalledJson(stage, { ...task, rowVersion: 999 }); return stalled.result; }
       return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>);
     await user.click(await within(await screen.findByRole('grid', { name: '视频发布任务' })).findByRole('button', { name: '重试原任务' }));
     vi.useFakeTimers(); const keyboard = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     screen.getByRole('button', { name: '确认重试原任务' }).focus();
@@ -895,7 +896,7 @@ describe('video publish read slice', () => {
     const fetcher = mockReads((url, init) => {
       if (url.endsWith('/tasks') && init.method === 'POST') { signal = init.signal; removal = vi.spyOn(signal!, 'removeEventListener'); stalled = stalledJson(stage, ticketFor(JSON.parse(init.body as string))); return stalled.result; } return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareConfirmation(user);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareConfirmation(user);
     vi.useFakeTimers();
     await act(async () => { screen.getByRole('button', { name: '确认并上传' }).click(); });
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {}); const calls = fetcher.mock.calls.length;
@@ -911,7 +912,7 @@ describe('video publish read slice', () => {
       if (url.endsWith('/tasks') && init.method === 'POST') return Promise.reject(new TypeError('TEST_unknown'));
       if (url.endsWith('/tasks') && init.method === 'GET' && block) { signal = init.signal; removal = vi.spyOn(signal!, 'removeEventListener'); stalled = stalledJson(stage, { ...list, items: [] }, true); return stalled.result; } return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareUpload(user); block = true;
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareUpload(user); block = true;
     vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '核对上传任务' }).click(); });
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {}); const calls = fetcher.mock.calls.length;
     await act(async () => { view.unmount(); }); expect(signal?.aborted).toBe(true);
@@ -928,7 +929,7 @@ describe('video publish read slice', () => {
         vi.spyOn(response.body!, 'cancel').mockImplementation(() => new Promise<void>(() => {})); return response;
       } return undefined;
     });
-    const user = userEvent.setup(); const view = render(<VideoPublish {...commandProps} />); await prepareConfirmation(user);
+    const user = userEvent.setup(); const view = render(<><VideoPublish {...commandProps} /><Toast.Provider /></>); await prepareConfirmation(user);
     vi.useFakeTimers(); await act(async () => { screen.getByRole('button', { name: '确认并上传' }).click(); });
     expect(text).not.toHaveBeenCalled(); expect(screen.getByRole('textbox', { name: '发布文案' })).toBeEnabled();
     await act(async () => { fireEvent.change(screen.getByRole('textbox', { name: '发布文案' }), { target: { value: 'TEST_edited_but_original_retained' } }); screen.getByRole('button', { name: '立即刷新' }).click(); });

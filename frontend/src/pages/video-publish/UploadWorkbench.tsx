@@ -5,6 +5,7 @@ import { parseIdentityJson } from '../../shared/api/identity-json';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { decodeDetail, decodeDevices, decodeList, decodeTask, decodeTicket, requireIsolatedUploadOrigin, UploadOriginError, uploadOriginConfigurationHelp, type Config, type Device, type Task } from './contracts';
 import { Facts } from './TaskFacts';
+import { useOperationToast } from '../../shared/operation-toast';
 import type { VideoCommand } from './useVideoCommand';
 
 interface CapturedUpload { file: File; caption: string; deviceSerial: string; deviceLabel: string; clientRequestId: string }
@@ -13,7 +14,8 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
 }) {
   const [file, setFile] = useState<File>(); const [caption, setCaption] = useState(''); const [device, setDevice] = useState('');
   const selectedDevice = useRef<Device | undefined>(undefined);
-  const [devices, setDevices] = useState<Device[]>([]); const [deviceNotice, setDeviceNotice] = useState('');
+  const [devices, setDevices] = useState<Device[]>([]);
+  const notify = useOperationToast();
   const [preview, setPreview] = useState(''); const [confirmationPreview, setConfirmationPreview] = useState('');
   const [resumeDeviceLabel, setResumeDeviceLabel] = useState(''); const [metadata, setMetadata] = useState(''); const [message, setMessage] = useState('');
   const [task, setTask] = useState<Task>(); const [captured, setCaptured] = useState<CapturedUpload>();
@@ -47,9 +49,9 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
   function pick(next?: File) {
     if (!next || locked) return;
     if (!config || next.type !== 'video/mp4' || !next.name.toLowerCase().endsWith('.mp4') || next.size === 0 || BigInt(next.size) > BigInt(config.maxVideoBytes)) {
-      setMessage('请选择符合服务端上限的非空 MP4 视频。'); if (picker.current) picker.current.value = ''; return;
+      notify.warning('请选择符合服务端上限的非空 MP4 视频'); if (picker.current) picker.current.value = ''; return;
     }
-    if (task && (next.name !== task.filename || String(next.size) !== String(task.sizeBytes))) { setMessage('续传必须选择原文件名和原大小的视频；可先放弃续传再创建其他任务。'); if (picker.current) picker.current.value = ''; return; }
+    if (task && (next.name !== task.filename || String(next.size) !== String(task.sizeBytes))) { notify.warning('续传必须选择原文件名和原大小的视频', '可先放弃续传再创建其他任务。'); if (picker.current) picker.current.value = ''; return; }
     setFile(next); setUploaded(false); edit();
   }
   function clear() {
@@ -64,8 +66,8 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     const controller = new AbortController(); readController.current?.abort(); readController.current = controller; setChecking(true);
     try {
       const result = await withinRequestLifetime(controller, (signal) => requestJson<unknown>(root, '/v2/video-publish/devices', { signal }));
-      const rows = decodeDevices(result.data); if (mounted.current && readController.current === controller && !controller.signal.aborted) { setDevices(rows); setDeviceNotice('设备列表已更新；原选择保持不变。'); }
-    } catch (error: unknown) { if (mounted.current && readController.current === controller) { command.hold(error); setDeviceNotice('设备列表不可用，仍可使用默认设备；不会替换当前选择。'); } }
+      const rows = decodeDevices(result.data); if (mounted.current && readController.current === controller && !controller.signal.aborted) { setDevices(rows); notify.success('设备列表已更新', '原选择保持不变。'); }
+    } catch (error: unknown) { if (mounted.current && readController.current === controller) { command.hold(error); notify.warning('设备列表不可用', '仍可使用默认设备；不会替换当前选择。'); } }
     finally { if (mounted.current && readController.current === controller) { readController.current = undefined; setChecking(false); } }
   }
   function requestUpload(retry = false) {
@@ -100,7 +102,7 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
       }, validate);
       if (!ticket || !mounted.current) return;
       setTask(ticket.task); onChanged();
-      if (!ticket.upload) { setMessage('服务端已确认原幂等任务进入后续处理；当前草稿保留供核对，不会再次上传。'); return; }
+      if (!ticket.upload) { notify.success('服务端已确认原幂等任务进入后续处理', '当前草稿保留供核对，不会再次上传。'); return; }
       requireIsolatedUploadOrigin(new URL(ticket.upload.url));
       const request = new XMLHttpRequest(); xhr.current = request; command.binaryPending(true); setUploading(true); setProgress(0);
       // The origin fence plus withCredentials=false isolates cross-origin PUT credentials.
@@ -144,7 +146,7 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     const result = await command.send(attemptedPath.current, { rowVersion: target.rowVersion }, (value) => {
       const row = decodeTask(value); if (row.taskId !== target.taskId) throw new Error('任务身份不匹配'); return row;
     });
-    if (result) { setTask(result); setUploaded(false); setMessage('服务端已确认上传并入队。草稿仍保留；可明确清除后创建下一任务。'); onChanged(); }
+    if (result) { setTask(result); setUploaded(false); notify.success('服务端已确认上传并入队', '草稿仍保留；可明确清除后创建下一任务。'); onChanged(); }
   }
   async function acceptResume() {
     if (!resume || locked || checking || command.needsCheck || command.cooldown || !resume.allowedActions.includes('continue_upload')) return;
@@ -175,7 +177,7 @@ export default function UploadWorkbench({ root, config, canTaskWrite, command, r
     <p>{Array.from(caption).length} / {config?.maxCaptionCharacters ?? '加载中'} 字符 · 文件上限 {config?.maxVideoBytes ?? '加载中'} 字节</p>
     {command.failure?.fieldErrors.caption && <p role="alert">{command.failure.fieldErrors.caption}</p>}
     <div className="erp-filter-row"><Select className="w-full max-w-xl" aria-label="创建目标设备" value={`device:${device}`} isDisabled={locked || Boolean(task)} onChange={(key) => { if (typeof key !== 'string') return; const serial = key.slice('device:'.length); setDevice(serial); selectedDevice.current = devices.find((row) => row.serial === serial); edit(); }}><Label>目标设备</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox><ListBox.Item id="device:" textValue={`默认 · ${config?.target.deviceSerialMasked ?? '未配置'}`}>默认 · {config?.target.deviceSerialMasked ?? '未配置'}</ListBox.Item>{device && !devices.some((row) => row.serial === device) ? <ListBox.Item id={`device:${device}`} textValue={`${selectedDevice.current?.serialMasked ?? '当前选择'}（本次列表未返回；提交时由服务端校验）`}>{selectedDevice.current?.serialMasked ?? '当前选择'}（本次列表未返回；提交时由服务端校验）</ListBox.Item> : null}{devices.map((row) => <ListBox.Item key={row.serial} id={`device:${row.serial}`} textValue={`${row.serialMasked} · ${row.model || row.product} · ${row.state}${row.isBusy ? ' · 忙' : ''}${row.isEmulator ? ' · 模拟器' : ''}`}>{row.serialMasked} · {row.model || row.product} · {row.state}{row.isBusy ? ' · 忙' : ''}{row.isEmulator ? ' · 模拟器' : ''}</ListBox.Item>)}</ListBox></Select.Popover></Select>
-    <Button variant="secondary" isDisabled={checking || command.cooldown} onPress={() => { void loadDevices(); }}>加载设备列表</Button></div>{deviceNotice && <p role="status">{deviceNotice}</p>}
+    <Button variant="secondary" isDisabled={checking || command.cooldown} onPress={() => { void loadDevices(); }}>加载设备列表</Button></div>
     {!canWrite && <p>{task ? '继续上传与确认入队需要 readwrite 能力提示，以服务端校验为准。' : config?.writeBlockReason ?? '服务端创建条件尚不可用。'}</p>}
     {task && <Facts items={[[ '上传任务 ID', task.taskId ], ['上传 rowVersion', task.rowVersion], ['当前服务端阶段', task.stageLabel], ['原 clientRequestId', task.clientRequestId]]} />}
     <div className="flex flex-wrap gap-2">

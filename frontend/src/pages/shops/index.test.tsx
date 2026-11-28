@@ -1,12 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 
 const modulePath = './index';
 const props: PageProps = { bootstrap: { rootPath: '/tts', pageId: 'shops', navigation: [], releaseId: 'TEST', roleCapabilities: { readwrite: true, admin: false } } };
 const shop = { id: 41, platform: 'tiktok', shop_id: '90071992547409931234567', account_name: 'TEST_name', shop_alias: null, region: null, seller_type: null, status: 'active', opened_date: null, credential_id: null, service_id: 'TEST_svc', app_credentials_configured: true };
-const savedApp = '当前店铺的 App 配置已保存，可以获取授权链接。';
+const savedApp = 'App 配置已保存';
 const json = (value: unknown, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers });
 type Command = { url: string; init: RequestInit };
 
@@ -18,7 +19,7 @@ function api(command: (url: string, init: RequestInit) => Promise<Response>) {
 }
 async function mount(bootstrap = props.bootstrap) {
   const { default: Shops } = await import(modulePath);
-  return render(<Shops bootstrap={bootstrap} />);
+  return render(<><Shops bootstrap={bootstrap} /><Toast.Provider /></>);
 }
 async function openRegister(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText(shop.shop_id);
@@ -44,7 +45,7 @@ const save = (dialog: HTMLElement) => within(dialog).getByRole('button', { name:
 // Charge the one-time real module load to setup, including single-case reruns.
 // Every interaction still runs with the normal 5s budget and file isolation.
 beforeAll(async () => { await import(modulePath); });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('shops content', () => {
   it.each([undefined, { readwrite: false, admin: false }, { readwrite: false, admin: true }])('fails closed on missing/readonly hints without inventing a hierarchy %#', async (roleCapabilities) => {
@@ -199,7 +200,7 @@ describe('shops content', () => {
     expect(commands[0].init.method).toBe('GET');
     expect(within(dialog).getByText(/店铺 .*Service TEST_svc/)).toBeVisible();
     await user.click(within(dialog).getByRole('button', { name: '复制链接' }));
-    await within(dialog).findByText('授权链接已复制'); expect(copy).toHaveBeenCalledWith('https://services.tiktokshop.com/open/authorize?state=TEST_one');
+    await screen.findByText('授权链接已复制'); expect(copy).toHaveBeenCalledWith('https://services.tiktokshop.com/open/authorize?state=TEST_one');
   });
 
   it('clears explicitly discarded App input and keeps readwrite App management available', async () => {
@@ -228,7 +229,7 @@ describe('shops content', () => {
   it('fails closed if write hints disappear while a draft is open without trapping cancellation', async () => {
     let commands = 0; api(async () => { commands++; return json({ created: true, shop }); });
     const user = userEvent.setup(); const view = await mount(); const dialog = await openRegister(user);
-    const { default: Shops } = await import(modulePath); view.rerender(<Shops bootstrap={{ ...props.bootstrap, roleCapabilities: undefined }} />);
+    const { default: Shops } = await import(modulePath); view.rerender(<><Shops bootstrap={{ ...props.bootstrap, roleCapabilities: undefined }} /><Toast.Provider /></>);
     expect(save(dialog)).toBeDisabled(); expect(within(dialog).getByRole('button', { name: '取消' })).toBeEnabled(); expect(commands).toBe(0);
   });
 

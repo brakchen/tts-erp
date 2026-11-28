@@ -3,6 +3,7 @@ import type { FrontendBootstrap } from '../../shared/contracts';
 import UploadAsset from '../media-assets/UploadAsset';
 import { decodeDigitalHuman, type Asset, type DigitalHuman } from '../media-assets/contracts';
 import { mediaWrite, useMediaAction, useMediaRead } from '../media-assets/media-ui';
+import { useOperationToast } from '../../shared/operation-toast';
 import AssetPicker, { emptyPickerDraft } from './AssetPicker';
 
 export default function PickAssets({ bootstrap, target, onClose, onChanged }: {
@@ -15,7 +16,7 @@ export default function PickAssets({ bootstrap, target, onClose, onChanged }: {
   const [draft, setDraft] = useState(emptyPickerDraft);
   const [revision, setRevision] = useState(0);
   const [acknowledged, setAcknowledged] = useState<DigitalHuman>();
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const action = useMediaAction();
   const read = useMediaRead(root, path + '?includeAssets=false', decodeDigitalHuman, revision);
   const human = acknowledged ?? read.data ?? target;
@@ -34,24 +35,21 @@ export default function PickAssets({ bootstrap, target, onClose, onChanged }: {
           setAcknowledged(updated);
         }
       } finally {
-        if (added) {
-          setNotice('已添加 ' + added + ' 项素材。');
-          onChanged();
-        }
+        if (added) onChanged();
       }
       onClose('已为「' + target.name + '」添加 ' + added + ' 项素材。');
     });
   }
   function uploadChanged(message: string) {
     setUpload(false);
-    setNotice(message);
+    notify.success(message);
     setAcknowledged(undefined);
     setRevision((value) => value + 1);
     onChanged();
   }
   return <>
-    <AssetPicker root={root} human={human} pending={action.pending} error={action.error} notice={notice}
-      onAdd={add} onClose={() => onClose(notice)} onUpload={() => setUpload(true)} uploading={upload}
+    <AssetPicker root={root} human={human} pending={action.pending} error={action.error}
+      onAdd={add} onClose={() => onClose()} onUpload={() => setUpload(true)} uploading={upload}
       draft={draft} onDraft={setDraft} targetRead={read} revision={revision} />
     {upload && <UploadAsset bootstrap={bootstrap} target={{ id: target.digitalHumanId, name: target.name }}
       onClose={(completed) => { if (completed) uploadChanged('素材已入库，可在列表中勾选添加。'); else setUpload(false); }}

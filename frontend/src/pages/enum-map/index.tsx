@@ -4,6 +4,7 @@ import { Alert, Button, Label, ListBox, Modal, Select, Table } from '@heroui/rea
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import type { PageProps } from '../../shared/contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import { decodeEnumDelete, decodeEnumList, decodeEnumUpsert, parseSortOrder, type EnumRow } from './contracts';
 import EnumForm, { fieldLabels, type EnumDraft } from './EnumForm';
 
@@ -25,7 +26,7 @@ export default function EnumMap({ bootstrap }: PageProps) {
   const [readBlocked, setReadBlocked] = useState(false);
   const [failure, setFailure] = useState<CommandFailure>();
   const [recovery, setRecovery] = useState<Recovery>();
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const mounted = useRef(true);
   const inFlight = useRef(false);
   const recoveryGate = useRef<Recovery['phase'] | 'none'>('none');
@@ -60,7 +61,7 @@ export default function EnumMap({ bootstrap }: PageProps) {
   const mayStart = () => canManage && !inFlight.current && !cooldown && (recoveryGate.current === 'none' || recoveryGate.current === 'checked');
   function open(target: Dialog) {
     if (!mayStart()) return;
-    recoveryGate.current = 'none'; setRecovery(undefined); setFailure(undefined); setNotice(''); setDialog(target);
+    recoveryGate.current = 'none'; setRecovery(undefined); setFailure(undefined); setDialog(target);
   }
   function close() { if (!inFlight.current) { setDialog(undefined); if (!failure?.uncertain) setFailure(undefined); } }
   function reject(error: unknown, attempt: Attempt) {
@@ -89,7 +90,7 @@ export default function EnumMap({ bootstrap }: PageProps) {
       if (Object.keys(errors).length) { setFailure({ message: '请检查输入', fieldErrors: errors, uncertain: false, retryAfter: 0 }); return; }
       body = { enum_type: target.enum_type, enum_value, label_zh: draft.label_zh.trim(), sort_order };
     }
-    inFlight.current = true; setPending(true); recoveryGate.current = 'none'; setRecovery(undefined); setFailure(undefined); setNotice('');
+    inFlight.current = true; setPending(true); recoveryGate.current = 'none'; setRecovery(undefined); setFailure(undefined);
     try {
       if (target.kind === 'delete') {
         if (target.row === undefined) throw new Error('未选定映射');
@@ -99,7 +100,7 @@ export default function EnumMap({ bootstrap }: PageProps) {
         const { data } = await requestJson<unknown>(bootstrap.rootPath, '/v2/config/enum-map', { method: 'PUT', body: JSON.stringify(body) });
         decodeEnumUpsert(data);
       }
-      if (mounted.current) { setDialog(undefined); setNotice(target.kind === 'delete' ? '映射删除已确认' : '映射保存已确认'); setRefresh((value) => value + 1); }
+      if (mounted.current) { setDialog(undefined); notify.success(target.kind === 'delete' ? '映射删除已确认' : '映射保存已确认'); setRefresh((value) => value + 1); }
     } catch (error: unknown) { reject(error, attempt); }
     finally { inFlight.current = false; if (mounted.current) setPending(false); }
   }
@@ -144,7 +145,7 @@ export default function EnumMap({ bootstrap }: PageProps) {
     </section>
     {!canManage && <p>当前仅浏览；维护需要 admin 权限，以服务端判定为准。</p>}
     {pending && <p role="status">提交中，请等待确认…</p>}{cooldown && <p role="status">请等待服务端指定时间后再提交；仍可修改或取消草稿，不会自动重试。</p>}
-    {notice && <p role="status">{notice}</p>}{!dialog && <>{alert}{check}</>}
+    {!dialog && <>{alert}{check}</>}
     {list.loading && <p role="status">加载映射中…</p>}{list.error && <Alert status="danger"><Alert.Content><Alert.Title>列表不可用</Alert.Title><Alert.Description>{list.error}</Alert.Description><Button isDisabled={readBlocked} onPress={() => setRefresh((value) => value + 1)}>重试映射</Button></Alert.Content></Alert>}
     {list.rows && <><p>显示顺序沿用服务端；字段较多时可在表格区域横向滚动。</p><Table variant="secondary" className="erp-table"><Table.ScrollContainer className="erp-table-scroll" tabIndex={0} role="region" aria-label="枚举表格"><Table.Content aria-label="枚举映射" className="min-w-[44rem] erp-table-content"><Table.Header className="erp-table-head">
       <Table.Column className="erp-table-column" isRowHeader>英文值</Table.Column><Table.Column className="erp-table-column">中文标签</Table.Column><Table.Column className="erp-table-column">排序</Table.Column>{canManage && <Table.Column className="erp-table-column">操作</Table.Column>}

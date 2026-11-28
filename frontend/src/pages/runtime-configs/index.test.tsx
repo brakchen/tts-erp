@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { parse, stringify } from 'lossless-json';
 import type { PageProps } from '../../shared/contracts';
 import RuntimeConfigs from './index';
@@ -35,58 +36,58 @@ async function revealJsonText(label = '配置内容') {
 async function edit() { await open(); fireEvent.click(screen.getByRole('button', { name: '继续编辑草稿' })); await revealJsonText(); }
 const text = () => screen.getByLabelText('配置内容 JSON 文本');
 async function review() { fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByRole('button', { name: '确认发布' }); }
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('runtime config guided workflow', () => {
   it('shows published content before editing without unrelated forms', async () => {
-    api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await open(); expect(screen.queryByLabelText('配置内容 JSON 文本')).toBeNull(); expect(screen.queryByRole('form')).toBeNull(); fireEvent.click(screen.getByRole('button', { name: '继续编辑草稿' })); await revealJsonText(); expect(text()).not.toHaveAttribute('readonly'); expect(text()).toHaveValue('{\n  "enabled": false\n}');
+    api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await open(); expect(screen.queryByLabelText('配置内容 JSON 文本')).toBeNull(); expect(screen.queryByRole('form')).toBeNull(); fireEvent.click(screen.getByRole('button', { name: '继续编辑草稿' })); await revealJsonText(); expect(text()).not.toHaveAttribute('readonly'); expect(text()).toHaveValue('{\n  "enabled": false\n}');
   });
   it('checks without writes and confirms the exact lossless candidate in one command', async () => {
-    const f = api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{"zero":0,"absent":null,"id":9007199254740993}' } }); await review(); expect(writes(f)).toHaveLength(0); expect(screen.getByLabelText('增加和删除的内容')).toHaveTextContent('9007199254740993');
+    const f = api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); fireEvent.change(text(), { target: { value: '{"zero":0,"absent":null,"id":9007199254740993}' } }); await review(); expect(writes(f)).toHaveLength(0); expect(screen.getByLabelText('增加和删除的内容')).toHaveTextContent('9007199254740993');
     fireEvent.click(screen.getByRole('button', { name: '返回修改' })); await revealJsonText(); expect(text()).toHaveValue('{"zero":0,"absent":null,"id":9007199254740993}'); await review(); fireEvent.change(screen.getByLabelText('发布说明'), { target: { value: 'TEST publish' } }); fireEvent.click(screen.getByRole('button', { name: '确认发布' }));
     await screen.findByText(/已发布为 v2/); expect(writes(f)).toHaveLength(1); const [url, init] = writes(f)[0]; expect(url).toBe('/tts/v2/config/runtime/items/test.flags/publish'); expect(init?.body).toContain('9007199254740993'); expect(init?.body).toContain('"expectedDraftVersion":3'); expect(init?.body).toContain('"expectedPublishedVersion":1'); expect(init?.body).toContain('TEST publish');
   });
   it('temporarily saves without publishing and checks the returned draft version', async () => {
-    const f = api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{"TEST":0}' } }); fireEvent.click(screen.getByRole('button', { name: '暂存草稿' })); await screen.findByText(/草稿已保存，尚未发布/); expect(writes(f)).toHaveLength(1); await review(); expect(f.mock.calls.find(([url]) => url.endsWith('/preview'))?.[1]?.body).toContain('"expectedDraftVersion":4');
+    const f = api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); fireEvent.change(text(), { target: { value: '{"TEST":0}' } }); fireEvent.click(screen.getByRole('button', { name: '暂存草稿' })); await screen.findByText(/草稿已保存，尚未发布/); expect(writes(f)).toHaveLength(1); await review(); expect(f.mock.calls.find(([url]) => url.endsWith('/preview'))?.[1]?.body).toContain('"expectedDraftVersion":4');
   });
   it('keeps invalid JSON and sends no preview', async () => {
-    const f = api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{TEST invalid' } }); fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByText(/必须是有效 JSON 对象/); expect(text()).toHaveValue('{TEST invalid'); expect(f.mock.calls.some(([url]) => url.endsWith('/preview'))).toBe(false);
+    const f = api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); fireEvent.change(text(), { target: { value: '{TEST invalid' } }); fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByText(/必须是有效 JSON 对象/); expect(text()).toHaveValue('{TEST invalid'); expect(f.mock.calls.some(([url]) => url.endsWith('/preview'))).toBe(false);
   });
   it('does not leave after a failed save and allows explicit discard', async () => {
-    api(async () => json({}, 422)); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{"TEST":true}' } }); fireEvent.click(screen.getByRole('button', { name: '返回配置概览' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: '暂存并离开' })); await within(dialog).findByText('请检查标红的字段'); expect(text()).toHaveValue('{"TEST":true}'); expect(screen.getByRole('dialog')).toBeVisible(); fireEvent.click(within(dialog).getByRole('button', { name: '放弃修改并离开' })); await screen.findByRole('button', { name: '继续编辑草稿' });
+    api(async () => json({}, 422)); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); fireEvent.change(text(), { target: { value: '{"TEST":true}' } }); fireEvent.click(screen.getByRole('button', { name: '返回配置概览' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: '暂存并离开' })); await within(dialog).findByText('请检查标红的字段'); expect(text()).toHaveValue('{"TEST":true}'); expect(screen.getByRole('dialog')).toBeVisible(); fireEvent.click(within(dialog).getByRole('button', { name: '放弃修改并离开' })); await screen.findByRole('button', { name: '继续编辑草稿' });
   });
   it('uses historical content as input rather than directly publishing', async () => {
-    const f = api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await open(); fireEvent.click(screen.getByRole('button', { name: '查看发布历史' })); fireEvent.click(await screen.findByRole('button', { name: '使用 v1 内容' })); await revealJsonText(); expect(text()).toHaveValue('{\n  "enabled": true\n}'); expect(writes(f)).toHaveLength(0); await review(); expect(f.mock.calls.find(([url]) => url.endsWith('/preview'))?.[1]?.body).toContain('"sourceRevisionVersion":1');
+    const f = api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await open(); fireEvent.click(screen.getByRole('button', { name: '查看发布历史' })); fireEvent.click(await screen.findByRole('button', { name: '使用 v1 内容' })); await revealJsonText(); expect(text()).toHaveValue('{\n  "enabled": true\n}'); expect(writes(f)).toHaveLength(0); await review(); expect(f.mock.calls.find(([url]) => url.endsWith('/preview'))?.[1]?.body).toContain('"sourceRevisionVersion":1');
   });
   it('obeys the server no-change decision', async () => {
-    api(async () => json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: false, publishedText: '{}', candidateText: '{}', sourceRevisionVersion: null })); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); await review(); expect(screen.getByRole('button', { name: '确认发布' })).toBeDisabled(); expect(screen.getByText(/无需重复发布/)).toBeVisible();
+    api(async () => json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: false, publishedText: '{}', candidateText: '{}', sourceRevisionVersion: null })); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); await review(); expect(screen.getByRole('button', { name: '确认发布' })).toBeDisabled(); expect(screen.getByText(/无需重复发布/)).toBeVisible();
   });
   it('preserves input during conflict and compares latest facts', async () => {
-    api(async () => json({ detail: 'published version conflict; reload before publishing' }, 409)); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{"TEST_mine":true}' } }); fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByText(/版本已变化/); fireEvent.click(screen.getByRole('button', { name: '查看最新内容' })); await screen.findByRole('region', { name: '最新服务端内容' }); expect(text()).toHaveValue('{"TEST_mine":true}');
+    api(async () => json({ detail: 'published version conflict; reload before publishing' }, 409)); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); fireEvent.change(text(), { target: { value: '{"TEST_mine":true}' } }); fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByText(/版本已变化/); fireEvent.click(screen.getByRole('button', { name: '查看最新内容' })); await screen.findByRole('region', { name: '最新服务端内容' }); expect(text()).toHaveValue('{"TEST_mine":true}');
   });
   it('does not replay unknown writes and requires another review after verification', async () => {
     expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
     return;
 });
   it('prevents duplicate final commands', async () => {
-    const f = api(async (url) => url.endsWith('/preview') ? json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText: '{}', sourceRevisionVersion: null }) : new Promise<Response>(() => {})); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); await review(); const b = screen.getByRole('button', { name: '确认发布' }); fireEvent.click(b); fireEvent.click(b); await waitFor(() => expect(writes(f)).toHaveLength(1)); expect(b).toBeDisabled();
+    const f = api(async (url) => url.endsWith('/preview') ? json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText: '{}', sourceRevisionVersion: null }) : new Promise<Response>(() => {})); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); await review(); const b = screen.getByRole('button', { name: '确认发布' }); fireEvent.click(b); fireEvent.click(b); await waitFor(() => expect(writes(f)).toHaveLength(1)); expect(b).toBeDisabled();
   });
   it('keeps creation fields after failure', async () => {
-    api(async () => json({}, 422)); render(<RuntimeConfigs bootstrap={bootstrap} />); fireEvent.click(await screen.findByRole('button', { name: '新建配置' })); fireEvent.change(screen.getByLabelText('配置键'), { target: { value: 'test.new' } }); fireEvent.change(screen.getByLabelText('配置名称'), { target: { value: 'TEST new' } }); fireEvent.submit(screen.getByRole('form', { name: '创建配置' })); await screen.findByText('请检查标红的字段'); expect(screen.getByLabelText('配置键')).toHaveValue('test.new');
+    api(async () => json({}, 422)); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); fireEvent.click(await screen.findByRole('button', { name: '新建配置' })); fireEvent.change(screen.getByLabelText('配置键'), { target: { value: 'test.new' } }); fireEvent.change(screen.getByLabelText('配置名称'), { target: { value: 'TEST new' } }); fireEvent.submit(screen.getByRole('form', { name: '创建配置' })); await screen.findByText('请检查标红的字段'); expect(screen.getByLabelText('配置键')).toHaveValue('test.new');
   });
   it('locks credential names on update, confirms and preserves unknown plaintext input', async () => {
-    const f = api(async () => json({}, 500)); render(<RuntimeConfigs bootstrap={bootstrap} />); fireEvent.click(await screen.findByRole('button', { name: '管理凭证' })); fireEvent.click(await screen.findByRole('button', { name: '更新凭证 test_token' })); expect(screen.getByLabelText('凭证名称')).toBeDisabled(); fireEvent.change(screen.getByLabelText('凭证明文'), { target: { value: 'TEST_secret' } }); fireEvent.submit(screen.getByRole('form', { name: '凭证写入' })); fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '确认更新凭证' })); await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/); expect(screen.getByLabelText('凭证明文')).toHaveValue('TEST_secret'); expect(writes(f)).toHaveLength(1);
+    const f = api(async () => json({}, 500)); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); fireEvent.click(await screen.findByRole('button', { name: '管理凭证' })); fireEvent.click(await screen.findByRole('button', { name: '更新凭证 test_token' })); expect(screen.getByLabelText('凭证名称')).toBeDisabled(); fireEvent.change(screen.getByLabelText('凭证明文'), { target: { value: 'TEST_secret' } }); fireEvent.submit(screen.getByRole('form', { name: '凭证写入' })); fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '确认更新凭证' })); await screen.findByText(/服务出错了，请稍后重试|网络已断开，请检查网络后重试|等待超时，请稍后重试|服务暂不可用，请稍后重试|服务暂时无响应，请稍后重试/); expect(screen.getByLabelText('凭证明文')).toHaveValue('TEST_secret'); expect(writes(f)).toHaveLength(1);
   });
   it('offers no plaintext draft on credential exit', async () => {
-    api(); render(<RuntimeConfigs bootstrap={bootstrap} />); fireEvent.click(await screen.findByRole('button', { name: '管理凭证' })); fireEvent.click(await screen.findByRole('button', { name: '新增凭证' })); fireEvent.change(screen.getByLabelText('凭证明文'), { target: { value: 'TEST_secret' } }); fireEvent.click(screen.getByRole('button', { name: '返回配置列表' })); expect(within(await screen.findByRole('dialog')).queryByRole('button', { name: '暂存并离开' })).toBeNull();
+    api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); fireEvent.click(await screen.findByRole('button', { name: '管理凭证' })); fireEvent.click(await screen.findByRole('button', { name: '新增凭证' })); fireEvent.change(screen.getByLabelText('凭证明文'), { target: { value: 'TEST_secret' } }); fireEvent.click(screen.getByRole('button', { name: '返回配置列表' })); expect(within(await screen.findByRole('dialog')).queryByRole('button', { name: '暂存并离开' })).toBeNull();
   });
   it('makes no reads for readonly bootstrap', () => {
-    const f = api(); render(<RuntimeConfigs bootstrap={{ ...bootstrap, roleCapabilities: { readwrite: false, admin: false } }} />); expect(screen.getByText(/没有运行配置的读写权限/)).toBeVisible(); expect(f).not.toHaveBeenCalled();
+    const f = api(); render(<><RuntimeConfigs bootstrap={{ ...bootstrap, roleCapabilities: { readwrite: false, admin: false } }} /><Toast.Provider /></>); expect(screen.getByText(/没有运行配置的读写权限/)).toBeVisible(); expect(f).not.toHaveBeenCalled();
   });
   it('guards native leave only for unsaved edits', async () => {
-    api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); let e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); expect(e.defaultPrevented).toBe(false); fireEvent.change(text(), { target: { value: '{"TEST":1}' } }); await act(async () => {}); e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); expect(e.defaultPrevented).toBe(true);
+    api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); let e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); expect(e.defaultPrevented).toBe(false); fireEvent.change(text(), { target: { value: '{"TEST":1}' } }); await act(async () => {}); e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); expect(e.defaultPrevented).toBe(true);
   });
   it('preserves configuration filtering independently of the credential archive filter', async () => {
-    api(); render(<RuntimeConfigs bootstrap={bootstrap} />);
+    api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>);
     const manageSecrets = await screen.findByRole('button', { name: '管理凭证' });
     // The toolbar exists during the initial read; only an enabled control can
     // navigate. Clicking the disabled first-render button silently does nothing.
@@ -96,13 +97,13 @@ describe('runtime config guided workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: '返回配置列表' })); expect(await screen.findByRole('checkbox', { name: '显示已停用配置' })).not.toBeChecked();
   });
   it('actually discards input before reopening an editor', async () => {
-    api(); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.change(text(), { target: { value: '{"TEST_discard":1}' } });
+    api(); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); fireEvent.change(text(), { target: { value: '{"TEST_discard":1}' } });
     await review(); fireEvent.change(screen.getByLabelText('发布说明'), { target: { value: 'TEST discard comment' } }); fireEvent.click(screen.getByRole('button', { name: '返回配置概览' }));
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '放弃修改并离开' })); fireEvent.click(await screen.findByRole('button', { name: '继续编辑草稿' }));
     await revealJsonText(); expect(text()).toHaveValue('{\n  "enabled": false\n}'); await review(); expect(screen.getByLabelText('发布说明')).toHaveValue('');
   });
   it('keeps independent create inputs during manual recovery even after visiting a config', async () => {
-    api(async () => json({}, 500), (url) => url.endsWith('/items/test.new') ? json({ detail: 'runtime config not found' }, 404) : undefined); render(<RuntimeConfigs bootstrap={bootstrap} />); await open(); fireEvent.click(screen.getByRole('button', { name: '返回配置列表' })); fireEvent.click(await screen.findByRole('button', { name: '新建配置' }));
+    api(async () => json({}, 500), (url) => url.endsWith('/items/test.new') ? json({ detail: 'runtime config not found' }, 404) : undefined); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await open(); fireEvent.click(screen.getByRole('button', { name: '返回配置列表' })); fireEvent.click(await screen.findByRole('button', { name: '新建配置' }));
     fireEvent.change(screen.getByLabelText('配置键'), { target: { value: 'test.new' } }); fireEvent.change(screen.getByLabelText('配置名称'), { target: { value: 'TEST new' } }); fireEvent.submit(screen.getByRole('form', { name: '创建配置' }));
     expect(screen.queryByRole('button', { name: '查询核对' })).toBeNull();
     return;
@@ -113,19 +114,19 @@ describe('runtime config guided workflow', () => {
       if (url.endsWith('/preview')) return json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText: '{}', sourceRevisionVersion: null });
       acknowledged = true; return json({ configKey: initial.configKey, publishedVersion: 2 });
     }, (url) => acknowledged && url.endsWith('/items/test.flags') ? json({}, 503) : undefined);
-    render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); await review(); fireEvent.click(screen.getByRole('button', { name: '确认发布' })); await screen.findByText(/发布已确认；请先重试/);
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); await review(); fireEvent.click(screen.getByRole('button', { name: '确认发布' })); await screen.findByText(/发布已确认；请先重试/);
     fireEvent.click(screen.getByRole('button', { name: '返回配置列表' })); await waitFor(() => expect(screen.getByRole('button', { name: '查看与修改 TEST 配置' })).toBeEnabled()); expect(screen.getByRole('button', { name: '新建配置' })).toBeEnabled();
   });
   it.each([
     ['runtime_schema_invalid', '配置内容不符合校验规则'], ['runtime_secret_unavailable', '引用的凭证不存在'], ['runtime_business_invalid', '配置未通过业务规则校验'], ['runtime_source_rollout_invalid', '此历史版本带有已退役'], ['runtime_number_invalid', '配置包含无法存储的数字'],
   ])('shows controlled corrective feedback for %s', async (code, message) => {
-    api(async () => json({ detail: { code, rawSecret: 'TEST_do_not_show' } }, 422)); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit(); fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByText(new RegExp(message)); expect(screen.queryByText('TEST_do_not_show')).toBeNull(); expect(text()).toHaveValue('{\n  "enabled": false\n}');
+    api(async () => json({ detail: { code, rawSecret: 'TEST_do_not_show' } }, 422)); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit(); fireEvent.click(screen.getByRole('button', { name: '检查并发布' })); await screen.findByText(new RegExp(message)); expect(screen.queryByText('TEST_do_not_show')).toBeNull(); expect(text()).toHaveValue('{\n  "enabled": false\n}');
   });
   it('locks leaving throughout historical validation and the following save', async () => {
     let resolve!: (response: Response) => void;
     const validation = new Promise<Response>((done) => { resolve = done; });
     const f = api(async (url, init) => url.endsWith('/preview') ? validation : json({ ...initial, draftVersion: 4, draftPayload: (parse(String(init.body)) as { payload: unknown }).payload }));
-    render(<RuntimeConfigs bootstrap={bootstrap} />); await open();
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await open();
     fireEvent.click(screen.getByRole('button', { name: '查看发布历史' }));
     fireEvent.click(await screen.findByRole('button', { name: '使用 v1 内容' }));
     fireEvent.click(screen.getByRole('button', { name: '返回配置概览' }));
@@ -145,7 +146,7 @@ describe('runtime config guided workflow', () => {
   it('retries the failed detail request rather than refreshing the list', async () => {
     let attempts = 0;
     const f = api(undefined, (url) => url.endsWith('/items/test.flags') && ++attempts === 1 ? json({}, 503) : undefined);
-    render(<RuntimeConfigs bootstrap={bootstrap} />);
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>);
     fireEvent.click(await screen.findByRole('button', { name: '查看与修改 TEST 配置' }));
     fireEvent.click(await screen.findByRole('button', { name: '重试读取' }));
     await screen.findByRole('button', { name: '继续编辑草稿' });
@@ -154,7 +155,7 @@ describe('runtime config guided workflow', () => {
   it('retries schema inference and delivers its result to the creation form', async () => {
     let attempts = 0;
     const f = api(async () => ++attempts === 1 ? json({}, 503) : json({ jsonSchema: { type: 'object', title: 'TEST retry' } }));
-    render(<RuntimeConfigs bootstrap={bootstrap} />);
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>);
     fireEvent.click(await screen.findByRole('button', { name: '新建配置' }));
     await userEvent.click(screen.getByRole('button', { name: '高级选项：校验规则 Schema' }));
     fireEvent.click(screen.getByRole('button', { name: '预览自动校验规则' }));
@@ -166,7 +167,7 @@ describe('runtime config guided workflow', () => {
   it('retries history loading and clears retries when leaving that context', async () => {
     let attempts = 0;
     const f = api(undefined, (url) => url.endsWith('/revisions') && ++attempts % 2 === 1 ? json({}, 503) : undefined);
-    render(<RuntimeConfigs bootstrap={bootstrap} />); await open();
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await open();
     fireEvent.click(screen.getByRole('button', { name: '查看发布历史' }));
     fireEvent.click(await screen.findByRole('button', { name: '重试读取' }));
     await screen.findByRole('button', { name: '使用 v1 内容' });
@@ -181,7 +182,7 @@ describe('runtime config guided workflow', () => {
   it('retries publication review but invalidates that retry when its input changes', async () => {
     let attempts = 0;
     const f = api(async (_url, init) => ++attempts % 2 === 1 ? json({}, 503) : json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText: stringify((parse(String(init.body)) as { payload: unknown }).payload), sourceRevisionVersion: null }));
-    render(<RuntimeConfigs bootstrap={bootstrap} />); await edit();
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit();
     fireEvent.click(screen.getByRole('button', { name: '检查并发布' }));
     fireEvent.click(await screen.findByRole('button', { name: '重试读取' }));
     await screen.findByRole('button', { name: '确认发布' });
@@ -194,7 +195,7 @@ describe('runtime config guided workflow', () => {
   });
   it('keeps the list after verifying an abandoned creation instead of reopening an unrelated config', async () => {
     const f = api(async () => json({}, 500), (url) => url.endsWith('/items/test.new') ? json({ detail: 'runtime config not found' }, 404) : undefined);
-    render(<RuntimeConfigs bootstrap={bootstrap} />); await open();
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await open();
     fireEvent.click(screen.getByRole('button', { name: '返回配置列表' }));
     fireEvent.click(await screen.findByRole('button', { name: '新建配置' }));
     fireEvent.change(screen.getByLabelText('配置键'), { target: { value: 'test.new' } });
@@ -213,7 +214,7 @@ describe('runtime config guided workflow', () => {
       if (url.endsWith('/preview')) return json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText: canonical, sourceRevisionVersion: null });
       published = true; return json({ configKey: initial.configKey, publishedVersion: 2 });
     }, (url) => published && url.endsWith('/items/test.flags') ? failRefresh ? json({}, 503) : json({ ...initial, draftVersion: 4, publishedVersion: 2, hasDraft: false, draftPayload: null, publishedPayload: parse(canonical) }) : undefined);
-    render(<RuntimeConfigs bootstrap={bootstrap} />); await edit();
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit();
     fireEvent.change(text(), { target: { value: raw } }); await review();
     fireEvent.click(screen.getByRole('button', { name: '确认发布' }));
     await screen.findByText(/发布已确认；请先重试/);
@@ -224,7 +225,7 @@ describe('runtime config guided workflow', () => {
     expect(screen.queryByText(/读取或检查失败|最新详情加载失败/)).toBeNull(); expect(writes(f)).toHaveLength(1);
   });
   it('keeps leave-dialog input after a determined save failure and allows an explicit retry without a check flow', async () => {
-    api(async () => json({}, 500)); render(<RuntimeConfigs bootstrap={bootstrap} />); await edit();
+    api(async () => json({}, 500)); render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit();
     fireEvent.change(text(), { target: { value: '{"TEST_retained":true}' } });
     fireEvent.click(screen.getByRole('button', { name: '返回配置概览' }));
     const dialog = await screen.findByRole('dialog');
@@ -237,7 +238,7 @@ describe('runtime config guided workflow', () => {
   });
   it.each(['[]', 'TEST invalid JSON'])('refuses malformed canonical candidate %s before enabling publication', async (candidateText) => {
     const f = api(async () => json({ configKey: initial.configKey, draftVersion: 3, publishedVersion: 1, hasChanges: true, publishedText: '{}', candidateText, sourceRevisionVersion: null }));
-    render(<RuntimeConfigs bootstrap={bootstrap} />); await edit();
+    render(<><RuntimeConfigs bootstrap={bootstrap} /><Toast.Provider /></>); await edit();
     fireEvent.click(screen.getByRole('button', { name: '检查并发布' }));
     await screen.findByText('服务出错了，请稍后重试');
     expect(screen.queryByRole('button', { name: '确认发布' })).toBeNull(); expect(writes(f)).toHaveLength(0);

@@ -5,6 +5,7 @@ import { parseIdentityJson } from '../../shared/api/identity-json';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { array, decodeOptions, identity, record, type Option } from './contracts';
 import { parseIds } from './query';
+import { useOperationToast } from '../../shared/operation-toast';
 
 export default function Selection({ root, shopPk, focused, canWrite, blocked, fence, applied, onApply, onFocused }: {
   root: string; shopPk: string; focused: boolean; canWrite: boolean; blocked: boolean; fence: { current: number }; applied: string[];
@@ -13,6 +14,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
   const [draft, setDraft] = useState<string[]>(applied); const [choices, setChoices] = useState<Option[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const [revision, setRevision] = useState(0); const [needsCheck, setNeedsCheck] = useState(() => focused && performance.now() < fence.current); const [cooldown, setCooldown] = useState(() => performance.now() < fence.current);
   const [forbidden, setForbidden] = useState(false);
   const lifetime = useRef<AbortController | undefined>(undefined); const pending = useRef(false); const cancelDelay = useRef<(() => void) | undefined>(undefined);
@@ -61,7 +63,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
   }, [root, shopPk, query, draft, busy, needsCheck]);
   async function change(next: string[]): Promise<boolean> {
     if (pending.current || loading || cooldown || needsCheck || blocked || performance.now() < notBefore.current) return false;
-    if (!focused) { if (next.length > 100) { setNotice('最多选择 100 个 SPU'); return false; } setDraft(next); setNotice(''); return true; }
+    if (!focused) { if (next.length > 100) { notify.warning('最多选择 100 个 SPU'); return false; } setDraft(next); setNotice(''); return true; }
     if (!canWrite || !shopPk || forbidden) return false;
     const add = next.filter((id) => !draft.includes(id)); const remove = draft.filter((id) => !next.includes(id));
     if (!add.length && !remove.length) return true;
@@ -72,10 +74,10 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
       const result = record(raw); if (identity(result.shopPk) !== shopPk || !Number.isSafeInteger(Number(result.total)) || Number(result.total) < 0) throw new Error('保存响应不完整，需重新读取关注事实');
       array(result.addedSpuIds).forEach(identity); array(result.removedSpuIds).forEach(identity);
       if (scope?.signal.aborted) return false;
-      setDraft(next); focusedCallback.current(Number(result.total)); setNotice('已实时保存'); return true;
+      setDraft(next); focusedCallback.current(Number(result.total)); notify.success('已实时保存'); return true;
     } catch (error: unknown) {
       if (scope?.signal.aborted) return false;
-      setNeedsCheck(true); focusedCallback.current(null); setNotice(`${error instanceof Error ? error.message : '保存未确认'}；原选择保留。请先重新读取关注事实，再决定后续修改。`);
+      setNeedsCheck(true); focusedCallback.current(null); notify.failure('保存未确认', `${error instanceof Error ? error.message : '保存未确认'}；原选择保留。请先重新读取关注事实，再决定后续修改。`, { uncertain: true });
       if (error instanceof ApiError && error.status === 403) setForbidden(true);
       hold(error);
       return false;
@@ -84,7 +86,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
   async function resolveIds(ids: string[], pasted = false) {
     if (disabled || pending.current || performance.now() < notBefore.current) return;
     const maximum = focused ? 500 : 100;
-    const next = [...new Set([...draft, ...ids])]; if (!ids.length || ids.length > maximum || (!focused && next.length > maximum)) { setNotice(`一次最多 ${maximum} 个 SPU${focused ? '' : '，含已选项'}`); return; }
+    const next = [...new Set([...draft, ...ids])]; if (!ids.length || ids.length > maximum || (!focused && next.length > maximum)) { notify.warning(`一次最多 ${maximum} 个 SPU${focused ? '' : '，含已选项'}`); return; }
     if (pasted) setQuery(ids.join(', '));
     pending.current = true; setBusy(true); const scope = lifetime.current; const found: Option[] = [];
     const controller = new AbortController(); resolveController.current?.abort(); resolveController.current = controller; const generation = ++resolveGeneration.current;
@@ -100,7 +102,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
       const saved = await change([...new Set([...draft, ...ids.filter((id) => returned.has(id))])]);
       if (!saved || scope?.signal.aborted || controller.signal.aborted || generation !== resolveGeneration.current) return;
       if (returned.size) setQuery('');
-      if (missing.length && (pasted || returned.size)) setNotice(`未添加当前店铺无法确认的 SPU：${missing.join('、')}`);
+      if (missing.length && (pasted || returned.size)) notify.warning('部分 SPU 未添加', `未添加当前店铺无法确认的 SPU：${missing.join('、')}`);
     } catch (error: unknown) { if (!scope?.signal.aborted && !controller.signal.aborted && generation === resolveGeneration.current) { hold(error); setNotice(error instanceof Error ? error.message : '批量解析失败'); } }
     finally { scope?.signal.removeEventListener('abort', cancel); if (!scope?.signal.aborted && generation === resolveGeneration.current) { pending.current = false; setBusy(false); resolveController.current = undefined; } }
   }

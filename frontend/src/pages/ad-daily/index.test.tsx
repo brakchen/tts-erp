@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 import summaryContract from '../../../../tests/fixtures/ad_daily_summary.json';
@@ -14,12 +15,12 @@ async function chooseOption(label: string, option: string) {
   await userEvent.click(screen.getByRole('button', { name: (name) => name.includes(label) }));
   await userEvent.click(await screen.findByRole('option', { name: option }));
 }
-async function mount() { return render(<AdDaily {...props} />); }
+async function mount() { return render(<><AdDaily {...props} /><Toast.Provider /></>); }
 function api(data: unknown = payload) {
   const fetcher = vi.fn(async (url: string) => json(url.endsWith('/options') ? options : data));
   vi.stubGlobal('fetch', fetcher); return fetcher;
 }
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); history.replaceState(null, '', '/'); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); history.replaceState(null, '', '/'); });
 it('renders the provider-verified summary contract', async () => {
   api({ ...payload, summary: summaryContract });
   await mount();
@@ -149,7 +150,7 @@ it('keeps a failed copy selectable and reports explicit failure', async () => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error('TEST no clipboard')) } });
   api(); await mount(); await screen.findByText('TEST_CAMPAIGN');
   await userEvent.click(screen.getByRole('button', { name: '复制商品 ID TEST_PRODUCT' }));
-  expect(await screen.findByText('复制失败，请手动选择 ID')).toBeVisible(); expect(screen.getByText('TEST_PRODUCT')).toBeVisible();
+  expect(await screen.findByText('复制失败')).toBeVisible(); expect(screen.getByText('请手动选择 ID')).toBeVisible(); expect(screen.getByText('TEST_PRODUCT')).toBeVisible();
 });
 it('keeps options errors separate from usable rows and retries options explicitly', async () => {
   let optionsCalls = 0;

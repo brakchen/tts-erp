@@ -5,6 +5,7 @@ import { Button, Label, ListBox, Modal, Select, Table } from '@heroui/react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import type { PageProps } from '../../shared/contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import { decodeAcknowledgement, decodeJobs, type Attempt, type Job, type JobsData } from './contracts';
 
 type Recovery = { attempt: Attempt; phase: 'waiting' | 'checking' | 'checked' | 'failed' };
@@ -26,7 +27,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
   const [denied, setDenied] = useState(false);
   const [failure, setFailure] = useState<CommandFailure>();
   const [recovery, setRecovery] = useState<Recovery>();
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const mounted = useRef(true);
   const busy = useRef(false);
   const reading = useRef(false);
@@ -92,7 +93,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     busy.current = true;
     // Consume the captured recovery only after this submission owns the flight guard.
     if (checkedRecovery) { gate.current = undefined; setRecovery(undefined); }
-    setPending(true); setFailure(undefined); setNotice('');
+    setPending(true); setFailure(undefined);
     try {
       const body = attempt.kind === 'enabled' ? { enabled: attempt.enabled } : attempt.shop_id === null ? {} : { shop_id: attempt.shop_id };
       const { data: value } = await requestJson<unknown>(bootstrap.rootPath, `/v2/admin/sync-jobs/${encodeURIComponent(attempt.job_name)}/${attempt.kind}`, {
@@ -102,8 +103,8 @@ export default function SyncJobs({ bootstrap }: PageProps) {
       if (!mounted.current) return;
       if (attempt.kind === 'enabled') {
         setData((previous) => previous && { ...previous, jobs: previous.jobs.map((j) => j.job_name === attempt.job_name ? { ...j, enabled: attempt.enabled } : j) });
-        setNotice('周期调度变更已确认');
-      } else setNotice('已提交后台，尚未确认完成；请稍后明确刷新查看运行状态。');
+        notify.success('周期调度变更已确认');
+      } else notify.warning('已提交后台', '尚未确认完成；请稍后明确刷新查看运行状态。');
     } catch (error: unknown) {
       if (!mounted.current) return;
       const result = commandFailure(error, { enabled: '周期调度', shop_id: '执行店铺' });
@@ -160,7 +161,7 @@ export default function SyncJobs({ bootstrap }: PageProps) {
     {!canRead && <p role="alert">需要 readwrite 或 admin 才能读取任务管理数据。</p>}
     {loading && <p role="status">加载任务中…</p>}{readError && <p role="alert">{readError}</p>}
     {scopeReset && <p role="status">原执行店铺已不可用，已重置为全部授权店铺；请重新选择执行店铺，或通过全店铺确认明确执行。</p>}
-    {pending && <p role="status">提交中，请勿重复操作…</p>}{notice && <p role="status">{notice}</p>}
+    {pending && <p role="status">提交中，请勿重复操作…</p>}
     {failure && <div role="alert"><p>{failure.message}</p>{Object.values(failure.fieldErrors).map((text) => <p key={text}>{text}</p>)}</div>}
     {cooldown && <p role="status">服务端指定冷却中，读取和提交均暂停；到期不会自动重试。</p>}
     {recovery && <section aria-label="命令核对" className="erp-panel space-y-2">

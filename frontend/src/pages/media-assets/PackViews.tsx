@@ -7,6 +7,7 @@ import OperationConfirmation from './OperationConfirmation';
 import PackEditor from './PackEditor';
 import ViewAsset from './ViewAsset';
 import { decodeAssetList, decodeMediaPack, decodeMediaPackFeed, type Asset, type DigitalHuman, type MediaPack } from './contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import { ActionError, ReadStatus, mediaWrite, useMediaAction, useMediaRead } from './media-ui';
 
 export function PackPicker({ root, human, assetIds, onClose, onCreate, onDone }: {
@@ -70,7 +71,7 @@ export function PackCatalog({ bootstrap, canWrite, human, revision, onOpen }: {
   const [changes, setChanges] = useState(0);
   const [mode, setMode] = useState<'create' | 'attach'>();
   const [detaching, setDetaching] = useState<MediaPack>();
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const action = useMediaAction();
   const path = human ? '/packs?digitalHumanId=' + human.digitalHumanId : '/packs';
   const feed = useCursorFeed(root, path, decodeMediaPackFeed, revision + ':' + changes);
@@ -80,7 +81,7 @@ export function PackCatalog({ bootstrap, canWrite, human, revision, onOpen }: {
   function saved(pack: MediaPack) {
     setMode(undefined);
     setChanges((current) => current + 1);
-    if (human) setNotice('已关联「' + pack.name + '」。');
+    if (human) notify.success('已关联「' + pack.name + '」。');
     else onOpen(pack.packId);
   }
 
@@ -90,7 +91,6 @@ export function PackCatalog({ bootstrap, canWrite, human, revision, onOpen }: {
       {canWrite && (!human || human.status === 'active') && <Button aria-haspopup="dialog"
         onPress={() => setMode(human ? 'attach' : 'create')}>{human ? '添加素材包' : '新建素材包'}</Button>}
     </div>
-    {notice && <p className="media-status" role="status">{notice}</p>}
     <ReadStatus title="素材包" loading={feed.loading} error={!feed.data ? feed.error : undefined} onRetry={feed.retry} />
     {feed.data && !items.length && <p className="media-box">{human ? '还没有关联素材包。' : '资产库还没有素材包。'}</p>}
     <ul className="media-grid" data-media-grid aria-label="素材包列表">
@@ -119,7 +119,7 @@ export function PackCatalog({ bootstrap, canWrite, human, revision, onOpen }: {
         await mediaWrite(root, '/digital-humans/' + human.digitalHumanId + '/packs/' + detaching.packId, 'DELETE', () => undefined);
         setDetaching(undefined);
         setChanges((current) => current + 1);
-        setNotice('已解除关联。素材包仍在公共资产库。');
+        notify.success('已解除关联。素材包仍在公共资产库。');
       })} />}
   </section>;
 }
@@ -136,7 +136,7 @@ export function PackDetail({ bootstrap, id, canWrite, backLabel, onBack }: {
   const [adding, setAdding] = useState(false);
   const [preview, setPreview] = useState<string>();
   const [removing, setRemoving] = useState<Asset>();
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const action = useMediaAction();
   const read = useMediaRead(root, '/packs/' + id, decodeMediaPack, revision);
   const pack = read.data;
@@ -144,7 +144,7 @@ export function PackDetail({ bootstrap, id, canWrite, backLabel, onBack }: {
   const items = feed.data?.items ?? [];
 
   function changed(message: string) {
-    setNotice(message);
+    notify.success(message);
     setRevision((current) => current + 1);
   }
 
@@ -160,7 +160,6 @@ export function PackDetail({ bootstrap, id, canWrite, backLabel, onBack }: {
         {canWrite && pack && <Button aria-haspopup="dialog" onPress={() => setAdding(true)}>添加视频</Button>}
       </div>
     </header>
-    {notice && <p className="media-status" role="status">{notice}</p>}
     <ReadStatus title="素材包详情" loading={read.loading} error={read.error} onRetry={read.retry} />
     <ReadStatus title="包内视频" loading={feed.loading} error={!feed.data ? feed.error : undefined} onRetry={feed.retry} />
     {feed.data && !items.length && <p className="media-box">这个素材包里还没有视频。</p>}

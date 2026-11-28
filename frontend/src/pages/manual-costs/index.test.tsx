@@ -43,7 +43,7 @@ async function editCost(value = '12.3400', name = 'TEST 商品') {
   fireEvent.change(dialog.getByRole('textbox', { name: '采购价' }), { target: { value } });
   return dialog;
 }
-afterEach(() => { toastQueue.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { toastQueue.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('purchase-price workbench', () => {
   it('keeps missing purchase prices blank and defaults their currency to CNY', () => {

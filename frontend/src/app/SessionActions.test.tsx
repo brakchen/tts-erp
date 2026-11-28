@@ -1,9 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import { Toast, toastQueue } from '@heroui/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SessionActions from './SessionActions';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { toastQueue.clear(); vi.unstubAllGlobals(); });
 
 describe('SessionActions', () => {
   it('preserves the existing session label and explicit CSRF-protected logout', async () => {
@@ -11,7 +12,7 @@ describe('SessionActions', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetcher);
     const signedOut = vi.fn();
-    render(<SessionActions rootPath="/tts" onSignedOut={signedOut} />);
+    render(<><SessionActions rootPath="/tts" onSignedOut={signedOut} /><Toast.Provider /></>);
     await screen.findByText('TEST 运营');
     await userEvent.click(screen.getByRole('button', { name: '退出登录' }));
     await waitFor(() => expect(signedOut).toHaveBeenCalledTimes(1));
@@ -21,7 +22,7 @@ describe('SessionActions', () => {
   it('does not treat auth off or header-key mode as an expired browser session', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"authenticated":false}')));
     const signedOut = vi.fn();
-    render(<SessionActions rootPath="" onSignedOut={signedOut} />);
+    render(<><SessionActions rootPath="" onSignedOut={signedOut} /><Toast.Provider /></>);
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('button', { name: '退出登录' })).not.toBeInTheDocument();
     expect(signedOut).not.toHaveBeenCalled();
@@ -30,7 +31,7 @@ describe('SessionActions', () => {
     const fetcher = vi.fn().mockResolvedValueOnce(new Response('{"authenticated":true,"username":"TEST_user"}')).mockRejectedValueOnce(new TypeError('network'));
     vi.stubGlobal('fetch', fetcher);
     const signedOut = vi.fn();
-    render(<SessionActions rootPath="" onSignedOut={signedOut} />);
+    render(<><SessionActions rootPath="" onSignedOut={signedOut} /><Toast.Provider /></>);
     await userEvent.click(await screen.findByRole('button', { name: '退出登录' }));
     await screen.findByText('网络已断开，请检查网络后重试');
     expect(signedOut).not.toHaveBeenCalled();

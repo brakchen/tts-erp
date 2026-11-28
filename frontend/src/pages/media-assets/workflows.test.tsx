@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Toast, toastQueue } from '@heroui/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PageProps } from '../../shared/contracts';
 import DigitalHumans from '../digital-humans';
@@ -67,6 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  toastQueue.clear();
   vi.unstubAllGlobals();
   Upload.last = undefined;
   history.replaceState(null, '', '/');
@@ -79,7 +81,7 @@ const findConfirmation = async () => within(await screen.findByRole('alertdialog
 
 function renderLegacyPicker() {
   const onClose = vi.fn();
-  render(<PickAssets bootstrap={bootstrap} target={decodeDigitalHuman(human)} onClose={onClose} onChanged={() => undefined} />);
+  render(<><PickAssets bootstrap={bootstrap} target={decodeDigitalHuman(human)} onClose={onClose} onChanged={() => undefined} /><Toast.Provider /></>);
   return onClose;
 }
 
@@ -103,7 +105,7 @@ it('opens the native picker from a visible control and preserves the selected fi
   const user = userEvent.setup();
   vi.stubGlobal('XMLHttpRequest', Upload);
   vi.stubGlobal('fetch', apiFetch(async (url) => url.endsWith('/upload-url') ? json(ticket, 201) : json(page())));
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(button('上传素材'));
   const input = screen.getByLabelText('素材文件') as HTMLInputElement;
   expect(input).not.toBeVisible();
@@ -145,7 +147,7 @@ it('requires explicit upload, separates 100% transfer from confirmation, and ret
     return json({ ...page(next ? [{ ...asset, asset_id: 3, filename: 'TEST_续载.png' }] : [asset]), total: 2, nextCursor: next ? null : 'TEST_next' });
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.type(screen.getByLabelText('搜索素材'), 'TEST_filter');
   await user.click(button('搜索'));
   await user.click(await findButton('加载更多'));
@@ -295,7 +297,7 @@ it('creates a persona in a dialog and shows its new card without changing routes
     return json(status === 'archived' ? [] : saved ? [created, human] : [human]);
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<DigitalHumans bootstrap={bootstrap} />);
+  render(<><DigitalHumans bootstrap={bootstrap} /><Toast.Provider /></>);
   await chooseStatus(user, '已归档');
   await user.click(button('新建数字人'));
   const dialog = await screen.findByRole('dialog', { name: '新建数字人' });
@@ -322,7 +324,7 @@ it('preserves a failed metadata edit and only writes changed fields', async () =
     return json(page([stored]));
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('编辑 ' + asset.filename));
   const field = screen.getByLabelText('素材名称');
   await user.clear(field);
@@ -345,7 +347,7 @@ it('asks before discarding asset A and never applies its draft to asset B', asyn
     return json(page([asset, second]));
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('编辑 ' + asset.filename));
   await user.type(screen.getByLabelText('素材名称'), 'TEST_草稿');
   await user.click(button('取消'));
@@ -372,7 +374,7 @@ it('blocks deletion with fresh archived references', async () => {
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('删除 ' + asset.filename));
   const confirmation = await findConfirmation();
   const confirm = confirmation.getByRole('button', { name: '确认删除' });
@@ -395,7 +397,7 @@ it('keeps the detail and refreshes references when a concurrent association reje
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('删除 ' + asset.filename));
   const confirmation = await findConfirmation();
   await waitFor(() => expect(confirmation.getByRole('button', { name: '确认删除' })).toBeEnabled());
@@ -417,7 +419,7 @@ it('distinguishes denied reads from empty results and renews a failed preview', 
     if (++reads === 1) return json({}, 403);
     return json(page());
   }));
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   expect(await screen.findByText('你没有权限查看此内容。')).toBeVisible();
   expect(screen.queryByText('素材库还没有文件。')).not.toBeInTheDocument();
   await user.click(button('重试素材列表'));
@@ -491,7 +493,7 @@ it('uses tag arrays, prevents Enter submitting, and retains the pending tag afte
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('编辑 ' + asset.filename));
   const input = screen.getByLabelText('新增标签');
   expect(input).not.toHaveAttribute('maxlength');
@@ -506,7 +508,7 @@ it('uses tag arrays, prevents Enter submitting, and retains the pending tag afte
   await user.type(input, 'test_A B{Enter}');
   expect(screen.getAllByRole('row', { name: 'TEST_a b' })).toHaveLength(1);
   expect(screen.queryByRole('row', { name: 'test_A B' })).not.toBeInTheDocument();
-  expect(screen.getByText('已选中现有标签「TEST_a b」。')).toBeVisible();
+  expect(screen.getAllByText('已选中现有标签「TEST_a b」。').length).toBeGreaterThan(0);
   expect(screen.getByText('已选 1 个 · 可多选，再次点击取消')).toBeVisible();
   await user.click(screen.getByRole('row', { name: 'TEST_a b' }));
   await user.type(input, ' TEST_有,标点 {Enter}');
@@ -546,7 +548,7 @@ it('filters and explicitly adds upload tags without writing discarded or unselec
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(button('上传素材'));
   expect(screen.queryByRole('searchbox', { name: '搜索标签' })).not.toBeInTheDocument();
   expect(fetcher.mock.calls.some(([url]) => url.endsWith('/assets/tags'))).toBe(false);
@@ -596,7 +598,7 @@ it('preserves a typed space after an existing tag prefix until the complete tag 
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('编辑 ' + asset.filename));
   expect(await screen.findByRole('row', { name: prefix })).toBeVisible();
   const input = screen.getByLabelText('新增标签');
@@ -632,7 +634,7 @@ it('reuses a pending existing tag at save without rewriting its raw input', asyn
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('编辑 ' + asset.filename));
   const option = await screen.findByRole('row', { name: canonical });
   const input = screen.getByLabelText('新增标签');
@@ -663,7 +665,7 @@ it('waits for delayed tag candidates before saving a pending tag', async () => {
     return json(page());
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   const submit = '保存资料';
   await user.click(await findButton('编辑 ' + asset.filename));
   expect(await screen.findByText('正在加载已有标签…')).toBeVisible();
@@ -769,7 +771,7 @@ it('keeps newly filtered cards when an older cursor request finishes late', asyn
     return json({ ...page(), nextCursor: 'TEST_next' });
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('加载更多'));
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes('TEST_next'))).toBe(true));
   await user.type(screen.getByLabelText('搜索素材'), 'TEST_filtered');
@@ -789,7 +791,7 @@ it('starts at the first cursor when returning to a previously extended status fi
     return json({ items: [human], total: 2, nextCursor: 'TEST_next' });
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<DigitalHumans bootstrap={bootstrap} />);
+  render(<><DigitalHumans bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('加载更多'));
   expect(await screen.findByRole('heading', { name: older.name })).toBeVisible();
   await chooseStatus(user, '已归档');
@@ -818,7 +820,7 @@ it('confirms archiving before a write and keeps its pending confirmation exclusi
     return json(!status || stored.status === status ? [stored] : []);
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<DigitalHumans bootstrap={bootstrap} />);
+  render(<><DigitalHumans bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('归档 ' + human.name));
   let confirmation = await findConfirmation();
   expect(confirmation.getByRole('heading', { name: '归档「' + human.name + '」' })).toBeVisible();
@@ -862,7 +864,7 @@ it('keeps removal confirmation exclusive while pending and retains its failures'
     return json([{ ...human, asset_ids: attached ? [2] : [] }]);
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<DigitalHumans bootstrap={bootstrap} />);
+  render(<><DigitalHumans bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(await findButton('查看档案 ' + human.name));
   await user.click(await findButton('管理原有素材 · 1'));
   await user.click(await findButton('移除关联 ' + asset.filename));
@@ -889,7 +891,7 @@ it('blocks unsupported replacement files before preview or requesting an upload 
   const user = userEvent.setup();
   const fetcher = apiFetch(async () => json(page()));
   vi.stubGlobal('fetch', fetcher);
-  render(<MediaAssets bootstrap={bootstrap} />);
+  render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(button('上传素材'));
 
   const input = screen.getByLabelText('素材文件');
@@ -914,7 +916,7 @@ it('previews the selected local file before upload and releases URLs on replacem
   vi.stubGlobal('XMLHttpRequest', Upload);
   const fetcher = apiFetch(async () => json(page()));
   vi.stubGlobal('fetch', fetcher);
-  const view = render(<MediaAssets bootstrap={bootstrap} />);
+  const view = render(<><MediaAssets bootstrap={bootstrap} /><Toast.Provider /></>);
   await user.click(button('上传素材'));
   const image = new File(['abc'], 'TEST_local.png', { type: 'image/png' });
   fireEvent.change(screen.getByLabelText('素材文件'), { target: { files: [image] } });
@@ -957,16 +959,16 @@ it('refreshes available rows and hidden matches when references change identity 
   });
   const draft = { ...emptyPickerDraft, keyword: asset.filename, query: asset.filename };
   const props = {
-    root: '/tts', pending: false, error: '', notice: '', draft, revision: 0, onDraft: vi.fn(),
+    root: '/tts', pending: false, error: '', draft, revision: 0, onDraft: vi.fn(),
     onAdd: vi.fn(), onClose: vi.fn(), onUpload: vi.fn(), targetRead: { loading: false, retry: vi.fn() },
   };
-  const view = render(<AssetPicker {...props} human={profile()} />);
+  const view = render(<><AssetPicker {...props} human={profile()} /><Toast.Provider /></>);
   expect(await screen.findByText('已隐藏 1 项已添加素材')).toBeVisible();
   expect(await screen.findByText('符合条件的素材均已添加。取消勾选“隐藏已选内容”可查看。')).toBeVisible();
   expect(screen.queryByRole('checkbox', { name: asset.filename })).not.toBeInTheDocument();
 
   linkedIds = [second.asset_id];
-  view.rerender(<AssetPicker {...props} human={profile()} />);
+  view.rerender(<><AssetPicker {...props} human={profile()} /><Toast.Provider /></>);
   expect(await screen.findByRole('checkbox', { name: asset.filename })).toBeEnabled();
   expect(screen.getByRole('checkbox', { name: asset.filename })).not.toBeChecked();
   await waitFor(() => expect(screen.queryByText('已隐藏 1 项已添加素材')).not.toBeInTheDocument());

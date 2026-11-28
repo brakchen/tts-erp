@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/client';
 import { parseIdentityJson } from '../../shared/api/identity-json';
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
+import { useOperationToast } from '../../shared/operation-toast';
 import { commandResult, labels, type CommandKind } from './contracts';
 import { withinRequestLifetime } from './requestLifetime';
 
@@ -13,7 +14,7 @@ export function useCommands(root: string, canManage: boolean) {
   const [failure, setFailure] = useState<CommandFailure>();
   const [phase, setPhase] = useState<Recovery>('none');
   const [cooldown, setCooldown] = useState(false);
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const lock = useRef(false), recovery = useRef<Recovery>('none'), notBefore = useRef(0);
   const alive = useRef(true), delay = useRef<(() => void) | undefined>(undefined);
   const controllers = useRef(new Set<AbortController>());
@@ -40,14 +41,14 @@ export function useCommands(root: string, canManage: boolean) {
   const canSubmit = () => canManage && !lock.current && readyRead() && ['none', 'allowed'].includes(recovery.current);
   async function submit(command: Command): Promise<boolean> {
     if (!canSubmit()) return false;
-    lock.current = true; setPending(true); setFailure(undefined); setNotice('');
+    lock.current = true; setPending(true); setFailure(undefined);
     recovery.current = 'none'; setPhase('none');
     try {
       const { data } = await bounded((signal) => requestJson<unknown>(root, command.path, {
         method: command.method, signal, body: command.body === undefined ? undefined : JSON.stringify(command.body),
       }, parseIdentityJson));
       commandResult(data, command.kind);
-      if (alive.current) { setNotice('操作已确认'); return true; }
+      if (alive.current) { notify.success('操作已确认'); return true; }
       return false;
     } catch (error) {
       if (alive.current) {
@@ -65,8 +66,8 @@ export function useCommands(root: string, canManage: boolean) {
   }
   function allowRetry() { if (recovery.current === 'checked' && readyRead()) { recovery.current = 'allowed'; setPhase('allowed'); } }
   function edit() { setFailure((f) => f && Object.keys(f.fieldErrors).length ? { ...f, fieldErrors: {} } : f); }
-  function reset() { if (recovery.current !== 'none' || lock.current || !readyRead()) return false; setFailure(undefined); setNotice(''); return true; }
-  return { pending, failure, phase, cooldown, notice, read, submit, verify, allowRetry, edit, reset,
+  function reset() { if (recovery.current !== 'none' || lock.current || !readyRead()) return false; setFailure(undefined); return true; }
+  return { pending, failure, phase, cooldown, read, submit, verify, allowRetry, edit, reset,
     blocked: !canManage || pending || cooldown || !['none', 'allowed'].includes(phase), readyRead, canSubmit };
 }
 export type Commands = ReturnType<typeof useCommands>;

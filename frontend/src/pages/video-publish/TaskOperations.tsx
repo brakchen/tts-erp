@@ -5,6 +5,7 @@ import { parseIdentityJson } from '../../shared/api/identity-json';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import { decodeDetail, decodeTask, type Detail, type Task } from './contracts';
 import { Facts } from './TaskFacts';
+import { useOperationToast } from '../../shared/operation-toast';
 import type { VideoCommand } from './useVideoCommand';
 
 export const actionLabels: Record<string, string> = { retry: '重试原任务', cancel: '取消任务', verify: '再次自动核验', retry_cleanup: '重试清理', replace_upload: '重新上传', confirm_published: '确认已发布', edit_settings: '编辑发布设置', continue_upload: '重新选择文件继续' };
@@ -29,6 +30,7 @@ export default function TaskOperations({ operation, command, canWrite, onClose, 
   const { task: original, action } = operation;
   const [facts, setFacts] = useState<Detail>(); const [dialog, setDialog] = useState(action !== 'confirm_published' && action !== 'edit_settings');
   const [checking, setChecking] = useState(false); const [message, setMessage] = useState('');
+  const notify = useOperationToast();
   const [prompt, setPrompt] = useState(''); const [device, setDevice] = useState(''); const [appPackage, setAppPackage] = useState('');
   const [discard, setDiscard] = useState(false); const [settled, setSettled] = useState(false);
   const [locked, setLocked] = useState(false); const controller = useRef<AbortController | undefined>(undefined); const mounted = useRef(true);
@@ -61,14 +63,14 @@ export default function TaskOperations({ operation, command, canWrite, onClose, 
     const body: Record<string, unknown> = { rowVersion: target.rowVersion };
     if (action === 'retry_cleanup') {
       const resources = target.cleanupRetryableResources.filter((name) => name === 'device' || name === 'spool');
-      if (!resources.length) { setMessage('没有服务端提供的可重试设备或 spool 资源。'); return; }
+      if (!resources.length) { notify.warning('没有服务端提供的可重试设备或 spool 资源'); return; }
       body.resources = resources;
     }
     if (action === 'edit_settings') {
       if (prompt.trim()) body.prompt = prompt;
       if (device.trim()) body.deviceSerial = device.trim();
       if (appPackage.trim() && appPackage.trim() !== facts?.target.appPackage) body.appPackage = appPackage.trim();
-      if (Object.keys(body).length === 1) { setMessage('没有需要保存的修改。空白字段表示不修改；设备掩码不会作为序列号提交。'); return; }
+      if (Object.keys(body).length === 1) { notify.warning('没有需要保存的修改', '空白字段表示不修改；设备掩码不会作为序列号提交。'); return; }
     }
     sent.current = true; attemptedPath.current = endpoint; setDialog(false); setMessage('');
     const result = await command.send(endpoint, body, (value) => {
@@ -78,7 +80,7 @@ export default function TaskOperations({ operation, command, canWrite, onClose, 
     if (!mounted.current) return;
     if (result) {
       setSettled(true);
-      setMessage('服务端已确认本次操作。请读取当前事实查看最新状态或审计；不会自动再次提交。'); onChanged();
+      notify.success('服务端已确认本次操作', '请读取当前事实查看最新状态或审计；不会自动再次提交。'); onChanged();
       if (action === 'replace_upload') onResume(result);
     }
   }

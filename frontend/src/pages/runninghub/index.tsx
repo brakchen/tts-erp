@@ -11,6 +11,7 @@ import type { Artifact, Batch, Config, Job, Template } from './contracts';
 import { canTerminateBatch, statuses, templateLabel } from './contracts';
 import { Check, Choice, Field, SelectTile, WorkModal } from './controls';
 import { errorText, useRead } from './requests';
+import { useOperationToast } from '../../shared/operation-toast';
 import TemplateEditor from './TemplateEditor';
 import './runninghub.css';
 
@@ -108,7 +109,8 @@ export default function RunningHub({ bootstrap }: PageProps) {
   const pending = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const [feedback, setFeedback] = useState('');
+  const [accountInfo, setAccountInfo] = useState('');
+  const notify = useOperationToast();
   const [dialog, setDialog] = useState<'config' | 'template' | 'plan' | 'pay'>();
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
@@ -152,17 +154,16 @@ export default function RunningHub({ bootstrap }: PageProps) {
     if (pending.current) return undefined;
     pending.current = true;
     setBusy(true);
-    setFeedback('');
     try {
       const response = await requestJson<T>(root, '/v2/runninghub' + path, { method, body: JSON.stringify(value) });
       if (!mounted.current) return undefined;
       if (path !== '/plan' && path !== '/account') {
-        setFeedback('操作已保存。');
+        notify.success('操作已保存。');
         setRevision((n) => n + 1);
       }
       return response.data;
     } catch (failure) {
-      if (mounted.current) setFeedback(errorText(failure));
+      if (mounted.current) notify.failure('操作未完成', errorText(failure));
     } finally {
       pending.current = false;
       if (mounted.current) setBusy(false);
@@ -176,12 +177,11 @@ export default function RunningHub({ bootstrap }: PageProps) {
       setInstanceType(config.data.instanceType);
       setConcurrency(String(config.data.concurrency));
     }
-    setFeedback('');
+    setAccountInfo('');
     setDialog('config');
   }
 
   function openBatch(id: string, archive = false) {
-    setFeedback('');
     setBatchId(id);
     setArchiveView(archive);
     setDetailAction(undefined);
@@ -196,7 +196,6 @@ export default function RunningHub({ bootstrap }: PageProps) {
   }
 
   function prepareStart(current: Batch) {
-    setFeedback('');
     setPaid(false);
     setStartTarget(current);
     setDialog('pay');
@@ -223,7 +222,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
     if (saved?.id) {
       setBatchOffset(0);
       setRequestId(crypto.randomUUID());
-      setFeedback('批次已保存，可在批次记录中启动。');
+      notify.success('批次已保存，可在批次记录中启动。');
       setDialog(undefined);
     }
   }
@@ -231,7 +230,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
   async function saveWorkflowVersion() {
     let value: unknown;
     try { value = graph.trim() ? JSON.parse(graph) : null; }
-    catch { setFeedback('工作流 JSON 无法解析。'); return; }
+    catch { notify.warning('工作流 JSON 无法解析。'); return; }
     await command('/workflow/check', { graph: value });
   }
 
@@ -265,7 +264,6 @@ export default function RunningHub({ bootstrap }: PageProps) {
     : '';
   const run = async (path: string, value?: object) => { await command(path, value); };
   const close = () => setDialog(undefined);
-  const notice = feedback && <p role="status" className="break-words">{feedback}</p>;
   const selectedBatch = batch.data;
   const firstClipReady = selectedBatch?.status === 'FIRST_CLIP_READY';
   const remaining = selectedBatch?.counts.DEFERRED ?? 0;
@@ -282,7 +280,6 @@ export default function RunningHub({ bootstrap }: PageProps) {
     </PageIntro>
     {!canWrite && <p role="status">当前为只读权限。</p>}
     {[config.error, templates.error, assets.error, decodeError].filter(Boolean).map((error, index) => <p role="alert" key={index}>{error}</p>)}
-    {!dialog && !batchId && notice}
     {profile?.dispatchPausedReason && <p className="rh-empty" role="status">
       账户新任务派发已暂停：{profile.dispatchPausedReason}。已受理任务继续跟踪。
     </p>}
@@ -331,7 +328,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
           <div className="rh-panel-heading">
             <h3 id="rh-templates-title"><span className="rh-step mr-2">02</span>人物模板</h3>
             {canWrite && <Button size="sm" isDisabled={disabled}
-              onPress={() => { setFeedback(''); setDialog('template'); }}>
+              onPress={() => { setDialog('template'); }}>
               <span aria-hidden="true">＋</span> 新建模板
             </Button>}
           </div>
@@ -397,7 +394,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
             void command('/config', { credentialRef: credentialRef.trim(), workflowId: profile.workflowId, instanceType, concurrency: Number(concurrency) }, 'PUT');
           }}>保存配置</Button>
           <Button isDisabled={busy} variant="secondary" onPress={() => {
-            void command<Record<string, unknown>>('/account').then((data) => { if (data) setFeedback('账户信息：' + JSON.stringify(data)); });
+            void command<Record<string, unknown>>('/account').then((data) => { if (data) setAccountInfo('账户信息：' + JSON.stringify(data)); });
           }}>检查账户</Button>
         </div>
         <h4 className="border-t pt-3 font-semibold">更新工作流版本</h4>
@@ -413,15 +410,15 @@ export default function RunningHub({ bootstrap }: PageProps) {
           }}>恢复账户派发</Button>}
         </div>
       </>}
-      {notice}
+      {accountInfo && <p role="status" className="break-words">{accountInfo}</p>}
     </WorkModal>}
 
-    {dialog === 'template' && <TemplateEditor root={root} busy={busy} feedback={feedback} close={close}
+    {dialog === 'template' && <TemplateEditor root={root} busy={busy} close={close}
       save={async (draft) => {
         const saved = await command<Template>('/templates', draft);
         if (saved) {
           setSelectedTemplates([saved.id]);
-          setFeedback('已保存 ' + templateLabel(saved) + ' · ' + saved.clips.length + ' 段');
+          notify.success('已保存 ' + templateLabel(saved) + ' · ' + saved.clips.length + ' 段');
           close();
         }
       }} />}
@@ -443,7 +440,6 @@ export default function RunningHub({ bootstrap }: PageProps) {
         : '成片段数以模板实际选入的参考视频为准。'}</p>
       {!profile?.workflowVersionId && <p className="rh-empty">请先在工作流配置中检查并保存版本。</p>}
       <details><summary>查看成片归档路径</summary><ul className="max-h-52 overflow-auto">{preview.paths.map((path) => <li className="break-all" key={path}>{path}</li>)}</ul></details>
-      {notice}
     </WorkModal>}
 
     {dialog === 'pay' && startTarget && <WorkModal title={resuming ? '恢复批次' : '启动批次'} busy={busy} close={close} footer={<>
@@ -457,7 +453,6 @@ export default function RunningHub({ bootstrap }: PageProps) {
       {startingLive && <div className="rounded-lg bg-warning-soft p-3">
         <Check label="我了解实际生成会产生 RunningHub 费用。" selected={paid} onChange={setPaid} disabled={busy} />
       </div>}
-      {notice}
     </WorkModal>}
 
     <Drawer.Backdrop isOpen={Boolean(batchId)} isDismissable={!busy} isKeyboardDismissDisabled={busy}
@@ -468,7 +463,6 @@ export default function RunningHub({ bootstrap }: PageProps) {
           <Drawer.Body className="space-y-3">
             {(batch.error || jobs.error) && <p role="alert">{batch.error || jobs.error}</p>}
             {batch.loading && !selectedBatch && <p role="status">正在读取批次…</p>}
-            {notice}
             {selectedBatch && <>
               <p className="break-all font-mono text-xs">{selectedBatch.id}</p>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -476,7 +470,7 @@ export default function RunningHub({ bootstrap }: PageProps) {
                   {selectedBatch.mode === 'dry-run' ? ' · 历史演练批次' : ''}</p>
                 {canWrite && canTerminateBatch(selectedBatch) && !detailAction &&
                   <Button ref={terminateTrigger} size="sm" variant="danger" isDisabled={busy}
-                    onPress={() => { setFeedback(''); setDetailAction('terminate'); }}>终止批次</Button>}
+                    onPress={() => { setDetailAction('terminate'); }}>终止批次</Button>}
               </div>
               {canWrite && canTerminateBatch(selectedBatch) && detailAction === 'terminate' &&
                 <section aria-labelledby="rh-terminate-title" className="space-y-2 rounded-lg border p-3">
@@ -540,13 +534,13 @@ export default function RunningHub({ bootstrap }: PageProps) {
                   <Button variant="secondary" autoFocus isDisabled={busy} onPress={backToDetails}>返回详情</Button>
                   <Button isDisabled={disabled || (selectedBatch.mode === 'live' && !paid)} onPress={() => {
                     void command<Batch>('/batches/' + selectedBatch.id + '/continue', { confirmPaid: paid })
-                      .then((saved) => { if (saved) { setDetailAction(undefined); setFeedback('已安排剩余片段继续生成。'); } });
+                      .then((saved) => { if (saved) { setDetailAction(undefined); notify.success('已安排剩余片段继续生成。'); } });
                   }}>确认继续生成</Button>
                 </div>
               </> : <>
                 <p>首段满意后，可在同一个批次里完成后续片段。</p>
                 {canWrite && !detailAction && <Button ref={continueTrigger} isDisabled={busy} onPress={() => {
-                  setFeedback(''); setPaid(false); setDetailAction('continue');
+                  setPaid(false); setDetailAction('continue');
                 }}>继续生成剩余 {remaining} 段</Button>}
               </>}
             </section>}

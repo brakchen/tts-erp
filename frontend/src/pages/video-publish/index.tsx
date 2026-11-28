@@ -2,6 +2,7 @@ import PageIntro from '../../shared/PageIntro';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Label, ListBox, Modal, Select, Table } from '@heroui/react';
 import type { PageProps } from '../../shared/contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import { decodeConfig, decodeCurrent, decodeDetail, decodeList, decodeTaskDiagnostics, type Task } from './contracts';
 import { AttemptFacts, AvailableActions, DetailFacts, Facts, Identity, TargetFacts } from './TaskFacts';
 import { useVideoRead } from './useVideoRead';
@@ -29,7 +30,7 @@ function VideoPublishContent({ bootstrap }: PageProps) {
   const [operation, setOperation] = useState<Operation>();
   function actOn(task: Task, action: string) {
     if (command.blocked || !canTaskWrite) return;
-    if (operation) { setNotice('请先完成或关闭当前操作面板；原目标和输入不会被新选择覆盖。'); return; }
+    if (operation) { notify.warning('请先完成或关闭当前操作面板', '原目标和输入不会被新选择覆盖。'); return; }
     if (action === 'continue_upload') { setResume(task); setSelected(null); return; }
     setSelected(null); setOperation({ task, action, root: bootstrap.rootPath });
   }
@@ -45,7 +46,7 @@ function VideoPublishContent({ bootstrap }: PageProps) {
   function setSelected(id: string | null) { setDiagnosticRequest(undefined); setSelection(id === null ? null : { root: bootstrap.rootPath, id }); }
   function setAppendPath(path: string | null) { setAppendQuery(path === null ? null : { root: bootstrap.rootPath, path }); }
   const [extra, setExtra] = useState<{ filter: string; items: Task[]; nextCursor: string | null; appended: boolean }>({ filter: '', items: [], nextCursor: null, appended: false });
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   useEffect(() => { const update = () => setVisible(!document.hidden); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
   const params = new URLSearchParams(); if (filter) params.set('status', filter);
   const listPath = `${api}/tasks${params.size ? `?${params}` : ''}`;
@@ -71,8 +72,8 @@ function VideoPublishContent({ bootstrap }: PageProps) {
   const nextCursor = extra.filter === filter && extra.appended ? extra.nextCursor : history.data?.nextCursor;
   const blocked = config.blocked || current.blocked || history.blocked || more.blocked || detail.blocked;
   async function copy(value: string) {
-    try { await navigator.clipboard.writeText(value); setNotice('ID 已复制（完整值）。'); }
-    catch { setNotice('复制失败，请选择完整 ID 手动复制。'); }
+    try { await navigator.clipboard.writeText(value); notify.success('ID 已复制（完整值）'); }
+    catch { notify.failure('复制失败', '请选择完整 ID 手动复制。'); }
   }
   function chooseFilter(value: string) { setFilter(value); setAppendPath(null); setExtra({ filter: value, items: [], nextCursor: null, appended: false }); }
   function loadMore() {
@@ -91,7 +92,6 @@ function VideoPublishContent({ bootstrap }: PageProps) {
       <span>上一响应结束后计时；隐藏页面暂停。</span>
     </div>
     {blocked && <p role="status">读取冷却中；等待完整 Retry-After 后可明确刷新，不会自动重试。</p>}
-    {notice && <p role="status">{notice}</p>}
     {!canTaskWrite && <p>任务写操作需要服务端提供的 readwrite 能力提示；仍可读取详情，接口会再次验证权限。创建条件与任务允许操作分别由服务端判定。</p>}
     <div className="grid min-w-0 items-start gap-4 2xl:grid-cols-2">
     <UploadWorkbench key={bootstrap.rootPath} root={bootstrap.rootPath} config={config.data} canTaskWrite={canTaskWrite} command={command} resume={resume} onResumeAccepted={() => setResume(undefined)} onChanged={() => setRevision((value) => value + 1)} />

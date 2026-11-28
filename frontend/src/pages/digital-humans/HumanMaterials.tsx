@@ -7,6 +7,7 @@ import OperationConfirmation from '../media-assets/OperationConfirmation';
 import ViewAsset from '../media-assets/ViewAsset';
 import { decodeAssetList, decodeDigitalHuman, type DigitalHuman } from '../media-assets/contracts';
 import { AssetTags, ReadStatus, assetType, mediaWrite, useMediaAction, useMediaRead } from '../media-assets/media-ui';
+import { useOperationToast } from '../../shared/operation-toast';
 
 export default function HumanMaterials({ bootstrap, id, revision, canWrite, onBack, onPick, onChanged }: {
   bootstrap: FrontendBootstrap; id: string; revision: number; canWrite: boolean;
@@ -19,7 +20,7 @@ export default function HumanMaterials({ bootstrap, id, revision, canWrite, onBa
   const [selection, setSelection] = useState<string[]>([]);
   const [view, setView] = useState<string>();
   const [removing, setRemoving] = useState<{ ids: string[]; title: string }>();
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const action = useMediaAction();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus({ preventScroll: true }); }, []);
@@ -39,7 +40,7 @@ export default function HumanMaterials({ bootstrap, id, revision, canWrite, onBa
       else await mediaWrite(root, path + 'batch-remove', 'POST', () => undefined, { assetIds: removing.ids });
       const ids = new Set(removing.ids);
       setSelection((previous) => previous.filter((assetId) => !ids.has(assetId)));
-      setNotice('已移除 ' + ids.size + ' 项关联。');
+      notify.success('已移除 ' + ids.size + ' 项关联。');
       setRemoving(undefined);
       onChanged();
     });
@@ -60,7 +61,6 @@ export default function HumanMaterials({ bootstrap, id, revision, canWrite, onBa
       <h1 tabIndex={-1} ref={heading}>{human ? human.name + '的素材' : '素材管理'}</h1>
     </header>
     <ReadStatus title="数字人档案" loading={read.loading} error={read.error} onRetry={read.retry} />
-    {notice && <p className="media-status" role="status">{notice}</p>}
     {human && <>
       <div className="media-list-toolbar">
         <h2>关联素材 <span className="text-muted">· {activeIds.size} 项</span></h2>

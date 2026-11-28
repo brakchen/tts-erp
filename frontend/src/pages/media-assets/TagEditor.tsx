@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Checkbox, Disclosure, Input, Label, Tag, TagGroup, TextField, buttonVariants } from '@heroui/react';
 import { decodeTags } from './contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import { ReadStatus, useMediaRead } from './media-ui';
 
 /** Each input is one tag, including punctuation. Candidates stay server-owned. */
@@ -24,7 +25,7 @@ export default function TagEditor({ root, selected, input, onChange, onInput, on
   const selection = withPendingTag(selected, '');
   const selectedKeys = new Set(selection.map((tag) => tag.toLowerCase()));
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const notify = useOperationToast();
   const normalized = input.trim().replace(/\s+/gu, ' ');
   const existing = [...selection, ...choices].find((tag) => tag.toLowerCase() === normalized.toLowerCase());
   // Share the server catalog with the submit owner; preserve the raw draft
@@ -34,13 +35,12 @@ export default function TagEditor({ root, selected, input, onChange, onInput, on
   }, [read.data, onCatalog]);
   function add() {
     if (disabled || read.loading || !read.data) return;
-    setNotice('');
     if (!normalized) { setError('请输入标签名称。'); return; }
     const tag = existing ?? normalized;
     setError('');
     onChange(withPendingTag(selected, tag));
     onInput('');
-    setNotice(existing ? '已选中现有标签「' + tag + '」。' : '已添加标签「' + tag + '」。');
+    notify.success(existing ? '已选中现有标签「' + tag + '」。' : '已添加标签「' + tag + '」。');
   }
   return <div className="media-tag-editor">
     <TagGroup aria-label="可选素材标签" selectionMode="multiple" selectedKeys={selectedKeys}
@@ -63,7 +63,7 @@ export default function TagEditor({ root, selected, input, onChange, onInput, on
     <p className="media-tag-count" aria-live="polite">已选 {selection.length} 个 · 可多选，再次点击取消</p>
     <ReadStatus title="已有标签" loading={read.loading} error={read.error} onRetry={read.retry} />
     <div className="media-tag-add">
-      <TextField value={input} onChange={(value) => { setError(''); setNotice(''); onInput(value); }}
+      <TextField value={input} onChange={(value) => { setError(''); onInput(value); }}
         isDisabled={disabled} isInvalid={Boolean(error)} className="min-w-0 flex-1">
         <Label>新增标签</Label><Input placeholder="输入新标签名称，按回车添加" onKeyDown={(event) => {
           if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!event.nativeEvent.isComposing) add(); }
@@ -72,7 +72,6 @@ export default function TagEditor({ root, selected, input, onChange, onInput, on
       <Button variant="secondary" isDisabled={disabled || read.loading || !read.data} onPress={add}>添加标签</Button>
     </div>
     {error && <p className="media-error" role="alert">{error}</p>}
-    {notice && <p className="media-muted" role="status">{notice}</p>}
   </div>;
 }
 
