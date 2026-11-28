@@ -4,6 +4,7 @@ import { ApiError, requestJson, scheduleReadDelay } from '../../shared/api/clien
 import { commandFailure, type CommandFailure } from '../../shared/api/command-errors';
 import { withinRequestLifetime } from '../../shared/api/request-lifetime';
 import type { PageProps } from '../../shared/contracts';
+import { useOperationToast } from '../../shared/operation-toast';
 import { canonicalNext, confirmLogin, LoginContractError } from './contracts';
 import { leaveLogin } from './navigation';
 import BrandPanel from './BrandPanel';
@@ -30,6 +31,7 @@ export default function Login({ bootstrap }: PageProps) {
   const controllers = useRef(new Set<AbortController>());
   const notBefore = useRef(0);
   const stopCooldown = useRef<(() => void) | undefined>(undefined);
+  const notify = useOperationToast();
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -77,7 +79,10 @@ export default function Login({ bootstrap }: PageProps) {
       const result = commandFailure(error, labels, 'login');
       setFailure(result);
       const status = error instanceof ApiError ? error.status : undefined;
-      if (status === 429 || ((status === 500 || status === 503) && result.retryAfter > 0)) holdCooldown(result.retryAfter);
+      const rateLimited = (status === 429 || status === 500 || status === 503) && result.retryAfter > 0;
+      // 限流冷却需要页面内倒计时，保留内联 Alert；其余失败是一次性结果，用 toast。
+      if (rateLimited) holdCooldown(result.retryAfter);
+      else notify.failure('登录未完成', result.message);
     } finally {
       controllers.current.delete(controller); inFlight.current = false;
       if (mounted.current) setPending(false);
@@ -111,7 +116,7 @@ export default function Login({ bootstrap }: PageProps) {
                 </InputGroup>
                 <FieldError>{failure?.fieldErrors.password}</FieldError>
               </TextField>
-              {failure && <Alert status="danger"><Alert.Content><Alert.Title>登录未完成</Alert.Title><Alert.Description>{loginAlert(failure, remaining)}</Alert.Description></Alert.Content></Alert>}
+              {failure && cooldown && <Alert status="danger"><Alert.Content><Alert.Title>登录未完成</Alert.Title><Alert.Description>{loginAlert(failure, remaining)}</Alert.Description></Alert.Content></Alert>}
               <Button type="submit" fullWidth size="lg" isDisabled={blocked}>{pending ? '登录中…' : '登录'}<span aria-hidden="true">↗</span></Button>
               {pending && <p role="status">正在等待登录响应…</p>}
             </form>
