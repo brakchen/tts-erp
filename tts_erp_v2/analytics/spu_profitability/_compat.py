@@ -26,6 +26,7 @@ def read_legacy_overview(
     scope: ProfitScope,
     view: RowView,
     fee_rate: Decimal | None,
+    listed_only: bool = False,
     projection_lookback_days: int = 30,
 ) -> ProfitabilityOverview:
     with consistent_read_snapshot(session) as calculated_at:
@@ -35,6 +36,7 @@ def read_legacy_overview(
             view=view,
             calculated_at=calculated_at,
             fee_rate=fee_rate,
+            listed_only=listed_only,
             legacy_include_all=scope.include_inactive,
             projection_lookback_days=projection_lookback_days,
         )

@@ -126,6 +126,7 @@ def _read_overview_in_snapshot(
     calculated_at,
     only_spu_pk: int | None = None,
     fee_rate: Decimal | None = None,
+    listed_only: bool = False,
     legacy_include_all: bool | None = None,
     projection_lookback_days: int = 30,
 ) -> ProfitabilityOverview:
@@ -135,9 +136,12 @@ def _read_overview_in_snapshot(
         shop_pk=scope.shop_pk,
         selection=scope.effective_selection,
         active_only=(
-            legacy_include_all
-            if legacy_include_all is not None
-            else not scope.include_inactive
+            listed_only
+            or (
+                legacy_include_all
+                if legacy_include_all is not None
+                else not scope.include_inactive
+            )
         ),
         include_without_activity=(
             legacy_include_all

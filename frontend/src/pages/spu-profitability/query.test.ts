@@ -31,6 +31,14 @@ describe('profitability page scope', () => {
     expect(percentToRatio('+1')).toBe('0.01');
     expect(percentToRatio('')).toBe(null);
   });
+  it('persists the listed-only filter and sends it as a server scope parameter', () => {
+    const q = initialQuery('spu-roi', '?shop_pk=7', { listedOnly: true });
+    expect(q.listedOnly).toBe(true);
+    expect(queryParams(q, false).get('listed_only')).toBe('true');
+    const fallback = initialQuery('spu-roi', '?shop_pk=7');
+    expect(fallback.listedOnly).toBe(false);
+    expect(queryParams(fallback, false).get('listed_only')).toBe('false');
+  });
   it('keeps one preset when month-to-date equals a rolling window', () => {
     const presets = datePresets('2026-11-08');
     expect(presets.some((preset) => preset.id === '7')).toBe(false);

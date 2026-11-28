@@ -623,6 +623,7 @@ def list_spu_roi(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     include_all: bool = Query(default=False),
+    listed_only: bool = Query(default=False),
     shop_pk: int | None = Query(default=None, ge=1),
     fee_rate: str | None = Query(default=None, max_length=20),
     w_start: date | None = Query(default=None),  # noqa: B008
@@ -677,6 +678,7 @@ def list_spu_roi(
             scope=profit_scope,
             view=view,
             fee_rate=fee_value,
+            listed_only=listed_only,
             projection_lookback_days=projection_lookback_days,
         )
     except FxRateUnavailable:

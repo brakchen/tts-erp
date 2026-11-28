@@ -80,6 +80,18 @@ it.each(['spu-roi', 'focused-spus'] as const)('keeps %s dates with results and t
   expect(within(overview).getByLabelText('利润')).toBeInTheDocument();
   expect(document.getElementById('kpi-net-profit')).not.toBeNull();
 });
+it('checking 仅展示已上架 sends listed_only=true on the next overview read', async () => {
+  await act(async () => { render(<><Page bootstrap={bootstrap} /><Toast.Provider /></>); });
+  await screen.findByText('TEST_RESULT');
+  const readsBefore = calls.filter((call) => call.url.includes('/analytics/spu-roi?'));
+  expect(readsBefore.length).toBeGreaterThan(0);
+  expect(new URL(readsBefore.at(-1)!.url, location.origin).searchParams.get('listed_only')).toBe('false');
+  fireEvent.click(screen.getByRole('checkbox', { name: '仅展示已上架' }));
+  await waitFor(() => {
+    const reads = calls.filter((call) => call.url.includes('/analytics/spu-roi?'));
+    expect(new URL(reads.at(-1)!.url, location.origin).searchParams.get('listed_only')).toBe('true');
+  });
+});
 it('both page profiles render through the same React owner and keep the server scope', async () => {
   // This case owns request scope; Summary.test.tsx owns metric rendering.
   // Layout cases above continue rendering the real Summary.
