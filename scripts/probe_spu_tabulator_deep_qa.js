@@ -333,12 +333,12 @@ async function deepFlow(page, state) {
     ["广告消耗", "spend"],
     ["广告系统实际ROI", "ad_system_actual_roi"],
     ["广告系统保本ROI", "ad_system_breakeven_roi"],
-    ["有效销售", "effective_sales"],
     ["总单量", "total_orders"],
-    ["有效单量", "effective_order_count"],
-    ["取消率%", "cancel_rate"],
-    ["严格全损率%", "strict_full_loss_rate"],
     ["净利润", "net_profit"],
+    ["有效单量", "effective_order_count"],
+    ["严格全损率%", "strict_full_loss_rate"],
+    ["取消率%", "cancel_rate"],
+    ["有效销售", "effective_sales"],
   ];
   for (const [title, field] of sorts) {
     const url = await clickAndWait(

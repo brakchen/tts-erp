@@ -65,10 +65,14 @@ it.each(['spu-roi', 'focused-spus'] as const)('keeps %s dates with results and t
   await act(async () => { render(<><Page bootstrap={{ ...bootstrap, pageId }} /><Toast.Provider /></>); });
   await screen.findByText('TEST_RESULT');
   const overview = screen.getByRole('region', { name: '经营概览' });
-  const filters = screen.getByRole('region', { name: '店铺与经营日期筛选' });
+  const filters = screen.getByRole('region', { name: '店铺、日期与 SPU 筛选' });
+  const freshness = document.getElementById('data-freshness')!;
+  const details = screen.getByRole('region', { name: '商品经营明细' });
   expect(overview.contains(filters)).toBe(false);
-  expect(filters.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(filters.compareDocumentPosition(document.getElementById('data-freshness')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(overview.compareDocumentPosition(freshness) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(freshness.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(filters.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(filters).toContainElement(screen.getByLabelText('按 SPU ID / 标题搜索'));
   expect(overview.compareDocumentPosition(screen.getByLabelText('按 SPU ID / 标题搜索')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const sample = within(overview).getByRole('region', { name: '历史预测依据' });
   const profit = within(overview).getByLabelText('利润');

@@ -88,6 +88,12 @@
           <h3 class="erp-section-heading">利润</h3>
           <div class="gap-2">
             <span id="sum-projection-status" class="erp-table-meta">可预测</span>
+            <label>历史样本
+              <select id="filter-projection-lookback-days" aria-label="预测样本天数">
+                <option selected>30 天</option>
+                <option>90 天</option>
+              </select>
+            </label>
             <button class="btn btn-sm" type="button" data-open="dlg-profit-help">口径帮助</button>
           </div>
         </header>
@@ -148,7 +154,8 @@
 <div data-demo-panel="overview" data-demo="error" class="hidden"><section class="erp-overview" aria-label="经营概览"><header class="erp-toolbar"><h2 class="erp-section-heading">经营概览</h2></header><p role="status">经营概览加载失败</p><p><button class="btn" type="button">重试</button></p></section></div>
 <div data-demo-panel="overview" data-demo="noshop" class="hidden"><section class="erp-overview" aria-label="经营概览"><header class="erp-toolbar"><h2 class="erp-section-heading">经营概览</h2></header><p role="status">请选择店铺</p><p>请先选择当前经营店铺。</p></section></div>
 
-<section class="erp-panel erp-profit-controls" aria-label="店铺与经营范围">
+<section class="erp-profit-freshness" aria-label="数据更新"><p class="meta">数据更新：正常 · 全账号 · 2026-11-12 21:50（店铺当地）</p></section>
+<section class="erp-panel erp-profit-controls" aria-label="店铺、日期与 SPU 筛选">
   <div class="erp-toolbar">
     <label class="erp-shop-picker">当前店铺
       <select aria-label="当前店铺">
@@ -167,22 +174,13 @@
       <button class="btn btn-sm" type="button">本月</button>
       <button class="btn btn-sm" type="button">不限</button>
     </div>
-    <label>预测样本
-      <select id="filter-projection-lookback-days" aria-label="预测样本天数">
-        <option selected>30 天</option>
-        <option>90 天</option>
-      </select>
-    </label>
     <button class="btn btn-sm" type="button" data-toggle="toolbar-more-focused" aria-controls="toolbar-more-focused" aria-expanded="false">更多</button>
   </div>
   <div id="toolbar-more-focused" class="hidden erp-toolbar" style="margin-top:12px;">
     <label>临时佣金费率（%）<input id="filter-fee" inputmode="decimal" placeholder="留空使用实测 / 基线" aria-label="临时覆写平台佣金费率（百分比）"></label>
     <label class="field inline"><input type="checkbox" id="filter-include-all"> 含无活动 SPU</label>
   </div>
-  <p class="meta">数据更新：正常 · 全账号 · 2026-11-12 21:50（店铺当地）</p>
-</section>
-
-<section class="erp-panel stack" aria-label="重点关注 SPU">
+  <div class="erp-spu-selection stack">
   <h2 class="erp-section-heading">重点关注 SPU</h2>
   <p class="meta">关注清单一次上限 500 个 SPU。保存为实时写入当前店铺关注事实。</p>
   <div class="chip-row" aria-label="已关注 SPU 标签">
@@ -201,9 +199,9 @@
   <label>批量选择 SPU
     <textarea rows="3" placeholder="粘贴内部编号，逗号或换行分隔"></textarea>
   </label>
-  
   <p>当前为只读权限；可浏览关注商品，修改需要 readwrite。</p>
   <p class="meta">服务端冷却尚未结束时需手动重试读取或搜索，不会自动重试。保存未确认时原选择保留，需先重新读取关注事实。</p>
+  </div>
 </section>
 <p>尚未关注 SPU，请在上方搜索并添加。当前范围仍为关注清单。</p>
 <section class="stack">
@@ -213,7 +211,7 @@
       <table class="erp-table" aria-label="商品经营明细">
         <thead><tr>
       <th>商品</th><th>广告消耗</th><th>广告系统实际ROI</th><th>广告系统保本ROI</th>
-      <th>有效销售</th><th>总单量</th><th>有效单量</th><th>取消率%</th><th>全损率%</th><th>净利润</th>
+      <th>总单量</th><th>净利润</th><th>有效单量</th><th>全损率%</th><th>取消率%</th><th>有效销售</th>
     </tr></thead>
         <tbody><tr>
           <td>
@@ -227,8 +225,8 @@
             </div>
           </td>
           <td class="num">1,280.00</td><td class="num">1.92</td><td class="num">≈1.18</td>
-          <td class="num">4,860.00</td><td class="num">42</td><td class="num">38</td>
-          <td class="num">2.38%</td><td class="num">2.38%</td><td class="num">745.00</td>
+          <td class="num">42</td><td class="num">745.00</td><td class="num">38</td>
+          <td class="num">2.38%</td><td class="num">2.38%</td><td class="num">4,860.00</td>
           
         </tr><tr class="erp-profit-loss">
           <td>
@@ -242,8 +240,8 @@
             </div>
           </td>
           <td class="num">640.00</td><td class="num">1.10</td><td class="num">1.25</td>
-          <td class="num">1,980.00</td><td class="num">28</td><td class="num">22</td>
-          <td class="num">7.14%</td><td class="num">3.57%</td><td class="num">-86.00</td>
+          <td class="num">28</td><td class="num">-86.00</td><td class="num">22</td>
+          <td class="num">3.57%</td><td class="num">7.14%</td><td class="num">1,980.00</td>
           
         </tr></tbody>
       </table>

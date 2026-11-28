@@ -4558,7 +4558,7 @@ def test_spu_roi_page_d8_no_column_toggles(api_client, readonly_key):
         assert retired not in body + page + table
     block = table.split("export const columns = [", 1)[1].split("] as const", 1)[0]
     fields = re.findall(r"\['[^']+', '([^']+)'\]", block)
-    assert fields == ["spend", "ad_system_actual_roi", "ad_system_breakeven_roi", "effective_sales", "total_orders", "effective_order_count", "cancel_rate", "strict_full_loss_rate", "net_profit"]
+    assert fields == ["spend", "ad_system_actual_roi", "ad_system_breakeven_roi", "total_orders", "net_profit", "effective_order_count", "strict_full_loss_rate", "cancel_rate", "effective_sales"]
     assert "columns.map(([title, field])" in table
 
 
@@ -4810,7 +4810,7 @@ def test_spu_roi_page_no_old_columns(api_client, readonly_key):
     table = _react_profitability_source("ProfitabilityTable.tsx")
     block = table.split("export const columns = [", 1)[1].split("] as const", 1)[0]
     labels = re.findall(r"\['([^']+)', '[^']+'\]", block)
-    assert labels == ["广告消耗", "广告系统实际ROI", "广告系统保本ROI", "有效销售", "总单量", "有效单量", "取消率%", "严格全损率%", "净利润"]
+    assert labels == ["广告消耗", "广告系统实际ROI", "广告系统保本ROI", "总单量", "净利润", "有效单量", "严格全损率%", "取消率%", "有效销售"]
     assert "title: '商品', field: 'spu_id'" in table
     for retired in ("实际ROI", "保本ROI", "销售$", "有效销售$", "退货$", "取消单量", "退货率%", "全损退款$", "关联广告数"):
         assert retired not in labels

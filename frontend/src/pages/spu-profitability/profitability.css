@@ -6,6 +6,7 @@
 .erp-profit-controls .erp-shop-picker { width: 294px; max-width: 100%; }
 .erp-profit-dates > label { width: 176px; flex: 0 1 176px; }
 .erp-profit-projection { width: 144px; }
+.erp-profit-controls .erp-spu-selection { min-width: 0; padding-top: 4px; }
 .erp-spu-selection-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .erp-spu-selection-heading label { margin: 0; cursor: text; }
 .erp-spu-selection-search { display: block; }

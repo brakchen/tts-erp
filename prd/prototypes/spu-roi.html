@@ -23,7 +23,6 @@
 <div data-demo-panel="overview" data-demo="ok" class="">
 <div id="spu-time-scope">
 <div class="scope-global">
-  <label>当前店铺 <select id="scope-shop" aria-label="当前店铺"><option>示例店铺 A</option><option>示例店铺 B</option></select></label>
   <p>金额 CNY</p>
 </div>
 
@@ -34,27 +33,6 @@
     </div>
     <span class="scope-range" data-report-range>2026-11-19 ~ 2026-11-25</span>
   </header>
-<section class="erp-panel erp-profit-controls" aria-label="经营日期筛选">
-  <div class="erp-toolbar">
-
-    <label>起始日<input type="date" id="filter-w-start" value="2026-11-19" aria-label="经营起始日期"></label>
-    <label>截止日<input type="date" id="filter-w-end" value="2026-11-25" aria-label="经营截止日期"></label>
-    <div class="gap-2" role="group" aria-label="快捷日期范围">
-      <button class="btn btn-sm" type="button" data-range="2026-11-25/2026-11-25" aria-pressed="false">昨天</button>
-      <button class="btn btn-sm" type="button" data-range="2026-11-19/2026-11-25" aria-pressed="false">近 7 天</button>
-      <button class="btn btn-sm" type="button" data-range="2026-10-27/2026-11-25" aria-pressed="false">近 30 天</button>
-      <button class="btn btn-sm" type="button" data-range="2026-11-01/2026-11-25" aria-pressed="false">本月</button>
-      <button class="btn btn-sm" type="button" data-range="/" aria-pressed="false">不限</button>
-    </div>
-
-    <button class="btn btn-sm" type="button" data-toggle="toolbar-more-roi" aria-controls="toolbar-more-roi" aria-expanded="false">更多</button>
-  </div>
-  <div id="toolbar-more-roi" class="hidden erp-toolbar" style="margin-top:12px;">
-    <label>临时佣金费率（%）<input id="filter-fee" inputmode="decimal" placeholder="留空使用实测 / 基线" aria-label="临时覆写平台佣金费率（百分比）"></label>
-    <label class="field inline"><input type="checkbox" id="filter-include-all"> 含无活动 SPU</label>
-  </div>
-  <p id="scope-date-error" class="scope-date-error" role="alert"></p>
-</section>
   <div class="erp-overview-grid">
     
       <article class="erp-card" aria-label="销售">
@@ -206,7 +184,26 @@
 
 
 
-<section class="erp-panel stack" aria-label="SPU 范围">
+<section class="erp-panel erp-profit-controls" aria-label="店铺、日期与 SPU 筛选">
+  <div class="erp-toolbar">
+    <label>当前店铺 <select id="scope-shop" aria-label="当前店铺"><option>示例店铺 A</option><option>示例店铺 B</option></select></label>
+    <label>起始日<input type="date" id="filter-w-start" value="2026-11-19" aria-label="经营起始日期"></label>
+    <label>截止日<input type="date" id="filter-w-end" value="2026-11-25" aria-label="经营截止日期"></label>
+    <div class="gap-2" role="group" aria-label="快捷日期范围">
+      <button class="btn btn-sm" type="button" data-range="2026-11-25/2026-11-25" aria-pressed="false">昨天</button>
+      <button class="btn btn-sm" type="button" data-range="2026-11-19/2026-11-25" aria-pressed="false">近 7 天</button>
+      <button class="btn btn-sm" type="button" data-range="2026-10-27/2026-11-25" aria-pressed="false">近 30 天</button>
+      <button class="btn btn-sm" type="button" data-range="2026-11-01/2026-11-25" aria-pressed="false">本月</button>
+      <button class="btn btn-sm" type="button" data-range="/" aria-pressed="false">不限</button>
+    </div>
+    <button class="btn btn-sm" type="button" data-toggle="toolbar-more-roi" aria-controls="toolbar-more-roi" aria-expanded="false">更多</button>
+  </div>
+  <div id="toolbar-more-roi" class="hidden erp-toolbar" style="margin-top:12px;">
+    <label>临时佣金费率（%）<input id="filter-fee" inputmode="decimal" placeholder="留空使用实测 / 基线" aria-label="临时覆写平台佣金费率（百分比）"></label>
+    <label class="field inline"><input type="checkbox" id="filter-include-all"> 含无活动 SPU</label>
+  </div>
+  <p id="scope-date-error" class="scope-date-error" role="alert"></p>
+  <div class="erp-spu-selection stack">
   <h2 class="erp-section-heading">SPU 范围</h2>
   <p class="meta">精确多选一次上限 100 个 SPU（含已选项）。点「查询」后按所选范围查看大盘。</p>
   <div class="chip-row" aria-label="已选 SPU 标签">
@@ -226,8 +223,8 @@
     <textarea rows="3" placeholder="粘贴内部编号，逗号或换行分隔"></textarea>
   </label>
   <div class="gap-2"><button class="btn btn-primary" type="button">查询</button><button class="btn" type="button">清除选择</button></div>
-  
   <p class="meta">服务端冷却尚未结束时需手动重试读取或搜索，不会自动重试。保存未确认时原选择保留，需先重新读取关注事实。</p>
+  </div>
 </section>
 
 <section class="stack">
@@ -237,7 +234,7 @@
       <table class="erp-table" aria-label="商品经营明细">
         <thead><tr>
       <th>商品</th><th>广告消耗</th><th>广告系统实际ROI</th><th>广告系统保本ROI</th>
-      <th>有效销售</th><th>总单量</th><th>有效单量</th><th>取消率%</th><th>全损率%</th><th>净利润</th><th>采购价平均值</th><th>采购价中位数</th><th>销售价平均值</th><th>销售价中位数</th><th>实付价平均值</th><th>实付价中位数</th>
+      <th>总单量</th><th>净利润</th><th>有效单量</th><th>全损率%</th><th>取消率%</th><th>有效销售</th><th>采购价平均值</th><th>采购价中位数</th><th>销售价平均值</th><th>销售价中位数</th><th>实付价平均值</th><th>实付价中位数</th>
     </tr></thead>
         <tbody><tr>
           <td>
@@ -251,8 +248,8 @@
             </div>
           </td>
           <td class="num">1,280.00</td><td class="num">1.92</td><td class="num">≈1.18</td>
-          <td class="num">4,860.00</td><td class="num">42</td><td class="num">38</td>
-          <td class="num">2.38%</td><td class="num">2.38%</td><td class="num">745.00</td>
+          <td class="num">42</td><td class="num">745.00</td><td class="num">38</td>
+          <td class="num">2.38%</td><td class="num">2.38%</td><td class="num">4,860.00</td>
           <td class="num">≈32.50</td><td class="num">≈31.00</td><td class="num">89.90</td><td class="num">79.90</td><td class="num">76.40</td><td class="num">69.90</td>
         </tr><tr class="erp-profit-loss">
           <td>
@@ -266,8 +263,8 @@
             </div>
           </td>
           <td class="num">640.00</td><td class="num">1.10</td><td class="num">1.25</td>
-          <td class="num">1,980.00</td><td class="num">28</td><td class="num">22</td>
-          <td class="num">7.14%</td><td class="num">3.57%</td><td class="num">-86.00</td>
+          <td class="num">28</td><td class="num">-86.00</td><td class="num">22</td>
+          <td class="num">3.57%</td><td class="num">7.14%</td><td class="num">1,980.00</td>
           <td class="num">≈32.50</td><td class="num">≈31.00</td><td class="num">89.90</td><td class="num">79.90</td><td class="num">76.40</td><td class="num">69.90</td>
         </tr></tbody>
       </table>

@@ -30,7 +30,7 @@ function loadTable(root: string): Promise<Constructor> {
   }); scripts.set(url, promise); return promise;
 }
 export const columns = [
-  ['广告消耗', 'spend'], ['广告系统实际ROI', 'ad_system_actual_roi'], ['广告系统保本ROI', 'ad_system_breakeven_roi'], ['有效销售', 'effective_sales'], ['总单量', 'total_orders'], ['有效单量', 'effective_order_count'], ['取消率%', 'cancel_rate'], ['严格全损率%', 'strict_full_loss_rate'], ['净利润', 'net_profit'],
+  ['广告消耗', 'spend'], ['广告系统实际ROI', 'ad_system_actual_roi'], ['广告系统保本ROI', 'ad_system_breakeven_roi'], ['总单量', 'total_orders'], ['净利润', 'net_profit'], ['有效单量', 'effective_order_count'], ['严格全损率%', 'strict_full_loss_rate'], ['取消率%', 'cancel_rate'], ['有效销售', 'effective_sales'],
 ] as const;
 const priceGroups = [['采购价', 'purchase', 'purchasePrice'], ['销售价', 'originalSale', 'originalSalePrice'], ['实付价', 'paid', 'paidPrice']] as const;
 export function sortLabel(field: string): string { const metric = columns.find(([, key]) => key === field); if (metric) return metric[0]; if (field === 'roi_real') return '实际ROI'; for (const [label, , prefix] of priceGroups) { if (field === `${prefix}Mean`) return `${label}平均值`; if (field === `${prefix}Median`) return `${label}中位数`; } return field; }

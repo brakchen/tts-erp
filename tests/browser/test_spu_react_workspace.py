@@ -58,16 +58,23 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
         assert costs['x'] >= sales['x'] + sales['width']
     else:
         assert costs['y'] >= sales['y'] + sales['height']
-    filters = page.get_by_role('region', name='店铺与经营日期筛选').bounding_box()
-    assert filters
-    assert filters['y'] + filters['height'] <= overview['y'] + 1
+    filters = page.get_by_role('region', name='店铺、日期与 SPU 筛选').bounding_box()
+    freshness = page.get_by_role('region', name='数据更新').bounding_box()
+    details = page.get_by_role('region', name='商品经营明细').bounding_box()
+    assert filters and freshness and details
+    assert freshness['y'] >= overview['y'] + overview['height'] - 1
+    assert filters['y'] >= freshness['y'] + freshness['height'] - 1
+    assert filters['y'] + filters['height'] <= details['y'] + 1
     kpi = page.locator('#kpi-net-profit').bounding_box()
     assert kpi and overview['y'] <= kpi['y'] < sales['y']
     sample = page.get_by_role('region', name='历史预测依据').bounding_box()
     assert sample and sample['y'] > profit['y']
     assert sample['y'] + sample['height'] <= profit['y'] + profit['height']
+    # Combined shop/date + SPU selection is taller than the old filter-only bar
+    # (previously 2560px <= 160, 1440px <= 230). Limits cover one toolbar row
+    # plus SPU heading, search field and apply/clear actions with wrapping slack.
     if width == 2560:
-        assert filters['height'] <= 160, filters
+        assert filters['height'] <= 320, filters
         controls = [page.locator(selector).bounding_box() for selector in (
             '#filter-w-start', '#filter-w-end', '#btn-toolbar-more',
         )]
@@ -75,7 +82,7 @@ def test_spu_workspaces_keep_controls_and_a_full_metric_visible(
         bottoms = [box['y'] + box['height'] for box in controls]
         assert max(bottoms) - min(bottoms) <= 2, controls
     elif width == 1440:
-        assert filters['height'] <= 230, filters
+        assert filters['height'] <= 420, filters
     report = overflow_report(page)
     assert report['scrollWidth'] <= report['clientWidth'] + 1, report
     assert not report['offenders'], report

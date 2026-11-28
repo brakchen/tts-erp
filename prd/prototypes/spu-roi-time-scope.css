@@ -11,7 +11,6 @@
 #spu-time-scope .scope-report { border: 1px solid var(--rule); border-top: 4px solid var(--accent); border-radius: 10px; padding: 22px; background: var(--surface); min-width: 0; }
 #spu-time-scope .scope-report .scope-kicker { color: var(--accent); }
 #spu-time-scope .scope-range { color: var(--accent); background: var(--paper-deep); padding: 6px 10px; border-radius: 6px; font-size: 13px; font-variant-numeric: tabular-nums; }
-#spu-time-scope .scope-report .erp-profit-controls { margin: 16px 0; padding: 14px 0; border: 0; border-top: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft); box-shadow: none; border-radius: 0; }
 #spu-time-scope .scope-report .erp-overview-grid { gap: 16px; }
 #spu-time-scope .scope-report .erp-card { padding: 18px; box-shadow: none; }
 #spu-time-scope .scope-report .erp-overview-profit { border-color: var(--rule); }

@@ -110,7 +110,7 @@ export default function Selection({ root, shopPk, focused, canWrite, blocked, fe
   const unapplied = !focused && (draft.length !== applied.length || draft.some((id) => !applied.includes(id)));
   const selected = draft.map((id) => choices.find((item) => item.spu_id === id) ?? { spu_id: id, title: null, status: null });
   const options = [...new Map([...selected, ...choices].map((item) => [item.spu_id, item])).values()];
-  return <section aria-label={focused ? '重点关注 SPU' : 'SPU 范围'} className="erp-panel space-y-3">
+  return <section aria-label={focused ? '重点关注 SPU' : 'SPU 范围'} className="erp-spu-selection space-y-3">
     <div className="erp-spu-selection-heading">
       <h2 className="erp-section-heading">{focused ? '重点关注 SPU' : 'SPU 范围'}</h2>
       <label id="spu-search-label" htmlFor="spu-search-input" className="erp-table-meta">按 SPU ID / 标题搜索</label>
