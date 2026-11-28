@@ -59,13 +59,16 @@ describe('login content', () => {
     expect(init.credentials).toBe('same-origin'); expect(new Headers(init.headers).get('X-Requested-With')).toBe('tts-erp');
     expect(JSON.parse(init.body as string)).toEqual({ username: 'TEST_User', password: 'TEST_password', next });
     expect(screen.getByRole('button', { name: '登录中…' })).toBeDisabled();
+    expect(screen.getByText('正在等待登录响应…')).toBeVisible();
     await act(async () => release(json({ ok: true, ...identity })));
+    expect(screen.queryByText('正在等待登录响应…')).toBeNull();
     expect(leaveLogin).toHaveBeenCalledExactlyOnceWith(next); expect(screen.getByLabelText('密码', { exact: true })).toHaveValue('');
   });
   it.each([undefined, '//evil.test', '/v2/pages/dashboard', '/tts/../evil', '/tts/%2e%2e/evil', '/tts/tts/v2/pages/dashboard'])('fails closed on absent or noncanonical bootstrap next %#', async (loginNextPath) => {
     const fetcher = mockApi(async () => json({ ok: true, ...identity })); render(<><Login bootstrap={{ ...bootstrap, loginNextPath }} /><Toast.Provider /></>);
     await fill(); submit(); expect(fetcher).not.toHaveBeenCalled(); expect(loginButton()).toBeDisabled();
-    expect(screen.getByText(/登录暂不可用/)).toBeVisible();
+    expect(screen.getByText('登录暂不可用')).toBeVisible();
+    expect(screen.getByText('缺少有效的返回地址，请重新打开服务端登录页。')).toBeVisible();
   });
   it('uses static non-enumerating 401 feedback, preserves the username, and keeps the button usable', async () => {
     const fetcher = mockApi(async () => json({ detail: 'TEST_RAW_PASSWORD_USER_MISSING' }, 401)); render(<><Login bootstrap={bootstrap} /><Toast.Provider /></>); await fill(); submit();
@@ -140,10 +143,9 @@ describe('login determined failures', () => {
   });
   it('clears stale submitted field errors on genuine edits while retaining static feedback and the password', async () => {
     mockApi(async () => json({ detail: [{ loc: ['body', 'username'], type: 'value_error', msg: 'TEST_RAW', input: 'TEST_RAW' }] }, 422));
-    render(<><Login bootstrap={bootstrap} /><Toast.Provider /></>); await fill(); submit(); await screen.findByText('请检查标红的字段');
+    render(<><Login bootstrap={bootstrap} /><Toast.Provider /></>); await fill(); submit(); await screen.findByText('用户名：格式不符合要求');
     const username = screen.getByLabelText('用户名', { exact: true }); expect(username).toBeInvalid();
-    expect(screen.getByText('用户名：格式不符合要求')).toBeVisible();
-    assertFailureToast('请检查标红的字段');
+    assertFailureToast('用户名：格式不符合要求');
     fireEvent.change(username, { target: { value: 'TEST_fixed' } }); expect(username).toBeValid(); expect(screen.getByLabelText('密码', { exact: true })).toHaveValue('TEST_password'); expect(document.body.textContent).not.toContain('TEST_RAW');
     expect(loginButton()).toBeEnabled();
   });

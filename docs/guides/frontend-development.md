@@ -113,7 +113,7 @@
 
 写操作的结果反馈统一走 `frontend/src/shared/operation-toast.ts` 的 `useOperationToast()`，它基于全站共用的 AppShell 内 `Toast.Provider`：成功 `success` 短时展示（4 秒），失败 `failure` 保留更久（6 秒），结果不确定（可能已生效、需要人工核对）时传 `uncertain` 不自动消失；流程阻断类提示用 `warning`。同一组件的新反馈会替换上一条，组件卸载时关闭未消失的反馈。
 
-只有**一次性操作结果**用 toast；持续性状态仍内联展示，包括加载中、空结果、服务端冷却/限流等待、表单字段校验错误，以及「查询核对 → 明确重试」这类需要页面内动作的多步恢复流程。测试渲染页面组件时需自行挂 `<Toast.Provider />`（页面自身不挂，由 AppShell 挂），并在 `afterEach` 调 `toastQueue.clear()`（`destroy()` 只暂停计时器，toast 会泄漏到后续测试），参照 manual-costs 的测试写法。
+一次性操作结果用 toast；请求等待状态用 `pending()`（带加载指示、不自动消失，请求结束后调用返回的关闭句柄）。空结果、服务端冷却/限流等待，以及「查询核对 → 明确重试」这类需要页面内动作的多步恢复流程仍内联展示。表单字段校验错误默认在字段下内联；登录页已改为把字段错误并入失败 toast（字段仅保留标红）。测试渲染页面组件时需自行挂 `<Toast.Provider />`（页面自身不挂，由 AppShell 挂），并在 `afterEach` 调 `toastQueue.clear()`（`destroy()` 只暂停计时器，toast 会泄漏到后续测试），参照 manual-costs 的测试写法。
 
 HeroUI 内容槽有自身布局默认值，例如 Card.Content 默认纵向排列；页面应通过公开 API 或内层布局容器
 表达所需排列，不全局改库样式。按钮式链接按[官方组合方式](https://heroui.com/en/docs/react/getting-started/composition)
